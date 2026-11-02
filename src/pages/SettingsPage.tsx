@@ -1,13 +1,13 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Save, UserPlus, Pencil, Shield, Users, KeyRound, Fuel, ClipboardList, Bell, FileText } from 'lucide-react';
-import Card, { CardHeader } from '../components/ui/Card';
+import { Save, UserPlus, Pencil, Shield, Users, KeyRound, Receipt, Sprout, Building2 } from 'lucide-react';
+import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
-import SplitHeading from '../components/ui/SplitHeading';
+import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
 import Skeleton from '../components/ui/Skeleton';
 import EmptyState, { LoadFailedState } from '../components/ui/EmptyState';
@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { logActivity } from '../lib/activityLogger';
 import { supabase, checkMutationResult, sanitizeError, assertRpcResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { getPagesForRole, getCategories } from '../lib/pagePermissions';
 import { Sentry } from '../lib/sentry';
 import {
@@ -58,6 +59,171 @@ import {
   type GuardrailMode,
 } from '../lib/labelGuardrailSetting';
 import type { Profile, AppSetting, UserRole } from '../types';
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Admin',
+  sales_rep: 'Sales rep',
+  driver: 'Driver',
+  applicator: 'Applicator',
+};
+
+const FIELD_CLASS =
+  'h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm text-nav-dark placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 disabled:text-gray-500';
+const CHECK_CLASS = 'w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green/20';
+const TEXTAREA_CLASS =
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-nav-dark placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-y';
+
+// --- Style D building blocks (first use; move to components/ui the second time they are needed) ---
+
+function SettingsSection({ id, icon, title, action, children }: {
+  id: string;
+  icon: ReactNode;
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <Card id={id} padding={false} className="scroll-mt-32 overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-cream-dark px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-crx-green text-white">
+            {icon}
+          </span>
+          <h2 className="font-heading text-2xl font-bold leading-none text-nav-dark">{title}</h2>
+        </div>
+        {action}
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+function SaveButton({ dirty, saving, onClick, label }: {
+  dirty: boolean;
+  saving: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <Button
+      size="sm"
+      variant={dirty ? 'primary' : 'secondary'}
+      icon={<Save className="w-4 h-4" />}
+      onClick={onClick}
+      disabled={!dirty}
+      loading={saving}
+    >
+      {label}
+    </Button>
+  );
+}
+
+function UnsavedChip({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <span className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 align-middle font-sans text-xs font-semibold text-amber-800">
+      Unsaved
+    </span>
+  );
+}
+
+function SubPart({ title, help, dirty, saveButton, children }: {
+  title: string;
+  help?: ReactNode;
+  dirty: boolean;
+  saveButton: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="border-t border-gray-200">
+      <div className="flex flex-wrap items-start justify-between gap-2 px-4 pt-3 pb-1">
+        <div className="min-w-0 flex-1 basis-64">
+          <h3 className="font-heading text-lg font-semibold text-nav-dark">
+            {title}
+            <UnsavedChip show={dirty} />
+          </h3>
+          {help && <p className="mt-0.5 text-[13px] text-secondary">{help}</p>}
+        </div>
+        {saveButton}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** Label on the left (about 220px), field beside it; the label stacks above the field on phones. */
+function Row({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
+  const labelClass = 'text-sm font-semibold text-nav-dark sm:w-[220px] sm:shrink-0';
+  return (
+    <div className="flex flex-col gap-1.5 border-b border-gray-100 px-4 py-2 last:border-b-0 sm:flex-row sm:items-center sm:gap-4">
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className={labelClass}>{label}</label>
+      ) : (
+        <span className={labelClass}>{label}</span>
+      )}
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">{children}</div>
+    </div>
+  );
+}
+
+function initials(name: string) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+}
+
+function pageAccessLabel(user: Profile) {
+  if (user.role === 'admin') return 'Full access';
+  const pages = getPagesForRole(user.role);
+  const allowed = pages.filter((p) => !(user.denied_pages || []).includes(p.key)).length;
+  return allowed === pages.length ? 'All pages' : `${allowed} of ${pages.length} pages`;
+}
+
+// --- Saved-value tracking: each sub-part's Save stays off until one of its settings differs from what was loaded or last saved ---
+
+interface SettingsForm {
+  companyName: string;
+  companyPhone: string;
+  companyEmail: string;
+  companyAddress: string;
+  defaultValidDays: string;
+  arReminderDays: string;
+  defaultTier: string;
+  fuelSurcharge: FuelSurchargeConfig;
+  autoDraftEnabled: boolean;
+  guardrailMode: GuardrailMode;
+  sheetConfig: ApplicatorSheetCustomConfig;
+  preNoticeTemplate: PreNotificationTemplate;
+  postNoticeTemplate: PostNotificationTemplate;
+}
+
+/** Each setting exactly as its Save writes it to app_settings. */
+function toSettingValues(f: SettingsForm): Record<string, string> {
+  return {
+    company_name: f.companyName,
+    company_phone: f.companyPhone,
+    company_email: f.companyEmail,
+    company_address: f.companyAddress,
+    default_quote_valid_days: f.defaultValidDays,
+    ar_reminder_days: f.arReminderDays,
+    default_tier: f.defaultTier,
+    fuel_surcharge: serializeFuelSurchargeConfig(f.fuelSurcharge),
+    [AUTO_DRAFT_SETTING_KEY]: serializeAutoDraftEnabled(f.autoDraftEnabled),
+    [LABEL_RATE_GUARDRAIL_MODE_KEY]: serializeGuardrailMode(f.guardrailMode),
+    applicator_sheet_custom: serializeCustomConfig(f.sheetConfig),
+    pre_application_notice_template: JSON.stringify({ subject: f.preNoticeTemplate.subject, body: f.preNoticeTemplate.body }),
+    post_application_notice_template: JSON.stringify({ subject: f.postNoticeTemplate.subject, body: f.postNoticeTemplate.body }),
+  };
+}
+
+const GROUP_KEYS = {
+  company: ['company_name', 'company_phone', 'company_email', 'company_address'],
+  fuel: ['fuel_surcharge'],
+  autoDraft: [AUTO_DRAFT_SETTING_KEY],
+  defaults: ['default_quote_valid_days', 'ar_reminder_days', 'default_tier'],
+  guardrail: [LABEL_RATE_GUARDRAIL_MODE_KEY],
+  sheet: ['applicator_sheet_custom'],
+  notices: ['pre_application_notice_template', 'post_application_notice_template'],
+} as const;
+type SettingsGroup = keyof typeof GROUP_KEYS;
 
 // --- Permissions Panel ---
 
@@ -110,7 +276,7 @@ function UserPermissionsPanel({
           <button
             type="button"
             onClick={disableAll}
-            className="text-xs text-red-500 hover:underline"
+            className="text-xs text-red-600 hover:underline"
           >
             Disable All
           </button>
@@ -121,7 +287,7 @@ function UserPermissionsPanel({
           const catPages = rolePages.filter((p) => p.category === cat);
           return (
             <div key={cat}>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
                 {cat}
               </p>
               <div className="space-y-1">
@@ -138,7 +304,7 @@ function UserPermissionsPanel({
                         onChange={() => togglePage(page.key)}
                         className="w-3.5 h-3.5 rounded border-gray-300 text-crx-green focus:ring-crx-green/20"
                       />
-                      <span className={`text-sm ${allowed ? 'text-nav-dark' : 'text-gray-400 line-through'}`}>
+                      <span className={`text-sm ${allowed ? 'text-nav-dark' : 'text-gray-500 line-through'}`}>
                         {page.label}
                       </span>
                     </label>
@@ -182,12 +348,10 @@ export default function SettingsPage() {
   // optional column toggles). Blank by default => standard CRX header.
   const [sheetConfig, setSheetConfig] = useState<ApplicatorSheetCustomConfig>(DEFAULT_CUSTOM_CONFIG);
   const [savingSheet, setSavingSheet] = useState(false);
-  // Field-app parity #40: editable pre-application notice template (subject + body).
+  // Field-app parity #40/#41: editable pre- and post-application notice templates (subject + body).
   const [preNoticeTemplate, setPreNoticeTemplate] = useState<PreNotificationTemplate>(DEFAULT_PRE_NOTIFICATION_TEMPLATE);
-  const [savingPreNotice, setSavingPreNotice] = useState(false);
-  // Field-app parity #41: editable post-application notice template (subject + body).
   const [postNoticeTemplate, setPostNoticeTemplate] = useState<PostNotificationTemplate>(DEFAULT_POST_NOTIFICATION_TEMPLATE);
-  const [savingPostNotice, setSavingPostNotice] = useState(false);
+  const [savingNotices, setSavingNotices] = useState(false);
   const [users, setUsers] = useState<Profile[]>([]);
   const [savingCompany, setSavingCompany] = useState(false);
   const [savingDefaults, setSavingDefaults] = useState(false);
@@ -208,7 +372,7 @@ export default function SettingsPage() {
   const [editIsActive, setEditIsActive] = useState(true);
   const [editDeniedPages, setEditDeniedPages] = useState<string[]>([]);
   const [savingUser, setSavingUser] = useState(false);
-  const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
+  const [editConfirmOpen, setEditConfirmOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [passwordTarget, setPasswordTarget] = useState<Profile | null>(null);
   const [adminSetPassword, setAdminSetPassword] = useState('');
@@ -224,6 +388,20 @@ export default function SettingsPage() {
   // True once a settings read has succeeded: until then the forms hold defaults, not saved values.
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const settingsLoadSeqRef = useRef(0);
+  // What each setting held when it was loaded or last saved; null until a read succeeds.
+  const [savedValues, setSavedValues] = useState<Record<string, string> | null>(null);
+
+  const values = toSettingValues({
+    companyName, companyPhone, companyEmail, companyAddress, defaultValidDays, arReminderDays, defaultTier,
+    fuelSurcharge, autoDraftEnabled, guardrailMode, sheetConfig, preNoticeTemplate, postNoticeTemplate,
+  });
+  const changedKeys = (group: SettingsGroup) =>
+    savedValues === null ? [] : GROUP_KEYS[group].filter((key) => values[key] !== savedValues[key]);
+  const isDirty = (group: SettingsGroup) => changedKeys(group).length > 0;
+  const markSaved = (keys: readonly string[], saved: Record<string, string> = values) =>
+    setSavedValues((prev) => prev && { ...prev, ...Object.fromEntries(keys.map((key) => [key, saved[key]])) });
+  const anyDirty = !settingsLoadError && (Object.keys(GROUP_KEYS) as SettingsGroup[]).some(isDirty);
+  const blocker = useUnsavedChanges(anyDirty);
 
   const fetchSettings = async () => {
     const seq = ++settingsLoadSeqRef.current;
@@ -238,25 +416,40 @@ export default function SettingsPage() {
     const settings = (data || []) as AppSetting[];
     const map: Record<string, string> = {};
     settings.forEach((s) => { map[s.setting_key] = s.setting_value; });
-    setCompanyName(map['company_name'] || '');
-    setCompanyPhone(map['company_phone'] || '');
-    setCompanyEmail(map['company_email'] || '');
-    setCompanyAddress(map['company_address'] || '');
-    setDefaultValidDays(map['default_quote_valid_days'] || '30');
-    setArReminderDays(map['ar_reminder_days'] || '30');
-    setDefaultTier(map['default_tier'] || '1');
-    // #32: blank/absent => the inert OFF default (never invents a rate).
-    setFuelSurcharge(parseFuelSurchargeConfig(map['fuel_surcharge']));
-    // §4: blank/absent/anything-but-'true' => OFF (the safe default).
-    setAutoDraftEnabled(parseAutoDraftEnabled(map[AUTO_DRAFT_SETTING_KEY]));
-    // §5: blank/absent/anything-but-'block' => WARN (the safe default; never blocks).
-    setGuardrailMode(parseGuardrailMode(map[LABEL_RATE_GUARDRAIL_MODE_KEY]));
-    // #9: blank/absent => standard CRX header + all optional columns shown.
-    setSheetConfig(parseCustomConfig(map['applicator_sheet_custom']));
-    // #40: blank/absent => the seeded default pre-notification wording.
-    setPreNoticeTemplate(parsePreNotificationTemplate(map['pre_application_notice_template']));
-    // #41: blank/absent => the seeded default post-notification wording.
-    setPostNoticeTemplate(parsePostNotificationTemplate(map['post_application_notice_template']));
+    const loaded: SettingsForm = {
+      companyName: map['company_name'] || '',
+      companyPhone: map['company_phone'] || '',
+      companyEmail: map['company_email'] || '',
+      companyAddress: map['company_address'] || '',
+      defaultValidDays: map['default_quote_valid_days'] || '30',
+      arReminderDays: map['ar_reminder_days'] || '30',
+      defaultTier: map['default_tier'] || '1',
+      // #32: blank/absent => the inert OFF default (never invents a rate).
+      fuelSurcharge: parseFuelSurchargeConfig(map['fuel_surcharge']),
+      // §4: blank/absent/anything-but-'true' => OFF (the safe default).
+      autoDraftEnabled: parseAutoDraftEnabled(map[AUTO_DRAFT_SETTING_KEY]),
+      // §5: blank/absent/anything-but-'block' => WARN (the safe default; never blocks).
+      guardrailMode: parseGuardrailMode(map[LABEL_RATE_GUARDRAIL_MODE_KEY]),
+      // #9: blank/absent => standard CRX header + all optional columns shown.
+      sheetConfig: parseCustomConfig(map['applicator_sheet_custom']),
+      // #40/#41: blank/absent => the seeded default notice wording.
+      preNoticeTemplate: parsePreNotificationTemplate(map['pre_application_notice_template']),
+      postNoticeTemplate: parsePostNotificationTemplate(map['post_application_notice_template']),
+    };
+    setCompanyName(loaded.companyName);
+    setCompanyPhone(loaded.companyPhone);
+    setCompanyEmail(loaded.companyEmail);
+    setCompanyAddress(loaded.companyAddress);
+    setDefaultValidDays(loaded.defaultValidDays);
+    setArReminderDays(loaded.arReminderDays);
+    setDefaultTier(loaded.defaultTier);
+    setFuelSurcharge(loaded.fuelSurcharge);
+    setAutoDraftEnabled(loaded.autoDraftEnabled);
+    setGuardrailMode(loaded.guardrailMode);
+    setSheetConfig(loaded.sheetConfig);
+    setPreNoticeTemplate(loaded.preNoticeTemplate);
+    setPostNoticeTemplate(loaded.postNoticeTemplate);
+    setSavedValues(toSettingValues(loaded));
     setSettingsLoadError(false);
     setSettingsLoaded(true);
   };
@@ -313,6 +506,7 @@ export default function SettingsPage() {
         saveSetting('company_email', companyEmail),
         saveSetting('company_address', companyAddress),
       ]);
+      markSaved(GROUP_KEYS.company);
       toast('success', 'Company info saved');
       if (profile) logActivity({ event: 'settings_updated', description: 'Company info updated', performedBy: profile.id });
     } catch (err: unknown) {
@@ -334,6 +528,7 @@ export default function SettingsPage() {
         saveSetting('ar_reminder_days', normalizedReminderDays),
         saveSetting('default_tier', defaultTier),
       ]);
+      markSaved(GROUP_KEYS.defaults, { ...values, ar_reminder_days: normalizedReminderDays });
       toast('success', 'Default settings saved');
       if (profile) logActivity({ event: 'settings_updated', description: 'Default settings updated', performedBy: profile.id });
     } catch (err: unknown) {
@@ -352,6 +547,7 @@ export default function SettingsPage() {
     setSavingFuel(true);
     try {
       await saveSetting('fuel_surcharge', serializeFuelSurchargeConfig(fuelSurcharge));
+      markSaved(GROUP_KEYS.fuel);
       toast('success', 'Fuel surcharge settings saved');
       if (profile) {
         logActivity({
@@ -370,6 +566,7 @@ export default function SettingsPage() {
     setSavingAutoDraft(true);
     try {
       await saveSetting(AUTO_DRAFT_SETTING_KEY, serializeAutoDraftEnabled(autoDraftEnabled));
+      markSaved(GROUP_KEYS.autoDraft);
       toast('success', `Auto-invoice ${autoDraftEnabled ? 'enabled' : 'disabled'}`);
       if (profile) {
         logActivity({
@@ -388,6 +585,7 @@ export default function SettingsPage() {
     setSavingGuardrail(true);
     try {
       await saveSetting(LABEL_RATE_GUARDRAIL_MODE_KEY, serializeGuardrailMode(guardrailMode));
+      markSaved(GROUP_KEYS.guardrail);
       toast('success', `Label-rate guardrail set to ${guardrailMode === 'block' ? 'Block (admin override required)' : 'Warn'}`);
       if (profile) {
         logActivity({
@@ -408,6 +606,7 @@ export default function SettingsPage() {
     setSavingSheet(true);
     try {
       await saveSetting('applicator_sheet_custom', serializeCustomConfig(sheetConfig));
+      markSaved(GROUP_KEYS.sheet);
       toast('success', 'Custom applicator sheet settings saved');
       if (profile) {
         logActivity({
@@ -422,58 +621,38 @@ export default function SettingsPage() {
     setSavingSheet(false);
   };
 
-  // #40: persist the editable pre-application notice wording. Subject + body must
-  // both be non-blank (a blank template would email an empty notice).
-  const savePreNoticeTemplate = async () => {
+  // #40/#41: persist the changed notice templates. Subject + body must all be non-blank
+  // (a blank template would email an empty notice).
+  const saveNoticeTemplates = async () => {
     if (!preNoticeTemplate.subject.trim() || !preNoticeTemplate.body.trim()) {
       toast('error', 'The pre-notification subject and message cannot be blank.');
       return;
     }
-    setSavingPreNotice(true);
-    try {
-      await saveSetting(
-        'pre_application_notice_template',
-        JSON.stringify({ subject: preNoticeTemplate.subject, body: preNoticeTemplate.body }),
-      );
-      toast('success', 'Pre-notification message saved');
-      if (profile) {
-        logActivity({
-          event: 'settings_updated',
-          description: 'Pre-application notice template updated',
-          performedBy: profile.id,
-        });
-      }
-    } catch (errUnknown: unknown) {
-      toast('error', sanitizeError(errUnknown));
-    }
-    setSavingPreNotice(false);
-  };
-
-  // #41: persist the editable post-application notice wording. Subject + body must
-  // both be non-blank (a blank template would email an empty notice).
-  const savePostNoticeTemplate = async () => {
     if (!postNoticeTemplate.subject.trim() || !postNoticeTemplate.body.trim()) {
       toast('error', 'The post-notification subject and message cannot be blank.');
       return;
     }
-    setSavingPostNotice(true);
+    const changed = changedKeys('notices');
+    setSavingNotices(true);
     try {
-      await saveSetting(
-        'post_application_notice_template',
-        JSON.stringify({ subject: postNoticeTemplate.subject, body: postNoticeTemplate.body }),
-      );
-      toast('success', 'Post-notification message saved');
+      await Promise.all(changed.map((key) => saveSetting(key, values[key])));
+      markSaved(changed);
+      toast('success', 'Customer notices saved');
       if (profile) {
-        logActivity({
-          event: 'settings_updated',
-          description: 'Post-application notice template updated',
-          performedBy: profile.id,
-        });
+        for (const key of changed) {
+          logActivity({
+            event: 'settings_updated',
+            description: key === 'pre_application_notice_template'
+              ? 'Pre-application notice template updated'
+              : 'Post-application notice template updated',
+            performedBy: profile.id,
+          });
+        }
       }
     } catch (errUnknown: unknown) {
       toast('error', sanitizeError(errUnknown));
     }
-    setSavingPostNotice(false);
+    setSavingNotices(false);
   };
 
   const toggleSheetColumn = (key: keyof ApplicatorSheetCustomConfig['columns']) => {
@@ -613,11 +792,28 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const editChanged = editingUser !== null && (
+    editName !== editingUser.full_name
+    || editRole !== editingUser.role
+    || editPhone !== (editingUser.phone || '')
+    || editIsActive !== editingUser.is_active
+    || [...editDeniedPages].sort().join('|') !== [...(editingUser.denied_pages || [])].sort().join('|')
+  );
+
+  // Changes that take access away or hand it out are confirmed before they are saved.
+  const editWarnings = editingUser ? [
+    editRole !== editingUser.role
+      && `Change ${editName}'s role from ${ROLE_LABELS[editingUser.role]} to ${ROLE_LABELS[editRole]}; the pages they can open change with it.`,
+    !editIsActive && editingUser.is_active
+      && `Deactivate ${editName}: they will be signed out of any open sessions and blocked from signing in again. Reactivating them restores access.`,
+    editingUser.id === profile?.id && (editRole !== 'admin' || !editIsActive)
+      && 'This is your own account: you will lose access to Settings as soon as you save.',
+  ].filter((w): w is string => Boolean(w)) : [];
+
   const handleEditUser = async () => {
-    if (!editingUser) return;
-    // If deactivating, show confirm modal first
-    if (editIsActive === false && editingUser.is_active === true) {
-      setDeactivateConfirmOpen(true);
+    if (!editingUser || !editChanged) return;
+    if (editWarnings.length > 0) {
+      setEditConfirmOpen(true);
       return;
     }
     await executeEditUser();
@@ -625,7 +821,7 @@ export default function SettingsPage() {
 
   const executeEditUser = async () => {
     if (!editingUser) return;
-    setDeactivateConfirmOpen(false);
+    setEditConfirmOpen(false);
     setSavingUser(true);
     try {
       const idemKey = adminUpdateIdem.getKey();
@@ -724,13 +920,6 @@ export default function SettingsPage() {
     setSettingPassword(false);
   };
 
-  const roleColors: Record<UserRole, 'success' | 'info' | 'warning'> = {
-    admin: 'success',
-    sales_rep: 'info',
-    driver: 'warning',
-    applicator: 'warning',
-  };
-
   if (role !== 'admin') return null;
 
   if (pageLoading) {
@@ -744,20 +933,116 @@ export default function SettingsPage() {
     );
   }
 
-  return (
-    <div className="space-y-6">
-      <SplitHeading title="App" accent="Settings" />
+  const settingsReady = !settingsLoadError && settingsLoaded;
+  const addUserButton = (
+    <Button size="sm" icon={<UserPlus className="w-4 h-4" />} onClick={() => setUserModalOpen(true)}>
+      Add User
+    </Button>
+  );
 
-      {!settingsLoadError && settingsLoaded && (
+  return (
+    <div className="phone-touch space-y-5">
+      <header>
+        <h1 className="font-heading text-4xl font-bold leading-none text-nav-dark">
+          App <span className="split-heading-accent">Settings</span>
+        </h1>
+        <p className="mt-1.5 text-sm text-secondary">Company-wide settings and who can sign in. Changes apply to everyone.</p>
+      </header>
+
+      {settingsReady && (
         <SectionJumpBar
           sections={[
-            { id: 'settings-company', label: 'Company' },
             { id: 'settings-users', label: 'Users', count: users.length },
             { id: 'settings-billing', label: 'Billing' },
             { id: 'settings-field', label: 'Field jobs' },
+            { id: 'settings-company', label: 'Company' },
           ]}
         />
       )}
+
+      <SettingsSection id="settings-users" icon={<Users className="w-5 h-5" />} title="Users" action={addUserButton}>
+        {usersLoadError ? (
+          <LoadFailedState title="Users could not be loaded" onRetry={() => void fetchUsers()} />
+        ) : users.length === 0 ? (
+          <EmptyState
+            icon={<Users className="w-6 h-6 text-gray-500" />}
+            title="No users found"
+            description="Add your first team member to get started."
+            action={addUserButton}
+          />
+        ) : (
+          <>
+            {/* Phones: one list, a row per person. */}
+            <ul className="divide-y divide-gray-100 md:hidden">
+              {users.map((u) => (
+                <li key={u.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-nav-dark text-xs font-semibold text-white">
+                    {initials(u.full_name)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold text-nav-dark">{u.full_name}</p>
+                    <p className="truncate text-xs text-secondary">
+                      {ROLE_LABELS[u.role]} · {pageAccessLabel(u)}
+                      {!u.is_active && <span className="font-semibold text-gray-700"> · Inactive</span>}
+                    </p>
+                  </div>
+                  <Button size="sm" variant="secondary" onClick={() => openEditModal(u)} aria-label={`Edit ${u.full_name}`}>
+                    Edit
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            {/* relative: keeps the sr-only header label inside the scroll box instead of widening the page. */}
+            <div className="relative hidden overflow-x-auto md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="px-4 py-2 text-left font-semibold text-secondary">Name</th>
+                    <th className="px-4 py-2 text-left font-semibold text-secondary">Email</th>
+                    <th className="px-4 py-2 text-left font-semibold text-secondary">Role</th>
+                    <th className="px-4 py-2 text-left font-semibold text-secondary">Phone</th>
+                    <th className="px-4 py-2 text-left font-semibold text-secondary">Page access</th>
+                    <th className="px-4 py-2 text-left font-semibold text-secondary">Status</th>
+                    <th className="px-4 py-2"><span className="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {users.map((u) => (
+                    <tr key={u.id}>
+                      <td className="whitespace-nowrap px-4 py-2 font-semibold text-nav-dark">
+                        <span aria-hidden="true" className="mr-2.5 inline-flex h-[30px] w-[30px] items-center justify-center rounded-full bg-nav-dark align-middle text-xs font-semibold text-white">
+                          {initials(u.full_name)}
+                        </span>
+                        {u.full_name}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2 text-secondary">{u.email}</td>
+                      <td className="whitespace-nowrap px-4 py-2">{ROLE_LABELS[u.role]}</td>
+                      <td className="whitespace-nowrap px-4 py-2">{u.phone || '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-2">{pageAccessLabel(u)}</td>
+                      <td className="px-4 py-2">
+                        <Badge variant={u.is_active ? 'success' : 'default'}>
+                          {u.is_active ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={<Pencil className="w-3.5 h-3.5" />}
+                          onClick={() => openEditModal(u)}
+                          aria-label={`Edit ${u.full_name}`}
+                        >
+                          Edit
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </SettingsSection>
 
       {settingsLoadError ? (
         <Card>
@@ -767,575 +1052,379 @@ export default function SettingsPage() {
           />
         </Card>
       ) : !settingsLoaded ? null : (
-      <Card id="settings-company" className="scroll-mt-32">
-        <CardHeader
-          title="Company"
-          accent="Info"
-          action={
-            <Button
-              size="sm"
-              icon={<Save className="w-4 h-4" />}
-              onClick={saveCompanyInfo}
-              loading={savingCompany}
-            >
-              Save
-            </Button>
-          }
-        />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label="Company Name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
-          <Input label="Phone" value={companyPhone} onChange={(e) => setCompanyPhone(e.target.value)} />
-          <Input label="Email" type="email" value={companyEmail} onChange={(e) => setCompanyEmail(e.target.value)} />
-          <Input label="Address" value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} />
-        </div>
-      </Card>
-      )}
-
-      <Card id="settings-users" className="scroll-mt-32">
-        <CardHeader
-          title="User"
-          accent="Management"
-          action={
-            <Button
-              size="sm"
-              icon={<UserPlus className="w-4 h-4" />}
-              onClick={() => setUserModalOpen(true)}
-            >
-              Add User
-            </Button>
-          }
-        />
-        <div className="overflow-x-auto">
-          {usersLoadError ? (
-            <LoadFailedState title="Users could not be loaded" onRetry={() => void fetchUsers()} />
-          ) : users.length === 0 ? (
-            <EmptyState
-              icon={<Users className="w-6 h-6 text-gray-400" />}
-              title="No users found"
-              description="Add your first team member to get started."
-              action={
-                <Button size="sm" icon={<UserPlus className="w-4 h-4" />} onClick={() => setUserModalOpen(true)}>
-                  Add User
-                </Button>
-              }
-            />
-          ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="px-4 py-3 text-left font-medium text-secondary">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Email</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Role</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Phone</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Status</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Restrictions</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-b border-gray-50">
-                  <td className="px-4 py-3 font-medium text-nav-dark">{u.full_name}</td>
-                  <td className="px-4 py-3 text-secondary">{u.email}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant={roleColors[u.role]}>{u.role.replace('_', ' ')}</Badge>
-                  </td>
-                  <td className="px-4 py-3">{u.phone || '-'}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant={u.is_active ? 'success' : 'default'}>
-                      {u.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    {u.role === 'admin' ? (
-                      <span className="text-xs text-gray-400">Full access</span>
-                    ) : u.denied_pages?.length > 0 ? (
-                      <Badge variant="warning">{u.denied_pages.length} restricted</Badge>
-                    ) : (
-                      <span className="text-xs text-gray-400">None</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<Pencil className="w-3.5 h-3.5" />}
-                      onClick={() => openEditModal(u)}
-                    >
-                      Edit
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          )}
-        </div>
-      </Card>
-
-      {!settingsLoadError && settingsLoaded && (
       <>
-      <Card id="settings-billing" className="scroll-mt-32">
-        <CardHeader
-          title="Default"
-          accent="Settings"
-          action={
-            <Button
-              size="sm"
-              icon={<Save className="w-4 h-4" />}
-              onClick={saveDefaults}
-              loading={savingDefaults}
+      <SettingsSection id="settings-billing" icon={<Receipt className="w-5 h-5" />} title="Billing">
+        <SubPart
+          title="Fuel surcharge"
+          help="Off by default. Added to field-application invoices only when it is on and you enter your own rate; CropRX never sets one for you."
+          dirty={isDirty('fuel')}
+          saveButton={<SaveButton label="Save fuel surcharge" dirty={isDirty('fuel')} saving={savingFuel} onClick={saveFuelSurcharge} />}
+        >
+          <Row label="Add to new invoices" htmlFor="fuel-enabled">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                id="fuel-enabled"
+                type="checkbox"
+                checked={fuelSurcharge.enabled}
+                onChange={(e) => setFuelSurcharge((c) => ({ ...c, enabled: e.target.checked }))}
+                className={CHECK_CLASS}
+              />
+              On
+            </label>
+          </Row>
+          <Row label="Basis and rate" htmlFor="fuel-basis">
+            <select
+              id="fuel-basis"
+              value={fuelSurcharge.basis}
+              onChange={(e) =>
+                setFuelSurcharge((c) => ({ ...c, basis: e.target.value as FuelSurchargeBasis }))
+              }
+              disabled={!fuelSurcharge.enabled}
+              className={`${FIELD_CLASS} min-w-0 flex-1 basis-56`}
             >
-              Save
-            </Button>
-          }
-        />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input
-            label="Default Quote Valid Days"
-            type="number"
-            min="1"
-            value={defaultValidDays}
-            onChange={(e) => setDefaultValidDays(e.target.value)}
-          />
+              <option value="">Select a basis…</option>
+              <option value="per_acre">Per acre ($/acre applied)</option>
+              <option value="percent">Percent of invoice (% of the bill)</option>
+              <option value="flat">Flat amount ($ per invoice)</option>
+            </select>
+            <span className="inline-flex items-center gap-2">
+              <input
+                aria-label={`Rate${fuelSurcharge.basis ? ` (${fuelSurchargeRateUnit(fuelSurcharge.basis)})` : ''}`}
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                placeholder="Blank = none"
+                value={fuelSurcharge.rate}
+                onChange={(e) => setFuelSurcharge((c) => ({ ...c, rate: e.target.value }))}
+                disabled={!fuelSurcharge.enabled}
+                className={`${FIELD_CLASS} w-32`}
+              />
+              {fuelSurcharge.basis && <span className="text-[13px] text-secondary">{fuelSurchargeRateUnit(fuelSurcharge.basis)}</span>}
+            </span>
+          </Row>
+          <Row label="Status">
+            {fuelSurchargeIsActive(fuelSurcharge) ? (
+              <span className="font-medium text-amber-700">
+                Active: a &ldquo;Fuel Surcharge&rdquo; line will be added to new field-application invoices.
+              </span>
+            ) : (
+              <span className="text-secondary">Inert: no surcharge will be applied (off, or no rate entered).</span>
+            )}
+          </Row>
+        </SubPart>
+
+        {/* §4: Auto-invoice on job completion (DRAFTS ONLY — never auto-posts). */}
+        <SubPart
+          title="Automatic invoice drafts"
+          help="Drafts only, never posted on their own. A draft waits in Ready to Post on the Office Cockpit for someone to check and post. If pricing can't be worked out, the job still completes and the office is told to bill it by hand."
+          dirty={isDirty('autoDraft')}
+          saveButton={<SaveButton label="Save invoice drafts" dirty={isDirty('autoDraft')} saving={savingAutoDraft} onClick={saveAutoDraft} />}
+        >
+          <Row label="When a job is completed" htmlFor="auto-draft-enabled">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                id="auto-draft-enabled"
+                type="checkbox"
+                checked={autoDraftEnabled}
+                onChange={(e) => setAutoDraftEnabled(e.target.checked)}
+                className={CHECK_CLASS}
+              />
+              Create a draft invoice
+            </label>
+          </Row>
+        </SubPart>
+
+        <SubPart
+          title="Reminders and quote defaults"
+          help="Quotes valid for and Default price tier are stored for later; quotes and PDFs do not use them yet."
+          dirty={isDirty('defaults')}
+          saveButton={<SaveButton label="Save defaults" dirty={isDirty('defaults')} saving={savingDefaults} onClick={saveDefaults} />}
+        >
           {/* AR reminder threshold. NOTE: takes effect only once parked migration
               20260702162000 is applied live (get_ar_reminder_candidates reads
               app_settings.ar_reminder_days). Apply that migration before/with this deploy. */}
-          <Input
-            label="AR Reminder Threshold (days past due)"
-            type="number"
-            min="1"
-            max="3650"
-            value={arReminderDays}
-            onChange={(e) => setArReminderDays(e.target.value)}
-          />
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Default Tier</label>
+          <Row label="Remind when unpaid after" htmlFor="ar-reminder-days">
+            <input
+              id="ar-reminder-days"
+              type="number"
+              min="1"
+              max="3650"
+              inputMode="numeric"
+              value={arReminderDays}
+              onChange={(e) => setArReminderDays(e.target.value)}
+              className={`${FIELD_CLASS} w-24`}
+            />
+            <span className="text-[13px] text-secondary">days past due</span>
+          </Row>
+          <Row label="Quotes valid for" htmlFor="default-valid-days">
+            <input
+              id="default-valid-days"
+              type="number"
+              min="1"
+              inputMode="numeric"
+              value={defaultValidDays}
+              onChange={(e) => setDefaultValidDays(e.target.value)}
+              className={`${FIELD_CLASS} w-24`}
+            />
+            <span className="text-[13px] text-secondary">days</span>
+          </Row>
+          <Row label="Default price tier" htmlFor="default-tier">
             <select
+              id="default-tier"
               value={defaultTier}
               onChange={(e) => setDefaultTier(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              className={`${FIELD_CLASS} w-36`}
             >
               <option value="1">Tier 1</option>
               <option value="2">Tier 2</option>
               <option value="3">Tier 3</option>
             </select>
-          </div>
-        </div>
-      </Card>
+          </Row>
+        </SubPart>
+      </SettingsSection>
 
-      <Card>
-        <CardHeader
-          title="Fuel"
-          accent="Surcharge"
-          action={
-            <Button
-              size="sm"
-              icon={<Save className="w-4 h-4" />}
-              onClick={saveFuelSurcharge}
-              loading={savingFuel}
-            >
-              Save
-            </Button>
-          }
-        />
-        <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg bg-amber-50 border border-amber-100 p-3">
-            <Fuel className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
-            <p className="text-sm text-amber-800">
-              <strong>Off by default.</strong> A fuel surcharge is only added to
-              field-application invoices when you turn it on <em>and</em> enter your own
-              rate below. Leave the rate blank for no surcharge. CropRX does not set a
-              rate for you &mdash; this is your billing decision.
-            </p>
-          </div>
-
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={fuelSurcharge.enabled}
-              onChange={(e) => setFuelSurcharge((c) => ({ ...c, enabled: e.target.checked }))}
-              className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green/20"
-            />
-            <span className="text-sm font-medium text-secondary">
-              Apply a fuel surcharge to field-application invoices
-            </span>
-          </label>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-secondary mb-1">Basis</label>
-              <select
-                value={fuelSurcharge.basis}
-                onChange={(e) =>
-                  setFuelSurcharge((c) => ({ ...c, basis: e.target.value as FuelSurchargeBasis }))
-                }
-                disabled={!fuelSurcharge.enabled}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 disabled:text-gray-400"
-              >
-                <option value="">Select a basis…</option>
-                <option value="per_acre">Per acre ($/acre applied)</option>
-                <option value="percent">Percent of invoice (% of the bill)</option>
-                <option value="flat">Flat amount ($ per invoice)</option>
-              </select>
+      <SettingsSection id="settings-field" icon={<Sprout className="w-5 h-5" />} title="Field jobs">
+        {/* §5: Label-rate guardrail mode (WARN by default — never blocks a save). */}
+        <SubPart
+          title="Label-rate guardrail"
+          help="Checks each chemical's per-acre rate in a tank mix against its maximum label rate, and shows the re-entry (REI) and pre-harvest (PHI) windows. A product with no label rate on file is never blocked."
+          dirty={isDirty('guardrail')}
+          saveButton={<SaveButton label="Save guardrail" dirty={isDirty('guardrail')} saving={savingGuardrail} onClick={saveGuardrailMode} />}
+        >
+          <Row label="Over the label rate">
+            <div role="radiogroup" aria-label="Over the label rate" className="flex flex-col gap-1.5">
+              <label className="inline-flex items-center gap-2 cursor-pointer max-md:min-h-11">
+                <input
+                  type="radio"
+                  name="guardrail-mode"
+                  checked={guardrailMode === 'warn'}
+                  onChange={() => setGuardrailMode('warn')}
+                  className="w-4 h-4 border-gray-300 text-crx-green focus:ring-crx-green/20"
+                />
+                <span><strong className="font-semibold">Warn</strong> &mdash; flag it; the mix still saves (recommended)</span>
+              </label>
+              <label className="inline-flex items-center gap-2 cursor-pointer max-md:min-h-11">
+                <input
+                  type="radio"
+                  name="guardrail-mode"
+                  checked={guardrailMode === 'block'}
+                  onChange={() => setGuardrailMode('block')}
+                  className="w-4 h-4 border-gray-300 text-crx-green focus:ring-crx-green/20"
+                />
+                <span><strong className="font-semibold">Block</strong> &mdash; an admin must override with a logged reason before saving</span>
+              </label>
             </div>
-            <Input
-              label={`Rate${fuelSurcharge.basis ? ` (${fuelSurchargeRateUnit(fuelSurcharge.basis)})` : ''}`}
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="Blank = no surcharge"
-              value={fuelSurcharge.rate}
-              onChange={(e) => setFuelSurcharge((c) => ({ ...c, rate: e.target.value }))}
-              disabled={!fuelSurcharge.enabled}
-            />
-          </div>
+          </Row>
+        </SubPart>
 
-          <p className="text-xs text-secondary">
-            {fuelSurchargeIsActive(fuelSurcharge) ? (
-              <span className="text-amber-700 font-medium">
-                Active &mdash; a &ldquo;Fuel Surcharge&rdquo; line will be added to new
-                field-application invoices.
-              </span>
-            ) : (
-              <span className="text-gray-400">
-                Inert &mdash; no surcharge will be applied (off, or no rate entered).
-              </span>
-            )}
-          </p>
-        </div>
-      </Card>
-
-      {/* §4: Auto-invoice on job completion (DRAFTS ONLY — never auto-posts). */}
-      <Card>
-        <CardHeader
-          title="Auto"
-          accent="Invoice"
-          action={
-            <Button
-              size="sm"
-              icon={<Save className="w-4 h-4" />}
-              onClick={saveAutoDraft}
-              loading={savingAutoDraft}
-            >
-              Save
-            </Button>
-          }
-        />
-        <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg bg-blue-50 border border-blue-100 p-3">
-            <FileText className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
-            <p className="text-sm text-blue-800">
-              <strong>Off by default.</strong> When on, completing a field job automatically
-              creates a <strong>draft</strong> field-application invoice (using your existing
-              prices and customer splits). It is <em>never</em> posted automatically &mdash;
-              a draft simply lands in the &ldquo;Ready to Post&rdquo; queue on the Office
-              Cockpit, where someone reviews and posts it by hand. If pricing can&rsquo;t be
-              worked out, the job still completes and the office is alerted to bill it
-              manually.
-            </p>
-          </div>
-
-          <label className="flex items-center gap-3 cursor-pointer">
+        {/* #9: Custom applicator field-sheet layout (LAYOUT ONLY). */}
+        <SubPart
+          title="Applicator field sheet"
+          help="Layout only: the header, logo, footer and optional columns of the Custom Applicator Report. It never changes a chemical, rate, acre or billing figure. Blank fields use the standard CropRX header."
+          dirty={isDirty('sheet')}
+          saveButton={<SaveButton label="Save field sheet" dirty={isDirty('sheet')} saving={savingSheet} onClick={saveSheetConfig} />}
+        >
+          <Row label="Header company name" htmlFor="sheet-company-name">
             <input
-              type="checkbox"
-              checked={autoDraftEnabled}
-              onChange={(e) => setAutoDraftEnabled(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green/20"
-            />
-            <span className="text-sm font-medium text-secondary">
-              Automatically create a draft invoice when a field job is completed
-            </span>
-          </label>
-
-          <p className="text-xs text-secondary">
-            {autoDraftEnabled ? (
-              <span className="text-blue-700 font-medium">
-                On &mdash; completed jobs will auto-create a draft invoice for review (never
-                auto-posted).
-              </span>
-            ) : (
-              <span className="text-gray-400">
-                Off &mdash; billing stays a manual step (transfer each completed job to an
-                invoice yourself).
-              </span>
-            )}
-          </p>
-        </div>
-      </Card>
-
-      {/* §5: Label-rate guardrail mode (WARN by default — never blocks a save). */}
-      <Card id="settings-field" className="scroll-mt-32">
-        <CardHeader
-          title="Label-Rate"
-          accent="Guardrail"
-          action={
-            <Button
-              size="sm"
-              icon={<Save className="w-4 h-4" />}
-              onClick={saveGuardrailMode}
-              loading={savingGuardrail}
-            >
-              Save
-            </Button>
-          }
-        />
-        <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg bg-blue-50 border border-blue-100 p-3">
-            <Shield className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
-            <p className="text-sm text-blue-800">
-              When building a tank mix, each chemical&rsquo;s per-acre rate is checked against the
-              product&rsquo;s maximum label rate, and the re-entry (REI) and pre-harvest (PHI)
-              windows are shown. <strong>Warn</strong> (recommended) flags an over-label rate but
-              never stops the save. <strong>Block</strong> requires an admin to override an
-              over-label line with a logged reason before saving &mdash; it is still never a hard
-              wall. A product with no label rate on file is never blocked.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="radio"
-                name="guardrail-mode"
-                checked={guardrailMode === 'warn'}
-                onChange={() => setGuardrailMode('warn')}
-                className="w-4 h-4 mt-0.5 border-gray-300 text-crx-green focus:ring-crx-green/20"
-              />
-              <span className="text-sm">
-                <span className="font-medium text-secondary">Warn</span>
-                <span className="block text-xs text-gray-500">Flag over-label rates; the mix still saves. (Recommended default.)</span>
-              </span>
-            </label>
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="radio"
-                name="guardrail-mode"
-                checked={guardrailMode === 'block'}
-                onChange={() => setGuardrailMode('block')}
-                className="w-4 h-4 mt-0.5 border-gray-300 text-crx-green focus:ring-crx-green/20"
-              />
-              <span className="text-sm">
-                <span className="font-medium text-secondary">Block (admin override)</span>
-                <span className="block text-xs text-gray-500">An over-label line needs an admin override with a logged reason before saving.</span>
-              </span>
-            </label>
-          </div>
-        </div>
-      </Card>
-
-      {/* #9: Custom applicator field-sheet layout (LAYOUT ONLY). */}
-      <Card>
-        <CardHeader
-          title="Custom Applicator"
-          accent="Field Sheet"
-          action={
-            <Button
-              size="sm"
-              icon={<Save className="w-4 h-4" />}
-              onClick={saveSheetConfig}
-              loading={savingSheet}
-            >
-              Save
-            </Button>
-          }
-        />
-        <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg bg-green-50 border border-green-100 p-3">
-            <ClipboardList className="w-5 h-5 text-crx-green mt-0.5 shrink-0" />
-            <p className="text-sm text-green-800">
-              <strong>Layout only.</strong> These settings change how the
-              &ldquo;Custom Applicator Report&rdquo; field sheet looks &mdash; the company
-              header, logo, footer, and which optional columns appear. They never
-              change any chemical, rate, acre, or billing figure. Leave fields blank to
-              use the standard CropRX header.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="Company Name (header)"
+              id="sheet-company-name"
               placeholder="Blank = Crop RX Solutions"
               value={sheetConfig.company_name}
               onChange={(e) => setSheetConfig((c) => ({ ...c, company_name: e.target.value }))}
+              className={`${FIELD_CLASS} min-w-0 flex-1 basis-64`}
             />
-            <Input
-              label="Company Address (header)"
+          </Row>
+          <Row label="Header address" htmlFor="sheet-company-address">
+            <input
+              id="sheet-company-address"
               placeholder="Blank = West York, IL"
               value={sheetConfig.company_address}
               onChange={(e) => setSheetConfig((c) => ({ ...c, company_address: e.target.value }))}
+              className={`${FIELD_CLASS} min-w-0 flex-1 basis-64`}
             />
-          </div>
-
-          <Input
-            label="Footer Text (optional)"
-            placeholder="An extra line under the standard footer"
-            value={sheetConfig.footer_text}
-            onChange={(e) => setSheetConfig((c) => ({ ...c, footer_text: e.target.value }))}
-          />
-
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Header Logo (optional)</label>
-            <div className="flex items-center gap-3">
-              <input
-                type="file"
-                accept="image/png,image/jpeg"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  if (file.size > 500 * 1024) {
-                    toast('error', 'Logo must be under 500 KB');
-                    return;
-                  }
-                  const reader = new FileReader();
-                  reader.onload = () => setSheetConfig((c) => ({ ...c, logo_data_url: typeof reader.result === 'string' ? reader.result : '' }));
-                  reader.readAsDataURL(file);
-                }}
-                className="text-sm"
-              />
-              {sheetConfig.logo_data_url && (
-                <Button size="sm" variant="secondary" onClick={() => setSheetConfig((c) => ({ ...c, logo_data_url: '' }))}>
-                  Remove
-                </Button>
-              )}
-            </div>
+          </Row>
+          <Row label="Footer text" htmlFor="sheet-footer">
+            <input
+              id="sheet-footer"
+              placeholder="An extra line under the standard footer"
+              value={sheetConfig.footer_text}
+              onChange={(e) => setSheetConfig((c) => ({ ...c, footer_text: e.target.value }))}
+              className={`${FIELD_CLASS} min-w-0 flex-1 basis-64`}
+            />
+          </Row>
+          <Row label="Header logo" htmlFor="sheet-logo">
+            <input
+              id="sheet-logo"
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 500 * 1024) {
+                  toast('error', 'Logo must be under 500 KB');
+                  return;
+                }
+                const reader = new FileReader();
+                reader.onload = () => setSheetConfig((c) => ({ ...c, logo_data_url: typeof reader.result === 'string' ? reader.result : '' }));
+                reader.readAsDataURL(file);
+              }}
+              className="min-w-0 max-w-full text-sm"
+            />
             {sheetConfig.logo_data_url && (
-              <img src={sheetConfig.logo_data_url} alt="Logo preview" className="mt-2 h-10 object-contain" />
+              <>
+                <img src={sheetConfig.logo_data_url} alt="Logo preview" className="h-9 object-contain" />
+                <Button size="sm" variant="secondary" onClick={() => setSheetConfig((c) => ({ ...c, logo_data_url: '' }))}>
+                  Remove logo
+                </Button>
+              </>
             )}
-          </div>
+          </Row>
+          <Row label="Optional columns">
+            {([
+              ['crop', 'Crop'],
+              ['pest', 'Pest'],
+              ['total_applied', 'Total Applied'],
+              ['gl_lb', 'gal/lb Equivalent'],
+              ['rei', 'REI'],
+              ['phi', 'PHI'],
+            ] as [keyof ApplicatorSheetCustomConfig['columns'], string][]).map(([key, label]) => (
+              <label key={key} className="inline-flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sheetConfig.columns[key]}
+                  onChange={() => toggleSheetColumn(key)}
+                  className={CHECK_CLASS}
+                />
+                {label}
+              </label>
+            ))}
+          </Row>
+        </SubPart>
 
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-2">Optional columns on the Custom sheet</label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {([
-                ['crop', 'Crop'],
-                ['pest', 'Pest'],
-                ['total_applied', 'Total Applied'],
-                ['gl_lb', 'gal/lb Equivalent'],
-                ['rei', 'REI'],
-                ['phi', 'PHI'],
-              ] as [keyof ApplicatorSheetCustomConfig['columns'], string][]).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={sheetConfig.columns[key]}
-                    onChange={() => toggleSheetColumn(key)}
-                    className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green/20"
-                  />
-                  <span className="text-sm text-secondary">{label}</span>
-                </label>
-              ))}
+        {/* #40/#41: editable pre- and post-application customer notice wording. */}
+        <SubPart
+          title="Customer notices"
+          help={<>Emailed when you press <strong>Send Pre-Notification</strong> on a job (before) or <strong>Send Post-Notification</strong> on a completed job or its invoice (after).</>}
+          dirty={isDirty('notices')}
+          saveButton={<SaveButton label="Save notices" dirty={isDirty('notices')} saving={savingNotices} onClick={saveNoticeTemplates} />}
+        >
+          <Row label="Fill-ins">
+            {['{{customer}}', '{{job_number}}', '{{job_date}}'].map((ph) => (
+              <code key={ph} className="rounded bg-cream-dark px-1.5 py-0.5 text-[13px] text-nav-dark">{ph}</code>
+            ))}
+            <span className="text-[13px] text-secondary">are filled in for each customer.</span>
+          </Row>
+          <Row label="Before spraying" htmlFor="pre-notice-subject">
+            <div className="flex w-full flex-col gap-1.5">
+              <input
+                id="pre-notice-subject"
+                value={preNoticeTemplate.subject}
+                onChange={(e) => setPreNoticeTemplate((t) => ({ ...t, subject: e.target.value }))}
+                placeholder="Upcoming application on your fields"
+                className={`${FIELD_CLASS} w-full`}
+              />
+              <textarea
+                aria-label="Before spraying message"
+                value={preNoticeTemplate.body}
+                onChange={(e) => setPreNoticeTemplate((t) => ({ ...t, body: e.target.value }))}
+                rows={5}
+                className={TEXTAREA_CLASS}
+                placeholder="Hello {{customer}}, ..."
+              />
             </div>
-          </div>
-        </div>
-      </Card>
+          </Row>
+          <Row label="After spraying" htmlFor="post-notice-subject">
+            <div className="flex w-full flex-col gap-1.5">
+              <input
+                id="post-notice-subject"
+                value={postNoticeTemplate.subject}
+                onChange={(e) => setPostNoticeTemplate((t) => ({ ...t, subject: e.target.value }))}
+                placeholder="Your field application is complete"
+                className={`${FIELD_CLASS} w-full`}
+              />
+              <textarea
+                aria-label="After spraying message"
+                value={postNoticeTemplate.body}
+                onChange={(e) => setPostNoticeTemplate((t) => ({ ...t, body: e.target.value }))}
+                rows={5}
+                className={TEXTAREA_CLASS}
+                placeholder="Hello {{customer}}, ..."
+              />
+            </div>
+          </Row>
+        </SubPart>
+      </SettingsSection>
 
-      {/* #40: editable pre-application customer notice wording (subject + body). */}
-      <Card>
-        <CardHeader
-          title="Pre-Application"
-          accent="Customer Notice"
-          action={
-            <Button
-              size="sm"
-              icon={<Save className="w-4 h-4" />}
-              onClick={savePreNoticeTemplate}
-              loading={savingPreNotice}
-            >
-              Save
-            </Button>
-          }
-        />
-        <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg bg-green-50 border border-green-100 p-3">
-            <Bell className="w-5 h-5 text-crx-green mt-0.5 shrink-0" />
-            <p className="text-sm text-green-800">
-              The message emailed to a customer when you click <strong>Send Pre-Notification</strong> on
-              a job. Use <code>{'{{customer}}'}</code>, <code>{'{{job_number}}'}</code> and{' '}
-              <code>{'{{job_date}}'}</code> as placeholders &mdash; they are filled in per recipient.
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Subject</label>
-            <Input
-              value={preNoticeTemplate.subject}
-              onChange={(e) => setPreNoticeTemplate((t) => ({ ...t, subject: e.target.value }))}
-              placeholder="Upcoming application on your fields"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Message</label>
-            <textarea
-              value={preNoticeTemplate.body}
-              onChange={(e) => setPreNoticeTemplate((t) => ({ ...t, body: e.target.value }))}
-              rows={8}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-y"
-              placeholder="Hello {{customer}}, ..."
-            />
-          </div>
+      <SettingsSection
+        id="settings-company"
+        icon={<Building2 className="w-5 h-5" />}
+        title="Company"
+        action={<SaveButton label="Save company details" dirty={isDirty('company')} saving={savingCompany} onClick={saveCompanyInfo} />}
+      >
+        <div className="border-t border-gray-200 px-4 pt-2">
+          <p className="text-[13px] text-secondary">
+            Stored for later; invoices and quotes still print the standard company details.
+            <UnsavedChip show={isDirty('company')} />
+          </p>
         </div>
-      </Card>
-
-      {/* #41: editable post-application customer notice wording (subject + body). */}
-      <Card>
-        <CardHeader
-          title="Post-Application"
-          accent="Customer Notice"
-          action={
-            <Button
-              size="sm"
-              icon={<Save className="w-4 h-4" />}
-              onClick={savePostNoticeTemplate}
-              loading={savingPostNotice}
-            >
-              Save
-            </Button>
-          }
-        />
-        <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg bg-green-50 border border-green-100 p-3">
-            <Bell className="w-5 h-5 text-crx-green mt-0.5 shrink-0" />
-            <p className="text-sm text-green-800">
-              The message emailed to a customer when you click <strong>Send Post-Notification</strong> on
-              a completed job or its field-application invoice. Use <code>{'{{customer}}'}</code>,{' '}
-              <code>{'{{job_number}}'}</code> and <code>{'{{job_date}}'}</code> as placeholders &mdash;
-              they are filled in per recipient.
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Subject</label>
-            <Input
-              value={postNoticeTemplate.subject}
-              onChange={(e) => setPostNoticeTemplate((t) => ({ ...t, subject: e.target.value }))}
-              placeholder="Your field application is complete"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Message</label>
-            <textarea
-              value={postNoticeTemplate.body}
-              onChange={(e) => setPostNoticeTemplate((t) => ({ ...t, body: e.target.value }))}
-              rows={8}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-y"
-              placeholder="Hello {{customer}}, ..."
-            />
-          </div>
-        </div>
-      </Card>
+        <Row label="Company name" htmlFor="company-name">
+          <input
+            id="company-name"
+            name="company_name"
+            autoComplete="off"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            className={`${FIELD_CLASS} min-w-0 flex-1 basis-64`}
+          />
+        </Row>
+        <Row label="Phone and email" htmlFor="company-phone">
+          <input
+            id="company-phone"
+            name="company_phone"
+            type="tel"
+            autoComplete="off"
+            aria-label="Company phone"
+            value={companyPhone}
+            onChange={(e) => setCompanyPhone(e.target.value)}
+            className={`${FIELD_CLASS} min-w-0 flex-1 basis-40`}
+          />
+          <input
+            name="company_email"
+            type="email"
+            autoComplete="off"
+            aria-label="Company email"
+            value={companyEmail}
+            onChange={(e) => setCompanyEmail(e.target.value)}
+            className={`${FIELD_CLASS} min-w-0 flex-1 basis-52`}
+          />
+        </Row>
+        <Row label="Address" htmlFor="company-address">
+          <input
+            id="company-address"
+            name="company_address"
+            autoComplete="off"
+            value={companyAddress}
+            onChange={(e) => setCompanyAddress(e.target.value)}
+            className={`${FIELD_CLASS} min-w-0 flex-1 basis-64`}
+          />
+        </Row>
+      </SettingsSection>
       </>
       )}
 
       <Modal open={userModalOpen} onClose={() => setUserModalOpen(false)} title="Add" accent="User">
         <div className="space-y-4">
-          <Input label="Full Name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-          <Input label="Email" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
-          <Input label="Password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min 6 characters" />
+          <Input label="Full Name" value={newName} onChange={(e) => setNewName(e.target.value)} autoComplete="off" />
+          {/* The browser must not fill in the signed-in admin's own saved login here. */}
+          <Input label="Email" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} autoComplete="off" />
+          <Input label="Password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min 6 characters" autoComplete="new-password" />
           <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Role</label>
+            <label htmlFor="new-user-role" className="block text-sm font-medium text-secondary mb-1">Role</label>
             <select
+              id="new-user-role"
               value={newRole}
               onChange={(e) => setNewRole(e.target.value as UserRole)}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >
               <option value="admin">Admin</option>
               <option value="sales_rep">Sales Rep</option>
@@ -1343,7 +1432,7 @@ export default function SettingsPage() {
               <option value="applicator">Applicator</option>
             </select>
           </div>
-          <Input label="Phone" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} />
+          <Input label="Phone" type="tel" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} autoComplete="off" />
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setUserModalOpen(false)}>Cancel</Button>
             <Button onClick={handleCreateUser} loading={creatingUser}>Create User</Button>
@@ -1354,15 +1443,19 @@ export default function SettingsPage() {
       <Modal open={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit" accent="User" size="large">
         <div className="space-y-4">
           {editingUser && (
-            <p className="text-sm text-secondary">{editingUser.email}</p>
+            <p className="text-sm text-secondary">
+              {editingUser.email}
+              {editingUser.id === profile?.id && <span className="font-semibold text-nav-dark"> (you)</span>}
+            </p>
           )}
-          <Input label="Full Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+          <Input label="Full Name" value={editName} onChange={(e) => setEditName(e.target.value)} autoComplete="off" />
           <div>
-            <label className="block text-sm font-medium text-secondary mb-1">Role</label>
+            <label htmlFor="edit-user-role" className="block text-sm font-medium text-secondary mb-1">Role</label>
             <select
+              id="edit-user-role"
               value={editRole}
               onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >
               <option value="admin">Admin</option>
               <option value="sales_rep">Sales Rep</option>
@@ -1370,16 +1463,16 @@ export default function SettingsPage() {
               <option value="applicator">Applicator</option>
             </select>
           </div>
-          <Input label="Phone" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
+          <Input label="Phone" type="tel" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} autoComplete="off" />
           <div>
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={editIsActive}
                 onChange={(e) => setEditIsActive(e.target.checked)}
-                className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green/20"
+                className={CHECK_CLASS}
               />
-              <span className="text-sm font-medium text-secondary">Active</span>
+              <span className="text-sm font-medium text-secondary">Active (can sign in)</span>
             </label>
           </div>
 
@@ -1389,11 +1482,11 @@ export default function SettingsPage() {
             onChange={setEditDeniedPages}
           />
 
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3">
             <div>
               {editingUser && (
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   icon={<KeyRound className="w-3.5 h-3.5" />}
                   onClick={() => { setEditModalOpen(false); openPasswordModal(editingUser); }}
@@ -1404,19 +1497,19 @@ export default function SettingsPage() {
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={() => setEditModalOpen(false)}>Cancel</Button>
-              <Button onClick={handleEditUser} loading={savingUser}>Save Changes</Button>
+              <Button onClick={handleEditUser} loading={savingUser} disabled={!editChanged}>Save Changes</Button>
             </div>
           </div>
         </div>
       </Modal>
 
       <ConfirmModal
-        open={deactivateConfirmOpen}
-        onClose={() => setDeactivateConfirmOpen(false)}
+        open={editConfirmOpen}
+        onClose={() => setEditConfirmOpen(false)}
         onConfirm={executeEditUser}
-        title="Deactivate User"
-        message={`Deactivate ${editName}? They will be signed out of any open sessions and blocked from signing in again. Reactivating them restores access.`}
-        confirmLabel="Deactivate"
+        title="Confirm User Changes"
+        message={editWarnings.join(' ')}
+        confirmLabel={!editIsActive && editingUser?.is_active ? 'Deactivate' : 'Save Changes'}
         variant="warning"
       />
 
@@ -1427,12 +1520,14 @@ export default function SettingsPage() {
               Setting a new password for <strong>{passwordTarget.full_name}</strong> ({passwordTarget.email})
             </p>
           )}
+          {/* new-password: the browser offers to generate one rather than filling in the admin's own. */}
           <Input
             label="New Password"
             type="password"
             value={adminSetPassword}
             onChange={(e) => setAdminSetPassword(e.target.value)}
             placeholder="At least 8 characters"
+            autoComplete="new-password"
           />
           <Input
             label="Confirm Password"
@@ -1440,6 +1535,7 @@ export default function SettingsPage() {
             value={adminConfirmPassword}
             onChange={(e) => setAdminConfirmPassword(e.target.value)}
             placeholder="Re-enter the password"
+            autoComplete="new-password"
           />
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setPasswordModalOpen(false)}>Cancel</Button>
@@ -1447,6 +1543,12 @@ export default function SettingsPage() {
           </div>
         </div>
       </Modal>
+
+      <UnsavedChangesModal
+        open={blocker.state === 'blocked'}
+        onStay={() => blocker.reset?.()}
+        onLeave={() => blocker.proceed?.()}
+      />
     </div>
   );
 }

@@ -1237,9 +1237,12 @@ export default function Products() {
           <ProductsMobileList
             products={products}
             categories={categories}
+            vendors={vendors}
             categoryFilter={categoryFilter}
+            vendorFilter={vendorFilter}
             statusFilter={statusFilter}
             onCategoryFilterChange={setCategoryFilter}
+            onVendorFilterChange={setVendorFilter}
             onStatusFilterChange={setStatusFilter}
             onOpenProduct={(product) => navigate(`/products/${product.id}`)}
             loadError={loadError}

@@ -52,6 +52,8 @@ function renderList(
   products: readonly MobileProduct[],
   options: {
     categoryFilter?: string;
+    vendorFilter?: string;
+    onVendorFilterChange?: (value: string) => void;
     statusFilter?: 'active' | 'inactive' | 'all';
     loadError?: boolean;
     onRetry?: () => void;
@@ -62,7 +64,10 @@ function renderList(
     <ProductsMobileList
       products={products}
       categories={['Fungicide', 'Herbicide']}
+      vendors={['Vendor 1', 'Vendor 2']}
       categoryFilter={options.categoryFilter ?? ''}
+      vendorFilter={options.vendorFilter ?? ''}
+      onVendorFilterChange={options.onVendorFilterChange ?? vi.fn()}
       statusFilter={options.statusFilter ?? 'all'}
       onCategoryFilterChange={vi.fn()}
       onStatusFilterChange={vi.fn()}
@@ -107,6 +112,9 @@ describe('ProductsMobileList', () => {
     const onStatusFilterChange = vi.fn();
     const props = {
       products,
+      vendors: ['Vendor 1', 'Vendor 2'],
+      vendorFilter: '',
+      onVendorFilterChange: vi.fn(),
       categories: ['Fungicide', 'Herbicide'],
       categoryFilter: '',
       statusFilter: 'all' as const,
@@ -167,5 +175,18 @@ describe('ProductsMobileList', () => {
     expect(screen.queryByText('No matching products')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Try again'));
     expect(onRetry).toHaveBeenCalledOnce();
+  });
+});
+
+describe('ProductsMobileList vendor filter', () => {
+  it('shows only the chosen vendor and lets the phone clear it', () => {
+    const onVendorFilterChange = vi.fn();
+    renderList([createProduct('1'), createProduct('2')], { vendorFilter: 'Vendor 1', onVendorFilterChange });
+
+    expect(screen.getByText('Product 1')).toBeInTheDocument();
+    expect(screen.queryByText('Product 2')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Filter by vendor'), { target: { value: '' } });
+    expect(onVendorFilterChange).toHaveBeenCalledWith('');
   });
 });

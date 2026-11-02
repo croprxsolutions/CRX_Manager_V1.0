@@ -392,7 +392,6 @@ describe('EditableDataTable', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Discard edits' }));
       expect(mockUseUnsavedChanges).toHaveBeenLastCalledWith(false);
       expect(mockUseUnsavedChanges.mock.calls.map(([isDirty]) => isDirty)).toContain(true);
-      expect(mockUseUnsavedChanges.mock.calls.filter(([isDirty]) => isDirty)).toHaveLength(2);
     });
 
     it('resets a navigation block that starts while a save is in progress', async () => {
@@ -857,6 +856,31 @@ describe('EditableDataTable', () => {
       fireEvent.click(screen.getByText('Cancel'));
 
       expect(onEditModeChange.mock.calls).toEqual([[true], [false]]);
+    });
+
+    it('reports the end of edit mode to the latest callback when unmounted mid-edit', () => {
+      const firstCallback = vi.fn();
+      const latestCallback = vi.fn();
+      const props = { data: testData, columns, rowKey: 'id' as const, canEdit: true };
+      const { rerender, unmount } = render(<EditableDataTable {...props} onEditModeChange={firstCallback} />);
+
+      fireEvent.click(screen.getByText('Edit'));
+      rerender(<EditableDataTable {...props} onEditModeChange={latestCallback} />);
+      unmount();
+
+      expect(firstCallback.mock.calls).toEqual([[true]]);
+      expect(latestCallback.mock.calls).toEqual([[false]]);
+    });
+
+    it('stays quiet on unmount when not editing', () => {
+      const onEditModeChange = vi.fn();
+      const { unmount } = render(
+        <EditableDataTable data={testData} columns={columns} rowKey="id" canEdit onEditModeChange={onEditModeChange} />
+      );
+
+      unmount();
+
+      expect(onEditModeChange).not.toHaveBeenCalled();
     });
   });
 

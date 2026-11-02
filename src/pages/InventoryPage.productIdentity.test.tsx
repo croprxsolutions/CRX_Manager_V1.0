@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import InventoryPage from './InventoryPage';
+import type { InventoryPositionRow } from '../types';
 
 vi.mock('../hooks/useUnsavedChanges', () => ({
   useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
@@ -48,6 +49,48 @@ const siblings = [
     product_family: { name: 'Family B' },
   },
 ];
+
+function inventoryPosition(overrides: Partial<InventoryPositionRow> = {}): InventoryPositionRow {
+  return {
+    inventory_id: 'inventory-a',
+    product_id: 'product-a',
+    product_name: 'Product A',
+    inventory_unit: 'GAL',
+    container_size: 2.5,
+    container_type: 'Jug',
+    vendor: 'Vendor',
+    current_cost: 10,
+    location: 'Main Warehouse',
+    unit_size: '2.5 GL',
+    quantity_available: 20,
+    quantity_prebooked: 0,
+    quantity_on_order: 0,
+    holds_qty: 0,
+    job_holds_qty: 0,
+    planned_qty: 0,
+    delivered_ytd: 0,
+    net_position: 20,
+    reorder_point: 0,
+    min_stock_level: 0,
+    is_low_stock: false,
+    ...overrides,
+  };
+}
+
+function CurrentSearch() {
+  return <output data-testid="router-search">{useLocation().search}</output>;
+}
+
+function renderInventoryAt(entry: string) {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <>
+        <InventoryPage />
+        <CurrentSearch />
+      </>
+    </MemoryRouter>,
+  );
+}
 
 function query(data: unknown) {
   const builder: Record<string, unknown> = {};
@@ -265,5 +308,89 @@ describe('InventoryPage Product identity writers', () => {
       'create_inventory_hold',
       expect.objectContaining({ p_product_id: 'product-b' }),
     ));
+  });
+
+  it('filters the grid and phone cards by product, then Show all clears only that parameter', async () => {
+    mocks.rpc.mockImplementation(async (name: string) => name === 'get_inventory_position'
+      ? {
+          data: [
+            inventoryPosition({ is_low_stock: true }),
+            inventoryPosition({ inventory_id: 'inventory-b', product_id: 'product-b', product_name: 'Product B', location: 'South' }),
+          ],
+          error: null,
+        }
+      : { data: [], error: null });
+    renderInventoryAt('/inventory?product=product-a&keep=yes');
+
+    expect(await screen.findByText('Showing one product: Product A')).toBeInTheDocument();
+    for (const label of ['Total on Floor', 'Net Position', 'Planned', 'Committed', 'Delivered YTD', 'Inventory Value']) {
+      expect(screen.queryByText(label, { selector: 'p' })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText(/ACTION REQUIRED.*Need Reordering/)).not.toBeInTheDocument();
+    const filteredReorderChips = screen.getAllByRole('button', { name: /Needs Reorder/ });
+    expect(filteredReorderChips.some((chip) => within(chip).queryByText('1'))).toBe(false);
+
+    const cards = screen.getByTestId('inventory-mobile-cards');
+    expect(within(cards).getByText('Product A')).toBeInTheDocument();
+    expect(within(cards).queryByText('Product B')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all' }));
+    await waitFor(() => expect(screen.getByTestId('router-search')).toHaveTextContent('?keep=yes'));
+    expect(await within(cards).findByText('Product B')).toBeInTheDocument();
+    const totalOnFloorLabel = await screen.findByText('Total on Floor', { selector: 'p' });
+    const summaryCards = totalOnFloorLabel.closest('div.grid');
+    expect(summaryCards).not.toBeNull();
+    for (const label of ['On Order', 'Total on Floor', 'Net Position', 'Planned', 'Committed', 'Delivered YTD', 'Inventory Value']) {
+      expect(within(summaryCards as HTMLElement).getByText(label, { selector: 'p' })).toBeInTheDocument();
+    }
+    expect(screen.getByText(/ACTION REQUIRED.*Need Reordering/)).toBeInTheDocument();
+    const unfilteredReorderChips = screen.getAllByRole('button', { name: /Needs Reorder/ });
+    await waitFor(() => expect(unfilteredReorderChips.some((chip) => within(chip).queryByText('1'))).toBe(true));
+    expect(screen.queryByRole('button', { name: 'Show all' })).not.toBeInTheDocument();
+  });
+
+  it('clears selected inventory rows when the product parameter changes', async () => {
+    mocks.rpc.mockImplementation(async (name: string) => name === 'get_inventory_position'
+      ? { data: [inventoryPosition()], error: null }
+      : { data: [], error: null });
+    renderInventoryAt('/inventory?product=product-a');
+
+    const selectProduct = await screen.findByRole('checkbox', { name: 'Select Product A' });
+    fireEvent.click(selectProduct);
+    expect(screen.getByRole('button', { name: 'Adjust 1 Selected' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Adjust 1 Selected' })).not.toBeInTheDocument());
+    expect(selectProduct).not.toBeChecked();
+  });
+
+  it('shows every product when the product parameter is absent', async () => {
+    mocks.rpc.mockImplementation(async (name: string) => name === 'get_inventory_position'
+      ? {
+          data: [
+            inventoryPosition(),
+            inventoryPosition({ inventory_id: 'inventory-b', product_id: 'product-b', product_name: 'Product B', location: 'South' }),
+          ],
+          error: null,
+        }
+      : { data: [], error: null });
+    renderInventoryAt('/inventory?keep=yes');
+
+    const cards = await screen.findByTestId('inventory-mobile-cards');
+    expect(within(cards).getByText('Product A')).toBeInTheDocument();
+    expect(within(cards).getByText('Product B')).toBeInTheDocument();
+    expect(screen.queryByText('Showing one product')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show all' })).not.toBeInTheDocument();
+  });
+
+  it('keeps an unknown product filter visible with an empty grid and Show all action', async () => {
+    mocks.rpc.mockImplementation(async (name: string) => name === 'get_inventory_position'
+      ? { data: [inventoryPosition()], error: null }
+      : { data: [], error: null });
+    renderInventoryAt('/inventory?product=missing');
+
+    expect(await screen.findByText('Showing one product')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show all' })).toBeInTheDocument();
+    expect(within(screen.getByTestId('inventory-mobile-cards')).getByText('No inventory records')).toBeInTheDocument();
   });
 });

@@ -12,9 +12,12 @@ const MOBILE_PAGE_SIZE = 50;
 type Props = {
   products: readonly MobileProduct[];
   categories: readonly string[];
+  vendors: readonly string[];
   categoryFilter: string;
+  vendorFilter: string;
   statusFilter: 'active' | 'inactive' | 'all';
   onCategoryFilterChange: (value: string) => void;
+  onVendorFilterChange: (value: string) => void;
   onStatusFilterChange: (value: 'active' | 'inactive' | 'all') => void;
   onOpenProduct: (product: MobileProduct) => void;
   loadError?: boolean;
@@ -28,9 +31,12 @@ function formatTierPrice(price: number | null): string {
 export default function ProductsMobileList({
   products,
   categories,
+  vendors,
   categoryFilter,
+  vendorFilter,
   statusFilter,
   onCategoryFilterChange,
+  onVendorFilterChange,
   onStatusFilterChange,
   onOpenProduct,
   loadError = false,
@@ -41,10 +47,11 @@ export default function ProductsMobileList({
 
   const filteredProducts = useMemo(() => products.filter((product) => {
     if (categoryFilter && product.category !== categoryFilter) return false;
+    if (vendorFilter && product.vendor !== vendorFilter) return false;
     if (statusFilter === 'active' && !product.is_active) return false;
     if (statusFilter === 'inactive' && product.is_active) return false;
     return !search || matchesProductSearch(product, search);
-  }), [categoryFilter, products, search, statusFilter]);
+  }), [categoryFilter, products, search, statusFilter, vendorFilter]);
 
   const resetVisibleCount = () => setVisibleCount(MOBILE_PAGE_SIZE);
 
@@ -81,13 +88,27 @@ export default function ProductsMobileList({
             ))}
           </select>
           <select
+            value={vendorFilter}
+            onChange={(event) => {
+              onVendorFilterChange(event.target.value);
+              resetVisibleCount();
+            }}
+            aria-label="Filter by vendor"
+            className="min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+          >
+            <option value="">All Vendors</option>
+            {vendors.map((vendor) => (
+              <option key={vendor} value={vendor}>{vendor}</option>
+            ))}
+          </select>
+          <select
             value={statusFilter}
             onChange={(event) => {
               onStatusFilterChange(event.target.value as 'active' | 'inactive' | 'all');
               resetVisibleCount();
             }}
             aria-label="Filter by status"
-            className="min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+            className="col-span-2 min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
           >
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>

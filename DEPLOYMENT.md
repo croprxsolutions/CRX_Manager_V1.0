@@ -190,7 +190,7 @@ Two older workflows, `production-migration.yml` and `production-approval-canary.
 exist.
 
 The jobs inside `ci.yml` are `phase3-private-artifact-containment`, `ci-scope`,
-`sql-validation`, `lint-typecheck-build`, `unit-tests`, `regression-tests`,
+`sql-validation`, `lint-typecheck-build`, `unit-test-shard-1` to `-3`, `unit-tests`, `regression-tests`,
 `lint-typecheck-test`, `phase3c-containment-windows`, `guard-hooks-windows`, and
 `e2e-smoke`. `ci-scope` classifies each change fail-closed, so a docs-only pull
 request can skip the expensive proof steps while anything touching code, SQL, or
@@ -198,10 +198,13 @@ the agent surface gets the full run.
 
 Since 2026-10-21 the expensive work runs side by side instead of in one long
 job: `lint-typecheck-build` (audit, lint, type check, Deno, docs, workflow map,
-build), `unit-tests` (Vitest with coverage), and `regression-tests` (guard-hook,
+build), three `unit-test-shard-*` jobs (Vitest), and `regression-tests` (guard-hook,
 Phase 3C packet, Phase 2 smoke guard, agent-workflow, and RPC-contract tests)
 start together, alongside `sql-validation`, once containment and `ci-scope` have
-both passed. The two Windows suites likewise run as two parallel jobs
+both passed. Since 2026-11-01 Vitest runs as three shards: `unit-tests` merges them and enforces the coverage
+ratchet on the total. A failed shard skips `unit-tests`, and that skip turns the required check red. The
+guard suite runs its scripts side by side through `scripts/run-correction-guards.mjs`,
+which reads the `test:correction-guards` list in `package.json`. The two Windows suites likewise run as two parallel jobs
 (`phase3c-containment-windows`, `guard-hooks-windows`). The required check
 **Lint, Type Check, Test, Build** (`lint-typecheck-test`) runs last; it is red
 unless containment, routing, SQL validation, all three Ubuntu parts, and both

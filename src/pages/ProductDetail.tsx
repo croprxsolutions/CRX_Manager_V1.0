@@ -11,7 +11,9 @@ import PricingChangePreviewModal from '../components/products/PricingChangePrevi
 import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductSellPriceHistory from '../components/products/ProductSellPriceHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
+import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
+import ProductStockCard from '../components/products/ProductStockCard';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -1095,6 +1097,9 @@ export default function ProductDetail() {
                     Look up EPA
                   </Button>
                 </div>
+                <div className="mt-1">
+                  <EpaLabelLink epaRegistration={product.epa_registration} showHint />
+                </div>
                 {isNew && (
                   <p className="mt-1 text-xs text-secondary">
                     You can preview EPA data now, but save the product before creating a review draft.
@@ -1606,6 +1611,7 @@ export default function ProductDetail() {
 
         {!isNew && id && (
           <div className="space-y-4">
+            <ProductStockCard key={id} productId={id} isActive={product.is_active !== false} />
             {isAdmin && (
               <Card>
                 <CardHeader title="Select" accent="Cost Basis" />

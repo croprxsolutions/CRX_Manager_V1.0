@@ -34,6 +34,10 @@ line. `.state/build.json` holds the full migration list.
   that point anywhere but the fixed `127.0.0.1` ports or keys this test copy did not sign, a Docker on
   another machine, a frontend on port 5199 that is not wired to this test copy, a stack of the same name
   from somewhere else, and a gateway published beyond loopback. `target.mjs` holds the checks.
+- **The frontend serves this checkout and nothing else.** Inside it, keys, `.env` files, `.state`, backups,
+  the memory folder and every `.claude` folder return 403. The `.claude` rule is tied to this checkout's own
+  path, so a checkout that lives under `.claude/worktrees/` still works and its parent's `.claude` stays out
+  of reach because it is outside the checkout.
 - **Commands pass on no credentials.** Child programs get a short list of variables, not the whole shell.
 - **The frontend never reads a checkout's `.env`.** It sets the Supabase address and key itself, and sets
   the Mapbox and Sentry values empty.

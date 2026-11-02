@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, type ReactNode } from 'react';
 import { Search, ArrowUpDown, ArrowUp, ArrowDown, Pencil, X, Save } from 'lucide-react';
 import EmptyState, { LoadFailedState } from './EmptyState';
 import Button from './Button';
@@ -172,6 +172,13 @@ export default function EditableDataTable<T extends Record<string, any>>({
   const [cancelConfirmationOpen, setCancelConfirmationOpen] = useState(false);
 
   const dirtyCount = dirtyRows.size;
+  const editExitRef = useRef({ editMode, onEditModeChange });
+  editExitRef.current = { editMode, onEditModeChange };
+
+  // A table can vanish mid-edit (a tab change or remount); the parent must not stay in edit layout.
+  useEffect(() => () => {
+    if (editExitRef.current.editMode) editExitRef.current.onEditModeChange?.(false);
+  }, []);
   const blocker = useUnsavedChanges(editMode && dirtyCount > 0);
 
   useEffect(() => {

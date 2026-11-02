@@ -321,11 +321,11 @@ export default function Combobox({
           className={`
             w-full px-3 py-2 text-sm text-nav-dark bg-white
             border border-gray-200 rounded-lg
-            placeholder:text-gray-400
+            placeholder:text-gray-500
             focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green
             disabled:opacity-50 disabled:bg-gray-50
             transition-colors duration-150
-            ${error ? 'border-red-400 focus:ring-red-200 focus:border-red-400' : ''}
+            ${error ? 'border-red-500 focus:ring-red-200 focus:border-red-500' : ''}
             ${className}
           `}
           role="combobox"
@@ -363,7 +363,7 @@ export default function Combobox({
           />
         )}
       </div>
-      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 -- Written 2026-11-02. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migration-history.md.
+-- docs/reference/migrations.d/20261102235000_bind_order_replay_receipts_batch4b.md.
 --
 -- WHAT: batch 4b of the system-wide idempotency replay-binding fix (KNOWN_ISSUES.md KI-10, "live
 --   functions replay a saved result matched on the retry key alone"). This cut binds the two order
@@ -101,9 +101,10 @@
 --     reason only records the approval of a request that already committed.
 --
 -- ORDERING: strict. Live high-water when written: 20261102200000 (PR #1290, ledger 20261102183928),
---   then 20261102180000 (batch 4a, ledger 20261102184730). Open PRs hold 20261102160000 (#1276) and
---   20261102180000 (#1289); none touches these functions or the guard trigger. Re-read the live
---   ledger before applying.
+--   then 20261102180000 (batch 4a, ledger 20261102184730). Open PRs hold 20261102210000 (#1276),
+--   20261102220000 (#1289) and 20261102230000; none touches these functions, their implementations
+--   or the guard trigger. Renumbered from 20261102220000 to a stamp no open PR holds. Re-read the
+--   live ledger before applying.
 --
 -- idempotency-body-check: exempt. Every wrapper reads idempotency_keys through
 --   check_idempotency_intent with its own operation literal and writes it through
@@ -201,8 +202,10 @@ BEGIN
   END IF;
 
   -- What the wrappers rely on: the intent check as installed by 20260811130000 (pinned), the two
-  -- binding columns, auth.uid() (pinned), batch 1's live helpers (pinned), and the below-cost gate
-  -- the two order wrappers call first (pinned; callable only by postgres and service_role).
+  -- binding columns, auth.uid() (pinned), batch 1's live helpers (pinned), the below-cost gate the
+  -- two order wrappers call first (pinned; invoker rights, callable only by postgres and
+  -- service_role), and the price_order implementation whose save_idempotency writes the receipt the
+  -- wrapper binds (pinned; definer, callable only by postgres).
   IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
        WHERE n.nspname = 'public' AND p.proname = 'check_idempotency_intent') <> 1
      OR NOT EXISTS (
@@ -248,9 +251,26 @@ BEGIN
      OR NOT EXISTS (
        SELECT 1 FROM pg_proc p
         WHERE p.oid = to_regprocedure('public._begin_below_cost_money_write(text,uuid,jsonb)')
-          AND p.proowner = 'postgres'::regrole
-          AND md5(replace(p.prosrc, chr(13), '')) = '309a01b18f3cd94dbc0146b031978a13') THEN
-    RAISE EXCEPTION 'PREFLIGHT_BELOW_COST_GATE_DRIFT: _begin_below_cost_money_write differs from its reviewed live body';
+          AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef
+          AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+          AND md5(replace(p.prosrc, chr(13), '')) = '309a01b18f3cd94dbc0146b031978a13'
+          AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                      FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+              IS NOT DISTINCT FROM ARRAY['postgres', 'service_role']::text[]) THEN
+    RAISE EXCEPTION 'PREFLIGHT_BELOW_COST_GATE_DRIFT: _begin_below_cost_money_write differs from its reviewed live body or ACL';
+  END IF;
+  IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = '_price_order_below_cost_impl_20260810') <> 1
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_proc p
+        WHERE p.oid = to_regprocedure('public._price_order_below_cost_impl_20260810(uuid,jsonb,uuid,text)')
+          AND p.proowner = 'postgres'::regrole AND p.prosecdef
+          AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+          AND md5(replace(p.prosrc, chr(13), '')) = 'bad627af481b79da93e5afbb1a3bc181'
+          AND ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                      FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+              IS NOT DISTINCT FROM ARRAY['postgres']::text[]) THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRICE_ORDER_IMPL_DRIFT: _price_order_below_cost_impl_20260810 differs from its reviewed live body or ACL';
   END IF;
 
   -- Cutover: a receipt written by an old body carries no binding, and the intent check refuses it.

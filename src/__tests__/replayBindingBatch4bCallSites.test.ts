@@ -1,5 +1,5 @@
 /**
- * Replay-binding batch 4b (migration 20261102220000): price_order, update_order_items and
+ * Replay-binding batch 4b (migration 20261102235000): price_order, update_order_items and
  * mark_inventory_row_verified replay a saved result only for the same person and the exact same
  * request.
  *

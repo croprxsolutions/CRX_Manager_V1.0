@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261102220000 candidate: price_order, update_order_items and
+ * Full-chain proof for the 20261102235000 candidate: price_order, update_order_items and
  * mark_inventory_row_verified replay a stored idempotency receipt only for the same person and the
  * exact same request (batch 4b of the replay-binding fix, KNOWN_ISSUES.md KI-10).
  *
@@ -40,7 +40,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261102220000_bind_order_replay_receipts_batch4b.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261102235000_bind_order_replay_receipts_batch4b.sql');
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -219,7 +219,10 @@ function fidelity() {
   const gate = /to_regprocedure\('public\._begin_below_cost_money_write\(text,uuid,jsonb\)'\)[\s\S]*?= '([0-9a-f]{32})'/.exec(sql);
   assert.ok(gate, 'the preflight pins _begin_below_cost_money_write');
   assert.equal(md5Of('_begin_below_cost_money_write'), gate[1], '_begin_below_cost_money_write replayed with a body that differs from the live pin');
-  console.log(`[prover] FIDELITY: all ${pins.length + helpers.length + 2} pinned bodies (${[...pins.map(([n]) => n), ...helpers.map((h) => h[1]), 'auth.uid()', '_begin_below_cost_money_write'].join(', ')}) match the pins`);
+  const impl = /to_regprocedure\('public\._price_order_below_cost_impl_20260810\(uuid,jsonb,uuid,text\)'\)[\s\S]*?= '([0-9a-f]{32})'/.exec(sql);
+  assert.ok(impl, 'the preflight pins _price_order_below_cost_impl_20260810');
+  assert.equal(md5Of('_price_order_below_cost_impl_20260810'), impl[1], '_price_order_below_cost_impl_20260810 replayed with a body that differs from the live pin');
+  console.log(`[prover] FIDELITY: all ${pins.length + helpers.length + 3} pinned bodies (${[...pins.map(([n]) => n), ...helpers.map((h) => h[1]), 'auth.uid()', '_begin_below_cost_money_write', '_price_order_below_cost_impl_20260810'].join(', ')}) match the pins`);
 }
 
 // ------------------------------------------------------------------------------------------------

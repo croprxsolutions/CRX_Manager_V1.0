@@ -292,6 +292,27 @@
   }
 }
 
+/* Product editing on phones: 44px tap targets, and 16px field text so an iPhone does not zoom in
+   on a field. Unlayered on purpose, so it outranks the sizing utilities, and only below the
+   width where the bottom navigation shows, so desktop keeps its sizes. */
+@media (width < 48rem) {
+  .phone-touch :is(input:not([type='checkbox'], [type='radio'], [type='hidden'], [type='file']), select, textarea) {
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+  .phone-touch :is(button, [role='button'], a[href], label:has(> input[type='checkbox'])) {
+    min-height: 2.75rem;
+  }
+  .phone-touch :is(button, [role='button']) {
+    min-width: 2.75rem;
+  }
+  /* A section's toggle already names the one card inside it. */
+  .phone-section-body > :only-child > :first-child:has(> h3:only-child),
+  .phone-section-body > :only-child > :first-child > h3:not(:only-child) {
+    display: none;
+  }
+}
+
 /* Utility: hide scrollbar while keeping scroll functionality */
 .scrollbar-hide {
   -ms-overflow-style: none;

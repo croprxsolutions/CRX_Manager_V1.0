@@ -165,6 +165,11 @@ describe('generateYearEndSummaryPdf', () => {
     );
   });
 
+  it('never prints the price tier on the customer summary', async () => {
+    await generateYearEndSummaryPdf(makeSummaryData());
+    expect(JSON.stringify(mockDoc.text.mock.calls)).not.toMatch(/tier/i);
+  });
+
   it('renders season year', async () => {
     await generateYearEndSummaryPdf(makeSummaryData());
     const textCalls = mockDoc.text.mock.calls.flat();

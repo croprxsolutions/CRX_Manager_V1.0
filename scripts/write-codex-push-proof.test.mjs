@@ -50,6 +50,7 @@ import {
   parseArgs,
   removeSanitizedReviewWorkspace,
   resolveRepoRoot,
+  reviewProofBase,
   run,
   runCodexWithSandboxFallback,
   safeReviewCaptureText,
@@ -59,7 +60,7 @@ import {
 import { gitLocalEnvironmentNames } from "../.claude/hooks/git-test-env.mjs";
 // Cross-check against the REAL guard validator so the minted proof shape can
 // never silently drift from what codex-push-guard actually accepts.
-import { proofValid } from "../.claude/hooks/codex-push-lib.mjs";
+import { proofValid, proofValidForMerge } from "../.claude/hooks/codex-push-lib.mjs";
 
 // Git hooks export repository-local GIT_* variables. A scratch `git init`
 // must never inherit them or it can target/reinitialize the caller's real
@@ -1029,6 +1030,72 @@ assert.equal(
     runBody.includes("resolveFallback: () => fallbackCodexExecutable(),"),
     "run() hands the shared runner the fixed fallback resolver",
   );
+}
+
+// A clean review survives origin/main moving forward under it, bound to the base it
+// started from; every other change of context refuses. Real Git, because run() is
+// not injectable: the block below pins run() to this same decision.
+{
+  const repo = mkdtempSync(path.join(tmpdir(), "crx-review-base-"));
+  const git = (...args) => execFileSync("git", ["-c", "user.name=Review Test", "-c", "user.email=review@example.invalid", ...args], { cwd: repo, encoding: "utf8" }).trim();
+  const commit = (file, text) => {
+    writeFileSync(path.join(repo, file), text);
+    git("add", ".");
+    git("commit", "-qm", file);
+    return git("rev-parse", "HEAD");
+  };
+  try {
+    git("init", "-q", "-b", "main");
+    const older = commit("a.txt", "older\n");
+    const start = commit("a.txt", "start\n");
+    const forward = commit("a.txt", "main moved on\n");
+    git("checkout", "-q", "-b", "sideways", older);
+    const sideways = commit("s.txt", "rewritten main\n");
+    git("checkout", "-q", "-b", "feature", start);
+    const head = commit("b.txt", "pr\n");
+    const stable = { root: repo, headBefore: head, headAfter: head, baseBefore: start, baseAfter: start, cleanBefore: true, cleanAfter: true };
+    const check = (changes) => reviewProofBase({ ...stable, ...changes });
+
+    assert.equal(check({}), start, "review base: an unmoved main binds to that base");
+    assert.equal(check({ baseAfter: forward }), start, "review base: main moving forward keeps the review, bound to the START base");
+
+    // The kept proof behaves exactly as if main had moved just after the review.
+    const proof = buildCodexPushProof({ headSha: head, baseSha: check({ baseAfter: forward }), verdict: "clean" });
+    const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
+    const mergeAccepts = (data) => proofValidForMerge({ data, headSha: head, nowMs: Date.now(), baseSha: forward, isAncestor });
+    assert.equal(mergeAccepts(proof), true, "review base: the merge gate accepts the kept proof");
+    assert.equal(proofValid(proof, head, new Date(), forward), false, "review base: a push on the moved main still refuses it");
+    assert.equal(
+      mergeAccepts(buildCodexPushProof({ headSha: head, baseSha: forward, verdict: "clean" })),
+      false,
+      "review base: a proof claiming the END base is refused, since the head does not contain it",
+    );
+
+    assert.equal(check({ baseBefore: forward, baseAfter: start }), null, "review base: main rewinding refuses");
+    assert.equal(check({ baseAfter: sideways }), null, "review base: main moving sideways refuses");
+    assert.equal(check({ baseAfter: "e".repeat(40) }), null, "review base: a failed ancestry check refuses");
+    assert.equal(check({ baseAfter: "" }), null, "review base: an unreadable end base refuses");
+    assert.equal(check({ baseBefore: "", baseAfter: forward }), null, "review base: an unreadable start base refuses");
+    assert.equal(check({ baseBefore: "main", baseAfter: forward }), null, "review base: a base that is not a 40-hex sha refuses");
+
+    assert.equal(check({ headAfter: start }), null, "review base: a moved HEAD refuses");
+    assert.equal(check({ headAfter: start, baseAfter: forward }), null, "review base: a moved HEAD refuses even on a forward main");
+    assert.equal(check({ headBefore: "", headAfter: "" }), null, "review base: an unreadable HEAD refuses");
+    writeFileSync(path.join(repo, "b.txt"), "edited during the review\n");
+    assert.equal(worktreeIsClean(repo), false, "review base fixture: the tree is dirty");
+    assert.equal(check({ baseAfter: forward, cleanAfter: worktreeIsClean(repo) }), null, "review base: a dirty tree refuses even on a forward main");
+    assert.equal(check({ cleanBefore: false }), null, "review base: a tree dirty before the review refuses");
+
+    const wrapperSource = readFileSync(fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url)), "utf8");
+    const runBody = wrapperSource.slice(wrapperSource.indexOf("export function run("));
+    assert.ok(
+      runBody.includes("reviewProofBase({ root, headBefore, headAfter, baseBefore, baseAfter, cleanBefore, cleanAfter })"),
+      "run() takes the mint decision from reviewProofBase",
+    );
+    assert.ok(runBody.includes("headSha: headAfter, baseSha: proofBase, verdict"), "run() mints with the base reviewProofBase chose");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 }
 
 // write-apply-proofs.mjs must use the SAME shared runner, not a private copy.

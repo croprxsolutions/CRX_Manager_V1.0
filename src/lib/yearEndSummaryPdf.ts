@@ -168,11 +168,8 @@ export async function generateYearEndSummaryPdf(
   if (c.account_number) {
     doc.text(`ACCT #: ${c.account_number}`, rightX, y + 16, { align: 'right' });
   }
-  if (c.assigned_tier) {
-    doc.text(`TIER: ${c.assigned_tier}`, rightX, y + 28, { align: 'right' });
-  }
   if (c.payment_terms) {
-    doc.text(`TERMS: ${c.payment_terms}`, rightX, y + 40, { align: 'right' });
+    doc.text(`TERMS: ${c.payment_terms}`, rightX, y + 28, { align: 'right' });
   }
   if (c.phone) {
     doc.setFont('helvetica', 'normal');

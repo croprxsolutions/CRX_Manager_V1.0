@@ -16,6 +16,7 @@ DECLARE
   v_count bigint;
   v_err text;
   v_suffix text := substr(md5(random()::text), 1, 8);
+  v_pricing jsonb;
 BEGIN
   SELECT id INTO v_admin FROM profiles
   WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
@@ -33,11 +34,25 @@ BEGIN
 
   INSERT INTO customers (farm_name)
   VALUES ('[SMOKE] Voided Sales ' || v_suffix) RETURNING id INTO v_customer;
-  -- Pricing-free shell (a priced products INSERT is refused since the Phase 1a
-  -- cutover); the chain's cost lives on its order and PO lines.
+  -- Pricing-free shell, then cost/price through the governed preview/apply
+  -- path (a priced products INSERT is refused since the Phase 1a cutover; the
+  -- order line below needs a cost basis).
   INSERT INTO products (product_name, category)
   VALUES ('[SMOKE] Voided Product ' || v_suffix, 'Herbicide')
   RETURNING id INTO v_product;
+  v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object('product_id', v_product, 'row_version', 1,
+      'pricing_mode', 'price_driven', 'new_cost', '40.00',
+      'tier1_price', '100.00', 'tier2_price', '100.00', 'tier3_price', '100.00')),
+    v_admin, gen_random_uuid()::text);
+  IF NOT COALESCE((v_pricing->>'apply_allowed')::boolean, false) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing preview failed: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,
+    v_pricing->>'request_fingerprint', v_admin, gen_random_uuid()::text);
+  IF (SELECT current_cost FROM products WHERE id = v_product) IS DISTINCT FROM 40.00 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing apply did not set current_cost';
+  END IF;
   INSERT INTO orders (
     order_number, customer_id, salesman_id, order_date, status,
     total_price, total_profit

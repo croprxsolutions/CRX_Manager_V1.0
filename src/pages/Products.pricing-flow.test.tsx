@@ -10,6 +10,7 @@ const {
   mockPreviewPricing,
   mockProducts,
   mockProductUpdate,
+  mockRole,
   mockToast,
   pricingWorkbookFileLimit,
   pricingWorkbookRowLimit,
@@ -21,6 +22,7 @@ const {
   mockPreviewPricing: vi.fn(),
   mockProducts: [] as Array<Record<string, unknown>>,
   mockProductUpdate: vi.fn(),
+  mockRole: { current: 'admin' },
   mockToast: vi.fn(),
   pricingWorkbookFileLimit: 10 * 1024 * 1024,
   pricingWorkbookRowLimit: 1,
@@ -178,7 +180,7 @@ vi.mock('../lib/costFields', async (importOriginal) => ({
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
-    role: 'admin',
+    role: mockRole.current,
     profile: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', full_name: 'Test Admin' },
   }),
 }));
@@ -191,7 +193,14 @@ vi.mock('../components/products/ProductsMobileList', async () => {
   const actual = await vi.importActual<typeof import('../components/products/ProductsMobileList')>(
     '../components/products/ProductsMobileList',
   );
-  return { ...actual, default: () => null };
+  return {
+    ...actual,
+    default: ({ products, onChangePrice }: { products: typeof product[]; onChangePrice?: (row: typeof product) => void }) => (
+      onChangePrice && products[0]
+        ? <button onClick={() => onChangePrice(products[0])}>Test change price</button>
+        : null
+    ),
+  };
 });
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
@@ -207,6 +216,7 @@ async function inlinePreview(): Promise<Record<string, unknown>> {
 describe('Products governed inline pricing flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRole.current = 'admin';
     mockProducts.splice(0, mockProducts.length, product);
     mockPreviewPricing.mockResolvedValue({
       change_set_id: '22222222-2222-4222-8222-222222222222',
@@ -319,6 +329,60 @@ describe('Products governed inline pricing flow', () => {
       'error', `Choose margin-driven or price-driven for ${product.product_name}.`,
     ));
     expect(mockPreviewPricing).not.toHaveBeenCalled();
+  });
+
+  it('sends a quick price change through the source, preview, approval and apply, never a direct update', async () => {
+    render(<Products />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Test change price' }));
+    expect(screen.getByLabelText('Tier 2 price')).toHaveValue('58.82');
+    fireEvent.change(screen.getByLabelText('Tier 2 price'), { target: { value: '60.10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Review Price Change' }));
+
+    const preview = await screen.findByRole('button', { name: 'Preview changes' });
+    expect(screen.queryByRole('button', { name: 'Review Price Change' })).not.toBeInTheDocument();
+    expect(mockPreviewPricing).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Source (supplier, document, date)'), { target: { value: 'Helena list' } });
+    fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Matching a bid' } });
+    fireEvent.click(preview);
+
+    await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'products_inline',
+      rows: [{
+        product_id: product.id,
+        product_name: product.product_name,
+        sku: product.sku,
+        row_version: 7,
+        pricing_mode: 'price_driven',
+        new_cost: '50',
+        tier1_price: '62.5',
+        tier2_price: '60.10',
+        tier3_price: '55.56',
+        change_reason: 'Matching a bid',
+        price_source: 'Helena list',
+      }],
+    })));
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply approved changes' }));
+    await waitFor(() => expect(mockApplyPricing).toHaveBeenCalled());
+    expect(mockApprovePricing.mock.invocationCallOrder[0]).toBeLessThan(mockApplyPricing.mock.invocationCallOrder[0]);
+    expect(mockProductUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps the quick price change open when the row is refused', async () => {
+    mockProducts.splice(0, mockProducts.length, { ...product, pricing_version: 0 });
+    render(<Products />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Test change price' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review Price Change' }));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('pricing version')));
+    expect(screen.getByRole('button', { name: 'Review Price Change' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Preview changes' })).not.toBeInTheDocument();
+  });
+
+  it('offers the quick price change to admins only', async () => {
+    mockRole.current = 'sales_rep';
+    render(<Products />);
+    await screen.findByRole('button', { name: 'Test inline pricing save' });
+    expect(screen.queryByRole('button', { name: 'Test change price' })).not.toBeInTheDocument();
   });
 
   it('previews and applies inline pricing without a direct products update', async () => {

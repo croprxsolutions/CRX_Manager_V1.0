@@ -885,6 +885,19 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByLabelText('Current Cost')).not.toBeDisabled();
   });
 
+  it('opens the folded section that holds a refused field', async () => {
+    render(<ProductDetail />);
+    await screen.findByText('Grower Description');
+    const toggle = screen.getByRole('button', { name: 'Product Information' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.change(screen.getByLabelText(/Product Name/), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'));
+    expect(mockPreviewPricing).not.toHaveBeenCalled();
+  });
+
   it('preserves exact cents from the Product pricing form through preview', async () => {
     render(<ProductDetail />);
     await screen.findByText('Grower Description');

@@ -10,6 +10,7 @@ import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import CustomerSalesSheetModal from '../components/products/CustomerSalesSheetModal';
 import BulkProductImport from '../components/products/BulkProductImport';
 import ProductsMobileList from '../components/products/ProductsMobileList';
+import QuickPriceChangeModal, { type QuickPriceFields } from '../components/products/QuickPriceChangeModal';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
 import PricingSourceReasonModal, { type PricingSourceReason } from '../components/products/PricingSourceReasonModal';
 import { useToast } from '../components/ui/Toast';
@@ -166,6 +167,7 @@ export default function Products() {
   // Inline price edits waiting for their source and reason before the preview.
   const [pendingInlineRows, setPendingInlineRows] = useState<PricingPreviewInputRow[] | null>(null);
   const [previewingInline, setPreviewingInline] = useState(false);
+  const [quickPriceProductId, setQuickPriceProductId] = useState<string | null>(null);
   const [applyingPricing, setApplyingPricing] = useState(false);
   const [workbookBusy, setWorkbookBusy] = useState(false);
   const [tableRevision, setTableRevision] = useState(0);
@@ -719,6 +721,13 @@ export default function Products() {
     }
   };
 
+  // A phone's one-product change is an Edit table save of one row, so it gets the same row checks and review.
+  // handleBulkSave shows its own refusal, and the modal stays open to fix it.
+  const submitQuickPrice = (productId: string, fields: QuickPriceFields) => {
+    handleBulkSave(new Map([[productId, { ...fields, pricing_mode: 'price_driven' }]]))
+      .then(() => setQuickPriceProductId(null), () => undefined);
+  };
+
   const previewInlinePricing = async ({ source, reason }: PricingSourceReason) => {
     if (!profile || !pendingInlineRows) return;
     setPreviewingInline(true);
@@ -1090,8 +1099,10 @@ export default function Products() {
     );
   }
 
+  const quickPriceProduct = products.find((product) => product.id === quickPriceProductId);
+
   return (
-    <div className="space-y-4">
+    <div className="phone-touch space-y-4">
       <PageHeader
         title="Products"
         subtitle={<HelpTip text="Your product master list. Set tier pricing (1/2/3) for customer-specific pricing, mark products as RUP for compliance tracking, and manage unit sizes. Edit inline by clicking any editable cell." />}
@@ -1221,6 +1232,7 @@ export default function Products() {
             onVendorFilterChange={setVendorFilter}
             onStatusFilterChange={setStatusFilter}
             onOpenProduct={(product) => navigate(`/products/${product.id}`)}
+            onChangePrice={isAdmin ? (product) => setQuickPriceProductId(product.id) : undefined}
             loadError={loadError}
             onRetry={retryProducts}
           />
@@ -1331,6 +1343,15 @@ export default function Products() {
           setBulkProductImportOpen(false);
         }}
       />
+
+      {quickPriceProduct && (
+        <QuickPriceChangeModal
+          key={quickPriceProduct.id}
+          product={quickPriceProduct}
+          onClose={() => setQuickPriceProductId(null)}
+          onSubmit={(fields) => submitQuickPrice(quickPriceProduct.id, fields)}
+        />
+      )}
 
       <PricingChangePreviewModal
         open={pricingPreview !== null}

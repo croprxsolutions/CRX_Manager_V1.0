@@ -92,6 +92,11 @@ describe('sanitizeError', () => {
       .toBe('Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery');
   });
 
+  it('tells the user a completed delivery is voided, not cancelled', () => {
+    expect(sanitizeError('DELIVERY_COMPLETED_USE_VOID: a completed delivery cannot be cancelled; an admin must void it instead'))
+      .toBe('Nothing was changed. This delivery is already completed, so it cannot be cancelled. An admin can void it instead');
+  });
+
   it('explains an incomplete order invoice line separately from the delivered cap', () => {
     expect(sanitizeError('ORDER_INVOICE_LINE_INVALID: a non-product line requires a charge type'))
       .toBe('Nothing was changed. This order invoice has an incomplete or invalid line. Each sale line needs a product and nonnegative quantity; each non-product line needs a charge type. Remove and re-add an incomplete line');

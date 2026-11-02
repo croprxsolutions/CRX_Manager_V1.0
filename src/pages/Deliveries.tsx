@@ -916,14 +916,21 @@ export default function Deliveries() {
           throw error;
         }
         batchCancelIdem.resetKey();
-        logActivity({ event: 'batch_cancel_deliveries', description: `Batch cancelled ${ids.length} delivery(ies). Reason: ${reason}`, performedBy: profile.id });
-        return assertRpcResult(data, 'batch_cancel_deliveries');
+        // The server skips any delivery that completed or was cancelled since this list loaded.
+        const cancelled = assertRpcResult<number>(data, 'batch_cancel_deliveries');
+        if (cancelled > 0) logActivity({ event: 'batch_cancel_deliveries', description: `Batch cancelled ${cancelled} of ${ids.length} selected delivery(ies). Reason: ${reason}`, performedBy: profile.id });
+        return cancelled;
       },
       toast,
-      successMessage: `Cancelled ${ids.length} delivery(ies)`,
       setLoading: setCancelling,
       sentryTag: 'batch_cancel_deliveries',
-      onSuccess: () => {
+      onSuccess: (cancelled) => {
+        const skipped = ids.length - cancelled;
+        if (skipped > 0) {
+          toast('warning', `Cancelled ${cancelled} of ${ids.length} delivery(ies). ${skipped} were no longer scheduled or in progress and were skipped; an admin can void a completed delivery instead.`);
+        } else {
+          toast('success', `Cancelled ${cancelled} delivery(ies)`);
+        }
         setSelected(new Set());
         fetchDeliveries();
       },

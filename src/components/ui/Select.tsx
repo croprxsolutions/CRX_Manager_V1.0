@@ -35,7 +35,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
             focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green
             disabled:opacity-50 disabled:bg-gray-50
             transition-colors duration-150
-            ${error ? 'border-red-400 focus:ring-red-200 focus:border-red-400' : ''}
+            ${error ? 'border-red-500 focus:ring-red-200 focus:border-red-500' : ''}
             ${className}
           `}
           {...props}
@@ -49,7 +49,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
             </option>
           ))}
         </select>
-        {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+        {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
       </div>
     );
   }

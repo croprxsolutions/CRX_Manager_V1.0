@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, Refused,
   assertAppPortIsLoopback, assertCleanEnvironment, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings,
+  denyInsideCheckout,
 } from './target.mjs';
+import { isFileLoadingAllowed, resolveConfig } from 'vite';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.join(HERE, 'app.mjs');
@@ -138,6 +140,23 @@ describe('running frontend', () => {
   ]) {
     it(`refuses ${name}`, async () => {
       await assert.rejects(assertFrontendIsOurs(localKey('anon'), { isOpen: portOpen, fetchFn }), Refused);
+    });
+  }
+});
+
+describe('private folders', () => {
+  for (const parent of ['/CRX_Manager', '/CRX (old) [1]/a+b'].map((folder) => path.resolve(folder).replaceAll('\\', '/'))) {
+    it(`serves a checkout under ${parent}/.claude but not its own .claude`, async () => {
+      const root = `${parent}/.claude/worktrees/one`;
+      const config = await resolveConfig({
+        configFile: false, root, server: { fs: { allow: [root], deny: [denyInsideCheckout(`${root}\\`, '.claude')] } },
+      }, 'serve');
+      assert.equal(isFileLoadingAllowed(config, `${root}/src/lib/db.ts`), true);
+      assert.equal(isFileLoadingAllowed(config, `${root}/.claude/settings.json`), false);
+      assert.equal(isFileLoadingAllowed(config, `${root.toLowerCase()}/.CLAUDE/settings.json`), false);
+      assert.equal(isFileLoadingAllowed(config, `${root}/sub/.claude/settings.json`), false);
+      assert.equal(isFileLoadingAllowed(config, `${parent}/.claude/settings.json`), false);
+      assert.equal(isFileLoadingAllowed(config, `${parent}/.claude/worktrees/two/src/lib/db.ts`), false);
     });
   }
 });

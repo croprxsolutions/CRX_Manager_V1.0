@@ -374,16 +374,48 @@ export function shellArgvWord(word) {
 
 // Resolve the repository directory selected by one or more `git -C` options.
 // Git applies repeated -C values from left to right, so preserve that behavior.
-export function gitPushCwd(cmd, fallbackCwd) {
+// `fullCmd` (optional) is the whole command the push sits in, so a `-C "$W"`
+// can be read as the literal W was given earlier in it (folderVariableValue).
+export function gitPushCwd(cmd, fallbackCwd, fullCmd = "") {
   const base = path.resolve(fallbackCwd || process.cwd());
   const prefix = String(cmd || "").match(GIT_PUSH_PREFIX_RE)?.[1] || "";
   const optionRe = new RegExp(`(?:^|\\s)-C\\s+(${GIT_ARG})`, "g");
   let cwd = base;
   let match;
   while ((match = optionRe.exec(prefix)) !== null) {
-    cwd = path.resolve(cwd, unquoteShellArg(match[1]));
+    const name = match[1].match(/^(?:"\$(\w+)"|"\$\{(\w+)\}"|\$(\w+)|\$\{(\w+)\})$/)?.slice(1).find(Boolean);
+    const literal = name ? folderVariableValue(fullCmd, name) : null;
+    cwd = path.resolve(cwd, literal ?? unquoteShellArg(match[1]));
   }
   return cwd;
+}
+
+// `W="C:/x"; git -C "$W" push` (2026-11-02: five harmless pushes denied with
+// `spawnSync git ENOENT`). Returns W's literal only when the FIRST statement of
+// the command is `W=<literal>` ending in `;`, `&&` or a newline (always runs, in
+// this shell), and every later mention of W is a plain `$W` / `${W}` read — so a
+// second assignment, `unset W`, `${W:=…}`, `read W` or `export W` all return
+// null. A value with `$`, a backtick, `~` or a shell escape returns null, and
+// GIT_* names are left alone. null keeps today's fail-closed path.
+export function folderVariableValue(fullCmd, name) {
+  const text = String(fullCmd || "");
+  if (!/^[A-Za-z_]\w*$/.test(name) || /^GIT_/i.test(name)) return null;
+  const head = text.match(new RegExp(
+    `^\\s*${name}=(?:"((?:[^"$\`\\\\]|\\\\(?![$\`"\\\\\\r\\n]))*)"|'([^']*)'|([^\\s"'$\`\\\\;&|<>()~*?[\\]{}#]+))[^\\S\\r\\n]*(?:;|&&|\\r?\\n)`,
+  ));
+  if (!head) return null;
+  const rest = text.slice(head[0].length);
+  // A shell that sources or evals text can reassign W where it cannot be read.
+  if (/(?:^|[;&|\r\n(])\s*(?:source|\.|eval)\s/.test(rest)) return null;
+  const mention = new RegExp(`(?<![\\w])${name}(?![\\w])`, "g");
+  let found;
+  while ((found = mention.exec(rest)) !== null) {
+    const at = found.index;
+    const plain = rest[at - 1] === "$";
+    const braced = rest.slice(at - 2, at) === "${" && rest[at + name.length] === "}";
+    if (!plain && !braced) return null;
+  }
+  return head[1] ?? head[2] ?? head[3];
 }
 
 // Shell directory changes and git context environment variables apply outside

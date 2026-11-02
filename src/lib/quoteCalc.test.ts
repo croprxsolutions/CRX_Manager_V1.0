@@ -682,6 +682,8 @@ describe('convertToGlLb', () => {
 
   it('handles lowercase unit strings', () => {
     expect(convertToGlLb(4, 'qt', 'liquid')).toEqual({ value: 1, unit: 'GL' });
+    expect(convertToGlLb(16, 'oz', 'seed')).toBeNull();
+    expect(convertToGlLb(2, 'Ea', 'each')).toBeNull();
     expect(convertToGlLb(16, 'oz', 'dry')).toEqual({ value: 1, unit: 'LB' });
   });
 

@@ -1,3 +1,4 @@
+import type { ProductForm } from '../types';
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, useMemo, lazy, Suspense } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Save, Plus, Trash2, Check, FileText, Beaker, Ban, MessageSquarePlus, Printer, CloudSun, MapPin, Truck, ClipboardList, FlaskConical, Bell, History, BookmarkPlus, GripVertical, ChevronUp, ChevronDown, Map as MapIcon, ShieldAlert, CalendarClock, AlertTriangle, Sprout, Send } from 'lucide-react';
@@ -48,7 +49,7 @@ import { localToday, parseLocalDate } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
 import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
-import { unitOptionsForForm, isKnownUnit } from '../lib/units';
+import { unitOptionsForForm, isKnownUnit, asProductForm } from '../lib/units';
 import {
   LABEL_RATE_GUARDRAIL_MODE_KEY,
   DEFAULT_GUARDRAIL_MODE,
@@ -1025,7 +1026,7 @@ export default function JobDetail() {
     // since-deactivated ones (allProducts is is_active=true only) — mirrors the
     // WPS-notice label fetch so a retired product still prints its compliance data.
     const pids = chemRows.filter((c) => c.product_id).map((c) => c.product_id);
-    const labelById = new Map<string, { rei_hours: number | null; phi_days: number | null; epa_registration: string | null; product_form: 'liquid' | 'dry' | null }>();
+    const labelById = new Map<string, { rei_hours: number | null; phi_days: number | null; epa_registration: string | null; product_form: ProductForm | null }>();
     if (pids.length > 0) {
       const { data: lp, error: lpErr } = await supabase
         .from('products')
@@ -1033,7 +1034,7 @@ export default function JobDetail() {
         .in('id', pids);
       if (lpErr || !lp) return null;
       (lp as Array<{ id: string; rei_hours: number | null; phi_days: number | null; epa_registration: string | null; product_form: string | null }>).forEach((p) => {
-        const form = p.product_form === 'liquid' || p.product_form === 'dry' ? p.product_form : null;
+        const form = asProductForm(p.product_form);
         labelById.set(p.id, { rei_hours: p.rei_hours, phi_days: p.phi_days, epa_registration: p.epa_registration, product_form: form });
       });
       // A short array (RLS-hidden / deleted product) returns NO error, but a missing
@@ -1363,7 +1364,7 @@ export default function JobDetail() {
   // carried line (1 oz/ac × 100 ac stored as 6.25 lb) into one that cannot be proven safe —
   // and chemLineBillingHazard fails closed, so the whole job becomes unsaveable. Resolving
   // the form by id, inactive included, is what keeps the guard from firing on good rows.
-  const [jobProductLabels, setJobProductLabels] = useState<Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; product_form: 'liquid' | 'dry' | null }>>(new Map());
+  const [jobProductLabels, setJobProductLabels] = useState<Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; product_form: ProductForm | null }>>(new Map());
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
 
   useEffect(() => {
@@ -1485,12 +1486,12 @@ export default function JobDetail() {
         .in('id', ids);
       if (cancelled) return;
       if (error) { setJobProductLabels(new Map()); setJobLabelsLoadedKey(chemProductIdKey); return; }
-      const m = new Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; product_form: 'liquid' | 'dry' | null }>();
+      const m = new Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; product_form: ProductForm | null }>();
       for (const p of (data as unknown as Array<{ id: string; max_label_rate: number | null; max_label_rate_unit: string | null; product_form: string | null }> | null) ?? []) {
         m.set(p.id, {
           max_label_rate: p.max_label_rate,
           max_label_rate_unit: p.max_label_rate_unit,
-          product_form: p.product_form === 'liquid' || p.product_form === 'dry' ? p.product_form : null,
+          product_form: asProductForm(p.product_form),
         });
       }
       setJobProductLabels(m);
@@ -1507,14 +1508,14 @@ export default function JobDetail() {
     return { max_label_rate: lp?.max_label_rate ?? null, max_label_rate_unit: lp?.max_label_rate_unit ?? null };
   }, [jobProductLabels, allProducts]);
 
-  // Resolve a line's liquid/dry form the same inactive-safe way: the by-id fetch wins, then
+  // Resolve a line's product form the same inactive-safe way: the by-id fetch wins, then
   // allProducts. Every caller that feeds a UNIT CONVERSION must come through here — reading
   // allProducts directly is what mis-classified discontinued products (Codex P2, 2026-08-23).
-  const productFormFor = useCallback((productId: string): 'liquid' | 'dry' | null => {
+  const productFormFor = useCallback((productId: string): ProductForm | null => {
     const fromJob = jobProductLabels.get(productId);
     if (fromJob) return fromJob.product_form;
     const form = allProducts.find((p) => p.id === productId)?.product_form ?? null;
-    return form === 'liquid' || form === 'dry' ? form : null;
+    return asProductForm(form);
   }, [jobProductLabels, allProducts]);
 
   // §5: aggregate guardrail state from chemRows + allProducts (the live label max). Drives

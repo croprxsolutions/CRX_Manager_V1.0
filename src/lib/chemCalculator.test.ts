@@ -421,6 +421,12 @@ describe('chemCalculator — reconcileChemAutofillUnits (P1 money fix)', () => {
 });
 
 describe('chemCalculator — fieldAppPricedQuantity (PARKED-010 field-app billing unit fix)', () => {
+  it('keeps matching seed and each units and refuses cross-unit guesses', () => {
+    expect(fieldAppPricedQuantity(50, ' lb ', 'Lb', 'seed')).toBe(50);
+    expect(fieldAppPricedQuantity(7, 'Ea', 'Ea', 'each')).toBe(7);
+    expect(fieldAppPricedQuantity(16, 'oz', 'Lb', 'seed')).toBeNull();
+    expect(fieldAppPricedQuantity(5, 'Unit', 'Ea', 'each')).toBeNull();
+  });
   it('converts oz → gallons for a liquid product (÷128)', () =>
     expect(fieldAppPricedQuantity(3200, 'oz', 'Gal', 'liquid')).toBe(25));
   it('converts qt → gallons for a liquid product (÷4)', () =>
@@ -449,6 +455,22 @@ describe('chemCalculator — fieldAppPricedQuantity (PARKED-010 field-app billin
     expect(pricedQty).toBe(12.5);               // 1,600 oz = 12.5 gal
     const extendedCents = Math.round((pricedQty as number) * pricePerGalCents);
     expect(extendedCents).toBe(40125);          // $401.25 (was 1600 × 3210 = $51,360)
+  });
+});
+
+describe('seed and each equivalents and stock-unit reconciliation', () => {
+  it('never invents a gallon or pound equivalent', () => {
+    for (const form of ['seed', 'each'] as const) {
+      expect(toGallonOrLbEquivalent(16, 'oz', form)).toBeNull();
+      expect(toGallonOrLbEquivalent(16, 'lb', form)).toBeNull();
+      expect(toGallonOrLbEquivalent(16, 'gal', form)).toBeNull();
+    }
+    expect(toGallonOrLbEquivalent(128, 'oz', 'liquid')).toEqual({ value: 1, unit: 'gal' });
+    expect(toGallonOrLbEquivalent(16, 'oz', 'dry')).toEqual({ value: 1, unit: 'lb' });
+  });
+  it('keeps the stock unit when a seed/each rate uses another measure', () => {
+    expect(reconcileChemAutofillUnits('Lb', 'oz/ac', 100, 200, 'seed').unit).toBe('Lb');
+    expect(reconcileChemAutofillUnits('Ea', 'gal/ac', 100, 200, 'each').unit).toBe('Ea');
   });
 });
 

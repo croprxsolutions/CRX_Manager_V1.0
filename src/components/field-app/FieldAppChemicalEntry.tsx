@@ -1,3 +1,4 @@
+import type { ProductForm } from '../../types';
 import { useState, useRef, useEffect, useCallback, Fragment } from 'react';
 import { Plus, Trash2, AlertTriangle, ShieldAlert, Clock, CalendarClock } from 'lucide-react';
 import Button from '../ui/Button';
@@ -51,7 +52,7 @@ export interface ChemicalLine {
    * conversion display (liquid -> gal, dry -> lb). Captured on product select; the
    * server is authoritative via convert_to_gl_lb().
    */
-  product_form?: 'liquid' | 'dry' | null;
+  product_form?: ProductForm | null;
   /**
    * Phase 1 (2026-04-29): when true, the unit_price_cents on this line is a
    * deliberate manual override. The server records price_source = 'manual'.

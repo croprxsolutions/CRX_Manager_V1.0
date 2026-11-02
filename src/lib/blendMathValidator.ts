@@ -5,6 +5,7 @@
 // though no MG size is defined anywhere. Any other factor table used here would let
 // this warning and the invoice disagree about the same line.
 import { fieldAppPricedQuantity } from './chemCalculator';
+import { asProductForm } from './units';
 
 interface TicketData {
   total_acres: number | null;
@@ -270,7 +271,7 @@ export function validateBlendMath(
       if (!product.rate_per_acre || product.rate_per_acre <= 0 || product.quantity <= 0) continue;
 
       const name = product.product_name || 'Unnamed product';
-      const form = product.product_form?.trim().toLowerCase() === 'dry' ? 'dry' : 'liquid';
+      const form = asProductForm(product.product_form) ?? 'liquid';
 
       // Billing's own fallback for a blank line rate unit.
       const lineRateUnit = (product.rate_per_acre_unit ?? '').trim();
@@ -291,7 +292,9 @@ export function validateBlendMath(
 
       if (expected === null) {
         unchecked(
-          `Not checked — ${name}: the rate is in ${rateUnit} but the quantity is in ${qtyUnit}, which can't be converted${form === 'dry' ? ' for a dry product' : ''}. Please verify this line by hand.`
+          form === 'seed' || form === 'each'
+            ? `Not checked — ${name}: Weight and volume can't be worked out for seed or each products. Please verify this line by hand.`
+            : `Not checked — ${name}: the rate is in ${rateUnit} but the quantity is in ${qtyUnit}, which can't be converted${form === 'dry' ? ' for a dry product' : ''}. Please verify this line by hand.`
         );
       } else if (expected > 0) {
         const pctDiff = Math.abs(product.quantity - expected) / expected;
@@ -320,7 +323,7 @@ export function validateBlendMath(
   for (const product of products) {
     if (!product.rate_per_acre || product.rate_per_acre <= 0) continue;
     const name = product.product_name || 'Unnamed product';
-    const form = product.product_form?.trim().toLowerCase() === 'dry' ? 'dry' : 'liquid';
+    const form = asProductForm(product.product_form) ?? 'liquid';
     const lineRateUnit = (product.rate_per_acre_unit ?? '').trim();
     const rateUnit = rateBaseUnit(lineRateUnit !== '' ? lineRateUnit : product.product_rate_unit);
     const soldUnit = rateBaseUnit(product.product_inventory_unit);
@@ -336,7 +339,9 @@ export function validateBlendMath(
     // rather than inferring it from an empty string; tracked in KNOWN_ISSUES.md.
     if (rateUnit !== '' && soldUnit !== '' && fieldAppPricedQuantity(1, rateUnit, soldUnit, form) === null) {
       mismatch(
-        `${name}: the rate unit (${rateUnit}) can't be converted to the unit this product is sold in (${soldUnit}), so this ticket will fail when you invoice it.`
+        form === 'seed' || form === 'each'
+          ? `${name}: Weight and volume can't be worked out for seed or each products. The rate unit (${rateUnit}) differs from the sold unit (${soldUnit}), so this ticket will fail when you invoice it.`
+          : `${name}: the rate unit (${rateUnit}) can't be converted to the unit this product is sold in (${soldUnit}), so this ticket will fail when you invoice it.`
       );
     }
   }
@@ -396,20 +401,22 @@ export function validateBlendMath(
     // silence — it left `convertedSum` and said nothing, so a ticket could pass with
     // a product quietly uncounted. Exactly the silent-skip this file exists to remove.
     let anyUnexpectedUnconvertible = false;
+    let anySeedEachUnconvertible = false;
     for (const p of products) {
       const qty = p.quantity || 0;
       if (qty === 0) continue;
       anyContributing = true;
       const unitRecorded = normalizeUnit(p.unit) !== null;
       if (!unitRecorded) anyMissingUnit = true;
-      const form = p.product_form?.trim().toLowerCase() === 'dry' ? 'dry' : 'liquid';
+      const form = asProductForm(p.product_form) ?? 'liquid';
       const converted = fieldAppPricedQuantity(qty, rateBaseUnit(p.unit), headerUnit, form);
       if (converted === null) {
         anyUnconvertible = true;
+        if (unitRecorded && (form === 'seed' || form === 'each')) anySeedEachUnconvertible = true;
         // Dry product in a spray tank is the ONE expected exclusion (pounds do not
         // convert to gallons without a density), so it stays quiet. A row with no
         // unit at all is already reported above and must not be counted twice.
-        if (unitRecorded && !(totalIsVolume && form === 'dry')) anyUnexpectedUnconvertible = true;
+        if (unitRecorded && form !== 'seed' && form !== 'each' && !(totalIsVolume && form === 'dry')) anyUnexpectedUnconvertible = true;
       } else {
         convertedSum += converted;
       }
@@ -419,6 +426,9 @@ export function validateBlendMath(
       unchecked(
         `Not checked — a product has a quantity but no unit, so it can't be counted towards the total. Please verify the total by hand.`
       );
+    }
+    if (anySeedEachUnconvertible) {
+      unchecked("Weight and volume can't be worked out for seed or each products.");
     }
 
     if (anyContributing && totalIsWeight && anyUnconvertible) {

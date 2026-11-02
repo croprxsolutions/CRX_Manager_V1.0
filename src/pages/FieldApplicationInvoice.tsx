@@ -1,3 +1,4 @@
+import { asProductForm } from '../lib/units';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
@@ -1394,7 +1395,7 @@ export default function FieldApplicationInvoice() {
           // #25: per-line Warehouse / Vendor and the product form (for the gl/lb display).
           warehouse: (it.warehouse as string | null) ?? null,
           vendor: (it.vendor as string | null) ?? null,
-          product_form: (it.product_form as 'liquid' | 'dry' | null) ?? null,
+          product_form: asProductForm(it.product_form as string | null),
           epa_registration: (it.epa_registration as string | null) || undefined,
           // U4 (Codex R4): rehydrate manual pricing — a persisted manual price
           // (price_source='manual') or ANY product-less line (no tier fallback

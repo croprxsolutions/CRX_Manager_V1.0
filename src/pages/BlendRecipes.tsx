@@ -489,7 +489,7 @@ export default function BlendRecipes() {
   // two updateItem calls in one handler (product_id then product_name). Reading the closure
   // meant the second call started from pre-first-call state and threw the product_id away —
   // the row kept the product's NAME while its ID silently reverted to ''. That left the unit
-  // picker unable to see the product's liquid/dry form, and the saved item carried no product.
+  // picker unable to see the product's form, and the saved item carried no product.
   const updateItem = (idx: number, field: keyof EditItem, value: string | number | null) => {
     setEditItems((prev) => prev.map((item, i) => (i === idx ? { ...item, [field]: value } : item)));
   };
@@ -743,7 +743,7 @@ export default function BlendRecipes() {
                     <UnitSelect
                       unitConversions={unitConversions}
                       // NOT the page's `form` state (that is recipe metadata) — this is the
-                      // selected product's liquid/dry form, which filters the unit list.
+                      // selected product's form, which filters the unit list.
                       form={products.find((p) => p.id === item.product_id)?.product_form ?? null}
                       value={item.unit}
                       onChange={(value) => updateItem(idx, 'unit', value)}

@@ -244,12 +244,14 @@ export function validateCommissionSplits(
  * Convert total applied quantity to gallons (liquid) or pounds (dry).
  * Liquid: OZ→GL (/128), PT→GL (/8), QT→GL (/4), GL stays.
  * Dry:    OZ→LB (/16), LB stays.
+ * Seed/each: no weight or volume equivalent.
  */
 export function convertToGlLb(
   totalApplied: number,
   unit: string | null | undefined,
   productForm: 'liquid' | 'dry' | string,
-): { value: number; unit: string } {
+): { value: number; unit: string } | null {
+  if (productForm === 'seed' || productForm === 'each') return null;
   const u = (unit || 'OZ').toUpperCase();
 
   if (productForm === 'dry') {

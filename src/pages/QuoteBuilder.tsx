@@ -88,6 +88,7 @@ import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
+import { rateUnitOptionsForProduct } from '../lib/units';
 import { QuoteLineCost } from '../components/quotes/QuoteLineCost';
 import type {
   Quote,
@@ -5261,12 +5262,7 @@ export default function QuoteBuilder() {
                                 className="w-20 px-1 py-0.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green mt-0.5"
                               >
                                 <option value="">--</option>
-                                {unitConversions
-                                  .filter((uc) => {
-                                    const form = prod?.product_form;
-                                    if (!form) return true;
-                                    return uc.unit_type === form || uc.unit_type === 'both';
-                                  })
+                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit || prod?.unit_size)
                                   .map((uc) => (
                                     <option key={uc.id} value={uc.unit}>
                                       per {uc.unit}
@@ -5320,12 +5316,7 @@ export default function QuoteBuilder() {
                                 className="w-20 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
                               >
                                 <option value="">--</option>
-                                {unitConversions
-                                  .filter((uc) => {
-                                    const form = prod?.product_form;
-                                    if (!form) return true;
-                                    return uc.unit_type === form || uc.unit_type === 'both';
-                                  })
+                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit || prod?.unit_size)
                                   .map((uc) => (
                                     <option key={uc.id} value={uc.unit}>
                                       {uc.unit}

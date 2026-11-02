@@ -2,6 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { validateBlendMath } from './blendMathValidator';
 
 describe('validateBlendMath', () => {
+  it('keeps matching seed units but flags seed conversions before billing', () => {
+    const ticket = { total_acres: 10, total_volume: null, total_volume_unit: null, application_rate: null };
+    const seed = { product_name: 'Seed', quantity: 20, unit: 'Lb', rate_per_acre: 2,
+      rate_per_acre_unit: 'Lb', product_form: 'seed', product_rate_unit: null,
+      product_inventory_unit: 'Lb' };
+    expect(validateBlendMath(ticket, [seed])).toEqual([]);
+    const mismatched = validateBlendMath(ticket, [{ ...seed, rate_per_acre_unit: 'oz' }]);
+    expect(mismatched.some((warning) => warning.message.includes("Weight and volume can't be worked out for seed or each products."))).toBe(true);
+    expect(mismatched.some((warning) => warning.message.includes('fail when you invoice'))).toBe(true);
+  });
   describe('per-product rate × acres validation', () => {
     it('returns no warnings when quantity matches rate × acres', () => {
       const warnings = validateBlendMath(

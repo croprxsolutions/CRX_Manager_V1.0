@@ -11,19 +11,57 @@
  * The server (field_app_priced_quantity / normalize_rate_unit) stays authoritative
  * for saved money; these are UI-option helpers only.
  */
-import type { UnitConversion } from '../types';
+import type { ProductForm, UnitConversion } from '../types';
+
+export const PRODUCT_FORM_OPTIONS: readonly { value: ProductForm; label: string }[] = [
+  { value: 'liquid', label: 'Liquid' },
+  { value: 'dry', label: 'Dry' },
+  { value: 'seed', label: 'Seed' },
+  { value: 'each', label: 'Each / unit' },
+];
+
+export const FORM_UNIT_RULES: Record<'seed' | 'each', readonly string[]> = {
+  seed: ['Lb', 'Unit'],
+  each: ['Ea', 'Unit'],
+};
+
+export function asProductForm(value: string | null | undefined): ProductForm | null {
+  const normalized = value?.trim().toLowerCase();
+  return PRODUCT_FORM_OPTIONS.find((option) => option.value === normalized)?.value ?? null;
+}
+
+export function isProductForm(value: string | null | undefined): value is ProductForm {
+  return PRODUCT_FORM_OPTIONS.some((option) => option.value === value);
+}
 
 /**
  * Options for a rate/inventory-unit dropdown, filtered by the product's form.
- * A null/undefined form → all units (can't filter yet). 'both'-type units
- * (Ea, Unit) are always included.
+ * A null/undefined form → all units (can't filter yet). Liquid and dry include
+ * 'both'-type units; seed and each use their exact allowlists.
  */
 export function unitOptionsForForm(
   conversions: UnitConversion[],
   form: string | null | undefined,
 ): UnitConversion[] {
   if (!form) return conversions;
+  if (form === 'seed' || form === 'each') {
+    return conversions.filter((uc) => FORM_UNIT_RULES[form].includes(uc.unit));
+  }
   return conversions.filter((uc) => uc.unit_type === form || uc.unit_type === 'both');
+}
+
+/** Seed and each have no conversions: a rate or quote unit must be the stock unit. */
+export function rateUnitOptionsForProduct(
+  conversions: UnitConversion[],
+  form: string | null | undefined,
+  inventoryUnit: string | null | undefined,
+): UnitConversion[] {
+  if (form !== 'seed' && form !== 'each') return unitOptionsForForm(conversions, form);
+  if (!inventoryUnit?.trim()) return [];
+  const exact = conversions.find((uc) => uc.unit === inventoryUnit);
+  if (exact) return [exact];
+  const insensitive = conversions.find((uc) => uc.unit.toLowerCase() === inventoryUnit.trim().toLowerCase());
+  return insensitive ? [insensitive] : [];
 }
 
 /**

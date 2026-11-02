@@ -4,6 +4,9 @@ Complete reference for inventory management, calculations, and transaction handl
 
 ---
 
+Product forms: liquid and dry retain their existing unit-type rules. Seed inventory and container units are exactly Lb or Unit; Each / unit uses exactly Ea or Unit. Seed and Each have no gallon or pound equivalent, and different rate and inventory units cannot be converted for these forms. The price workbook accepts only Ea/Unit as a new rate unit on seed/each products and refuses others.
+Seed and Each have no unit conversions, so their rate unit and every quote line's rate and price units must equal the product's stock unit; the database refuses anything else.
+
 ## Core Tables
 
 | Table | Purpose |

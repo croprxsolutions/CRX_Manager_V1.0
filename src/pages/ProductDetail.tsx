@@ -6,6 +6,7 @@ import Button from '../components/ui/Button';
 import Combobox from '../components/ui/Combobox';
 import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
+import PhoneSection from '../components/ui/PhoneSection';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
 import ProductPriceHistory from '../components/products/ProductPriceHistory';
@@ -26,6 +27,7 @@ import { Sentry } from '../lib/sentry';
 import { unitOptionsForForm, isKnownUnit } from '../lib/units';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
+import { usePhoneSections } from '../hooks/usePhoneSections';
 import type { CostHistory, EpaLookupResult, Product, UnitConversion } from '../types';
 import {
   applyProductPricingChangeSet,
@@ -286,6 +288,10 @@ export default function ProductDetail() {
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
   const skipUnsavedPromptRef = useRef(false);
   const blocker = useUnsavedChanges(isDirty || marginFloorDirty, skipUnsavedPromptRef);
+  // On phones the page folds. Pricing opens first; someone with no pricing to edit starts on the details.
+  const { sectionProps, reveal: revealPhoneSection } = usePhoneSections(
+    isNew || !isAdmin ? ['information', 'pricing'] : ['pricing'],
+  );
 
   const fetchProduct = useCallback(async (reportError = true): Promise<boolean> => {
     const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).eq('id', id!).maybeSingle();
@@ -603,6 +609,7 @@ export default function ProductDetail() {
     }
     if (!product.product_name) {
       toast('error', 'Product name is required');
+      revealPhoneSection('information');
       return;
     }
 
@@ -615,6 +622,7 @@ export default function ProductDetail() {
       const value = pricingMoneyInput(product, pricingMoneyDrafts, field);
       if (value !== '' && pricingDollarInputToCents(value) === null) {
         toast('error', `${label} must be a non-negative dollar amount with no more than two decimal places`);
+        revealPhoneSection('pricing');
         return;
       }
     }
@@ -622,16 +630,19 @@ export default function ProductDetail() {
     // Container size must be positive if set
     if (product.container_size != null && product.container_size <= 0) {
       toast('error', 'Container size must be greater than 0');
+      revealPhoneSection('information');
       return;
     }
 
     // Label intervals must be non-negative (printed on WPS compliance notices)
     if (product.rei_hours != null && product.rei_hours < 0) {
       toast('error', 'REI (hours) cannot be negative');
+      revealPhoneSection('information');
       return;
     }
     if (product.phi_days != null && product.phi_days < 0) {
       toast('error', 'PHI (days) cannot be negative');
+      revealPhoneSection('information');
       return;
     }
 
@@ -682,6 +693,7 @@ export default function ProductDetail() {
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_product' } });
       toast('error', sanitizeError(err));
+      revealPhoneSection(pricingChanged(product, persistedProduct, pricingMoneyDrafts) ? 'pricing' : 'information');
     } finally {
       setSaving(false);
     }
@@ -1027,7 +1039,7 @@ export default function ProductDetail() {
     : null;
 
   return (
-    <div className="space-y-4">
+    <div className={`phone-touch space-y-4 ${isAdmin ? 'max-md:pb-10' : ''}`}>
       <div className="flex items-center gap-3">
         <button aria-label="Back to products" onClick={() => navigate('/products')} className="p-2 rounded-lg hover:bg-white hover:shadow-sm transition-all text-secondary">
           <ArrowLeft className="w-5 h-5" />
@@ -1055,6 +1067,8 @@ export default function ProductDetail() {
             </div>
           )}
           <fieldset disabled={pricingReloadRequired || (isNew && saving)} className="contents">
+          {/* The fieldset disables these toggles too, so a locked page keeps every section open. */}
+          <PhoneSection title="Product Information" {...sectionProps('information', pricingReloadRequired)}>
           <Card>
             <CardHeader title="Product" accent="Information" />
 
@@ -1461,20 +1475,24 @@ export default function ProductDetail() {
               />
             </div>
           </Card>
+          </PhoneSection>
 
           {!isNew && id && persistedProduct?.id === id && (
-            <ProductBrandsSection
-              // Shown only once this page's own product has loaded, and remounted for each product, so one
-              // product's name, brands, open form or copy picker never reach (or get saved onto) the next.
-              key={id}
-              productId={id}
-              productName={persistedProduct.product_name}
-              isAdmin={isAdmin}
-              userId={profile?.id ?? null}
-            />
+            <PhoneSection title="Brands" {...sectionProps('brands', pricingReloadRequired)}>
+              <ProductBrandsSection
+                // Shown only once this page's own product has loaded, and remounted for each product, so one
+                // product's name, brands, open form or copy picker never reach (or get saved onto) the next.
+                key={id}
+                productId={id}
+                productName={persistedProduct.product_name}
+                isAdmin={isAdmin}
+                userId={profile?.id ?? null}
+              />
+            </PhoneSection>
           )}
 
           {isAdmin && (
+            <PhoneSection title="Pricing & Margins" {...sectionProps('pricing', pricingReloadRequired)}>
             <Card>
               <CardHeader title="Pricing" accent="& Margins" />
               {isNew ? (
@@ -1583,11 +1601,16 @@ export default function ProductDetail() {
                 </div>
               </div>
             </Card>
+            </PhoneSection>
           )}
 
           {isAdmin && (
-            <div className="flex justify-end">
-              <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
+            // On phones this sits on top of the bottom navigation, so saving is always in reach.
+            <div
+              data-testid="product-save-bar"
+              className="flex justify-end max-md:fixed max-md:inset-x-0 max-md:bottom-[calc(2.75rem+env(safe-area-inset-bottom))] max-md:z-20 max-md:border-t max-md:border-gray-200 max-md:bg-white max-md:px-4 max-md:py-2"
+            >
+              <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} className="max-md:w-full">
                 {isNew ? 'Create Product' : 'Save Changes'}
               </Button>
             </div>
@@ -1600,21 +1623,26 @@ export default function ProductDetail() {
             // Keyed by product: moving to another product starts a fresh card, so nothing from the
             // last product's floor, history or in-flight save carries over. Prefixed so it never
             // shares a key with ProductBrandsSection, its sibling in this fieldset.
-            <ProductMarginFloorCard
-              key={`margin-floor-${id}`}
-              productId={id}
-              tierMargins={[persistedProduct?.tier1_margin, persistedProduct?.tier2_margin, persistedProduct?.tier3_margin]}
-              userId={profile.id}
-              onDirtyChange={setMarginFloorDirty}
-            />
+            <PhoneSection title="Margin Floor" {...sectionProps('floor', pricingReloadRequired)}>
+              <ProductMarginFloorCard
+                key={`margin-floor-${id}`}
+                productId={id}
+                tierMargins={[persistedProduct?.tier1_margin, persistedProduct?.tier2_margin, persistedProduct?.tier3_margin]}
+                userId={profile.id}
+                onDirtyChange={setMarginFloorDirty}
+              />
+            </PhoneSection>
           )}
           </fieldset>
         </div>
 
         {!isNew && id && (
-          <div className="space-y-4">
-            <ProductStockCard key={id} productId={id} isActive={product.is_active !== false} />
+          <div className="space-y-4 max-md:space-y-0">
+            <PhoneSection title="Stock & Reorder" {...sectionProps('stock')}>
+              <ProductStockCard key={id} productId={id} isActive={product.is_active !== false} />
+            </PhoneSection>
             {isAdmin && (
+              <PhoneSection title="Cost Basis" {...sectionProps('basis')}>
               <Card>
                 <CardHeader title="Select" accent="Cost Basis" />
                 {costBasisLoading ? (
@@ -1695,8 +1723,10 @@ export default function ProductDetail() {
                   <p className="text-sm text-secondary">Governed cost-basis options are unavailable for this Product.</p>
                 )}
               </Card>
+              </PhoneSection>
             )}
             {isAdmin && (
+              <PhoneSection title="Price & Cost History" {...sectionProps('history')}>
               <ProductPriceHistory
                 productId={id}
                 costBasisWorkspace={costBasisWorkspace}
@@ -1705,10 +1735,8 @@ export default function ProductDetail() {
                 onSelectSupplierBasis={(candidate) => void handleSupplierBasisSelection(candidate)}
                 onSelectPurchaseBasis={(candidate) => void handlePurchaseBasisSelection(candidate)}
               />
-            )}
-            {/* To-Do 0.4: sell prices over time. Admin-only, like all price history. */}
-            {isAdmin && <ProductSellPriceHistory productId={id} reloadToken={priceHistoryReloadToken} />}
-            {isAdmin && (
+              {/* To-Do 0.4: sell prices over time. Admin-only, like all price history. */}
+              <ProductSellPriceHistory productId={id} reloadToken={priceHistoryReloadToken} />
               <Card>
                 <CardHeader title="Cost" accent="History" />
                 {!costHistoryLoaded && !costHistoryLoadFailed ? (
@@ -1767,6 +1795,7 @@ export default function ProductDetail() {
                   </div>
                 )}
               </Card>
+              </PhoneSection>
             )}
             <ProductChangeHistory productId={id} reloadToken={priceHistoryReloadToken} />
           </div>

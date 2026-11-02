@@ -10,7 +10,7 @@ import { assertInvoiceSendable } from '../../lib/invoiceSendDisposition';
 import { Sentry } from '../../lib/sentry';
 import { INVOICE_COLUMNS } from '../../lib/costFields';
 import { runCriticalAction } from '../../lib/criticalAction';
-import { generateIdempotencyKey } from '../../lib/idempotency';
+import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../../lib/idempotency';
 import ConfirmModal from '../ui/ConfirmModal';
 import MobileCardList from '../ui/MobileCardList';
 import {
@@ -483,7 +483,11 @@ export default function FieldInvoicesPostedPanel() {
           Sentry.captureException(err, { tags: { rpc: 'unpost_invoice', page: 'field-invoices-posted' } });
           const msg = err instanceof Error ? err.message : String(err);
           failures.push(`${row.invoice_number}: ${msg}`);
-          // Keep the failed invoice's key cached so a retry reuses it.
+          // Keep the failed invoice's key cached so a retry reuses it, unless the server proved nothing ran
+          // under it (key used for another request or person): retire it, since an unpost cannot repeat
+          // (the body refuses an invoice no longer posted) and the list reloads below.
+          const bindingRejection = getIdempotencyBindingRejection(err);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') delete unpostKeysRef.current[row.id];
         }
       }
 

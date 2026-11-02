@@ -14,7 +14,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
 import { assertInvoiceLifecycleSendable, assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { generateIdempotencyKey } from '../lib/idempotency';
+import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { createdInvoiceAddressSearch, createdInvoiceIdFromAddress } from '../lib/fieldAppNewInvoiceAddress';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
@@ -1963,7 +1963,6 @@ export default function FieldApplicationInvoice() {
       const key = saveIdem.getKey();
       const send = recordSend(unanswered, key, fingerprint);
       unansweredSaveRef.current = send.entry;
-      const retryMayReplayOldValues = send.mayReplayOtherValues;
       const { data, error } = await supabase.rpc('save_field_app_invoice', {
         // save_field_app_invoice accepts NULL p_invoice_id to create a new
         // invoice (live signature is nullable; generated type narrows to string).
@@ -1972,13 +1971,26 @@ export default function FieldApplicationInvoice() {
         p_idempotency_key: key,
       });
 
-      if (error) {
+      // The first save under this key committed with other values (an edit after a lost reply).
+      // The server no longer hands that result back as this save's (migration 20261102180000); it
+      // refuses and reports it, so take its invoice ids as the earlier save and write the current
+      // values over it below, under a new key, exactly as a replay of old values was handled.
+      const mismatch = error ? getIdempotencyMismatchResult(error, 'save_field_app_invoice') : null;
+      const earlierSave = Array.isArray(mismatch?.invoice_ids) ? (mismatch as unknown as FieldAppInvoiceResult) : null;
+      if (error && !earlierSave) {
         // The server refused it (rolled back, no receipt): a retry under this key is a fresh
         // save, not a replay, so it needs no follow-up write (Codex review, PR #893).
         if (isDefinitiveRpcError(error)) unansweredSaveRef.current = forgetRefusedSend(unansweredSaveRef.current, fingerprint);
+        // Another person's key retires it. An unreadable receipt keeps it: that save may have committed.
+        const bindingRejection = getIdempotencyBindingRejection(error);
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+          saveIdem.resetKey();
+          unansweredSaveRef.current = null;
+        }
         throw error;
       }
-      let result = assertRpcResult<FieldAppInvoiceResult>(data, 'save_field_app_invoice');
+      const retryMayReplayOldValues = send.mayReplayOtherValues || earlierSave !== null;
+      let result = earlierSave ?? assertRpcResult<FieldAppInvoiceResult>(data, 'save_field_app_invoice');
       saveIdem.resetKey();
       unansweredSaveRef.current = null;
       let ids = result.invoice_ids || [];
@@ -2153,12 +2165,17 @@ export default function FieldApplicationInvoice() {
           const billingSend = recordSend(unansweredBilling, billingKey, billingFingerprint);
           billingKeysRef.current[billingKeyId] = billingSend.entry;
           const billingMayReplayOldValues = billingSend.mayReplayOtherValues;
-          const writeBilling = async (key: string) => {
+          const writeBilling = async (key: string): Promise<boolean | 'key_refused'> => {
             const billingResult = await supabase.rpc('update_field_app_invoice_billing', {
               ...billingArgs,
               p_idempotency_key: key,
             });
             if (billingResult.error) {
+              // The key was first used for other values (an edit after a lost reply) or is not this
+              // person's: nothing ran now. Repeating a billing write is harmless, so the caller
+              // writes the current values under a new key.
+              const bindingRejection = getIdempotencyBindingRejection(billingResult.error);
+              if (bindingRejection === 'intent' || bindingRejection === 'actor') return 'key_refused';
               Sentry.captureException(billingResult.error, {
                 level: 'error',
                 extra: { context: 'field_app_invoice_billing_persist', invoice_ids: ids },
@@ -2175,11 +2192,12 @@ export default function FieldApplicationInvoice() {
             assertRpcResult(billingResult.data, 'update_field_app_invoice_billing');
             return true;
           };
-          billingOk = await writeBilling(billingKey);
-          if (billingOk && billingMayReplayOldValues) {
+          const firstBilling = await writeBilling(billingKey);
+          billingOk = firstBilling === true;
+          if (firstBilling === 'key_refused' || (billingOk && billingMayReplayOldValues)) {
             const followUpKey = generateIdempotencyKey('update_field_app_invoice_billing', profile.id);
             billingKeysRef.current[billingKeyId] = { key: followUpKey, fingerprints: [billingFingerprint] };
-            billingOk = await writeBilling(followUpKey);
+            billingOk = (await writeBilling(followUpKey)) === true;
           }
           // Clear the per-id key only on success so a retry after a failure reuses it.
           if (billingOk) delete billingKeysRef.current[billingKeyId];
@@ -2347,6 +2365,13 @@ export default function FieldApplicationInvoice() {
       }
       fetchInvoice();
     } catch (err) {
+      // A key used for another request or person retires (an unpost cannot repeat: the body refuses
+      // an invoice no longer posted); fetchInvoice below the call is skipped, so reload here.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+        delete unpostKeysRef.current[isGroup ? `grp:${invoiceGroupId}` : id];
+        fetchInvoice();
+      }
       Sentry.captureException(err, { tags: { rpc: isGroup ? 'unpost_invoice_group' : 'unpost_invoice' } });
       toast('error', `Unpost failed: ${fieldAppError(err)}`);
     } finally {
@@ -2902,6 +2927,13 @@ export default function FieldApplicationInvoice() {
       skipUnsavedPromptRef.current = true;
       navigate(`/jobs/${result.job_id}`);
     } catch (err) {
+      // A key used for another request or person retires (the body refuses an invoice already sent
+      // back); reload.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+        transferToSchedulingIdem.resetKey();
+        fetchInvoice();
+      }
       Sentry.captureException(err, { tags: { action: 'transfer_invoice_to_job' } });
       toast('error', `Transfer to scheduling failed: ${fieldAppError(err)}`);
     } finally {

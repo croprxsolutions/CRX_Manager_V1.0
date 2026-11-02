@@ -34,13 +34,14 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 52 |
+| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
-margin: the table-level lock is live since 2026-10-25; the server-function audit is still owed), KI-10 (about 69 functions still replay a saved answer on the retry
+margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
+migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
 key alone), KI-18 (UTC/browser-clock season can
 suppress the pre-harvest safety warning).
 
@@ -80,8 +81,8 @@ click-through as an applicator was done. Part B also widened `_can_see_field` to
 so the earlier gap where an applicator sent to one field of a split job got no weather centroid on Job Detail
 should be gone (not checked in the app; 0 split assignments live, 2026-10-22).
 
-### KI-02 — Product cost and margin: server functions not yet fully audited
-**MED · PARTIAL · security/money · follow-up audit unassigned**
+### KI-02 — Product cost and margin: server functions audited and fixed live 2026-11-02
+**MED · PARTIAL · security/money · fix migration `20261102200000` live 2026-11-02; retiring `admin_set_application_service_cost` remains**
 Mason decided cost and margin are admin-only. Screens and report functions were changed (migrations
 `20261019010000`, `20261019230000`) and purchase-order cost is locked (`20261021140000`, `20261021141000`,
 PR #980). **The column lock is live:** `20261022101000_cost_columns_admin_only` (PR #1089, applied 2026-10-25
@@ -94,14 +95,14 @@ Two residuals stay accepted by Mason (2026-10-21): commission amount and rate to
 refusals let a rep narrow a cost by trial and error. Includes the older sub-items "reps can recover
 application-service cost" and "retire the old `admin_set_application_service_cost` function" (no caller left in
 `src/`; no DROP migration exists).
-Still open (Mason, 2026-10-25, kept out of the column lock): column grants cannot limit owner-rights (SECURITY
-DEFINER) functions. The 45 signed-in-executable ones whose body names a cost field were read live on 2026-10-25,
-but 22 more that reach cost only through inner helper functions (`create_quote_version`, `save_invoice`,
-`price_order`, `save_job` and others) are not yet traced, nor are definer functions that serialize a whole row to
-JSON (`to_jsonb`/`row_to_json`), and nothing re-checks function bodies after a later change. Owed: audit those call
-chains, and add a standing DB invariant sweep that flags any signed-in-executable function returning cost, profit or
-margin to a non-admin. The same follow-up makes the cost-lock proof script record each ledger-only migration once
-(CodeRabbit, PR #1089).
+**Function audit done 2026-11-02** (report: `docs/audits/2026-11-02-cost-margin-definer-function-audit.md`): every
+signed-in-executable owner-rights (SECURITY DEFINER) function that names cost, reaches it through an inner helper, or
+turns a cost-bearing row into JSON was traced live. Migration `20261102200000_cost_definer_leaks_closed` changes the ones
+that need it so only admins get cost (real-schema proof
+`scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs`); **applied live 2026-11-02 18:39 UTC (12:39 PM Central), ledger `20261102183928`; read-only post-apply check and sweep clean**. The standing sweep
+`cost-exposure-review` now flags any new or changed function that names cost, and the cost-lock proof records each
+ledger-only migration once (CodeRabbit, PR #1089). Decided by Mason 2026-11-02: existing inventory notes stay as they
+are; no new note gets a cost.
 
 ### KI-03 — Reps do not yet have the decided invoice and commission-split scoping
 **MED · OPEN · security/money · Mason decided, build unassigned**
@@ -114,6 +115,9 @@ the `invoice_shares_insert` policy (checked live 2026-10-13: no ownership test);
 on other reps' invoices, and payments and prepay/credit application stay open to reps. Any rep can
 still change a commission split on a job, quote or order (only the customer default is protected). Any rep can
 also roll over any rep's quote.
+The 2026-11-02 cost audit noted more functions in this same ownership and role-check area (not cost); the list is in
+Mason's private notes until the scoping work is built. It also noted that an admin's automatic draft invoice for a job
+with a below-cost line always fails, so that job is billed by hand.
 
 ### KI-04 — Connected tools with no permission rule run without a prompt
 **LOW · FIXED 2026-11-02 (residual accepted) · tooling-guards/security**
@@ -165,8 +169,11 @@ When a user retries an action with a saved "retry key", these functions return t
 without checking that the retry is for the same person and record. Nothing is double-charged; a reused key with
 a different target gives a false "success" on the wrong record. Fixed on `main`: batch 1 (`20261016060000`,
 PR #942), batch 2 (`20261016140000`, PR #951), batch 3a (`20261019200000`, PR #954), batch 3b (`20261019235000`,
-PR #967). Remaining: `unpost_invoice`, `price_order`, `update_order_items`, `save_field_app_invoice`, rebate
-claims, `close_accounting_period`, notification RPCs and about 55 MED/LOW functions (batch 4). No open PR.
+PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invoice`, `unpost_invoice_group`,
+`close_accounting_period`, `reopen_accounting_period`, `transfer_invoice_to_job`, `save_field_app_invoice`,
+`update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
+`create_rebate_claim`, `transition_rebate_claim`). Remaining: `price_order`, `update_order_items`, notification
+RPCs and about 45 MED/LOW functions (batches 4b to 4d). No open PR.
 Batch 4 includes `mark_inventory_row_verified` (MED, added 2026-10-23, PR #1042 follow-up 3; Mason: "batch it"):
 it matches its saved result on key and operation only, so a reused key with a different `p_inventory_id`, or from
 another admin, returns the first call's result. `IntegrityCleanupPanel.tsx` mints a fresh key per click, so no
@@ -292,6 +299,17 @@ local replay's screen (a new line added after its product's cost rose shows the 
 
 ---
 
+### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
+**MED · OPEN (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · unassigned**
+`get_ar_aging` (`supabase/migrations/20260805151605_fix_historical_ar_report_cutoffs.sql` ~L147) checks every
+customer before returning rows; one customer whose balance cannot be rebuilt as of the chosen past date raises an
+error and the whole report returns nothing. `allocate_payment` also accepts a future `p_payment_date` outside closed
+periods, which can trip the same later-activity test and block even a current report. The refusal itself is
+deliberate (it stops invented historical balances), so the fix is not to suppress it: report that customer as
+"cannot be shown as of this date" while returning the rest, and refuse future-dated payments.
+
+---
+
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
@@ -361,6 +379,22 @@ sent, but every outbound path uses Main Warehouse only and no transfer exists, s
 ship. A live check on 2026-11-02 found all 117 inventory rows at Main Warehouse, so nothing has been stranded yet.
 Fix: list active `warehouses` rows only, refuse unknown locations on the server, and print the real location.
 Multi-warehouse support stays (`docs/manual/DECISION_LOG.md`, 2026-11-02; checklist in `docs/workflows/INVENTORY_RULES.md`).
+
+
+### KI-93 — One blend ticket can deduct its stock twice
+**MED · OPEN (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · unassigned (after the cycle-count freeze lands)**
+A blend ticket can produce both an application record (`create_application_record_from_blend_ticket`, which
+deducts stock as `job_applied`) and an order (`create_order_from_blend_ticket`, whose delivery deducts again).
+Neither checks for the other, and same-operation retry protection does not cover the cross-path case. Fix: each
+path refuses when the ticket already went down the other one, inside PostgreSQL.
+
+### KI-94 — Voiding a delivery can put back more reserved stock than completion took
+**LOW-MED · OPEN (found 2026-11-02, Ponytail audit #16, confirmed by Sol) · database/inventory · unassigned**
+Completion (`supabase/migrations/20261014210000_order_invoices_rep_own_name.sql` ~L612) lowers
+`quantity_prebooked` by `LEAST(delivered, prebooked)`, but `void_delivery` adds back the full delivered quantity.
+Prebooked 3, delivered 10, voided: prebooked becomes 10, so available stock reads low. Fully reserved deliveries are
+unaffected. Cancelling a completed delivery is refused since PR #1284, so only void remains. Fix needs a decision
+first (Sol): put back exactly what completion took (store it), or rebuild the order's outstanding reservation.
 
 ## Database and release process
 
@@ -523,6 +557,20 @@ catalog (#1110). Done = the chain passes on main and still fails first against 2
 
 ---
 
+
+### KI-96 — Unused code and copied helpers make every change slower
+**LOW · OPEN (found 2026-11-02, Ponytail audit #17-#20) · tooling/frontend · unassigned (do last; changes no behavior)**
+About 11,000 lines nothing runs: 20 one-off scripts in `scripts/smoke/`, 5 switched-off guards in `.claude/hooks/`
+(never the always-kept ones in `AGENTS.md`), 3 browser-test setups and 12 committed `tmpclaude-*` files; offline
+sync for eight actions the phones no longer queue (`src/lib/offlineSync.ts` ~L404-469); and two Edge Functions
+nothing calls (`reset-user-password`, `setup-blend-tickets-storage`). Helpers are copied: date formatting about 78
+times, money formatting in a dozen files (two print "$-5.00"), customer-notification code in both the job and
+invoice pages. `src/pages/QuoteBuilder.tsx` (~6,000 lines) and the job page (~5,400) mix loading, pricing, saving,
+status actions and PDF/email; moving status actions and PDF/email into their own files changes nothing for users.
+Delete with a grep of every reference first; keep one copy of each helper.
+
+---
+
 ## Accepted risks (Mason decided to live with these; do not re-open without a new decision)
 
 | ID | What | Why accepted |
@@ -594,8 +642,11 @@ edge function** (the live function answers "Unknown email_type: purchase_order")
   ticket) means these should be widened to the dispatch route too; not built.
 
 ### KI-74 — More cost exposure and prerequisites (extends KI-02)
-**HIGH/MED · OPEN · security/money · Mason**
-`blend_recipe_items` and cost fields reachable through field-billing and dispatch paths remain readable (HIGH).
+**MED · PARTIAL · security/money · Mason**
+~~`blend_recipe_items` and cost fields reachable through field-billing and dispatch paths remain readable (HIGH).~~
+**Settled by the 2026-11-02 audit (KI-02):** `blend_recipe_items` cost was closed by the column lock; field billing,
+delivery and offline sync give an applicator or driver no cost; the remaining dispatch path is covered by
+`20261102200000` (live 2026-11-02).
 Commission amount plus rate can reveal a rep's profit, and Quick Receive reveals which open PO line is cheaper
 (MED). The computed field `invoice_post_version` reads the whole invoice row, so revoking invoice columns can break
 posting: the cost-column lock must ship with a column-safe version design in the same change (MED). **Done in
@@ -605,8 +656,8 @@ the `invoices_postable` view (every column but `total_cost_cents`), the seven sc
 
 ### KI-75 — Retry-key detail (extends KI-10, KI-11)
 **HIGH on money paths · OPEN · money**
-Still on the replay-binding list: `transfer_invoice_to_job`, `update_field_app_invoice_billing`, and the after-lock
-race in `apply_credit_memo_to_invoice`. Screen-side: the `PrepaymentManagerPanel` split-check modal, JobDetail
+`transfer_invoice_to_job` and `update_field_app_invoice_billing` are now bound (batch 4a, `20261102180000`). Still
+open: the after-lock race in `apply_credit_memo_to_invoice`. Screen-side: the `PrepaymentManagerPanel` split-check modal, JobDetail
 reset-before-call defects the scanner cannot see, and payload-sensitive actions in FieldStop, DeliveryDetail and
 OrderDetail.
 

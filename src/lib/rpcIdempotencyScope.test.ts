@@ -258,6 +258,11 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // (20261019235000) re-emits the body only to retarget its keyless per-delivery cancel; changing
   // the literal would orphan the wrapper's receipt binding.
   _batch_cancel_deliveries_replay_impl_20261015: ['batch_cancel_deliveries'],
+  // Direct EXECUTE is revoked (postgres-only). Replay-binding batch 4a (20261102180000) renamed the
+  // live unpost_invoice_group body to this name and re-emits it only to unpost each member through
+  // unpost_invoice's renamed body (no per-member key); it keeps the public operation literal so the
+  // wrapper binds that same receipt, and changing it would orphan every existing receipt.
+  _unpost_invoice_group_replay_impl_20261015: ['unpost_invoice_group'],
   // Direct EXECUTE is revoked (postgres-only). Batch 3b (20261019235000) renamed the live
   // cancel_delivery body to this name with ALTER FUNCTION ... RENAME TO, so it kept the public
   // literal the wrapper binds. 20261102140000 re-emits it only to refuse a completed delivery;
@@ -302,6 +307,12 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // that one receipt namespace. 20261020210000 re-emits the live body under its own name (Goal 3
   // tier-1 fallback only); changing the literal would orphan existing receipts.
   _create_order_from_blend_ticket_replay_impl_20261015: ['create_order_from_blend_ticket'],
+  // Direct EXECUTE is revoked (postgres-only). Replay-binding renamed the live manual_inventory_add and
+  // complete_job bodies to these names (ALTER FUNCTION ... RENAME TO), so each kept the public literal its
+  // wrapper binds. 20261102200000 re-emits them only to keep cost admin-only; changing the literal would
+  // orphan existing receipts.
+  _manual_inventory_add_replay_impl_20261015: ['manual_inventory_add'],
+  _complete_job_replay_impl_20261015: ['complete_job'],
   // Direct EXECUTE is revoked. This private split-invoice implementation is
   // the implementation half of create_split_invoices_from_order and must use
   // the public operation namespace for one replay result across both layers.

@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { downloadBatchStatements } from '../lib/statementPdf';
 import { downloadBatchYearEndSummaries } from '../lib/yearEndSummaryPdf';
@@ -299,6 +300,13 @@ export default function MonthEndClose() {
       setShowCloseModal(false);
       fetchData();
     } catch (err: unknown) {
+      // A key used for another request or person retires; a close cannot repeat (the body refuses a
+      // period already closed), so reload to show one an earlier try made.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+        closePeriodIdem.resetKey();
+        fetchData();
+      }
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'close_accounting_period' } });
       toast('error', sanitizeError(err));
     }
@@ -311,9 +319,11 @@ export default function MonthEndClose() {
       toast('error', 'Cannot reopen period — profile not loaded. Please refresh.');
       return;
     }
+    // The server replays a reopen only for the same period and reason, so each pair has its own key.
+    const reopenScope = JSON.stringify([reopenTarget.id, reopenReason]);
     setReopening(true);
     try {
-      const key = reopenPeriodIdem.getKey();
+      const key = reopenPeriodIdem.getKeyFor(reopenScope);
       const { data, error } = await supabase.rpc('reopen_accounting_period', {
         p_period_id: reopenTarget.id,
         p_reason: reopenReason,
@@ -322,7 +332,7 @@ export default function MonthEndClose() {
       });
       if (error) throw error;
       assertRpcResult(data, 'reopen_accounting_period');
-      reopenPeriodIdem.resetKey();
+      reopenPeriodIdem.resetKeyFor(reopenScope);
       logActivity({ event: 'reopen_accounting_period', description: `Reopened accounting period: ${reopenTarget.id}. Reason: ${reopenReason}`, performedBy: profile.id });
       toast('success', 'Accounting period reopened');
       setShowReopenModal(false);
@@ -330,6 +340,13 @@ export default function MonthEndClose() {
       setReopenTarget(null);
       fetchData();
     } catch (err: unknown) {
+      // A key used for another request or person retires (a reopen cannot repeat: the body refuses
+      // an open period).
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+        reopenPeriodIdem.resetKeyFor(reopenScope);
+        fetchData();
+      }
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'reopen_accounting_period' } });
       toast('error', sanitizeError(err));
     }

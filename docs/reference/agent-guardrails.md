@@ -509,7 +509,11 @@ rules prompt in every mode, including `bypassPermissions`; the desktop app ignor
    review. A prompt naming a gate file is something Mason CAN judge ("did I ask for safety-gate work?"). `gh pr merge`
    moves to `allow`; the merge gates are its hard stop, and item 7 keeps them closed when the local guard breaks.
    `scripts/agent-manifest-parity.mjs` reads only each manifest's `hooks` block, so these `ask` rules are not mistaken
-   for hook wiring.
+   for hook wiring. **2026-11-02 (KI-04):** connector tools that send or post outside the company also prompt —
+   Slack send/schedule/canvas/list/reaction/upload, Gmail send/reply/forward, Calendar event writes, Drive
+   `share_file`, GitHub-MCP comment/issue/review/PR/repository writes, and Supabase feedback. Read tools and Slack
+   drafts stay free. Named by tool, so a newly connected or re-identified connector is unlisted until added
+   (accepted: Mason wants a relaxed harness).
 2. **Superseded:** CodeRabbit makes no automatic reviews since 2026-10-21 (`docs/reference/coderabbit-native-review.md`).
 3. **Superseded:** the `protect-main` ruleset no longer requires an approving review (Mason, 2026-10-19). It keeps its required checks and no bypass actors. The ruleset is Mason's alone to change; agents never change or work around it, and no document carries a step-by-step way to switch it off.
 4. **Adversarial review:** unchanged from the autonomous-landing entry — Luna rounds and an exact-SHA Sol proof on

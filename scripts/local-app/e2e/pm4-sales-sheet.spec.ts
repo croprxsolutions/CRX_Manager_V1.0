@@ -22,6 +22,11 @@ async function addProducts(page: Page) {
   await page.evaluate(async (rows) => {
     const path = '/src/lib/db.ts';
     const { supabase } = await import(/* @vite-ignore */ path);
+    const { error: categoryError } = await supabase.rpc('upsert_product_category', {
+      p_name: rows[0].category, p_is_active: true, p_sort_order: 901,
+      p_idempotency_key: `pm4-${rows[0].category}`,
+    });
+    if (categoryError) throw new Error(categoryError.message);
     const { error } = await supabase.from('products').insert(rows);
     if (error) throw new Error(error.message);
   }, [

@@ -64,6 +64,13 @@ function chainable(resolveWith: unknown) {
 
 vi.mock('../lib/db', () => ({
   supabase: { from: vi.fn(() => chainable({ data: mocks.products, error: null })) },
+  supabaseUntyped: { from: vi.fn(() => chainable({
+    data: [
+      { name: 'Herbicide', is_active: true, sort_order: 10 },
+      { name: 'Seed', is_active: true, sort_order: 20 },
+      { name: 'Old', is_active: false, sort_order: 30 },
+    ], error: null,
+  })) },
   sanitizeError: (error: unknown) => error instanceof Error ? error.message : String(error),
   checkMutationResult: vi.fn(),
 }));
@@ -183,6 +190,20 @@ describe('Products list and exports', () => {
     expect(mobileLayout).toHaveClass('hidden');
     expect(tableLayout).toHaveClass('block');
     expect(tableLayout).not.toHaveClass('hidden');
+  });
+
+  it('offers Seed in inline category editing and shows a retired value only on its row', async () => {
+    mocks.products.splice(0, mocks.products.length,
+      { ...activeProduct, category: 'Old' },
+      { ...activeProduct, id: '33333333-3333-4333-8333-333333333333', product_name: 'Another Product' });
+    await loadProducts();
+    fireEvent.click(screen.getByText('Edit'));
+    const categorySelects = screen.getAllByRole('combobox', { name: 'Category' });
+    expect(categorySelects).toHaveLength(2);
+    expect(categorySelects[0]).toHaveTextContent('Seed');
+    expect(categorySelects[0]).toHaveTextContent('Old (retired)');
+    expect(categorySelects[1]).toHaveTextContent('Seed');
+    expect(categorySelects[1]).not.toHaveTextContent('Old (retired)');
   });
 
   it('exports only active rows to customer CSV and PDF even when All is selected', async () => {

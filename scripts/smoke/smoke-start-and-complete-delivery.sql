@@ -81,7 +81,7 @@ BEGIN
   VALUES ('[SMOKE] Start Complete Farm ' || v_suffix, '[SMOKE]-SACD-' || v_suffix)
   RETURNING id INTO v_customer;
   INSERT INTO public.products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Start Complete Product ' || v_suffix, 'GL', '[SMOKE]-EPA-SACD-' || v_suffix, 'liquid')
+  VALUES ('[SMOKE] Start Complete Product ' || v_suffix, 'GL', '999999-99999', 'liquid')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,

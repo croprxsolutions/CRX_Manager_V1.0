@@ -140,7 +140,7 @@ BEGIN
   RETURNING id INTO v_customer;
 
   INSERT INTO products (product_name, is_rup, epa_registration, signal_word)
-  VALUES ('[SMOKE] RUP Product ' || v_suffix, true, 'EPA-SMK-' || v_suffix, 'Warning')
+  VALUES ('[SMOKE] RUP Product ' || v_suffix, true, '999999-99999', 'Warning')
   RETURNING id INTO v_product;
 
   v_lic_num := 'SMK-LIC-' || v_suffix;

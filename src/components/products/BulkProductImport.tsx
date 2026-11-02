@@ -6,6 +6,9 @@ import { useToast } from '../ui/Toast';
 import { supabase, checkMutationResult } from '../../lib/db';
 import { isCSVFile } from '../../lib/documentOCR';
 import { Sentry } from '../../lib/sentry';
+import { sanitizeError } from '../../lib/errorSanitizer';
+import { EPA_REGISTRATION_PATTERN } from '../../lib/productBrands';
+import { listProductCategories } from '../../lib/productSetup';
 import {
   buildProductInsert,
   isProductImportStringField,
@@ -45,13 +48,45 @@ const FIELD_MAPPINGS: Record<string, string[]> = {
   notes: ['notes', 'description', 'comments', 'note'],
 };
 
+function validateImportRow(
+  cols: string[], fieldMapping: Record<number, string>, allowedCategories: Set<string>, row: number,
+): { product?: ParsedProduct; invalid?: ValidationResult['invalid'][number] } {
+  const product: Partial<ParsedProduct> = {};
+  const data: Record<string, string> = {};
+  let numberError: string | null = null;
+  cols.forEach((value, index) => {
+    const field = fieldMapping[index];
+    if (!field) return;
+    data[field] = value;
+    if (isProductImportStringField(field)) {
+      if (value.trim()) product[field] = value;
+    } else if (field === 'container_size' || field === 'rate_per_acre') {
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      const number = Number(trimmed);
+      const valid = !/^0[xob]/i.test(trimmed) && Number.isFinite(number)
+        && (field !== 'container_size' || number > 0) && (field !== 'rate_per_acre' || number >= 0);
+      if (valid) product[field] = number;
+      else numberError = field === 'container_size'
+        ? 'Container size must be a number greater than 0.'
+        : 'Rate Per Acre must be a number of zero or greater.';
+    }
+  });
+  const error = !product.product_name?.trim() ? 'Missing product name'
+    : numberError
+      || (product.category && !allowedCategories.has(product.category.trim()) ? 'Choose an active category from the list.' : null)
+      || (product.epa_registration && !EPA_REGISTRATION_PATTERN.test(product.epa_registration.trim())
+        ? 'EPA number must look like 524-475 or 100-1234-5905. This checks format only.' : null);
+  return error ? { invalid: { row, error, data } } : { product: product as ParsedProduct };
+}
+
 export default function BulkProductImport({ open, onClose, onSuccess }: BulkProductImportProps) {
   const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [uploadResults, setUploadResults] = useState<{ success: number; failed: number } | null>(null);
+  const [uploadResults, setUploadResults] = useState<{ success: number; failed: number; errors: string[] } | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -124,7 +159,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
 
     for (let i = 1; i < lines.length; i++) {
       const cols = parseCSVLine(lines[i]);
-      if (cols.length > 0 && cols[0]) {
+      if (cols.some((value) => value.trim() !== '')) {
         rows.push(cols);
       }
     }
@@ -176,44 +211,21 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         return;
       }
 
+      const categories = await listProductCategories();
+      const allowedCategories = new Set(categories.filter((category) => category.is_active).map((category) => category.name));
       const valid: ParsedProduct[] = [];
       const invalid: Array<{ row: number; error: string; data: Record<string, string> }> = [];
 
       rows.forEach((cols, idx) => {
-        const product: Partial<ParsedProduct> = {};
-        const rowData: Record<string, string> = {};
-
-        cols.forEach((value, colIdx) => {
-          const field = fieldMapping[colIdx];
-          if (field) {
-            rowData[field] = value;
-
-            if (isProductImportStringField(field)) {
-              if (value) product[field] = value;
-            } else if (field === 'container_size' || field === 'rate_per_acre') {
-              const num = parseFloat(value);
-              if (!isNaN(num) && num >= 0) {
-                product[field] = num;
-              }
-            }
-          }
-        });
-
-        if (!product.product_name) {
-          invalid.push({
-            row: idx + 2,
-            error: 'Missing product name',
-            data: rowData,
-          });
-          return;
-        }
-
-        valid.push(product as ParsedProduct);
+        const result = validateImportRow(cols, fieldMapping, allowedCategories, idx + 2);
+        if (result.invalid) invalid.push(result.invalid);
+        else if (result.product) valid.push(result.product);
       });
 
       setValidation({ valid, invalid });
-    } catch {
-      toast('error', 'Failed to parse file.');
+    } catch (error) {
+      Sentry.captureException(error);
+      toast('error', 'Could not read the category list or parse the file. Try again.');
     }
     setParsing(false);
   };
@@ -224,6 +236,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
 
     let success = 0;
     let failed = 0;
+    const errors: string[] = [];
 
     for (const product of validation.valid) {
       const productResult = await supabase.from('products').insert(buildProductInsert(product)).select('id');
@@ -231,13 +244,19 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       if (productResult.error) {
         Sentry.captureException(productResult.error instanceof Error ? productResult.error : new Error(String(productResult.error)), { extra: { context: 'Failed to insert product' } });
         failed++;
+        errors.push(`${product.product_name}: ${sanitizeError(productResult.error)}`);
       } else {
-        try { checkMutationResult(productResult, 'Insert product'); } catch (e) { Sentry.captureException(e instanceof Error ? e : new Error(String(e))); failed++; continue; }
+        try { checkMutationResult(productResult, 'Insert product'); } catch (e) {
+          Sentry.captureException(e instanceof Error ? e : new Error(String(e)));
+          failed++;
+          errors.push(`${product.product_name}: ${sanitizeError(e)}`);
+          continue;
+        }
         success++;
       }
     }
 
-    setUploadResults({ success, failed });
+    setUploadResults({ success, failed, errors });
     setUploading(false);
 
     if (success > 0) {
@@ -334,11 +353,6 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
                       {product.rate_per_acre && <p className="text-gray-500">Rate/Acre: {product.rate_per_acre} {product.rate_unit || ''}</p>}
                     </div>
                   ))}
-                  {validation.valid.length > 5 && (
-                    <p className="text-xs text-secondary text-center pt-1">
-                      + {validation.valid.length - 5} more products
-                    </p>
-                  )}
                 </div>
               </div>
             )}
@@ -367,6 +381,12 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
               Successfully imported {uploadResults.success} product(s)
               {uploadResults.failed > 0 && `, ${uploadResults.failed} failed`}
             </p>
+          </div>
+        )}
+        {uploadResults && uploadResults.errors.length > 0 && (
+          <div className="max-h-40 overflow-y-auto rounded-lg border border-red-200 bg-red-50 p-3" role="status">
+            <p className="text-sm font-medium text-red-800">Products that need a correction</p>
+            {uploadResults.errors.map((error, index) => <p key={index} className="mt-1 text-xs text-red-800">{error}</p>)}
           </div>
         )}
 

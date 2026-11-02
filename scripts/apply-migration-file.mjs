@@ -354,6 +354,9 @@ try {
     // in THIS Claude Code session (his reply counts only where he was asked).
     ownerApprovalDoor: true,
     ownerSessionId: process.env.CLAUDE_CODE_SESSION_ID,
+    // --confirm re-reads the live ledger before transmitting (below), so the
+    // snapshot's age is not refused here.
+    liveOrderingRecheck: true,
   });
 } catch (err) {
   die(2,

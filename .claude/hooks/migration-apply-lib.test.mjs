@@ -216,6 +216,16 @@ denies(evaluate(fixture({ snapshot: { captured_at: iso(-48 * 3600 * 1000), appli
   "h old (captured", "snapshot older than 24h");
 denies(evaluate(fixture({ snapshot: { applied: [{ version: "20260101000000", name: "20260101000000_baseline" }] } })),
   "no usable captured_at", "snapshot with no captured_at (freshness unknowable)");
+// The apply script re-reads the live ledger before it transmits, so snapshot age
+// is not its ordering evidence: an old or undated snapshot passes there.
+allows(evaluate(fixture({ snapshot: { captured_at: iso(-1393 * 3600 * 1000), applied: [{ version: "20260101000000", name: "20260101000000_baseline" }] } }),
+  { liveOrderingRecheck: true }), "old snapshot passes when the caller re-checks the live ledger");
+allows(evaluate(fixture({ snapshot: { applied: [{ version: "20260101000000", name: "20260101000000_baseline" }] } }),
+  { liveOrderingRecheck: true }), "undated snapshot passes when the caller re-checks the live ledger");
+// ...but the snapshot still answers ordering: an old one that already shows a newer
+// applied row refuses there too.
+denies(evaluate(fixture({ snapshot: { captured_at: iso(-1393 * 3600 * 1000), applied: [{ version: "20270101000000", name: "20270101000000_much_newer" }] } }),
+  { liveOrderingRecheck: true }), "MIGRATION ORDERING GUARD", "old snapshot still refuses a replay it can see");
 denies(evaluate(fixture({ snapshot: { captured_at: iso(0), applied: [{ version: "x", name: "no_timestamp_here" }] } })),
   "not one carries a 14-digit migration timestamp", "snapshot carrying no 14-digit timestamp to compare against");
 denies(evaluate(fixture({ snapshot: "not json at all" })), "could not read the applied-migration snapshot",

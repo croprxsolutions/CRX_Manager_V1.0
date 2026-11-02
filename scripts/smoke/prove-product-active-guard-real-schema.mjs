@@ -434,8 +434,36 @@ try {
     const deliveryId = seedDelivery(thirds.orderId, thirds.lineId, thirdsProduct, n, false, n === 219);
     seed(`UPDATE public.delivery_items SET quantity_delivered = 0.33335 WHERE delivery_id = '${deliveryId}';`);
   }
-  seed(`UPDATE public.invoice_items SET quantity = 1.00005 WHERE invoice_id = '${uid(1219)}';`);
+  // An order invoice (no delivery) rounds the whole line once.
+  seed(`UPDATE public.invoices SET delivery_id = NULL WHERE id = '${uid(1219)}';
+    UPDATE public.invoice_items SET quantity = 1.00005 WHERE invoice_id = '${uid(1219)}';`);
   assert.deepEqual(preview(thirdsProduct).blockers, []);
+  // Per-delivery billing: an uninvoiced 0.00005 delivery is still unbilled.
+  const sliverProduct = product('[PROVER] PM3 Sliver');
+  const sliver = seedOrderLine(sliverProduct, 'PM3-SLIVER', 'fulfilled', 904);
+  for (const n of [905, 906]) {
+    const deliveryId = seedDelivery(sliver.orderId, sliver.lineId, sliverProduct, n, false, n === 905);
+    seed(`UPDATE public.delivery_items SET quantity_delivered = 0.00005 WHERE delivery_id = '${deliveryId}';`);
+  }
+  seed(`UPDATE public.invoice_items SET quantity = 0.0001 WHERE invoice_id = '${uid(1905)}';`);
+  assert.equal(preview(sliverProduct).blockers[0].number, 'PM3-SLIVER');
+  // Order billing rounds each line: two lines of 0.00005 + 0.00009 bill 0.0001 each.
+  const twoFractionProduct = product('[PROVER] PM3 Two Fraction Lines');
+  const twoFraction = seedOrderLine(twoFractionProduct, 'PM3-TWO-FRACTION', 'fulfilled', 907);
+  seed(`INSERT INTO public.order_items(order_id, product_id, product_name, total_units_needed,
+      quantity_remaining, price_per_unit, cost_per_unit, total_price)
+      VALUES ('${twoFraction.orderId}', '${twoFractionProduct}', '[PROVER] chemical', 1, 1, 2, 1, 2);`);
+  const fractionLineId = scalar(`SELECT id FROM public.order_items WHERE order_id = '${twoFraction.orderId}'
+    AND id <> '${twoFraction.lineId}';`);
+  for (const [lineId, first, second] of [[twoFraction.lineId, 908, 909], [fractionLineId, 910, 911]]) {
+    const invoicedDelivery = seedDelivery(twoFraction.orderId, lineId, twoFractionProduct, first, false, true);
+    const otherDelivery = seedDelivery(twoFraction.orderId, lineId, twoFractionProduct, second);
+    seed(`UPDATE public.delivery_items SET quantity_delivered = 0.00005 WHERE delivery_id = '${invoicedDelivery}';
+      UPDATE public.delivery_items SET quantity_delivered = 0.00009 WHERE delivery_id = '${otherDelivery}';
+      UPDATE public.invoices SET delivery_id = NULL WHERE id = '${uid(first + 1000)}';
+      UPDATE public.invoice_items SET quantity = 0.0001 WHERE invoice_id = '${uid(first + 1000)}';`);
+  }
+  assert.deepEqual(preview(twoFractionProduct).blockers, []);
   // Each delivery invoice rounds its own row: 0.33334 twice bills 0.3333 twice, which is fully billed.
   const perDeliveryProduct = product('[PROVER] PM3 Per Delivery Rounding');
   const perDelivery = seedOrderLine(perDeliveryProduct, 'PM3-PER-DELIVERY', 'fulfilled', 901);

@@ -101,15 +101,21 @@ BEGIN
                    WHERE di.order_item_id = oi.id AND d.order_id = o.id
                      AND d.status = 'completed' AND d.deleted_at IS NULL))
                 OR coalesce((
-                  -- Delivery invoices round each row; order invoices round the line
-                  -- (_order_invoice_overbilling). Either billing shape counts as fully billed.
-                  SELECT least(sum(round(coalesce(di.quantity_delivered, 0), 4)),
-                               round(sum(coalesce(di.quantity_delivered, 0)), 4))
-                    FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
-                   WHERE di.product_id = v_product.id AND d.order_id = o.id
-                     AND d.status = 'completed' AND d.deleted_at IS NULL
-                     AND NOT EXISTS (SELECT 1 FROM public.delivery_external_billings b
-                                      WHERE b.delivery_id = d.id)), 0) >
+                  -- Match _order_invoice_overbilling(): delivery invoices round each row;
+                  -- order invoices round each order line.
+                  SELECT sum(CASE WHEN EXISTS (
+                      SELECT 1 FROM public.invoices pi WHERE pi.order_id = o.id AND pi.delivery_id IS NOT NULL
+                         AND pi.invoice_type <> 'credit_memo' AND pi.deleted_at IS NULL
+                         AND pi.status NOT IN ('voided', 'cancelled'))
+                    THEN g.per_row ELSE g.per_line END)
+                    FROM (SELECT sum(round(coalesce(di.quantity_delivered, 0), 4)) AS per_row,
+                                 round(sum(coalesce(di.quantity_delivered, 0)), 4) AS per_line
+                            FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
+                           WHERE di.product_id = v_product.id AND d.order_id = o.id
+                             AND d.status = 'completed' AND d.deleted_at IS NULL
+                             AND NOT EXISTS (SELECT 1 FROM public.delivery_external_billings b
+                                              WHERE b.delivery_id = d.id)
+                           GROUP BY di.order_item_id) g), 0) >
                   coalesce((
                     SELECT round(sum(ii.quantity), 4) FROM public.invoice_items ii
                     JOIN public.invoices i ON i.id = ii.invoice_id
@@ -393,7 +399,8 @@ CREATE TRIGGER trigger_z_guard_order_reopen_inactive_product BEFORE UPDATE OF st
   FOR EACH ROW EXECUTE FUNCTION public.guard_order_reopen_inactive_product();
 
 -- Retired products with a balance remain visible and valued. These are the newest
--- bodies from the named source migrations; only their product filters change.
+-- bodies from the named source migrations; only their product filters change, and the
+-- cost report no longer marks an inactive product below reorder.
 CREATE OR REPLACE FUNCTION public._get_inventory_position_cost_impl_20261019()
  RETURNS jsonb
  LANGUAGE plpgsql

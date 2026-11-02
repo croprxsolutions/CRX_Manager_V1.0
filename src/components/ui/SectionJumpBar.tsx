@@ -6,6 +6,9 @@ export interface JumpSection {
   count?: number;
 }
 
+// Matches `scroll-mt-32` (128px) plus a little slack, so a jumped-to section counts as current.
+const SCROLL_OFFSET_PX = 140;
+
 interface SectionJumpBarProps {
   sections: JumpSection[];
   ariaLabel?: string;
@@ -25,21 +28,20 @@ export default function SectionJumpBar({ sections, ariaLabel = 'Jump to section'
   const currentId = sections.some((section) => section.id === activeId) ? activeId : sections[0]?.id;
 
   useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') return;
-    // A section is "in view" once its top passes just under the two sticky bars.
-    const observer = new IntersectionObserver(
-      (entries) => {
-        // Entries arrive in any order; the topmost section in view wins.
-        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible.length > 0) setActiveId(visible[0].target.id);
-      },
-      { rootMargin: '-130px 0px -60% 0px' },
-    );
-    for (const id of ids.split('|')) {
-      const element = document.getElementById(id);
-      if (element) observer.observe(element);
-    }
-    return () => observer.disconnect();
+    const order = ids.split('|');
+    // The current section is the last one whose top has passed under the two sticky bars, so
+    // untagged cards between sections and fast jumps never leave a stale pill lit.
+    const update = () => {
+      let current = order[0];
+      for (const id of order) {
+        const element = document.getElementById(id);
+        if (element && element.getBoundingClientRect().top <= SCROLL_OFFSET_PX) current = id;
+      }
+      setActiveId(current);
+    };
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    return () => window.removeEventListener('scroll', update);
   }, [ids]);
 
   // On a phone the active pill can sit past the edge of the row; slide it into view.

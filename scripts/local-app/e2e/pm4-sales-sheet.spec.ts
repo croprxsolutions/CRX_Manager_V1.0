@@ -7,6 +7,7 @@ const run = Date.now();
 const category = `Proof ${run}`;
 const activeName = `=Active, "Quoted" ${run}`;
 const inactiveName = `Inactive Proof ${run}`;
+const farm = `Proof Farm ${run}`;
 const epa = `98${String(run).slice(-3)}-7${String(run).slice(-2, -1).replace('0', '1')}1`;
 
 async function signIn(page: Page) {
@@ -27,6 +28,35 @@ async function addProducts(page: Page) {
     { product_name: activeName, product_form: 'liquid', category, manufacturer: `Maker ${run}`, epa_registration: epa, is_rup: true, signal_word: 'Caution', is_active: true },
     { product_name: inactiveName, product_form: 'liquid', category, manufacturer: null, epa_registration: null, is_rup: false, signal_word: null, is_active: false },
   ]);
+}
+
+async function addCustomer(page: Page) {
+  await page.evaluate(async (row) => {
+    const path = '/src/lib/db.ts';
+    const { supabase } = await import(/* @vite-ignore */ path);
+    const { error } = await supabase.from('customers').insert(row);
+    if (error) throw new Error(error.message);
+  }, { farm_name: farm, assigned_tier: 2 });
+}
+
+// The dialog moves focus just after it opens, which clears text typed in that same moment.
+async function pickCustomer(page: Page, name: string) {
+  const option = page.getByRole('option', { name: new RegExp(name) });
+  await expect(async () => {
+    await page.getByRole('combobox', { name: 'Customer' }).fill(name);
+    await expect(option).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  await option.click();
+}
+
+async function salesSheet(page: Page, section: 'PDF' | 'CSV'): Promise<Download> {
+  await page.getByRole('button', { name: /^Download/ }).first().click();
+  await page.getByRole('button', { name: 'Customer Sales Sheet' }).nth(section === 'PDF' ? 0 : 1).click();
+  await pickCustomer(page, farm);
+  await page.screenshot({ path: `scripts/local-app/.state/pm4-sheet-${section}.png` });
+  const started = page.waitForEvent('download');
+  await page.getByRole('button', { name: `Download ${section}` }).click();
+  return started;
 }
 
 async function chooseFilters(page: Page, status: string) {
@@ -56,6 +86,7 @@ async function pdfText(file: Download) {
 test('the sales sheet leaves out inactive products and internal fields, whatever the filter', async ({ page }) => {
   await signIn(page);
   await addProducts(page);
+  await addCustomer(page);
   await page.goto('/products');
 
   await page.getByLabel('Filter by category').filter({ visible: true }).selectOption(category);
@@ -67,20 +98,23 @@ test('the sales sheet leaves out inactive products and internal fields, whatever
   await page.screenshot({ path: 'scripts/local-app/.state/pm4-list.png' });
 
   await chooseFilters(page, 'all');
-  const csv = (await fileText(await download(page, 'CSV', 'Sales Sheet (prices only)'))).toString('utf8');
+  const csv = (await fileText(await salesSheet(page, 'CSV'))).toString('utf8');
   const lines = csv.trim().split('\n');
   expect(lines).toHaveLength(2);
   expect(csv).not.toContain(inactiveName);
   // Spreadsheet safety: the leading = is neutralised and the comma and quotes stay inside one cell.
   expect(lines[1]).toContain(`"'=Active, ""Quoted"" ${run}"`);
-  expect(lines[0]).not.toMatch(/cost|margin|status|epa|signal|notes/i);
+  expect(lines[0]).not.toMatch(/cost|margin|status|epa|signal|notes|tier/i);
+  expect(lines[0]).toContain('"Price"');
+  expect(csv).not.toMatch(/41\.11|43\.33/);
 
-  const pdf = await pdfText(await download(page, 'PDF', 'Sales Sheet (prices only)'));
+  const pdf = await pdfText(await salesSheet(page, 'PDF'));
   expect(pdf).toContain('Product Sales Sheet');
-  expect(pdf).toContain('1 active product(s)');
+  expect(pdf).toContain(`Prepared for ${farm}`);
+  expect(pdf).not.toMatch(/41\.11|43\.33/);
   expect(pdf).toContain(String(run));
   expect(pdf).not.toContain(inactiveName);
-  expect(pdf).not.toMatch(/Cost|Margin|Internal|EPA/);
+  expect(pdf).not.toMatch(/Cost|Margin|Internal|EPA|Tier/);
 
   const internal = (await fileText(await download(page, 'CSV', 'Internal (cost + margin)'))).toString('utf8');
   const internalLines = internal.trim().split('\n');

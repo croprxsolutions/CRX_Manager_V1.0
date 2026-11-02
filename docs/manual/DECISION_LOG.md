@@ -10,6 +10,14 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-01 — Customers see only their own price, and never a tier
+
+**Decision (Mason, in chat):** what a customer is handed shows only the price tier assigned to them, and nothing on it may say Tier 1, 2 or 3. The sales sheet is now made for one chosen customer and shows one "Price" column, from that customer's `assigned_tier`. The printed quote and the year-end customer summary no longer print the tier.
+
+**Why.** Tiers are private: a customer who sees them learns that other customers pay less.
+
+**What this forbids/implies:** no customer-facing document or file may carry tier wording or a second tier's price. A customer with no valid tier gets no sheet, rather than a guessed price. Internal views and internal downloads keep their tiers.
+
 ## 2026-11-01 — A product with saved prices opens price-driven
 
 **Decision:** The pricing mode is not stored, so a product opens price-driven when all three prices are saved, even if margins are saved too; margin-driven when it has no prices and all three margins; and with no mode otherwise.

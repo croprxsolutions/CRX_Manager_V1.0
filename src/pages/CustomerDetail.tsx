@@ -190,7 +190,7 @@ export default function CustomerDetail() {
   const [cropSaving, setCropSaving] = useState<CropValue | null>(null);
 
   // Financials tab state
-  interface AgingRow { customer_id: string; farm_name: string; current_amount: number; days_30: number; days_60: number; days_90: number; over_90: number; total_outstanding: number; open_credit_cents?: number | null }
+  interface AgingRow { customer_id: string; farm_name: string; current_amount: number; days_30: number; days_60: number; days_90: number; over_90: number; total_outstanding: number; open_credit_cents?: number | null; unavailable_reason?: string | null }
   interface TxnRow { transaction_date: string; transaction_type: string; reference_number: string; amount_cents: number; running_balance: number }
   interface PrepayRow { id: string; bucket_label: string; original_amount_cents: number; balance_cents: number }
   const [aging, setAging] = useState<AgingRow | null>(null);
@@ -658,6 +658,8 @@ export default function CustomerDetail() {
           .eq('customer_id', id!);
         if (agingError) throw agingError;
         const myAging = assertRpcResult<AgingRow[]>(agingData, 'get_ar_aging').find((a) => a.customer_id === id) || null;
+        // KI-95: no amounts for a balance that can't be rebuilt; fail as before rather than show $0.
+        if (myAging?.unavailable_reason) throw new Error(`get_ar_aging: ${myAging.unavailable_reason}`);
         if (isStale()) return;
         setAging(myAging);
 

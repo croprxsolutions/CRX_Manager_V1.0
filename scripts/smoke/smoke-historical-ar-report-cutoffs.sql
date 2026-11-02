@@ -1,5 +1,6 @@
--- Rollback-only proof for 20260805151605_fix_historical_ar_report_cutoffs and
--- 20260805171334_fix_customer_balance_paid_invoice_totals.
+-- Rollback-only proof for 20260805151605_fix_historical_ar_report_cutoffs,
+-- 20260805171334_fix_customer_balance_paid_invoice_totals and (AR Aging flags an
+-- unrebuildable customer instead of failing everyone) 20261103150000_ar_aging_flags_unrebuildable_customers.
 -- Run after the candidate migration in the same transaction pre-apply, or
 -- directly through run-smoke.mjs after apply. The terminal exception proves
 -- every fixture and mutation rolled back.
@@ -174,22 +175,38 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: later prepay activity did not fail historical reconstruction closed';
   END IF;
 
-  -- Prove both public reports propagate the shared fail-closed contract. A
-  -- future replacement must not bypass or swallow the helper exception.
-  v_failed_closed := false;
-  BEGIN
-    PERFORM 1 FROM public.get_ar_aging(v_cutoff);
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE:%' THEN
-      v_failed_closed := true;
-    ELSE
-      RAISE;
-    END IF;
-  END;
-  IF NOT v_failed_closed THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: AR Aging did not propagate unsupported historical reconstruction';
+  -- KI-95 (20261103150000): AR Aging keeps the refusal but no longer fails the
+  -- whole report. The unsafe customer comes back flagged with no amounts, and
+  -- the safe customer's row is exactly what it was before the unsafe one existed.
+  SELECT *
+    INTO v_ar
+    FROM public.get_ar_aging(v_cutoff) a
+   WHERE a.customer_id = v_unsafe_customer;
+  IF v_ar.customer_id IS DISTINCT FROM v_unsafe_customer
+     OR v_ar.unavailable_reason IS DISTINCT FROM 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE'
+     OR num_nonnulls(v_ar.current_amount, v_ar.days_30, v_ar.days_60, v_ar.days_90, v_ar.over_90,
+                     v_ar.total_outstanding, v_ar.prepay_balance_cents, v_ar.open_credit_cents) <> 0 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: AR Aging did not flag the unrebuildable customer without amounts, got reason=% total=%',
+      v_ar.unavailable_reason, v_ar.total_outstanding;
+  END IF;
+  IF (SELECT count(*) FROM public.get_ar_aging(v_cutoff) a WHERE a.customer_id = v_unsafe_customer) <> 1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: AR Aging returned the flagged customer more than once';
   END IF;
 
+  SELECT *
+    INTO v_ar
+    FROM public.get_ar_aging(v_cutoff) a
+   WHERE a.customer_id = v_customer;
+  IF v_ar.customer_id IS DISTINCT FROM v_customer
+     OR v_ar.total_outstanding IS DISTINCT FROM 100.00::numeric
+     OR v_ar.days_30 IS DISTINCT FROM 100.00::numeric
+     OR v_ar.open_credit_cents IS DISTINCT FROM 3000::bigint
+     OR v_ar.unavailable_reason IS NOT NULL THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: one unrebuildable customer changed a safe customer''s AR row, got gross=% credit=% reason=%',
+      v_ar.total_outstanding, v_ar.open_credit_cents, v_ar.unavailable_reason;
+  END IF;
+
+  -- Customer Balance Listing still fails closed (outside KI-95's report fix).
   v_failed_closed := false;
   BEGIN
     PERFORM 1 FROM public.get_customer_balance_listing(v_cutoff);

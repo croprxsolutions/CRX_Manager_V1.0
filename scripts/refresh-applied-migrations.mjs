@@ -20,6 +20,11 @@
 //     node scripts/refresh-applied-migrations.mjs < rows.json
 //     cat rows.json | node scripts/refresh-applied-migrations.mjs
 //
+//   Or pass the file the Supabase MCP `list_migrations` tool saved to disk
+//   (shape {"migrations":[{version,name},...]}) as the one argument:
+//
+//     node scripts/refresh-applied-migrations.mjs path/to/list_migrations.txt
+//
 //   Accepts either a bare array or {result: [...]} / {applied: [...]}, and rows
 //   shaped as strings, {name}, or {version}.
 //
@@ -37,9 +42,9 @@ const outPath = path.join(projectDir, ".claude", "session-state", "applied-migra
 
 let raw = "";
 try {
-  raw = readFileSync(0, "utf8");
+  raw = readFileSync(process.argv[2] ?? 0, "utf8");
 } catch {
-  console.error("refresh-applied-migrations: no input on stdin.");
+  console.error(`refresh-applied-migrations: no input on ${process.argv[2] ?? "stdin"}.`);
   process.exit(1);
 }
 

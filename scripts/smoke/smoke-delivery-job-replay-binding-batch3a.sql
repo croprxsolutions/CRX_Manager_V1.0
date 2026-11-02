@@ -92,7 +92,7 @@ BEGIN
 
   -- A product is born pricing-free, so price it through the governed preview/apply path.
   INSERT INTO public.products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Delivery Job Replay Product ' || v_suffix, 'GL', '[SMOKE]-EPA-DJRB-' || v_suffix, 'liquid')
+  VALUES ('[SMOKE] Delivery Job Replay Product ' || v_suffix, 'GL', '999999-99999', 'liquid')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,

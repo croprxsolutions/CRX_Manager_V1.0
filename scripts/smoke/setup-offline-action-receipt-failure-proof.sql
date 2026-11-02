@@ -109,7 +109,7 @@ BEGIN
     product_name, unit_size, current_cost, epa_registration, product_form
   ) VALUES (
     '[PROOF] Offline Receipt Product ' || v_suffix,
-    'GL', 6, '[PROOF]-EPA-' || v_suffix, 'liquid'
+    'GL', 6, '999999-99999', 'liquid'
   ) RETURNING id INTO v_product;
 
   INSERT INTO public.inventory (

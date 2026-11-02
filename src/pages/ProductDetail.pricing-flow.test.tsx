@@ -922,6 +922,31 @@ describe('ProductDetail governed pricing flow', () => {
     expect(mockProductUpdate).not.toHaveBeenCalled();
   });
 
+  it('lets a legacy invalid detail row reach the pricing review', async () => {
+    productLoadResults.push({
+      data: { ...product, product_name: '  Legacy  ', sku: '' }, error: null,
+    });
+    render(<ProductDetail />);
+    await screen.findByText('Grower Description');
+    fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'price_driven' } });
+    fireEvent.change(screen.getByLabelText('Tier 1 price'), { target: { value: '75' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await giveSourceAndReason('Supplier list', 'Price update');
+    await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalled());
+    expect(mockProductUpdate).not.toHaveBeenCalled();
+  });
+
+  it('saves notes without rewriting unchanged invalid legacy identity fields', async () => {
+    productLoadResults.push({ data: { ...product, product_name: '  Legacy  ', sku: '' }, error: null });
+    render(<ProductDetail />);
+    const notes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(notes, { target: { value: 'New note' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mockProductUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      product_name: '  Legacy  ', sku: '', quoting_notes: 'New note',
+    })));
+  });
+
   it('keeps unrelated unsaved Product details intact by blocking quick pricing review', async () => {
     render(<ProductDetail />);
     await screen.findByText('Grower Description');

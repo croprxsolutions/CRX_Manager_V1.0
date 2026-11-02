@@ -2987,6 +2987,8 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 }
 
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
+  // Local product setup candidate is unapplied; generated types reflect live only.
+  'upsert_product_category',
   // The live registry/type regeneration through 20260903202611 moved every
   // former entry into
   // MUTATING_RPCS_WITH_IDEMPOTENCY. This bucket remains for the normal pre-apply

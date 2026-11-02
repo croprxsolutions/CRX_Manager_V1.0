@@ -93,7 +93,7 @@ BEGIN
   VALUES ('[SMOKE] Evidence Farm ' || v_suffix, '[SMOKE]-DCE-' || v_suffix, 'smk-dce-' || v_suffix || '@example.invalid')
   RETURNING id INTO v_customer;
   INSERT INTO public.products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Evidence Product ' || v_suffix, 'GL', '[SMOKE]-EPA-DCE-' || v_suffix, 'liquid')
+  VALUES ('[SMOKE] Evidence Product ' || v_suffix, 'GL', '999999-99999', 'liquid')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes('product_page', NULL,
     jsonb_build_array(jsonb_build_object('product_id', v_product, 'row_version', 1, 'pricing_mode', 'price_driven',

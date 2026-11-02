@@ -138,7 +138,7 @@ PROOF — Ran: real-schema proof, full Vitest, typecheck, build, lint, code-heal
 | Package | Status | Branch | PR | Builder, rounds | Luna | Reviewers | Migration | Sol |
 |---|---|---|---|---|---|---|---|---|
 | WP-PM-9 Forms, units, containers | ⬜ | | | | | | | |
-| DM-0 Data hygiene | ⬜ | | | | | | | |
+| DM-0 Data hygiene | PARKED: review lists delivered; the data step is Mason's | none (no code) | none | no build | n/a | n/a | none | not required |
 | WP-PM-5 Use Timing | ⬜ | | | | | | | |
 | WP-PM-6a Unit audit | ⬜ | | | | | | | |
 | WP-PM-6b New-product flow, Duplicate 💲 | ⬜ | | | | | | | |
@@ -148,3 +148,6 @@ PROOF — Ran: real-schema proof, full Vitest, typecheck, build, lint, code-heal
 | WP-PM-8b Incomplete badge, near-match warnings, rate help | ⬜ | | | | | | | |
 
 ## Wave 2 attempt 2 proof
+
+**DM-0 Data hygiene: PARKED (data step for Mason, as the mission's row requires).** Review lists only; no data changed. The list is in Mason's private vault, `Products\Product Master review6-11-02 DM-0 data hygiene review list.md` (vault-local commit `dc68c9f`). Counts from a read-only live query, 604 products (595 active): 11 with no form (proposed: 8 "each", 3 "liquid"; "each" needs WP-PM-9 live first), 13 with no SKU (Mason types them), the duplicate `9768NR` SKU (2 rows; the one with 13 order lines keeps it), 3 duplicate-name groups (7 rows: one exact duplicate pair that has order lines on both, so it is a complicated case under the 2026-10-30 rule; one pair set up as liquid and dry under a "12#" name; one group of three where one row is in use), 4 test rows (2 hold old stock that needs an approved adjustment), and 0 exact duplicates split by vendor. Tote and Bulk decisions wait for PAR-2.
+PROOF — Ran: two read-only SELECTs on live (counts, then the review rows) · Saw: the counts above, matching the grand plan's DATA-1 figures (11, 13, 1, 3, 1) plus 3 more test-like rows and one same-vendor duplicate pair · Not verified: nothing was written or changed; the "every old reference still resolves" check belongs to Mason's data step.

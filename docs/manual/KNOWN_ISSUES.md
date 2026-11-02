@@ -40,7 +40,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
-margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes wait on
+margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
 migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
 key alone), KI-18 (UTC/browser-clock season can
 suppress the pre-harvest safety warning).
@@ -81,8 +81,8 @@ click-through as an applicator was done. Part B also widened `_can_see_field` to
 so the earlier gap where an applicator sent to one field of a split job got no weather centroid on Job Detail
 should be gone (not checked in the app; 0 split assignments live, 2026-10-22).
 
-### KI-02 — Product cost and margin: server functions audited; fixes not yet live
-**MED · PARTIAL · security/money · fix migration `20261102200000` awaiting apply**
+### KI-02 — Product cost and margin: server functions audited and fixed live 2026-11-02
+**MED · PARTIAL · security/money · fix migration `20261102200000` live 2026-11-02; retiring `admin_set_application_service_cost` remains**
 Mason decided cost and margin are admin-only. Screens and report functions were changed (migrations
 `20261019010000`, `20261019230000`) and purchase-order cost is locked (`20261021140000`, `20261021141000`,
 PR #980). **The column lock is live:** `20261022101000_cost_columns_admin_only` (PR #1089, applied 2026-10-25
@@ -95,11 +95,11 @@ Two residuals stay accepted by Mason (2026-10-21): commission amount and rate to
 refusals let a rep narrow a cost by trial and error. Includes the older sub-items "reps can recover
 application-service cost" and "retire the old `admin_set_application_service_cost` function" (no caller left in
 `src/`; no DROP migration exists).
-**Function audit done 2026-11-02** (the report is published once the fix is applied, as `docs/audits/2026-11-02-cost-margin-definer-function-audit.md`): every
+**Function audit done 2026-11-02** (the report is published once the screen change is deployed, as `docs/audits/2026-11-02-cost-margin-definer-function-audit.md`): every
 signed-in-executable owner-rights (SECURITY DEFINER) function that names cost, reaches it through an inner helper, or
 turns a cost-bearing row into JSON was traced live. Migration `20261102200000_cost_definer_leaks_closed` changes the ones
 that need it so only admins get cost (real-schema proof
-`scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs`); **not applied yet**. The standing sweep
+`scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs`); **applied live 2026-11-02 18:39 UTC (12:39 PM Central), ledger `20261102183928`; read-only post-apply check and sweep clean**. The standing sweep
 `cost-exposure-review` now flags any new or changed function that names cost, and the cost-lock proof records each
 ledger-only migration once (CodeRabbit, PR #1089). Decided by Mason 2026-11-02: existing inventory notes stay as they
 are; no new note gets a cost.
@@ -602,7 +602,7 @@ edge function** (the live function answers "Unknown email_type: purchase_order")
 ~~`blend_recipe_items` and cost fields reachable through field-billing and dispatch paths remain readable (HIGH).~~
 **Settled by the 2026-11-02 audit (KI-02):** `blend_recipe_items` cost was closed by the column lock; field billing,
 delivery and offline sync give an applicator or driver no cost; the remaining dispatch path is covered by
-`20261102200000` (not applied yet).
+`20261102200000` (live 2026-11-02).
 Commission amount plus rate can reveal a rep's profit, and Quick Receive reveals which open PO line is cheaper
 (MED). The computed field `invoice_post_version` reads the whole invoice row, so revoking invoice columns can break
 posting: the cost-column lock must ship with a column-safe version design in the same change (MED). **Done in

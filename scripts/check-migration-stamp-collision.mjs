@@ -31,7 +31,8 @@ if (added === null || top === null || porcelain === null) {
 
 const mine = added.split("\n").map((p) => p.trim())
   .filter((p) => STAMP.test(p.slice(DIR.length + 1)))
-  .map((p) => ({ name: p.slice(DIR.length + 1), content: lf(git(["show", `:${p}`]) ?? "") }));
+  // An unreadable staged blob stays null, so it never matches and is refused.
+  .map((p) => ({ name: p.slice(DIR.length + 1), content: git(["show", `:${p}`])?.replace(/\r\n/g, "\n") ?? null }));
 if (mine.length === 0) process.exit(0);
 
 const self = normPath(top.trim());

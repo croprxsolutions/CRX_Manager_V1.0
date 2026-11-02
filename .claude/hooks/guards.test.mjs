@@ -1105,4 +1105,72 @@ for (const command of [
   fs.rmSync(outer, { recursive: true, force: true });
 }
 
+// codex-push-guard: `W="<literal path>"; git -C "$W" push` resolves exactly like
+// `git -C "<literal path>" push`. Five harmless pushes were denied on 2026-11-02
+// with `spawnSync git ENOENT` because the guard read "$W" as a folder name. Any
+// variable the guard cannot prove is that one literal stays denied.
+{
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "crx-folder-var-"));
+  const git = (...args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  spawnSync("git", ["init", "-q", repo], { encoding: "utf8" });
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "test");
+  git("config", "commit.gpgsign", "false");
+  git("commit", "--allow-empty", "-q", "-m", "init");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  git("branch", "-M", "feature");
+  git("config", "remote.origin.url", "https://github.com/masonwells1/CRX_Manager_V1.0.git");
+  fs.mkdirSync(path.join(repo, "supabase", "migrations"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "supabase", "migrations", "20261102000000_x.sql"), "select 1;\n");
+  git("add", "supabase/migrations/20261102000000_x.sql");
+  git("commit", "-q", "-m", "risky");
+
+  const dir = repo.replace(/\\/g, "/");
+  const pushVerb = "pu" + "sh"; // keep the literal out of this file's own text
+  const run = (command) => runHook("codex-push-guard.mjs", { cwd: os.tmpdir(), tool_name: "Bash", tool_input: { command } });
+
+  // (a) the variable forms resolve the same as the literal form.
+  eq(run(`git -C "${dir}" ${pushVerb} -q origin feature`).stdout.trim(), "", "literal -C feature push passes (control)");
+  for (const [assign, use] of [
+    [`W="${dir}"`, `"$W"`],
+    [`W='${dir}'`, `"\${W}"`],
+    [`W=${dir}`, `$W`],
+  ]) {
+    eq(run(`${assign}; git -C ${use} add a.md && git -C ${use} commit -m "m"; git -C ${use} ${pushVerb} -q`).stdout.trim(), "",
+      `folder variable resolves like the literal: ${assign} … -C ${use}`);
+  }
+  eq(run(`W="${dir}"\ngit -C "$W" add . && git -C "$W" ${pushVerb} origin feature`).stdout.trim(), "",
+    "folder variable on its own line, with `add .`, resolves like the literal");
+
+  // (b) anything the guard cannot bind to one literal stays denied.
+  for (const command of [
+    `W="${dir}"; W="${dir}"; git -C "$W" ${pushVerb} origin feature`,
+    `W="$(git rev-parse --show-toplevel)"; git -C "$W" ${pushVerb} origin feature`,
+    `W=\`echo ${dir}\`; git -C "$W" ${pushVerb} origin feature`,
+    `D="${dir}"; W="$D"; git -C "$W" ${pushVerb} origin feature`,
+    `git -C "$W" ${pushVerb} origin feature`,
+    `git -C "$W" ${pushVerb} origin feature; W="${dir}"`,
+    `false && W="${dir}"; git -C "$W" ${pushVerb} origin feature`,
+    `W="${dir}" | cat; git -C "$W" ${pushVerb} origin feature`,
+    `W="${dir}"; unset W; git -C "$W" ${pushVerb} origin feature`,
+    `W="${dir}"; . ./env.sh; git -C "$W" ${pushVerb} origin feature`,
+    `W=~/repo; git -C "$W" ${pushVerb} origin feature`,
+    `GIT_X="${dir}"; git -C "$GIT_X" ${pushVerb} origin feature`,
+    `W="${dir}"; cd "$W" && git ${pushVerb} origin feature`,
+    `cd "${dir}" && git ${pushVerb} origin feature`,
+  ]) {
+    ok(/"permissionDecision":"deny"/.test(run(command).stdout), `unbindable folder variable stays denied: ${command}`);
+  }
+
+  // (c) a variable pointing at a protected main push is still refused.
+  const literalMain = run(`git -C "${dir}" ${pushVerb} origin HEAD:main`).stdout;
+  const variableMain = run(`W="${dir}"; git -C "$W" ${pushVerb} origin HEAD:main`).stdout;
+  ok(/push to main/.test(literalMain), "literal -C risky push to main is refused (control)");
+  ok(/push to main/.test(variableMain), "folder-variable risky push to main is refused the same way");
+  ok(/force-pushing/.test(run(`W="${dir}"; git -C "$W" ${pushVerb} --force origin feature`).stdout),
+    "folder-variable force push is still refused");
+
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+
 console.log(`guards: ${pass} assertions passed`);

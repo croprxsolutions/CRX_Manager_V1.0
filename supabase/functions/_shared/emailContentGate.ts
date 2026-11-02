@@ -63,10 +63,13 @@ function urlProblem(value: string): string | null {
   return null;
 }
 
+function hasControlCharacter(text: string): boolean {
+  return [...text].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127);
+}
+
 /** Why this subject + HTML body may not be sent, or null when it may. */
 export function emailContentProblem(subject: string, html: string): string | null {
-  // deno-lint-ignore no-control-regex
-  if (!subject.trim() || subject.length > MAX_SUBJECT_LENGTH || /[\u0000-\u001f\u007f]/.test(subject)) {
+  if (!subject.trim() || subject.length > MAX_SUBJECT_LENGTH || hasControlCharacter(subject)) {
     return `Email subject must be one line of plain text, at most ${MAX_SUBJECT_LENGTH} characters`;
   }
   if (html.length > MAX_HTML_LENGTH) return "Email body is too large";
@@ -107,13 +110,12 @@ export function emailContentProblem(subject: string, html: string): string | nul
 
 /** Why this attachment may not be sent, or null when it is a plainly named PDF. */
 export function attachmentProblem(filename: unknown, content: unknown): string | null {
-  // deno-lint-ignore no-control-regex
-  if (typeof filename !== "string" || !/^[^\\/:*?"<>|\u0000-\u001f]{1,150}\.pdf$/i.test(filename)) {
+  if (typeof filename !== "string" || hasControlCharacter(filename) || !/^[^\\/:*?"<>|]{1,150}\.pdf$/i.test(filename)) {
     return "Each attachment must be a PDF with a plain file name";
   }
   // "%PDF-" encodes to "JVBERi0" in base64. Only the file type is checked: a valid
   // PDF can say anything, so parsing it deeper would add no safety.
-  if (typeof content !== "string" || !content.startsWith("JVBERi0") ||!/^[A-Za-z0-9+/]*={0,2}$/.test(content)) {
+  if (typeof content !== "string" || !content.startsWith("JVBERi0") || !/^[A-Za-z0-9+/]*={0,2}$/.test(content)) {
     return "Each attachment must be a base64 PDF";
   }
   return null;

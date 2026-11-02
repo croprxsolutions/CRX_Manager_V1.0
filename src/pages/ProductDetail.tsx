@@ -11,6 +11,7 @@ import PricingChangePreviewModal from '../components/products/PricingChangePrevi
 import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductSellPriceHistory from '../components/products/ProductSellPriceHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
+import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -1070,6 +1071,9 @@ export default function ProductDetail() {
                   >
                     Look up EPA
                   </Button>
+                </div>
+                <div className="mt-1">
+                  <EpaLabelLink epaRegistration={product.epa_registration} showHint />
                 </div>
                 {isNew && (
                   <p className="mt-1 text-xs text-secondary">

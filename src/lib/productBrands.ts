@@ -11,6 +11,15 @@ const PRODUCT_BRAND_COLUMNS =
  */
 export const EPA_REGISTRATION_PATTERN = /^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$/;
 
+export function epaLabelSearchUrl(epaRegistration: string | null | undefined): string | null {
+  const registration = epaRegistration?.trim();
+  if (!registration || !EPA_REGISTRATION_PATTERN.test(registration)) return null;
+
+  // EPA holds labels under the basic registration; a three-part number opens an empty page (checked 2026-11-01 against EPA's site).
+  const [companyNumber, productNumber] = registration.split('-');
+  return `https://ordspub.epa.gov/ords/pesticides/f?p=PPLS:102:::NO::P102_REG_NUM:${companyNumber}-${productNumber}`;
+}
+
 export interface ProductBrandInput {
   productId: string;
   /** Omit to add a new brand. */

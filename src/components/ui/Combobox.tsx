@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type Ref } from 'react';
+import { Check } from 'lucide-react';
 
 interface ComboboxProps {
   label?: string;
@@ -11,6 +12,263 @@ interface ComboboxProps {
   className?: string;
 }
 
+interface ComboboxStateProps {
+  disabled: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+}
+
+interface ComboboxOptionProps {
+  option: string;
+  index: number;
+  inputId: string;
+  isSavedOption: boolean;
+  isHighlighted: boolean;
+  onSelect: (option: string) => void;
+  onHighlight: (index: number) => void;
+}
+
+interface ComboboxListProps {
+  filtered: string[];
+  value: string;
+  highlightIndex: number;
+  inputId: string;
+  listboxId: string;
+  listRef: Ref<HTMLUListElement>;
+  onSelect: (option: string) => void;
+  onHighlight: (index: number) => void;
+}
+
+function useComboboxState({ disabled, value, onChange, options }: ComboboxStateProps) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState<string | null>(null);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const [scrollVersion, setScrollVersion] = useState(0);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const valueBeforeTypingRef = useRef<string | null>(null);
+  const pendingScrollIndexRef = useRef<number | null>(null);
+
+  const filtered = query === null
+    ? options
+    : options.filter((option) => option.toLowerCase().includes(query.toLowerCase()));
+  const listIsRendered = open && filtered.length > 0 && !disabled;
+
+  const requestScroll = useCallback((index: number) => {
+    pendingScrollIndexRef.current = index;
+    setScrollVersion((version) => version + 1);
+  }, []);
+
+  const openDropdown = useCallback(() => {
+    if (disabled) return;
+
+    const savedIndex = options.findIndex(
+      (option) => option.toLowerCase() === value.toLowerCase()
+    );
+    valueBeforeTypingRef.current = null;
+    setQuery(null);
+    setHighlightIndex(savedIndex);
+    setOpen(true);
+    if (savedIndex >= 0) {
+      requestScroll(savedIndex);
+    } else {
+      pendingScrollIndexRef.current = null;
+    }
+  }, [disabled, options, requestScroll, value]);
+
+  const closeDropdown = useCallback(() => {
+    setOpen(false);
+    setQuery(null);
+    setHighlightIndex(-1);
+    valueBeforeTypingRef.current = null;
+    pendingScrollIndexRef.current = null;
+  }, []);
+
+  // Close on outside click.
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        closeDropdown();
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [closeDropdown]);
+
+  // Scroll only for opening and keyboard movement, after the option is rendered.
+  useLayoutEffect(() => {
+    if (!listIsRendered || pendingScrollIndexRef.current === null) return;
+    const item = listRef.current?.children[pendingScrollIndexRef.current] as HTMLElement | undefined;
+    item?.scrollIntoView({ block: 'nearest' });
+    pendingScrollIndexRef.current = null;
+  }, [listIsRendered, scrollVersion]);
+
+  const selectOption = useCallback(
+    (option: string) => {
+      onChange(option);
+      closeDropdown();
+    },
+    [closeDropdown, onChange]
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
+
+    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      openDropdown();
+      return;
+    }
+    if (!open) return;
+
+    switch (e.key) {
+      case 'ArrowDown': {
+        e.preventDefault();
+        if (filtered.length === 0) break;
+        const nextIndex = highlightIndex < filtered.length - 1 ? highlightIndex + 1 : 0;
+        setHighlightIndex(nextIndex);
+        requestScroll(nextIndex);
+        break;
+      }
+      case 'ArrowUp': {
+        e.preventDefault();
+        if (filtered.length === 0) break;
+        const nextIndex = highlightIndex > 0 ? highlightIndex - 1 : filtered.length - 1;
+        setHighlightIndex(nextIndex);
+        requestScroll(nextIndex);
+        break;
+      }
+      case 'Enter':
+        e.preventDefault();
+        if (highlightIndex >= 0 && highlightIndex < filtered.length) {
+          selectOption(filtered[highlightIndex]);
+        } else {
+          closeDropdown();
+        }
+        break;
+      case 'Escape': {
+        e.preventDefault();
+        e.stopPropagation();
+        const valueToRestore = valueBeforeTypingRef.current;
+        const shouldRestoreValue = query !== null;
+        closeDropdown();
+        if (shouldRestoreValue && valueToRestore !== null) {
+          onChange(valueToRestore);
+        }
+        break;
+      }
+      case 'Tab':
+        closeDropdown();
+        break;
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return;
+    if (!open) {
+      openDropdown();
+      pendingScrollIndexRef.current = null;
+    }
+    if (query === null) valueBeforeTypingRef.current = value;
+    setQuery(e.target.value);
+    setHighlightIndex(-1);
+    onChange(e.target.value);
+  };
+
+  const handleInputFocus = () => {
+    if (!disabled && !open) openDropdown();
+  };
+
+  const handleInputClick = () => {
+    if (!disabled && !open) openDropdown();
+  };
+
+  return {
+    wrapperRef,
+    listRef,
+    filtered,
+    highlightIndex,
+    listIsRendered,
+    setHighlightIndex,
+    selectOption,
+    handleInputChange,
+    handleInputFocus,
+    handleInputClick,
+    handleKeyDown,
+  };
+}
+
+function ComboboxOption({
+  option,
+  index,
+  inputId,
+  isSavedOption,
+  isHighlighted,
+  onSelect,
+  onHighlight,
+}: ComboboxOptionProps) {
+  return (
+    <li
+      id={`${inputId}-option-${index}`}
+      role="option"
+      aria-selected={isSavedOption}
+      onMouseDown={(e) => {
+        e.preventDefault(); // prevent blur before selection
+        onSelect(option);
+      }}
+      onMouseEnter={() => onHighlight(index)}
+      className={`
+        w-full text-left px-3 py-2 text-sm cursor-pointer
+        ${isHighlighted
+          ? 'bg-crx-green/10 text-crx-green font-medium'
+          : 'text-nav-dark hover:bg-gray-50'}
+        ${isSavedOption ? 'font-medium' : ''}
+      `}
+    >
+      {option}
+      {isSavedOption && <Check className="inline-block h-4 w-4 ml-2" aria-hidden="true" />}
+    </li>
+  );
+}
+
+function ComboboxList({
+  filtered,
+  value,
+  highlightIndex,
+  inputId,
+  listboxId,
+  listRef,
+  onSelect,
+  onHighlight,
+}: ComboboxListProps) {
+  return (
+    <ul
+      ref={listRef}
+      id={listboxId}
+      role="listbox"
+      className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+    >
+      {filtered.map((option, index) => {
+        const isSavedOption = option.toLowerCase() === value.toLowerCase();
+        const isHighlighted = index === highlightIndex;
+
+        return (
+          <ComboboxOption
+            key={option}
+            option={option}
+            index={index}
+            inputId={inputId}
+            isSavedOption={isSavedOption}
+            isHighlighted={isHighlighted}
+            onSelect={onSelect}
+            onHighlight={onHighlight}
+          />
+        );
+      })}
+    </ul>
+  );
+}
+
 export default function Combobox({
   label,
   value,
@@ -21,79 +279,22 @@ export default function Combobox({
   error = '',
   className = '',
 }: ComboboxProps) {
-  const [open, setOpen] = useState(false);
-  const [highlightIndex, setHighlightIndex] = useState(-1);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
-  const inputId = label?.toLowerCase().replace(/\s+/g, '-');
-
-  const filtered = options.filter((o) =>
-    o.toLowerCase().includes(value.toLowerCase())
-  );
-
-  // Close on outside click
-  useEffect(() => {
-    const handleMouseDown = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleMouseDown);
-    return () => document.removeEventListener('mousedown', handleMouseDown);
-  }, []);
-
-  // Reset highlight when filtered list changes
-  useEffect(() => {
-    setHighlightIndex(-1);
-  }, [value]);
-
-  // Scroll highlighted item into view
-  useEffect(() => {
-    if (highlightIndex >= 0 && listRef.current) {
-      const item = listRef.current.children[highlightIndex] as HTMLElement;
-      item?.scrollIntoView({ block: 'nearest' });
-    }
-  }, [highlightIndex]);
-
-  const selectOption = useCallback(
-    (opt: string) => {
-      onChange(opt);
-      setOpen(false);
-      setHighlightIndex(-1);
-    },
-    [onChange]
-  );
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      setOpen(true);
-      return;
-    }
-    if (!open) return;
-
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        setHighlightIndex((i) => (i < filtered.length - 1 ? i + 1 : 0));
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        setHighlightIndex((i) => (i > 0 ? i - 1 : filtered.length - 1));
-        break;
-      case 'Enter':
-        e.preventDefault();
-        if (highlightIndex >= 0 && highlightIndex < filtered.length) {
-          selectOption(filtered[highlightIndex]);
-        } else {
-          setOpen(false);
-        }
-        break;
-      case 'Escape':
-        setOpen(false);
-        setHighlightIndex(-1);
-        break;
-    }
-  };
+  const generatedId = useId();
+  const inputId = label?.toLowerCase().replace(/\s+/g, '-') || `combobox-${generatedId}`;
+  const listboxId = `${inputId}-listbox`;
+  const {
+    wrapperRef,
+    listRef,
+    filtered,
+    highlightIndex,
+    listIsRendered,
+    setHighlightIndex,
+    selectOption,
+    handleInputChange,
+    handleInputFocus,
+    handleInputClick,
+    handleKeyDown,
+  } = useComboboxState({ disabled, value, onChange, options });
 
   return (
     <div className="w-full" ref={wrapperRef}>
@@ -110,13 +311,9 @@ export default function Combobox({
           id={inputId}
           type="text"
           value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => {
-            if (!disabled) setOpen(true);
-          }}
+          onChange={handleInputChange}
+          onFocus={handleInputFocus}
+          onClick={handleInputClick}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
@@ -132,11 +329,11 @@ export default function Combobox({
             ${className}
           `}
           role="combobox"
-          aria-expanded={open}
+          aria-expanded={listIsRendered}
           aria-autocomplete="list"
-          aria-controls={inputId ? `${inputId}-listbox` : undefined}
+          aria-controls={listIsRendered ? listboxId : undefined}
           aria-activedescendant={
-            highlightIndex >= 0 && inputId
+            listIsRendered && highlightIndex >= 0 && highlightIndex < filtered.length
               ? `${inputId}-option-${highlightIndex}`
               : undefined
           }
@@ -153,35 +350,17 @@ export default function Combobox({
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
 
-        {open && filtered.length > 0 && !disabled && (
-          <ul
-            ref={listRef}
-            id={inputId ? `${inputId}-listbox` : undefined}
-            role="listbox"
-            className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto"
-          >
-            {filtered.map((opt, i) => (
-              <li
-                key={opt}
-                id={inputId ? `${inputId}-option-${i}` : undefined}
-                role="option"
-                aria-selected={i === highlightIndex}
-                onMouseDown={(e) => {
-                  e.preventDefault(); // prevent blur before selection
-                  selectOption(opt);
-                }}
-                onMouseEnter={() => setHighlightIndex(i)}
-                className={`
-                  w-full text-left px-3 py-2 text-sm cursor-pointer
-                  ${i === highlightIndex
-                    ? 'bg-crx-green/10 text-crx-green font-medium'
-                    : 'text-nav-dark hover:bg-gray-50'}
-                `}
-              >
-                {opt}
-              </li>
-            ))}
-          </ul>
+        {listIsRendered && (
+          <ComboboxList
+            filtered={filtered}
+            value={value}
+            highlightIndex={highlightIndex}
+            inputId={inputId}
+            listboxId={listboxId}
+            listRef={listRef}
+            onSelect={selectOption}
+            onHighlight={setHighlightIndex}
+          />
         )}
       </div>
       {error && <p className="mt-1 text-xs text-red-500">{error}</p>}

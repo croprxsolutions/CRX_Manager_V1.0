@@ -10,6 +10,7 @@ import {
   type PoGateResult,
   type PoGateSnapshot,
 } from "../_shared/purchaseOrderEmailGate.ts";
+import { attachmentProblem, emailContentProblem } from "../_shared/emailContentGate.ts";
 
 // =============================================================================
 // CRX send-email — Sprint F #1 lockdown
@@ -30,8 +31,14 @@ import {
 //      match the request's customer_id.
 //   4. Attachments capped at 5 files / 10MB total decoded.
 //   5. Per-user rate limit of 50 emails per rolling hour (counts email_log).
-//   6. (Future) Server-side HTML templates keyed by email_type — current
-//      version still accepts caller HTML but is gated by validation above.
+//   6. Every customer email names one record that belongs to its customer
+//      (an invoice, delivery, order, quote, or job notice; statements and AR
+//      reminders are about the customer's account). The caller still writes the
+//      HTML, so _shared/emailContentGate.ts refuses anything beyond plain
+//      formatting, and attachments must be PDFs (audit finding 7, 2026-11-02).
+//   7. The idempotency key is scoped to caller + email_type + record, so one
+//      user's guessable key can never replay or block another's email (audit
+//      finding 8, 2026-11-02).
 // =============================================================================
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -50,8 +57,6 @@ const CUSTOMER_EMAIL_TYPES = new Set([
   "delivery_completed",
   "quote",
   "ar_reminder",
-  "low_stock_alert",
-  "month_end_close",
   // Field-app parity #40: before-application customer notice. Sendable by
   // admin + sales_rep (it is in ALL_EMAIL_TYPES, which both roles map to below);
   // NOT a driver type. This line is PREPARED but its effect only goes live when
@@ -74,6 +79,19 @@ const PURCHASE_ORDER_EMAIL_TYPE = "purchase_order";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ALL_EMAIL_TYPES = new Set([...CUSTOMER_EMAIL_TYPES, PURCHASE_ORDER_EMAIL_TYPE]);
+
+// The record each of these types is about, checked to belong to customer_id.
+// invoice, the job notices and purchase_order are checked in their own steps;
+// statement and ar_reminder are about the customer's whole account.
+const RECORD_BY_EMAIL_TYPE: Record<string, { resourceType: string; table: string }> = {
+  delivery_completed: { resourceType: "delivery", table: "deliveries" },
+  order_confirmed: { resourceType: "order", table: "orders" },
+  quote: { resourceType: "quote", table: "quotes" },
+};
+const JOB_NOTICE_TYPE_BY_EMAIL_TYPE: Record<string, string> = {
+  pre_application_notice: "pre",
+  post_application_notice: "post",
+};
 
 // What email types each role may send.
 //   admin     -> all types in ALL_EMAIL_TYPES (incl. purchase_order)
@@ -207,6 +225,13 @@ Deno.serve(async (req: Request) => {
     if (typeof to !== "string" || typeof subject !== "string" || typeof html !== "string") {
       return jsonResponse({ error: "to, subject, html must be strings" }, 400);
     }
+    if (idempotency_key != null && (typeof idempotency_key !== "string" || !idempotency_key || idempotency_key.length > 256)) {
+      return jsonResponse({ error: "idempotency_key must be a non-empty string of at most 256 characters" }, 400);
+    }
+    const contentProblem = emailContentProblem(subject, html);
+    if (contentProblem) {
+      return jsonResponse({ error: contentProblem }, 400);
+    }
 
     // 4. email_type allowlist (catch unknown values + per-role gate)
     if (!ALL_EMAIL_TYPES.has(email_type)) {
@@ -267,6 +292,40 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // 5b. The record this email is about (audit finding 7). It must belong to
+    // customer_id, and it scopes the idempotency key below (finding 8).
+    let recordRef = `customer:${customer_id}`;
+    const recordSpec = RECORD_BY_EMAIL_TYPE[email_type];
+    if (isPurchaseOrderEmail || email_type === "invoice") {
+      // Ownership is checked in their own steps; both require a resource_id.
+      recordRef = `${resource_type}:${resource_id}`;
+    } else if (recordSpec) {
+      if (resource_type !== recordSpec.resourceType || typeof resource_id !== "string" || !UUID_PATTERN.test(resource_id)) {
+        return jsonResponse(
+          { error: `${email_type} emails require resource_type='${recordSpec.resourceType}' and resource_id` },
+          400,
+        );
+      }
+      const { data: recordRow, error: recordErr } = await adminClient
+        .from(recordSpec.table)
+        .select("customer_id")
+        .eq("id", resource_id)
+        .maybeSingle();
+      if (recordErr) {
+        return jsonResponse({ error: `${recordSpec.resourceType} lookup failed: ${recordErr.message}` }, 503);
+      }
+      if (!recordRow) {
+        return jsonResponse({ error: `${recordSpec.resourceType} not found` }, 404);
+      }
+      if (recordRow.customer_id !== customer_id) {
+        return jsonResponse({ error: `${recordSpec.resourceType} does not belong to customer_id` }, 403);
+      }
+      recordRef = `${resource_type}:${resource_id}`;
+    } else if (!JOB_NOTICE_TYPE_BY_EMAIL_TYPE[email_type] && resource_type &&
+      (resource_type !== "customer" || resource_id !== customer_id)) {
+      return jsonResponse({ error: `${email_type} emails are about the customer's account only` }, 400);
+    }
+
     // Invoice sends are gated again inside the server boundary. The browser also
     // checks immediately before calling us for fast feedback, but that check can
     // be bypassed or race with a status change. Never trust it as the authority.
@@ -285,21 +344,28 @@ Deno.serve(async (req: Request) => {
     // job has invoices, derive the correct child (or sole legacy un-split invoice)
     // and enforce its disposition. If billing has not happened, no invoice gate
     // exists yet and the ordinary post-application notice remains sendable.
-    if (email_type === "post_application_notice") {
+    // Pre-application notices are bound the same way, minus the invoice gate.
+    const jobNoticeType = JOB_NOTICE_TYPE_BY_EMAIL_TYPE[email_type];
+    let notificationRow: { job_id: string; customer_id: string } | null = null;
+    if (jobNoticeType) {
       if (!idempotency_key) {
-        return jsonResponse({ error: "Post-application notices require an idempotency key" }, 400);
+        return jsonResponse({ error: "Job notices require their notification's idempotency key" }, 400);
       }
-      const { data: notificationRow, error: notificationErr } = await adminClient
+      const { data: noticeRow, error: notificationErr } = await adminClient
         .from("job_notifications")
-        .select("job_id, customer_id")
+        .select("job_id, customer_id, notification_type")
         .eq("idempotency_key", idempotency_key)
         .maybeSingle();
       if (notificationErr) {
         return jsonResponse({ error: `Notification lookup failed: ${notificationErr.message}` }, 500);
       }
-      if (!notificationRow || notificationRow.customer_id !== customer_id) {
+      if (!noticeRow || noticeRow.customer_id !== customer_id || noticeRow.notification_type !== jobNoticeType) {
         return jsonResponse({ error: "Notification key does not match this customer" }, 403);
       }
+      notificationRow = noticeRow;
+      recordRef = `job:${noticeRow.job_id}`;
+    }
+    if (email_type === "post_application_notice" && notificationRow) {
       const { data: jobInvoices, error: jobInvoicesErr } = await adminClient
         .from("invoices")
         .select("id, customer_id, status, deleted_at")
@@ -491,11 +557,9 @@ Deno.serve(async (req: Request) => {
       }
       let totalBytes = 0;
       for (const att of attachments) {
-        if (!att?.filename || typeof att.content !== "string") {
-          return jsonResponse(
-            { error: "Each attachment must have filename + base64 content" },
-            400,
-          );
+        const problem = attachmentProblem(att?.filename, att?.content);
+        if (problem) {
+          return jsonResponse({ error: problem }, 400);
         }
         totalBytes += decodedBase64Length(att.content);
       }
@@ -526,14 +590,22 @@ Deno.serve(async (req: Request) => {
 
     // 9. Idempotency replay — return cached success if we've already sent
     //    successfully under this key.
+    //    The stored key is scoped to caller + type + record (audit finding 8):
+    //    another user's guessable key can neither replay nor block this send.
     let emailLogId: string | null = null;
+    const scopedIdempotencyKey = idempotency_key
+      ? `${caller.id}:${email_type}:${recordRef}:${idempotency_key}`
+      : null;
 
-    if (idempotency_key) {
-      const { data: existing } = await adminClient
+    if (scopedIdempotencyKey) {
+      const { data: existing, error: existingErr } = await adminClient
         .from("email_log")
         .select("id, resend_message_id, status")
-        .eq("idempotency_key", idempotency_key)
+        .eq("idempotency_key", scopedIdempotencyKey)
         .maybeSingle();
+      if (existingErr) {
+        return jsonResponse({ error: `Idempotency lookup failed: ${existingErr.message}` }, 503);
+      }
 
       if (existing && existing.status === "sent") {
         // Already successfully sent — return cached success.
@@ -575,14 +647,18 @@ Deno.serve(async (req: Request) => {
     //     write fails, we DON'T send — otherwise the customer could receive
     //     an email with no audit record and no idempotency replay marker.
     if (emailLogId) {
-      // Existing pending/failed row from a prior interrupted attempt — reset
-      // it to pending. Don't update content fields (preserve original intent).
+      // Existing failed row from a prior attempt — reset it to pending and
+      // record THIS attempt's content, so the log shows what was actually sent.
       const { error: updateErr } = await adminClient
         .from("email_log")
         .update({
           status: "pending",
           resend_message_id: null,
           error_message: null,
+          recipient_email: to,
+          subject,
+          html_body: html,
+          attachment_name: attachments?.[0]?.filename || null,
         })
         .eq("id", emailLogId);
       if (updateErr) {
@@ -615,7 +691,7 @@ Deno.serve(async (req: Request) => {
           resend_message_id: null,
           status: "pending",
           error_message: null,
-          idempotency_key: idempotency_key || null,
+          idempotency_key: scopedIdempotencyKey,
           created_by: caller.id,
         })
         .select("id")

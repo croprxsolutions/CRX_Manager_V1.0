@@ -76,6 +76,7 @@ import { localDatePlusDays, localToday, parseLocalDate, todayInBusinessTz } from
 import { computeSeason, seasonEndDate } from '../utils/season';
 import { downloadQuotePdf, generateQuotePdf } from '../lib/quotePdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
+import { escapeHtml } from '../lib/proofNotification';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import { preferredQuoteNotes } from '../lib/quoteNotes';
 import { adaptQuoteVersionList, orderedQuoteVersionHistory, type QuoteVersionRow, type UnreadableQuoteVersion } from '../lib/quoteVersionAdapter';
@@ -3193,8 +3194,8 @@ export default function QuoteBuilder() {
         to: selectedCustomer.email,
         subject: `Quote ${quoteNumber} from Crop Rx Solutions`,
         html: buildEmailHtml(
-          `<p>Hi ${selectedCustomer.contact_name || selectedCustomer.farm_name || 'there'},</p>` +
-          `<p>Please find your quote <strong>${quoteNumber}</strong> attached as a PDF. ` +
+          `<p>Hi ${escapeHtml(selectedCustomer.contact_name || selectedCustomer.farm_name || 'there')},</p>` +
+          `<p>Please find your quote <strong>${escapeHtml(quoteNumber)}</strong> attached as a PDF. ` +
           `Let us know if you have any questions or would like to proceed.</p>` +
           `<p>Thank you,<br/>Crop Rx Solutions</p>`
         ),

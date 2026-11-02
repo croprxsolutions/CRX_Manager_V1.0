@@ -52,3 +52,22 @@ describe('send-email invoice authority contracts', () => {
     expect(source).toContain('email_type === "invoice" &&\n        finalInvoiceRow.send_disposition != null');
   });
 });
+
+describe('send-email content and replay contracts (audit findings 7 and 8)', () => {
+  it('refuses unverified content and ties each customer email to a record its customer owns', () => {
+    const contentCheck = source.indexOf('const contentProblem = emailContentProblem(subject, html);');
+    const outboundSend = source.indexOf('await fetch("https://api.resend.com/emails"');
+    expect(contentCheck).toBeGreaterThan(-1);
+    expect(contentCheck).toBeLessThan(outboundSend);
+    expect(source).toContain('const problem = attachmentProblem(att?.filename, att?.content);');
+    expect(source).toContain('if (recordRow.customer_id !== customer_id) {');
+    expect(source).toContain('noticeRow.notification_type !== jobNoticeType');
+  });
+
+  it('stores and looks up the idempotency key only in its caller + type + record scope', () => {
+    expect(source).toContain('`${caller.id}:${email_type}:${recordRef}:${idempotency_key}`');
+    expect(source).toContain('.eq("idempotency_key", scopedIdempotencyKey)');
+    expect(source).toContain('idempotency_key: scopedIdempotencyKey,');
+    expect(source).not.toContain('.from("email_log")\n        .select("id, resend_message_id, status")\n        .eq("idempotency_key", idempotency_key)');
+  });
+});

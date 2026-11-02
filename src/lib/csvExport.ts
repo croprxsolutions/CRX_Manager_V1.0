@@ -82,5 +82,3 @@ export function fmtDateCSV(d: unknown): string {
     ? parseLocalDate(text).toLocaleDateString()
     : new Date(text).toLocaleDateString();
 }
-
-export const fmtDateOnlyCSV = fmtDateCSV;

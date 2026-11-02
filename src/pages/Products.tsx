@@ -73,6 +73,7 @@ import {
   type SetMarginFloorsResult,
 } from '../lib/marginFloors';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { isDefinitiveRpcRejection } from '../lib/idempotency';
 import { matchesProductSearch } from '../lib/productSearch';
 
 const INLINE_PRICING_FIELDS = new Set([
@@ -500,22 +501,26 @@ export default function Products() {
           p_idempotency_key: productActiveIdem.getKeyFor(scope),
         });
         if (response.error) {
+          const rpcError = response.error;
           if (hasRpcCode(response.error, RpcErrorCodes.PRODUCT_ACTIVE_REVIEW_STALE)
             || hasRpcCode(response.error, RpcErrorCodes.PRODUCT_DEACTIVATION_BLOCKED)) {
-            productActiveIdem.resetKeyFor(scope);
+            // A raised refusal committed nothing, so the key is retired for a fresh review.
+            if (isDefinitiveRpcRejection(rpcError)) productActiveIdem.resetKeyFor(scope);
             closeActiveReview();
             toast('warning', 'Product details changed since this review. Review the selection again.');
             void startActiveReview(ids, active);
             throw new CriticalActionHandledError('Product review changed');
           }
           if (hasRpcCode(response.error, RpcErrorCodes.PRODUCT_INACTIVE)) {
-            productActiveIdem.resetKeyFor(scope);
+            // A raised refusal committed nothing, so the key is retired for a fresh review.
+            if (isDefinitiveRpcRejection(rpcError)) productActiveIdem.resetKeyFor(scope);
             toast('error', sanitizeError(response.error));
             throw new CriticalActionHandledError('Product is inactive');
           }
           if (hasRpcCode(response.error, RpcErrorCodes.NOT_AUTHORIZED)
             || hasRpcCode(response.error, RpcErrorCodes.AUTH_REQUIRED)) {
-            productActiveIdem.resetKeyFor(scope);
+            // A raised refusal committed nothing, so the key is retired for a fresh review.
+            if (isDefinitiveRpcRejection(rpcError)) productActiveIdem.resetKeyFor(scope);
             closeActiveReview();
             toast('error', 'Your admin access changed. Sign in again, then review the products.');
             throw new CriticalActionHandledError('Admin access changed');

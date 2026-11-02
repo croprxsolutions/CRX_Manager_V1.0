@@ -1,6 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-11-02 (America/Chicago), for the live ledger only (high-water `20261101181836`, 1,089 rows; WP-PM-12a and WP-PM-3 are not applied); quote price trail and expiry grant 2026-11-01 (live reads after the apply); quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
+**Last verified:** 2026-11-02 (America/Chicago), for the live ledger only (see the WP-PM-3 changelog note); quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
 Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 Every other section keeps its own date; nothing below was re-certified by that read.
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature

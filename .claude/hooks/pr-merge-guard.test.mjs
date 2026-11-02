@@ -322,6 +322,22 @@ for (const command of [
 // CodeRabbit, PR #882: a quoted `'$('` before a hidden merge no longer hides it.
 r = runHook({ tool_name: "Bash", tool_input: { command: "P=gh; echo '$('; x=$($P pr merge 1 --admin)" } });
 
+// Auto-merge is Mason's click (2026-11-02): agents may turn it off, never on.
+r = runHook({ tool_name: "mcp__ccd_pr__set_auto_merge", tool_input: { enabled: true, url: "https://github.com/o/r/pull/1" } });
+ok(r.decision?.permissionDecision === "deny", "agent turning auto-merge ON through the app tool is denied");
+r = runHook({ tool_name: "mcp__ccd_pr__set_auto_merge", tool_input: { url: "https://github.com/o/r/pull/1" } });
+ok(r.decision?.permissionDecision === "deny", "app auto-merge call without enabled:false is denied");
+r = runHook({ tool_name: "mcp__ccd_pr__set_auto_merge", tool_input: { enabled: false, url: "https://github.com/o/r/pull/1" } });
+ok(r.status === 0 && r.decision === null, "agent turning auto-merge OFF passes");
+r = runHook({ tool_name: "Bash", tool_input: { command: "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_1\"}) { clientMutationId } }'" } });
+ok(r.decision?.permissionDecision === "deny", "GraphQL enablePullRequestAutoMerge denied");
+r = runHook({ tool_name: "Bash", tool_input: { command: "rg enablePullRequestAutoMerge docs/" } });
+ok(r.status === 0 && r.decision === null, "searching for the mutation name is not a GraphQL call");
+r = runHook({ tool_name: "Bash", tool_input: { command: "rg -n 'graphql|enablePullRequestAutoMerge' .claude/hooks/pr-merge-guard.mjs" } });
+ok(r.status === 0 && r.decision === null, "a read-only search naming graphql AND the mutation passes (Codex App P2, PR #1295)");
+r = runHook({ tool_name: "Bash", tool_input: { command: "curl -X POST https://api.github.com/graphql -d '{\"query\":\"mutation{enablePullRequestAutoMerge(input:{}){clientMutationId}}\"}'" } });
+ok(r.decision?.permissionDecision === "deny", "enablePullRequestAutoMerge over raw curl to /graphql denied");
+
 r = runHook({ tool_name: "Bash", tool_input: { command: "gh api graphql -f query='mutation { mergePullRequest(input: {}) }'" } });
 ok(r.decision?.permissionDecision === "deny", "GraphQL merge denied");
 ok(/mergePullRequest/.test(r.decision?.permissionDecisionReason || ""), "GraphQL deny explains itself");

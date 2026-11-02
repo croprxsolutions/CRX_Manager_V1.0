@@ -12718,14 +12718,6 @@ export type Database = {
         }
         Returns: Json
       }
-      admin_set_application_service_cost: {
-        Args: {
-          p_cost_per_acre_cents: number
-          p_idempotency_key?: string
-          p_service_id: string
-        }
-        Returns: Json
-      }
       admin_update_profile: {
         Args: {
           new_denied_pages?: string[]

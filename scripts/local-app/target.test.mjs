@@ -11,7 +11,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, Refused,
-  assertAppPortIsLoopback, assertCleanEnvironment, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings,
+  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings,
   denyInsideCheckout,
 } from './target.mjs';
 import { isFileLoadingAllowed, resolveConfig } from 'vite';
@@ -175,6 +175,15 @@ describe('network exposure', () => {
       assert.throws(() => assertAppPortIsLoopback(`  TCP    ${address}:${APP_PORT}    0.0.0.0:0    LISTENING    123\n`), Refused);
     });
   }
+  it('accepts a second frontend on a free user port', () => assert.equal(assertExtraAppPort('5201'), 5201));
+  for (const port of [String(APP_PORT), String(API_PORT), String(DB_PORT), '80', '1023', '65536', '5201abc', '0x1451', '', undefined]) {
+    it(`refuses a second frontend on port "${port}"`, () => assert.throws(() => assertExtraAppPort(port), Refused));
+  }
+  it('frontend --port refuses the shared copy\'s port before anything starts', () => {
+    const result = spawnSync(process.execPath, [APP, 'frontend', '--port', String(APP_PORT)], { encoding: 'utf8', timeout: 30000 });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /--port needs a port/);
+  });
   it('accepts this computer\'s Docker', () => {
     assert.doesNotThrow(() => assertLocalDockerEndpoint('npipe:////./pipe/dockerDesktopLinuxEngine'));
     assert.doesNotThrow(() => assertLocalDockerEndpoint('unix:///var/run/docker.sock'));

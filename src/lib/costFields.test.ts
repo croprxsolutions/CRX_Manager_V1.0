@@ -186,7 +186,7 @@ describe('column lists match the schema registry', () => {
       // against the candidate SQL until a post-apply registry refresh includes it.
       const candidateColumns = table === 'products' ? ['use_timings'] : [];
       if (table === 'products') {
-        const candidate = readFileSync(join(HERE, '..', '..', 'supabase', 'migrations', '20261102220000_product_use_timings.sql'), 'utf8');
+        const candidate = readFileSync(join(HERE, '..', '..', 'supabase', 'migrations', '20261103140000_product_use_timings.sql'), 'utf8');
         expect(candidate).toMatch(/ALTER TABLE public\.products ADD COLUMN use_timings text\[\]/);
       }
       expect([...safe].sort()).toEqual([...new Set([...live, ...candidateColumns])].filter((c) => !cost.includes(c)).sort());

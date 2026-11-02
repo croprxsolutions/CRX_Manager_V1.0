@@ -7683,39 +7683,6 @@ export type Database = {
         }
         Relationships: []
       }
-      product_use_timing_options: {
-        Row: {
-          category: string
-          code: string
-          created_at: string
-          crop: string | null
-          is_active: boolean
-          label: string
-          sort_order: number
-          timing_code: string
-        }
-        Insert: {
-          category: string
-          code: string
-          created_at?: string
-          crop?: string | null
-          is_active?: boolean
-          label: string
-          sort_order: number
-          timing_code: string
-        }
-        Update: {
-          category?: string
-          code?: string
-          created_at?: string
-          crop?: string | null
-          is_active?: boolean
-          label?: string
-          sort_order?: number
-          timing_code?: string
-        }
-        Relationships: []
-      }
       product_change_history: {
         Row: {
           change_type: string
@@ -8324,6 +8291,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      product_use_timing_options: {
+        Row: {
+          category: string
+          code: string
+          created_at: string
+          crop: string | null
+          is_active: boolean
+          label: string
+          sort_order: number
+          timing_code: string
+        }
+        Insert: {
+          category: string
+          code: string
+          created_at?: string
+          crop?: string | null
+          is_active?: boolean
+          label: string
+          sort_order: number
+          timing_code: string
+        }
+        Update: {
+          category?: string
+          code?: string
+          created_at?: string
+          crop?: string | null
+          is_active?: boolean
+          label?: string
+          sort_order?: number
+          timing_code?: string
+        }
+        Relationships: []
       }
       products: {
         Row: {

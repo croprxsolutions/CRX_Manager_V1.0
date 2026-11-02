@@ -3,7 +3,9 @@ import type { UseTimingOption } from '../types';
 
 const H = vi.hoisted(() => ({ from: vi.fn() }));
 vi.mock('./db', () => ({ supabase: { from: H.from } }));
+vi.mock('./sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 import { listProductUseTimingOptions, visibleProductUseTimingOptions } from './productUseTimings';
+import { Sentry } from './sentry';
 
 const options: UseTimingOption[] = [
   { code: 'pre_emerge_corn', label: 'Pre-Emerge Corn', timing_code: 'pre_emergence', crop: 'corn', category: 'Herbicide', sort_order: 20, is_active: true },
@@ -27,6 +29,9 @@ describe('product use timing options', () => {
   it('surfaces a database load error', async () => {
     const error = new Error('read failed');
     H.from.mockReturnValue({ select: () => ({ order: () => ({ order: async () => ({ data: null, error }) }) }) });
-    await expect(listProductUseTimingOptions()).rejects.toBe(error);
+    await expect(listProductUseTimingOptions()).rejects.toThrow('read failed');
+    expect(Sentry.captureException).toHaveBeenCalledWith(expect.any(Error), {
+      tags: { source: 'fetch', action: 'load_use_timing_options' },
+    });
   });
 });

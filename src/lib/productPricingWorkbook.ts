@@ -545,7 +545,7 @@ export async function generateProductPricingWorkbook(
   const useTimingColumn = PRICING_WORKBOOK_HEADERS.indexOf('use_timing') + 1;
   for (let row = 2; row <= pricingExport.rows.length + 1; row += 1) {
     const cell = worksheet.getCell(row, useTimingColumn);
-    cell.note = 'For several use timings, separate labels with a semicolon (;).';
+    cell.note = 'For several use timings, separate labels with a semicolon (;). Use the exact labels; a misspelled label cancels the whole upload at apply.';
   }
   // This is a usability guard only. The preview RPC revalidates every protected
   // value against its retained server manifest; Excel protection is not security.

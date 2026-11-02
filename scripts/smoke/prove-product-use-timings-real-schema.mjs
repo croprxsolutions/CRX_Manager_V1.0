@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261102220000_product_use_timings.
+ * Real-schema proof for 20261103140000_product_use_timings.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17
  * container and replays ordered post-baseline migrations up to this candidate. It exercises
  * transaction, legacy-row, check, category, role, replay and mutation checks against the real schema.
  *
- * Run: node scripts/smoke/prove-product-setup-checks-real-schema.mjs   (needs Docker)
+ * Run: node scripts/smoke/prove-product-use-timings-real-schema.mjs   (needs Docker)
  * Prints PRODUCT_USE_TIMINGS_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
@@ -22,7 +22,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261102220000_product_use_timings.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261103140000_product_use_timings.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -199,6 +199,7 @@ try {
   stageText('candidate.sql', lf(CANDIDATE));
   const candidate = apply('candidate.sql');
   assert.equal(candidate.status, 0, candidate.output);
+  console.log(`[prover] BEFORE row triggers: ${scalar("SELECT string_agg(tgname::text, ', ' ORDER BY tgname) FROM pg_trigger WHERE tgrelid = 'public.products'::regclass AND NOT tgisinternal AND tgenabled = 'O' AND (tgtype & 3) = 3;")}`);
   ledger(path.basename(CANDIDATE, '.sql'));
   assert.equal(scalar('SELECT count(*) FROM public.products WHERE cardinality(use_timings) > 0;'), before);
   assert.equal(scalar("SELECT sum(pricing_version) FROM public.products WHERE product_name LIKE 'PM5 %';"), versionBefore);
@@ -218,6 +219,14 @@ try {
   assert.equal(scalar(`SELECT array_to_string(use_timings, ',') FROM public.products WHERE id = ${product('PM5 Corn')};`), 'pre_emerge,post_emergence');
   refused(`UPDATE public.products SET use_timing = 'Unknown' WHERE id = ${product('PM5 Corn')};`, /Unknown use timing "Unknown"/);
   refused(`UPDATE public.products SET use_timing = 'Pre-Emerge' WHERE id = ${product('PM5 Corn')};`, /several use timings/);
+  refused(`UPDATE public.products SET use_timing = 'Pre-Emerge Corn' WHERE id = ${product('PM5 Corn')};`, /several use timings/);
+  refused(`UPDATE public.products SET use_timing = 'Pre-Emerge; Pre-Emerge Corn' WHERE id = ${product('PM5 Corn')};`, /several use timings/);
+  psql(`UPDATE public.products SET use_timing = 'Pre-Emerge; Post-Emergence; Pre-Emerge Corn' WHERE id = ${product('PM5 Corn')};`);
+  assert.equal(scalar(`SELECT array_to_string(use_timings, ',') FROM public.products WHERE id = ${product('PM5 Corn')};`), 'pre_emerge,pre_emerge_corn,post_emergence');
+  psql(`UPDATE public.products SET use_timings = ARRAY['pre_emerge','post_emergence'] WHERE id = ${product('PM5 Corn')};`);
+  psql("UPDATE public.product_use_timing_options SET is_active = false WHERE code = 'pre_emerge';");
+  psql(`UPDATE public.products SET notes = 'unrelated edit' WHERE id = ${product('PM5 Corn')};`);
+  psql("UPDATE public.product_use_timing_options SET is_active = true WHERE code = 'pre_emerge';");
   psql(`UPDATE public.products SET use_timing = 'Pre-Emerge' WHERE id = ${product('PM5 Soy')};`);
   assert.equal(scalar(`SELECT use_timings[1] FROM public.products WHERE id = ${product('PM5 Soy')};`), 'pre_emerge');
   refused(`UPDATE public.products SET use_timings = ARRAY['foliar'] WHERE id = ${product('PM5 Post')};`, /unavailable for category/);
@@ -226,11 +235,13 @@ try {
   assert.equal(scalar(`SELECT category || ':' || COALESCE(use_timing, 'NULL') FROM public.products WHERE id = ${product('PM5 Post')};`), 'Insecticide:NULL');
   psql("INSERT INTO public.products(product_name, category) VALUES ('PM5 Alias', 'Post Emergence');");
   assert.equal(scalar(`SELECT category || ':' || use_timings[1] FROM public.products WHERE id = ${product('PM5 Alias')};`), 'Herbicide:post_emergence');
+  refused("INSERT INTO public.products(product_name, category, use_timings, use_timing) VALUES ('PM5 Conflicting Insert', 'Herbicide', ARRAY['pre_emerge'], 'Foliar');", /changed two ways at once/);
   refused(`UPDATE public.products SET use_timings = ARRAY['pre_emerge_corn'], use_timing = 'Foliar' WHERE id = ${product('PM5 Soy')};`, /changed two ways at once/);
   console.log('[prover] app, legacy, category, alias and conflict paths passed');
 
   assert.equal(roleScalar('authenticated', 'SELECT count(*) FROM public.product_use_timing_options;'), '9');
   refused('SET ROLE anon; SELECT count(*) FROM public.product_use_timing_options;', /permission denied/);
+  refused('SET ROLE service_role; SELECT count(*) FROM public.product_use_timing_options;', /permission denied/);
   refused("SET ROLE authenticated; INSERT INTO public.product_use_timing_options(code,label,timing_code,category,sort_order) VALUES ('bad','Bad','bad','Herbicide',999);", /permission denied/);
   for (const role of ['anon', 'authenticated', 'service_role', 'metabase_ro']) {
     for (const privilege of ['SELECT', 'REFERENCES', 'INSERT', 'UPDATE']) {
@@ -270,7 +281,7 @@ try {
 
   // The Phase 2 public wrapper calls the real apply_product_pricing_change_set internally;
   // direct calls are deliberately blocked by PRODUCT_COST_BASIS_CONTEXT_REQUIRED.
-  const workbook = (suffix, timing, note) => session(`DO $workbook$
+  const workbookSql = (suffix, timing, note) => `DO $workbook$
     DECLARE v_export jsonb; v_row jsonb; v_preview jsonb; v_id uuid := ${product('PM5 Corn')};
     BEGIN
       v_export := public.create_pricing_workbook_export(ARRAY[v_id], '${ADMIN}', 'pm5-export-${suffix}');
@@ -299,7 +310,8 @@ try {
         '${ADMIN}', 'pm5-approve-${suffix}');
       PERFORM public.apply_product_cost_basis_change_set((v_preview->>'change_set_id')::uuid,
         v_preview->>'request_fingerprint', '${ADMIN}', 'pm5-apply-${suffix}');
-    END $workbook$;`);
+    END $workbook$;`;
+  const workbook = (suffix, timing, note) => session(workbookSql(suffix, timing, note));
   const pricingSnapshot = () => scalar(`SELECT row_to_json(x)::text FROM (
     SELECT trim_scale(current_cost)::text AS current_cost, cost_updated_date,
       trim_scale(tier1_price)::text AS tier1_price,
@@ -322,6 +334,22 @@ try {
   assert.equal(pricingSnapshot(), pricesBefore);
   const versionAfterWorkbook = scalar(`SELECT pricing_version FROM public.products WHERE id = ${product('PM5 Corn')};`);
   console.log(`[prover] unchanged workbook cell: pricing_version ${versionBeforeWorkbook} -> ${versionAfterWorkbook}; exact price/cost values unchanged`);
+  workbook('remove', 'Pre-Emerge', 'PM5 workbook removed timing');
+  assert.equal(scalar(`SELECT array_to_string(use_timings, ',') FROM public.products WHERE id = ${product('PM5 Corn')};`), 'pre_emerge');
+  assert.equal(pricingSnapshot(), pricesBefore);
+  workbook('restore', 'Pre-Emerge; Post-Emergence', 'PM5 workbook restored timing');
+  assert.equal(scalar(`SELECT array_to_string(use_timings, ',') FROM public.products WHERE id = ${product('PM5 Corn')};`), 'pre_emerge,post_emergence');
+  assert.equal(pricingSnapshot(), pricesBefore);
+  const timingBeforeUnknown = scalar(`SELECT use_timing FROM public.products WHERE id = ${product('PM5 Corn')};`);
+  const versionBeforeUnknown = scalar(`SELECT pricing_version FROM public.products WHERE id = ${product('PM5 Corn')};`);
+  refused(`BEGIN; SET LOCAL ROLE authenticated;
+    SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true);
+    SELECT set_config('request.jwt.claims', json_build_object('sub', '${ADMIN}', 'role', 'authenticated')::text, true);
+    ${workbookSql('unknown', 'Misspelled Timing', 'PM5 workbook unknown timing')}
+    COMMIT;`, /Unknown use timing "Misspelled Timing"/);
+  assert.equal(scalar(`SELECT use_timing FROM public.products WHERE id = ${product('PM5 Corn')};`), timingBeforeUnknown);
+  assert.equal(scalar(`SELECT pricing_version FROM public.products WHERE id = ${product('PM5 Corn')};`), versionBeforeUnknown);
+  assert.equal(pricingSnapshot(), pricesBefore);
   workbook('third', 'Pre-Emerge; Pre-Emerge Corn; Post-Emergence', 'PM5 workbook added timing');
   assert.equal(scalar(`SELECT array_to_string(use_timings, ',') FROM public.products WHERE id = ${product('PM5 Corn')};`), 'pre_emerge,pre_emerge_corn,post_emergence');
   assert.equal(pricingSnapshot(), pricesBefore);

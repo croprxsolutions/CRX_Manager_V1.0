@@ -3,10 +3,16 @@
 -- ROLLBACK: drop trg_sync_product_use_timings, sync_product_use_timings(), use_timings,
 -- and product_use_timing_options; use_timing retains its last joined label text.
 SET LOCAL lock_timeout = '5s';
+CREATE TEMP TABLE product_use_timings_tx ON COMMIT DROP AS
+SELECT pg_current_xact_id()::text AS transaction_id;
 
 DO $preflight$
 DECLARE v_bad record;
 BEGIN
+  IF to_regclass('pg_temp.product_use_timings_tx') IS NULL
+     OR (SELECT transaction_id FROM pg_temp.product_use_timings_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
+    RAISE EXCEPTION 'PRODUCT_USE_TIMINGS_NOT_IN_TRANSACTION';
+  END IF;
   IF to_regclass('public.product_use_timing_options') IS NOT NULL
      OR EXISTS (SELECT 1 FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'use_timings') THEN
@@ -36,12 +42,14 @@ CREATE TABLE public.product_use_timing_options (
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX product_use_timing_options_lower_label_key
+  ON public.product_use_timing_options (lower(label));
 ALTER TABLE public.product_use_timing_options OWNER TO postgres;
 ALTER TABLE public.product_use_timing_options ENABLE ROW LEVEL SECURITY;
 CREATE POLICY product_use_timing_options_select ON public.product_use_timing_options
   FOR SELECT TO authenticated USING ((SELECT public.is_active_profile()));
 REVOKE ALL ON TABLE public.product_use_timing_options FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
-GRANT SELECT ON TABLE public.product_use_timing_options TO authenticated, service_role;
+GRANT SELECT ON TABLE public.product_use_timing_options TO authenticated;
 
 INSERT INTO public.product_use_timing_options(code, label, timing_code, crop, category, sort_order) VALUES
   ('post_emergence', 'Post-Emergence', 'post_emergence', NULL, 'Herbicide', 40),
@@ -62,10 +70,23 @@ GRANT SELECT (use_timings) ON public.products TO authenticated;
 GRANT REFERENCES (use_timings) ON public.products TO authenticated;
 GRANT SELECT (use_timings) ON public.products TO anon;
 
--- The pricing BEFORE guard watches only price fields; the history AFTER trigger watches
--- use_timing text, not this new array. Backfill before installing sync so neither changes.
-UPDATE public.products p SET use_timings = ARRAY[o.code]
-FROM public.product_use_timing_options o WHERE p.use_timing = o.label;
+-- The version guard counts use_timing text as an information change. This backfill writes
+-- only use_timings, so it leaves pricing_version and the legacy text unchanged.
+DO $fill$
+DECLARE v_row record;
+BEGIN
+  FOR v_row IN
+    SELECT p.id, o.code FROM public.products p
+    JOIN public.product_use_timing_options o ON p.use_timing = o.label
+  LOOP
+    BEGIN
+      UPDATE public.products SET use_timings = ARRAY[v_row.code] WHERE id = v_row.id;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE EXCEPTION 'PRODUCT_USE_TIMINGS_BACKFILL_FAILED: product %: %', v_row.id, SQLERRM;
+    END;
+  END LOOP;
+END;
+$fill$;
 
 DO $backfill$
 BEGIN
@@ -94,6 +115,7 @@ DECLARE
   v_old_codes text[] := '{}';
   v_legacy boolean := false;
   v_list_changed boolean := false;
+  v_codes_changed boolean := true;
 BEGIN
   IF NEW.use_timings IS NULL THEN
     RAISE EXCEPTION 'Use timings must be a list.' USING ERRCODE = '22023';
@@ -120,18 +142,25 @@ BEGIN
     FOREACH v_part IN ARRAY string_to_array(COALESCE(NEW.use_timing, ''), ';') LOOP
       v_part := btrim(v_part);
       IF v_part = '' THEN CONTINUE; END IF;
-      SELECT * INTO v_option FROM public.product_use_timing_options WHERE lower(label) = lower(v_part);
-      IF NOT FOUND THEN
+      BEGIN
+        SELECT * INTO STRICT v_option FROM public.product_use_timing_options WHERE lower(label) = lower(v_part);
+      EXCEPTION WHEN NO_DATA_FOUND THEN
         RAISE EXCEPTION 'Unknown use timing "%". Pick from the list.', v_part USING ERRCODE = '22023';
-      END IF;
+      END;
       v_codes := array_append(v_codes, v_option.code);
     END LOOP;
     IF TG_OP = 'UPDATE' AND cardinality(OLD.use_timings) >= 2
-       AND cardinality(ARRAY(SELECT DISTINCT x FROM unnest(v_codes) x)) < cardinality(OLD.use_timings)
-       AND NOT EXISTS (SELECT 1 FROM unnest(v_codes) x WHERE x <> ALL(OLD.use_timings)) THEN
+       AND current_setting('crx.pricing_authorized', true) IS DISTINCT FROM 'phase1a'
+       AND EXISTS (SELECT 1 FROM unnest(OLD.use_timings) old_code
+                   WHERE old_code <> ALL(v_codes)) THEN
       RAISE EXCEPTION 'This product has several use timings; change them on the product page (refresh if you only see one).'
         USING ERRCODE = '22023';
     END IF;
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    v_codes_changed := ARRAY(SELECT DISTINCT x FROM unnest(v_codes) x ORDER BY x)
+      IS DISTINCT FROM ARRAY(SELECT DISTINCT x FROM unnest(v_old_codes) x ORDER BY x);
   END IF;
 
   IF NEW.category NOT IN ('Herbicide', 'Foliar Fertilizer') OR NEW.category IS NULL THEN
@@ -142,6 +171,9 @@ BEGIN
   END IF;
 
   FOR v_code IN SELECT DISTINCT x FROM unnest(v_codes) x LOOP
+    IF TG_OP = 'UPDATE' AND NOT v_codes_changed AND NEW.category IS NOT DISTINCT FROM OLD.category THEN
+      CONTINUE;
+    END IF;
     SELECT * INTO v_option FROM public.product_use_timing_options WHERE code = v_code;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'Unknown use timing "%". Pick from the list.', v_code USING ERRCODE = '22023';
@@ -157,6 +189,10 @@ BEGIN
          string_agg(o.label, '; ' ORDER BY o.sort_order, o.code)
     INTO NEW.use_timings, v_labels
     FROM public.product_use_timing_options o WHERE o.code = ANY(v_codes);
+  IF TG_OP = 'INSERT' AND cardinality(v_codes) > 0 AND NEW.use_timing IS NOT NULL
+     AND NEW.use_timing IS DISTINCT FROM v_labels THEN
+    RAISE EXCEPTION 'Use timing was changed two ways at once; refresh and try again.' USING ERRCODE = '22023';
+  END IF;
   IF TG_OP = 'UPDATE' AND v_list_changed AND NEW.use_timing IS DISTINCT FROM OLD.use_timing
      AND NEW.use_timing IS DISTINCT FROM v_labels THEN
     RAISE EXCEPTION 'Use timing was changed two ways at once; refresh and try again.' USING ERRCODE = '22023';
@@ -167,14 +203,20 @@ END;
 $function$;
 ALTER FUNCTION public.sync_product_use_timings() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.sync_product_use_timings() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
--- Alphabetical BEFORE order: trg_normalize_product_category, trg_sync_product_use_timings,
--- trigger_y_require_governed_product_pricing, trigger_z_guard_version_product_pricing.
+-- Alphabetical BEFORE row order on products: trg_normalize_product_category,
+-- trg_sync_product_use_timings, trg_validate_product_category,
+-- trg_validate_product_setup_fields, trg_validate_product_units,
+-- trigger_calculate_prices_from_margin, trigger_guard_product_cost_basis_unit_change,
+-- trigger_recalc_product_price_per_acre,
+-- trigger_x_require_governed_phase3_product_metadata,
+-- trigger_y_require_governed_product_pricing, trigger_z_guard_version_product_pricing,
+-- trigger_zz_require_product_cost_basis. Some fire only for their listed UPDATE columns.
 -- trigger_zz_write_product_change_history is AFTER, so sees the final joined text.
 CREATE TRIGGER trg_sync_product_use_timings BEFORE INSERT OR UPDATE ON public.products
   FOR EACH ROW EXECUTE FUNCTION public.sync_product_use_timings();
 
 DO $postflight$
-DECLARE v_role text; v_privilege text; v_policy pg_policy%ROWTYPE;
+DECLARE v_role text; v_privilege text; v_policy pg_policy%ROWTYPE; v_before_names text[];
 BEGIN
   IF (SELECT count(*) FROM public.product_use_timing_options) <> 9
      OR (SELECT array_agg(code ORDER BY sort_order) FROM public.product_use_timing_options)
@@ -194,11 +236,16 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_USE_TIMINGS_POSTFLIGHT_POLICY';
   END IF;
   IF NOT has_table_privilege('authenticated', 'public.product_use_timing_options', 'SELECT')
-     OR NOT has_table_privilege('service_role', 'public.product_use_timing_options', 'SELECT')
+     OR has_table_privilege('service_role', 'public.product_use_timing_options', 'SELECT')
      OR has_table_privilege('anon', 'public.product_use_timing_options', 'SELECT, INSERT, UPDATE, DELETE')
      OR has_table_privilege('authenticated', 'public.product_use_timing_options', 'INSERT, UPDATE, DELETE')
      OR has_table_privilege('service_role', 'public.product_use_timing_options', 'INSERT, UPDATE, DELETE')
-     OR has_table_privilege('metabase_ro', 'public.product_use_timing_options', 'SELECT, INSERT, UPDATE, DELETE') THEN
+     OR has_table_privilege('metabase_ro', 'public.product_use_timing_options', 'SELECT, INSERT, UPDATE, DELETE')
+     OR EXISTS (SELECT 1 FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+                WHERE c.oid = 'public.product_use_timing_options'::regclass
+                  AND a.grantee = 0 AND a.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER'))
+     OR has_table_privilege('anon', 'public.product_use_timing_options', 'TRUNCATE, REFERENCES, TRIGGER')
+     OR has_table_privilege('authenticated', 'public.product_use_timing_options', 'TRUNCATE, REFERENCES, TRIGGER') THEN
     RAISE EXCEPTION 'PRODUCT_USE_TIMINGS_POSTFLIGHT_OPTIONS_GRANTS';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.products'::regclass
@@ -215,13 +262,20 @@ BEGIN
       END IF;
     END LOOP;
   END LOOP;
-  IF (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
-       AND tgname IN ('trg_normalize_product_category','trg_sync_product_use_timings',
-       'trigger_y_require_governed_product_pricing','trigger_z_guard_version_product_pricing',
-       'trigger_zz_write_product_change_history') AND tgenabled = 'O') <> 5
-     OR NOT ('trg_normalize_product_category' < 'trg_sync_product_use_timings'
-             AND 'trg_sync_product_use_timings' < 'trigger_y_require_governed_product_pricing'
-             AND 'trigger_y_require_governed_product_pricing' < 'trigger_z_guard_version_product_pricing') THEN
+  SELECT array_agg(tgname::text ORDER BY tgname) INTO v_before_names
+    FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
+    AND NOT tgisinternal AND tgenabled = 'O' AND (tgtype & 3) = 3;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
+       AND tgname = 'trg_sync_product_use_timings' AND tgenabled = 'O' AND tgtype = 23)
+     OR array_position(v_before_names, 'trg_normalize_product_category') IS NULL
+     OR array_position(v_before_names, 'trigger_y_require_governed_product_pricing') IS NULL
+     OR array_position(v_before_names, 'trigger_z_guard_version_product_pricing') IS NULL
+     OR NOT (array_position(v_before_names, 'trg_normalize_product_category')
+             < array_position(v_before_names, 'trg_sync_product_use_timings')
+             AND array_position(v_before_names, 'trg_sync_product_use_timings')
+             < array_position(v_before_names, 'trigger_y_require_governed_product_pricing')
+             AND array_position(v_before_names, 'trg_sync_product_use_timings')
+             < array_position(v_before_names, 'trigger_z_guard_version_product_pricing')) THEN
     RAISE EXCEPTION 'PRODUCT_USE_TIMINGS_POSTFLIGHT_TRIGGER_ORDER';
   END IF;
   IF (SELECT count(*) FROM pg_temp.product_use_timing_before WHERE use_timing IS NOT NULL)

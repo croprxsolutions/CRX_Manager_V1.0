@@ -106,7 +106,9 @@ function pricingChanged(
 
 function productDetailsChanged(product: Partial<Product>, persisted: Product | null): boolean {
   if (!persisted) return false;
-  return PRODUCT_NONPRICING_FIELDS.some((field) => product[field] !== persisted[field]);
+  return PRODUCT_NONPRICING_FIELDS.some((field) => field === 'use_timings'
+    ? [...(product.use_timings ?? [])].sort().join('\u0000') !== [...(persisted.use_timings ?? [])].sort().join('\u0000')
+    : product[field] !== persisted[field]);
 }
 
 function pricingPreviewRow(
@@ -427,8 +429,7 @@ export default function ProductDetail() {
       setCategoryLoadFailed(true);
       toast('error', 'Could not load product categories. Refresh before saving a category.');
     });
-    listProductUseTimingOptions().then(setTimingOptions).catch((error: unknown) => {
-      Sentry.captureException(error);
+    listProductUseTimingOptions().then(setTimingOptions).catch(() => {
       setTimingLoadFailed(true);
       toast('error', 'Could not load use timings. Refresh before changing them.');
     });
@@ -1150,25 +1151,34 @@ export default function ProductDetail() {
                   ))}
                 </select>
               </div>
-              {(product.category === 'Herbicide' || product.category === 'Foliar Fertilizer') && (
-                <div role="group" aria-label="Use Timing">
-                  <p className="mb-1 text-sm font-medium text-secondary">Use Timing</p>
+              {(product.category === 'Herbicide' || product.category === 'Foliar Fertilizer'
+                || (timingLoadFailed && ((product.use_timings?.length ?? 0) > 0 || Boolean(product.use_timing)))) && (
+                <fieldset>
+                  <legend className="mb-1 text-sm font-medium text-secondary">Use Timing</legend>
                   <div className="rounded-lg border border-gray-200 bg-white p-2 space-y-1">
-                    {visibleProductUseTimingOptions(timingOptions, product.category, product.use_timings ?? []).map((option) => (
-                      <label key={option.code} className="flex min-h-9 items-center gap-2 rounded px-2 text-sm text-nav-dark hover:bg-gray-50">
+                    {timingLoadFailed ? (
+                      <>
+                        <p className="px-2 text-sm text-secondary">Use timings could not be loaded. Refresh before changing them.</p>
+                        <p className="px-2 text-sm text-nav-dark">{(product.use_timings ?? []).length > 0
+                          && (product.use_timings ?? []).every((code) => timingOptions.some((option) => option.code === code))
+                          ? (product.use_timings ?? []).map((code) => timingOptions.find((option) => option.code === code)!.label).join('; ')
+                          : product.use_timing || 'No saved use timings'}</p>
+                      </>
+                    ) : visibleProductUseTimingOptions(timingOptions, product.category, product.use_timings ?? []).map((option) => (
+                      <label key={option.code} className={`flex min-h-9 items-center gap-2 rounded px-2 text-sm text-nav-dark ${isAdmin && !pricingReloadRequired && !(isNew && saving) ? 'hover:bg-gray-50' : ''}`}>
                         <input
                           type="checkbox"
                           checked={(product.use_timings ?? []).includes(option.code)}
                           onChange={(event) => toggleUseTiming(option.code, event.target.checked)}
                           disabled={!isAdmin || timingLoadFailed}
-                          className="h-4 w-4 accent-crx-green"
+                          className="h-4 w-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
                         />
                         {option.label}{option.is_active ? '' : ' (retired)'}
                       </label>
                     ))}
-                    {timingOptions.length === 0 && <p className="px-2 text-sm text-secondary">Loading use timings...</p>}
+                    {!timingLoadFailed && timingOptions.length === 0 && <p className="px-2 text-sm text-secondary">Loading use timings...</p>}
                   </div>
-                </div>
+                </fieldset>
               )}
               <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin} placeholder="Type or select..." />
               <Combobox label="Manufacturer" value={product.manufacturer || ''} onChange={(v) => update('manufacturer', v)} options={manufacturerOptions} disabled={!isAdmin} placeholder="Type or select..." />

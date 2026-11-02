@@ -13,6 +13,7 @@ const H = vi.hoisted(() => ({
   resetDraftKey: vi.fn(),
   brandSection: vi.fn(),
   savedPayload: null as Record<string, unknown> | null,
+  optionLoadFailed: false,
 }));
 
 function baseProduct(overrides: Partial<Product> = {}): Product {
@@ -96,13 +97,18 @@ vi.mock('../lib/db', () => {
     H.product = { ...H.product!, ...payload } as Product;
     return chainable({ data: [{ id: H.product.id }], error: null });
   });
+  const insertProduct = vi.fn((rows: Record<string, unknown>[]) => {
+    H.savedPayload = rows[0];
+    H.product = baseProduct({ ...rows[0], id: 'product-1' } as Partial<Product>);
+    return chainable({ data: [{ id: 'product-1' }], error: null });
+  });
 
   return {
     supabase: {
       from,
       functions: { invoke: H.invoke },
     },
-    supabaseUntyped: { rpc: H.rpc, from: () => ({ update: updateProduct }) },
+    supabaseUntyped: { rpc: H.rpc, from: () => ({ update: updateProduct, insert: insertProduct }) },
     assertRpcResult: (data: unknown) => {
       if (data == null) throw new Error('RPC returned no data');
       return data;
@@ -160,11 +166,14 @@ vi.mock('../lib/productSetup', async (importOriginal) => ({
 
 vi.mock('../lib/productUseTimings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/productUseTimings')>()),
-  listProductUseTimingOptions: async () => [
-    { code: 'pre_emerge_corn', label: 'Pre-Emerge Corn', category: 'Herbicide', is_active: true, sort_order: 20 },
-    { code: 'post_emerge_soybeans', label: 'Post-Emerge Soybeans', category: 'Herbicide', is_active: true, sort_order: 60 },
-    { code: 'foliar', label: 'Foliar', category: 'Foliar Fertilizer', is_active: true, sort_order: 90 },
-  ],
+  listProductUseTimingOptions: async () => {
+    if (H.optionLoadFailed) throw new Error('options unavailable');
+    return [
+      { code: 'pre_emerge_corn', label: 'Pre-Emerge Corn', timing_code: 'pre_emergence', crop: 'corn', category: 'Herbicide', is_active: true, sort_order: 20 },
+      { code: 'post_emerge_soybeans', label: 'Post-Emerge Soybeans', timing_code: 'post_emergence', crop: 'soybeans', category: 'Herbicide', is_active: true, sort_order: 60 },
+      { code: 'foliar', label: 'Foliar', timing_code: 'foliar', crop: null, category: 'Foliar Fertilizer', is_active: true, sort_order: 90 },
+    ];
+  },
 }));
 
 // Supplier evidence has its own focused tests. Keep this suite scoped to the
@@ -188,6 +197,7 @@ describe('ProductDetail brands section', () => {
     H.routeId = 'product-1';
     H.product = baseProduct();
     H.savedPayload = null;
+    H.optionLoadFailed = false;
   });
 
   it('shows the brands section for the product that loaded, with its saved name', async () => {
@@ -219,6 +229,35 @@ describe('ProductDetail brands section', () => {
     const reloaded = await screen.findByRole('group', { name: 'Use Timing' });
     expect(within(reloaded).getByRole('checkbox', { name: 'Pre-Emerge Corn' })).toBeChecked();
     expect(within(reloaded).getByRole('checkbox', { name: 'Post-Emerge Soybeans' })).toBeChecked();
+  });
+
+  it('creates a product with two timings and reloads both', async () => {
+    H.routeId = 'new';
+    const created = render(<ProductDetail />);
+    fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
+    await screen.findByRole('option', { name: 'Herbicide' });
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
+    const group = await screen.findByRole('group', { name: 'Use Timing' });
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'Pre-Emerge Corn' }));
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'Post-Emerge Soybeans' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Product' }));
+    await waitFor(() => expect(H.savedPayload?.use_timings).toEqual(['pre_emerge_corn', 'post_emerge_soybeans']));
+    expect(H.savedPayload).not.toHaveProperty('use_timing');
+    created.unmount();
+    H.routeId = 'product-1';
+    render(<ProductDetail />);
+    const saved = await screen.findByRole('group', { name: 'Use Timing' });
+    expect(within(saved).getByRole('checkbox', { name: 'Pre-Emerge Corn' })).toBeChecked();
+    expect(within(saved).getByRole('checkbox', { name: 'Post-Emerge Soybeans' })).toBeChecked();
+  });
+
+  it('shows saved timings read only when options fail to load', async () => {
+    H.product = baseProduct({ use_timings: ['pre_emerge_corn', 'post_emerge_soybeans'], use_timing: 'Pre-Emerge Corn; Post-Emerge Soybeans' });
+    H.optionLoadFailed = true;
+    render(<ProductDetail />);
+    expect(await screen.findByText('Use timings could not be loaded. Refresh before changing them.')).toBeInTheDocument();
+    expect(screen.getByText('Pre-Emerge Corn; Post-Emerge Soybeans')).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Use Timing' })).queryAllByRole('checkbox')).toHaveLength(0);
   });
 
   it('cancels or confirms clearing timings on a category change', async () => {

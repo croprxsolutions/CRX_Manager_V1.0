@@ -60,7 +60,7 @@ export interface UseTimingOption {
   label: string;
   timing_code: string;
   crop: string | null;
-  category: string;
+  category: 'Herbicide' | 'Foliar Fertilizer';
   sort_order: number;
   is_active: boolean;
 }

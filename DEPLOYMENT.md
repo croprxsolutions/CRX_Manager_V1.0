@@ -202,7 +202,7 @@ build), three `unit-test-shard-*` jobs (Vitest), and `regression-tests` (guard-h
 Phase 3C packet, Phase 2 smoke guard, agent-workflow, and RPC-contract tests)
 start together, alongside `sql-validation`, once containment and `ci-scope` have
 both passed. Since 2026-11-01 Vitest runs as three shards: `unit-tests` merges them and enforces the coverage
-ratchet on the total, so a failed shard turns it, and the required check, red. The
+ratchet on the total. A failed shard skips `unit-tests`, and that skip turns the required check red. The
 guard suite runs its scripts side by side through `scripts/run-correction-guards.mjs`,
 which reads the `test:correction-guards` list in `package.json`. The two Windows suites likewise run as two parallel jobs
 (`phase3c-containment-windows`, `guard-hooks-windows`). The required check

@@ -36,7 +36,8 @@ export async function runAll(commands, { cwd = REPO_ROOT, concurrency = DEFAULT_
       });
       const seconds = ((Date.now() - started) / 1000).toFixed(1);
       if (code === 0) {
-        log(`ok   ${seconds}s ${command}`);
+        // A passing suite can still warn, e.g. "no 8.3 aliases on this volume" on Windows.
+        log(`ok   ${seconds}s ${command}\n${output}`);
       } else {
         failures.push(command);
         log(`FAIL ${seconds}s ${command}\n${output}`);

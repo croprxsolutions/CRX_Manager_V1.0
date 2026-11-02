@@ -14,14 +14,14 @@ for (const unsupported of ['npm run other', 'node a.mjs || node b.mjs', 'node a.
 
 const temp = mkdtempSync(path.join(tmpdir(), 'run-correction-guards-'));
 try {
-  writeFileSync(path.join(temp, 'pass.mjs'), "console.log('quiet on success');\n");
+  writeFileSync(path.join(temp, 'pass.mjs'), "console.log('notice on success');\n");
   writeFileSync(path.join(temp, 'fail.mjs'), "console.error('fail detail'); process.exit(3);\n");
   const lines = [];
   const failures = await runAll(['node fail.mjs', 'node pass.mjs', 'node pass.mjs'], { cwd: temp, concurrency: 2, log: (line) => lines.push(line) });
   assert.deepEqual(failures, ['node fail.mjs'], 'a failure is reported and the rest still run');
   assert.equal(lines.filter((line) => line.startsWith('ok ')).length, 2);
   assert(lines.some((line) => line.startsWith('FAIL') && line.includes('fail detail')), 'a failure shows its output');
-  assert(!lines.join('\n').includes('quiet on success'), 'a pass stays quiet');
+  assert(lines.some((line) => line.startsWith('ok ') && line.includes('notice on success')), 'a pass shows its output');
   assert.deepEqual(await runAll(['node missing.mjs'], { cwd: temp, log: () => {} }), ['node missing.mjs'], 'a missing suite fails');
 } finally {
   rmSync(temp, { recursive: true, force: true });

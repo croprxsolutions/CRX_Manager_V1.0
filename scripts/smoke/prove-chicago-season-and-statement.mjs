@@ -20,17 +20,23 @@ const sql = (text, user = 'postgres') =>
   docker(['exec', '-i', name, 'psql', '-U', user, '-d', 'postgres', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1'], text).stdout.trim();
 
 const whole = file(`supabase/migrations/${candidate}`);
-const functions = whole.slice(whole.indexOf('CREATE OR REPLACE FUNCTION public.current_season()'));
-// The live bodies before this migration: the candidate with its two statement
-// date lines and the season clock reverted (the preflight digests prove it).
+const CHI = "(now() AT TIME ZONE 'America/Chicago')::date";
+const at = (marker) => whole.indexOf(marker);
+const functions = whole.slice(at('CREATE OR REPLACE FUNCTION public.current_season()'), at('ALTER TABLE public.invoices'));
+const returnCredit = whole.slice(at('CREATE OR REPLACE FUNCTION public._issue_return_credit_header_only_impl_20260825'));
+// The live bodies before this migration: the candidate with its Chicago date
+// reads reverted (the preflight digests prove it).
 const live = functions
-  .replace("(now() AT TIME ZONE 'America/Chicago')::date", 'CURRENT_DATE')
+  .replace(CHI, 'CURRENT_DATE')
   .replace("(a.created_at AT TIME ZONE 'America/Chicago')::date", 'a.created_at::date')
   .replace("(pa.applied_at AT TIME ZONE 'America/Chicago')::date", 'pa.applied_at::date');
-// Only the season's clock read is swapped in a disposable copy.
+const liveReturnCredit = returnCredit.replaceAll(CHI, 'CURRENT_DATE');
+// Only clock reads are swapped in disposable copies.
+const proofNow = "current_setting('crx.proof_clock')::timestamptz";
 const clocked = (source) => source
-  .replace('CURRENT_DATE);', "(current_setting('crx.proof_clock')::timestamptz AT TIME ZONE current_setting('TimeZone'))::date);")
-  .replace("compute_season((now() AT", "compute_season((current_setting('crx.proof_clock')::timestamptz AT");
+  .replace('CURRENT_DATE);', `(${proofNow} AT TIME ZONE current_setting('TimeZone'))::date);`)
+  .replaceAll(CHI, `(${proofNow} AT TIME ZONE 'America/Chicago')::date`);
+const clockedLiveReturn = liveReturnCredit.replaceAll('CURRENT_DATE', `(${proofNow} AT TIME ZONE current_setting('TimeZone'))::date`);
 const season = (clock, timezone = 'UTC') => sql(`BEGIN; SET LOCAL TIME ZONE '${timezone}';
   SELECT set_config('crx.proof_clock','${clock}',true) \\g /dev/null
   SELECT public.current_season(); ROLLBACK;`);
@@ -59,15 +65,19 @@ try {
   sql(file('supabase/baselines/20260727174805_acl_lockdown.sql'));
   sql('CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();', 'supabase_admin');
   sql(live);
-  sql(`REVOKE ALL ON FUNCTION public._get_customer_statement_scoped_impl(uuid,date,date) FROM PUBLIC, anon, authenticated, service_role;`);
+  sql(liveReturnCredit);
+  sql(`REVOKE ALL ON FUNCTION public._get_customer_statement_scoped_impl(uuid,date,date) FROM PUBLIC, anon, authenticated, service_role;
+    REVOKE ALL ON FUNCTION public._issue_return_credit_header_only_impl_20260825(uuid,uuid,text) FROM PUBLIC, anon, authenticated, service_role;`);
 
   // Wrong-body guard, then the exact migration on the live-equivalent state.
   assert.throws(() => sql(`BEGIN; CREATE OR REPLACE FUNCTION public.current_season() RETURNS integer LANGUAGE sql STABLE SET search_path TO 'public' AS $f$ SELECT 1 $f$; ${whole} ROLLBACK;`), /PREFLIGHT_FAIL/);
-  const acls = () => sql("SELECT string_agg(proname || proacl::text, ',' ORDER BY proname) FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ('current_season','_get_customer_statement_scoped_impl')");
+  const acls = () => sql("SELECT string_agg(proname || proacl::text, ',' ORDER BY proname) FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ('current_season','_get_customer_statement_scoped_impl','_issue_return_credit_header_only_impl_20260825')");
   const before = acls();
   sql(whole);
   assert.equal(acls(), before, 'grants preserved');
   assert.equal(sql("SELECT public.current_season() = public.compute_season((now() AT TIME ZONE 'America/Chicago')::date)"), 't');
+  assert.equal(sql("SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum WHERE d.adrelid='public.invoices'::regclass AND a.attname='invoice_date'"),
+    "((now() AT TIME ZONE 'America/Chicago'::text))::date", 'invoice_date default is the Chicago date');
   console.log('PASS: exact migration applies on the live bodies, refuses drift, keeps grants');
 
   // Season: 2026-10-01 00:30 UTC is Sept 30 7:30pm Central (still season 2026).
@@ -100,6 +110,28 @@ try {
   sql(live);
   assert.deepEqual(statement('2026-10-01', '2026-10-31'), [], 'old function moved them to November');
   console.log('PASS: 7:30pm/11:59pm Central Oct 31 prepay and payment land in October (old code put them in November)');
+
+  // Return credit at 7:30pm Central Sept 30: date and season must agree.
+  sql(`SET session_replication_role = replica;
+    INSERT INTO public.returns(id,return_number,customer_id,status,requested_by)
+      VALUES ('ac680000-0000-4000-8000-000000000006','RET-PROOF-1','${customer}','received','${actor}');
+    INSERT INTO public.return_items(return_id,product_id,quantity,unit_price_cents,extended_cents)
+      VALUES ('ac680000-0000-4000-8000-000000000006',gen_random_uuid(),1,1500,1500);`);
+  sql(clocked(functions));
+  const credit = (body) => {
+    sql(body);
+    return sql(`BEGIN;
+      SELECT set_config('crx.proof_clock','2026-10-01 00:30+00',true) \\g /dev/null
+      SELECT set_config('request.jwt.claim.sub','${actor}',true) \\g /dev/null
+      SELECT set_config('crx.proof_credit',
+        public._issue_return_credit_header_only_impl_20260825('ac680000-0000-4000-8000-000000000006', NULL)->>'credit_invoice_id', true) \\g /dev/null
+      SELECT i.invoice_date || '|' || i.season || '|' || i.total_amount_cents FROM public.invoices i
+       WHERE i.id = current_setting('crx.proof_credit')::uuid;
+      ROLLBACK;`);
+  };
+  assert.equal(credit(clockedLiveReturn), '2026-10-01|2026|-1500', 'old body pairs a 1 Oct date with the 30 Sept season');
+  assert.equal(credit(clocked(returnCredit)), '2026-09-30|2026|-1500');
+  console.log('PASS: a return credit at 7:30pm Central Sept 30 is dated Sept 30 in season 2026 (old body: Oct 1 date, Sept 30 season)');
 } finally {
   docker(['rm', '-f', name], undefined, true);
 }

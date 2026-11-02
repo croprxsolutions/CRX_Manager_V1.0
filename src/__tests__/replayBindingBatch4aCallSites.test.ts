@@ -50,7 +50,7 @@ describe('replay-binding batch 4a call sites retire a key only when nothing ran 
   it('a field invoice save refused for other values recovers the earlier save instead of creating again', () => {
     const source = read('src/pages/FieldApplicationInvoice.tsx');
     expect(source).toContain("const mismatch = error ? getIdempotencyMismatchResult(error, 'save_field_app_invoice') : null;");
-    expect(source).toContain('const earlierSave = Array.isArray(mismatch?.invoice_ids) ? (mismatch as FieldAppInvoiceResult) : null;');
+    expect(source).toContain('const earlierSave = Array.isArray(mismatch?.invoice_ids) ? (mismatch as unknown as FieldAppInvoiceResult) : null;');
     expect(source).toContain('const retryMayReplayOldValues = send.mayReplayOtherValues || earlierSave !== null;');
     expect(source).toContain("let result = earlierSave ?? assertRpcResult<FieldAppInvoiceResult>(data, 'save_field_app_invoice');");
   });

@@ -1975,7 +1975,7 @@ export default function FieldApplicationInvoice() {
       // refuses and reports it, so take its invoice ids as the earlier save and write the current
       // values over it below, under a new key, exactly as a replay of old values was handled.
       const mismatch = error ? getIdempotencyMismatchResult(error, 'save_field_app_invoice') : null;
-      const earlierSave = Array.isArray(mismatch?.invoice_ids) ? (mismatch as FieldAppInvoiceResult) : null;
+      const earlierSave = Array.isArray(mismatch?.invoice_ids) ? (mismatch as unknown as FieldAppInvoiceResult) : null;
       if (error && !earlierSave) {
         // The server refused it (rolled back, no receipt): a retry under this key is a fresh
         // save, not a replay, so it needs no follow-up write (Codex review, PR #893).

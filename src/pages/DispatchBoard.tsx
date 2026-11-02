@@ -590,7 +590,7 @@ export default function DispatchBoard() {
         {/* LEFT RAIL — nav groups (criterion #2) */}
         <nav className="lg:w-60 shrink-0 bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-800 p-3 lg:p-4">
           <div className="flex items-center gap-2 px-2 pb-3 mb-2 border-b border-slate-800">
-            <Truck className="w-6 h-6 text-crx-green" />
+            <Truck className="w-6 h-6 text-crx-green-on-dark" />
             <span className="text-base font-semibold tracking-wide">Dispatch</span>
           </div>
           <div className="flex flex-row lg:flex-col gap-4 lg:gap-5">
@@ -607,11 +607,11 @@ export default function DispatchBoard() {
                         aria-current={active ? 'page' : undefined}
                         className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left text-sm font-medium transition-colors min-h-[44px] ${
                           active
-                            ? 'bg-crx-green/20 text-crx-green ring-1 ring-crx-green/40'
+                            ? 'bg-crx-green-on-dark/20 text-crx-green-on-dark ring-1 ring-crx-green-on-dark/40'
                             : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                         }`}
                       >
-                        <span className={active ? 'text-crx-green' : 'text-slate-400'}>{item.icon}</span>
+                        <span className={active ? 'text-crx-green-on-dark' : 'text-slate-400'}>{item.icon}</span>
                         <span>{item.label}</span>
                       </button>
                     );
@@ -627,10 +627,10 @@ export default function DispatchBoard() {
           {/* Toolbar: section title + search + OPTIONS menu */}
           <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900/60">
             <h1 className="text-lg font-semibold flex items-center gap-2 shrink-0">
-              {section === 'map' && <><MapIcon className="w-5 h-5 text-crx-green" /> Job Map</>}
-              {section === 'list' && <><ListIcon className="w-5 h-5 text-crx-green" /> Job List</>}
-              {section === 'dispatch' && <><Send className="w-5 h-5 text-crx-green" /> Dispatch Jobs</>}
-              {section === 'dispatched' && <><ClipboardList className="w-5 h-5 text-crx-green" /> Dispatched List</>}
+              {section === 'map' && <><MapIcon className="w-5 h-5 text-crx-green-on-dark" /> Job Map</>}
+              {section === 'list' && <><ListIcon className="w-5 h-5 text-crx-green-on-dark" /> Job List</>}
+              {section === 'dispatch' && <><Send className="w-5 h-5 text-crx-green-on-dark" /> Dispatch Jobs</>}
+              {section === 'dispatched' && <><ClipboardList className="w-5 h-5 text-crx-green-on-dark" /> Dispatched List</>}
             </h1>
 
             {/* Quick search + Options drive the JOB filters (map/list/dispatch sections).
@@ -646,7 +646,7 @@ export default function DispatchBoard() {
                 value={filters.search}
                 onChange={(e) => patchFilter('search', e.target.value)}
                 placeholder="Search job # or customer…"
-                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-crx-green/40 focus:border-crx-green"
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40 focus:border-crx-green-on-dark"
               />
             </div>
             )}
@@ -699,13 +699,13 @@ export default function DispatchBoard() {
                     >
                       <FlaskConical className="w-4 h-4 text-slate-400" />
                       <span className="flex-1 text-left">Filter Jobs By Recipe</span>
-                      {activeRecipeName && <span className="text-xs text-crx-green truncate max-w-[80px]">{activeRecipeName}</span>}
+                      {activeRecipeName && <span className="text-xs text-crx-green-on-dark truncate max-w-[80px]">{activeRecipeName}</span>}
                     </button>
                     {recipeMenuOpen && (
                       <div className="max-h-56 overflow-y-auto border-y border-slate-700 bg-slate-900 py-1">
                         <button
                           onClick={() => { patchFilter('recipeId', ''); setRecipeMenuOpen(false); setOptionsOpen(false); }}
-                          className={`w-full text-left px-6 py-2.5 text-sm hover:bg-slate-700 ${!filters.recipeId ? 'text-crx-green' : 'text-slate-300'}`}
+                          className={`w-full text-left px-6 py-2.5 text-sm hover:bg-slate-700 ${!filters.recipeId ? 'text-crx-green-on-dark' : 'text-slate-300'}`}
                         >
                           All recipes
                         </button>
@@ -716,7 +716,7 @@ export default function DispatchBoard() {
                           <button
                             key={r.id}
                             onClick={() => { patchFilter('recipeId', r.id); setRecipeMenuOpen(false); setOptionsOpen(false); }}
-                            className={`w-full text-left px-6 py-2.5 text-sm hover:bg-slate-700 ${filters.recipeId === r.id ? 'text-crx-green' : 'text-slate-300'}`}
+                            className={`w-full text-left px-6 py-2.5 text-sm hover:bg-slate-700 ${filters.recipeId === r.id ? 'text-crx-green-on-dark' : 'text-slate-300'}`}
                           >
                             {r.name}
                           </button>
@@ -820,7 +820,7 @@ export default function DispatchBoard() {
                       value={filters.search}
                       onChange={(e) => patchFilter('search', e.target.value)}
                       placeholder="Search job # or customer…"
-                      className="w-full pl-9 pr-3 py-3 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-crx-green/40"
+                      className="w-full pl-9 pr-3 py-3 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40"
                     />
                   </div>
 
@@ -829,7 +829,7 @@ export default function DispatchBoard() {
                       Only shown to dispatchers (admin/sales_rep) — the RPC is gated to
                       them, so an applicator must not be offered the wizard (#36 P2). */}
                   {section === 'dispatch' && canDispatch && (
-                    <div className="flex items-center justify-between gap-3 rounded-xl border border-crx-green/30 bg-crx-green/10 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-crx-green-on-dark/30 bg-crx-green-on-dark/10 px-4 py-3">
                       <p className="text-sm text-slate-200">
                         Dispatch individual field locations to applicators or crews.
                         <span className="text-slate-400"> {dispatchableLocations.length} dispatchable location{dispatchableLocations.length === 1 ? '' : 's'}.</span>
@@ -837,7 +837,7 @@ export default function DispatchBoard() {
                       <button
                         onClick={() => setWizardOpen(true)}
                         disabled={dispatchableLocations.length === 0}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] shrink-0"
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] shrink-0"
                       >
                         <Send className="w-4 h-4" /> Start Dispatch
                       </button>
@@ -898,7 +898,7 @@ export default function DispatchBoard() {
                             }
                           }}
                           className={`rounded-xl border bg-slate-900 p-4 transition-colors cursor-pointer ${
-                            selected ? 'border-crx-green ring-1 ring-crx-green/40' : 'border-slate-800 hover:border-slate-600'
+                            selected ? 'border-crx-green-on-dark ring-1 ring-crx-green-on-dark/40' : 'border-slate-800 hover:border-slate-600'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -906,7 +906,7 @@ export default function DispatchBoard() {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <button
                                   onClick={(e) => { e.stopPropagation(); navigate(`/jobs/${job.id}`); }}
-                                  className="text-base font-semibold text-crx-green hover:underline"
+                                  className="text-base font-semibold text-crx-green-on-dark hover:underline"
                                 >
                                   {job.job_number}
                                 </button>
@@ -960,7 +960,7 @@ export default function DispatchBoard() {
                               shows BOTH names; falls back to the whole-job applicator. */}
                           {job.assigned_to_label && (
                             <div className="mt-3 flex items-center gap-2 text-sm">
-                              <Users className="w-4 h-4 text-crx-green" />
+                              <Users className="w-4 h-4 text-crx-green-on-dark" />
                               <span className="text-slate-400">Assigned To:</span>
                               <span className="font-semibold text-slate-100">{job.assigned_to_label}</span>
                             </div>
@@ -973,7 +973,7 @@ export default function DispatchBoard() {
                             <div className="mt-3 flex items-center gap-2" role="presentation" onClick={(e) => e.stopPropagation()}>
                               <button
                                 onClick={() => setWizardOpen(true)}
-                                className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg bg-crx-green/15 border border-crx-green/40 text-sm font-medium text-crx-green hover:bg-crx-green/25 min-h-[44px]"
+                                className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg bg-crx-green-on-dark/15 border border-crx-green-on-dark/40 text-sm font-medium text-crx-green-on-dark hover:bg-crx-green-on-dark/25 min-h-[44px]"
                               >
                                 <Send className="w-4 h-4" /> Dispatch Locations
                               </button>
@@ -999,7 +999,7 @@ export default function DispatchBoard() {
           <button type="button" aria-label="Close more search options" className="absolute inset-0 bg-black/60" onClick={() => setMoreSearchOpen(false)} />
           <div className="relative w-full max-w-sm h-full bg-slate-900 border-l border-slate-800 p-5 overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-semibold flex items-center gap-2"><SlidersHorizontal className="w-5 h-5 text-crx-green" /> More Search Options</h2>
+              <h2 className="text-base font-semibold flex items-center gap-2"><SlidersHorizontal className="w-5 h-5 text-crx-green-on-dark" /> More Search Options</h2>
               <button aria-label="Close search options" onClick={() => setMoreSearchOpen(false)} className="p-2 rounded-lg hover:bg-slate-800 text-slate-400"><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-4">
@@ -1043,7 +1043,7 @@ export default function DispatchBoard() {
               </div>
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setFilters(emptyDispatchFilters)} className="flex-1 px-4 py-3 rounded-lg border border-slate-700 text-sm text-slate-200 hover:bg-slate-800 min-h-[44px]">Clear All</button>
-                <button onClick={() => setMoreSearchOpen(false)} className="flex-1 px-4 py-3 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green/90 min-h-[44px]">Done</button>
+                <button onClick={() => setMoreSearchOpen(false)} className="flex-1 px-4 py-3 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 min-h-[44px]">Done</button>
               </div>
             </div>
           </div>
@@ -1372,12 +1372,12 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
       {/* Assignee filter (criterion #3) */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
         <label className="flex items-center gap-2 text-sm text-slate-300">
-          <Users className="w-4 h-4 text-crx-green" />
+          <Users className="w-4 h-4 text-crx-green-on-dark" />
           <span>Assignee</span>
           <select
             value={filterValue}
             onChange={(e) => onFilterChange(e.target.value)}
-            className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 min-h-[44px] min-w-[180px] focus:outline-none focus:ring-2 focus:ring-crx-green/40"
+            className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 min-h-[44px] min-w-[180px] focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40"
           >
             <option value="">All assignees</option>
             {applicators.length > 0 && (
@@ -1452,7 +1452,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-base font-semibold text-crx-green">{row.job_number}</span>
+                    <span className="text-base font-semibold text-crx-green-on-dark">{row.job_number}</span>
                     <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tracking-wide ${badge.className}`}>
                       {badge.label}
                     </span>
@@ -1475,7 +1475,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
 
               {/* Assignee */}
               <div className="mt-3 flex items-center gap-2 text-sm">
-                <Users className="w-4 h-4 text-crx-green" />
+                <Users className="w-4 h-4 text-crx-green-on-dark" />
                 <span className="text-slate-400">Assigned To:</span>
                 <span className="font-semibold text-slate-100">{row.assignee_name || 'Unknown'}</span>
                 <span className="text-xs text-slate-500">({row.assignee_kind})</span>
@@ -1497,7 +1497,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
                         value={reassignChoice}
                         onChange={(e) => setReassignChoice(e.target.value)}
                         disabled={busy}
-                        className="text-sm rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-slate-100 min-h-[44px] min-w-[180px] focus:outline-none focus:ring-2 focus:ring-crx-green/40 disabled:opacity-50"
+                        className="text-sm rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-slate-100 min-h-[44px] min-w-[180px] focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40 disabled:opacity-50"
                       >
                         <option value="">Choose new assignee…</option>
                         {applicators.length > 0 && (
@@ -1519,7 +1519,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
                         onClick={() => doReassign(row, reassignChoice)}
                         disabled={busy || !reassignChoice || reassignChoice === currentAssigneeValue}
                         title={reassignChoice === currentAssigneeValue ? 'Pick a different assignee to reassign' : undefined}
-                        className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+                        className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
                       >
                         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />} Save
                       </button>
@@ -1542,7 +1542,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
                         disabled={busy}
                         className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm font-medium text-slate-100 hover:bg-slate-700 min-h-[44px] disabled:opacity-50"
                       >
-                        <RotateCcw className="w-4 h-4 text-crx-green" /> Reassign
+                        <RotateCcw className="w-4 h-4 text-crx-green-on-dark" /> Reassign
                       </button>
                       <button
                         onClick={() => setUndispatchFor(row)}

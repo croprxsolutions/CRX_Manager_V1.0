@@ -645,7 +645,7 @@ export default function FieldView() {
       <div
         key={card.job_id}
         className={`rounded-xl border bg-slate-900 transition-colors ${
-          expanded ? 'border-crx-green ring-1 ring-crx-green/40' : 'border-slate-800'
+          expanded ? 'border-crx-green-on-dark ring-1 ring-crx-green-on-dark/40' : 'border-slate-800'
         }`}
       >
         {/* Card header — the always-visible summary row (tap to expand). */}
@@ -656,7 +656,7 @@ export default function FieldView() {
         >
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-base font-semibold text-crx-green">{card.job_number}</span>
+              <span className="text-base font-semibold text-crx-green-on-dark">{card.job_number}</span>
               <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tracking-wide ${badge.className}`}>
                 {badge.label}
               </span>
@@ -726,11 +726,11 @@ export default function FieldView() {
               </div>
             ) : detail ? (
               <>
-                <Section icon={<Users className="w-4 h-4 text-crx-green" />} title="Customer">
+                <Section icon={<Users className="w-4 h-4 text-crx-green-on-dark" />} title="Customer">
                   <p className="text-sm text-slate-100 font-medium">{card.customer_name || 'Unknown'}</p>
                 </Section>
 
-                <Section icon={<MapPin className="w-4 h-4 text-crx-green" />} title="Locations">
+                <Section icon={<MapPin className="w-4 h-4 text-crx-green-on-dark" />} title="Locations">
                   {detail.fields.length === 0 ? (
                     <p className="text-sm text-slate-500">No locations.</p>
                   ) : (
@@ -747,7 +747,7 @@ export default function FieldView() {
                   )}
                 </Section>
 
-                <Section icon={<Sprout className="w-4 h-4 text-crx-green" />} title="Crops">
+                <Section icon={<Sprout className="w-4 h-4 text-crx-green-on-dark" />} title="Crops">
                   {cropList(detail).length === 0 ? (
                     <p className="text-sm text-slate-500">No crop recorded.</p>
                   ) : (
@@ -762,7 +762,7 @@ export default function FieldView() {
                 </Section>
 
                 {/* Chemicals — rate/quantity ONLY, no pricing (U12 owner decision). */}
-                <Section icon={<FlaskConical className="w-4 h-4 text-crx-green" />} title="Chemicals">
+                <Section icon={<FlaskConical className="w-4 h-4 text-crx-green-on-dark" />} title="Chemicals">
                   <p className="text-[11px] text-slate-500 -mt-1 mb-1.5">Applies to the whole job.</p>
                   {detail.chemicals.length === 0 ? (
                     <p className="text-sm text-slate-500">No chemicals listed.</p>
@@ -797,7 +797,7 @@ export default function FieldView() {
 
                 {/* Complete Job form — only for an in_progress job the applicator opened. */}
                 {showingCompleteForm && card.job_status === 'in_progress' && (
-                  <Section icon={<CheckCircle2 className="w-4 h-4 text-crx-green" />} title="Complete Job">
+                  <Section icon={<CheckCircle2 className="w-4 h-4 text-crx-green-on-dark" />} title="Complete Job">
                     {!isOnline && (
                       <p className="flex items-center gap-1.5 text-[11px] text-amber-400 mb-2">
                         <WifiOff className="w-3.5 h-3.5" /> You're offline &mdash; this will save now and sync when you reconnect.
@@ -882,7 +882,7 @@ export default function FieldView() {
       {/* Header — title + view toggle. Touch-friendly; sized for a phone width. */}
       <div className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border-b border-slate-800">
         <div className="flex items-center gap-2 px-4 py-3">
-          <Truck className="w-6 h-6 text-crx-green shrink-0" />
+          <Truck className="w-6 h-6 text-crx-green-on-dark shrink-0" />
           <h1 className="text-base font-semibold tracking-wide shrink-0">My Day</h1>
           <div className="ml-auto inline-flex rounded-lg bg-slate-800 p-0.5">
             <button
@@ -916,7 +916,7 @@ export default function FieldView() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search job # or customer…"
-                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-crx-green/40 focus:border-crx-green min-h-[44px]"
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40 focus:border-crx-green-on-dark min-h-[44px]"
               />
             </div>
             <button

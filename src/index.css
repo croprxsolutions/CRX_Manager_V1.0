@@ -41,8 +41,12 @@
   --color-black: #000; --color-white: #fff;
 
   /* CRX brand (was tailwind.config.js `theme.extend`). */
-  --color-crx-green: #28a26a;
-  --color-crx-green-hover: #218a5c;
+  --color-crx-green: #1a7a50;
+  --color-crx-green-hover: #166340;
+  /* The original brand green, kept for green text, icons and markers on dark surfaces
+     (sidebar, dispatch board, field view, driver screens, login panel), where the deeper
+     crx-green is too dark to read. Buttons with white text use crx-green everywhere. */
+  --color-crx-green-on-dark: #28a26a;
   --color-crx-green-light: #e8f5ee;
   --color-crx-green-tint: #f0faf5;
   --color-nav-dark: #2e2e2e;

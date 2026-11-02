@@ -96,7 +96,7 @@ Flag code that would violate a documented lifecycle:
 - Any UPDATE to `financial_audit_log` (append-only) or `inventory_transactions` outside the legitimate reversal/correction transaction types documented in `docs/workflows/INVENTORY_RULES.md` (`cancelled_delivery_reversal`, `void_delivery_reversal`, `prebook_reconciliation`) — flag a mutating UPDATE to an existing row, not those compensating INSERTs.
 
 ### CHECK 11 — Framework rules  — MED
-- New icon package (only `lucide-react` allowed) or CSS framework (only Tailwind; brand `crx-green` `#28A26A`).
+- New icon package (only `lucide-react` allowed) or CSS framework (only Tailwind; brand `crx-green` `#1A7A50`).
 - A second Supabase client (only `src/lib/db.ts`).
 - A new page not lazy-loaded in the shared page list `src/appPages.tsx`, or a route or `PAGE_PERMISSIONS` entry added by hand outside it.
 

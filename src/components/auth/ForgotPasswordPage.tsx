@@ -38,16 +38,16 @@ export default function ForgotPasswordPage() {
           <h2 className="text-3xl font-heading font-semibold text-white leading-tight mb-4">
             Password
             <br />
-            <span className="text-crx-green">Reset</span>
+            <span className="text-crx-green-on-dark">Reset</span>
           </h2>
           <p className="text-gray-400 max-w-sm leading-relaxed">
             We&apos;ll send you a link to reset your password.
           </p>
         </div>
         <div className="absolute inset-0 opacity-5">
-          <div className="absolute top-20 -left-10 w-64 h-64 rounded-full border-2 border-crx-green" />
-          <div className="absolute bottom-20 right-10 w-96 h-96 rounded-full border border-crx-green" />
-          <div className="absolute top-1/2 left-1/3 w-48 h-48 rounded-full border border-crx-green" />
+          <div className="absolute top-20 -left-10 w-64 h-64 rounded-full border-2 border-crx-green-on-dark" />
+          <div className="absolute bottom-20 right-10 w-96 h-96 rounded-full border border-crx-green-on-dark" />
+          <div className="absolute top-1/2 left-1/3 w-48 h-48 rounded-full border border-crx-green-on-dark" />
         </div>
       </div>
 

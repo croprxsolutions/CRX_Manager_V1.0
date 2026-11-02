@@ -74,8 +74,8 @@ export default function DeliveryCalendar({ deliveries, onDeliveryClick, onDateCl
           color: #1e293b;
         }
         .delivery-calendar .fc-button-primary {
-          background-color: #28A26A !important;
-          border-color: #28A26A !important;
+          background-color: var(--color-crx-green) !important;
+          border-color: var(--color-crx-green) !important;
           font-size: 0.8125rem !important;
           padding: 0.375rem 0.75rem !important;
           border-radius: 0.5rem !important;
@@ -114,7 +114,7 @@ export default function DeliveryCalendar({ deliveries, onDeliveryClick, onDateCl
           background-color: #f8fafc;
         }
         .delivery-calendar .fc-daygrid-more-link {
-          color: #28A26A;
+          color: var(--color-crx-green);
           font-weight: 600;
           font-size: 0.75rem;
         }

@@ -48,7 +48,7 @@ Add `useState`/`useEffect`, `supabase`/`checkMutationResult` from `../lib/db`, o
 from `../contexts/AuthContext` **only when the page uses them**.
 
 Key rules:
-- Use Tailwind CSS only (brand color: `crx-green` / `#28A26A`)
+- Use Tailwind CSS only (brand color: `crx-green` / `#1A7A50`; see `DESIGN.md`)
 - Lucide React icons only
 - Export as `default` function (required for lazy loading)
 - `src/lib/db.ts` is the only Supabase client; call `assertRpcResult()` after RPCs and

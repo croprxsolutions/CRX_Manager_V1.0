@@ -269,7 +269,7 @@ export default function DispatchWizard({
         {/* Header + stepper */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
           <h2 className="text-base font-semibold flex items-center gap-2">
-            <Send className="w-5 h-5 text-crx-green" /> Dispatch Jobs
+            <Send className="w-5 h-5 text-crx-green-on-dark" /> Dispatch Jobs
           </h2>
           <button onClick={handleClose} aria-label="Close" className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
             <X className="w-5 h-5" />
@@ -288,7 +288,7 @@ export default function DispatchWizard({
                     isActive
                       ? 'bg-crx-green text-white'
                       : isDone
-                        ? 'bg-crx-green/30 text-crx-green'
+                        ? 'bg-crx-green-on-dark/30 text-crx-green-on-dark'
                         : 'bg-slate-800 text-slate-500'
                   }`}
                 >
@@ -332,9 +332,9 @@ export default function DispatchWizard({
                               type="checkbox"
                               checked={isSel}
                               onChange={() => toggle(loc.jobFieldId)}
-                              className="w-5 h-5 rounded border-slate-600 bg-slate-800 text-crx-green focus:ring-crx-green/40"
+                              className="w-5 h-5 rounded border-slate-600 bg-slate-800 text-crx-green-on-dark focus:ring-crx-green-on-dark/40"
                             />
-                            <MapPin className={`w-4 h-4 ${isSel ? 'text-crx-green' : 'text-slate-500'}`} />
+                            <MapPin className={`w-4 h-4 ${isSel ? 'text-crx-green-on-dark' : 'text-slate-500'}`} />
                             <span className="flex-1 text-sm text-slate-200">{loc.fieldName}</span>
                             {loc.acres != null && <span className="text-xs text-slate-500 tabular-nums">{loc.acres} ac</span>}
                           </label>
@@ -364,7 +364,7 @@ export default function DispatchWizard({
                     const val = e.target.value;
                     setActiveAssignee(val ? assigneeOptions.find((o) => `${o.kind}:${o.id}` === val) ?? null : null);
                   }}
-                  className="flex-1 min-w-[160px] text-sm rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-slate-100 min-h-[44px] focus:outline-none focus:ring-2 focus:ring-crx-green/40"
+                  className="flex-1 min-w-[160px] text-sm rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-slate-100 min-h-[44px] focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40"
                 >
                   <option value="">Choose…</option>
                   {applicators.length > 0 && (
@@ -412,8 +412,8 @@ export default function DispatchWizard({
                           const val = e.target.value;
                           applyToLocation(loc.jobFieldId, val ? assigneeOptions.find((o) => `${o.kind}:${o.id}` === val) : undefined);
                         }}
-                        className={`text-sm rounded-lg bg-slate-800 border px-3 py-2.5 text-slate-100 min-h-[44px] min-w-[170px] focus:outline-none focus:ring-2 focus:ring-crx-green/40 ${
-                          current ? 'border-crx-green/50' : 'border-amber-500/50'
+                        className={`text-sm rounded-lg bg-slate-800 border px-3 py-2.5 text-slate-100 min-h-[44px] min-w-[170px] focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40 ${
+                          current ? 'border-crx-green-on-dark/50' : 'border-amber-500/50'
                         }`}
                       >
                         <option value="">Unassigned</option>
@@ -455,7 +455,7 @@ export default function DispatchWizard({
               {summary.map((grp) => (
                 <div key={`${grp.assignee.kind}:${grp.assignee.id}`} className="rounded-xl border border-slate-800 overflow-hidden">
                   <div className="px-4 py-2.5 bg-slate-800/60 flex items-center gap-2">
-                    <Users className="w-4 h-4 text-crx-green" />
+                    <Users className="w-4 h-4 text-crx-green-on-dark" />
                     <span className="text-sm font-semibold text-slate-100">{grp.assignee.name}</span>
                     <span className="text-xs text-slate-500">
                       ({grp.assignee.kind === 'crew' ? 'crew' : 'applicator'}) · {grp.locations.length} location{grp.locations.length === 1 ? '' : 's'}
@@ -495,7 +495,7 @@ export default function DispatchWizard({
               <button
                 onClick={goAssign}
                 disabled={!canAdvanceToAssign(selected)}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
               >
                 Next: Assign <ChevronRight className="w-4 h-4" />
               </button>
@@ -504,7 +504,7 @@ export default function DispatchWizard({
               <button
                 onClick={goFinish}
                 disabled={!canAdvanceToFinish(selected, assignments)}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
               >
                 Next: Finish <ChevronRight className="w-4 h-4" />
               </button>
@@ -513,7 +513,7 @@ export default function DispatchWizard({
               <button
                 onClick={() => (stolenLocations.length > 0 ? setStealConfirmOpen(true) : handleFinish())}
                 disabled={submitting || !canAdvanceToFinish(selected, assignments)}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green/90 disabled:opacity-50 min-h-[44px]"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-50 min-h-[44px]"
               >
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                 Finish Dispatching

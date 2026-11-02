@@ -1632,7 +1632,7 @@ export default function DeliveryDetail() {
             <button
               onClick={() => setReassignConfirmOpen(true)}
               disabled={reassigning}
-              className="flex items-center gap-4 w-full bg-gray-800 rounded-xl p-5 border border-crx-green active:bg-gray-700 transition-colors disabled:opacity-50"
+              className="flex items-center gap-4 w-full bg-gray-800 rounded-xl p-5 border border-crx-green-on-dark active:bg-gray-700 transition-colors disabled:opacity-50"
             >
               <div className="w-12 h-12 rounded-full bg-crx-green flex items-center justify-center shrink-0">
                 <UserPlus className="w-6 h-6 text-white" />
@@ -1737,7 +1737,7 @@ export default function DeliveryDetail() {
                           type="number"
                           value={currentQty}
                           onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
-                          className="w-16 text-center px-1 py-1.5 text-sm text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green"
+                          className="w-16 text-center px-1 py-1.5 text-sm text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark"
                           min="0"
                           step="any"
                           aria-label={`Quantity for ${(item.product as unknown as { product_name: string })?.product_name || 'item'}`}
@@ -1834,7 +1834,7 @@ export default function DeliveryDetail() {
               <select
                 value={driverIssueType}
                 onChange={(e) => setDriverIssueType(e.target.value as DeliveryIssueType)}
-                className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green"
+                className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark"
               >
                 {Object.entries(ISSUE_TYPE_LABELS).map(([key, label]) => (
                   <option key={key} value={key}>{label}</option>
@@ -1846,7 +1846,7 @@ export default function DeliveryDetail() {
                   onChange={(e) => setDriverIssueNotes(e.target.value)}
                   placeholder="Describe the issue..."
                   rows={2}
-                  className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green resize-none"
+                  className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark resize-none"
                 />
               )}
             </div>
@@ -1863,7 +1863,7 @@ export default function DeliveryDetail() {
                   value={signedBy}
                   onChange={(e) => setSignedBy(e.target.value)}
                   placeholder="Customer name"
-                  className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green"
+                  className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark"
                 />
               </div>
               <div className="flex items-center gap-1">
@@ -1875,7 +1875,7 @@ export default function DeliveryDetail() {
                     setUsePaperTicket(e.target.checked);
                     if (e.target.checked) setSignatureDataUrl(null);
                   }}
-                  className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green bg-gray-700"
+                  className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green-on-dark bg-gray-700"
                 />
                 Customer signed a paper ticket (no signal at the site)
               </label>
@@ -1907,7 +1907,7 @@ export default function DeliveryDetail() {
                       value={paperDeliveredOn}
                       max={todayInBusinessTz()}
                       onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                      className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green"
+                      className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark"
                     />
                   </div>
                   <button
@@ -1941,7 +1941,7 @@ export default function DeliveryDetail() {
                     type="checkbox"
                     checked={emailOnComplete}
                     onChange={(e) => setEmailOnComplete(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green bg-gray-700"
+                    className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green-on-dark bg-gray-700"
                   />
                   Email delivery receipt to customer
                   <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />

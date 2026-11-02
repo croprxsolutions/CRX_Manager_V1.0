@@ -837,7 +837,7 @@ export default function DispatchBoard() {
                       <button
                         onClick={() => setWizardOpen(true)}
                         disabled={dispatchableLocations.length === 0}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] shrink-0"
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-hover disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] shrink-0"
                       >
                         <Send className="w-4 h-4" /> Start Dispatch
                       </button>
@@ -1043,7 +1043,7 @@ export default function DispatchBoard() {
               </div>
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setFilters(emptyDispatchFilters)} className="flex-1 px-4 py-3 rounded-lg border border-slate-700 text-sm text-slate-200 hover:bg-slate-800 min-h-[44px]">Clear All</button>
-                <button onClick={() => setMoreSearchOpen(false)} className="flex-1 px-4 py-3 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 min-h-[44px]">Done</button>
+                <button onClick={() => setMoreSearchOpen(false)} className="flex-1 px-4 py-3 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-hover min-h-[44px]">Done</button>
               </div>
             </div>
           </div>
@@ -1519,7 +1519,7 @@ function DispatchedList({ applicators, crews, performedBy, canDispatch, isAdmin,
                         onClick={() => doReassign(row, reassignChoice)}
                         disabled={busy || !reassignChoice || reassignChoice === currentAssigneeValue}
                         title={reassignChoice === currentAssigneeValue ? 'Pick a different assignee to reassign' : undefined}
-                        className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+                        className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-hover disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
                       >
                         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />} Save
                       </button>

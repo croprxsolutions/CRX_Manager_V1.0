@@ -495,7 +495,7 @@ export default function DispatchWizard({
               <button
                 onClick={goAssign}
                 disabled={!canAdvanceToAssign(selected)}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-hover disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
               >
                 Next: Assign <ChevronRight className="w-4 h-4" />
               </button>
@@ -504,7 +504,7 @@ export default function DispatchWizard({
               <button
                 onClick={goFinish}
                 disabled={!canAdvanceToFinish(selected, assignments)}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-hover disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
               >
                 Next: Finish <ChevronRight className="w-4 h-4" />
               </button>
@@ -513,7 +513,7 @@ export default function DispatchWizard({
               <button
                 onClick={() => (stolenLocations.length > 0 ? setStealConfirmOpen(true) : handleFinish())}
                 disabled={submitting || !canAdvanceToFinish(selected, assignments)}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-on-dark/90 disabled:opacity-50 min-h-[44px]"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-crx-green text-sm font-semibold text-white hover:bg-crx-green-hover disabled:opacity-50 min-h-[44px]"
               >
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                 Finish Dispatching

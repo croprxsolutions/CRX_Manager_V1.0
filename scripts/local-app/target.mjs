@@ -31,6 +31,16 @@ const LIVE_VALUE = [
   /\bsb_(secret|publishable)_/,
 ];
 
+/**
+ * A Vite deny pattern for a folder name anywhere inside this checkout. Vite matches whole paths, so a
+ * bare `**\/.claude/**` would also deny every file of a checkout that itself sits under a .claude folder.
+ * Escaped, because a bracket or parenthesis left in the path would stop the pattern matching at all.
+ */
+export function denyInsideCheckout(root, folder) {
+  const escaped = root.replaceAll('\\', '/').replace(/\/+$/, '').replace(/[\\$^*+?()[\]{}!|]/g, '\\$&');
+  return `${escaped}/**/${folder}/**`;
+}
+
 export class Refused extends Error {
   constructor(message) {
     super(`LOCAL_APP_REFUSED: ${message}`);

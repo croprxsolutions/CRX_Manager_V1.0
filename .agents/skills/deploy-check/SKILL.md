@@ -134,7 +134,7 @@ If ready, state the remaining landing steps explicitly — this skill does **not
    **Vercel is a required check**.
 4. Once required checks are green, freeze the candidate and record its head SHA. A draft: mark it
    ready now. An off-list PR is already ready; a fix pushed after it opened (for a failing check or a
-   review comment) lands on green checks, as a fix after `gh pr ready` does, and needs no new review. CodeRabbit is **advisory** since 2026-10-19 (Mason) and never submits APPROVED or
+   review comment) needs no new Codex App review, just as a fix after `gh pr ready` does not. CodeRabbit is **advisory** since 2026-10-19 (Mason) and never submits APPROVED or
    CHANGES_REQUESTED. Since 2026-10-21 it makes no automatic reviews: marking ready starts none,
    and it reviews only when an agent posts `@coderabbitai full review` on a money or Mason-named PR. GitHub's `protect-main`
    ruleset no longer requires an approving review (required status checks stay). If CodeRabbit's

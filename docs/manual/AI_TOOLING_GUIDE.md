@@ -147,7 +147,7 @@ subagents, `/preflight`, `/audit`, the Luna rounds, the fleet and status reports
 schema registry refresh, the daily landing summary workflow.
 
 **Mandatory for every merge into `main`** (`AGENTS.md`, "Safety and Protected Delivery"):
-1. A pull request, opened ready (a draft first, marked ready once its head is final, when it touches a Sol-list file).
+1. A pull request, opened ready once Luna is clean (a draft first, marked ready once its head is final, when it touches a Sol-list file).
 2. Every required check green on that head.
 3. CodeRabbit and Codex App comments fixed or answered, each thread replied to and resolved. A
    money PR also needs a clean CodeRabbit review of its current head; narrow fixes for a review

@@ -34,7 +34,7 @@ The step-by-step procedures live in `DEPLOYMENT.md` and `.claude/commands/ship.m
 Vercel builds a preview for every PR and deploys production when a PR merges into `main`.
 Nobody pushes to `main` directly — the `protect-main` ruleset rejects it.
 
-1. Open a PR, ready unless it touches a Sol-list file; a Sol-list PR opens as a draft and is marked
+1. Open a PR once Luna is clean, ready unless it touches a Sol-list file; a Sol-list PR opens as a draft and is marked
    ready once the head is frozen (the Codex GitHub App reviews a PR when it becomes ready). CodeRabbit is advice only (since 2026-10-19 it never
    approves or blocks) and makes no automatic reviews since 2026-10-21: it reviews a money or
    Mason-named PR when the agent requests it. Fix or answer any comments that arrive before the merge.

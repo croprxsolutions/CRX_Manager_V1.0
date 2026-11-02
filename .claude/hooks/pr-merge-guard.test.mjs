@@ -333,6 +333,10 @@ r = runHook({ tool_name: "Bash", tool_input: { command: "gh api graphql -f query
 ok(r.decision?.permissionDecision === "deny", "GraphQL enablePullRequestAutoMerge denied");
 r = runHook({ tool_name: "Bash", tool_input: { command: "rg enablePullRequestAutoMerge docs/" } });
 ok(r.status === 0 && r.decision === null, "searching for the mutation name is not a GraphQL call");
+r = runHook({ tool_name: "Bash", tool_input: { command: "rg -n 'graphql|enablePullRequestAutoMerge' .claude/hooks/pr-merge-guard.mjs" } });
+ok(r.status === 0 && r.decision === null, "a read-only search naming graphql AND the mutation passes (Codex App P2, PR #1295)");
+r = runHook({ tool_name: "Bash", tool_input: { command: "curl -X POST https://api.github.com/graphql -d '{\"query\":\"mutation{enablePullRequestAutoMerge(input:{}){clientMutationId}}\"}'" } });
+ok(r.decision?.permissionDecision === "deny", "enablePullRequestAutoMerge over raw curl to /graphql denied");
 
 r = runHook({ tool_name: "Bash", tool_input: { command: "gh api graphql -f query='mutation { mergePullRequest(input: {}) }'" } });
 ok(r.decision?.permissionDecision === "deny", "GraphQL merge denied");

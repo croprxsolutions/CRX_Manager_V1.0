@@ -136,7 +136,7 @@ function addRequest(request) {
 if (/set_auto_merge$/i.test(toolName) && toolInput.enabled !== false) {
   deny("PR MERGE GATE: only Mason turns auto-merge on, from the PR's auto-merge toggle in the app. An agent may turn it off, or merge itself through `gh pr merge` once every gate passes.");
 }
-if (typeof toolInput.command === "string" && /graphql/i.test(toolInput.command) && /enablePullRequestAutoMerge/i.test(toolInput.command)) {
+if (typeof toolInput.command === "string" && /\bapi\s+graphql\b|\/graphql\b/i.test(toolInput.command) && /enablePullRequestAutoMerge/i.test(toolInput.command)) {
   deny("PR MERGE GATE: only Mason turns auto-merge on, from the PR's auto-merge toggle in the app; the GraphQL enablePullRequestAutoMerge mutation is refused for agents.");
 }
 if (GITHUB_MERGE_TOOL.test(toolName)) {

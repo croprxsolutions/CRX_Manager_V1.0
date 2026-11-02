@@ -71,7 +71,7 @@ BEGIN
       'unit_price_cents', 250, 'cost_cents', 100, 'sort_order', 0,
       'warehouse', 'North Shed', 'vendor', 'Override Vendor', 'manual_override', false
     )),
-    v_admin, NULL, NULL
+    v_admin, NULL, 'smoke-fa-whv-'||gen_random_uuid()::text
   );
 
   v_inv := (v_res->'invoice_ids'->>0)::uuid;
@@ -113,7 +113,7 @@ BEGIN
       'cost_cents', 100, 'sort_order', 0
       -- no warehouse, no vendor, no manual_override -> tier price + product vendor
     )),
-    v_admin, NULL, NULL
+    v_admin, NULL, 'smoke-fa-whv-'||gen_random_uuid()::text
   );
   v_inv2 := (v_res->'invoice_ids'->>0)::uuid;
   SELECT vendor INTO v_vendor2 FROM invoice_items WHERE invoice_id = v_inv2 AND is_application_fee = false;

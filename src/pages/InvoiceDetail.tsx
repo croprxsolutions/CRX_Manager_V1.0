@@ -1422,6 +1422,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setShowUnpostModal(false);
       fetchInvoice(id);
     } catch (err: unknown) {
+      // A key used for another request or person retires (an unpost cannot repeat: the body refuses
+      // an invoice that is no longer posted); reload so an unpost an earlier attempt made shows.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+        delete unpostKeysRef.current[invoice.invoice_group_id ? `grp:${invoice.invoice_group_id}` : id];
+        fetchInvoice(id);
+      }
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
         extra: { context: invoice.invoice_group_id ? 'unpost_invoice_group' : 'unpost_invoice' },
       });
@@ -1454,6 +1461,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('success', `Invoice returned to scheduling — job ${result.job_number} reopened`);
       navigate(`/jobs/${result.job_id}`);
     } catch (err: unknown) {
+      // A key used for another request or person retires (the body refuses an invoice already sent
+      // back); reload.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+        transferToSchedulingIdem.resetKey();
+        fetchInvoice(id);
+      }
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'transfer_invoice_to_job' } });
       toast('error', sanitizeError(err));
     }

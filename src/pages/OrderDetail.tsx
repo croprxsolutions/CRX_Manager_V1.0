@@ -1236,6 +1236,13 @@ export default function OrderDetail() {
       else toast('info', 'Nothing to consolidate — fewer than 2 draft invoices.');
       await fetchOrder();
     } catch (err) {
+      // A key used for another request or person retires; a repeat is harmless (fewer than 2 drafts
+      // is a no-op), so reload to show a merge an earlier attempt made.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+        consolidateIdem.resetKey();
+        await fetchOrder();
+      }
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'consolidate_draft_invoices' } });
       if (hasRpcCode(err, RpcErrorCodes.INSUFFICIENT_ROLE)) toast('error', 'Only admin or sales can consolidate invoices.');
       else toast('error', sanitizeError(err));

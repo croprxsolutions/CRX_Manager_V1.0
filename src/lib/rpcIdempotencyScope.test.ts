@@ -258,6 +258,11 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // (20261019235000) re-emits the body only to retarget its keyless per-delivery cancel; changing
   // the literal would orphan the wrapper's receipt binding.
   _batch_cancel_deliveries_replay_impl_20261015: ['batch_cancel_deliveries'],
+  // Direct EXECUTE is revoked (postgres-only). Batch 3b (20261019235000) renamed the live
+  // cancel_delivery body to this name with ALTER FUNCTION ... RENAME TO, so it kept the public
+  // literal the wrapper binds. 20261102140000 re-emits it only to refuse a completed delivery;
+  // changing the literal would orphan every existing receipt.
+  _cancel_delivery_replay_impl_20261015: ['cancel_delivery'],
   // Direct EXECUTE is revoked (postgres-only after batch 3b). Migration 20260714222000 renamed the
   // live void_order body to this name with ALTER FUNCTION ... RENAME TO, so it kept the public
   // void_order literal, and the public wrapper binds that same receipt. Batch 3b (20261019235000)

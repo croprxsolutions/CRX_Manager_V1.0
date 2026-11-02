@@ -3,11 +3,13 @@
 // side, so CI gets the same suite without a second list that can drift from it.
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { availableParallelism } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Half a 4-core runner. Several suites assert their own wall-clock speed to catch
+// catastrophic backtracking; at 4 at once, guards.test.mjs missed its 3s limit in CI.
+const DEFAULT_CONCURRENCY = 2;
 
 export function guardCommands(script) {
   const commands = script.split('&&').map((command) => command.trim());
@@ -18,7 +20,7 @@ export function guardCommands(script) {
   return commands;
 }
 
-export async function runAll(commands, { cwd = REPO_ROOT, concurrency = availableParallelism(), log = console.log } = {}) {
+export async function runAll(commands, { cwd = REPO_ROOT, concurrency = DEFAULT_CONCURRENCY, log = console.log } = {}) {
   const queue = [...commands];
   const failures = [];
   const worker = async () => {

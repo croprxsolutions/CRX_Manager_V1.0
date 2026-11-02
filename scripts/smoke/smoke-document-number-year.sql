@@ -93,13 +93,13 @@ BEGIN
   END IF;
 
   BEGIN
-    PERFORM public.create_rebate_claim(v_program, 0, 1500);
+    PERFORM public.create_rebate_claim(v_program, 0, 1500, p_idempotency_key => gen_random_uuid()::text);
     RAISE EXCEPTION 'SMOKE_FAIL: zero quantity was accepted';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'QUANTITY_INVALID%' THEN RAISE; END IF;
   END;
   BEGIN
-    PERFORM public.create_rebate_claim(v_program, 2, 0);
+    PERFORM public.create_rebate_claim(v_program, 2, 0, p_idempotency_key => gen_random_uuid()::text);
     RAISE EXCEPTION 'SMOKE_FAIL: zero claim amount was accepted';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'CLAIM_AMOUNT_INVALID%' THEN RAISE; END IF;
@@ -123,7 +123,7 @@ BEGIN
   END;
   RESET ROLE;
   BEGIN
-    PERFORM public.create_rebate_claim(v_program, 2, 1500);
+    PERFORM public.create_rebate_claim(v_program, 2, 1500, p_idempotency_key => gen_random_uuid()::text);
     RAISE EXCEPTION 'SMOKE_FAIL: driver created a rebate claim';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'FORBIDDEN%' THEN RAISE; END IF;
@@ -131,7 +131,7 @@ BEGIN
 
   PERFORM set_config('request.jwt.claims', '', true);
   BEGIN
-    PERFORM public.create_rebate_claim(v_program, 2, 1500);
+    PERFORM public.create_rebate_claim(v_program, 2, 1500, p_idempotency_key => gen_random_uuid()::text);
     RAISE EXCEPTION 'SMOKE_FAIL: anonymous caller created a rebate claim';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'AUTH_REQUIRED%' THEN RAISE; END IF;

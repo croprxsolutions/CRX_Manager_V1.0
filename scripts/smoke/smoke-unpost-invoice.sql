@@ -61,7 +61,7 @@ BEGIN
 
   -- Forged actor must be rejected BEFORE any real unpost (no mutation).
   BEGIN
-    PERFORM unpost_invoice(v_inv, v_forged, NULL);
+    PERFORM unpost_invoice(v_inv, v_forged, '[SMOKE] up-forged-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: forged actor allowed';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -114,7 +114,7 @@ BEGIN
     VALUES (v_aset, v_cust, 100, 100000, v_inv_money);
   UPDATE invoices SET paid_amount_cents = 100000 WHERE id=v_inv_money;
   BEGIN
-    PERFORM unpost_invoice(v_inv_money, v_admin, NULL);
+    PERFORM unpost_invoice(v_inv_money, v_admin, '[SMOKE] up-money-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: unposted an invoice with money applied';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -133,7 +133,7 @@ BEGIN
     VALUES ('[SMOKE] UP-DRAFT-'||v_sfx, v_cust, 'field_application', 'draft', CURRENT_DATE, 50000, v_admin)
     RETURNING id INTO v_inv_draft;
   BEGIN
-    PERFORM unpost_invoice(v_inv_draft, v_admin, NULL);
+    PERFORM unpost_invoice(v_inv_draft, v_admin, '[SMOKE] up-draft-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: unposted a draft invoice';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -149,7 +149,7 @@ BEGIN
   INSERT INTO accounting_periods (period_start, period_end, status, closed_by, closed_at)
     VALUES (v_period_month, (v_period_month + INTERVAL '1 month - 1 day')::date, 'closed', v_admin, now());
   BEGIN
-    PERFORM unpost_invoice(v_inv_period, v_admin, NULL);
+    PERFORM unpost_invoice(v_inv_period, v_admin, '[SMOKE] up-period-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: unposted in a closed period';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;

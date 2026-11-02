@@ -22,7 +22,7 @@ import { fetchAllRows } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { generateIdempotencyKey } from '../lib/idempotency';
+import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
 import { parseLocalDate } from '../lib/dateUtils';
 import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
@@ -329,7 +329,22 @@ export default function Rebates() {
           p_notes: cForm.notes || undefined,
           p_idempotency_key: createClaimKey.getKey(),
         });
-        if (error) throw error;
+        if (error) {
+          // The key was used for a different claim (an edit after a lost reply) or by someone else:
+          // nothing ran now, so retire it and reload. If that earlier attempt created a claim, say so instead of making
+          // a second one under a fresh key.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+            createClaimKey.resetKey();
+            fetchClaims();
+            const earlier = getIdempotencyMismatchResult(error, 'create_rebate_claim');
+            if (typeof earlier?.claim_number === 'string') {
+              setCModalOpen(false);
+              throw new Error(`Claim ${earlier.claim_number} was already created by an earlier attempt. Open it to make changes.`);
+            }
+          }
+          throw error;
+        }
         const result = assertRpcResult<{ claim_id: string; claim_number: string }>(data, 'create_rebate_claim');
         if (profile) logActivity({ event: 'rebate_claim_created', description: `Rebate claim ${result.claim_number} created`, performedBy: profile.id });
         return result;
@@ -364,6 +379,13 @@ export default function Rebates() {
           p_idempotency_key: idempotencyKey,
         });
         if (error) {
+          // A key used for another request or person retires (a transition cannot repeat: the body
+          // refuses a claim no longer in the old status); reload so one an earlier attempt made shows.
+          const bindingRejection = getIdempotencyBindingRejection(error);
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') {
+            transitionKeysRef.current.delete(scope);
+            fetchClaims();
+          }
           if (hasRpcCode(error, RpcErrorCodes.INVALID_TRANSITION)) {
             throw new Error('This claim is no longer in the expected state — refresh and try again.');
           }

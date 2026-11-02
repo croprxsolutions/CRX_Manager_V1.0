@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildSync } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { bundleNodeEsm } from './bundle-node-esm.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const files = [
@@ -164,43 +164,20 @@ try {
       path.join(repoRoot, 'src', 'lib', 'productPricingSupplierEvidenceWorkbook.ts'),
     )};\n`,
   );
-  buildSync({
-    entryPoints: [workbookRoundtripScript],
-    outfile: workbookRoundtripBundle,
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    packages: 'external',
+  await bundleNodeEsm(workbookRoundtripScript, workbookRoundtripBundle);
+  await bundleNodeEsm(costBasisRowsEntry, costBasisRowsBundle, {
+    'import.meta.env': JSON.stringify({
+      VITE_SUPABASE_URL: 'https://example.invalid',
+      VITE_SUPABASE_ANON_KEY: 'disposable-workbook-proof-key',
+    }),
+    window: 'globalThis',
   });
-  buildSync({
-    entryPoints: [costBasisRowsEntry],
-    outfile: costBasisRowsBundle,
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    packages: 'external',
-    define: {
-      'import.meta.env': JSON.stringify({
-        VITE_SUPABASE_URL: 'https://example.invalid',
-        VITE_SUPABASE_ANON_KEY: 'disposable-workbook-proof-key',
-      }),
-      window: 'globalThis',
-    },
-  });
-  buildSync({
-    entryPoints: [supplierEvidenceWorkbookEntry],
-    outfile: supplierEvidenceWorkbookBundle,
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    packages: 'external',
-    define: {
-      'import.meta.env': JSON.stringify({
-        VITE_SUPABASE_URL: 'https://example.invalid',
-        VITE_SUPABASE_ANON_KEY: 'disposable-workbook-proof-key',
-      }),
-      window: 'globalThis',
-    },
+  await bundleNodeEsm(supplierEvidenceWorkbookEntry, supplierEvidenceWorkbookBundle, {
+    'import.meta.env': JSON.stringify({
+      VITE_SUPABASE_URL: 'https://example.invalid',
+      VITE_SUPABASE_ANON_KEY: 'disposable-workbook-proof-key',
+    }),
+    window: 'globalThis',
   });
   run(process.execPath, [
     workbookRoundtripBundle, exportJsonPath, parsedPayloadPath, exportedWorkbookPath,

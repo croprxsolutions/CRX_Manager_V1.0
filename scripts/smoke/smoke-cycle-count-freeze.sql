@@ -89,6 +89,12 @@ BEGIN
     END IF;
   END;
   BEGIN
+    UPDATE public.inventory SET product_id = p1 WHERE id = i2;
+    RAISE EXCEPTION 'SMOKE_FAIL: (c) a counted row changed product during the count';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'INVENTORY_FROZEN_FOR_CYCLE_COUNT:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (c) %', SQLERRM; END IF;
+  END;
+  BEGIN
     UPDATE public.inventory SET quantity_available = quantity_available - 1 WHERE id = i2;
     RAISE EXCEPTION 'SMOKE_FAIL: (c) a direct stock write during the count was accepted';
   EXCEPTION WHEN OTHERS THEN

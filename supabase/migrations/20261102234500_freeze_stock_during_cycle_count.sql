@@ -11,7 +11,9 @@
 -- quantity_available + (counted - expected). A delivery or receipt made while the count was open
 -- changed quantity_available AND is already in what the warehouse counted, so it landed twice.
 --
--- 1. Freeze. A BEFORE UPDATE trigger on inventory refuses any change to quantity_available of an
+-- 1. Freeze. A BEFORE UPDATE trigger on inventory refuses any change to quantity_available (or to
+--    product_id, which would swap the counted product; no app path edits it, and location changes
+--    are already refused by guard_inventory_location_change) of an
 --    inventory row (one product at one location) that is a line of an in_progress cycle count,
 --    with INVENTORY_FROZEN_FOR_CYCLE_COUNT naming the product, location and count. Every stock
 --    path writes that column (receiving and quick receive, receipt reversal, delivery complete /
@@ -127,9 +129,10 @@ REVOKE ALL ON FUNCTION public._freeze_inventory_during_cycle_count_20261102()
   FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 CREATE TRIGGER trg_freeze_inventory_during_cycle_count
-  BEFORE UPDATE OF quantity_available ON public.inventory
+  BEFORE UPDATE OF quantity_available, product_id ON public.inventory
   FOR EACH ROW
-  WHEN (OLD.quantity_available IS DISTINCT FROM NEW.quantity_available)
+  WHEN (OLD.quantity_available IS DISTINCT FROM NEW.quantity_available
+        OR OLD.product_id IS DISTINCT FROM NEW.product_id)
   EXECUTE FUNCTION public._freeze_inventory_during_cycle_count_20261102();
 
 -- One open count per warehouse, enforced for every write path (admins can still insert

@@ -298,13 +298,13 @@ Physical inventory verification process.
 
 ### Flow
 1. Start a count for a warehouse with `create_cycle_count()`. One transaction numbers it and fills `cycle_count_items` with expected quantities from `inventory`, locking those rows. A warehouse can have only one open count.
-2. While the count is open, those products are **frozen** at that location. Any change to `quantity_available` (receiving, delivery complete/void/cancel, job or blend application, returns, adjustments) is refused with `INVENTORY_FROZEN_FOR_CYCLE_COUNT`, naming the count. Booking and holds still work. This is Mason's decision of 2026-11-02 (migration `20261102180000`).
+2. While the count is open, those products are **frozen** at that location. Any change to `quantity_available` (receiving, delivery complete/void/cancel, job or blend application, returns, adjustments) is refused with `INVENTORY_FROZEN_FOR_CYCLE_COUNT`, naming the count. Booking and holds still work. This is Mason's decision of 2026-11-02 (migration `20261102234500`).
 3. User enters actual counted quantities
 4. System calculates variance (counted - expected)
 5. Complete the count via `complete_cycle_count()` RPC (the only write allowed through the freeze), or cancel it. Either one lifts the freeze. Completion refuses with `CYCLE_COUNT_STOCK_MOVED` if a counted line's stock no longer matches its snapshot.
 6. Variances create `inventory_transactions` of type 'adjusted'
 
-Only Complete Count can mark an open count completed, only Reverse Count can cancel a completed count, a cancelled count stays cancelled, and a count's warehouse never changes (`CYCLE_COUNT_STATUS_LOCKED`). Lines of an open count cannot be deleted, moved, or have their expected quantity or product changed, even by a direct table write (`CYCLE_COUNT_LINE_LOCKED`).
+Only Complete Count can mark an open count completed, only Reverse Count can cancel a completed count, a cancelled count stays cancelled, and a count's warehouse never changes (`CYCLE_COUNT_STATUS_LOCKED`). Lines of an open or completed count cannot be deleted, moved, or have their expected quantity or product changed, even by a direct table write (`CYCLE_COUNT_LINE_LOCKED`).
 
 ### Tables
 - `cycle_counts` — count sessions (status: in_progress/completed/cancelled)

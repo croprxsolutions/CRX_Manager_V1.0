@@ -1,6 +1,6 @@
 -- CONTAINER ONLY (plants [SMOKE] products and inventory): run through
 -- scripts/smoke/prove-cycle-count-freeze-real-schema.mjs, never against the live database.
--- Covers 20261102180000: an open cycle count freezes on-hand stock of its rows; completion applies
+-- Covers 20261102234500: an open cycle count freezes on-hand stock of its rows; completion applies
 -- the counted quantity once; the freeze lifts on complete and cancel; a stale snapshot is refused.
 -- Always ends in SMOKE_PASS_ROLLBACK (= PASS) or SMOKE_FAIL.
 DO $smoke$
@@ -132,6 +132,12 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (d) the completion exemption outlived the completion';
   END IF;
 
+  BEGIN
+    DELETE FROM public.cycle_count_items WHERE cycle_count_id = v_cc AND inventory_id = i1;
+    RAISE EXCEPTION 'SMOKE_FAIL: (d) a line of a completed count was deleted before reversal';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_NOT_IN_PROGRESS%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (d) %', SQLERRM; END IF;
+  END;
   BEGIN
     UPDATE public.cycle_counts SET status = 'cancelled' WHERE id = v_cc;
     RAISE EXCEPTION 'SMOKE_FAIL: (d) a completed count was cancelled directly without undoing it';

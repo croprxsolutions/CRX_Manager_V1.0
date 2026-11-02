@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261102180000 candidate (cycle-count freeze): while a cycle count is
+ * Full-chain proof for the 20261102234500 candidate (cycle-count freeze): while a cycle count is
  * open, the stock of every inventory row it counts cannot move; completion applies the counted
  * quantity exactly once; the freeze lifts on complete and cancel; a stale snapshot cannot complete;
  * and create_cycle_count starts a count and snapshots stock in one transaction.
@@ -31,7 +31,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261102180000_freeze_stock_during_cycle_count.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261102234500_freeze_stock_during_cycle_count.sql');
 const CHAIN = path.join(ROOT, 'scripts', 'smoke', 'smoke-cycle-count-freeze.sql');
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([

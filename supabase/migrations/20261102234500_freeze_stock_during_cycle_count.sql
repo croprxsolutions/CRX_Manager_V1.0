@@ -49,7 +49,8 @@
 --    written its ledger rows in the same transaction, and any change of a count's warehouse;
 --    trg_guard_open_cycle_count_items refuses
 --    (CYCLE_COUNT_LINE_LOCKED) deleting a line of an open count or changing its expected_qty,
---    inventory_id, product_id or cycle_count_id, including moving a line into an open count. Entering counted_qty and cancelling stay allowed. The
+--    inventory_id, product_id or cycle_count_id, including moving a line into an open count.
+--    Lines of a completed count were already locked (CYCLE_COUNT_NOT_IN_PROGRESS). Entering counted_qty and cancelling stay allowed. The
 --    one-open-count index compares lower(btrim(warehouse)) so spacing or case cannot dodge it.
 --
 -- Live state 2026-11-02: 17 cycle counts, all cancelled; none in_progress, so nothing is frozen
@@ -202,6 +203,7 @@ BEGIN
     RETURN NEW;
   END IF;
   -- The new count matters too: moving a line from a closed count into an open one is refused.
+  -- (Lines of completed counts are already locked by the older CYCLE_COUNT_NOT_IN_PROGRESS guard.)
   SELECT count_number INTO v_count_number
     FROM public.cycle_counts
    WHERE status = 'in_progress'
@@ -382,7 +384,7 @@ BEGIN
    FOR UPDATE OF i;
 
   -- Applying counted - expected on top of stock that moved since the start would count that
-  -- movement twice (20261102180000). expected_qty is numeric(10,2), so compare at that scale.
+  -- movement twice (20261102234500). expected_qty is numeric(10,2), so compare at that scale.
   SELECT p.product_name, cci.expected_qty, i.quantity_available, cc.count_number
     INTO v_moved
     FROM public.cycle_count_items cci

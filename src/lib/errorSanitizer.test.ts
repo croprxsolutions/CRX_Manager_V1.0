@@ -18,7 +18,7 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ code: 'P0001', message: `CHEM_PRICE_REQUIRED: ${sentence}` }))
       .toBe(`Nothing was saved. ${sentence}`);
   });
-  // The RAISE text of 20261102180000_freeze_stock_during_cycle_count.sql with its values filled in.
+  // The RAISE text of 20261102234500_freeze_stock_during_cycle_count.sql with its values filled in.
   it('explains a cycle-count freeze refusal without the raw token', () => {
     const sentence = 'Atrazine 4L at Main Warehouse is being counted in cycle count CC-2026-00018. Shipping and receiving for it are paused until that count is completed or cancelled.';
     expect(sanitizeError({ code: 'P0001', message: `INVENTORY_FROZEN_FOR_CYCLE_COUNT: ${sentence}` }))

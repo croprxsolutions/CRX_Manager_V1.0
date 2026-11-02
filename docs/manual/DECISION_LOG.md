@@ -16,7 +16,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Why.** Stock that moved during an open count was counted twice: once in the shelf count and again when completion applied the difference on top of the moved stock.
 
-**What this forbids/implies:** while a count is open, any change to on-hand stock of a counted row is refused (`INVENTORY_FROZEN_FOR_CYCLE_COUNT`), except that count's own completion. Booking and holds still work. A warehouse has one open count at a time. Migration `20261102180000`; rules in `docs/workflows/INVENTORY_RULES.md` (Cycle Counts).
+**What this forbids/implies:** while a count is open, any change to on-hand stock of a counted row is refused (`INVENTORY_FROZEN_FOR_CYCLE_COUNT`), except that count's own completion. Booking and holds still work. A warehouse has one open count at a time. Migration `20261102234500`; rules in `docs/workflows/INVENTORY_RULES.md` (Cycle Counts).
 
 ## 2026-11-02 — Keep the multi-warehouse features; only Main Warehouse is used today
 

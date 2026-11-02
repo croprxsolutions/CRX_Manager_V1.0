@@ -52,7 +52,7 @@ test('edit mode shows a page of rows, keeps edits across pages, and warns before
 
   await page.getByText('Supplier Pricing').first().click();
   await page.getByRole('button', { name: 'Leave' }).click();
-  await expect(page).toHaveURL(/\/inventory/);
+  await expect(page).toHaveURL(/\/supplier-pricing/);
 });
 
 test.describe('on a phone', () => {

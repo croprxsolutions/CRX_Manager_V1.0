@@ -31,6 +31,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { ledgerRowsToNames } from "../.claude/hooks/migration-ordering-lib.mjs";
 
 const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const outPath = path.join(projectDir, ".claude", "session-state", "applied-migrations.json");
@@ -121,16 +122,7 @@ if (!rows) {
 // version as a `<version>_<name>` prefix. normalizeMigrationName() understands
 // that shape — it is the same one the live ledger produced on 2026-07-15.
 const TS = /\d{14}/;
-const applied = rows
-  .map((r) => {
-    if (typeof r === "string") return r;
-    const name = (r?.name ?? "").toString().trim();
-    const version = (r?.version ?? "").toString().trim();
-    if (name && TS.test(name)) return name;
-    if (version && name) return `${version}_${name}`;
-    return version || name || "";
-  })
-  .filter(Boolean);
+const applied = ledgerRowsToNames(rows);
 
 const withoutTimestamp = applied.filter((n) => !TS.test(n));
 if (withoutTimestamp.length) {

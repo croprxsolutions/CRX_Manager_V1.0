@@ -634,24 +634,24 @@ export default function SettingsPage() {
     }
     const changed = changedKeys('notices');
     setSavingNotices(true);
-    try {
-      await Promise.all(changed.map((key) => saveSetting(key, values[key])));
-      markSaved(changed);
-      toast('success', 'Customer notices saved');
-      if (profile) {
-        for (const key of changed) {
-          logActivity({
-            event: 'settings_updated',
-            description: key === 'pre_application_notice_template'
-              ? 'Pre-application notice template updated'
-              : 'Post-application notice template updated',
-            performedBy: profile.id,
-          });
-        }
+    // Each template saves on its own, so one that saved is marked and logged even if the other fails.
+    const results = await Promise.allSettled(changed.map((key) => saveSetting(key, values[key])));
+    const saved = changed.filter((_, i) => results[i].status === 'fulfilled');
+    markSaved(saved);
+    if (profile) {
+      for (const key of saved) {
+        logActivity({
+          event: 'settings_updated',
+          description: key === 'pre_application_notice_template'
+            ? 'Pre-application notice template updated'
+            : 'Post-application notice template updated',
+          performedBy: profile.id,
+        });
       }
-    } catch (errUnknown: unknown) {
-      toast('error', sanitizeError(errUnknown));
     }
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failed) toast('error', sanitizeError(failed.reason));
+    else toast('success', 'Customer notices saved');
     setSavingNotices(false);
   };
 
@@ -801,9 +801,16 @@ export default function SettingsPage() {
   );
 
   // Changes that take access away or hand it out are confirmed before they are saved.
+  const pagesGranted = editingUser && editRole !== 'admin'
+    ? (editingUser.denied_pages || []).filter((key) => !editDeniedPages.includes(key)).length
+    : 0;
   const editWarnings = editingUser ? [
     editRole !== editingUser.role
       && `Change ${editName}'s role from ${ROLE_LABELS[editingUser.role]} to ${ROLE_LABELS[editRole]}; the pages they can open change with it.`,
+    editRole === editingUser.role && pagesGranted > 0
+      && `Give ${editName} access to ${pagesGranted} more page${pagesGranted === 1 ? '' : 's'}.`,
+    editIsActive && !editingUser.is_active
+      && `Reactivate ${editName}: they will be able to sign in again.`,
     !editIsActive && editingUser.is_active
       && `Deactivate ${editName}: they will be signed out of any open sessions and blocked from signing in again. Reactivating them restores access.`,
     editingUser.id === profile?.id && (editRole !== 'admin' || !editIsActive)

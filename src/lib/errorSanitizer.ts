@@ -124,6 +124,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. Product quantities across all invoices for this order cannot exceed completed deliveries. Refresh the invoice and bill only delivered goods. Record advance payments as prepay'],
   [/^ORDER_INVOICE_LINE_INVALID\b/,
    'Nothing was changed. This order invoice has an incomplete or invalid line. Each sale line needs a product and nonnegative quantity; each non-product line needs a charge type. Remove and re-add an incomplete line'],
+  // cancel_delivery / batch cancel (20261102140000): a completed delivery is undone only by an admin's void.
+  [/^DELIVERY_COMPLETED_USE_VOID\b/,
+   'Nothing was changed. This delivery is already completed, so it cannot be cancelled. An admin can void it instead'],
   // enforce_delivery_void_needs_invoice_void: a delivery with an active posted invoice cannot be voided or cancelled
   [/^DELIVERY_HAS_POSTED_INVOICE\b/,
    'Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery'],

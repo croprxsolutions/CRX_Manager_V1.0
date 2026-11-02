@@ -292,7 +292,8 @@ export default function DeliveryDetail() {
   const isAdmin = role === 'admin';
   const isAdminOrRep = role === 'admin' || role === 'sales_rep';
   const canEdit = isAdminOrRep && delivery?.status !== 'completed' && delivery?.status !== 'cancelled';
-  const canCancel = isAdminOrRep && delivery?.status !== 'cancelled' && delivery?.status !== 'completed';
+  // Only scheduled and in-progress deliveries cancel; a completed one is voided (admin-only).
+  const canCancel = isAdminOrRep && (delivery?.status === 'scheduled' || delivery?.status === 'in_progress');
   const canVoid = isAdmin && delivery?.status === 'completed';
   const isAssignedDriver = isDriver && profile?.id === delivery?.assigned_driver;
   const canConfirm = (isAdminOrRep || isAssignedDriver) && delivery?.status === 'scheduled';

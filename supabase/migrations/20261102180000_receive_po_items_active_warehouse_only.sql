@@ -1,10 +1,12 @@
--- KI-85: new stock may be placed only at an active warehouse.
+-- KI-85: new stock may be placed only at Main Warehouse, and only while it is active.
 --
 -- Deliveries, jobs, blends and holds ship from Main Warehouse only and there is
 -- no transfer function, so stock received at any other location is stranded.
 -- The receiving and Add Inventory screens now list active `warehouses` rows;
 -- this makes the server refuse any other location instead of storing whatever
--- text is sent.
+-- text is sent. The server accepts Main Warehouse only, even if another warehouse
+-- row is active, until a stock-transfer function exists (DECISION_LOG 2026-11-02);
+-- the migration that adds transfers must lift this guard to any active warehouse.
 --
 -- Only the two public wrappers change; each body is otherwise identical to its
 -- previous definition (receive_po_items: 20260831233000; manual_inventory_add:
@@ -23,7 +25,7 @@
 --
 -- Grants: none here. CREATE OR REPLACE keeps each function's live ACL (authenticated and
 -- service_role execute; PUBLIC and anon do not); the postcondition below re-checks anon.
--- Callers: PurchaseOrderDetail and QuickReceivePanel send a picked active warehouse;
+-- Callers: PurchaseOrderDetail and QuickReceivePanel send a picked active warehouse (today only Main);
 -- ReceivingHubPanel, InventoryPage (receive) and offlineSync omit storage_location (Main
 -- Warehouse); InventoryPage Add Inventory now picks an active warehouse.
 
@@ -70,8 +72,8 @@ BEGIN
     RETURN v_replay -> 'result';
   END IF;
 
-  -- KI-85: refuse, never normalize, a location that is not an active warehouse.
-  -- The check share-locks each warehouse it accepts, so none is deactivated or renamed before the receipt commits.
+  -- KI-85: refuse, never normalize, any location but Main Warehouse until transfers exist.
+  -- The check share-locks the Main Warehouse row, so it is not deactivated or renamed before the receipt commits.
   IF jsonb_typeof(p_items) = 'array' AND EXISTS (
     SELECT 1
       FROM jsonb_array_elements(p_items) AS i(item)
@@ -79,13 +81,14 @@ BEGIN
        AND NOT EXISTS (
          SELECT 1 FROM public.warehouses w
           WHERE w.is_active
-            AND w.name = COALESCE(i.item->>'storage_location', 'Main Warehouse')
+            AND w.name = 'Main Warehouse'
+            AND COALESCE(i.item->>'storage_location', 'Main Warehouse') = 'Main Warehouse'
           FOR SHARE
        )
   ) THEN
     RAISE EXCEPTION USING
       ERRCODE = 'P0001',
-      MESSAGE = 'UNKNOWN_STORAGE_LOCATION: every storage_location must name an active warehouse';
+      MESSAGE = 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist';
   END IF;
 
   v_result := public._section9_receive_po_items_intent_impl_20260831(
@@ -143,16 +146,17 @@ BEGIN
   IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
   END IF;
-  -- KI-85: refuse, never normalize, a location that is not an active warehouse.
-  -- The check share-locks the warehouse it accepts, so it is not deactivated or renamed before the add commits.
+  -- KI-85: refuse, never normalize, any location but Main Warehouse until transfers exist.
+  -- The check share-locks the Main Warehouse row, so it is not deactivated or renamed before the add commits.
   IF v_replay IS NULL AND NOT EXISTS (
     SELECT 1 FROM public.warehouses w
-     WHERE w.is_active AND w.name = COALESCE(p_location, 'Main Warehouse')
+     WHERE w.is_active AND w.name = 'Main Warehouse'
+       AND COALESCE(p_location, 'Main Warehouse') = 'Main Warehouse'
      FOR SHARE
   ) THEN
     RAISE EXCEPTION USING
       ERRCODE = 'P0001',
-      MESSAGE = 'UNKNOWN_STORAGE_LOCATION: the location must name an active warehouse';
+      MESSAGE = 'UNKNOWN_STORAGE_LOCATION: stock can be added only to Main Warehouse until stock transfers between warehouses exist';
   END IF;
   -- On a saved replay the impl's own check_idempotency returns the stored result before any write
   -- (20260702141000), unchanged since 20261016140000; proven live 2026-11-02 (stock rose once).

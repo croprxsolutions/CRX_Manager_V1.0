@@ -528,13 +528,13 @@ describe('QuickReceivePanel Product identity', () => {
     window.localStorage.setItem(storageKey, JSON.stringify(record));
     await seedPendingIntent(storageKey, record);
     mocks.rpc.mockImplementation(async (name: string) => (name === 'receive_po_items'
-      ? { data: null, error: { code: 'P0001', message: 'UNKNOWN_STORAGE_LOCATION: every storage_location must name an active warehouse' } }
+      ? { data: null, error: { code: 'P0001', message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' } }
       : { data: null, error: new Error(`Unexpected RPC ${name}`) }));
 
     render(<MemoryRouter><QuickReceivePanel /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /retry exact receiving/i }));
 
-    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringContaining('not an active warehouse')));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringContaining('only into Main Warehouse')));
     expect(mocks.rpc).toHaveBeenCalledWith('receive_po_items', expect.objectContaining({ p_items: frozenPayload }));
     expect(screen.queryByText(/successfully received/i)).toBeNull();
     expect(mocks.toast.mock.calls.filter(([kind]) => kind === 'success')).toEqual([]);

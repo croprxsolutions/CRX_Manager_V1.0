@@ -11,8 +11,8 @@ describe('sanitizeError', () => {
       .toBe('Choose a category from the product category list');
   });
   it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
-    const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: every storage_location must name an active warehouse' });
-    expect(message).toContain('not an active warehouse');
+    const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' });
+    expect(message).toContain('only into Main Warehouse');
     expect(message).not.toContain('UNKNOWN_STORAGE_LOCATION');
   });
   // The RAISE text of 20261022087000_job_chemicals_refuse_unpriced_zero_price_line.sql with the product filled in.

@@ -6,7 +6,7 @@ Last verified: 2026-09-26 (against the pins on `main` after PR #796).
 
 ## The GPT-6 family
 
-OpenAI's current models are GPT-6 Astra (`gpt-6-astra`, most capable, launched early September 2026), GPT-6 Sol (`gpt-6-sol`, complex coding and agentic work, launched 2026-09-22), and GPT-6 Luna (`gpt-6-luna`, fast and cheap for focused high-volume work, launched 2026-09-22). Reasoning effort is `none`, `low`, `medium`, `high`, `xhigh`, or `max`. `gpt-6-terra` and `gpt-6-spark` are refused for this account on the current CLI, so the retired three-tier split collapsed onto Luna (volume) and Sol (money).
+OpenAI's current models are GPT-6 Astra (`gpt-6-astra`, most capable, launched early September 2026), GPT-6 Sol (`gpt-6-sol`, complex coding and agentic work, launched 2026-09-22), and GPT-6 Luna (`gpt-6-luna`, fast and cheap for focused high-volume work, launched 2026-09-22). Reasoning effort is `none`, `low`, `medium`, `high`, `xhigh`, or `max`. `gpt-6-terra` and `gpt-6-spark` are refused for this account on the current CLI, so the retired three-tier split collapsed onto Luna (volume) and Sol (money). `gpt-6.1-luna` is refused too (probed 2026-11-01 beside a bogus control), so `gpt-6-luna` is the newest Luna.
 
 ## Which model does which job
 
@@ -14,7 +14,7 @@ Mason's standing decisions: the 2026-09-20 tier split (Luna iterates, Sol is the
 
 | Job | Model | Effort | Where it is pinned |
 |---|---|---|---|
-| Iterating code review (advisory, every kind of work) | `gpt-6-luna` | `xhigh` | `scripts/overnight-codex-gate.mjs`, `/codex-review` Step 3A |
+| Iterating code review (advisory, every kind of work) | `gpt-6-luna` | `xhigh` | `scripts/luna-review.mjs` `LUNA_MODEL` (`/codex-review` Step 3A), `scripts/overnight-codex-gate.mjs` |
 | Early escalation of one review round for genuinely complex work (say why) | `gpt-6-sol` | `high` | `overnight-codex-gate.mjs --sol` |
 | Final exact-SHA ship gate for risky work (the only proof the push, merge, and migration guards accept) | `gpt-6-sol` | `high` | `scripts/write-codex-push-proof.mjs`, `.claude/hooks/codex-push-lib.mjs`, `.claude/hooks/migration-apply-lib.mjs`, `.codex/hooks/production-action-guard.mjs` |
 | Builder for a standard or mechanical unit | `gpt-6-luna` | `xhigh` | `scripts/codex-build.mjs` default |

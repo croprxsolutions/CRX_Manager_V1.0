@@ -129,7 +129,8 @@ describe('ProductMarginFloorCard', () => {
     mocks.fetchMarginFloor.mockResolvedValue(0.16);
     fireEvent.click(screen.getByRole('button', { name: /save floor/i }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Margin floor set to 16%.'));
-    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    // The toast fires as the reload returns; the page hears about it after React commits that reload.
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
 
     fireEvent.change(input, { target: { value: '17' } });
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);

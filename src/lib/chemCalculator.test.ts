@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   fmt4,
+  exactDecimalSum,
   sumAcres,
   sumAcresExact,
   applyChemEdit,
@@ -40,6 +41,11 @@ describe('chemCalculator — fmt4 / sumAcres', () => {
   });
   it('sumAcresExact preserves the sign while summing canonical field values exactly', () => {
     expect(sumAcresExact([{ acres_to_treat: '-0.3' }, { acres_to_treat: '0.2' }])).toBe('-0.1');
+  });
+  it('exactDecimalSum exposes the exact scaled-integer result for quantity display', () => {
+    expect(exactDecimalSum([0.1, 0.2])).toEqual({ coefficient: 3n, scale: 1 });
+    expect(exactDecimalSum([-0.3, 0.2])).toEqual({ coefficient: -1n, scale: 1 });
+    expect(exactDecimalSum([Number.POSITIVE_INFINITY])).toBeNull();
   });
 });
 

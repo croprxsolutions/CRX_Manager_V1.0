@@ -33,7 +33,7 @@ function payloadAcreValues(fieldRows: { acres_to_treat: string }[]): number[] {
   return fieldRows.map((field) => parseFloat(field.acres_to_treat) || 0);
 }
 
-function exactDecimalSum(values: number[]): ExactDecimal | null {
+export function exactDecimalSum(values: number[]): ExactDecimal | null {
   if (values.some((value) => !Number.isFinite(value))) return null;
   const decimals = values.map((value) => exactDecimal(value));
   if (decimals.some((value) => value == null)) return null;
@@ -176,7 +176,7 @@ export function chemQuantityTolerance(acres: number): number {
   return Math.max(0.0001, Math.min(0.00005 * acres, 0.1));
 }
 
-type ExactDecimal = { coefficient: bigint; scale: number };
+export type ExactDecimal = { coefficient: bigint; scale: number };
 
 const DECIMAL_TEXT = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
 const MIN_QUANTITY_TOLERANCE: ExactDecimal = { coefficient: 1n, scale: 4 }; // 0.0001

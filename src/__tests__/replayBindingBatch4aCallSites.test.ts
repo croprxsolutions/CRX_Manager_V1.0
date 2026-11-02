@@ -1,5 +1,5 @@
 /**
- * Replay-binding batch 4a (migration 20261102110000): unpost_invoice, unpost_invoice_group,
+ * Replay-binding batch 4a (migration 20261102180000): unpost_invoice, unpost_invoice_group,
  * transfer_invoice_to_job, close/reopen_accounting_period, save_field_app_invoice,
  * update_field_app_invoice_billing, consolidate_draft_invoices, create_rebate_claim and
  * transition_rebate_claim replay a saved result only for the same person and the exact same request.

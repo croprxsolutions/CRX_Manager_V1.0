@@ -112,8 +112,9 @@
 --     is replaced by the server inside the body; the replaced value is not part of the request.
 --
 -- ORDERING: strict. Live high-water when written: ledger 20261102144057 (20261102100000); then
---   20261102102000 (PR #1272) applied as ledger 20261102155933. Numbered above it and the open
---   candidate 20261102101000 (PR #1276); neither touches these functions or the guard trigger.
+--   20261102102000 (PR #1272) applied as ledger 20261102155933, and 20261102140000 (PR #1284,
+--   cancel_delivery bodies only) as ledger 20261102174004. Renumbered from 20261102110000 to sit
+--   above that live high-water; none of these touches these functions or the guard trigger.
 --   Re-read the live ledger before applying.
 --
 -- idempotency-body-check: exempt. Every wrapper reads idempotency_keys through

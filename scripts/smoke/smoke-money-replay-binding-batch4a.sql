@@ -1,5 +1,5 @@
 -- ============================================================================
--- SMOKE TEST (rolled back by design) for 20261102110000_bind_money_replay_receipts_batch4a.
+-- SMOKE TEST (rolled back by design) for 20261102180000_bind_money_replay_receipts_batch4a.
 --
 -- CONTAINER ONLY: run through scripts/smoke/prove-money-replay-binding-batch4a-real-schema.mjs,
 -- never against the live database. The fixtures post invoices and transfer jobs to invoices, which

@@ -1971,7 +1971,7 @@ export default function FieldApplicationInvoice() {
       });
 
       // The first save under this key committed with other values (an edit after a lost reply).
-      // The server no longer hands that result back as this save's (migration 20261102110000); it
+      // The server no longer hands that result back as this save's (migration 20261102180000); it
       // refuses and reports it, so take its invoice ids as the earlier save and write the current
       // values over it below, under a new key, exactly as a replay of old values was handled.
       const mismatch = error ? getIdempotencyMismatchResult(error, 'save_field_app_invoice') : null;

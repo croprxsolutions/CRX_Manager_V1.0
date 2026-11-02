@@ -258,7 +258,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // (20261019235000) re-emits the body only to retarget its keyless per-delivery cancel; changing
   // the literal would orphan the wrapper's receipt binding.
   _batch_cancel_deliveries_replay_impl_20261015: ['batch_cancel_deliveries'],
-  // Direct EXECUTE is revoked (postgres-only). Replay-binding batch 4a (20261102110000) renamed the
+  // Direct EXECUTE is revoked (postgres-only). Replay-binding batch 4a (20261102180000) renamed the
   // live unpost_invoice_group body to this name and re-emits it only to unpost each member through
   // unpost_invoice's renamed body (no per-member key); it keeps the public operation literal so the
   // wrapper binds that same receipt, and changing it would orphan every existing receipt.

@@ -1,6 +1,6 @@
 ## 2026-11-02 — replay-binding batch 4a: invoices, accounting periods and rebates (KI-10 / KI-75)
 
-- New migration `20261102110000_bind_money_replay_receipts_batch4a.sql` (not yet applied): eleven
+- New migration `20261102180000_bind_money_replay_receipts_batch4a.sql` (not yet applied): eleven
   functions now hand back a saved retry answer only to the same person for the exact same request —
   `unpost_invoice`, `unpost_invoice_group`, `close_accounting_period`, `reopen_accounting_period`,
   `transfer_invoice_to_job`, `save_field_app_invoice`, `update_field_app_invoice_billing`,

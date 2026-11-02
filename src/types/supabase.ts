@@ -7659,6 +7659,57 @@ export type Database = {
           },
         ]
       }
+      product_change_history: {
+        Row: {
+          change_type: string
+          changed_at: string
+          changed_by: string | null
+          changed_by_name: string | null
+          field_name: string | null
+          id: number
+          new_value: string | null
+          old_value: string | null
+          product_id: string
+        }
+        Insert: {
+          change_type: string
+          changed_at?: string
+          changed_by?: string | null
+          changed_by_name?: string | null
+          field_name?: string | null
+          id?: never
+          new_value?: string | null
+          old_value?: string | null
+          product_id: string
+        }
+        Update: {
+          change_type?: string
+          changed_at?: string
+          changed_by?: string | null
+          changed_by_name?: string | null
+          field_name?: string | null
+          id?: never
+          new_value?: string | null
+          old_value?: string | null
+          product_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_change_history_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_change_history_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_cost_basis: {
         Row: {
           basis_type: string

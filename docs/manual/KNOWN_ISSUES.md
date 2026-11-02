@@ -95,7 +95,7 @@ Two residuals stay accepted by Mason (2026-10-21): commission amount and rate to
 refusals let a rep narrow a cost by trial and error. Includes the older sub-items "reps can recover
 application-service cost" and "retire the old `admin_set_application_service_cost` function" (no caller left in
 `src/`; no DROP migration exists).
-**Function audit done 2026-11-02** (the report is published once the screen change is deployed, as `docs/audits/2026-11-02-cost-margin-definer-function-audit.md`): every
+**Function audit done 2026-11-02** (report: `docs/audits/2026-11-02-cost-margin-definer-function-audit.md`): every
 signed-in-executable owner-rights (SECURITY DEFINER) function that names cost, reaches it through an inner helper, or
 turns a cost-bearing row into JSON was traced live. Migration `20261102200000_cost_definer_leaks_closed` changes the ones
 that need it so only admins get cost (real-schema proof

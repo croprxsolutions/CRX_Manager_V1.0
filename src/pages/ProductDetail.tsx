@@ -22,6 +22,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, assertRpcResult, checkMutationResult, supabase, supabaseUntyped } from '../lib/db';
 import { localToday } from '../lib/dateUtils';
+import { formatUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
 import { unitOptionsForForm, isKnownUnit } from '../lib/units';
@@ -235,7 +236,6 @@ export default function ProductDetail() {
   const [saving, setSaving] = useState(false);
   const [costModal, setCostModal] = useState(false);
   const [newCost, setNewCost] = useState('');
-  const [costNote, setCostNote] = useState('');
   const [persistedProduct, setPersistedProduct] = useState<Product | null>(null);
   const [pricingMode, setPricingMode] = useState<PricingMode | ''>('');
   const [pricingMoneyDrafts, setPricingMoneyDrafts] = useState<ProductPricingMoneyDrafts>({});
@@ -244,7 +244,7 @@ export default function ProductDetail() {
   const [pricingPreviewTitle, setPricingPreviewTitle] = useState('Review Product Pricing');
   // A pricing change waiting for its source and reason before the preview.
   const [pendingPricingReview, setPendingPricingReview] = useState<
-    { costOverride?: string; initialReason: string } | null
+    { costOverride?: string } | null
   >(null);
   const [previewingPricing, setPreviewingPricing] = useState(false);
   const [applyingPricing, setApplyingPricing] = useState(false);
@@ -475,9 +475,9 @@ export default function ProductDetail() {
   };
 
   // Check everything but the source and reason before asking for them, so nobody types them for nothing.
-  const openPricingReview = (costOverride?: string, initialReason = '') => {
+  const openPricingReview = (costOverride?: string) => {
     buildPricingReviewRow({ source: '', reason: '' }, costOverride);
-    setPendingPricingReview({ costOverride, initialReason });
+    setPendingPricingReview({ costOverride });
   };
 
   const requestPricingReview = async ({
@@ -749,7 +749,7 @@ export default function ProductDetail() {
       return;
     }
     try {
-      openPricingReview(newCost, costNote);
+      openPricingReview(newCost);
       setCostModal(false);
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
@@ -807,7 +807,6 @@ export default function ProductDetail() {
       setIsDirty(true);
       setPricingPreview(null);
       setNewCost('');
-      setCostNote('');
       setCostBasisReason('');
       setManualBasisCost('');
       setCostBasisPricingBehavior('keep_sell_prices');
@@ -1597,7 +1596,12 @@ export default function ProductDetail() {
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-secondary">Cost</h4>
                   <div className="flex items-center gap-2">
-                    <Input id="product-current-cost" label="Current Cost" type="number" value={pricingMoneyInput(product, pricingMoneyDrafts, 'current_cost')} onChange={(e) => updatePricingMoney('current_cost', e.target.value)} disabled={isNew} />
+                    <div className="w-full">
+                      <span className="block text-sm font-medium text-secondary mb-1">Current Cost</span>
+                      <p aria-label="Current Cost" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-nav-dark">
+                        {product.current_cost == null ? 'N/A' : formatUSD(product.current_cost)}
+                      </p>
+                    </div>
                     {!isNew && (
                       <Button variant="secondary" size="sm" icon={<DollarSign className="w-3 h-3" />} showChevron={false} onClick={() => setCostModal(true)} className="mt-5">
                         Update
@@ -1891,7 +1895,6 @@ export default function ProductDetail() {
               <option value="price_driven">Keep entered prices; reconcile margins</option>
             </select>
           </div>
-          <Input label="Change Note (optional)" value={costNote} onChange={(e) => setCostNote(e.target.value)} placeholder="e.g. Supplier price increase" disabled={pricingReloadRequired} />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" showChevron={false} onClick={() => setCostModal(false)}>Cancel</Button>
             <Button onClick={handleCostUpdate} disabled={pricingReloadRequired}>Review Cost Change</Button>
@@ -1916,7 +1919,6 @@ export default function ProductDetail() {
         open={pendingPricingReview !== null}
         busy={previewingPricing}
         productCount={1}
-        initialReason={pendingPricingReview?.initialReason}
         onCancel={() => setPendingPricingReview(null)}
         onSubmit={(value) => void submitPricingReview(value)}
       />

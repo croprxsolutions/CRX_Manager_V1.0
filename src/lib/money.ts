@@ -29,6 +29,14 @@ export function formatCents(cents: number): string {
   return usdFormatter.format(cents / 100);
 }
 
+/** Format exact bigint cents without converting them through floating point. */
+export function formatExactCents(cents: bigint): string {
+  const negative = cents < 0n;
+  const absolute = negative ? -cents : cents;
+  const dollars = new Intl.NumberFormat('en-US').format(absolute / 100n);
+  return `${negative ? '-' : ''}$${dollars}.${(absolute % 100n).toString().padStart(2, '0')}`;
+}
+
 /** Format a number already in DOLLARS as USD. Does NOT divide. */
 export function formatUSD(dollars: number): string {
   return usdFormatter.format(dollars);

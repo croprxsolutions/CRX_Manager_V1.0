@@ -1,0 +1,3 @@
+## 2026-11-02 — One cost path, source choices, tier-order warning (local candidate)
+
+Saved Product cost is displayed read-only. Update cost opens the existing governed preview and approval flow and asks for the change reason once. Product pricing sources now use five choices with an optional detail (required for Other). The new database preview warning catches final Tier 2 prices below Tier 1 and Tier 3 below Tier 2, including margin-driven changes. It must be acknowledged before approval and apply. Existing warning calculations and history writes remain in the governed pipeline. The migration is a local candidate and has not been applied here.

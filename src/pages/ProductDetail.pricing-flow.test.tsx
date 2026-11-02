@@ -103,7 +103,7 @@ function chainable(resolveWith: unknown) {
 }
 
 vi.mock('../lib/db', async () => {
-  // Use the REAL sanitizeError. Stubbing it as `e instanceof Error ? e.message : …`
+  // Use the REAL sanitizeError. Stubbing it as `e instanceof Error ? e.message : â€¦`
   // would re-implement the very defect these screens were just fixed for: a
   // non-throwing postgrest call resolves its error as a PLAIN OBJECT, so an
   // `instanceof Error` stub silently reproduces the swallowed-message bug and the
@@ -129,7 +129,7 @@ vi.mock('../lib/db', async () => {
     // Faithful to the real helper: it RE-THROWS result.error, and that error is
     // a plain PostgREST object. A `vi.fn()` no-op here silently deletes the
     // error path, so any test aiming at a catch block would assert against a
-    // save that quietly "succeeded" — the same class of problem as stubbing
+    // save that quietly "succeeded" â€” the same class of problem as stubbing
     // sanitizeError.
     checkMutationResult: vi.fn((result: { error: unknown; data: unknown }) => {
       if (result.error) throw result.error;
@@ -204,7 +204,8 @@ import ProductDetail from './ProductDetail';
 
 /** Answers the source-and-reason prompt a product-page price change opens before its preview. */
 async function giveSourceAndReason(source: string, reason?: string) {
-  fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: source } });
+  fireEvent.change(await screen.findByLabelText('Source'), { target: { value: 'Other' } });
+  fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: source } });
   if (reason !== undefined) {
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: reason } });
   }
@@ -381,7 +382,7 @@ describe('ProductDetail governed pricing flow', () => {
     render(<ProductDetail />);
 
     expect(await screen.findByText('Legacy cost update')).toBeInTheDocument();
-    expect(screen.queryByText('Loading cost history…')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading cost historyâ€¦')).not.toBeInTheDocument();
   });
 
   it('rejects a direct detail save when the loaded pricing version is stale', async () => {
@@ -402,7 +403,7 @@ describe('ProductDetail governed pricing flow', () => {
   // The catches on this page were converted to sanitizeError() in the 2026-09-02
   // sweep. The error they receive is a PLAIN OBJECT (postgrest-js only builds a
   // real PostgrestError under .throwOnError()), so this exercises the actual
-  // shape rather than an Error the product never sees — and asserts BOTH halves
+  // shape rather than an Error the product never sees â€” and asserts BOTH halves
   // of the contract: a user-facing refusal survives intact, a raw Postgres
   // identifier does not.
   it('shows a plain-object server refusal verbatim but redacts raw identifiers', async () => {
@@ -423,7 +424,7 @@ describe('ProductDetail governed pricing flow', () => {
   it('redacts an unquoted Postgres permission error from a plain-object save failure', async () => {
     productMutationResult = {
       data: [],
-      // The UNQUOTED form Postgres actually emits — the form that used to pass
+      // The UNQUOTED form Postgres actually emits â€” the form that used to pass
       // through sanitizeError unredacted.
       error: { message: 'permission denied for table products', details: null, hint: null, code: '42501' },
     };
@@ -762,18 +763,18 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
     fireEvent.change(screen.getByLabelText('Tier 1 net margin percent'), { target: { value: '37' } });
-    fireEvent.change(screen.getByLabelText('Current Cost'), { target: { value: '55.00' } });
+    expect(screen.getByLabelText('Current Cost').tagName).toBe('P');
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'price_driven' } });
     expect(screen.getByLabelText('Tier 1 net margin percent')).toHaveValue(20);
     expect(screen.getByLabelText('Tier 1 net margin percent')).toBeDisabled();
-    expect(screen.getByLabelText('Current Cost')).toHaveValue(55);
+    expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
 
     fireEvent.change(screen.getByLabelText('Tier 1 price'), { target: { value: '75' } });
     fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
     fireEvent.change(screen.getAllByLabelText('Pricing mode')[1], { target: { value: 'margin_driven' } });
     expect(screen.getByLabelText('Tier 1 price')).toHaveValue(62.5);
     expect(screen.getByLabelText('Tier 1 price')).toBeDisabled();
-    expect(screen.getByLabelText('Current Cost')).toHaveValue(55);
+    expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
   });
 
   it.each(['.5', '100'])('refuses invalid margin draft %s before asking for a reason', async (margin) => {
@@ -783,7 +784,7 @@ describe('ProductDetail governed pricing flow', () => {
     fireEvent.change(screen.getByLabelText('Tier 1 net margin percent'), { target: { value: margin } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     expect(mockToast).toHaveBeenCalledWith('error', 'Enter each net margin as a plain number below 100.');
-    expect(screen.queryByLabelText('Source (supplier, document, date)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Source')).not.toBeInTheDocument();
     expect(mockPreviewPricing).not.toHaveBeenCalled();
   });
 
@@ -794,12 +795,11 @@ describe('ProductDetail governed pricing flow', () => {
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
     fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
-    fireEvent.change(screen.getByLabelText('Change Note (optional)'), { target: { value: 'Mid-month supplier increase' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
-    // The cost note starts the reason; the source still has to be given.
-    expect(await screen.findByLabelText('Reason for the change')).toHaveValue('Mid-month supplier increase');
+    expect(screen.queryByLabelText('Change Note (optional)')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('Reason for the change')).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Preview changes' })).toBeDisabled();
-    await giveSourceAndReason('Helena list Oct 2026');
+    await giveSourceAndReason('Helena list Oct 2026', 'Mid-month supplier increase');
 
     await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({
       source: 'product_page',
@@ -874,7 +874,7 @@ describe('ProductDetail governed pricing flow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply approved changes' }));
 
     expect(await screen.findByText(/Editing is locked until the latest values load/i)).toBeInTheDocument();
-    expect(screen.getByLabelText('Current Cost')).toBeDisabled();
+    expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
     expect(screen.getByLabelText('New Cost')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
 
@@ -882,7 +882,7 @@ describe('ProductDetail governed pricing flow', () => {
     await waitFor(() => {
       expect(screen.queryByText(/Editing is locked until the latest values load/i)).not.toBeInTheDocument();
     });
-    expect(screen.getByLabelText('Current Cost')).not.toBeDisabled();
+    expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
   });
 
   it('opens the folded section that holds a refused field', async () => {
@@ -903,13 +903,14 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
 
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'price_driven' } });
-    fireEvent.change(screen.getByLabelText('Current Cost'), {
+    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.change(screen.getByLabelText('New Cost'), {
       target: { value: '90071992547409.93' },
     });
     fireEvent.change(screen.getByLabelText('Tier 1 price'), {
       target: { value: '90071992547410.01' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
     await giveSourceAndReason('Supplier quote 4471', 'New list price');
 
     await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({

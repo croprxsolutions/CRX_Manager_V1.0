@@ -126,6 +126,26 @@ describe('price sheet approval (To-Do 0.1)', () => {
     });
   });
 
+  it('normalizes tier-order pair cents from text without losing precision', async () => {
+    mockRpc.mockResolvedValue({ data: {
+      change_set_id: 'change-2', rows: [], warnings: [{
+        product_id: 'p1', warning_codes: ['TIER_ORDER'], details: {
+          cost_before_cents: '2000', cost_after_cents: '2000', margin_floor: null,
+          tiers: [], open_quote_count: 0, open_quote_numbers: [],
+          tier_order: [{ lower_tier: 1, higher_tier: 2,
+            lower_cents: '9007199254740993', higher_cents: '9007199254740992' }],
+        },
+      }],
+    }, error: null });
+    const preview = await previewProductPricingChanges({
+      source: 'product_page', rows: [], performedBy: 'actor-1', idempotencyKey: 'tier-order',
+    });
+    expect(preview.warnings[0].details.tier_order).toEqual([{
+      lower_tier: 1, higher_tier: 2,
+      lower_cents: 9007199254740993n, higher_cents: 9007199254740992n,
+    }]);
+  });
+
   it('fingerprints a file as lower-case hex SHA-256', async () => {
     await expect(sha256Hex(new Blob(['abc']))).resolves.toBe(
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',

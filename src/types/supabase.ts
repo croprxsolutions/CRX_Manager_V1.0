@@ -7659,6 +7659,30 @@ export type Database = {
           },
         ]
       }
+      product_categories: {
+        Row: {
+          created_at: string
+          is_active: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          is_active?: boolean
+          name: string
+          sort_order: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       product_change_history: {
         Row: {
           change_type: string
@@ -8420,6 +8444,13 @@ export type Database = {
           vendor?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "product_setup_category_fk"
+            columns: ["category"]
+            isOneToOne: false
+            referencedRelation: "product_categories"
+            referencedColumns: ["name"]
+          },
           {
             foreignKeyName: "products_product_family_id_fkey"
             columns: ["product_family_id"]
@@ -15761,6 +15792,15 @@ export type Database = {
           p_manufacturer: string
           p_product_id: string
           p_signal_word: string
+        }
+        Returns: Json
+      }
+      upsert_product_category: {
+        Args: {
+          p_idempotency_key?: string
+          p_is_active: boolean
+          p_name: string
+          p_sort_order: number
         }
         Returns: Json
       }

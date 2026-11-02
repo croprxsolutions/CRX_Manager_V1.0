@@ -3006,6 +3006,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // passes 20261102140000 (the bodies never reach the generated types).
   '_cancel_delivery_replay_impl_20261015',
   '_batch_cancel_deliveries_replay_impl_20261015',
+  // 20261102200000 (cost admin-only) re-emits these two bodies; each keeps p_idempotency_key behind its
+  // required-key public wrapper. Prune once the registry high-water passes 20261102200000.
+  '_manual_inventory_add_replay_impl_20261015',
+  '_complete_job_replay_impl_20261015',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their

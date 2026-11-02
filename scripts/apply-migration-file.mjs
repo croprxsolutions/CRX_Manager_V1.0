@@ -67,6 +67,7 @@ import {
   CRX_PRODUCTION_REF,
 } from "../.claude/hooks/migration-apply-lib.mjs";
 import { assertWrappable } from "../.claude/hooks/migration-wrappability-lib.mjs";
+import { checkLiveMigrationOrdering } from "../.claude/hooks/migration-ordering-lib.mjs";
 import { assertApprovalStillValid, ownerOnceGuardSql, recordUsedApproval } from "../.claude/hooks/owner-approval-lib.mjs";
 
 // Every existing ledger row carries this; apply_migration fills it from the
@@ -394,6 +395,20 @@ if (!token) {
   die(1,
     "apply-migration-file: SUPABASE_ACCESS_TOKEN is not set, so there is no way to reach the\n" +
     "management API. Supply it for this one run; do not write it to a file.");
+}
+
+// ── LIVE ORDERING RE-CHECK ─────────────────────────────────────────────────
+// The gate above judged ordering against the local snapshot, which may be hours
+// old. On 2026-11-02 a peer session applied 20261102200000 after this checkout's
+// snapshot was taken, and 20261102180000 then passed the gate and applied out of
+// order. So re-read the live ledger now and run the same rule (same replay
+// marker) against it. Fails closed: no live list, no apply.
+// shortcut: a few seconds remain between this read and the transmission; move the
+// check into the transaction if two applies ever land that close together.
+{
+  const live = await checkLiveMigrationOrdering({ fetchImpl: fetch, projectId, token, name: migName, sql });
+  if (!live.ok) die(2, live.reason);
+  console.log(`Live ordering re-check passed (${live.count} applied rows; newest stamp ${live.newestApplied || "n/a"}).`);
 }
 
 // ── LEDGER PARITY ──────────────────────────────────────────────────────────

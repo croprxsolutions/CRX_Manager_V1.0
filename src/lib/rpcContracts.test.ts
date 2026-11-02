@@ -1454,6 +1454,7 @@ const MUTATING_RPCS_WITH_IDEMPOTENCY: string[] = [
   'create_application_record_from_blend_ticket',
   'create_blend_ticket',
   'create_commission_payment',
+  'create_cycle_count',
   'create_delivery_with_items',
   'create_direct_order',
   'create_followup_delivery',

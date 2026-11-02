@@ -9,11 +9,19 @@ describe('sanitizeError', () => {
       .toContain('This checks format only');
     expect(sanitizeError({ message: 'insert or update violates foreign key constraint "product_setup_category_fk"' }))
       .toBe('Choose a category from the product category list');
+    expect(sanitizeError({ message: 'duplicate key value violates unique constraint "cycle_counts_one_open_per_warehouse"' }))
+      .toBe('A cycle count is already open for this warehouse. Complete or cancel it first');
   });
   // The RAISE text of 20261022087000_job_chemicals_refuse_unpriced_zero_price_line.sql with the product filled in.
   it('explains a CHEM_PRICE_REQUIRED save refusal without the raw token', () => {
     const sentence = "Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter a price for the line (on a quote, the quote line's price), tick Customer supplied if the grower supplied it, or give the product a $0 price if you give it away.";
     expect(sanitizeError({ code: 'P0001', message: `CHEM_PRICE_REQUIRED: ${sentence}` }))
+      .toBe(`Nothing was saved. ${sentence}`);
+  });
+  // The RAISE text of 20261102180000_freeze_stock_during_cycle_count.sql with its values filled in.
+  it('explains a cycle-count freeze refusal without the raw token', () => {
+    const sentence = 'Atrazine 4L at Main Warehouse is being counted in cycle count CC-2026-00018. Shipping and receiving for it are paused until that count is completed or cancelled.';
+    expect(sanitizeError({ code: 'P0001', message: `INVENTORY_FROZEN_FOR_CYCLE_COUNT: ${sentence}` }))
       .toBe(`Nothing was saved. ${sentence}`);
   });
 

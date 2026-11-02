@@ -49,13 +49,6 @@ interface CycleCountDbRow {
   [key: string]: unknown;
 }
 
-interface InventoryDbRow {
-  id: string;
-  product_id: string;
-  quantity_available: number;
-  product?: { product_name: string } | null;
-}
-
 interface CountItemDbRow {
   product?: { product_name: string } | null;
   [key: string]: unknown;
@@ -73,6 +66,7 @@ export default function CycleCounts() {
   const updateCycleCountItemIdem = useIdempotencyKey('update_cycle_count_item', profile?.id || '');
   const reverseCycleCountIdem = useIdempotencyKey('reverse_cycle_count', profile?.id || '');
   const cancelCycleCountIdem = useIdempotencyKey('cancel_cycle_count', profile?.id || '');
+  const createCycleCountIdem = useIdempotencyKey('create_cycle_count', profile?.id || '');
   const [counts, setCounts] = useState<CountRow[]>([]);
   const [loading, setLoading] = useState(true);
   // A failed list read shows "could not be loaded", never "No cycle counts yet".
@@ -242,59 +236,21 @@ export default function CycleCounts() {
 
     await runCriticalAction({
       action: async () => {
-        // Generate sequential count number via advisory-lock RPC
-        const { data: countNumData, error: countNumError } = await supabase.rpc('next_cycle_count_number');
-        if (countNumError) throw countNumError;
-        const countNum = assertRpcResult<string>(countNumData, 'next_cycle_count_number');
+        // One server call numbers the count and snapshots stock while locking it, so nothing can
+        // move between the snapshot and the count opening (the open count then freezes that stock).
+        const scope = JSON.stringify([newWarehouse, newNotes]);
+        const { data, error } = await supabase.rpc('create_cycle_count', {
+          p_warehouse: newWarehouse,
+          p_notes: newNotes || undefined,
+          p_idempotency_key: createCycleCountIdem.getKeyFor(scope),
+        });
+        if (error) throw error;
+        const cc = assertRpcResult<{ cycle_count_id: string; count_number: string; item_count: number }>(data, 'create_cycle_count');
+        createCycleCountIdem.resetKeyFor(scope);
 
-        // Fetch inventory items for the selected warehouse: every one, page by page,
-        // since each becomes a count line (one request stopped at the server's row cap).
-        const { data: invData, error: invError } = await fetchAllRows((from, to) => supabase
-          .from('inventory')
-          .select('id, product_id, quantity_available, product:products(product_name)', { count: 'exact' })
-          .eq('location', newWarehouse)
-          .order('product_id')
-          .order('id')
-          .range(from, to));
+        await logActivity({ event: 'cycle_count_started', description: `Cycle count ${cc.count_number} started for ${newWarehouse} (${cc.item_count} products)`, performedBy: profile.id, entityType: 'cycle_count', entityId: cc.cycle_count_id });
 
-        if (invError) throw invError;
-        const invItems = (invData || []) as unknown as InventoryDbRow[];
-
-        if (invItems.length === 0) {
-          throw new Error('No inventory found at this location');
-        }
-
-        // Create the cycle count
-        const { data: cc, error: ccError } = await supabase
-          .from('cycle_counts')
-          .insert({
-            count_number: countNum,
-            warehouse: newWarehouse,
-            status: 'in_progress',
-            notes: newNotes || null,
-          })
-          .select()
-          .single();
-
-        if (ccError) throw ccError;
-
-        // Insert items
-        const items = invItems.map((inv) => ({
-          cycle_count_id: cc.id,
-          product_id: inv.product_id,
-          inventory_id: inv.id,
-          expected_qty: inv.quantity_available || 0,
-        }));
-
-        const { error: itemsError } = await supabase
-          .from('cycle_count_items')
-          .insert(items);
-
-        if (itemsError) throw itemsError;
-
-        await logActivity({ event: 'cycle_count_started', description: `Cycle count ${countNum} started for ${newWarehouse} (${invItems.length} products)`, performedBy: profile.id, entityType: 'cycle_count', entityId: cc.id });
-
-        return `Cycle count ${countNum} created with ${invItems.length} products`;
+        return `Cycle count ${cc.count_number} created with ${cc.item_count} products`;
       },
       toast,
       setLoading: setCreating,

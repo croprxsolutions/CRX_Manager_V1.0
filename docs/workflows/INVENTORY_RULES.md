@@ -297,11 +297,11 @@ pricing edit paths, and each change writes a `cost_history` row whose `change_so
 Physical inventory verification process.
 
 ### Flow
-1. Create a cycle count for a warehouse
-2. System populates `cycle_count_items` with expected quantities from `inventory`
+1. Start a count for a warehouse with `create_cycle_count()`. One transaction numbers it and fills `cycle_count_items` with expected quantities from `inventory`, locking those rows. A warehouse can have only one open count.
+2. While the count is open, those products are **frozen** at that location. Any change to `quantity_available` (receiving, delivery complete/void/cancel, job or blend application, returns, adjustments) is refused with `INVENTORY_FROZEN_FOR_CYCLE_COUNT`, naming the count. Booking and holds still work. This is Mason's decision of 2026-11-02 (migration `20261102180000`).
 3. User enters actual counted quantities
 4. System calculates variance (counted - expected)
-5. Complete the count via `complete_cycle_count()` RPC
+5. Complete the count via `complete_cycle_count()` RPC (the only write allowed through the freeze), or cancel it. Either one lifts the freeze. Completion refuses with `CYCLE_COUNT_STOCK_MOVED` if a counted line's stock no longer matches its snapshot.
 6. Variances create `inventory_transactions` of type 'adjusted'
 
 ### Tables

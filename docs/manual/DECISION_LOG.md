@@ -10,6 +10,14 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-02 — Stock freezes while a cycle count is open
+
+**Decision (Mason, in chat):** during a cycle count the warehouse stops shipping and receiving the products being counted, per product and location. The app enforces this as a freeze. It is not a formula that tries to net out movements made mid-count.
+
+**Why.** Stock that moved during an open count was counted twice: once in the shelf count and again when completion applied the difference on top of the moved stock.
+
+**What this forbids/implies:** while a count is open, any change to on-hand stock of a counted row is refused (`INVENTORY_FROZEN_FOR_CYCLE_COUNT`), except that count's own completion. Booking and holds still work. A warehouse has one open count at a time. Migration `20261102180000`; rules in `docs/workflows/INVENTORY_RULES.md` (Cycle Counts).
+
 ## 2026-11-02 — Keep the multi-warehouse features; only Main Warehouse is used today
 
 **Decision (Mason, in chat):** Crop RX works out of Main Warehouse only today, but other warehouses are planned. The `warehouses` table and per-location stock rows in `inventory` stay, even though the live `warehouses` table holds only Main Warehouse.

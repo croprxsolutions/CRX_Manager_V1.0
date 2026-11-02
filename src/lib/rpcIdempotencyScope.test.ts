@@ -99,6 +99,7 @@ const HELPER_SCOPED: string[] = [
   'confirm_delivery',
   'convert_quote_to_order',
   'create_commission_payment',
+  'create_cycle_count',
   'create_delivery_with_items',
   'create_direct_order',
   'create_followup_delivery',

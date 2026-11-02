@@ -17,6 +17,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^PRODUCT_SETUP_INVALID: REI hours\b/, 'REI hours must be zero or greater'],
   [/^PRODUCT_SETUP_INVALID: PHI days\b/, 'PHI days must be zero or greater'],
   [/product_setup_category_fk/, 'Choose a category from the product category list'],
+  [/cycle_counts_one_open_per_warehouse/, 'A cycle count is already open for this warehouse. Complete or cancel it first'],
   [/product_setup_name_check/, 'Enter a product name without spaces at either end'],
   [/product_setup_sku_check/, 'Enter a SKU without spaces at either end, or leave it blank'],
   [/product_setup_rate_check/, 'Rate Per Acre must be zero or greater'],
@@ -330,6 +331,8 @@ export function sanitizeError(error: unknown): string {
   // The server sentence names the product and says what to do, so it is kept.
   const chemPriceRequired = message.match(/^CHEM_PRICE_REQUIRED:\s*(.+)$/s);
   if (chemPriceRequired) return `Nothing was saved. ${chemPriceRequired[1].trim()}`;
+  const cycleCount = message.match(/^(?:INVENTORY_FROZEN_FOR_CYCLE_COUNT|CYCLE_COUNT_ALREADY_OPEN|CYCLE_COUNT_STOCK_MOVED|CYCLE_COUNT_NO_INVENTORY|CYCLE_COUNT_WAREHOUSE_REQUIRED):\s*(.+)$/s);
+  if (cycleCount) return `Nothing was saved. ${cycleCount[1].trim()}`;
   if (/^INVOICE_POSTED_LOCKED(?::|$)/.test(message)) {
     return 'This invoice was posted, so its lines, billing shares and field locations cannot change. Unpost it first, then edit.';
   }

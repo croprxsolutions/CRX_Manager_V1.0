@@ -238,7 +238,9 @@ BEGIN
     IF NEW.inventory_id IS NOT NULL AND NOT EXISTS (
          SELECT 1 FROM public.inventory i JOIN public.cycle_counts cc ON cc.id = NEW.cycle_count_id
           WHERE i.id = NEW.inventory_id AND i.product_id = NEW.product_id
-            AND lower(btrim(i.location)) = lower(btrim(cc.warehouse))) THEN
+            AND lower(btrim(i.location)) = lower(btrim(cc.warehouse))
+            -- Lock the row so a concurrent move waits for this line and then meets the freeze.
+            FOR SHARE OF i) THEN
       RAISE EXCEPTION 'CYCLE_COUNT_LINE_LOCKED: a cycle count line must be a stock row of that count''s warehouse, for that row''s product.';
     END IF;
     RETURN NEW;
@@ -330,7 +332,7 @@ BEGIN
   WITH locked AS (
     SELECT i.id, i.product_id, i.quantity_available
       FROM public.inventory i
-     WHERE i.location = v_warehouse
+     WHERE lower(btrim(i.location)) = lower(v_warehouse)
      ORDER BY i.id
        FOR NO KEY UPDATE
   )

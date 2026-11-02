@@ -40,6 +40,7 @@ Finish the whole job before moving on. Partial implementations do not enter the 
 ```bash
 npm run typecheck
 npm run lint
+npm run check:code-health
 npm run build
 npm run test
 npm run test:agent-workflows

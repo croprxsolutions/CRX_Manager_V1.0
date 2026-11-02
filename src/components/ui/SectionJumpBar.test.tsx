@@ -24,3 +24,11 @@ describe('SectionJumpBar', () => {
     expect(screen.getByRole('link', { name: 'Billing' })).toHaveAttribute('aria-current', 'location');
   });
 });
+
+describe('SectionJumpBar with a replaced list', () => {
+  it('falls back to the first section when the active one is gone', () => {
+    const { rerender } = render(<SectionJumpBar sections={sections} />);
+    rerender(<SectionJumpBar sections={[{ id: 'c', label: 'Field jobs' }, { id: 'd', label: 'Company' }]} />);
+    expect(screen.getByRole('link', { name: 'Field jobs' })).toHaveAttribute('aria-current', 'location');
+  });
+});

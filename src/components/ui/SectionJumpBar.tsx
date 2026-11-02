@@ -21,13 +21,16 @@ export default function SectionJumpBar({ sections, ariaLabel = 'Jump to section'
   // Callers pass a fresh array each render; re-observe only when the ids change.
   const navRef = useRef<HTMLElement>(null);
   const ids = sections.map((section) => section.id).join('|');
+  // A replaced section list may no longer hold the active id; fall back to its first section.
+  const currentId = sections.some((section) => section.id === activeId) ? activeId : sections[0]?.id;
 
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return;
     // A section is "in view" once its top passes just under the two sticky bars.
     const observer = new IntersectionObserver(
       (entries) => {
-        const visible = entries.filter((entry) => entry.isIntersecting);
+        // Entries arrive in any order; the topmost section in view wins.
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
         if (visible.length > 0) setActiveId(visible[0].target.id);
       },
       { rootMargin: '-130px 0px -60% 0px' },
@@ -43,7 +46,7 @@ export default function SectionJumpBar({ sections, ariaLabel = 'Jump to section'
   useEffect(() => {
     const pill = navRef.current?.querySelector<HTMLElement>('[aria-current]');
     if (typeof pill?.scrollIntoView === 'function') pill.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [activeId]);
+  }, [currentId]);
 
   return (
     <nav
@@ -53,7 +56,7 @@ export default function SectionJumpBar({ sections, ariaLabel = 'Jump to section'
     >
       <div className="flex gap-1.5 overflow-x-auto [-webkit-overflow-scrolling:touch]">
         {sections.map((section) => {
-          const isActive = section.id === activeId;
+          const isActive = section.id === currentId;
           return (
             <a
               key={section.id}

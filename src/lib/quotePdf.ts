@@ -106,9 +106,6 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
   doc.text(data.quote_number, pageW - margin, 38, { align: 'right' });
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Tier ${data.tier} Pricing`, pageW - margin, 53, { align: 'right' });
 
   y = 90;
 

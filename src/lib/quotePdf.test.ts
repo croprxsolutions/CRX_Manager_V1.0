@@ -102,6 +102,11 @@ describe('generateQuotePdf', () => {
     );
   });
 
+  it('never prints the price tier on the customer quote', async () => {
+    await generateQuotePdf(makeQuoteData({ tier: 2 }));
+    expect(JSON.stringify(mockDoc.text.mock.calls)).not.toMatch(/tier/i);
+  });
+
   it('renders the quote number', async () => {
     await generateQuotePdf(makeQuoteData());
     const textCalls = mockDoc.text.mock.calls.flat();

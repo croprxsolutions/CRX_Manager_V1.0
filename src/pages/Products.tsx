@@ -7,6 +7,7 @@ import EditableDataTable, { type EditableColumn } from '../components/ui/Editabl
 import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
+import CustomerSalesSheetModal from '../components/products/CustomerSalesSheetModal';
 import BulkProductImport from '../components/products/BulkProductImport';
 import ProductsMobileList from '../components/products/ProductsMobileList';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
@@ -24,7 +25,7 @@ import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
-import type { Product } from '../types';
+import type { Product, SalesSheetFormat } from '../types';
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
@@ -158,6 +159,7 @@ export default function Products() {
   // Once per render, not per row: the "Cost as of" column dates every product against it.
   const costFreshnessToday = todayInBusinessTz();
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [salesSheetFormat, setSalesSheetFormat] = useState<SalesSheetFormat | null>(null);
   const [pricingPreview, setPricingPreview] = useState<PricingPreviewResult | null>(null);
   // The uploaded price sheet a workbook preview came from; its approval must name it.
   const [pricingSourceFile, setPricingSourceFile] = useState<PricingSourceFile | null>(null);
@@ -375,58 +377,41 @@ export default function Products() {
   };
 
   // --- Download All (filtered) ---
-  const handleDownloadAllCSV = (includeCost: boolean) => {
-    if (includeCost && !isAdmin) return;
-    const rows = includeCost ? filtered : filtered.filter((p) => p.is_active);
-    if (!includeCost && rows.length === 0) {
+  const handleOpenSalesSheet = (format: SalesSheetFormat) => {
+    setExportMenuOpen(false);
+    if (!filtered.some((p) => p.is_active)) {
       toast('warning', 'No active products to include on the sales sheet.');
-      setExportMenuOpen(false);
       return;
     }
+    setSalesSheetFormat(format);
+  };
+
+  const handleDownloadInternalCSV = () => {
+    if (!isAdmin) return;
+    const rows = filtered;
     const fmtMargin = (v: unknown) => v != null ? `${(Number(v) * 100).toFixed(1)}%` : '';
-    const salesCols = [
-      { key: 'product_name', header: 'Product Name' },
-      { key: 'sku', header: 'SKU' },
-      { key: 'category', header: 'Category' },
-      { key: 'vendor', header: 'Vendor' },
-      { key: 'container_size', header: 'Container Size' },
-      { key: 'unit_size', header: 'Unit' },
+    const priceCols = [
+      { key: 'current_cost', header: 'Cost', format: formatProductMoneyCSV },
+      { key: 'cost_updated_date', header: 'Cost As Of', format: formatCostAsOfCSV },
+      { key: 'tier1_price', header: 'T1 Price', format: formatProductMoneyCSV },
+      { key: 'tier1_margin', header: 'T1 Margin %', format: fmtMargin },
+      { key: 'tier2_price', header: 'T2 Price', format: formatProductMoneyCSV },
+      { key: 'tier2_margin', header: 'T2 Margin %', format: fmtMargin },
+      { key: 'tier3_price', header: 'T3 Price', format: formatProductMoneyCSV },
+      { key: 'tier3_margin', header: 'T3 Margin %', format: fmtMargin },
     ];
-    const priceCols = includeCost
-      ? [
-          { key: 'current_cost', header: 'Cost', format: formatProductMoneyCSV },
-          { key: 'cost_updated_date', header: 'Cost As Of', format: formatCostAsOfCSV },
-          { key: 'tier1_price', header: 'T1 Price', format: formatProductMoneyCSV },
-          { key: 'tier1_margin', header: 'T1 Margin %', format: fmtMargin },
-          { key: 'tier2_price', header: 'T2 Price', format: formatProductMoneyCSV },
-          { key: 'tier2_margin', header: 'T2 Margin %', format: fmtMargin },
-          { key: 'tier3_price', header: 'T3 Price', format: formatProductMoneyCSV },
-          { key: 'tier3_margin', header: 'T3 Margin %', format: fmtMargin },
-        ]
-      : [
-          { key: 'tier1_price', header: 'Tier 1 Price', format: formatProductMoneyCSV },
-          { key: 'tier2_price', header: 'Tier 2 Price', format: formatProductMoneyCSV },
-          { key: 'tier3_price', header: 'Tier 3 Price', format: formatProductMoneyCSV },
-        ];
-    const filename = includeCost ? 'product-price-sheet-internal' : 'product-sales-sheet';
     exportToCSV(rows as unknown as Record<string, unknown>[], [
-      ...(includeCost ? INTERNAL_IDENTITY_COLUMNS : salesCols),
+      ...INTERNAL_IDENTITY_COLUMNS,
       ...priceCols,
-      ...(includeCost ? [{ key: 'is_active', header: 'Status', format: (v: unknown) => v ? 'Active' : 'Inactive' }] : []),
-    ], filename);
+      { key: 'is_active', header: 'Status', format: (v: unknown) => v ? 'Active' : 'Inactive' },
+    ], 'product-price-sheet-internal');
     toast('success', `Exported ${rows.length} product(s) to CSV`);
     setExportMenuOpen(false);
   };
 
-  const handleDownloadAllPDF = async (includeCost: boolean) => {
-    if (includeCost && !isAdmin) return;
-    const rows = includeCost ? filtered : filtered.filter((p) => p.is_active);
-    if (!includeCost && rows.length === 0) {
-      toast('warning', 'No active products to include on the sales sheet.');
-      setExportMenuOpen(false);
-      setExporting(false);
-      return;
-    }
+  const handleDownloadInternalPDF = async () => {
+    if (!isAdmin) return;
+    const rows = filtered;
     setExporting(true);
     setExportMenuOpen(false);
     try {
@@ -444,33 +429,24 @@ export default function Products() {
         { header: 'Size', key: 'container_size', format: (v) => v != null ? String(v) : '-' },
         { header: 'Unit', key: 'unit_size', format: (v) => String(v || '-') },
       ];
-      const pricePdfCols: ReportPdfColumn[] = includeCost
-        ? [
-            { header: 'Cost', key: 'current_cost', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
-            { header: 'T1 Price', key: 'tier1_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
-            { header: 'T1 Margin', key: '_t1_margin_str', align: 'right', format: fmtMarginPdf },
-            { header: 'T2 Price', key: 'tier2_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
-            { header: 'T2 Margin', key: '_t2_margin_str', align: 'right', format: fmtMarginPdf },
-            { header: 'T3 Price', key: 'tier3_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
-            { header: 'T3 Margin', key: '_t3_margin_str', align: 'right', format: fmtMarginPdf },
-          ]
-        : [
-            { header: 'Tier 1 Price', key: 'tier1_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
-            { header: 'Tier 2 Price', key: 'tier2_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
-            { header: 'Tier 3 Price', key: 'tier3_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
-          ];
-      const statusPdfCols: ReportPdfColumn[] = includeCost
-        ? [{ header: 'Status', key: 'is_active', format: (v) => v ? 'Active' : 'Inactive' }]
-        : [];
-      const title = includeCost ? 'Product & Pricing — Internal' : 'Product Sales Sheet';
+      const pricePdfCols: ReportPdfColumn[] = [
+        { header: 'Cost', key: 'current_cost', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
+        { header: 'T1 Price', key: 'tier1_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
+        { header: 'T1 Margin', key: '_t1_margin_str', align: 'right', format: fmtMarginPdf },
+        { header: 'T2 Price', key: 'tier2_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
+        { header: 'T2 Margin', key: '_t2_margin_str', align: 'right', format: fmtMarginPdf },
+        { header: 'T3 Price', key: 'tier3_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
+        { header: 'T3 Margin', key: '_t3_margin_str', align: 'right', format: fmtMarginPdf },
+      ];
+      const statusPdfCols: ReportPdfColumn[] = [{ header: 'Status', key: 'is_active', format: (v) => v ? 'Active' : 'Inactive' }];
       await downloadReportPdf({
-        title,
-        subtitle: `${rows.length} ${includeCost ? '' : 'active '}product(s) — ${new Date().toLocaleDateString()}`,
+        title: 'Product & Pricing — Internal',
+        subtitle: `${rows.length} product(s) — ${new Date().toLocaleDateString()}`,
         columns: [...basePdfCols, ...pricePdfCols, ...statusPdfCols],
         data: pdfData as unknown as Record<string, unknown>[],
         orientation: 'landscape',
       });
-      toast('success', `Downloaded ${includeCost ? 'internal' : 'sales'} price sheet PDF with ${rows.length} product(s)`);
+      toast('success', `Downloaded internal price sheet PDF with ${rows.length} product(s)`);
     } catch (err) {
       toast('error', sanitizeError(err));
     }
@@ -1148,21 +1124,21 @@ export default function Products() {
                 <div className="fixed inset-0 z-40" role="presentation" onClick={() => setExportMenuOpen(false)} onKeyDown={() => setExportMenuOpen(false)} />
                 <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
                   <p className="px-3 py-1.5 text-xs font-semibold text-secondary uppercase tracking-wide">PDF</p>
-                  <button onClick={() => handleDownloadAllPDF(false)} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-gray-400" /> Sales Sheet (prices only)
+                  <button onClick={() => handleOpenSalesSheet('pdf')} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-gray-400" /> Customer Sales Sheet
                   </button>
                   {isAdmin && (
-                    <button onClick={() => handleDownloadAllPDF(true)} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
+                    <button onClick={() => void handleDownloadInternalPDF()} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
                       <FileText className="w-4 h-4 text-gray-400" /> Internal (cost + margin)
                     </button>
                   )}
                   <div className="border-t border-gray-100 my-1" />
                   <p className="px-3 py-1.5 text-xs font-semibold text-secondary uppercase tracking-wide">CSV</p>
-                  <button onClick={() => handleDownloadAllCSV(false)} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
-                    <Download className="w-4 h-4 text-gray-400" /> Sales Sheet (prices only)
+                  <button onClick={() => handleOpenSalesSheet('csv')} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
+                    <Download className="w-4 h-4 text-gray-400" /> Customer Sales Sheet
                   </button>
                   {isAdmin && (
-                    <button onClick={() => handleDownloadAllCSV(true)} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
+                    <button onClick={handleDownloadInternalCSV} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2">
                       <Download className="w-4 h-4 text-gray-400" /> Internal (cost + margin)
                     </button>
                   )}
@@ -1377,6 +1353,14 @@ export default function Products() {
         onCancel={() => setPendingInlineRows(null)}
         onSubmit={(value) => void previewInlinePricing(value)}
       />
+
+      {salesSheetFormat && (
+        <CustomerSalesSheetModal
+          format={salesSheetFormat}
+          products={filtered.filter((p) => p.is_active)}
+          onClose={() => setSalesSheetFormat(null)}
+        />
+      )}
 
       <BulkDeleteConfirmModal
         open={deactivateModalOpen}

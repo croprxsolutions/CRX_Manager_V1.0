@@ -22,6 +22,8 @@ export interface ReportPdfColumn {
 
 export interface ReportPdfOptions {
   title: string;
+  /** Names the downloaded file instead of the title. */
+  fileName?: string;
   subtitle?: string;
   dateRange?: { start: string; end: string };
   columns: ReportPdfColumn[];
@@ -189,7 +191,7 @@ export async function generateReportPdf(options: ReportPdfOptions) {
 
 export async function downloadReportPdf(options: ReportPdfOptions) {
   const doc = await generateReportPdf(options);
-  const filename = options.title.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+  const filename = (options.fileName ?? options.title).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
   doc.save(`${filename}_${localToday()}.pdf`);
 }
 

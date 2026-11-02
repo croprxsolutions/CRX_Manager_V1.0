@@ -301,7 +301,7 @@ Rules for new pages and for any page a screen-cleanup PR touches. Existing pages
 ### Tabs or sections?
 - **Shared `Tabs` component** (`src/components/ui/Tabs.tsx`, state in `?tab=`): for alternative views of the same subject where people work in one at a time (Open / Paid / Voided invoices). Labels are short nouns; add a count when it helps triage. Six tabs at most.
 - **`WorkspaceTabs` link bar** (`src/components/layout/WorkspaceTabs.tsx`): only to join sibling pages that keep their own addresses (Billing, Products, Insights).
-- **Stacked sections** (one `Card` with a `CardHeader` per section): when people need to see the groups together, or there are four or fewer short groups.
+- **Stacked sections** (one `Card` with a `CardHeader` per section): when people need to see the groups together, or there are four or fewer short groups. This is the default for editing: Mason prefers one well-organised screen to more tabs or sub-pages (decided 2026-11-02). A long page adds a `SectionJumpBar` (below) rather than splitting into tabs.
 - Never hand-roll tab buttons; use `Tabs`. Some pages still do (Compliance, Rebates, A/R Aging, Job Detail, Field Dashboard, Team Board, Call Lists); move them to `Tabs` when those screens are worked on.
 - Never put a second tab row inside a tab. Use a filter or a select for the second level.
 - Never split one form's required fields across tabs; people miss the hidden ones.
@@ -310,6 +310,44 @@ Rules for new pages and for any page a screen-cleanup PR touches. Existing pages
 ### Settings-style pages
 - One `PageHeader`, then one `Card` per topic, each with a `CardHeader` title and a one-line description of what the settings affect.
 - Each card saves its own fields with its own Save button, which stays disabled until something changes. Don't mix one page-level Save with card-level saves.
-- More than five cards: group them into `Tabs` by topic (for example company, users and access, billing defaults, field paperwork), keeping each tab to a few cards.
+- More than five cards: keep them on one page, grouped by topic (for example Company, Users, Billing, Field jobs), with a `SectionJumpBar` under the header. Don't split them into tabs or sub-pages. This replaces the old "use `Tabs`" rule (Mason, 2026-11-02).
 - Destructive actions (deactivate a user, reset a password) sit at the end of their card as a `danger` or secondary button and always go through `ConfirmModal`.
 - On phones, cards stack full width and every control keeps the 44px tap target (`.phone-touch`).
+
+### Buttons: the › arrow
+- The › arrow (`showChevron`) means "this takes you somewhere": another page, or the next step of a wizard or a multi-step flow ("Next: signature", "View Orders").
+- Buttons that act where you are never show it: Save, Record payment, Delete, Confirm, or opening a modal.
+- "New …" and "Add …" buttons carry a + icon and no arrow, even when they open a new-record page. "Back to …" uses a left arrow, not ›.
+- `Button` shows no arrow unless you pass `showChevron`. Hand-built buttons follow the same rule.
+
+### Count bubbles
+- A count beside a tab or jump pill is a small round bubble. On the selected tab or pill it is solid `crx-green` with white text (or white with green text when the pill itself is solid green). On the others it is gray-100 with gray-600 text.
+
+### Form errors and placeholders
+- Error text and the required asterisk are `red-600`, and an input in error has a `red-500` border. Placeholders are `gray-500`, never lighter (gray-400 fails contrast on white). Keyboard focus shows a full-strength `crx-green` ring.
+
+---
+
+## Style D: Compact and Bold
+
+The app-wide look Mason chose on 2026-11-02. It joins packed, label-left rows with bold headings and section icons. Every new screen follows it, and every screen rebuilt in the look-and-feel program moves to it. The mockups (Settings on desktop, a field stop on a phone) are reference pictures, not code. Name every colour by its token; the hex codes below are only there so you can match the mockups.
+
+### Desktop
+- **Page title:** a large Barlow Semi Condensed heading (`font-heading`, about 2.25rem, bold) with the light `crx-green` accent word, and one short line under it saying what the page affects.
+- **Section bands:** each section (a `Card`) opens with a header band on `cream-dark` (#f0ede6). It holds a 36px square `crx-green` icon tile with a white Lucide icon, a bold Barlow heading (about 1.5rem), and the section's main action on the right.
+- **Sub-parts:** a section may hold several sub-parts. Each starts with a Barlow sub-heading (about 1.125rem, semibold) on a hairline divider, with its own Save on the right.
+- **Rows:** the label sits on the left in a column about 220px wide, and the field or fields sit beside it. Rows are about 36px tall, with inputs and buttons about 36px high, separated by gray-100 dividers. Below about 640px the label stacks above the field.
+- **Saving:** each sub-part saves its own fields. Its Save button stays disabled (gray) until something in that sub-part changes, and a changed sub-part shows an amber "Unsaved" chip by its heading. Warn before leaving a page with unsaved changes. There is never one page-level Save.
+- **Jump bar:** a page with more than about three sections gets a sticky `SectionJumpBar` of round pills, one per section. The active pill is solid `crx-green` with white text, and its count bubble is white with green text.
+- **People lists:** each name starts with a round dark initials avatar (`nav-dark`, #2e2e2e, with white initials).
+
+### Phone
+- **Header:** a dark `nav-dark` (#2e2e2e) band with a back arrow (44px target), the record number in small light-gray text, and a large white Barlow title (about 2rem). A step-by-step flow shows labelled steps under it: a short bar plus a label per step. Done and current steps are `crx-green-on-dark` (#28a26a); later steps are gray. The current step's label is white and bold.
+- **Lists:** one white rounded list with gray-100 dividers, not a stack of separate cards. A row that needs attention (short, over, failed) gets an `amber-50` (#fffbeb) fill, a 4px amber-500 left edge, and amber-800 detail text.
+- **Quantities:** 48px − and + buttons on `crx-green-light` (#e8f5ee) with a green symbol, around a large bold Barlow number (about 1.75rem) that can also be typed.
+- **Main action:** one full-width 56px `crx-green` button pinned to the bottom of the screen, in bold Barlow text. It carries the › arrow only when it moves to the next step.
+- **Tap targets:** every control is at least 44px. Wrap phone-edited screens in `.phone-touch`.
+
+### Shared pieces
+- `SectionJumpBar` (`src/components/ui/SectionJumpBar.tsx`): the sticky jump pills. Pass `sections` (`id`, `label`, optional `count`). Give each section element the matching `id`. The bar marks the section in view as active.
+- Section bands, the label-left row, the phone header and the quantity stepper are built in the screen rebuilds that first need them; move each into `src/components/ui/` the second time it is needed.

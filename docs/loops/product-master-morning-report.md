@@ -9,7 +9,7 @@
 | Package | Status | PR / where |
 |---|---|---|
 | WP-PM-12a Change history | **DRAFTED** | [#1266](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1266) |
-| WP-PM-3 Turning products off safely | **PARKED** (Sol HIGH after 3 rounds) | branch `pm/wp-pm-3-turn-off-safely` at `c13fa0298`, on this computer only |
+| WP-PM-3 Turning products off safely | **PARKED** (round 4, which you approved, fixed the first Sol HIGH; Sol then found a second) | branch `pm/wp-pm-3-turn-off-safely` at `cf04853d7`, on this computer only |
 | WP-PM-8 Setup checks (split: 8a now, 8b later) | **DRAFTED** (8a); 8b not attempted | [#1272](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1272) |
 | WP-PM-9 Forms, units, containers | not attempted (time; needs PM-8) | |
 | DM-0 Data hygiene | not attempted (time; needs PM-8, PM-9) | |
@@ -31,6 +31,7 @@ Each package took about two and a half hours, including three independent review
 - **Not proven:** multi-row update, product-delete refusal, `use_timing` rewrite, trigger order.
 
 ### WP-PM-3 Turning products off safely: PARKED
+- **Update 05:25:** round 4, which you approved, fixed the quantity-increase gap, pinned the inventory function bodies, and made a retired product never show as below reorder. The proof, 7,013 tests and all 24 browser tests passed. Sol then found one new HIGH: two lines of the same product on one order can hide a missing delivery record on one of them. **Next step:** a fifth round checks each line by its own delivery record, if you say yes.
 - **Why:** after the three build rounds the mission allows, Sol found one HIGH. Raising the ordered quantity of a turned-off product on an existing order line is not blocked, and that is a new sale. The guard deliberately left held lines editable, so the one live open order that holds a turned-off product keeps working, and the quantity case slipped through.
 - **Everything else passed:** three independent reviews found 1 BLOCKER and 13 HIGH between them, all fixed and confirmed by a re-review. The database proof passed (including two real sessions racing a deactivation in both orders), 6,996 unit tests passed, and all 24 browser tests passed. In the browser, the row button refuses with the order named, a stock warning is confirmed, and an inactive product is reactivated.
 - **Exact next step (needs your OK for a fourth round):** refuse an *increase* in ordered quantity on order, quote and PO lines for a turned-off product (decreases and other edits stay allowed), add a proof case, rerun Sol, then open the draft PR. The branch stacks on #1266.

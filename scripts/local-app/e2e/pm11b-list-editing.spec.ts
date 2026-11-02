@@ -41,7 +41,7 @@ test('edit mode shows a page of rows, keeps edits across pages, and warns before
   await firstName.fill(`${prefix} edited`);
   await page.getByRole('button', { name: 'Next' }).click();
   await expect(page.getByText('Showing 51–60 of 60')).toBeVisible();
-  await expect(page.getByText('1 unsaved on other pages')).toBeVisible();
+  await expect(page.getByText('1 unsaved not shown')).toBeVisible();
   await page.screenshot({ path: 'scripts/local-app/.state/pm11b-edit-page-2.png' });
 
   await page.getByText('Supplier Pricing').first().click();

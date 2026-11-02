@@ -54,6 +54,20 @@ BEGIN
 
   -- (b2) direct writes cannot close the open count or drop or change its lines.
   BEGIN
+    INSERT INTO public.cycle_counts (count_number, warehouse, status, initiated_by)
+      VALUES ('CC-SMOKE-DONE', '[SMOKE] Nowhere', 'completed', v_admin);
+    RAISE EXCEPTION 'SMOKE_FAIL: (b2) a count was inserted already completed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_STATUS_LOCKED: a cycle count must start in progress%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (b2) %', SQLERRM; END IF;
+  END;
+  BEGIN
+    INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
+      VALUES (v_cc, p1, i3, 3);
+    RAISE EXCEPTION 'SMOKE_FAIL: (b2) another warehouse''s row was added to the count';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_LINE_LOCKED: a cycle count line must be a stock row%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (b2) %', SQLERRM; END IF;
+  END;
+  BEGIN
     UPDATE public.cycle_counts SET status = 'completed' WHERE id = v_cc;
     RAISE EXCEPTION 'SMOKE_FAIL: (b2) an open count was marked completed directly';
   EXCEPTION WHEN OTHERS THEN

@@ -52,7 +52,9 @@
 --    trg_guard_open_cycle_count_items refuses
 --    (CYCLE_COUNT_LINE_LOCKED) deleting a line of an open count or changing its expected_qty,
 --    inventory_id, product_id or cycle_count_id, including moving a line into an open count.
---    Lines of a completed count were already locked (CYCLE_COUNT_NOT_IN_PROGRESS). Entering counted_qty and cancelling stay allowed. The
+--    Lines of a completed count were already locked (CYCLE_COUNT_NOT_IN_PROGRESS). Directly
+--    inserted counts must start in_progress (trg_guard_cycle_count_insert), and inserted lines must
+--    be a stock row of the count's warehouse for that row's product. Entering counted_qty and cancelling stay allowed. The
 --    one-open-count index compares lower(btrim(warehouse)) so spacing or case cannot dodge it.
 --
 -- Live state 2026-11-02: 17 cycle counts, all cancelled; none in_progress, so nothing is frozen
@@ -64,6 +66,7 @@
 -- public.inventory; DROP FUNCTION public._freeze_inventory_during_cycle_count_20261102();
 -- DROP INDEX public.cycle_counts_one_open_per_warehouse;
 -- DROP TRIGGER trg_guard_cycle_count_status ON public.cycle_counts;
+-- DROP TRIGGER trg_guard_cycle_count_insert ON public.cycle_counts;
 -- DROP FUNCTION public._guard_cycle_count_status_20261102();
 -- DROP TRIGGER trg_guard_open_cycle_count_items ON public.cycle_count_items;
 -- DROP FUNCTION public._guard_open_cycle_count_items_20261102();
@@ -154,6 +157,10 @@ CREATE FUNCTION public._guard_cycle_count_status_20261102()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
+  -- Fired on INSERT only for a count that does not start in_progress.
+  IF TG_OP = 'INSERT' THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: a cycle count must start in progress, not %.', NEW.status;
+  END IF;
   -- A count's lines are that warehouse's rows, so its warehouse never changes.
   IF OLD.warehouse IS DISTINCT FROM NEW.warehouse THEN
     RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: the warehouse of cycle count % cannot change.', OLD.count_number;
@@ -190,6 +197,12 @@ CREATE TRIGGER trg_guard_cycle_count_status
   WHEN (OLD.status IS DISTINCT FROM NEW.status OR OLD.warehouse IS DISTINCT FROM NEW.warehouse)
   EXECUTE FUNCTION public._guard_cycle_count_status_20261102();
 
+CREATE TRIGGER trg_guard_cycle_count_insert
+  BEFORE INSERT ON public.cycle_counts
+  FOR EACH ROW
+  WHEN (NEW.status IS DISTINCT FROM 'in_progress')
+  EXECUTE FUNCTION public._guard_cycle_count_status_20261102();
+
 CREATE FUNCTION public._guard_open_cycle_count_items_20261102()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -199,6 +212,15 @@ AS $function$
 DECLARE
   v_count_number text;
 BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.inventory_id IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public.inventory i JOIN public.cycle_counts cc ON cc.id = NEW.cycle_count_id
+          WHERE i.id = NEW.inventory_id AND i.product_id = NEW.product_id
+            AND lower(btrim(i.location)) = lower(btrim(cc.warehouse))) THEN
+      RAISE EXCEPTION 'CYCLE_COUNT_LINE_LOCKED: a cycle count line must be a stock row of that count''s warehouse, for that row''s product.';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF TG_OP = 'UPDATE' AND OLD.expected_qty IS NOT DISTINCT FROM NEW.expected_qty
      AND OLD.inventory_id IS NOT DISTINCT FROM NEW.inventory_id
      AND OLD.product_id IS NOT DISTINCT FROM NEW.product_id
@@ -223,7 +245,7 @@ REVOKE ALL ON FUNCTION public._guard_open_cycle_count_items_20261102()
   FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 CREATE TRIGGER trg_guard_open_cycle_count_items
-  BEFORE UPDATE OR DELETE ON public.cycle_count_items
+  BEFORE INSERT OR UPDATE OR DELETE ON public.cycle_count_items
   FOR EACH ROW
   EXECUTE FUNCTION public._guard_open_cycle_count_items_20261102();
 
@@ -433,6 +455,8 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.cycle_counts'::regclass
                   AND tgname = 'trg_guard_cycle_count_status' AND tgenabled = 'O')
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.cycle_counts'::regclass
+                  AND tgname = 'trg_guard_cycle_count_insert' AND tgenabled = 'O')
      OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.cycle_count_items'::regclass
                   AND tgname = 'trg_guard_open_cycle_count_items' AND tgenabled = 'O') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_POSTFLIGHT: a count-table guard trigger is missing or disabled';

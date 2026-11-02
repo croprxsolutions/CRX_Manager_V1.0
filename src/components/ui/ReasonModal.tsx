@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AlertTriangle, Trash2, ClipboardCheck, type LucideIcon } from 'lucide-react';
 import Modal from './Modal';
 import Button from './Button';
@@ -69,14 +69,19 @@ export default function ReasonModal({
   const [reason, setReason] = useState('');
   const [touched, setTouched] = useState(false);
 
+  const [wasOpen, setWasOpen] = useState(open);
+
   // Reset state whenever the modal is opened so a previous abort doesn't
-  // leak a stale reason into the next call.
-  useEffect(() => {
+  // leak a stale reason into the next call. This runs during render, not in an
+  // effect: an effect fires after the dialog is on screen and could wipe a
+  // reason entered in that gap, silently turning Confirm into a no-op.
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setReason('');
       setTouched(false);
     }
-  }, [open]);
+  }
 
   const trimmed = reason.trim();
   const tooShort = trimmed.length < minLength;

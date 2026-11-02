@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-01",
+    "generated_at": "2026-11-02",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json> (queries documented in the script header)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261031221306",
+    "migrations_high_water": "20261102144057",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -468,6 +468,9 @@
       "20261029160200_chicago_payment_business_date",
       "20261029160300_document_numbers_chicago_year",
       "20261030090000_quote_cost_alerts",
+      "20261101100000_quote_price_trail_and_expiry_grant",
+      "20261101120000_allocate_payment_error_shows_dollars",
+      "20261102100000_product_change_history",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1444,6 +1447,7 @@
     "pricing_change_sets",
     "pricing_workbook_export_rows",
     "pricing_workbook_exports",
+    "product_change_history",
     "product_cost_basis",
     "product_cost_basis_change_rows",
     "product_cost_basis_rollout",
@@ -2431,6 +2435,15 @@
         "product_brands_signal_word_check"
       ],
       "nullable": true
+    },
+    "product_change_history.change_type": {
+      "values": [
+        "created",
+        "updated"
+      ],
+      "constraints": [
+        "product_change_history_change_type_check"
+      ]
     },
     "product_cost_basis.basis_type": {
       "values": [
@@ -3971,6 +3984,12 @@
       "constraint": "product_brands_row_version_check",
       "def": "CHECK ((row_version >= 1))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_change_history",
+      "constraint": "product_change_history_check",
+      "def": "CHECK ((((change_type = 'created'::text) AND (field_name IS NULL)) OR ((change_type = 'updated'::text) AND (field_name IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
     },
     {
       "table": "product_cost_basis",
@@ -5928,6 +5947,16 @@
         "row_version",
         "created_at",
         "updated_at"
+      ]
+    },
+    "product_change_history": {
+      "no_default": [
+        "product_id",
+        "change_type"
+      ],
+      "with_default": [
+        "id",
+        "changed_at"
       ]
     },
     "product_cost_basis": {
@@ -8375,6 +8404,17 @@
       "created_at",
       "updated_at"
     ],
+    "product_change_history": [
+      "id",
+      "product_id",
+      "change_type",
+      "field_name",
+      "old_value",
+      "new_value",
+      "changed_by",
+      "changed_by_name",
+      "changed_at"
+    ],
     "product_cost_basis": [
       "id",
       "product_id",
@@ -8662,7 +8702,8 @@
       "changed_by",
       "changed_at",
       "grower_confirmed_by",
-      "grower_confirmed_at"
+      "grower_confirmed_at",
+      "sent_version"
     ],
     "quote_product_draws": [
       "id",

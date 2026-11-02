@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ from: vi.fn(), captureException: vi.fn() }));
-vi.mock('../../lib/db', () => ({ supabaseUntyped: { from: mocks.from } }));
+vi.mock('../../lib/db', () => ({ supabase: { from: mocks.from } }));
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: mocks.captureException } }));
 
 import ProductChangeHistory from './ProductChangeHistory';

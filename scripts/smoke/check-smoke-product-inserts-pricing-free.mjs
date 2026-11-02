@@ -9,12 +9,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const OPT_OUT = 'smoke-allow-priced-product-insert';
+const OPT_OUT_LINE = new RegExp(`^\\s*--\\s*${OPT_OUT}:\\s*\\S`, 'm');
 const PRICING_COLUMNS = ['current_cost', 'tier1_margin', 'tier2_margin', 'tier3_margin', 'tier1_price', 'tier2_price', 'tier3_price'];
 
+// Blank out quoted strings and comments in one left-to-right pass (so '--' inside a string is not a
+// comment), keeping newlines so reported line numbers stay exact. Dollar-quoted bodies are kept: DO blocks hold the INSERTs.
+function stripStringsAndComments(sql) {
+  return sql.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g, (s) => (s.startsWith("'") ? "''" : s.replace(/[^\n]/g, ' ')));
+}
+
 export function pricedProductInserts(sql) {
-  const code = sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+  const code = stripStringsAndComments(sql);
   const hits = [];
-  for (const m of code.matchAll(/\bINSERT\s+INTO\s+(?:public\.)?"?products"?\s*\(([^)]*)\)/gi)) {
+  for (const m of code.matchAll(/\bINSERT\s+INTO\s+(?:public\.)?"?products"?(?:\s+AS\s+\w+)?\s*\(([^)]*)\)/gi)) {
     const cols = m[1].split(',').map((c) => c.trim().replace(/"/g, '').toLowerCase());
     const priced = cols.filter((c) => PRICING_COLUMNS.includes(c));
     if (priced.length) hits.push({ line: code.slice(0, m.index).split('\n').length, priced });
@@ -29,16 +36,25 @@ const selfCheck = [
   ['INSERT INTO public.products (product_name, unit_size) VALUES (1, 2);', 0],
   ['INSERT INTO public.products_archive (current_cost) VALUES (1);', 0],
   ['-- INSERT INTO products (current_cost) VALUES (1);', 0],
+  ['INSERT INTO public.products AS p (product_name, current_cost) VALUES (1, 2);', 1],
+  ["SELECT '--'; INSERT INTO products (product_name, current_cost) VALUES (1, 2);", 1],
+  ["SELECT 'INSERT INTO products (current_cost) VALUES (1)';", 0],
 ];
 for (const [sql, want] of selfCheck) {
   if (pricedProductInserts(sql).length !== want) throw new Error(`self-check failed for: ${sql}`);
+}
+if (pricedProductInserts('/* a\nb\nc */\nINSERT INTO products (current_cost) VALUES (1);')[0]?.line !== 4) {
+  throw new Error('self-check failed: line number after a block comment');
+}
+if (OPT_OUT_LINE.test(`-- ${OPT_OUT}`) || !OPT_OUT_LINE.test(`-- ${OPT_OUT}: proves the refusal`)) {
+  throw new Error('self-check failed: opt-out must be a comment with a reason');
 }
 
 const dir = process.argv[2] ?? path.dirname(fileURLToPath(import.meta.url));
 const failures = [];
 for (const name of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
   const sql = readFileSync(path.join(dir, name), 'utf8');
-  if (sql.includes(OPT_OUT)) continue;
+  if (OPT_OUT_LINE.test(sql)) continue;
   for (const hit of pricedProductInserts(sql)) failures.push(`${name}:${hit.line} sets ${hit.priced.join(', ')}`);
 }
 

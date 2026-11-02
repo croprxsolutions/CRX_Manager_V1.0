@@ -292,7 +292,7 @@ describe('Products list and exports', () => {
   });
 
   it('leaves a missing customer price blank while preserving a real zero', async () => {
-    mocks.products.splice(0, mocks.products.length, { ...activeProduct, tier2_price: 0 });
+    mocks.products.splice(0, mocks.products.length, { ...activeProduct, tier1_price: null, tier2_price: 0 });
     await loadProducts();
     await downloadSalesSheet('CSV');
     const [rows, columns] = vi.mocked(exportToCSV).mock.calls[0];
@@ -303,6 +303,7 @@ describe('Products list and exports', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     const [selected, selectedColumns] = vi.mocked(exportToCSV).mock.calls[1];
+    expect(selectedColumns.find((column) => column.key === 'tier1_price')?.format?.(selected[0].tier1_price, selected[0])).toBe('');
     expect(selectedColumns.find((column) => column.key === 'tier2_price')?.format?.(selected[0].tier2_price, selected[0])).toBe('$0.00');
   });
 

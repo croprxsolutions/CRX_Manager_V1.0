@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Product } from '../../types';
+import type { Customer, Product, SalesSheetFormat } from '../../types';
 import { exportToCSV, fmtCSV } from '../../lib/csvExport';
 import { sanitizeError } from '../../lib/db';
 import { formatUSD } from '../../lib/money';
@@ -12,15 +12,13 @@ import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 
-export type SalesSheetFormat = 'pdf' | 'csv';
-
-export type SalesSheetProduct = Pick<
+type SalesSheetProduct = Pick<
   Product,
   'id' | 'product_name' | 'sku' | 'category' | 'vendor' | 'container_size' | 'unit_size'
   | 'tier1_price' | 'tier2_price' | 'tier3_price'
 >;
 
-type SalesSheetCustomer = CustomerSearchResult & { assigned_tier: number | null };
+type SalesSheetCustomer = CustomerSearchResult & Pick<Customer, 'assigned_tier'>;
 
 type Props = {
   format: SalesSheetFormat;
@@ -51,8 +49,9 @@ function sheetRows(products: readonly SalesSheetProduct[], tier: number) {
 
 async function downloadSheet(format: SalesSheetFormat, customer: SalesSheetCustomer, tier: number, products: readonly SalesSheetProduct[]) {
   const rows = sheetRows(products, tier);
+  const slug = customer.farm_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const fileName = slug ? `sales-sheet-${slug}` : 'sales-sheet';
   if (format === 'csv') {
-    const slug = customer.farm_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     exportToCSV(rows, [
       { key: 'product_name', header: 'Product Name' },
       { key: 'sku', header: 'SKU' },
@@ -61,11 +60,12 @@ async function downloadSheet(format: SalesSheetFormat, customer: SalesSheetCusto
       { key: 'container_size', header: 'Container Size' },
       { key: 'unit_size', header: 'Unit' },
       { key: 'price', header: 'Price', format: (value) => value == null ? '' : fmtCSV(value) },
-    ], slug ? `sales-sheet-${slug}` : 'sales-sheet');
+    ], fileName);
     return;
   }
   await downloadReportPdf({
     title: 'Product Sales Sheet',
+    fileName,
     subtitle: `Prepared for ${customer.farm_name} — ${new Date().toLocaleDateString()}`,
     columns: [
       { header: 'Product', key: 'product_name' },
@@ -73,7 +73,7 @@ async function downloadSheet(format: SalesSheetFormat, customer: SalesSheetCusto
       { header: 'Category', key: 'category', format: (value) => String(value || '-') },
       { header: 'Size', key: 'container_size', format: (value) => value != null ? String(value) : '-' },
       { header: 'Unit', key: 'unit_size', format: (value) => String(value || '-') },
-      { header: 'Price', key: 'price', align: 'right', format: (value) => value != null ? formatUSD(Number(value)) : '-' },
+      { header: 'Price', key: 'price', align: 'right', format: (value) => value != null ? formatUSD(Number(value)) : '' },
     ],
     data: rows,
     orientation: 'landscape',
@@ -86,7 +86,7 @@ export default function CustomerSalesSheetModal({ format, products, onClose }: P
   const [customer, setCustomer] = useState<SalesSheetCustomer | null>(null);
   const [downloading, setDownloading] = useState(false);
 
-  const tier = customer && [1, 2, 3].includes(customer.assigned_tier ?? 0) ? customer.assigned_tier : null;
+  const tier = customer && [1, 2, 3].includes(customer.assigned_tier) ? customer.assigned_tier : null;
   const unpriced = tier == null ? 0 : products.filter((product) => customerSheetPrice(product, tier) == null).length;
 
   const handleDownload = async () => {

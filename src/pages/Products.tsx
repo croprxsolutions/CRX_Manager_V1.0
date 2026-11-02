@@ -7,7 +7,7 @@ import EditableDataTable, { type EditableColumn } from '../components/ui/Editabl
 import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
-import CustomerSalesSheetModal, { type SalesSheetFormat } from '../components/products/CustomerSalesSheetModal';
+import CustomerSalesSheetModal from '../components/products/CustomerSalesSheetModal';
 import BulkProductImport from '../components/products/BulkProductImport';
 import ProductsMobileList from '../components/products/ProductsMobileList';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
@@ -25,7 +25,7 @@ import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
-import type { Product } from '../types';
+import type { Product, SalesSheetFormat } from '../types';
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,

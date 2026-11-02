@@ -97,7 +97,9 @@ test('the sales sheet shows the assigned customer one price and no tier, on desk
   expect(csv).toContain('103.23');
   expect(csv).not.toMatch(/100\.00|106\.67|tier/i);
 
-  const pdf = await pdfText(await downloadSheet(page, 'PDF', assignedFarm));
+  const pdfFile = await downloadSheet(page, 'PDF', assignedFarm);
+  expect(pdfFile.suggestedFilename()).toContain(`sales_sheet_assigned_farm_${run}`);
+  const pdf = await pdfText(pdfFile);
   expect(pdf).toContain(`Prepared for ${assignedFarm}`);
   expect(pdf).toContain('103.23');
   expect(pdf).not.toMatch(/100\.00|106\.67|tier/i);

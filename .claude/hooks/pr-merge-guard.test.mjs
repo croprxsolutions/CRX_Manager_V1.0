@@ -331,6 +331,8 @@ r = runHook({ tool_name: "mcp__ccd_pr__set_auto_merge", tool_input: { enabled: f
 ok(r.status === 0 && r.decision === null, "agent turning auto-merge OFF passes");
 r = runHook({ tool_name: "Bash", tool_input: { command: "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_1\"}) { clientMutationId } }'" } });
 ok(r.decision?.permissionDecision === "deny", "GraphQL enablePullRequestAutoMerge denied");
+r = runHook({ tool_name: "Bash", tool_input: { command: "rg enablePullRequestAutoMerge docs/" } });
+ok(r.status === 0 && r.decision === null, "searching for the mutation name is not a GraphQL call");
 
 r = runHook({ tool_name: "Bash", tool_input: { command: "gh api graphql -f query='mutation { mergePullRequest(input: {}) }'" } });
 ok(r.decision?.permissionDecision === "deny", "GraphQL merge denied");

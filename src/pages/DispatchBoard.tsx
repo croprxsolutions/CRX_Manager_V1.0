@@ -607,7 +607,7 @@ export default function DispatchBoard() {
                         aria-current={active ? 'page' : undefined}
                         className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left text-sm font-medium transition-colors min-h-[44px] ${
                           active
-                            ? 'bg-crx-green-on-dark/20 text-crx-green-on-dark ring-1 ring-crx-green-on-dark/40'
+                            ? 'bg-crx-green-on-dark/20 text-white ring-1 ring-crx-green-on-dark/40'
                             : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                         }`}
                       >

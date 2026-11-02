@@ -288,7 +288,7 @@ export default function DispatchWizard({
                     isActive
                       ? 'bg-crx-green text-white'
                       : isDone
-                        ? 'bg-crx-green-on-dark/30 text-crx-green-on-dark'
+                        ? 'bg-crx-green-on-dark/30 text-white'
                         : 'bg-slate-800 text-slate-500'
                   }`}
                 >

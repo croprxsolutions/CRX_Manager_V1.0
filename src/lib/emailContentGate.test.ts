@@ -110,6 +110,20 @@ describe('emailContentProblem refuses anything beyond plain formatting', () => {
     expect(emailContentProblem(ok, html)).not.toBeNull();
   });
 
+  it('treats only HTML whitespace as an attribute separator', () => {
+    for (const space of [' ', '﻿', ' ', '　']) {
+      expect(emailContentProblem(ok, `<p style=${space}"color:red">x</p>`)).not.toBeNull();
+      expect(emailContentProblem(ok, `<p${space}style="color:red">x</p>`)).not.toBeNull();
+    }
+    expect(emailContentProblem(ok, '<p\tstyle =\n"color:red">x</p>')).toBeNull();
+  });
+
+  it('refuses entities, quotes and image functions in a style', () => {
+    for (const style of ['color:&#114;ed', 'color:&lt;', 'font-family:\'x\'', 'background-image:none', 'background:url']) {
+      expect(emailContentProblem(ok, `<p style="${style}">x</p>`)).not.toBeNull();
+    }
+  });
+
   it('subject must be one plain line', () => {
     expect(emailContentProblem('Hi\nBcc: x@evil.example', '<p>x</p>')).not.toBeNull();
     expect(emailContentProblem('  ', '<p>x</p>')).not.toBeNull();

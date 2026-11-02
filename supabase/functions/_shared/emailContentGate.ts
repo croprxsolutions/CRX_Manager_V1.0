@@ -39,10 +39,13 @@ const MAX_HTML_LENGTH = 200_000;
 // Sticky (y) regexes are matched at one position, so the scan stays linear.
 const DOCTYPE = /<!DOCTYPE html>/iy;
 const COMMENT = /<!--[^<>[\]]*-->/y;
-// Every attribute value must be quoted and free of < and >.
-const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z-]+(?:\s*=\s*(?:"[^"<>]*"|'[^'<>]*'))?)*)\s*\/?>/y;
-const ATTRIBUTE = /([a-zA-Z-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'))?/g;
-const UNSAFE_STYLE = /url\s*\(|expression|@import|javascript:|\\|&#/i;
+// Every attribute value must be quoted and free of < and >. Only HTML's own
+// whitespace (never JS \s, which also matches Unicode spaces) separates
+// attributes, so this parse and a mail client's parse always agree.
+const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:[\t\n\f\r ]+[a-zA-Z-]+(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"[^"<>]*"|'[^'<>]*'))?)*)[\t\n\f\r ]*\/?>/y;
+const ATTRIBUTE = /([a-zA-Z-]+)(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"([^"]*)"|'([^']*)'))?/g;
+// Entities and quotes are refused outright: a mail client decodes them before CSS.
+const UNSAFE_STYLE = /url|image|expression|@import|javascript|\\|&|"|'/i;
 
 function urlProblem(value: string): string | null {
   // escapeHtml turns & into &amp;; any other entity could hide a scheme.

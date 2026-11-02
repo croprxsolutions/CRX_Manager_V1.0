@@ -343,7 +343,9 @@ function isPermanentFailure(message: string): boolean {
     || normalized.includes('not authorized')
     || normalized.includes('must be in_progress')
     // A person must void the invoice first; automatic retries cannot clear it.
-    || hasRpcCode(message, RpcErrorCodes.DELIVERY_HAS_POSTED_INVOICE);
+    || hasRpcCode(message, RpcErrorCodes.DELIVERY_HAS_POSTED_INVOICE)
+    // A completed delivery is voided by an admin, never cancelled; never auto-voided from the queue.
+    || hasRpcCode(message, RpcErrorCodes.DELIVERY_COMPLETED_USE_VOID);
 }
 
 /**

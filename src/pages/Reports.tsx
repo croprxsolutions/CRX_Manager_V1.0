@@ -12,7 +12,7 @@ import { hasPageAccess } from '../lib/pagePermissions';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
 import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
-import { exportToCSV, fmtCSV, fmtDateCSV, fmtDateOnlyCSV } from '../lib/csvExport';
+import { exportToCSV, fmtCSV, fmtDateCSV, fmtDateOnlyCSV, formatProductMoneyCSV } from '../lib/csvExport';
 import { formatExactUSD, formatUSD } from '../lib/money';
 import { parseDollarsToCentsSigned } from '../lib/parseCents';
 import LogbookReport from '../components/reports/LogbookReport';
@@ -1254,11 +1254,11 @@ export default function Reports() {
         { key: 'sku', header: 'SKU' },
         { key: 'category', header: 'Category' },
         { key: 'vendor', header: 'Vendor' },
-        ...(isAdmin ? [{ key: 'current_cost', header: 'Cost', format: fmtCSV }] : []),
-        { key: 'tier1_price', header: 'Tier 1', format: fmtCSV },
-        { key: 'tier2_price', header: 'Tier 2', format: fmtCSV },
-        { key: 'tier3_price', header: 'Tier 3', format: fmtCSV },
-      ], 'price_list');
+        ...(isAdmin ? [{ key: 'current_cost', header: 'Cost', format: formatProductMoneyCSV }] : []),
+        { key: 'tier1_price', header: 'Tier 1', format: formatProductMoneyCSV },
+        { key: 'tier2_price', header: 'Tier 2', format: formatProductMoneyCSV },
+        { key: 'tier3_price', header: 'Tier 3', format: formatProductMoneyCSV },
+      ], 'price_list_internal');
     }
     toast('success', 'Report exported');
   };

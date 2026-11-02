@@ -389,7 +389,7 @@ describe('Products list and exports', () => {
     expect(mocks.toast).toHaveBeenNthCalledWith(2, 'warning', 'No active products selected.');
   });
 
-  it('labels selected exports internal when Margins are shown', async () => {
+  it('labels selected exports internal with or without Margins', async () => {
     await loadProducts();
     fireEvent.click(screen.getByRole('button', { name: 'Margins' }));
     fireEvent.click(screen.getByRole('checkbox'));
@@ -402,7 +402,10 @@ describe('Products list and exports', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
-    expect(vi.mocked(exportToCSV).mock.calls[1][2]).toBe('products');
+    expect(vi.mocked(exportToCSV).mock.calls[1][2]).toBe('products-internal');
+    fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+    await waitFor(() => expect(downloadReportPdf).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(downloadReportPdf).mock.calls[1][0].title).toBe('Products — Internal');
   });
 
   it('uses filtered row counts for the internal PDF and adds Size and Unit to selected PDF', async () => {
@@ -444,7 +447,8 @@ describe('Products list and exports', () => {
     const [rows, columns, filename] = vi.mocked(exportToCSV).mock.calls[0];
     expect(rows.map((row) => row.id)).toEqual([activeProduct.id]);
     expect(columns.map((column) => column.key).join(' ')).not.toMatch(/cost|margin/);
-    expect(filename).toBe('products');
+    // Every tier is in this file, so it is labeled internal even for a rep.
+    expect(filename).toBe('products-internal');
   });
 
   it('shows a matching-products message without an add action when filters hide the catalog', async () => {

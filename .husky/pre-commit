@@ -35,6 +35,17 @@ fi
 echo "🛡️ Validating staged SQL migrations..."
 bash scripts/validate-sql.sh || exit 1
 
+# A migration can re-define an RPC that the idempotency/contract registries must
+# name; these tests failed only in CI on PR #1298. They read the working tree.
+if printf '%s\n' "$STAGED_FILES" | grep -Eq '^supabase/migrations/'; then
+  echo "🧾 Checking RPC idempotency and contract registries..."
+  npx vitest run src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts || {
+    echo ""
+    echo "❌ RPC REGISTRY TESTS FAILED — add the registry entry this migration needs."
+    exit 1
+  }
+fi
+
 echo "🛡️ Validating staged frontend files..."
 bash scripts/validate-frontend.sh || exit 1
 

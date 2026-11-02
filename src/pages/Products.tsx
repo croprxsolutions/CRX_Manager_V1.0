@@ -8,6 +8,7 @@ import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import BulkProductImport from '../components/products/BulkProductImport';
+import ProductsMobileList, { matchesProductSearch } from '../components/products/ProductsMobileList';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
 import PricingSourceReasonModal, { type PricingSourceReason } from '../components/products/PricingSourceReasonModal';
 import { useToast } from '../components/ui/Toast';
@@ -1120,11 +1121,13 @@ export default function Products() {
           <>
           {/* Bulk actions act on the selection, so they wait while the rows are hidden by a failed load. */}
           {canBulkAction && !loadError && (
-            <BulkActionBar
-              selectedCount={selectedCount}
-              actions={bulkActions}
-              onDeselectAll={clearSelection}
-            />
+            <div className="hidden md:block">
+              <BulkActionBar
+                selectedCount={selectedCount}
+                actions={bulkActions}
+                onDeselectAll={clearSelection}
+              />
+            </div>
           )}
           <div className="flex flex-wrap gap-2">
           {/* Download All dropdown. Exports wait while a failed load hides the rows: they would
@@ -1166,7 +1169,7 @@ export default function Products() {
             )}
           </div>
           {isAdmin && (
-            <>
+            <div className="hidden items-center gap-2 md:flex">
               <Button
                 variant="secondary"
                 icon={<FileSpreadsheet className="w-4 h-4" />}
@@ -1212,18 +1215,33 @@ export default function Products() {
               >
                 Import Products
               </Button>
-              <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/products/new')}>
-                Add Product
-              </Button>
-            </>
+            </div>
           )}
           </div>
+          {isAdmin && (
+            <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/products/new')}>
+              Add Product
+            </Button>
+          )}
           </>
         )}
       />
 
       <Card padding={false}>
-        <div className="p-5">
+        <div className="md:hidden">
+          <ProductsMobileList
+            products={products}
+            categories={categories}
+            categoryFilter={categoryFilter}
+            statusFilter={statusFilter}
+            onCategoryFilterChange={setCategoryFilter}
+            onStatusFilterChange={setStatusFilter}
+            onOpenProduct={(product) => navigate(`/products/${product.id}`)}
+            loadError={loadError}
+            onRetry={retryProducts}
+          />
+        </div>
+        <div className="hidden p-5 md:block">
           <EditableDataTable<ProductListRow>
             key={tableRevision}
             data={filtered}
@@ -1231,7 +1249,7 @@ export default function Products() {
             rowKey="id"
             searchable
             searchPlaceholder="Search products..."
-            searchKeys={['product_name', 'sku', 'category', 'vendor', 'manufacturer', 'epa_registration']}
+            searchMatcher={matchesProductSearch}
             onRowClick={(row) => navigate(`/products/${row.id}`)}
             emptyTitle={products.length > 0 ? 'No matching products' : 'No products yet'}
             emptyDescription={products.length > 0 ? 'Try a different search or filter' : 'Add your first product to get started'}

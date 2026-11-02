@@ -3001,6 +3001,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // through the private _unpost_invoice_replay_impl_20261015; it keeps p_idempotency_key behind the
   // required-key public wrapper and never reaches the generated types.
   '_unpost_invoice_group_replay_impl_20261015',
+  // 20261102140000 re-emits both cancel bodies (a completed delivery must be voided); each keeps
+  // p_idempotency_key behind its required-key public wrapper. Prune once the registry high-water
+  // passes 20261102140000 (the bodies never reach the generated types).
+  '_cancel_delivery_replay_impl_20261015',
+  '_batch_cancel_deliveries_replay_impl_20261015',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their

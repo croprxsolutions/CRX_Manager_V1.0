@@ -209,6 +209,7 @@ export const RpcErrorCodes = {
   ORDER_INVOICE_LINE_INVALID: 'ORDER_INVOICE_LINE_INVALID',
   // void_delivery / cancel_delivery — void the delivery's posted invoice first
   DELIVERY_HAS_POSTED_INVOICE: 'DELIVERY_HAS_POSTED_INVOICE',
+  DELIVERY_COMPLETED_USE_VOID: 'DELIVERY_COMPLETED_USE_VOID',
   ORDER_LIFECYCLE_BUSY_RETRY: 'ORDER_LIFECYCLE_BUSY_RETRY',
   // price_order (sell-side roadmap #2 v2)
   INVALID_PRICE: 'INVALID_PRICE',

@@ -81,3 +81,12 @@ export function todayInBusinessTz(now: Date = new Date()): string {
 
   return `${year}-${month}-${day}`;
 }
+
+/**
+ * Whole days since a YYYY-MM-DD date-only value, counted from local midnight
+ * (0 for today, 1 for yesterday). Timestamps must not be passed: their UTC date
+ * can differ from the local day.
+ */
+export function daysSinceLocalDate(dateStr: string, now: Date = new Date()): number {
+  return dateStr ? Math.floor((now.getTime() - parseLocalDate(dateStr).getTime()) / 86400000) : 0;
+}

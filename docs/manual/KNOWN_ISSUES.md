@@ -244,8 +244,10 @@ tiers is not built; the linkage field is not used for money today.
 - Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
   `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
   (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
-- `invoices.season` defaults to `current_season()` = UTC date, and the blend-ticket path uses it
-  (`20261020210000:1050,1227`): about five hours each 30 Sept evening can stamp the next season. LOW.
+- `invoices.season` defaults to `current_season()`, and the blend-ticket path uses it
+  (`20261020210000:1050,1227`). Fixed by `20261102230000` (once applied), which makes `current_season()` read the
+  Chicago date. `invoices.invoice_date` still defaults to the UTC `CURRENT_DATE`, so on 30 Sept 7 pm–midnight
+  Central a defaulted invoice gets a 1 Oct date with the 30 Sept season. LOW.
 - Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
   interval warning in `src/pages/JobDetail.tsx:1449`: a wrong season at the 1 October boundary can silently
   suppress the warning. MED (safety).
@@ -617,7 +619,7 @@ OrderDetail.
 **MED/LOW · OPEN · money**
 - Quote re-save can still be refused when a save both deletes or switches a saved line and adds several new lines
   for the same product (LOW).
-- `issue_return_credit` and the delivery-split functions can fall back to `current_season()` (UTC) (LOW).
+- `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; it reads the Chicago date from `20261102230000` (once applied), but the split path's `invoice_date = CURRENT_DATE` is still UTC (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
 - Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing

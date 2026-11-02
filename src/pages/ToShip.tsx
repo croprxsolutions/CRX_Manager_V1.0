@@ -20,7 +20,7 @@ import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
-import { parseLocalDate } from '../lib/dateUtils';
+import { daysSinceLocalDate, parseLocalDate } from '../lib/dateUtils';
 import type { InventoryPositionRow } from '../types';
 
 const OPEN_STATUSES = ['confirmed', 'partially_fulfilled'];
@@ -89,7 +89,7 @@ type PORow = {
 
 const fmtUnits = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 1 });
 const fmtMoney = (n: number) => '$' + Math.round(n).toLocaleString();
-const daysAgo = (d: string) => (d ? Math.floor((Date.now() - parseLocalDate(d.slice(0, 10)).getTime()) / 86400000) : 0);
+const daysAgo = (d: string) => daysSinceLocalDate(d);
 
 export default function ToShip() {
   const navigate = useNavigate();

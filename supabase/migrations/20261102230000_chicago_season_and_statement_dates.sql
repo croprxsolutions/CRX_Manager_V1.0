@@ -17,7 +17,8 @@ DECLARE
 BEGIN
   SELECT * INTO v_fn FROM pg_proc WHERE oid = to_regprocedure('public.current_season()');
   IF NOT FOUND OR md5(replace(v_fn.prosrc, chr(13), '')) <> 'e2b73d55a7a134ba0cfaeabe4c445ec0'
-     OR v_fn.prosecdef OR v_fn.provolatile <> 's' THEN
+     OR v_fn.prosecdef OR v_fn.provolatile <> 's'
+     OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public'] THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: current_season drift; re-review before applying';
   END IF;
   SELECT * INTO v_fn FROM pg_proc

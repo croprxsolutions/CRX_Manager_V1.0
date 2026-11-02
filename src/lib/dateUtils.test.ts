@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { todayInBusinessTz } from './dateUtils';
 
 describe('todayInBusinessTz', () => {
@@ -81,5 +81,22 @@ describe('todayInBusinessTz', () => {
     expect(todayInBusinessTz(new Date('2026-01-05T18:00:00Z'))).toBe('2026-01-05');
     expect(todayInBusinessTz(new Date('2026-09-09T18:00:00Z'))).toBe('2026-09-09');
     expect(todayInBusinessTz(new Date('2026-10-01T18:00:00Z'))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('daysSinceLocalDate', () => {
+  it('keeps a delivery scheduled today at 0 days after 7pm Central', async () => {
+    vi.stubEnv('TZ', 'America/Chicago');
+    try {
+      const { daysSinceLocalDate } = await import('./dateUtils');
+      const evening = new Date('2026-10-02T00:30:00Z'); // Oct 1, 7:30pm Central
+      // The former `new Date(dateOnly)` count read Oct 1 as UTC midnight: 1 day, "overdue".
+      expect(Math.floor((evening.getTime() - new Date('2026-10-01').getTime()) / 86400000)).toBe(1);
+      expect(daysSinceLocalDate('2026-10-01', evening)).toBe(0);
+      expect(daysSinceLocalDate('2026-09-30', evening)).toBe(1);
+      expect(daysSinceLocalDate('', evening)).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

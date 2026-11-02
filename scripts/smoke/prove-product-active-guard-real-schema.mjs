@@ -390,6 +390,24 @@ try {
     ROLLBACK;`));
   assert.deepEqual(chargeReview.blockers, []);
   turn(billedProduct, false, 'pm3-billed');
+  const twoLineProduct = product('[PROVER] PM3 Same Product Two Lines');
+  const twoLineOrder = seedOrderLine(twoLineProduct, 'PM3-TWO-LINES', 'fulfilled', 300);
+  const secondLineId = uid(1300);
+  seed(`UPDATE public.order_items SET quantity_delivered = 1, quantity_remaining = 0
+    WHERE id = '${twoLineOrder.lineId}';
+    INSERT INTO public.order_items(id, order_id, product_id, product_name, total_units_needed,
+      quantity_delivered, quantity_remaining, price_per_unit, cost_per_unit, total_price)
+      VALUES ('${secondLineId}', '${twoLineOrder.orderId}', '${twoLineProduct}',
+        '[PROVER] chemical', 1, 1, 0, 2, 1, 2);`);
+  seedDelivery(twoLineOrder.orderId, twoLineOrder.lineId, twoLineProduct, 301, false, true);
+  assert.equal(preview(twoLineProduct).blockers[0].number, 'PM3-TWO-LINES');
+  const twoLineToken = preview(twoLineProduct).review_token;
+  denied(ADMIN, `SELECT public.set_product_active(ARRAY['${twoLineProduct}']::uuid[],
+    false, '${twoLineToken}', 'pm3-two-lines-blocked');`,
+  /PRODUCT_DEACTIVATION_BLOCKED:.*PM3-TWO-LINES/);
+  assert.equal(scalar(`SELECT is_active FROM public.products WHERE id = '${twoLineProduct}';`), 't');
+  seedDelivery(twoLineOrder.orderId, secondLineId, twoLineProduct, 302, false, true);
+  assert.deepEqual(preview(twoLineProduct).blockers, []);
   const outsideProduct = product('[PROVER] PM3 Outside Billed');
   const outside = seedOrderLine(outsideProduct, 'PM3-OUTSIDE', 'fulfilled', 212);
   seedDelivery(outside.orderId, outside.lineId, outsideProduct, 213, true);

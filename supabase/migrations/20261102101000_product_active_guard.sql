@@ -85,7 +85,7 @@ BEGIN
                 -- A historic delivered quantity without a completed item is unknown.
                 (coalesce(oi.quantity_delivered, 0) > 0 AND NOT EXISTS (
                   SELECT 1 FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
-                   WHERE di.product_id = v_product.id AND d.order_id = o.id
+                   WHERE di.order_item_id = oi.id AND d.order_id = o.id
                      AND d.status = 'completed' AND d.deleted_at IS NULL))
                 OR coalesce((
                   SELECT round(sum(coalesce(di.quantity_delivered, 0)), 4)

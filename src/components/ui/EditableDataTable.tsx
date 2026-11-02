@@ -173,7 +173,9 @@ export default function EditableDataTable<T extends Record<string, any>>({
 
   const dirtyCount = dirtyRows.size;
   const editExitRef = useRef({ editMode, onEditModeChange });
-  editExitRef.current = { editMode, onEditModeChange };
+  useEffect(() => {
+    editExitRef.current = { editMode, onEditModeChange };
+  }, [editMode, onEditModeChange]);
 
   // A table can vanish mid-edit (a tab change or remount); the parent must not stay in edit layout.
   useEffect(() => () => {

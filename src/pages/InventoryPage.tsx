@@ -487,7 +487,6 @@ export default function InventoryPage() {
     const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('products')
       .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' })
-      .eq('is_active', true)
       .order('product_name')
       .order('id')
       .range(from, to)));
@@ -503,6 +502,9 @@ export default function InventoryPage() {
     setProducts((data || []) as unknown as PickerProduct[]);
     setProductsFailed(false);
   }, [toast]);
+
+  // The position RPC omits status, so load the catalog for an internal Inactive label.
+  useEffect(() => { void fetchProducts(); }, [fetchProducts]);
 
   const fetchCustomers = useCallback(async () => {
     const readId = ++customersReadRef.current;
@@ -1256,6 +1258,8 @@ export default function InventoryPage() {
       render: (row) => (
         <div className="flex items-center gap-1">
           <span className="font-medium text-nav-dark">{row.product_name}</span>
+          {products.some((product) => product.id === row.product_id && !product.is_active) &&
+            <span className="text-xs font-semibold text-amber-700">Inactive</span>}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1961,7 +1965,7 @@ export default function InventoryPage() {
                         setHoldWarning('');
                       }}
                       product={p}
-                      trailing={null}
+                      trailing={p.is_active ? null : <span className="font-semibold text-amber-700">Inactive</span>}
                     />
                   </div>
                 ))
@@ -2070,7 +2074,7 @@ export default function InventoryPage() {
                         setAddUnitSize(p.unit_size || '');
                       }}
                       product={p}
-                      trailing={null}
+                      trailing={p.is_active ? null : <span className="font-semibold text-amber-700">Inactive</span>}
                     />
                   </div>
                 ))

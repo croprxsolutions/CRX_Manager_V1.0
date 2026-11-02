@@ -1,20 +1,21 @@
 import { useEffect, useRef, useState, useMemo , useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileUp, Download, FileText, Trash2, Eye, EyeOff, ChevronDown, FileSpreadsheet, Upload } from 'lucide-react';
+import { Plus, FileUp, Download, FileText, Eye, EyeOff, ChevronDown, FileSpreadsheet, Upload, Power, PowerOff } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import EditableDataTable, { type EditableColumn } from '../components/ui/EditableDataTable';
 import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
-import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
+import ConfirmModal from '../components/ui/ConfirmModal';
+import Modal from '../components/ui/Modal';
 import BulkProductImport from '../components/products/BulkProductImport';
 import ProductsMobileList from '../components/products/ProductsMobileList';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
 import PricingSourceReasonModal, { type PricingSourceReason } from '../components/products/PricingSourceReasonModal';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, sanitizeError, checkMutationResult } from '../lib/db';
-import { runCriticalAction } from '../lib/criticalAction';
+import { supabase, supabaseUntyped, sanitizeError, checkMutationResult, assertRpcResult } from '../lib/db';
+import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
@@ -89,8 +90,15 @@ const INLINE_NONPRICING_FIELDS = new Set([
   'product_name',
   'category',
   'vendor',
-  'is_active',
 ]);
+
+type ActiveReviewEntry = { product_id: string; product_name: string; kind: string; number: string | null; message: string };
+type ActiveReview = {
+  products: Array<{ id: string; product_name: string; is_active: boolean }>;
+  blockers: ActiveReviewEntry[];
+  warnings: ActiveReviewEntry[];
+  review_token: string;
+};
 
 // Floors live in product_margin_floors, not on the product: the list copies each one onto its row.
 const MARGIN_FLOOR_FIELD = 'margin_floor_percent';
@@ -150,7 +158,7 @@ export default function Products() {
   const [categories, setCategories] = useState<string[]>([]);
   const [vendors, setVendors] = useState<string[]>([]);
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
-  const [deactivateModalOpen, setDeactivateModalOpen] = useState(false);
+  const [activeReview, setActiveReview] = useState<{ ids: string[]; active: boolean; key: string; result: ActiveReview } | null>(null);
   const [deactivating, setDeactivating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showSensitive, setShowSensitive] = useState(false);
@@ -191,7 +199,7 @@ export default function Products() {
     // A failed load hides the rows, so an open Deactivate dialog for a hidden selection closes too.
     const failLoad = () => {
       setLoadError(true);
-      setDeactivateModalOpen(false);
+      setActiveReview(null);
     };
     // Paginate so the master catalog never silently truncates as the catalog grows.
     // PostgREST caps a single response (default 1000), so we page through with .range().
@@ -281,12 +289,12 @@ export default function Products() {
     useRowSelection({
       data: filtered,
       getId: (p) => p.id,
-      isSelectable: (p) => p.is_active,
+      isSelectable: (p) => isAdmin || p.is_active,
     });
 
   const checkboxCol = useMemo(
-    () => createCheckboxColumn<Product>(selected, toggleSelect, (p) => p.id, (p) => p.is_active),
-    [selected, toggleSelect]
+    () => createCheckboxColumn<Product>(selected, toggleSelect, (p) => p.id, (p) => isAdmin || p.is_active),
+    [selected, toggleSelect, isAdmin]
   );
 
   const handleExportCSV = () => {
@@ -477,41 +485,50 @@ export default function Products() {
     setExporting(false);
   };
 
-  const handleDeactivate = async () => {
-    // The selection is hidden behind a failed load, so it cannot be confirmed.
-    if (loadError) return;
-    const ids = selectedRows.map((p) => p.id);
-
-    // H22: Block deactivation if any selected product has open PO lines
-    const { data: openPoLines } = await supabase
-      .from('purchase_order_items')
-      .select('id, product_id, purchase_order:purchase_orders!inner(status)')
-      .in('product_id', ids)
-      .in('purchase_order.status', ['draft', 'submitted', 'partially_received'])
-      .limit(1);
-    if (openPoLines && openPoLines.length > 0) {
-      toast('error', 'Cannot deactivate: one or more selected products have open purchase order lines. Receive or cancel those POs first.');
-      setDeactivateModalOpen(false);
-      return;
+  const startActiveReview = async (ids: string[], active: boolean) => {
+    if (!isAdmin || loadError || ids.length === 0) return;
+    try {
+      const { data, error } = await supabaseUntyped.rpc('preview_product_active_change', {
+        p_product_ids: ids, p_active: active,
+      });
+      if (error) throw error;
+      const result = assertRpcResult<ActiveReview>(data, 'preview_product_active_change');
+      if (!result || !Array.isArray(result.blockers) || !Array.isArray(result.warnings) || !result.review_token) {
+        throw new Error('Product review was incomplete. Try again.');
+      }
+      setActiveReview({ ids, active, key: crypto.randomUUID(), result });
+    } catch (err) {
+      toast('error', sanitizeError(err));
     }
+  };
 
+  const applyActiveReview = async () => {
+    if (!activeReview || activeReview.result.blockers.length > 0 || loadError || deactivating) return;
+    const { ids, active, key, result } = activeReview;
     await runCriticalAction({
       action: async () => {
-        const result = await supabase
-          .from('products')
-          .update({ is_active: false, updated_at: new Date().toISOString() })
-          .in('id', ids)
-          .select('id');
-        checkMutationResult(result, 'Deactivate products');
+        const response = await supabaseUntyped.rpc('set_product_active', {
+          p_product_ids: ids, p_active: active, p_review_token: result.review_token,
+          p_idempotency_key: key,
+        });
+        if (response.error) {
+          if (response.error.message.includes('PRODUCT_ACTIVE_REVIEW_STALE')) {
+            setActiveReview(null);
+            toast('warning', 'Product details changed since this review. Review the selection again.');
+            throw new CriticalActionHandledError('Product review changed');
+          }
+          throw response.error;
+        }
+        assertRpcResult(response.data, 'set_product_active');
       },
       toast,
       setLoading: setDeactivating,
-      successMessage: `Deactivated ${ids.length} product(s)`,
-      sentryTag: 'deactivate_products',
+      successMessage: `${active ? 'Reactivated' : 'Deactivated'} ${ids.length} product(s)`,
+      sentryTag: 'set_product_active',
       onSuccess: () => {
         clearSelection();
         fetchProducts();
-        setDeactivateModalOpen(false);
+        setActiveReview(null);
       },
     });
   };
@@ -519,7 +536,8 @@ export default function Products() {
   const bulkActions = [
     { key: 'csv', label: 'Export CSV', icon: <Download className="w-4 h-4" />, onClick: handleExportCSV },
     { key: 'pdf', label: 'Download PDF', icon: <FileText className="w-4 h-4" />, onClick: handleExportPDF, loading: exporting },
-    { key: 'deactivate', label: 'Deactivate', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeactivateModalOpen(true), variant: 'danger' as const },
+    ...(isAdmin && selectedRows.some((p) => p.is_active) ? [{ key: 'deactivate', label: 'Deactivate', icon: <PowerOff className="w-4 h-4" />, onClick: () => void startActiveReview(selectedRows.filter((p) => p.is_active).map((p) => p.id), false), variant: 'danger' as const }] : []),
+    ...(isAdmin && selectedRows.some((p) => !p.is_active) ? [{ key: 'reactivate', label: 'Reactivate', icon: <Power className="w-4 h-4" />, onClick: () => void startActiveReview(selectedRows.filter((p) => !p.is_active).map((p) => p.id), true) }] : []),
   ];
 
   const categoryOptions = categories.map((c) => ({ value: c, label: c }));
@@ -1092,12 +1110,15 @@ export default function Products() {
     {
       key: 'is_active',
       header: 'Status',
-      editable: isAdmin,
-      editType: 'toggle',
       render: (row) => (
-        <Badge variant={row.is_active ? 'success' : 'default'}>
-          {row.is_active ? 'Active' : 'Inactive'}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={row.is_active ? 'success' : 'default'}>{row.is_active ? 'Active' : 'Inactive'}</Badge>
+          {isAdmin && <button type="button"
+            className="min-h-8 rounded px-2 text-xs font-medium text-crx-green focus-visible:outline focus-visible:outline-2 focus-visible:outline-crx-green"
+            onClick={() => void startActiveReview([row.id], !row.is_active)}>
+            {row.is_active ? 'Deactivate' : 'Reactivate'}
+          </button>}
+        </div>
       ),
     },
   ];
@@ -1333,7 +1354,7 @@ export default function Products() {
                   <option value="inactive">Inactive</option>
                   <option value="all">All statuses</option>
                 </select>
-                {canBulkAction && !loadError && filtered.some((p) => p.is_active) && (
+                {canBulkAction && !loadError && filtered.some((p) => isAdmin || p.is_active) && (
                   <button
                     onClick={toggleAll}
                     className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"
@@ -1378,15 +1399,20 @@ export default function Products() {
         onSubmit={(value) => void previewInlinePricing(value)}
       />
 
-      <BulkDeleteConfirmModal
-        open={deactivateModalOpen}
-        onClose={() => setDeactivateModalOpen(false)}
-        count={selectedCount}
-        entityName="product"
-        actionWord="deactivate"
-        onConfirm={handleDeactivate}
-        loading={deactivating}
-      />
+      <Modal open={activeReview !== null && activeReview.result.blockers.length > 0}
+        onClose={() => setActiveReview(null)} title="Cannot deactivate products"
+        footer={<Button variant="secondary" onClick={() => setActiveReview(null)}>Close</Button>}>
+        <ul className="list-disc space-y-1 pl-5 text-sm text-red-800">
+          {activeReview?.result.blockers.map((entry, index) => <li key={`${entry.product_id}-${entry.kind}-${entry.number}-${index}`}>{entry.message}</li>)}
+        </ul>
+      </Modal>
+      <ConfirmModal open={activeReview !== null && activeReview.result.blockers.length === 0}
+        onClose={() => setActiveReview(null)} onConfirm={() => void applyActiveReview()}
+        title={activeReview?.active ? 'Reactivate products' : 'Deactivate products'}
+        message={`${activeReview?.ids.length ?? 0} product(s) will be ${activeReview?.active ? 'reactivated' : 'deactivated'}.${activeReview?.result.warnings.length
+          ? ` Review: ${activeReview.result.warnings.map((entry) => entry.message).join('; ')}` : ''}`}
+        confirmLabel={activeReview?.active ? 'Reactivate' : 'Deactivate'}
+        variant={activeReview?.active ? 'info' : 'warning'} loading={deactivating} />
     </div>
   );
 }

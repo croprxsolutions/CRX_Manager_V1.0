@@ -8,7 +8,7 @@ import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import BulkProductImport from '../components/products/BulkProductImport';
-import ProductsMobileList, { matchesProductSearch } from '../components/products/ProductsMobileList';
+import ProductsMobileList from '../components/products/ProductsMobileList';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
 import PricingSourceReasonModal, { type PricingSourceReason } from '../components/products/PricingSourceReasonModal';
 import { useToast } from '../components/ui/Toast';
@@ -72,6 +72,7 @@ import {
   type SetMarginFloorsResult,
 } from '../lib/marginFloors';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { matchesProductSearch } from '../lib/productSearch';
 
 const INLINE_PRICING_FIELDS = new Set([
   'pricing_mode',
@@ -166,6 +167,7 @@ export default function Products() {
   const [applyingPricing, setApplyingPricing] = useState(false);
   const [workbookBusy, setWorkbookBusy] = useState(false);
   const [tableRevision, setTableRevision] = useState(0);
+  const [isEditingProducts, setIsEditingProducts] = useState(false);
   const pricingWorkbookInputRef = useRef<HTMLInputElement>(null);
 
   const previewPricingIdem = useIdempotencyKey('preview_product_pricing_changes', profile?.id || '');
@@ -1169,7 +1171,7 @@ export default function Products() {
             )}
           </div>
           {isAdmin && (
-            <div className="hidden items-center gap-2 md:flex">
+            <div className="hidden flex-wrap items-center gap-2 md:flex">
               <Button
                 variant="secondary"
                 icon={<FileSpreadsheet className="w-4 h-4" />}
@@ -1228,7 +1230,10 @@ export default function Products() {
       />
 
       <Card padding={false}>
-        <div className="md:hidden">
+        <div
+          data-testid="products-mobile-layout"
+          className={isEditingProducts ? 'hidden' : 'md:hidden'}
+        >
           <ProductsMobileList
             products={products}
             categories={categories}
@@ -1241,7 +1246,10 @@ export default function Products() {
             onRetry={retryProducts}
           />
         </div>
-        <div className="hidden p-5 md:block">
+        <div
+          data-testid="products-table-layout"
+          className={isEditingProducts ? 'block p-5' : 'hidden p-5 md:block'}
+        >
           <EditableDataTable<ProductListRow>
             key={tableRevision}
             data={filtered}
@@ -1264,6 +1272,7 @@ export default function Products() {
             loadError={loadError}
             onRetry={retryProducts}
             canEdit={isAdmin}
+            onEditModeChange={setIsEditingProducts}
             onSave={handleBulkSave}
             headerActions={(
               <>

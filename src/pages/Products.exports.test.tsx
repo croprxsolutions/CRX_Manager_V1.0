@@ -149,6 +149,22 @@ describe('Products list and exports', () => {
     expect(screen.getByText('Inactive Product')).toBeInTheDocument();
   });
 
+  it('shows the table layout at every width while inline editing', async () => {
+    await loadProducts();
+    const mobileLayout = screen.getByTestId('products-mobile-layout');
+    const tableLayout = screen.getByTestId('products-table-layout');
+
+    expect(mobileLayout).toHaveClass('md:hidden');
+    expect(mobileLayout).not.toHaveClass('hidden');
+    expect(tableLayout).toHaveClass('hidden', 'md:block');
+
+    fireEvent.click(screen.getByText('Edit'));
+
+    expect(mobileLayout).toHaveClass('hidden');
+    expect(tableLayout).toHaveClass('block');
+    expect(tableLayout).not.toHaveClass('hidden');
+  });
+
   it('exports only active rows to customer CSV and PDF even when All is selected', async () => {
     await loadProducts();
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'all' } });

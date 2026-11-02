@@ -1,41 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
-import type { Product } from '../../types';
+import type { MobileProduct } from '../../types';
 import { formatUSD } from '../../lib/money';
+import { matchesProductSearch } from '../../lib/productSearch';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import EmptyState, { LoadFailedState } from '../ui/EmptyState';
 
 const MOBILE_PAGE_SIZE = 50;
-
-export type MobileProduct = Pick<
-  Product,
-  | 'id'
-  | 'product_name'
-  | 'sku'
-  | 'category'
-  | 'vendor'
-  | 'manufacturer'
-  | 'epa_registration'
-  | 'tier1_price'
-  | 'tier2_price'
-  | 'tier3_price'
-  | 'is_active'
->;
-
-// Keep phone and desktop search on the same Product identity fields and matching rule.
-// eslint-disable-next-line react-refresh/only-export-components
-export function matchesProductSearch(product: MobileProduct, search: string): boolean {
-  const lowerSearch = search.toLowerCase();
-  return [
-    product.product_name,
-    product.sku,
-    product.category,
-    product.vendor,
-    product.manufacturer,
-    product.epa_registration,
-  ].some((value) => value != null && String(value).toLowerCase().includes(lowerSearch));
-}
 
 type Props = {
   products: readonly MobileProduct[];
@@ -90,7 +62,7 @@ export default function ProductsMobileList({
             }}
             placeholder="Search products..."
             aria-label="Search products..."
-            className="min-h-11 w-full rounded-lg border border-gray-200 py-2 pl-9 pr-3 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+            className="min-h-11 w-full rounded-lg border border-gray-200 py-2 pl-9 pr-3 text-base focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
           />
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -139,7 +111,6 @@ export default function ProductsMobileList({
                 key={product.id}
                 type="button"
                 onClick={() => onOpenProduct(product)}
-                aria-label={`Open ${product.product_name}`}
                 className="block min-h-[44px] w-full rounded-xl border border-gray-200 bg-white p-4 text-left shadow-card transition-colors hover:bg-crx-green-tint focus:outline-none focus:ring-2 focus:ring-crx-green/40"
               >
                 <div className="flex min-w-0 items-start justify-between gap-3">
@@ -174,9 +145,8 @@ export default function ProductsMobileList({
               variant="secondary"
               className="min-h-11 w-full"
               onClick={() => setVisibleCount((count) => count + MOBILE_PAGE_SIZE)}
-              aria-label="Show 50 more products"
             >
-              Show more
+              Show {Math.min(MOBILE_PAGE_SIZE, filteredProducts.length - visibleCount)} more products
             </Button>
           )}
         </>

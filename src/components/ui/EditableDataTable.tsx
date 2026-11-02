@@ -3,6 +3,7 @@ import { Search, ArrowUpDown, ArrowUp, ArrowDown, Pencil, X, Save } from 'lucide
 import EmptyState, { LoadFailedState } from './EmptyState';
 import Button from './Button';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import ConfirmModal from './ConfirmModal';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 
 const EDIT_PAGE_SIZE = 50;
@@ -60,17 +61,39 @@ interface EditableDataTableProps<T> {
   onSave?: (changes: Map<string, Record<string, unknown>>) => Promise<void | boolean>;
   /** Whether edit mode is available */
   canEdit?: boolean;
+  /** Called when inline editing starts or ends. */
+  onEditModeChange?: (editing: boolean) => void;
   /** Extra actions to render next to the Edit/Save buttons */
   headerActions?: ReactNode;
 }
 
 function OtherPageUnsavedCount({ count }: { count: number }) {
   if (count === 0) return null;
-  return <span className="text-xs text-amber-700" role="status">{count} unsaved on other pages</span>;
+  return <span className="text-xs text-amber-700" role="status">{count} unsaved not shown</span>;
 }
 
 function isNavigationBlocked(blocker: ReturnType<typeof useUnsavedChanges>): boolean {
   return blocker.state === 'blocked';
+}
+
+function resetBlockerWhenClean(
+  dirtyCount: number,
+  blocker: ReturnType<typeof useUnsavedChanges>,
+): void {
+  if (dirtyCount === 0 && blocker.state === 'blocked') blocker.reset?.();
+}
+
+function requestEditCancel(
+  dirtyCount: number,
+  cancelEdit: () => void,
+  openConfirmation: () => void,
+): void {
+  if (dirtyCount > 0) openConfirmation();
+  else cancelEdit();
+}
+
+function discardRowsMessage(count: number): string {
+  return `Discard edits to ${count} ${count === 1 ? 'row' : 'rows'}?`;
 }
 
 function countDirtyRowsOffPage(
@@ -84,6 +107,7 @@ function countDirtyRowsOffPage(
 
 function EditPagination({
   editing,
+  loadError,
   total,
   page,
   maxPage,
@@ -91,13 +115,14 @@ function EditPagination({
   onNext,
 }: {
   editing: boolean;
+  loadError: boolean;
   total: number;
   page: number;
   maxPage: number;
   onPrevious: () => void;
   onNext: () => void;
 }) {
-  if (!editing || total <= EDIT_PAGE_SIZE) return null;
+  if (!editing || loadError || total <= EDIT_PAGE_SIZE) return null;
   return (
     <div className="mt-3 flex flex-wrap items-center justify-between gap-3" aria-label="Edit table pagination">
       <span className="text-sm text-secondary">
@@ -134,6 +159,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
   onRetry,
   onSave,
   canEdit = false,
+  onEditModeChange,
   headerActions,
 }: EditableDataTableProps<T>) {
   const [search, setSearch] = useState('');
@@ -143,9 +169,14 @@ export default function EditableDataTable<T extends Record<string, any>>({
   const [editPage, setEditPage] = useState(0);
   const [dirtyRows, setDirtyRows] = useState<Map<string, Record<string, unknown>>>(new Map());
   const [saving, setSaving] = useState(false);
+  const [cancelConfirmationOpen, setCancelConfirmationOpen] = useState(false);
 
   const dirtyCount = dirtyRows.size;
   const blocker = useUnsavedChanges(editMode && dirtyCount > 0);
+
+  useEffect(() => {
+    resetBlockerWhenClean(dirtyCount, blocker);
+  }, [blocker, dirtyCount]);
 
   const filtered = useMemo(() => {
     let result = data;
@@ -182,8 +213,8 @@ export default function EditableDataTable<T extends Record<string, any>>({
   const currentEditPage = Math.min(editPage, maxEditPage);
 
   useEffect(() => {
-    if (editPage > maxEditPage) setEditPage(maxEditPage);
-  }, [editPage, maxEditPage]);
+    setEditPage(0);
+  }, [filtered.length]);
 
   const pageRows = useMemo(() => {
     if (!editMode) return filtered;
@@ -240,6 +271,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
 
   const handleEnterEdit = () => {
     setEditMode(true);
+    onEditModeChange?.(true);
     setEditPage(0);
     setDirtyRows(new Map());
   };
@@ -247,6 +279,12 @@ export default function EditableDataTable<T extends Record<string, any>>({
   const handleCancelEdit = () => {
     setEditMode(false);
     setDirtyRows(new Map());
+    setCancelConfirmationOpen(false);
+    onEditModeChange?.(false);
+  };
+
+  const handleRequestCancelEdit = () => {
+    requestEditCancel(dirtyCount, handleCancelEdit, () => setCancelConfirmationOpen(true));
   };
 
   const handleSave = async () => {
@@ -256,9 +294,9 @@ export default function EditableDataTable<T extends Record<string, any>>({
     try {
       const shouldCloseEditMode = await onSave(dirtyRows);
       if (shouldCloseEditMode !== false) {
-        if (blocker.state === 'blocked') blocker.reset?.();
         setEditMode(false);
         setDirtyRows(new Map());
+        onEditModeChange?.(false);
       }
     } catch {
       // parent handles error toast
@@ -370,7 +408,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
         </div>
 
         {/* Edit mode controls */}
-        <div className="flex gap-2 items-center shrink-0">
+        <div className="flex flex-wrap gap-2 items-center shrink-0">
           {headerActions}
           {canEdit && !editMode && !loadError && (
             <Button
@@ -388,7 +426,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
                 variant="ghost"
                 size="sm"
                 icon={<X className="w-4 h-4" />}
-                onClick={handleCancelEdit}
+                onClick={handleRequestCancelEdit}
                 disabled={saving}
               >
                 Cancel
@@ -497,6 +535,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
       )}
       <EditPagination
         editing={editMode}
+        loadError={loadError}
         total={filtered.length}
         page={currentEditPage}
         maxPage={maxEditPage}
@@ -505,8 +544,19 @@ export default function EditableDataTable<T extends Record<string, any>>({
       />
       <UnsavedChangesModal
         open={isNavigationBlocked(blocker)}
+        disableLeave={saving}
         onStay={() => blocker.reset?.()}
         onLeave={() => blocker.proceed?.()}
+      />
+      <ConfirmModal
+        open={cancelConfirmationOpen}
+        onClose={() => setCancelConfirmationOpen(false)}
+        onConfirm={handleCancelEdit}
+        title="Discard edits?"
+        message={discardRowsMessage(dirtyCount)}
+        confirmLabel="Discard edits"
+        cancelLabel="Stay"
+        variant="warning"
       />
     </div>
   );

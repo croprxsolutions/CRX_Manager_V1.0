@@ -6,15 +6,11 @@ import type { EditableColumn } from './EditableDataTable';
 const { blockState, mockReset, mockUseUnsavedChanges } = vi.hoisted(() => {
   const state = { value: 'unblocked' as 'blocked' | 'unblocked' };
   const reset = vi.fn(() => { state.value = 'unblocked'; });
-  const blocker = {
-    get state() { return state.value; },
-    reset,
-    proceed: vi.fn(),
-  };
+  const createBlocker = () => ({ state: state.value, reset, proceed: vi.fn() });
   return {
     blockState: state,
     mockReset: reset,
-    mockUseUnsavedChanges: vi.fn((_isDirty: boolean) => blocker),
+    mockUseUnsavedChanges: vi.fn((_isDirty: boolean) => createBlocker()),
   };
 });
 
@@ -328,7 +324,7 @@ describe('EditableDataTable', () => {
       fireEvent.change(screen.getByDisplayValue('Product 1'), { target: { value: 'Changed Product 1' } });
       fireEvent.click(screen.getByText('Next'));
       expect(screen.getByText('Showing 51–100 of 120')).toBeInTheDocument();
-      expect(screen.getByText('1 unsaved on other pages')).toBeInTheDocument();
+      expect(screen.getByText('1 unsaved not shown')).toBeInTheDocument();
       fireEvent.change(screen.getByDisplayValue('Product 51'), { target: { value: 'Changed Product 51' } });
       fireEvent.click(screen.getByText('Previous'));
       expect(screen.getByDisplayValue('Changed Product 1')).toBeInTheDocument();
@@ -341,7 +337,7 @@ describe('EditableDataTable', () => {
       expect(changes.get('51')).toEqual({ name: 'Changed Product 51' });
     });
 
-    it('resets edit pagination when search changes and clamps when rows shrink', () => {
+    it('resets edit pagination when search changes or the filtered count changes', () => {
       const data = createManyRows(120);
       const props = {
         data,
@@ -363,7 +359,8 @@ describe('EditableDataTable', () => {
       fireEvent.click(screen.getByText('Next'));
       fireEvent.click(screen.getByText('Next'));
       rerender(<EditableDataTable {...props} data={data.slice(0, 55)} />);
-      expect(screen.getByText('Showing 51–55 of 55')).toBeInTheDocument();
+      expect(screen.getByText('Showing 1–50 of 55')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Product 1')).toBeInTheDocument();
     });
 
     it('resets edit pagination to the first page when sorting changes', () => {
@@ -391,24 +388,32 @@ describe('EditableDataTable', () => {
       expect(mockUseUnsavedChanges).toHaveBeenLastCalledWith(true);
 
       fireEvent.click(screen.getByText('Cancel'));
+      expect(mockUseUnsavedChanges).toHaveBeenLastCalledWith(true);
+      fireEvent.click(screen.getByRole('button', { name: 'Discard edits' }));
       expect(mockUseUnsavedChanges).toHaveBeenLastCalledWith(false);
       expect(mockUseUnsavedChanges.mock.calls.map(([isDirty]) => isDirty)).toContain(true);
-      expect(mockUseUnsavedChanges.mock.calls.filter(([isDirty]) => isDirty)).toHaveLength(1);
+      expect(mockUseUnsavedChanges.mock.calls.filter(([isDirty]) => isDirty)).toHaveLength(2);
     });
 
-    it('resets an active navigation block after a successful save', async () => {
-      const onSave = vi.fn().mockResolvedValue(undefined);
+    it('resets a navigation block that starts while a save is in progress', async () => {
+      let finishSave: (() => void) | undefined;
+      const onSave = vi.fn(() => new Promise<void>((resolve) => { finishSave = resolve; }));
       const props = { data: testData, columns, rowKey: 'id' as const, canEdit: true, onSave };
       const { rerender } = render(<EditableDataTable {...props} />);
       fireEvent.click(screen.getByText('Edit'));
       fireEvent.change(screen.getByDisplayValue('Product A'), { target: { value: 'Edited Product A' } });
 
+      fireEvent.click(screen.getByText(/Save \(1\)/));
+      await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+
       blockState.value = 'blocked';
       rerender(<EditableDataTable {...props} />);
       expect(screen.getByRole('alertdialog')).toBeInTheDocument();
-      fireEvent.click(screen.getByText(/Save \(1\)/));
+      expect(screen.getByRole('button', { name: 'Leave' })).toBeDisabled();
+      finishSave?.();
 
       await waitFor(() => expect(mockReset).toHaveBeenCalledTimes(1));
+      rerender(<EditableDataTable {...props} />);
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     });
 
@@ -596,14 +601,16 @@ describe('EditableDataTable', () => {
 
     it('will not save edits once a failed load hides the rows (PR #1043 review)', () => {
       const onSave = vi.fn().mockResolvedValue(undefined);
-      const props = { data: testData, columns, rowKey: 'id' as const, canEdit: true, onSave };
-      const { rerender } = render(<EditableDataTable {...props} />);
+      const props = { data: createManyRows(60), columns, rowKey: 'id' as const, canEdit: true, onSave };
+      const { rerender, container } = render(<EditableDataTable {...props} />);
       fireEvent.click(screen.getByText('Edit'));
-      fireEvent.change(screen.getByDisplayValue('Product A'), { target: { value: 'Product A Modified' } });
+      fireEvent.change(screen.getByDisplayValue('Product 1'), { target: { value: 'Changed Product 1' } });
+      expect(container.querySelector('[aria-label="Edit table pagination"]')).toBeInTheDocument();
 
       rerender(<EditableDataTable {...props} loadError />);
 
       expect(screen.getByRole('alert')).toHaveTextContent('This list could not be loaded');
+      expect(container.querySelector('[aria-label="Edit table pagination"]')).not.toBeInTheDocument();
       const saveBtn = screen.getByText(/Save/).closest('button')!;
       expect(saveBtn).toBeDisabled();
       fireEvent.click(saveBtn);
@@ -802,11 +809,54 @@ describe('EditableDataTable', () => {
       expect(screen.getByText(/Save \(1\)/)).toBeInTheDocument();
 
       fireEvent.click(screen.getByText('Cancel'));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard edits' }));
       // Re-enter edit mode
       fireEvent.click(screen.getByText('Edit'));
       // Save should be clean (no dirty count)
       expect(screen.getByText('Save')).toBeInTheDocument();
       expect(screen.queryByText(/Save \(\d+\)/)).not.toBeInTheDocument();
+    });
+
+    it('asks before discarding dirty rows and Stay preserves them', () => {
+      render(<EditableDataTable data={testData} columns={columns} rowKey="id" canEdit />);
+      fireEvent.click(screen.getByText('Edit'));
+      fireEvent.change(screen.getByDisplayValue('Product A'), { target: { value: 'Changed A' } });
+
+      fireEvent.click(screen.getByText('Cancel'));
+      expect(screen.getByText('Discard edits to 1 row?')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+
+      expect(screen.queryByText('Discard edits to 1 row?')).not.toBeInTheDocument();
+      expect(screen.getByDisplayValue('Changed A')).toBeInTheDocument();
+      expect(screen.getByText('Save (1)')).toBeInTheDocument();
+    });
+
+    it('cancels immediately without a confirmation when there are no edits', () => {
+      render(<EditableDataTable data={testData} columns={columns} rowKey="id" canEdit />);
+      fireEvent.click(screen.getByText('Edit'));
+
+      fireEvent.click(screen.getByText('Cancel'));
+
+      expect(screen.queryByText('Discard edits?')).not.toBeInTheDocument();
+      expect(screen.getByText('Edit')).toBeInTheDocument();
+    });
+
+    it('notifies the parent when edit mode starts and ends', () => {
+      const onEditModeChange = vi.fn();
+      render(
+        <EditableDataTable
+          data={testData}
+          columns={columns}
+          rowKey="id"
+          canEdit
+          onEditModeChange={onEditModeChange}
+        />
+      );
+
+      fireEvent.click(screen.getByText('Edit'));
+      fireEvent.click(screen.getByText('Cancel'));
+
+      expect(onEditModeChange.mock.calls).toEqual([[true], [false]]);
     });
   });
 

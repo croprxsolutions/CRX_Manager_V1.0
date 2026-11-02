@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import type { Product } from '../../types';
-import ProductsMobileList, { type MobileProduct } from './ProductsMobileList';
+import type { MobileProduct, Product } from '../../types';
+import ProductsMobileList from './ProductsMobileList';
 
 const createProduct = (id: string, overrides: Partial<Product> = {}): Product => ({
   id,
@@ -79,7 +79,9 @@ describe('ProductsMobileList', () => {
     const onOpenProduct = vi.fn();
     renderList([product], { onOpenProduct });
 
-    const card = screen.getByRole('button', { name: 'Open Product 1' });
+    const card = screen.getByRole('button', { name: /^Product 1\b/ });
+    expect(card).not.toHaveAttribute('aria-label');
+    expect(card).toHaveAccessibleName(/Product 1.*Inactive.*Tier 1.*\$10\.00/);
     expect(within(card).getByText('SKU: SKU-1')).toBeInTheDocument();
     expect(within(card).getByText('Herbicide')).toBeInTheDocument();
     expect(within(card).getByText('Tier 1')).toBeInTheDocument();
@@ -117,19 +119,19 @@ describe('ProductsMobileList', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search products...' }), {
       target: { value: 'manufacturer 2' },
     });
-    expect(screen.getByRole('button', { name: 'Open Product 2' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Open Product 1' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Product 2\b/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Product 1\b/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search products...' }), {
       target: { value: 'epa-2' },
     });
-    expect(screen.getByRole('button', { name: 'Open Product 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Product 2\b/ })).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search products...' }), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('Filter by category'), { target: { value: 'Fungicide' } });
     expect(onCategoryFilterChange).toHaveBeenCalledWith('Fungicide');
     view.rerender(<ProductsMobileList {...props} categoryFilter="Fungicide" />);
-    expect(screen.getByRole('button', { name: 'Open Product 2' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Open Product 1' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Product 2\b/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Product 1\b/ })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: 'active' } });
     expect(onStatusFilterChange).toHaveBeenCalledWith('active');
@@ -141,10 +143,19 @@ describe('ProductsMobileList', () => {
     const products = Array.from({ length: 120 }, (_, index) => createProduct(String(index + 1)));
     renderList(products);
 
-    expect(screen.getAllByRole('button', { name: /^Open Product/ })).toHaveLength(50);
+    expect(screen.getAllByRole('button', { name: /^Product \d+\b/ })).toHaveLength(50);
     fireEvent.click(screen.getByRole('button', { name: 'Show 50 more products' }));
-    expect(screen.getAllByRole('button', { name: /^Open Product/ })).toHaveLength(100);
-    expect(screen.getByRole('button', { name: 'Show 50 more products' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^Product \d+\b/ })).toHaveLength(100);
+    expect(screen.getByRole('button', { name: 'Show 20 more products' })).toBeInTheDocument();
+  });
+
+  it('labels Show more with the exact number of remaining cards', () => {
+    const products = Array.from({ length: 53 }, (_, index) => createProduct(String(index + 1)));
+    renderList(products);
+
+    expect(screen.getByRole('button', { name: 'Show 3 more products' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show 3 more products' }));
+    expect(screen.getAllByRole('button', { name: /^Product \d+\b/ })).toHaveLength(53);
   });
 
   it('shows a load failure with retry and no empty-list message', () => {

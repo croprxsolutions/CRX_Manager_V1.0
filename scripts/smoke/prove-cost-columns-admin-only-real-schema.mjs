@@ -215,11 +215,15 @@ function buildContainer() {
   for (const name of ['20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) psql(`\\i /tmp/${name}`, { user: name.includes('overlay') ? 'supabase_admin' : 'postgres' });
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
   const files = plan();
+  const recorded = new Set();
   let replayed = 0;
   for (const [i, file] of files.entries()) {
     const base = path.basename(file);
     if (PARKED.has(base)) continue;
-    for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
+    // Each ledger-only migration is recorded once, at its place in the order.
+    for (const only of LEDGER_ONLY) {
+      if (only < base && !recorded.has(only)) { ledger(path.basename(only, '.sql')); recorded.add(only); }
+    }
     if (LEDGER_ONLY.has(base)) continue;
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);

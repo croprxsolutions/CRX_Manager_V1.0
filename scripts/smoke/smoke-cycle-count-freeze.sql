@@ -59,6 +59,12 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'CYCLE_COUNT_STATUS_LOCKED: cycle count CC-% can only be completed with Complete Count%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (b2) %', SQLERRM; END IF;
   END;
+  BEGIN
+    UPDATE public.cycle_counts SET warehouse = '[SMOKE] Elsewhere' WHERE id = v_cc;
+    RAISE EXCEPTION 'SMOKE_FAIL: (b2) the warehouse of an open count changed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_STATUS_LOCKED: the warehouse of cycle count CC-% cannot change%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (b2) %', SQLERRM; END IF;
+  END;
   SELECT id INTO v_item FROM public.cycle_count_items WHERE cycle_count_id = v_cc AND inventory_id = i1;
   BEGIN
     DELETE FROM public.cycle_count_items WHERE id = v_item;

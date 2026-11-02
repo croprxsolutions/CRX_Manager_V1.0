@@ -46,7 +46,8 @@
 --    freeze: trg_guard_cycle_count_status refuses (CYCLE_COUNT_STATUS_LOCKED) marking an open
 --    count completed except inside its own Complete Count, and any change out of cancelled or
 --    from completed to anything but cancelled, and completed -> cancelled unless Reverse Count has
---    written its ledger rows in the same transaction; trg_guard_open_cycle_count_items refuses
+--    written its ledger rows in the same transaction, and any change of a count's warehouse;
+--    trg_guard_open_cycle_count_items refuses
 --    (CYCLE_COUNT_LINE_LOCKED) deleting a line of an open count or changing its expected_qty,
 --    inventory_id, product_id or cycle_count_id, including moving a line into an open count. Entering counted_qty and cancelling stay allowed. The
 --    one-open-count index compares lower(btrim(warehouse)) so spacing or case cannot dodge it.
@@ -149,6 +150,10 @@ CREATE FUNCTION public._guard_cycle_count_status_20261102()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
+  -- A count's lines are that warehouse's rows, so its warehouse never changes.
+  IF OLD.warehouse IS DISTINCT FROM NEW.warehouse THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: the warehouse of cycle count % cannot change.', OLD.count_number;
+  END IF;
   IF OLD.status = 'in_progress' AND NEW.status = 'completed'
      AND NEW.id::text IS DISTINCT FROM NULLIF(current_setting('crx.cycle_count_applying', true), '') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: cycle count % can only be completed with Complete Count, which applies it.', OLD.count_number;
@@ -176,9 +181,9 @@ REVOKE ALL ON FUNCTION public._guard_cycle_count_status_20261102()
   FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 CREATE TRIGGER trg_guard_cycle_count_status
-  BEFORE UPDATE OF status ON public.cycle_counts
+  BEFORE UPDATE OF status, warehouse ON public.cycle_counts
   FOR EACH ROW
-  WHEN (OLD.status IS DISTINCT FROM NEW.status)
+  WHEN (OLD.status IS DISTINCT FROM NEW.status OR OLD.warehouse IS DISTINCT FROM NEW.warehouse)
   EXECUTE FUNCTION public._guard_cycle_count_status_20261102();
 
 CREATE FUNCTION public._guard_open_cycle_count_items_20261102()

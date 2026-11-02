@@ -304,7 +304,7 @@ Physical inventory verification process.
 5. Complete the count via `complete_cycle_count()` RPC (the only write allowed through the freeze), or cancel it. Either one lifts the freeze. Completion refuses with `CYCLE_COUNT_STOCK_MOVED` if a counted line's stock no longer matches its snapshot.
 6. Variances create `inventory_transactions` of type 'adjusted'
 
-Only Complete Count can mark an open count completed, only Reverse Count can cancel a completed count, and a cancelled count stays cancelled (`CYCLE_COUNT_STATUS_LOCKED`). Lines of an open count cannot be deleted, moved, or have their expected quantity or product changed, even by a direct table write (`CYCLE_COUNT_LINE_LOCKED`).
+Only Complete Count can mark an open count completed, only Reverse Count can cancel a completed count, a cancelled count stays cancelled, and a count's warehouse never changes (`CYCLE_COUNT_STATUS_LOCKED`). Lines of an open count cannot be deleted, moved, or have their expected quantity or product changed, even by a direct table write (`CYCLE_COUNT_LINE_LOCKED`).
 
 ### Tables
 - `cycle_counts` — count sessions (status: in_progress/completed/cancelled)

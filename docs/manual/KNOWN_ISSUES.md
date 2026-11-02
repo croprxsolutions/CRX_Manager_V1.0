@@ -41,7 +41,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is still owed), KI-10 (about 69 functions still replay a saved answer on the retry
-key alone), KI-04 (tools with no permission rule run without a prompt), KI-18 (UTC/browser-clock season can
+key alone), KI-18 (UTC/browser-clock season can
 suppress the pre-harvest safety warning).
 
 ---
@@ -116,11 +116,14 @@ still change a commission split on a job, quote or order (only the customer defa
 also roll over any rep's quote.
 
 ### KI-04 — Connected tools with no permission rule run without a prompt
-**HIGH · PARTIAL · tooling-guards/security · unassigned**
-`.claude/hooks/migration-apply-guard.mjs:59` answers "allow" for every connected tool except migration apply, so
-any connector tool without an explicit ask/deny rule runs without confirmation. Vercel deploy tools and Supabase
-secret/branch tools were covered in PR #940; the email-send tool and any connector added later are not (no rule
-in `.claude/settings.json`; a user-level rule was not checked). Two smaller hook gaps from closed PR #605 remain.
+**LOW · FIXED 2026-11-02 (residual accepted) · tooling-guards/security**
+The original cause is gone: `migration-apply-guard.mjs` now runs only on `apply_migration` in Claude, and the Codex
+adapter drops a bare "allow". The outward-facing connector tools — Slack send/schedule/canvas/list/reaction/upload,
+Gmail send/reply/forward, Calendar event writes, Drive `share_file`, GitHub-MCP comment/issue/review/PR/repository
+writes, Supabase feedback — are now `ask` rules in `.claude/settings.json` (risky Vercel tools were already
+`deny`). User-level settings were not changed. Accepted residual (Mason, 2026-10-29: a relaxed harness): a newly
+connected connector, or one whose id changes on reconnect, is unlisted until someone adds it. The two PR #605 hook
+gaps are accepted in KI-78.
 
 ### KI-05 — A sales rep can write RUP register rows for an invoice that was never posted
 **MED · OPEN · security/money · unassigned**
@@ -643,8 +646,9 @@ service-role tools (LOW).
   stale after same-head invalidation; privileged workflow actions use mutable tags; merge guards do not bind
   approval to the recorded request marker or reviewer identity (MED; relevance lowered since CodeRabbit became
   advisory).
-- PR #605 hook gaps: MultiEdit edits are not inspected by several hooks; non-canonical path spellings can bypass
-  path-rule matching (LOW).
+- PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables`, `generated-column-check` and
+  `env-guard` still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
+  Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching (LOW).
 - Review-proof guard: besides the 8.3 short name, an interpreter can build the path, a hard link can expose the file
   outside the state directory, and an alias/junction can be swapped after the check (MED). A separate
   `export GIT_PAGER=...` can evade it, like `GIT_EXTERNAL_DIFF` (LOW).

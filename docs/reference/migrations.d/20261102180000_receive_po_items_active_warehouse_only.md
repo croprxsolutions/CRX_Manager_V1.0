@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, NOT APPLIED (2026-11-02).** `20261102180000_receive_po_items_active_warehouse_only.sql`.
+**LOCAL CANDIDATE, NOT APPLIED (2026-11-02).** `20261102180000_receive_po_items_active_warehouse_only.sql` (SQL sha256: `7822556fa2eb7a0dd606663f2f9f4d04c5da4a471f8782d909ee9cceb247d615`).
 
 KI-85 Part A. Replaces the public wrappers `receive_po_items(jsonb, uuid, text, boolean)` (previous body
 `20260831233000`) and `manual_inventory_add(uuid, text, numeric, text, uuid, text, numeric, text, numeric, numeric)`

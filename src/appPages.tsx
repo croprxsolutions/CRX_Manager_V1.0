@@ -37,7 +37,7 @@ import type { UserRole } from './types';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Products = lazy(() => import('./pages/Products'));
 const SupplierPricing = lazy(() => import('./pages/SupplierPricing'));
-const ProductDetail = lazy(() => import('./pages/ProductDetail'));
+const ProductDetailRoute = lazy(() => import('./components/ProductDetailRoute'));
 const Customers = lazy(() => import('./pages/Customers'));
 const CustomerDetail = lazy(() => import('./pages/CustomerDetail'));
 const CallLists = lazy(() => import('./pages/CallLists'));
@@ -286,7 +286,7 @@ export const APP_PAGES = [
     key: 'products', label: 'Products', category: 'Inventory & Buying', roles: ['admin', 'sales_rep'],
     routes: [
       { path: 'products', element: <Products /> },
-      { path: 'products/:id', element: <ProductDetail /> },
+      { path: 'products/:id', element: <ProductDetailRoute /> },
     ],
   },
   {

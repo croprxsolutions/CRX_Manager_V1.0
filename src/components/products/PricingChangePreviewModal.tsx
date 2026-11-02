@@ -233,7 +233,7 @@ function PricingEffectDetails({ effect }: { effect: PricingEffect }) {
                 ) : <>{displayMargin(tier.marginPercent)} margin</>}
               </div>
               {grossMargin && (
-                <div className="text-xs text-secondary">Gross / markup: {grossMargin}</div>
+                <div className="text-xs text-secondary">Markup %: {grossMargin}</div>
               )}
               {perAcre && (
                 <div className="mt-1 text-xs text-secondary">

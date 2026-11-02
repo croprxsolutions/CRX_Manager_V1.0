@@ -28,8 +28,10 @@ import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
   createPricingWorkbookExport,
+  defaultPricingMode,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
+  pricingMarginTextIsValid,
   previewProductPricingChanges,
   sha256Hex,
   type PricingAcknowledgement,
@@ -92,6 +94,24 @@ const INLINE_NONPRICING_FIELDS = new Set([
 const MARGIN_FLOOR_FIELD = 'margin_floor_percent';
 type ProductListRow = Product & { [MARGIN_FLOOR_FIELD]?: string };
 
+const INTERNAL_IDENTITY_COLUMNS = [
+  { key: 'product_name', header: 'Product Name' },
+  { key: 'sku', header: 'SKU' },
+  { key: 'category', header: 'Category' },
+  { key: 'vendor', header: 'Vendor' },
+  { key: 'manufacturer', header: 'Manufacturer' },
+  { key: 'container_size', header: 'Container Size' },
+  { key: 'unit_size', header: 'Unit' },
+  { key: 'epa_registration', header: 'EPA Reg #' },
+  { key: 'is_rup', header: 'RUP', format: (value: unknown) => value == null ? '' : value ? 'Yes' : 'No' },
+  { key: 'signal_word', header: 'Signal Word' },
+  { key: 'rei_hours', header: 'REI Hours' },
+  { key: 'phi_days', header: 'PHI Days' },
+  { key: 'product_form', header: 'Form' },
+  { key: 'inventory_unit', header: 'Inventory Unit' },
+  { key: 'container_unit', header: 'Container Unit' },
+];
+
 function inputDecimal(value: unknown): string | null {
   if (value === null || value === undefined || value === '') return null;
   return String(value).trim();
@@ -99,6 +119,10 @@ function inputDecimal(value: unknown): string | null {
 
 function storedMarginPercent(value: number | null | undefined): string | null {
   return value == null ? null : formatPricingMarginPercent(value);
+}
+
+function formatProductMoneyCSV(value: unknown): string {
+  return value == null ? '' : fmtCSV(value);
 }
 
 /** A tier's net margin under its price; red with "under floor" when below the product's floor. */
@@ -120,6 +144,7 @@ export default function Products() {
   const [loadError, setLoadError] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [vendorFilter, setVendorFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [categories, setCategories] = useState<string[]>([]);
   const [vendors, setVendors] = useState<string[]>([]);
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
@@ -127,6 +152,7 @@ export default function Products() {
   const [deactivating, setDeactivating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showSensitive, setShowSensitive] = useState(false);
+  const [showCompliance, setShowCompliance] = useState(false);
   // Once per render, not per row: the "Cost as of" column dates every product against it.
   const costFreshnessToday = todayInBusinessTz();
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
@@ -243,6 +269,8 @@ export default function Products() {
   const filtered = products.filter((p) => {
     if (categoryFilter && p.category !== categoryFilter) return false;
     if (vendorFilter && p.vendor !== vendorFilter) return false;
+    if (statusFilter === 'active' && !p.is_active) return false;
+    if (statusFilter === 'inactive' && p.is_active) return false;
     return true;
   });
 
@@ -259,44 +287,48 @@ export default function Products() {
   );
 
   const handleExportCSV = () => {
+    const rows = selectedRows.filter((p) => p.is_active);
+    if (rows.length === 0) {
+      toast('warning', 'No active products selected.');
+      return;
+    }
     const fmtMargin = (v: unknown) => v != null ? `${(Number(v) * 100).toFixed(1)}%` : '';
-    const baseCols = [
-      { key: 'product_name', header: 'Product Name' },
-      { key: 'sku', header: 'SKU' },
-      { key: 'category', header: 'Category' },
-      { key: 'vendor', header: 'Vendor' },
-    ];
     const showCostMargin = isAdmin && showSensitive;
     const priceCols = showCostMargin
       ? [
-          { key: 'current_cost', header: 'Cost', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'current_cost', header: 'Cost', format: formatProductMoneyCSV },
           { key: 'cost_updated_date', header: 'Cost As Of', format: formatCostAsOfCSV },
-          { key: 'tier1_price', header: 'T1 Price', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'tier1_price', header: 'T1 Price', format: formatProductMoneyCSV },
           { key: 'tier1_margin', header: 'T1 Margin %', format: fmtMargin },
-          { key: 'tier2_price', header: 'T2 Price', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'tier2_price', header: 'T2 Price', format: formatProductMoneyCSV },
           { key: 'tier2_margin', header: 'T2 Margin %', format: fmtMargin },
-          { key: 'tier3_price', header: 'T3 Price', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'tier3_price', header: 'T3 Price', format: formatProductMoneyCSV },
           { key: 'tier3_margin', header: 'T3 Margin %', format: fmtMargin },
         ]
       : [
-          { key: 'tier1_price', header: 'T1 Price', format: (v: unknown) => fmtCSV(v as number) },
-          { key: 'tier2_price', header: 'T2 Price', format: (v: unknown) => fmtCSV(v as number) },
-          { key: 'tier3_price', header: 'T3 Price', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'tier1_price', header: 'T1 Price', format: formatProductMoneyCSV },
+          { key: 'tier2_price', header: 'T2 Price', format: formatProductMoneyCSV },
+          { key: 'tier3_price', header: 'T3 Price', format: formatProductMoneyCSV },
         ];
-    exportToCSV(selectedRows as unknown as Record<string, unknown>[], [
-      ...baseCols,
+    exportToCSV(rows as unknown as Record<string, unknown>[], [
+      ...INTERNAL_IDENTITY_COLUMNS,
       ...priceCols,
       { key: 'is_active', header: 'Status', format: (v: unknown) => v ? 'Active' : 'Inactive' },
-    ], 'products');
-    toast('success', `Exported ${selectedRows.length} product(s) to CSV`);
+    ], showCostMargin ? 'products-internal' : 'products');
+    toast('success', `Exported ${rows.length} product(s) to CSV`);
   };
 
   const handleExportPDF = async () => {
+    const rows = selectedRows.filter((p) => p.is_active);
+    if (rows.length === 0) {
+      toast('warning', 'No active products selected.');
+      return;
+    }
     setExporting(true);
     try {
       const fmtMarginPdf = (v: unknown) => v != null ? String(v) : '';
       // Preprocess data with synthetic margin strings (reportPdf format only gets value, not row)
-      const pdfData = selectedRows.map((p) => ({
+      const pdfData = rows.map((p) => ({
         ...p,
         _t1_margin_str: p.tier1_margin != null ? `${(p.tier1_margin * 100).toFixed(1)}%` : '',
         _t2_margin_str: p.tier2_margin != null ? `${(p.tier2_margin * 100).toFixed(1)}%` : '',
@@ -306,6 +338,8 @@ export default function Products() {
         { header: 'Product', key: 'product_name' },
         { header: 'SKU', key: 'sku', format: (v) => String(v || '-') },
         { header: 'Category', key: 'category', format: (v) => String(v || '-') },
+        { header: 'Size', key: 'container_size', format: (v) => v != null ? String(v) : '-' },
+        { header: 'Unit', key: 'unit_size', format: (v) => String(v || '-') },
       ];
       const showCostMarginPdf = isAdmin && showSensitive;
       const pricePdfCols: ReportPdfColumn[] = showCostMarginPdf
@@ -324,13 +358,13 @@ export default function Products() {
             { header: 'T3 Price', key: 'tier3_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
           ];
       await downloadReportPdf({
-        title: 'Products',
-        subtitle: `${selectedRows.length} product(s) selected`,
+        title: showCostMarginPdf ? 'Products — Internal' : 'Products',
+        subtitle: `${rows.length} product(s) selected`,
         columns: [...basePdfCols, ...pricePdfCols, { header: 'Status', key: 'is_active', format: (v) => v ? 'Active' : 'Inactive' }],
         data: pdfData as unknown as Record<string, unknown>[],
         orientation: showCostMarginPdf ? 'landscape' : 'portrait',
       });
-      toast('success', `Downloaded PDF with ${selectedRows.length} product(s)`);
+      toast('success', `Downloaded PDF with ${rows.length} product(s)`);
     } catch (err) {
       toast('error', sanitizeError(err));
     }
@@ -339,8 +373,15 @@ export default function Products() {
 
   // --- Download All (filtered) ---
   const handleDownloadAllCSV = (includeCost: boolean) => {
+    if (includeCost && !isAdmin) return;
+    const rows = includeCost ? filtered : filtered.filter((p) => p.is_active);
+    if (!includeCost && rows.length === 0) {
+      toast('warning', 'No active products to include on the sales sheet.');
+      setExportMenuOpen(false);
+      return;
+    }
     const fmtMargin = (v: unknown) => v != null ? `${(Number(v) * 100).toFixed(1)}%` : '';
-    const baseCols = [
+    const salesCols = [
       { key: 'product_name', header: 'Product Name' },
       { key: 'sku', header: 'SKU' },
       { key: 'category', header: 'Category' },
@@ -350,32 +391,44 @@ export default function Products() {
     ];
     const priceCols = includeCost
       ? [
-          { key: 'current_cost', header: 'Cost', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'current_cost', header: 'Cost', format: formatProductMoneyCSV },
           { key: 'cost_updated_date', header: 'Cost As Of', format: formatCostAsOfCSV },
-          { key: 'tier1_price', header: 'T1 Price', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'tier1_price', header: 'T1 Price', format: formatProductMoneyCSV },
           { key: 'tier1_margin', header: 'T1 Margin %', format: fmtMargin },
-          { key: 'tier2_price', header: 'T2 Price', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'tier2_price', header: 'T2 Price', format: formatProductMoneyCSV },
           { key: 'tier2_margin', header: 'T2 Margin %', format: fmtMargin },
-          { key: 'tier3_price', header: 'T3 Price', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'tier3_price', header: 'T3 Price', format: formatProductMoneyCSV },
           { key: 'tier3_margin', header: 'T3 Margin %', format: fmtMargin },
         ]
       : [
-          { key: 'tier1_price', header: 'Tier 1 Price', format: (v: unknown) => fmtCSV(v as number) },
-          { key: 'tier2_price', header: 'Tier 2 Price', format: (v: unknown) => fmtCSV(v as number) },
-          { key: 'tier3_price', header: 'Tier 3 Price', format: (v: unknown) => fmtCSV(v as number) },
+          { key: 'tier1_price', header: 'Tier 1 Price', format: formatProductMoneyCSV },
+          { key: 'tier2_price', header: 'Tier 2 Price', format: formatProductMoneyCSV },
+          { key: 'tier3_price', header: 'Tier 3 Price', format: formatProductMoneyCSV },
         ];
     const filename = includeCost ? 'product-price-sheet-internal' : 'product-sales-sheet';
-    exportToCSV(filtered as unknown as Record<string, unknown>[], [...baseCols, ...priceCols], filename);
-    toast('success', `Exported ${filtered.length} product(s) to CSV`);
+    exportToCSV(rows as unknown as Record<string, unknown>[], [
+      ...(includeCost ? INTERNAL_IDENTITY_COLUMNS : salesCols),
+      ...priceCols,
+      ...(includeCost ? [{ key: 'is_active', header: 'Status', format: (v: unknown) => v ? 'Active' : 'Inactive' }] : []),
+    ], filename);
+    toast('success', `Exported ${rows.length} product(s) to CSV`);
     setExportMenuOpen(false);
   };
 
   const handleDownloadAllPDF = async (includeCost: boolean) => {
+    if (includeCost && !isAdmin) return;
+    const rows = includeCost ? filtered : filtered.filter((p) => p.is_active);
+    if (!includeCost && rows.length === 0) {
+      toast('warning', 'No active products to include on the sales sheet.');
+      setExportMenuOpen(false);
+      setExporting(false);
+      return;
+    }
     setExporting(true);
     setExportMenuOpen(false);
     try {
       const fmtMarginPdf = (v: unknown) => v != null ? String(v) : '';
-      const pdfData = filtered.map((p) => ({
+      const pdfData = rows.map((p) => ({
         ...p,
         _t1_margin_str: p.tier1_margin != null ? `${(p.tier1_margin * 100).toFixed(1)}%` : '',
         _t2_margin_str: p.tier2_margin != null ? `${(p.tier2_margin * 100).toFixed(1)}%` : '',
@@ -403,15 +456,18 @@ export default function Products() {
             { header: 'Tier 2 Price', key: 'tier2_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
             { header: 'Tier 3 Price', key: 'tier3_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
           ];
+      const statusPdfCols: ReportPdfColumn[] = includeCost
+        ? [{ header: 'Status', key: 'is_active', format: (v) => v ? 'Active' : 'Inactive' }]
+        : [];
       const title = includeCost ? 'Product & Pricing — Internal' : 'Product Sales Sheet';
       await downloadReportPdf({
         title,
-        subtitle: `${filtered.length} active product(s) — ${new Date().toLocaleDateString()}`,
-        columns: [...basePdfCols, ...pricePdfCols],
+        subtitle: `${rows.length} ${includeCost ? '' : 'active '}product(s) — ${new Date().toLocaleDateString()}`,
+        columns: [...basePdfCols, ...pricePdfCols, ...statusPdfCols],
         data: pdfData as unknown as Record<string, unknown>[],
         orientation: 'landscape',
       });
-      toast('success', `Downloaded ${includeCost ? 'internal' : 'sales'} price sheet PDF`);
+      toast('success', `Downloaded ${includeCost ? 'internal' : 'sales'} price sheet PDF with ${rows.length} product(s)`);
     } catch (err) {
       toast('error', sanitizeError(err));
     }
@@ -477,7 +533,7 @@ export default function Products() {
       getCellValue: (colKey: string) => unknown,
       setCellValue: (colKey: string, value: unknown) => void
     ) => {
-      const mode = getCellValue('pricing_mode') as PricingMode | undefined;
+      const mode = (getCellValue('pricing_mode') as PricingMode | undefined) || defaultPricingMode(row);
       if (mode === 'price_driven') {
         const price = getCellValue(priceKey);
         return (
@@ -611,11 +667,11 @@ export default function Products() {
           if (!Object.keys(fields).some((key) => INLINE_PRICING_FIELDS.has(key))) continue;
           const original = products.find((product) => product.id === productId);
           if (!original) throw new Error('A Product changed while you were editing. Refresh and try again.');
-          const mode = fields.pricing_mode as PricingMode | undefined;
+          const mode = (fields.pricing_mode as PricingMode | undefined) || defaultPricingMode(original);
           if (mode !== 'margin_driven' && mode !== 'price_driven') {
             throw new Error(`Choose margin-driven or price-driven for ${original.product_name}.`);
           }
-          const newCost = inputDecimal(fields.current_cost ?? original.current_cost);
+          const newCost = inputDecimal('current_cost' in fields ? fields.current_cost : original.current_cost);
           if (newCost === null) throw new Error(`Enter a cost for ${original.product_name}.`);
           if (mode === 'margin_driven' && pricingDollarInputToCents(newCost) === 0n) {
             throw new Error(`Margin-driven pricing requires a cost greater than $0 for ${original.product_name}. No prices were changed.`);
@@ -637,8 +693,8 @@ export default function Products() {
               const field = `tier${tier}_margin_percent` as const;
               const stored = original[`tier${tier}_margin` as const];
               const value = inputDecimal(fields[field] ?? storedMarginPercent(stored));
-              if (value === null) {
-                throw new Error(`Enter all three margins for ${original.product_name}.`);
+              if (value === null || !pricingMarginTextIsValid(value)) {
+                throw new Error(`Enter each net margin for ${original.product_name} as a plain number below 100.`);
               }
               row[field] = value;
             }
@@ -939,12 +995,19 @@ export default function Products() {
           key: 'pricing_mode',
           header: 'Pricing Mode',
           editable: true,
-          editType: 'select' as const,
-          editOptions: [
-            { value: 'margin_driven', label: 'Margin-driven' },
-            { value: 'price_driven', label: 'Price-driven' },
-          ],
           editAriaLabel: (row) => `Pricing mode for ${row.product_name}`,
+          editRender: (row, getCellValue, setCellValue) => (
+            <select
+              aria-label={`Pricing mode for ${row.product_name}`}
+              value={(getCellValue('pricing_mode') as PricingMode | undefined) || defaultPricingMode(row)}
+              onChange={(event) => setCellValue('pricing_mode', event.target.value)}
+              className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 bg-white"
+            >
+              {defaultPricingMode(row) === '' && <option value="">Choose a mode</option>}
+              <option value="margin_driven">Margin-driven</option>
+              <option value="price_driven">Price-driven</option>
+            </select>
+          ),
           render: () => <span className="text-xs text-gray-400">Choose while editing</span>,
         } satisfies EditableColumn<Product>]
       : []),
@@ -999,6 +1062,30 @@ export default function Products() {
         </div>
       ),
     },
+    ...(showCompliance
+      ? [
+          {
+            key: 'is_rup',
+            header: 'RUP',
+            render: (row: Product) => row.is_rup == null ? '-' : row.is_rup ? 'Yes' : 'No',
+          } satisfies EditableColumn<Product>,
+          {
+            key: 'signal_word',
+            header: 'Signal Word',
+            render: (row: Product) => row.signal_word || '-',
+          } satisfies EditableColumn<Product>,
+          {
+            key: 'product_form',
+            header: 'Form',
+            render: (row: Product) => row.product_form || '-',
+          } satisfies EditableColumn<Product>,
+          {
+            key: 'inventory_unit',
+            header: 'Inventory Unit',
+            render: (row: Product) => row.inventory_unit || row.unit_size || '-',
+          } satisfies EditableColumn<Product>,
+        ]
+      : []),
     {
       key: 'is_active',
       header: 'Status',
@@ -1144,12 +1231,12 @@ export default function Products() {
             rowKey="id"
             searchable
             searchPlaceholder="Search products..."
-            searchKeys={['product_name', 'sku', 'category', 'vendor']}
+            searchKeys={['product_name', 'sku', 'category', 'vendor', 'manufacturer', 'epa_registration']}
             onRowClick={(row) => navigate(`/products/${row.id}`)}
-            emptyTitle="No products yet"
-            emptyDescription="Add your first product to get started"
+            emptyTitle={products.length > 0 ? 'No matching products' : 'No products yet'}
+            emptyDescription={products.length > 0 ? 'Try a different search or filter' : 'Add your first product to get started'}
             emptyAction={
-              isAdmin ? (
+              products.length === 0 && isAdmin ? (
                 <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/products/new')}>
                   Add Product
                 </Button>
@@ -1160,16 +1247,28 @@ export default function Products() {
             onRetry={retryProducts}
             canEdit={isAdmin}
             onSave={handleBulkSave}
-            headerActions={isAdmin ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={showSensitive ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                onClick={() => setShowSensitive((v) => !v)}
-              >
-                {showSensitive ? 'Hide' : 'Margins'}
-              </Button>
-            ) : undefined}
+            headerActions={(
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={showCompliance ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  onClick={() => setShowCompliance((v) => !v)}
+                >
+                  {showCompliance ? 'Hide details' : 'Details'}
+                </Button>
+                {isAdmin && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={showSensitive ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    onClick={() => setShowSensitive((v) => !v)}
+                  >
+                    {showSensitive ? 'Hide' : 'Margins'}
+                  </Button>
+                )}
+              </>
+            )}
             filters={
               <>
                 <select
@@ -1194,7 +1293,17 @@ export default function Products() {
                     <option key={v} value={v}>{v}</option>
                   ))}
                 </select>
-                {canBulkAction && !loadError && filtered.length > 0 && (
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')}
+                  aria-label="Filter by status"
+                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="all">All statuses</option>
+                </select>
+                {canBulkAction && !loadError && filtered.some((p) => p.is_active) && (
                   <button
                     onClick={toggleAll}
                     className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"

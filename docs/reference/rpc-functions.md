@@ -595,7 +595,7 @@ These are NOT called directly from the frontend. They power triggers, guards, an
 
 ### Product categories (`20261102102000_product_setup_checks.sql`, local candidate; not applied)
 
-- `upsert_product_category(p_name text, p_is_active boolean, p_sort_order integer, p_idempotency_key text DEFAULT NULL)` → jsonb saved category. Admin only; trims and requires a nonblank name. A required retry key is bound to the caller and exact request through the same intent and receipt sequence as `upsert_product_brand`. Retire with `p_is_active=false`; a trigger then refuses moving products into it while preserving existing assignments. Active authenticated profiles read `product_categories`; no API role writes the table directly.
+- `upsert_product_category(p_name text, p_is_active boolean, p_sort_order integer, p_idempotency_key text DEFAULT NULL)` → jsonb saved category. Admin only; trims and collapses inner whitespace, requires a nonblank name of at most 100 characters, and refuses a name differing from an existing one only by case. A required retry key is bound to the caller and exact request through the same intent and receipt sequence as `upsert_product_brand`. Retire with `p_is_active=false`; a trigger then refuses moving products into it while preserving existing assignments. Active authenticated profiles read `product_categories`; no API role writes the table directly.
 
 ### Supplier Pricing Phase 1b (database LIVE; frontend shipped with PR #179)
 

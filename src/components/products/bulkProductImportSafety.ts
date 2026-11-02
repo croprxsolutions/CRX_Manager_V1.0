@@ -77,7 +77,7 @@ export function buildProductInsert(product: ParsedProduct) {
   return {
     product_name: product.product_name.trim(),
     sku: product.sku?.trim() || null,
-    category: product.category,
+    category: product.category?.trim() || null,
     use_timing: product.use_timing,
     vendor: product.vendor?.trim() || null,
     manufacturer: product.manufacturer?.trim() || null,

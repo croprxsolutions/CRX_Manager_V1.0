@@ -431,17 +431,19 @@ export default function ProductDetail() {
   }, [toast]);
 
   const saveExistingProductDetails = async () => {
-    const validation = productSetupValidationMessage(product, reiDraft, phiDraft);
+    const validation = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
     if (validation) throw new Error(validation);
-    if (persistedProduct?.product_form && product.product_form !== persistedProduct.product_form) {
-      throw new Error('Changing form waits for the reviewed unit change (WP-PM-6a).');
+    if ((persistedProduct?.product_form && product.product_form !== persistedProduct.product_form)
+      || (persistedProduct?.container_unit && product.container_unit !== persistedProduct.container_unit)
+      || (persistedProduct?.inventory_unit && product.inventory_unit !== persistedProduct.inventory_unit)) {
+      throw new Error("This can't change on a saved product yet; it waits for the reviewed unit change.");
     }
     if (!persistedProduct || persistedProduct.id !== id || !Number.isInteger(persistedProduct.pricing_version)) {
       throw new Error('Reload this Product before saving details.');
     }
     const result = await supabaseUntyped
       .from('products')
-      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft)))
+      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct)))
       .eq('id', id!)
       .eq('pricing_version', persistedProduct.pricing_version)
       .select('id');
@@ -622,23 +624,6 @@ export default function ProductDetail() {
       toast('error', 'Reload this Product before making another change.');
       return;
     }
-    const setupError = productSetupValidationMessage(product, reiDraft, phiDraft);
-    if (setupError) {
-      toast('error', setupError);
-      revealPhoneSection('information');
-      return;
-    }
-    if (categoryLoadFailed && (isNew || product.category !== persistedProduct?.category)) {
-      toast('error', 'Could not load product categories. Refresh before saving a category.');
-      revealPhoneSection('information');
-      return;
-    }
-    if (persistedProduct?.product_form && product.product_form !== persistedProduct.product_form) {
-      toast('error', 'Changing form waits for the reviewed unit change (WP-PM-6a).');
-      revealPhoneSection('information');
-      return;
-    }
-
     for (const [field, label] of [
       ['current_cost', 'Cost'],
       ['tier1_price', 'Tier 1 price'],
@@ -653,25 +638,6 @@ export default function ProductDetail() {
       }
     }
 
-    // Container size must be positive if set
-    if (product.container_size != null && product.container_size <= 0) {
-      toast('error', 'Container size must be greater than 0');
-      revealPhoneSection('information');
-      return;
-    }
-
-    // Label intervals must be non-negative (printed on WPS compliance notices)
-    if (product.rei_hours != null && product.rei_hours < 0) {
-      toast('error', 'REI (hours) cannot be negative');
-      revealPhoneSection('information');
-      return;
-    }
-    if (product.phi_days != null && product.phi_days < 0) {
-      toast('error', 'PHI (days) cannot be negative');
-      revealPhoneSection('information');
-      return;
-    }
-
     // Warn (but allow) if price < cost. The server preview remains authoritative.
     const costCents = pricingDollarInputToCents(pricingMoneyInput(product, pricingMoneyDrafts, 'current_cost')) ?? 0n;
     const priceCents = (['tier1_price', 'tier2_price', 'tier3_price'] as const)
@@ -679,6 +645,58 @@ export default function ProductDetail() {
       .filter((value): value is bigint => value !== null && value > 0n);
     if (costCents > 0n && priceCents.some((price) => price < costCents)) {
       toast('warning', 'Warning: One or more tier prices are below cost (negative margin)');
+    }
+
+    const hasPricingChanges = !isNew && pricingChanged(product, persistedProduct, pricingMoneyDrafts);
+    const hasProductDetailChanges = !isNew && productDetailsChanged(product, persistedProduct);
+    if (hasPricingChanges && hasProductDetailChanges) {
+      toast('error', 'Fix and save the product details first, then change the price.');
+      revealPhoneSection('information');
+      return;
+    }
+    if (hasPricingChanges) {
+      try { openPricingReview(); } catch (error) { toast('error', sanitizeError(error)); }
+      return;
+    }
+    const setupError = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
+    if (setupError) {
+      toast('error', setupError);
+      revealPhoneSection('information');
+      return;
+    }
+    if (categoryLoadFailed && Boolean(product.category) && product.category !== persistedProduct?.category) {
+      toast('error', 'Could not load product categories. Refresh before saving a category.');
+      revealPhoneSection('information');
+      return;
+    }
+    if ((persistedProduct?.product_form && product.product_form !== persistedProduct.product_form)
+      || (persistedProduct?.container_unit && product.container_unit !== persistedProduct.container_unit)
+      || (persistedProduct?.inventory_unit && product.inventory_unit !== persistedProduct.inventory_unit)) {
+      toast('error', "This can't change on a saved product yet; it waits for the reviewed unit change.");
+      revealPhoneSection('information');
+      return;
+    }
+
+    // Container size must be positive if set
+    if (product.container_size != null && product.container_size <= 0
+      && (!persistedProduct || product.container_size !== persistedProduct.container_size)) {
+      toast('error', 'Container size must be greater than 0');
+      revealPhoneSection('information');
+      return;
+    }
+
+    // Label intervals must be non-negative (printed on WPS compliance notices)
+    if (product.rei_hours != null && product.rei_hours < 0
+      && (!persistedProduct || product.rei_hours !== persistedProduct.rei_hours)) {
+      toast('error', 'REI (hours) cannot be negative');
+      revealPhoneSection('information');
+      return;
+    }
+    if (product.phi_days != null && product.phi_days < 0
+      && (!persistedProduct || product.phi_days !== persistedProduct.phi_days)) {
+      toast('error', 'PHI (days) cannot be negative');
+      revealPhoneSection('information');
+      return;
     }
 
     setSaving(true);
@@ -695,18 +713,6 @@ export default function ProductDetail() {
         logActivity({ event: 'product_created', description: `Product ${product.product_name} created`, performedBy: profile!.id, entityType: 'product' });
         skipUnsavedPromptRef.current = true;
         navigate('/products');
-        return;
-      }
-
-      const hasPricingChanges = pricingChanged(product, persistedProduct, pricingMoneyDrafts);
-      const hasProductDetailChanges = productDetailsChanged(product, persistedProduct);
-      if (hasPricingChanges && hasProductDetailChanges) {
-        throw new Error('Save Product details and pricing in separate review steps. Revert one kind of change, save the other, then make the remaining change.');
-      }
-
-      if (hasPricingChanges) {
-        // Ask where the new numbers came from and why; the preview runs from that prompt.
-        openPricingReview();
         return;
       }
 
@@ -1192,6 +1198,7 @@ export default function ProductDetail() {
                 step={1}
                 value={reiDraft}
                 onChange={(e) => {
+                  if (pricingReloadRequired) return;
                   setReiDraft(e.target.value);
                   update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
                 }}
@@ -1205,6 +1212,7 @@ export default function ProductDetail() {
                 step={1}
                 value={phiDraft}
                 onChange={(e) => {
+                  if (pricingReloadRequired) return;
                   setPhiDraft(e.target.value);
                   update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
                 }}
@@ -1363,8 +1371,16 @@ export default function ProductDetail() {
                   id="product-form"
                   value={product.product_form || ''}
                   onChange={(e) => {
-                    const form = e.target.value || null;
-                    update('product_form', form);
+                    const form = (e.target.value || null) as Product['product_form'];
+                    if (pricingReloadRequired) return;
+                    setProduct((current) => ({
+                      ...current,
+                      product_form: form,
+                      container_unit: isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
+                      inventory_unit: isKnownUnit(unitConversions, form, current.inventory_unit) ? current.inventory_unit : null,
+                      rate_unit: isKnownUnit(unitConversions, form, current.rate_unit) ? current.rate_unit : '',
+                    }));
+                    setIsDirty(true);
                   }}
                   disabled={!isAdmin || Boolean(persistedProduct?.product_form)}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
@@ -1374,7 +1390,7 @@ export default function ProductDetail() {
                   <option value="dry">Dry</option>
                 </select>
                 {persistedProduct?.product_form && (
-                  <p className="mt-1 text-xs text-secondary">Changing form waits for the reviewed unit change (WP-PM-6a)</p>
+                  <p className="mt-1 text-xs text-secondary">This can't change on a saved product yet; it waits for the reviewed unit change.</p>
                 )}
               </div>
             </div>
@@ -1391,7 +1407,7 @@ export default function ProductDetail() {
                     id="product-container-unit"
                     value={product.container_unit || ''}
                     onChange={(e) => update('container_unit', e.target.value || null)}
-                    disabled={!isAdmin}
+                    disabled={!isAdmin || Boolean(persistedProduct?.container_unit)}
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                   >
                     <option value="">-- Select --</option>
@@ -1440,7 +1456,7 @@ export default function ProductDetail() {
                 <select
                   value={product.inventory_unit || ''}
                   onChange={(e) => update('inventory_unit', e.target.value || null)}
-                  disabled={!isAdmin}
+                  disabled={!isAdmin || Boolean(persistedProduct?.inventory_unit)}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
                   <option value="">-- Select --</option>

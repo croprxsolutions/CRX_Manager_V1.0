@@ -166,4 +166,24 @@ describe('ProductDetail — leaving a new product', () => {
       product_form: 'dry',
     })]);
   });
+
+  it('clears only incompatible units when choosing a form for the first time', async () => {
+    mockFrom.mockImplementation((table: string) => chain(table === 'unit_conversions'
+      ? [
+        { id: 'gal', unit: 'Gal', unit_type: 'liquid' },
+        { id: 'lb', unit: 'Lb', unit_type: 'dry' },
+      ] : [{ id: 'product-1' }]));
+    renderNewProduct();
+    const container = await screen.findByLabelText('Unit');
+    await waitFor(() => expect(container.querySelectorAll('option').length).toBe(3));
+    const inventory = screen.getByText('Inventory Unit').parentElement!.querySelector('select')!;
+    const rate = screen.getByText('Rate Unit').parentElement!.querySelector('select')!;
+    fireEvent.change(container, { target: { value: 'Gal' } });
+    fireEvent.change(inventory, { target: { value: 'Lb' } });
+    fireEvent.change(rate, { target: { value: 'Lb' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'dry' } });
+    expect(container).toHaveValue('');
+    expect(inventory).toHaveValue('Lb');
+    expect(rate).toHaveValue('Lb');
+  });
 });

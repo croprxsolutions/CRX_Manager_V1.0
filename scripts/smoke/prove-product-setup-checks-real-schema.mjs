@@ -6,7 +6,7 @@
  * container and replays ordered post-baseline migrations up to this candidate. It exercises
  * transaction, legacy-row, check, category, role, replay and mutation checks against the real schema.
  *
- * Run: node scripts/smoke/prove-product-change-history-real-schema.mjs   (needs Docker)
+ * Run: node scripts/smoke/prove-product-setup-checks-real-schema.mjs   (needs Docker)
  * Prints PRODUCT_SETUP_CHECKS_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
@@ -178,6 +178,15 @@ function session(actor, sql, role = 'authenticated') {
     ${sql}
     COMMIT;`);
 }
+// Inner pricing functions are deliberately revoked from API roles; the public wrapper owns
+// browser access. Exercise their real apply path as the owner with an admin JWT, as other provers do.
+function ownerWithAdminClaim(sql) {
+  return psql(`BEGIN;
+    SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true);
+    SELECT set_config('request.jwt.claims', json_build_object('sub', '${ADMIN}', 'role', 'authenticated')::text, true);
+    ${sql}
+    COMMIT;`);
+}
 function roleScalar(role, actor, sql) {
   const r = docker([...psqlArgs(), '-A', '-t'], { input: `BEGIN;
     SET LOCAL ROLE ${role};
@@ -236,10 +245,15 @@ try {
   assert.notEqual(auto.status, 0, 'autocommit unexpectedly applied the migration');
   assert.match(`${auto.stdout}\n${auto.stderr}`, /PRODUCT_SETUP_CHECKS_NOT_IN_TRANSACTION/);
   assert.equal(scalar("SELECT to_regclass('public.product_categories') IS NULL;"), 't');
+  psql("INSERT INTO public.products(product_name, category) VALUES ('Unknown before migration', 'Not Listed');");
+  const unknown = apply('candidate.sql');
+  assert.notEqual(unknown.status, 0);
+  assert.match(unknown.output, /PREFLIGHT_PRODUCT_CATEGORY_UNKNOWN/);
+  psql("UPDATE public.products SET category = 'Herbicide' WHERE product_name = 'Unknown before migration';");
 
   for (const [label, mutation, error] of [
     ['policy', 'ALTER POLICY product_categories_select ON public.product_categories USING (true);', 'active-profile SELECT policy'],
-    ['fk', 'ALTER TABLE public.products DROP CONSTRAINT product_setup_category_fk;', 'FK or forward checks'],
+    ['fk', 'ALTER TABLE public.products DROP CONSTRAINT product_setup_category_fk;', 'FK or category index'],
   ]) {
     assert.equal(candidate.split('DO $postflight$').length - 1, 1);
     stageText(`mutation-${label}.sql`, candidate.replace('DO $postflight$', `${mutation}\nDO $postflight$`));
@@ -258,15 +272,16 @@ try {
   console.log('[prover] TRANSACTION: autocommit and second apply refused; four legacy bad rows survived');
 
   const checks = [
-    ['product_name', "''", 'product_setup_name_check'],
-    ['product_name', "' padded '", 'product_setup_name_check'],
-    ['sku', "''", 'product_setup_sku_check'],
-    ['sku', "' padded '", 'product_setup_sku_check'],
-    ['rate_per_acre', '-1', 'product_setup_rate_check'],
-    ['epa_registration', "''", 'product_setup_epa_check'],
-    ['epa_registration', "'bad-epa'", 'product_setup_epa_check'],
-    ['rei_hours', '-1', 'product_setup_rei_check'],
-    ['phi_days', '-1', 'product_setup_phi_check'],
+    ['product_name', "''", 'PRODUCT_SETUP_INVALID: product name'],
+    ['product_name', "' padded '", 'PRODUCT_SETUP_INVALID: product name'],
+    ['sku', "''", 'PRODUCT_SETUP_INVALID: SKU'],
+    ['sku', "' padded '", 'PRODUCT_SETUP_INVALID: SKU'],
+    ['rate_per_acre', '-1', 'PRODUCT_SETUP_INVALID: rate per acre'],
+    ['rate_per_acre', "'NaN'::numeric", 'PRODUCT_SETUP_INVALID: rate per acre'],
+    ['epa_registration', "''", 'PRODUCT_SETUP_INVALID: EPA number'],
+    ['epa_registration', "'bad-epa'", 'PRODUCT_SETUP_INVALID: EPA number'],
+    ['rei_hours', '-1', 'PRODUCT_SETUP_INVALID: REI hours'],
+    ['phi_days', '-1', 'PRODUCT_SETUP_INVALID: PHI days'],
   ];
   psql("INSERT INTO public.products(product_name, category) VALUES ('Valid setup row', 'Herbicide');");
   for (const [field, value, constraint] of checks) {
@@ -276,19 +291,52 @@ try {
     refused(insert, new RegExp(constraint));
     refused(`UPDATE public.products SET ${field} = ${value} WHERE product_name = 'Valid setup row';`, new RegExp(constraint));
   }
-  for (const name of ['  Legacy padded  ', 'Legacy empty SKU', 'Legacy bad EPA', 'Legacy empty EPA']) {
-    refused(`UPDATE public.products SET notes = 'other field' WHERE product_name = '${name}';`, /product_setup_(name|sku|epa)_check/);
-  }
+  psql("UPDATE public.products SET notes = 'other field' WHERE product_name IN ('  Legacy padded  ', 'Legacy empty SKU', 'Legacy bad EPA', 'Legacy empty EPA');");
+  session(ADMIN, "UPDATE public.products SET notes = 'admin edit' WHERE product_name = 'Legacy empty SKU';");
+  ownerWithAdminClaim(`DO $pricing$ DECLARE v_admin uuid := '${ADMIN}'; v_product uuid; v_pricing jsonb;
+    BEGIN SELECT id INTO v_product FROM public.products WHERE product_name = 'Legacy empty SKU';
+    v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+      jsonb_build_array(jsonb_build_object('product_id', v_product, 'row_version', 1,
+        'pricing_mode', 'price_driven', 'new_cost', '6.00', 'tier1_price', '10.00',
+        'tier2_price', '10.00', 'tier3_price', '10.00')), v_admin, 'setup-legacy-price-preview');
+    PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,
+      v_pricing->>'request_fingerprint', v_admin, 'setup-legacy-price-apply'); END $pricing$;`);
+  assert.equal(scalar("SELECT tier1_price = 10 FROM public.products WHERE product_name = 'Legacy empty SKU';"), 't');
+  session(ADMIN, "UPDATE public.products SET is_active = false WHERE product_name = 'Legacy empty SKU';");
+  assert.equal(scalar("SELECT is_active FROM public.products WHERE product_name = 'Legacy empty SKU';"), 'f');
+  refused("UPDATE public.products SET sku = '  ' WHERE product_name = 'Legacy empty SKU';", /PRODUCT_SETUP_INVALID: SKU/);
   psql("UPDATE public.products SET product_name = btrim(product_name), notes = 'repaired' WHERE product_name = '  Legacy padded  ';");
   psql("UPDATE public.products SET sku = NULL, notes = 'repaired' WHERE product_name = 'Legacy empty SKU';");
   psql("UPDATE public.products SET epa_registration = NULL, notes = 'repaired' WHERE product_name IN ('Legacy bad EPA', 'Legacy empty EPA');");
   psql("UPDATE public.products SET notes = 'later edit' WHERE product_name IN ('Legacy padded', 'Legacy empty SKU', 'Legacy bad EPA', 'Legacy empty EPA');");
-  console.log('[prover] CHECKS: every bad insert/update refused; unrelated edits of legacy bad rows require field repair');
+  console.log('[prover] CHECKS: bad changed fields refused; legacy price, notes and active writes worked');
+
+  // The schema baseline carries no unit rows, so seed the one liquid unit this case uses.
+  psql("INSERT INTO public.unit_conversions(unit, factor_oz, unit_type) VALUES ('fl oz', 1, 'liquid') ON CONFLICT (unit) DO UPDATE SET unit_type = 'liquid';");
+  psql("INSERT INTO public.products(product_name, category, unit_size) VALUES ('First unit choice', 'Seed', 'GL');");
+  psql("UPDATE public.products SET product_form = 'liquid', container_unit = 'fl oz', inventory_unit = 'fl oz' WHERE product_name = 'First unit choice';");
+  for (const field of ['product_form', 'container_unit', 'inventory_unit']) {
+    const value = field === 'product_form' ? 'dry' : 'Lb';
+    refused(`UPDATE public.products SET ${field} = '${value}' WHERE product_name = 'First unit choice';`, /This can't change on a saved product yet/);
+  }
+  assert.equal(scalar("SELECT product_form || ':' || container_unit || ':' || inventory_unit FROM public.products WHERE product_name = 'First unit choice';"), 'liquid:fl oz:fl oz');
+  ownerWithAdminClaim(`DO $pricing$ DECLARE v_admin uuid := '${ADMIN}'; v_product uuid; v_pricing jsonb;
+    BEGIN SELECT id INTO v_product FROM public.products WHERE product_name = 'First unit choice';
+    v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+      jsonb_build_array(jsonb_build_object('product_id', v_product, 'row_version', 1,
+        'pricing_mode', 'price_driven', 'new_cost', '7.00', 'tier1_price', '11.00',
+        'tier2_price', '11.00', 'tier3_price', '11.00')), v_admin, 'setup-unit-price-preview');
+    PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,
+      v_pricing->>'request_fingerprint', v_admin, 'setup-unit-price-apply'); END $pricing$;`);
+  assert.equal(scalar("SELECT product_form || ':' || container_unit || ':' || inventory_unit FROM public.products WHERE product_name = 'First unit choice';"), 'liquid:fl oz:fl oz');
 
   refused("INSERT INTO public.products(product_name, category) VALUES ('Unknown category', 'Syngnta');", /product_setup_category_fk/);
   psql("INSERT INTO public.products(product_name, category) VALUES ('Alias row', 'Post Emergence'), ('Seed row', 'Seed');");
   assert.equal(scalar("SELECT category FROM public.products WHERE product_name = 'Alias row';"), 'Herbicide');
   assert.equal(scalar("SELECT category FROM public.products WHERE product_name = 'Seed row';"), 'Seed');
+  refused("SELECT public.upsert_product_category('seed', true, 121, 'proof-case-duplicate');", /AUTH_REQUIRED/);
+  denied('authenticated', ADMIN, "SELECT public.upsert_product_category('seed', true, 121, 'proof-case-duplicate');", /PRODUCT_CATEGORY_ALREADY_EXISTS/);
+  denied('authenticated', ADMIN, `SELECT public.upsert_product_category('${'x'.repeat(101)}', true, 121, 'proof-too-long');`, /PRODUCT_CATEGORY_NAME_TOO_LONG/);
   const rpc = `SELECT public.upsert_product_category(' Seed ', false, 120, 'proof-retire-seed');`;
   const result = session(ADMIN, rpc).stdout;
   assert.match(result, /"is_active": false/);
@@ -302,6 +350,8 @@ try {
     "INSERT INTO public.product_categories(name, sort_order) VALUES ('Direct write', 130);");
   assert.equal(roleScalar('authenticated', REP, "SELECT count(*) FROM public.product_categories WHERE name = 'Seed';"), '1');
   assert.equal(roleScalar('authenticated', INACTIVE, "SELECT count(*) FROM public.product_categories;"), '0');
+  session(ADMIN, "SELECT public.upsert_product_category(' New   Category ', true, 140, 'proof-inner-space');");
+  assert.equal(scalar("SELECT count(*) FROM public.product_categories WHERE name = 'New Category';"), '1');
   refused("INSERT INTO public.products(product_name, category) VALUES ('Retired category', 'Seed');", /PRODUCT_CATEGORY_RETIRED/);
   refused("UPDATE public.products SET category = 'Seed' WHERE product_name = 'Valid setup row';", /PRODUCT_CATEGORY_RETIRED/);
   psql("UPDATE public.products SET notes = 'still valid' WHERE product_name = 'Seed row';");

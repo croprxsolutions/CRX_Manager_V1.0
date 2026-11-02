@@ -107,11 +107,11 @@ BEGIN
   RETURNING id INTO v_customer;
 
   INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Chem Alpha ' || v_sfx, 'GL', '[SMOKE]-EPA-A', 'liquid')
+  VALUES ('[SMOKE] Chem Alpha ' || v_sfx, 'GL', '999999-99999', 'liquid')
   RETURNING id INTO v_prod_a;
 
   INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Chem Beta ' || v_sfx, 'GL', '[SMOKE]-EPA-B', 'liquid')
+  VALUES ('[SMOKE] Chem Beta ' || v_sfx, 'GL', '999999-99999', 'liquid')
   RETURNING id INTO v_prod_b;
 
   INSERT INTO fields (customer_id, field_name, crop_type)

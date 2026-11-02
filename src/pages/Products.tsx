@@ -710,6 +710,14 @@ export default function Products() {
         const nonpricingFields = Object.fromEntries(
           Object.entries(fields).filter(([key]) => INLINE_NONPRICING_FIELDS.has(key)),
         );
+        if ('product_name' in nonpricingFields) {
+          const name = String(nonpricingFields.product_name ?? '').trim();
+          if (!name) throw new Error('Enter a product name before saving.');
+          nonpricingFields.product_name = name;
+        }
+        for (const field of ['vendor', 'category'] as const) {
+          if (nonpricingFields[field] === '') nonpricingFields[field] = null;
+        }
         const updateResult = await supabase
           .from('products')
           .update({ ...nonpricingFields, updated_at: new Date().toISOString() })

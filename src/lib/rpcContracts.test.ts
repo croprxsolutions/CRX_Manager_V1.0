@@ -1550,7 +1550,6 @@ const MUTATING_RPCS_WITH_IDEMPOTENCY: string[] = [
   'update_blend_ticket_billing_status',
   'update_cycle_count_item',
   'update_order_items',
-  'upsert_product_category',
   'upsert_product_supplier_link', // Supplier Pricing 1b — see approve_supplier_price_import note
   'void_commission_payment',
   'void_delivery',
@@ -2988,6 +2987,8 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 }
 
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
+  // Local product setup candidate is unapplied; generated types reflect live only.
+  'upsert_product_category',
   // The live registry/type regeneration through 20260903202611 moved every
   // former entry into
   // MUTATING_RPCS_WITH_IDEMPOTENCY. This bucket remains for the normal pre-apply

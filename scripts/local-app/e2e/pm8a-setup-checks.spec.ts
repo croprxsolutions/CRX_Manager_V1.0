@@ -30,10 +30,10 @@ test('product setup refuses invalid fields and saves Seed with a first form choi
 
   await page.getByLabel('EPA Registration').fill('');
   await page.getByLabel('Category').selectOption('Seed');
-  await page.getByText('Product Form').locator('..').locator('select').selectOption('dry');
+  await page.getByLabel('Product Form').selectOption('dry');
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await expect(page.getByText('Product updated')).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Category')).toHaveValue('Seed');
-  await expect(page.getByText('Product Form').locator('..').locator('select')).toHaveValue('dry');
+  await expect(page.getByLabel('Product Form')).toHaveValue('dry');
 });

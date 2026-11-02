@@ -8,6 +8,7 @@ import { isCSVFile } from '../../lib/documentOCR';
 import { Sentry } from '../../lib/sentry';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { EPA_REGISTRATION_PATTERN } from '../../lib/productBrands';
+import { listProductCategories } from '../../lib/productSetup';
 import {
   buildProductInsert,
   isProductImportStringField,
@@ -46,6 +47,38 @@ const FIELD_MAPPINGS: Record<string, string[]> = {
   container_type: ['container_type', 'package_type', 'pkg_type'],
   notes: ['notes', 'description', 'comments', 'note'],
 };
+
+function validateImportRow(
+  cols: string[], fieldMapping: Record<number, string>, allowedCategories: Set<string>, row: number,
+): { product?: ParsedProduct; invalid?: ValidationResult['invalid'][number] } {
+  const product: Partial<ParsedProduct> = {};
+  const data: Record<string, string> = {};
+  let numberError: string | null = null;
+  cols.forEach((value, index) => {
+    const field = fieldMapping[index];
+    if (!field) return;
+    data[field] = value;
+    if (isProductImportStringField(field)) {
+      if (value) product[field] = value;
+    } else if (field === 'container_size' || field === 'rate_per_acre') {
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      const number = Number(trimmed);
+      const valid = !/^0[xob]/i.test(trimmed) && Number.isFinite(number)
+        && (field !== 'container_size' || number > 0) && (field !== 'rate_per_acre' || number >= 0);
+      if (valid) product[field] = number;
+      else numberError = field === 'container_size'
+        ? 'Container size must be a number greater than 0.'
+        : 'Rate Per Acre must be a number of zero or greater.';
+    }
+  });
+  const error = !product.product_name?.trim() ? 'Missing product name'
+    : numberError
+      || (product.category && !allowedCategories.has(product.category.trim()) ? 'Choose an active category from the list.' : null)
+      || (product.epa_registration && !EPA_REGISTRATION_PATTERN.test(product.epa_registration.trim())
+        ? 'EPA number must look like 524-475 or 100-1234-5905. This checks format only.' : null);
+  return error ? { invalid: { row, error, data } } : { product: product as ParsedProduct };
+}
 
 export default function BulkProductImport({ open, onClose, onSuccess }: BulkProductImportProps) {
   const { toast } = useToast();
@@ -178,61 +211,21 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         return;
       }
 
+      const categories = await listProductCategories();
+      const allowedCategories = new Set(categories.filter((category) => category.is_active).map((category) => category.name));
       const valid: ParsedProduct[] = [];
       const invalid: Array<{ row: number; error: string; data: Record<string, string> }> = [];
 
       rows.forEach((cols, idx) => {
-        const product: Partial<ParsedProduct> = {};
-        const rowData: Record<string, string> = {};
-        let rateError: string | null = null;
-
-        cols.forEach((value, colIdx) => {
-          const field = fieldMapping[colIdx];
-          if (field) {
-            rowData[field] = value;
-
-            if (isProductImportStringField(field)) {
-              if (value) product[field] = value;
-            } else if (field === 'container_size' || field === 'rate_per_acre') {
-              const num = Number(value);
-              if (value !== '' && Number.isFinite(num)) {
-                product[field] = num;
-              } else if (field === 'rate_per_acre' && value !== '') {
-                rateError = 'Rate Per Acre must be a number of zero or greater.';
-              }
-            }
-          }
-        });
-
-        if (!product.product_name?.trim()) {
-          invalid.push({
-            row: idx + 2,
-            error: 'Missing product name',
-            data: rowData,
-          });
-          return;
-        }
-        if (rateError) {
-          invalid.push({ row: idx + 2, error: rateError, data: rowData });
-          return;
-        }
-
-        if (product.rate_per_acre != null && product.rate_per_acre < 0) {
-          invalid.push({ row: idx + 2, error: 'Rate Per Acre must be zero or greater.', data: rowData });
-          return;
-        }
-        if (product.epa_registration && !EPA_REGISTRATION_PATTERN.test(product.epa_registration.trim())) {
-          invalid.push({ row: idx + 2,
-            error: 'EPA number must look like 524-475 or 100-1234-5905. This checks format only.', data: rowData });
-          return;
-        }
-
-        valid.push(product as ParsedProduct);
+        const result = validateImportRow(cols, fieldMapping, allowedCategories, idx + 2);
+        if (result.invalid) invalid.push(result.invalid);
+        else if (result.product) valid.push(result.product);
       });
 
       setValidation({ valid, invalid });
-    } catch {
-      toast('error', 'Failed to parse file.');
+    } catch (error) {
+      Sentry.captureException(error);
+      toast('error', 'Could not read the category list or parse the file. Try again.');
     }
     setParsing(false);
   };
@@ -360,11 +353,6 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
                       {product.rate_per_acre && <p className="text-gray-500">Rate/Acre: {product.rate_per_acre} {product.rate_unit || ''}</p>}
                     </div>
                   ))}
-                  {validation.valid.length > 5 && (
-                    <p className="text-xs text-secondary text-center pt-1">
-                      + {validation.valid.length - 5} more products
-                    </p>
-                  )}
                 </div>
               </div>
             )}

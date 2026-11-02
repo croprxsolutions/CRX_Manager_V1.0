@@ -133,4 +133,15 @@ describe('ProductDetail — per-acre price display', () => {
     expect(screen.getByText('$10.25 / acre')).toBeTruthy();
     expect(screen.getByText('$8.00 / acre')).toBeTruthy();
   });
+
+  it('locks saved form and units while showing an existing container unit', async () => {
+    render(<ProductDetail />);
+    const form = await screen.findByLabelText('Product Form');
+    expect(form).toBeDisabled();
+    const container = screen.getByLabelText('Unit');
+    expect(container).toBeDisabled();
+    expect(container).toHaveTextContent('jug (existing)');
+    const inventory = screen.getByText('Inventory Unit').parentElement!.querySelector('select');
+    expect(inventory).toBeDisabled();
+  });
 });

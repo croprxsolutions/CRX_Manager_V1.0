@@ -25,6 +25,10 @@ function chainable(resolveWith: unknown = { data: [], error: null }) {
 
 vi.mock('../../lib/db', () => ({
   supabase: { from: vi.fn(() => chainable()), rpc: vi.fn(() => chainable()) },
+  supabaseUntyped: { from: vi.fn(() => chainable({
+    data: [{ name: 'Herbicide', is_active: true, sort_order: 1 },
+      { name: 'Retired', is_active: false, sort_order: 2 }], error: null,
+  })) },
 }));
 
 vi.mock('../../lib/documentOCR', () => ({
@@ -165,9 +169,9 @@ describe('BulkProductImport', () => {
 
   it('trims identity fields and sends blank optional text as NULL', () => {
     expect(buildProductInsert({
-      product_name: '  Chem  ', sku: '  ', epa_registration: '', vendor: ' ', manufacturer: '  Acme  ',
+      product_name: '  Chem  ', sku: '  ', category: '  Herbicide  ', epa_registration: '', vendor: ' ', manufacturer: '  Acme  ',
     })).toMatchObject({
-      product_name: 'Chem', sku: null, epa_registration: null, vendor: null, manufacturer: 'Acme',
+      product_name: 'Chem', sku: null, category: 'Herbicide', epa_registration: null, vendor: null, manufacturer: 'Acme',
     });
   });
 
@@ -177,7 +181,7 @@ describe('BulkProductImport', () => {
       error: { message: 'insert or update on table "products" violates foreign key constraint "product_setup_category_fk"' },
     }) as unknown as ReturnType<typeof supabase.from>);
     render(<BulkProductImport {...defaultProps} />);
-    const csv = 'product_name,category\nChem,Unknown';
+    const csv = 'product_name,category\nChem,Herbicide';
     const file = new File([csv], 'products.csv', { type: 'text/csv' });
     Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
     fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
@@ -196,5 +200,39 @@ describe('BulkProductImport', () => {
     fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
     expect(await screen.findByText(/Row 2: Rate Per Acre must be/)).toBeInTheDocument();
     expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['container_size', '0', /Container size must be/],
+    ['container_size', '-1', /Container size must be/],
+    ['container_size', '0x1A', /Container size must be/],
+    ['rate_per_acre', '0x1A', /Rate Per Acre must be/],
+    ['category', 'Unknown', /Choose an active category/],
+    ['category', 'Retired', /Choose an active category/],
+  ])('marks %s=%s invalid before import', async (field, value, message) => {
+    render(<BulkProductImport {...defaultProps} />);
+    const csv = `product_name,${field}\nChem,${value}`;
+    const file = new File([csv], 'products.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it('treats a whitespace-only number cell as blank', async () => {
+    render(<BulkProductImport {...defaultProps} />);
+    const csv = 'product_name,container_size,rate_per_acre\nChem,   ,   ';
+    const file = new File([csv], 'products.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText('Valid Products');
+    fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
+    await waitFor(() => expect(supabase.from).toHaveBeenCalledWith('products'));
+    const builder = vi.mocked(supabase.from).mock.results[0]?.value;
+    expect(builder.insert).toHaveBeenCalledWith(expect.objectContaining({
+      container_size: undefined, rate_per_acre: undefined,
+    }));
   });
 });

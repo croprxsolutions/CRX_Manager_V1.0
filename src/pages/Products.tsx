@@ -456,11 +456,14 @@ export default function Products() {
             { header: 'Tier 2 Price', key: 'tier2_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
             { header: 'Tier 3 Price', key: 'tier3_price', align: 'right', format: (v) => v != null ? fmt(Number(v)) : '-' },
           ];
+      const statusPdfCols: ReportPdfColumn[] = includeCost
+        ? [{ header: 'Status', key: 'is_active', format: (v) => v ? 'Active' : 'Inactive' }]
+        : [];
       const title = includeCost ? 'Product & Pricing — Internal' : 'Product Sales Sheet';
       await downloadReportPdf({
         title,
         subtitle: `${rows.length} ${includeCost ? '' : 'active '}product(s) — ${new Date().toLocaleDateString()}`,
-        columns: [...basePdfCols, ...pricePdfCols],
+        columns: [...basePdfCols, ...pricePdfCols, ...statusPdfCols],
         data: pdfData as unknown as Record<string, unknown>[],
         orientation: 'landscape',
       });

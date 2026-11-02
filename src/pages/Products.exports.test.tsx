@@ -168,6 +168,25 @@ describe('Products list and exports', () => {
     expect(pdf.columns.map((column) => column.key).join(' ')).not.toMatch(/cost|margin|notes|is_rup|signal_word|rei_hours|phi_days|product_form|is_active/);
   });
 
+  it('adds Status to the end of the internal PDF columns but not the sales sheet PDF', async () => {
+    await loadProducts();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'all' } });
+
+    openDownload();
+    internalOption('PDF');
+    await waitFor(() => expect(downloadReportPdf).toHaveBeenCalledTimes(1));
+    const [internal] = vi.mocked(downloadReportPdf).mock.calls[0];
+    const lastInternalColumn = internal.columns[internal.columns.length - 1];
+    expect(lastInternalColumn).toMatchObject({ header: 'Status', key: 'is_active' });
+    expect(lastInternalColumn.format?.(false)).toBe('Inactive');
+
+    openDownload();
+    salesOption('PDF');
+    await waitFor(() => expect(downloadReportPdf).toHaveBeenCalledTimes(2));
+    const [salesSheet] = vi.mocked(downloadReportPdf).mock.calls[1];
+    expect(salesSheet.columns.map((column) => column.key)).not.toContain('is_active');
+  });
+
   it('warns and downloads nothing when Inactive is selected for the sales sheet', async () => {
     await loadProducts();
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'inactive' } });

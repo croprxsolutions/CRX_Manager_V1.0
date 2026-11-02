@@ -24,6 +24,7 @@ import { logActivity } from '../lib/activityLogger';
 import { exportToCSV, fmtCSV } from '../lib/csvExport';
 import { fetchAllRows } from '../lib/pagedRead';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
+import RupIncompleteNotice, { RUP_FLAGS_KNOWN_INCOMPLETE } from '../components/compliance/RupIncompleteNotice';
 import { localToday, localDatePlusDays, parseLocalDate } from '../lib/dateUtils';
 import { formatCents as fmtCurrency } from '../lib/money';
 import type { ApplicatorLicense, RUPSalesRecord } from '../types';
@@ -704,27 +705,31 @@ export default function Compliance() {
 
       {/* ========== RUP PRODUCTS TAB ========== */}
       {tab === 'rup_products' && (
-        <Card padding={false}>
-          <div className="p-5">
-            <DataTable<RUPProduct>
-              columns={rupColumns}
-              data={rupProducts}
-              loading={loading}
-              loadError={rupProductsFailed}
-              onRetry={() => void fetchRUPProducts()}
-              searchable
-              searchPlaceholder="Search RUP products..."
-              searchKeys={['product_name', 'sku', 'manufacturer', 'epa_registration']}
-              emptyTitle="No RUP products"
-              emptyDescription="Mark products as RUP in the product editor to track them here."
-            />
-          </div>
-        </Card>
+        <div className="space-y-4">
+          <RupIncompleteNotice />
+          <Card padding={false}>
+            <div className="p-5">
+              <DataTable<RUPProduct>
+                columns={rupColumns}
+                data={rupProducts}
+                loading={loading}
+                loadError={rupProductsFailed}
+                onRetry={() => void fetchRUPProducts()}
+                searchable
+                searchPlaceholder="Search RUP products..."
+                searchKeys={['product_name', 'sku', 'manufacturer', 'epa_registration']}
+                emptyTitle="No RUP products"
+                emptyDescription="Mark products as RUP in the product editor to track them here."
+              />
+            </div>
+          </Card>
+        </div>
       )}
 
       {/* ========== RUP SALES REGISTER TAB ========== */}
       {tab === 'rup_sales' && (
         <>
+          <RupIncompleteNotice />
           {/* Filters */}
           <Card>
             <div className="flex items-end gap-4 flex-wrap">
@@ -786,7 +791,7 @@ export default function Compliance() {
                           { key: 'compliance_status', header: 'Compliance' },
                           { key: 'compliance_notes', header: 'Notes' },
                         ],
-                        'rup_sales_register'
+                        RUP_FLAGS_KNOWN_INCOMPLETE ? 'rup_sales_register_known_incomplete' : 'rup_sales_register'
                       )
                     }
                   >

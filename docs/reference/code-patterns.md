@@ -18,7 +18,7 @@ All numbers are generated server-side. The year-bearing `next_*_number` generato
 - Modal component accepts `size="large"` prop
 - Tab-based page layout used in: ARaging (3 tabs), Compliance (4 tabs), Rebates (2 tabs), InventoryPage (2 tabs: inventory, forecast), BlendRecipes
 - Commission split editor: `src/components/ui/CommissionSplitEditor.tsx`
-- Combobox component: `src/components/ui/Combobox.tsx` — dropdown with type-to-filter + accept new values. Used for Vendor, Manufacturer, Category on ProductDetail. Props: `value`, `onChange(string)`, `options: string[]`, `label`, `disabled`, `placeholder`
+- Combobox component: `src/components/ui/Combobox.tsx` — free-text dropdown: opening shows every option with the saved one marked, typing narrows the list and keeps new values, Escape cancels the typing, Tab keeps it. Used on ProductDetail and BrandVsGeneric. Props: `value`, `onChange(string)`, `options: string[]`, `label`, `disabled`, `placeholder`
 
 ## Bulk Operations Pattern
 - `useRowSelection` hook + `createCheckboxColumn` + `BulkActionBar` (auto-hides when 0 selected) + `BulkDeleteConfirmModal`

@@ -21,6 +21,7 @@ vi.mock('./db', async () => {
 
 import {
   EPA_REGISTRATION_PATTERN,
+  epaLabelSearchUrl,
   productBrandErrorMessage,
   saveProductBrand,
   suggestBrandNamesFromProductName,
@@ -60,6 +61,34 @@ describe('EPA_REGISTRATION_PATTERN', () => {
     expect(EPA_REGISTRATION_PATTERN.test('1234567-1')).toBe(false);
     expect(EPA_REGISTRATION_PATTERN.test('524-123456')).toBe(false);
     expect(EPA_REGISTRATION_PATTERN.test('524-475-1234567')).toBe(false);
+  });
+});
+
+describe('epaLabelSearchUrl', () => {
+  const url = 'https://ordspub.epa.gov/ords/pesticides/f?p=PPLS:102:::NO::P102_REG_NUM:';
+
+  it('links a two-part registration to its number', () => {
+    expect(epaLabelSearchUrl('524-475')).toBe(`${url}524-475`);
+  });
+
+  it('links a three-part distributor number to its two-part base', () => {
+    expect(epaLabelSearchUrl('524-475-1381')).toBe(`${url}524-475`);
+  });
+
+  it('trims surrounding spaces before validating and building the link', () => {
+    expect(epaLabelSearchUrl('  100-1070  ')).toBe(`${url}100-1070`);
+  });
+
+  it.each(['', '   '])('returns null for blank input %j', (registration) => {
+    expect(epaLabelSearchUrl(registration)).toBeNull();
+  });
+
+  it.each([null, undefined])('returns null for missing input %s', (registration) => {
+    expect(epaLabelSearchUrl(registration)).toBeNull();
+  });
+
+  it('returns null for a malformed registration', () => {
+    expect(epaLabelSearchUrl('EPA 524-475')).toBeNull();
   });
 });
 

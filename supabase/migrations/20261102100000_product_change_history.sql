@@ -1,11 +1,14 @@
 -- Written 2026-11-02. STATUS: NOT APPLIED (local candidate).
 --
 -- WHAT: record product setup creation and field changes with the session actor and a name snapshot.
+--   Note changes record only the field name; note text is never copied into permanent history.
 --   A products AFTER trigger writes the history in the product transaction.
--- NOT CHANGED: cost_history remains admin-only; product cost, margin, price, timestamps and
+-- NOT CHANGED: the admin-only cost history stays as it is; product cost, margin, price, timestamps and
 --   future product columns are not watched. Existing product rows are not backfilled.
 -- ACCESS CHANGE: a new table is readable only by active authenticated profiles. No API role
 --   can write it or execute its trigger functions.
+--   Every product created after apply gets a history row; once it has one, it cannot be hard-deleted.
+--   Retire products instead of deleting them.
 -- ROLLBACK (reviewed migration): remove the products trigger, both functions, and the table.
 --   Dropping the table destroys history and needs Mason's explicit approval.
 -- ORDERING: apply after every older pending migration; re-read the live ledger before apply.
@@ -112,44 +115,49 @@ BEGIN
   END IF;
 
   -- Explicit setup allow-list: a future product column is not watched until added here.
+  -- Notes and product_family_id record only the changed field, never either value.
   FOR v_change IN
     SELECT field_name, old_value, new_value FROM (VALUES
-      ('product_name', OLD.product_name::text, NEW.product_name::text),
-      ('sku', OLD.sku::text, NEW.sku::text),
-      ('category', OLD.category::text, NEW.category::text),
-      ('vendor', OLD.vendor::text, NEW.vendor::text),
-      ('manufacturer', OLD.manufacturer::text, NEW.manufacturer::text),
-      ('container_size', OLD.container_size::text, NEW.container_size::text),
-      ('container_unit', OLD.container_unit::text, NEW.container_unit::text),
-      ('container_type', OLD.container_type::text, NEW.container_type::text),
-      ('unit_size', OLD.unit_size::text, NEW.unit_size::text),
-      ('inventory_unit', OLD.inventory_unit::text, NEW.inventory_unit::text),
-      ('product_form', OLD.product_form::text, NEW.product_form::text),
-      ('suggested_rate', OLD.suggested_rate::text, NEW.suggested_rate::text),
-      ('rate_per_acre', OLD.rate_per_acre::text, NEW.rate_per_acre::text),
-      ('rate_unit', OLD.rate_unit::text, NEW.rate_unit::text),
-      ('notes', OLD.notes::text, NEW.notes::text),
-      ('internal_notes', OLD.internal_notes::text, NEW.internal_notes::text),
-      ('quoting_notes', OLD.quoting_notes::text, NEW.quoting_notes::text),
+      ('product_name', NULLIF(OLD.product_name::text, ''), NULLIF(NEW.product_name::text, '')),
+      ('sku', NULLIF(OLD.sku::text, ''), NULLIF(NEW.sku::text, '')),
+      ('category', NULLIF(OLD.category::text, ''), NULLIF(NEW.category::text, '')),
+      ('vendor', NULLIF(OLD.vendor::text, ''), NULLIF(NEW.vendor::text, '')),
+      ('manufacturer', NULLIF(OLD.manufacturer::text, ''), NULLIF(NEW.manufacturer::text, '')),
+      ('container_size', trim_scale(OLD.container_size)::text, trim_scale(NEW.container_size)::text),
+      ('container_unit', NULLIF(OLD.container_unit::text, ''), NULLIF(NEW.container_unit::text, '')),
+      ('container_type', NULLIF(OLD.container_type::text, ''), NULLIF(NEW.container_type::text, '')),
+      ('unit_size', NULLIF(OLD.unit_size::text, ''), NULLIF(NEW.unit_size::text, '')),
+      ('inventory_unit', NULLIF(OLD.inventory_unit::text, ''), NULLIF(NEW.inventory_unit::text, '')),
+      ('product_form', NULLIF(OLD.product_form::text, ''), NULLIF(NEW.product_form::text, '')),
+      ('suggested_rate', NULLIF(OLD.suggested_rate::text, ''), NULLIF(NEW.suggested_rate::text, '')),
+      ('rate_per_acre', trim_scale(OLD.rate_per_acre)::text, trim_scale(NEW.rate_per_acre)::text),
+      ('rate_unit', NULLIF(OLD.rate_unit::text, ''), NULLIF(NEW.rate_unit::text, '')),
+      ('notes', NULLIF(OLD.notes::text, ''), NULLIF(NEW.notes::text, '')),
+      ('internal_notes', NULLIF(OLD.internal_notes::text, ''), NULLIF(NEW.internal_notes::text, '')),
+      ('quoting_notes', NULLIF(OLD.quoting_notes::text, ''), NULLIF(NEW.quoting_notes::text, '')),
       ('is_active', OLD.is_active::text, NEW.is_active::text),
-      ('epa_registration', OLD.epa_registration::text, NEW.epa_registration::text),
+      ('epa_registration', NULLIF(OLD.epa_registration::text, ''), NULLIF(NEW.epa_registration::text, '')),
       ('is_rup', OLD.is_rup::text, NEW.is_rup::text),
-      ('signal_word', OLD.signal_word::text, NEW.signal_word::text),
+      ('signal_word', NULLIF(OLD.signal_word::text, ''), NULLIF(NEW.signal_word::text, '')),
       ('rei_hours', OLD.rei_hours::text, NEW.rei_hours::text),
       ('phi_days', OLD.phi_days::text, NEW.phi_days::text),
-      ('max_label_rate', OLD.max_label_rate::text, NEW.max_label_rate::text),
-      ('max_label_rate_unit', OLD.max_label_rate_unit::text, NEW.max_label_rate_unit::text),
-      ('use_timing', OLD.use_timing::text, NEW.use_timing::text),
+      ('max_label_rate', trim_scale(OLD.max_label_rate)::text, trim_scale(NEW.max_label_rate)::text),
+      ('max_label_rate_unit', NULLIF(OLD.max_label_rate_unit::text, ''), NULLIF(NEW.max_label_rate_unit::text, '')),
+      ('use_timing', NULLIF(OLD.use_timing::text, ''), NULLIF(NEW.use_timing::text, '')),
       ('product_family_id', OLD.product_family_id::text, NEW.product_family_id::text),
-      ('return_policy', OLD.return_policy::text, NEW.return_policy::text),
-      ('packaging_variant', OLD.packaging_variant::text, NEW.packaging_variant::text),
+      ('return_policy', NULLIF(OLD.return_policy::text, ''), NULLIF(NEW.return_policy::text, '')),
+      ('packaging_variant', NULLIF(OLD.packaging_variant::text, ''), NULLIF(NEW.packaging_variant::text, '')),
       ('is_full_tote_only', OLD.is_full_tote_only::text, NEW.is_full_tote_only::text)
     ) AS fields(field_name, old_value, new_value)
     WHERE old_value IS DISTINCT FROM new_value
   LOOP
     INSERT INTO public.product_change_history
       (product_id, change_type, field_name, old_value, new_value, changed_by, changed_by_name)
-    VALUES (NEW.id, 'updated', v_change.field_name, v_change.old_value, v_change.new_value,
+    VALUES (NEW.id, 'updated', v_change.field_name,
+            CASE WHEN v_change.field_name IN ('notes', 'internal_notes', 'quoting_notes', 'product_family_id')
+              THEN NULL ELSE v_change.old_value END,
+            CASE WHEN v_change.field_name IN ('notes', 'internal_notes', 'quoting_notes', 'product_family_id')
+              THEN NULL ELSE v_change.new_value END,
             v_actor, v_actor_name);
   END LOOP;
   RETURN NEW;
@@ -178,6 +186,7 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_CHANGE_HISTORY_POSTFLIGHT: active-profile SELECT policy';
   END IF;
   IF NOT has_table_privilege('authenticated', 'public.product_change_history', 'SELECT')
+     OR NOT has_function_privilege('authenticated', 'public.is_active_profile()', 'EXECUTE')
      OR has_table_privilege('authenticated', 'public.product_change_history', 'INSERT, UPDATE, DELETE, TRUNCATE')
      OR has_table_privilege('anon', 'public.product_change_history', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
      OR has_table_privilege('service_role', 'public.product_change_history', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')

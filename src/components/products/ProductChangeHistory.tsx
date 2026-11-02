@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Card, { CardHeader } from '../ui/Card';
+import { LoadFailedState } from '../ui/EmptyState';
 import { supabaseUntyped } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
+import { sanitizeError } from '../../lib/errorSanitizer';
+import { BUSINESS_TIMEZONE } from '../../lib/dateUtils';
 import type { ProductChangeHistoryEntry } from '../../types';
 
 const FIELD_LABELS: Record<string, string> = {
@@ -22,12 +25,18 @@ type LoadState =
   | { status: 'failed'; productId: string }
   | { status: 'loaded'; productId: string; rows: ProductChangeHistoryEntry[] };
 
-function displayValue(value: string | null): string {
+const BOOLEAN_FIELDS = new Set(['is_active', 'is_rup', 'is_full_tote_only']);
+const NO_VALUE_FIELDS = new Set(['notes', 'internal_notes', 'quoting_notes', 'product_family_id']);
+
+function displayValue(field: string | null, value: string | null): string {
+  if (BOOLEAN_FIELDS.has(field ?? '') && value !== null) return value === 'true' ? 'Yes' : 'No';
   return value === null || value === '' ? 'blank' : value;
 }
 
 export default function ProductChangeHistory({ productId, reloadToken = 0 }: { productId: string; reloadToken?: number }) {
   const [loaded, setLoaded] = useState<LoadState>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const state = loaded.status !== 'loading' && loaded.productId !== productId
     ? { status: 'loading' as const } : loaded;
 
@@ -43,43 +52,49 @@ export default function ProductChangeHistory({ productId, reloadToken = 0 }: { p
         .limit(50);
       if (cancelled) return;
       if (error) {
-        Sentry.captureException(error, { extra: { context: 'product_change_history' } });
+        Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), {
+          extra: { context: 'product_change_history' },
+        });
         setLoaded({ status: 'failed', productId });
       } else {
         setLoaded({ status: 'loaded', productId, rows: (data ?? []) as ProductChangeHistoryEntry[] });
       }
     })().catch((error: unknown) => {
       if (cancelled) return;
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), {
         extra: { context: 'product_change_history' },
       });
       setLoaded({ status: 'failed', productId });
     });
     return () => { cancelled = true; };
-  }, [productId, reloadToken]);
+  }, [productId, reloadToken, attempt]);
 
   return (
     <Card>
       <CardHeader title="Change" accent="History" />
       {state.status === 'loading' && <p className="text-sm text-secondary" role="status">Loading change history…</p>}
-      {state.status === 'failed' && <p className="text-sm text-secondary">Change history could not be loaded. Reload to try again.</p>}
+      {state.status === 'failed' && <LoadFailedState title="Change history could not be loaded" onRetry={retry} />}
       {state.status === 'loaded' && state.rows.length === 0 && <p className="text-sm text-secondary">No changes recorded yet.</p>}
-      {state.status === 'loaded' && state.rows.length > 0 && (
+      {state.status === 'loaded' && state.rows.length > 0 && (<>
         <ul className="max-h-96 space-y-3 overflow-y-auto" tabIndex={0} aria-label="Product changes, newest first">
           {state.rows.map((row) => (
             <li key={row.id} className="border-b border-gray-100 pb-3 text-sm last:border-0">
               <div className="flex flex-wrap justify-between gap-2">
                 <span className="font-medium text-nav-dark">{row.changed_by === null ? 'System' : row.changed_by_name || 'Unknown staff member'}</span>
-                <time className="text-secondary" dateTime={row.changed_at}>{new Date(row.changed_at).toLocaleString('en-US')}</time>
+                <time className="text-secondary" dateTime={row.changed_at}>{new Date(row.changed_at).toLocaleString('en-US', { timeZone: BUSINESS_TIMEZONE })}</time>
               </div>
               {row.change_type === 'created' ? (
                 <p>Created</p>
+              ) : NO_VALUE_FIELDS.has(row.field_name ?? '') ? (
+                <p>{FIELD_LABELS[row.field_name ?? ''] ?? row.field_name} changed</p>
               ) : (
-                <p><span className="font-medium">{FIELD_LABELS[row.field_name ?? ''] ?? row.field_name}</span>: {displayValue(row.old_value)} → {displayValue(row.new_value)}</p>
+                <p><span className="font-medium">{FIELD_LABELS[row.field_name ?? ''] ?? row.field_name}</span>: {displayValue(row.field_name, row.old_value)} → {displayValue(row.field_name, row.new_value)}</p>
               )}
             </li>
           ))}
         </ul>
+        {state.rows.length === 50 && <p className="mt-2 text-xs text-secondary">Showing the newest 50 changes.</p>}
+        </>
       )}
     </Card>
   );

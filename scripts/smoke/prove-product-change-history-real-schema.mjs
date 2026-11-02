@@ -159,6 +159,8 @@ function buildContainer() {
 const ADMIN = '7c610000-0000-4000-8000-0000000000a1';
 const REP = '7c610000-0000-4000-8000-0000000000b1';
 const INACTIVE = '7c610000-0000-4000-8000-0000000000c1';
+const DRIVER = '7c610000-0000-4000-8000-0000000000d1';
+const APPLICATOR = '7c610000-0000-4000-8000-0000000000e1';
 const PRODUCT_NAME = '[PROVER] Product History Chem';
 const WATCHED = [
   'product_name', 'sku', 'category', 'vendor', 'manufacturer', 'container_size', 'container_unit',
@@ -202,7 +204,9 @@ function seedProfiles() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
     ('${ADMIN}', 'product-history-admin@example.invalid', '{"full_name":"[PROVER] Product Admin","role":"admin"}'::jsonb),
     ('${REP}', 'product-history-rep@example.invalid', '{"full_name":"[PROVER] Product Rep","role":"sales_rep"}'::jsonb),
-    ('${INACTIVE}', 'product-history-inactive@example.invalid', '{"full_name":"[PROVER] Inactive Rep","role":"sales_rep"}'::jsonb);`);
+    ('${INACTIVE}', 'product-history-inactive@example.invalid', '{"full_name":"[PROVER] Inactive Rep","role":"sales_rep"}'::jsonb),
+    ('${DRIVER}', 'product-history-driver@example.invalid', '{"full_name":"[PROVER] Driver","role":"driver"}'::jsonb),
+    ('${APPLICATOR}', 'product-history-applicator@example.invalid', '{"full_name":"[PROVER] Applicator","role":"applicator"}'::jsonb);`);
   psql(`BEGIN;
     SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true);
     UPDATE public.profiles SET is_active = false WHERE id = '${INACTIVE}';
@@ -254,6 +258,26 @@ try {
   assert.equal(scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`), '2');
   console.log('[prover] DIRECT UPDATE: one signal-word row with session actor and name snapshot');
 
+  for (const field of ['rate_per_acre', 'container_size']) {
+    const before = scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`);
+    session(ADMIN, `UPDATE public.products SET ${field} = 2.50 WHERE id = '${productId}';`);
+    assert.equal(scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}'
+      AND field_name = '${field}' AND old_value IS NULL AND new_value = '2.5';`), '1');
+    assert.equal(Number(scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`)), Number(before) + 1);
+    session(ADMIN, `UPDATE public.products SET ${field} = 2.5 WHERE id = '${productId}';`);
+    assert.equal(scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`), String(Number(before) + 1));
+  }
+  const beforeBlank = scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`);
+  session(ADMIN, `UPDATE public.products SET manufacturer = '' WHERE id = '${productId}';`);
+  assert.equal(scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`), beforeBlank);
+  const secretNote = '[PROVER] private note text must not persist in history';
+  session(ADMIN, `UPDATE public.products SET notes = '${secretNote}' WHERE id = '${productId}';`);
+  assert.equal(scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}'
+    AND field_name = 'notes' AND old_value IS NULL AND new_value IS NULL;`), '1');
+  assert.equal(scalar(`SELECT count(*) FROM public.product_change_history
+    WHERE old_value = '${secretNote}' OR new_value = '${secretNote}';`), '0');
+  console.log('[prover] NORMALIZATION: numeric scale and blank text do not create false changes; notes never copy text');
+
   const forged = psql(`UPDATE public.product_change_history SET changed_by = '${REP}' WHERE product_id = '${productId}';`, { allowFailure: true });
   assert.match(`${forged.stdout}\n${forged.stderr}`, /PRODUCT_CHANGE_HISTORY_IS_APPEND_ONLY/);
   denied('authenticated', ADMIN, `INSERT INTO public.product_change_history(product_id, change_type, changed_by)
@@ -277,9 +301,11 @@ try {
     AND field_name = 'return_policy' AND new_value = 'returnable' AND changed_by = '${ADMIN}';`), '1');
   console.log('[prover] RPC: phase-3 metadata change recorded with the session actor');
 
-  psql(`INSERT INTO public.products(product_name, product_form) VALUES ('[PROVER] Bulk Import Product', 'liquid');`);
+  session(ADMIN, `INSERT INTO public.products(product_name, product_form)
+    VALUES ('[PROVER] Bulk Import Product', 'liquid');`);
   assert.equal(scalar(`SELECT count(*) FROM public.product_change_history h JOIN public.products p ON p.id = h.product_id
-    WHERE p.product_name = '[PROVER] Bulk Import Product' AND h.change_type = 'created' AND h.changed_by IS NULL;`), '1');
+    WHERE p.product_name = '[PROVER] Bulk Import Product' AND h.change_type = 'created'
+      AND h.changed_by = '${ADMIN}' AND h.changed_by_name = '[PROVER] Product Admin';`), '1');
   const count = scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`);
   session(ADMIN, `UPDATE public.products SET notes = notes WHERE id = '${productId}';`);
   assert.equal(scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`), count);
@@ -337,6 +363,10 @@ try {
     scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`));
   assert.equal(roleScalar('authenticated', REP, `SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`),
     scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`));
+  for (const staff of [DRIVER, APPLICATOR]) {
+    assert.equal(roleScalar('authenticated', staff, `SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`),
+      scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`));
+  }
   assert.equal(roleScalar('authenticated', INACTIVE, `SELECT count(*) FROM public.product_change_history WHERE product_id = '${productId}';`), '0');
   denied('anon', ADMIN, 'SELECT count(*) FROM public.product_change_history;');
   denied('service_role', ADMIN, 'SELECT count(*) FROM public.product_change_history;');

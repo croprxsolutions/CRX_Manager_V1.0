@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ from: vi.fn(), captureException: vi.fn() }));
@@ -13,7 +13,7 @@ const changed = {
   changed_at: '2026-11-02T15:00:00Z',
 };
 
-function returnRows(data: unknown, error: Error | null = null) {
+function returnRows(data: unknown, error: { message: string; code: string } | null = null) {
   const query = {
     select: vi.fn(), eq: vi.fn(), order: vi.fn(), limit: vi.fn(),
   };
@@ -56,11 +56,45 @@ describe('ProductChangeHistory', () => {
     expect(await screen.findByText('No changes recorded yet.')).toBeInTheDocument();
   });
 
-  it('reports a failed read without exposing the database error', async () => {
-    returnRows(null, new Error('private database detail'));
+  it('refetches when reloadToken changes', async () => {
+    returnRows([]);
+    const view = render(<ProductChangeHistory productId="p1" reloadToken={0} />);
+    expect(await screen.findByText('No changes recorded yet.')).toBeInTheDocument();
+    returnRows([changed]);
+    view.rerender(<ProductChangeHistory productId="p1" reloadToken={1} />);
+    expect(await screen.findByRole('listitem')).toHaveTextContent('Signal word: Caution → Warning');
+    expect(mocks.from).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows a field-only description when values are withheld', async () => {
+    returnRows([{ ...changed, field_name: 'notes', old_value: null, new_value: null }]);
     render(<ProductChangeHistory productId="p1" />);
-    expect(await screen.findByText('Change history could not be loaded. Reload to try again.')).toBeInTheDocument();
+    expect(await screen.findByText('Notes changed')).toBeInTheDocument();
+    expect(screen.queryByText(/→/)).not.toBeInTheDocument();
+  });
+
+  it('shows boolean changes as Yes and No', async () => {
+    returnRows([{ ...changed, field_name: 'is_active', old_value: 'true', new_value: 'false' }]);
+    render(<ProductChangeHistory productId="p1" />);
+    expect((await screen.findByText('Active')).parentElement).toHaveTextContent('Active: Yes → No');
+  });
+
+  it('explains the 50-row limit', async () => {
+    returnRows(Array.from({ length: 50 }, (_, index) => ({ ...changed, id: index + 1 })));
+    render(<ProductChangeHistory productId="p1" />);
+    expect(await screen.findByText('Showing the newest 50 changes.')).toBeInTheDocument();
+  });
+
+  it('reports a failed read without exposing the database error and retries', async () => {
+    returnRows(null, { message: 'private database detail', code: '42501' });
+    render(<ProductChangeHistory productId="p1" />);
+    expect(await screen.findByText('Change history could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('private database detail')).not.toBeInTheDocument();
     expect(mocks.captureException).toHaveBeenCalledOnce();
+    expect(mocks.captureException.mock.calls[0][0]).toBeInstanceOf(Error);
+    returnRows([changed]);
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getByRole('listitem')).toHaveTextContent('Signal word: Caution → Warning'));
+    expect(mocks.from).toHaveBeenCalledTimes(2);
   });
 });

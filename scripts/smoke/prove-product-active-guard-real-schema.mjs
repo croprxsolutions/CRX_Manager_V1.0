@@ -551,8 +551,8 @@ try {
   const holdProduct = product('[PROVER] PM3 Manual Hold');
   psql(`INSERT INTO public.inventory(product_id, location, quantity_available)
     VALUES ('${holdProduct}', 'Main Warehouse', 10);`);
-  const holdCall = (key) => `SELECT public.create_inventory_hold('${holdProduct}',
-    (SELECT id FROM public.customers LIMIT 1), 2, 'manual', NULL, 'PM3 proof',
+  const holdCall = (key, type = 'manual') => `SELECT public.create_inventory_hold('${holdProduct}',
+    (SELECT id FROM public.customers LIMIT 1), 2, '${type}', NULL, 'PM3 proof',
     '${ADMIN}', false, NULL, '${key}');`;
   const createdHold = withActor(ADMIN, holdCall('pm3-hold-before-off'));
   assert.match(createdHold.stdout, /hold_id/);
@@ -562,6 +562,8 @@ try {
   assert.equal(withActor(ADMIN, holdCall('pm3-hold-before-off')).stdout, createdHold.stdout,
     'an exact retry must replay its saved result after deactivation');
   denied(ADMIN, holdCall('pm3-hold-after-off'), /PRODUCT_INACTIVE:.*PM3 Manual Hold/);
+  // The hold RPC is manual-only, so no browser path can add a crop_program hold.
+  denied(ADMIN, holdCall('pm3-crop-hold-after-off', 'crop_program'), /HOLD_TYPE_NOT_ALLOWED/);
   withActor(ADMIN, `SELECT public.release_inventory_hold('${holdId}', '${ADMIN}', 'pm3-release-after-off');`);
   assert.equal(scalar(`SELECT is_active FROM public.inventory_holds WHERE id = '${holdId}';`), 'f');
 

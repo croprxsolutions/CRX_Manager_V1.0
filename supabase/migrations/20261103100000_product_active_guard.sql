@@ -355,8 +355,13 @@ CREATE FUNCTION public.guard_inactive_manual_hold() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE v_active boolean; v_name text;
 BEGIN
-  -- Quote and job holds may still be resynced for allowed parent records.
-  IF NEW.hold_type IS DISTINCT FROM 'manual' THEN RETURN NEW; END IF;
+  -- Source-backed quote/job/program holds may still resync for allowed parents;
+  -- source-free crop_program holds are hand-made like manual ones. A backstop:
+  -- create_inventory_hold already refuses crop_program (20261025090000).
+  IF NEW.hold_type IS DISTINCT FROM 'manual'
+     AND NOT (NEW.hold_type = 'crop_program' AND NEW.source_id IS NULL) THEN
+    RETURN NEW;
+  END IF;
   SELECT is_active, product_name INTO v_active, v_name FROM public.products
     WHERE id = NEW.product_id FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND: %', NEW.product_id; END IF;

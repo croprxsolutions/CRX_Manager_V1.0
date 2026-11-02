@@ -24,6 +24,8 @@ If on `main`, create one: `git checkout -b ship/<short-slug>`. Tell Mason the br
 - **Trivial** — one file, no SQL / money / inventory / RLS / auth / permission / lifecycle / other business-critical change (a copy tweak, a style fix, a prop rename): SKIP the review fan-out (Step 3) and the migration gate. Just make the change, run Step 2 (lint + build + test) and Step 2.5, then go to Step 7. Tell Mason in one line you're taking the light path.
 - **Substantial** — everything that is not Trivial: multiple files, OR touches SQL / money / inventory / RLS / auth / permission / a lifecycle / an RPC / other business-critical behavior: run the full pipeline below.
 
+**Know up front whether Sol applies.** Check every file you plan to touch, small tweaks included, against the Sol list, and say in the plan whether the PR will need Sol: `node --input-type=module -e "import {solRiskPathProblem as p} from './.claude/hooks/sol-risk-lib.mjs'; for (const f of process.argv.slice(1)) console.log(f, '->', p(f) ?? 'off the list')" <file> ...`. A one-word edit to a listed file pulls the whole PR into Sol (PR #1293, 2026-11-02: six cosmetic edits to listed files cost three Sol re-runs as main moved). Keep such edits out of an otherwise off-list PR.
+
 **For substantial work, plan before coding** — this is where Mason (a non-coder) has the most power, because he can read English even though he can't read code:
 1. Read the live schema / existing code for the area (don't trust memory).
 2. Write a short plain-English plan: what you'll build, the assumptions you're making, and the 2–4 files you'll touch.

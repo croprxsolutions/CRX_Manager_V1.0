@@ -201,8 +201,8 @@ Gently rounded, never sharp and never bubbly. Buttons, inputs, toasts and icon b
 All shared pieces live in `src/components/ui/` and `src/components/layout/`. Use them before writing new markup.
 
 ### Buttons (`Button`)
-- **Variants:** primary (crx-green, white text, small shadow, trailing chevron by default), secondary (white with a gray border), ghost (text only, gray hover fill), danger (red-600). Sizes sm, md (default) and lg.
-- **States:** colour transitions over 150ms; disabled is 50% opacity; `loading` swaps the icon for a spinner. Pass `showChevron={false}` when the chevron misleads (for example Save in a modal).
+- **Variants:** primary (crx-green, white text, small shadow), secondary (white with a gray border), ghost (text only, gray hover fill), danger (red-600). Sizes sm, md (default) and lg.
+- **States:** colour transitions over 150ms; disabled is 50% opacity; `loading` swaps the icon for a spinner. Pass `showChevron` only on a button that goes to another page or the next step; Save and other in-place actions never show the › arrow.
 
 ### Status badges (`Badge`)
 Fully round pills, 0.75rem medium text, capitalised. Pick the variant via `statusToBadgeVariant`; never colour a status ad hoc.
@@ -211,10 +211,10 @@ Fully round pills, 0.75rem medium text, capitalised. Pick the variant via `statu
 White, 0.75rem corners, hairline border, card shadow, 1.25rem padding (turn off with `padding={false}` for tables). `CardHeader` gives a section title with an optional accent word and a right-aligned action.
 
 ### Inputs (`Input`, `Select`, `Combobox`, `SearchableSelect`)
-White, 1px Field Edge border, 0.5rem corners, Slate Ink label above. Focus: crx-green border plus a 2px crx-green ring at 20%. Error: red-400 border and red-500 helper text. Required fields show a red asterisk.
+White, 1px Field Edge border, 0.5rem corners, Slate Ink label above. Focus: crx-green border plus a 2px crx-green ring at 20%. Error: red-500 border and red-600 helper text. Required fields show a red-600 asterisk. Placeholders are gray-500.
 
 ### Tabs (`Tabs`)
-Underline tabs: Inter 500 at 0.875rem, a 2px crx-green underline and green text on the active tab, Slate Ink otherwise, optional count bubble (Green Wash when active). Arrow-key navigation, scrolls horizontally on phones. Pages keep the active tab in the `?tab=` URL parameter.
+Underline tabs: Inter 500 at 0.875rem, a 2px crx-green underline and green text on the active tab, Slate Ink otherwise, optional count bubble (solid crx-green with white text when active). Arrow-key navigation, scrolls horizontally on phones. Pages keep the active tab in the `?tab=` URL parameter.
 
 ### Workspace link bar (`WorkspaceTabs`)
 A row of round pills under the top bar that link between sibling pages of one workspace. Active pill is solid crx-green with white text; inactive pills fill Cream Shadow on hover. Use this to move between pages and `Tabs` to switch views within one page.
@@ -227,6 +227,9 @@ Header row on Cream Shadow at 50% with Slate Ink medium labels and Lucide sort a
 
 ### Feedback (`Toast`, `ConfirmModal`, `Modal`, `EmptyState`, `Skeleton`)
 Use toasts for results and errors, `ConfirmModal` for every confirmation, `Modal` for forms, `EmptyState` for empty or failed lists, and `Skeleton` for loading. Never use the browser's `window.confirm` or `alert`.
+
+### App-wide layout style (Style D, compact and bold)
+Chosen 2026-11-02. Label-left rows, a Save per sub-part, Cream Shadow section bands with a green icon tile, a sticky `SectionJumpBar`, and on phones a Charcoal header with labelled steps and a pinned 56px main button. The full rules are in `docs/workflows/UI_PATTERNS.md` ("Style D").
 
 ## Do's and Don'ts
 

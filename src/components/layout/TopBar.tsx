@@ -78,7 +78,7 @@ export default function TopBar({ onMenuClick, onSearchClick, title, accent }: To
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-crx-green text-white text-sm font-medium hover:bg-crx-green/90 focus:outline-none focus:ring-2 focus:ring-crx-green/30 transition-all"
               >
                 <Plus className="w-4 h-4" />
-                + New
+                New
               </button>
               {newMenuOpen && (
                 <div

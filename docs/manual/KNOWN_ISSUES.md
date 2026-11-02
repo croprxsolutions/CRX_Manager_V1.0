@@ -34,7 +34,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 52 |
+| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 
@@ -299,6 +299,17 @@ local replay's screen (a new line added after its product's cost rose shows the 
 
 ---
 
+### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
+**MED · OPEN (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · unassigned**
+`get_ar_aging` (`supabase/migrations/20260805151605_fix_historical_ar_report_cutoffs.sql` ~L147) checks every
+customer before returning rows; one customer whose balance cannot be rebuilt as of the chosen past date raises an
+error and the whole report returns nothing. `allocate_payment` also accepts a future `p_payment_date` outside closed
+periods, which can trip the same later-activity test and block even a current report. The refusal itself is
+deliberate (it stops invented historical balances), so the fix is not to suppress it: report that customer as
+"cannot be shown as of this date" while returning the rest, and refuse future-dated payments.
+
+---
+
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
@@ -368,6 +379,22 @@ sent, but every outbound path uses Main Warehouse only and no transfer exists, s
 ship. A live check on 2026-11-02 found all 117 inventory rows at Main Warehouse, so nothing has been stranded yet.
 Fix: list active `warehouses` rows only, refuse unknown locations on the server, and print the real location.
 Multi-warehouse support stays (`docs/manual/DECISION_LOG.md`, 2026-11-02; checklist in `docs/workflows/INVENTORY_RULES.md`).
+
+
+### KI-93 — One blend ticket can deduct its stock twice
+**MED · OPEN (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · unassigned (after the cycle-count freeze lands)**
+A blend ticket can produce both an application record (`create_application_record_from_blend_ticket`, which
+deducts stock as `job_applied`) and an order (`create_order_from_blend_ticket`, whose delivery deducts again).
+Neither checks for the other, and same-operation retry protection does not cover the cross-path case. Fix: each
+path refuses when the ticket already went down the other one, inside PostgreSQL.
+
+### KI-94 — Voiding a delivery can put back more reserved stock than completion took
+**LOW-MED · OPEN (found 2026-11-02, Ponytail audit #16, confirmed by Sol) · database/inventory · unassigned**
+Completion (`supabase/migrations/20261014210000_order_invoices_rep_own_name.sql` ~L612) lowers
+`quantity_prebooked` by `LEAST(delivered, prebooked)`, but `void_delivery` adds back the full delivered quantity.
+Prebooked 3, delivered 10, voided: prebooked becomes 10, so available stock reads low. Fully reserved deliveries are
+unaffected. Cancelling a completed delivery is refused since PR #1284, so only void remains. Fix needs a decision
+first (Sol): put back exactly what completion took (store it), or rebuild the order's outstanding reservation.
 
 ## Database and release process
 
@@ -527,6 +554,20 @@ database. It completes a delivery with a direct `UPDATE`, which 20261022075000 n
 `smoke-field-app-split-penny-exact.sql`. This is a test gap, not a customer defect: the refusal it proves stays
 live, and `prove-quote-customer-row-version-real-schema.mjs` still runs the chain in its old form on the July
 catalog (#1110). Done = the chain passes on main and still fails first against 20261006200000 (CRX-LIFE-001).
+
+---
+
+
+### KI-96 — Unused code and copied helpers make every change slower
+**LOW · OPEN (found 2026-11-02, Ponytail audit #17-#20) · tooling/frontend · unassigned (do last; changes no behavior)**
+About 11,000 lines nothing runs: 20 one-off scripts in `scripts/smoke/`, 5 switched-off guards in `.claude/hooks/`
+(never the always-kept ones in `AGENTS.md`), 3 browser-test setups and 12 committed `tmpclaude-*` files; offline
+sync for eight actions the phones no longer queue (`src/lib/offlineSync.ts` ~L404-469); and two Edge Functions
+nothing calls (`reset-user-password`, `setup-blend-tickets-storage`). Helpers are copied: date formatting about 78
+times, money formatting in a dozen files (two print "$-5.00"), customer-notification code in both the job and
+invoice pages. `src/pages/QuoteBuilder.tsx` (~6,000 lines) and the job page (~5,400) mix loading, pricing, saving,
+status actions and PDF/email; moving status actions and PDF/email into their own files changes nothing for users.
+Delete with a grep of every reference first; keep one copy of each helper.
 
 ---
 

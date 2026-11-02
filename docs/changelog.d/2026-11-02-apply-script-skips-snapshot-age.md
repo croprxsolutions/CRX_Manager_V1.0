@@ -1,3 +1,3 @@
-## 2026-11-02 - Apply script no longer refuses an old migration snapshot
+## 2026-11-02 - Apply script reads the live migration list itself
 
-`scripts/apply-migration-file.mjs` stopped refusing when the local applied-migration snapshot is more than 24 hours old. The script re-reads the live migration list right before it transmits (added 2026-11-02), so the snapshot's age proved nothing there and only forced a manual refresh. The snapshot must still exist, and the MCP `apply_migration` path keeps the 24-hour rule because it has no live re-check.
+`scripts/apply-migration-file.mjs` no longer refuses when the local applied-migration snapshot is more than 24 hours old, and when `SUPABASE_ACCESS_TOKEN` is set it rebuilds that snapshot from the live ledger before its gate runs. That replaces the manual "list migrations, pipe to refresh-applied-migrations, re-run" step. The script still re-reads the live ledger right before it transmits. The MCP `apply_migration` path keeps the 24-hour rule because it has no live re-check.

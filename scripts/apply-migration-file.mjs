@@ -81,6 +81,36 @@ function die(code, msg) {
   process.exit(code);
 }
 
+// Rebuilds the applied-migration snapshot from the live ledger. Returns null on
+// success, otherwise a one-line reason.
+async function refreshSnapshotFromLive(token) {
+  let res;
+  try {
+    res = await fetch(`https://api.supabase.com/v1/projects/${projectId}/database/query`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: "select version, name from supabase_migrations.schema_migrations order by version;",
+      }),
+    });
+  } catch (err) {
+    return `the ledger read failed (${err?.message || err})`;
+  }
+  if (!res.ok) return `the ledger read failed (HTTP ${res.status})`;
+  const refresh = spawnSync(process.execPath, [path.join(projectDir, "scripts", "refresh-applied-migrations.mjs")], {
+    input: await res.text(),
+    encoding: "utf8",
+    cwd: projectDir,
+    env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir },
+  });
+  process.stdout.write(refresh.stdout || "");
+  if (refresh.status !== 0) {
+    console.error(refresh.stderr || "");
+    return `scripts/refresh-applied-migrations.mjs exited ${refresh.status}`;
+  }
+  return null;
+}
+
 function flagValue(argv, flag) {
   const i = argv.indexOf(flag);
   if (i === -1) return null;
@@ -335,6 +365,20 @@ console.log("");
   }
 }
 
+// ── FRESH VIEW OF THE LEDGER ───────────────────────────────────────────────
+// With a token, rebuild the snapshot from the live ledger first, so the gate's
+// ordering, pending-set and already-applied checks judge what is live rather than
+// a copy that may be weeks old (2026-11-02). Without one, the gate judges the
+// snapshot on disk.
+const token = process.env.SUPABASE_ACCESS_TOKEN;
+if (token) {
+  const failed = await refreshSnapshotFromLive(token);
+  if (failed) die(2, `LEDGER REFRESH FAILED: ${failed}. Refusing rather than judging an old snapshot.`);
+  console.log("Refreshed the applied-migration snapshot from the live ledger.");
+} else {
+  console.log("No SUPABASE_ACCESS_TOKEN: the gate judges the snapshot on disk. Set it to refresh that from the live ledger first.");
+}
+
 // ── THE GATE ───────────────────────────────────────────────────────────────
 // Identical rule book to the PreToolUse hook. A throw here is a refusal, never
 // a pass: the gate being in an unknown state is exactly when not to transmit.
@@ -393,7 +437,6 @@ if (!confirm) {
   process.exit(0);
 }
 
-const token = process.env.SUPABASE_ACCESS_TOKEN;
 if (!token) {
   die(1,
     "apply-migration-file: SUPABASE_ACCESS_TOKEN is not set, so there is no way to reach the\n" +
@@ -531,40 +574,22 @@ console.log(`APPLY OK — HTTP ${res.status}`);
 console.log(bodyText.slice(0, 2000));
 
 // ── SNAPSHOT REFRESH ───────────────────────────────────────────────────────
-// The ordering guard refuses a snapshot older than 24h and, more importantly, one
-// that predates this apply. Forgetting this step is a known recurring failure, so
+// The ordering guard refuses a snapshot that predates this apply (and, on the MCP
+// door, one older than 24h). Forgetting this step is a known recurring failure, so
 // the door that applies is the door that refreshes.
 console.log("");
 console.log("Refreshing the applied-migration snapshot…");
-const ledgerRes = await fetch(`https://api.supabase.com/v1/projects/${projectId}/database/query`, {
-  method: "POST",
-  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-  body: JSON.stringify({
-    query: "select version, name from supabase_migrations.schema_migrations order by version;",
-  }),
-});
-if (!ledgerRes.ok) {
-  // Non-zero, not a warning-and-exit-0: the apply COMMITTED and the snapshot is
-  // already gone, so the next apply will correctly block on missing evidence —
-  // but the operator must know this run did not finish cleanly.
-  die(4,
-    `APPLY COMMITTED, SNAPSHOT NOT REBUILT — the ledger re-read failed (HTTP ${ledgerRes.status}).\n` +
-    `The migration IS applied. The applied-migration snapshot was invalidated before transmission and ` +
-    `has not been rebuilt, so the next apply will refuse until you regenerate it:\n` +
-    `  select version, name from supabase_migrations.schema_migrations order by version;\n` +
-    `  node scripts/refresh-applied-migrations.mjs < rows.json`);
-}
-const refresh = spawnSync(process.execPath, [path.join(projectDir, "scripts", "refresh-applied-migrations.mjs")], {
-  input: await ledgerRes.text(),
-  encoding: "utf8",
-  cwd: projectDir,
-  env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir },
-});
-process.stdout.write(refresh.stdout || "");
-if (refresh.status !== 0) {
-  console.error(refresh.stderr || "");
-  die(4,
-    `APPLY COMMITTED, SNAPSHOT NOT REBUILT — scripts/refresh-applied-migrations.mjs exited ` +
-    `${refresh.status}.\nThe migration IS applied. The snapshot was invalidated before transmission and ` +
-    `has not been rebuilt, so the next apply will refuse until you regenerate it.`);
+{
+  const failed = await refreshSnapshotFromLive(token);
+  if (failed) {
+    // Non-zero, not a warning-and-exit-0: the apply COMMITTED and the snapshot is
+    // already gone, so the next apply will correctly block on missing evidence —
+    // but the operator must know this run did not finish cleanly.
+    die(4,
+      `APPLY COMMITTED, SNAPSHOT NOT REBUILT — ${failed}.\n` +
+      `The migration IS applied. The applied-migration snapshot was invalidated before transmission and ` +
+      `has not been rebuilt, so the next apply will refuse until you regenerate it:\n` +
+      `  select version, name from supabase_migrations.schema_migrations order by version;\n` +
+      `  node scripts/refresh-applied-migrations.mjs < rows.json`);
+  }
 }

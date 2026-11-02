@@ -94,6 +94,17 @@ try {
   r = validate(b);
   assert.equal(r.status, 0, "edited existing migration is not stamp-checked\n" + r.stdout + r.stderr);
   pass++;
+
+  // Renaming a committed migration onto another worktree's stamp is a rename, not an add (Codex App P2).
+  git(b, "reset", "-q");
+  write(a, "20261102260000_taken.sql", "select 'a';\n");
+  write(b, "20261102255000_mine.sql", "select 'mine';\n");
+  git(b, "add", "supabase/migrations/20261102255000_mine.sql");
+  git(b, "commit", "-q", "-m", "mine");
+  git(b, "mv", "supabase/migrations/20261102255000_mine.sql", "supabase/migrations/20261102260000_mine.sql");
+  r = validate(b);
+  assert.notEqual(r.status, 0, "renamed migration onto a used stamp must block\n" + r.stdout + r.stderr);
+  pass++;
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

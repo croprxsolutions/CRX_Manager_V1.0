@@ -51,8 +51,8 @@ TABLES_WITHOUT_UPDATED_AT=(
   cost_history
 )
 
-# Get staged SQL migration files
-STAGED_SQL=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^supabase/migrations/.*\.sql$' || true)
+# Get staged SQL migration files (--no-renames: a renamed migration counts as added, so it is validated and stamp-checked)
+STAGED_SQL=$(git diff --cached --no-renames --name-only --diff-filter=ACM | grep -E '^supabase/migrations/.*\.sql$' || true)
 
 if [ -z "$STAGED_SQL" ]; then
   exit 0

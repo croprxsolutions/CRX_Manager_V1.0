@@ -191,8 +191,11 @@ Products, Customers, Jobs, Quotes, PurchaseOrders, BlendTickets, Orders, Vehicle
 - Stacked variants read left to right: `file:hover:` styles the file button when the button is hovered; `hover:file:` styles it whenever the whole input is hovered.
 
 ### Brand color
-- Primary green: `crx-green` (#28A26A)
-- Use `bg-crx-green`, `text-crx-green`, `border-crx-green`, etc.
+- Primary green: `crx-green` (#1A7A50; hover `crx-green-hover` #166340). Deepened from #28A26A on 2026-11-02 (Mason's choice) so white button text and green text on cream pass the 4.5:1 contrast minimum.
+- On dark backgrounds (sidebar, Dispatch Board, Field View, the driver delivery view, the sign-in pages' dark panel), green text, icons, markers, borders and focus rings use `crx-green-on-dark` (#28A26A, the original green); the deep green is too dark to read there. Green buttons with white text stay `bg-crx-green` everywhere.
+- Use `bg-crx-green`, `text-crx-green`, `border-crx-green`, etc. Never use Tailwind's stock `green-*` / `emerald-*` for brand meaning; those are only for "success" status colours.
+- Name colours by token, never by hex code. Hex codes belong only in `src/index.css` (`@theme`) and `src/lib/pdfTheme.ts` (PDFs). Map libraries that need a literal colour are the one exception: field outlines sit on dark satellite imagery, so they use the on-dark green (#28A26A); keep them in step with that token.
+- The full brand rulebook (colours, type, spacing, components) is `DESIGN.md` at the repository root.
 
 ### Icons: Lucide React only
 ```typescript
@@ -284,16 +287,29 @@ Currently used for: `team_notes`, `team_note_comments`, `notifications`, `note_a
 
 ---
 
-## Tab-Based Page Layout
+## Page Layout
 
-Some pages use tabs to organize content:
+Rules for new pages and for any page a screen-cleanup PR touches. Existing pages that break them are not wrong to leave alone; fix them one screen at a time, with Mason's approval of the change list.
 
-| Page | Tabs |
-|------|------|
-| ARaging | 3 tabs |
-| Compliance | 4 tabs (licenses, RUP products, RUP sales, field listing) |
-| Rebates | 2 tabs |
-| InventoryPage | Multiple tabs |
-| BlendRecipes | Multiple tabs |
+### Page header
+- Every office page opens with `PageHeader` (`src/components/ui/PageHeader.tsx`): a title, an optional `crx-green` accent word, a one-line subtitle, and the page's actions on the right.
+- At most one primary (green) button per header, and it sits rightmost. Other actions are secondary or ghost buttons.
+- Detail pages (one quote, one customer) put `Breadcrumbs` above the header so the way back is obvious.
+- Below 768px the actions wrap under the title; don't hide them.
+- Page sections stack with `space-y-6`; content inside a card with `space-y-4`.
 
-Use the same tab component pattern when adding tabs to new pages.
+### Tabs or sections?
+- **Shared `Tabs` component** (`src/components/ui/Tabs.tsx`, state in `?tab=`): for alternative views of the same subject where people work in one at a time (Open / Paid / Voided invoices). Labels are short nouns; add a count when it helps triage. Six tabs at most.
+- **`WorkspaceTabs` link bar** (`src/components/layout/WorkspaceTabs.tsx`): only to join sibling pages that keep their own addresses (Billing, Products, Insights).
+- **Stacked sections** (one `Card` with a `CardHeader` per section): when people need to see the groups together, or there are four or fewer short groups.
+- Never hand-roll tab buttons; use `Tabs`. Some pages still do (Compliance, Rebates, A/R Aging, Job Detail, Field Dashboard, Team Board, Call Lists); move them to `Tabs` when those screens are worked on.
+- Never put a second tab row inside a tab. Use a filter or a select for the second level.
+- Never split one form's required fields across tabs; people miss the hidden ones.
+- When a tab replaces an old standalone page, keep the old address as a redirect (`LegacyTabRedirect`).
+
+### Settings-style pages
+- One `PageHeader`, then one `Card` per topic, each with a `CardHeader` title and a one-line description of what the settings affect.
+- Each card saves its own fields with its own Save button, which stays disabled until something changes. Don't mix one page-level Save with card-level saves.
+- More than five cards: group them into `Tabs` by topic (for example company, users and access, billing defaults, field paperwork), keeping each tab to a few cards.
+- Destructive actions (deactivate a user, reset a password) sit at the end of their card as a `danger` or secondary button and always go through `ConfirmModal`.
+- On phones, cards stack full width and every control keeps the 44px tap target (`.phone-touch`).

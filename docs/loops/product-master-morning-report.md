@@ -2,7 +2,7 @@
 
 **Status:** 3 drafted (change history; turning products off, after your approved rounds 4-6; the first half of setup checks), 0 parked, 8 not attempted, of 11. Run: 2026-11-01 21:50 to 04:25 Central. No new package may start after 03:50, so the run ended there, inside the 05:50 wrap (Wave 2, attempt 1).
 
-**Recommended next step:** land **#1266 (change history)** first. It passed every check, and every other database package in this wave stacks on it. Its live apply needs your own `I approve`, for the reason under "Mason-gated migrations". Its Sol proof stays valid until about 11:15 PM Central tonight (2026-11-02).
+**Recommended next step (current as of 2026-11-02 11:15 Central):** land **#1276 (turning products off)**. #1266 and #1272 are merged and their migrations are live. #1276 is open and up to date with main. Its migration was renamed to `20261102160000` so it applies after both live migrations. It owes an exact-head Sol, then the apply, then the merge. The original 04:25 recommendation, to land #1266 first, is done.
 
 ## Packages
 
@@ -60,7 +60,7 @@ Each package took about two and a half hours, including three independent review
 
 Every PR targets `main`. After a prerequisite lands, refresh and recheck the dependent PR's diff before landing it.
 
-## Mason-gated migrations (need your `I approve`)
+## Mason-gated migrations (historical: #1266 and #1272 are applied)
 - **#1266, `20261102100000_product_change_history`.** Nothing in it deletes data. Its append-only history table refuses TRUNCATE, and the owner-approval classifier reads that word as a data-deleting migration. That is a false positive, but the protection stays as it is, so the apply waits for you.
 
 - #1272 (`20261102102000_product_setup_checks`) is routine, with no access change and no classifier category. It still needs exact-head Sol at apply.
@@ -76,14 +76,13 @@ Every PR targets `main`. After a prerequisite lands, refresh and recheck the dep
 - #1272: requested after Sol at 04:03 and reviewed, with 5 comments. **Refuted and resolved (2):** the live-function list (trigger functions are not RPCs) and product hard-deletes (no app path deletes products). **Valid, left open for the landing session (3):** trim a category name after collapsing its whitespace (a raw error instead of a clear message for a tab-padded name); bound a browser test's keyboard loop by the vendor option count; a KNOWN_ISSUES note. These go in one reviewed Codex round, then exact-head Sol before apply, because tonight's three build rounds were used.
 - WP-PM-3: not requested (parked before a PR).
 
-## Sol proofs (each stays valid for 24 hours)
+## Sol proofs (historical: both PRs landed)
 - #1266: clean on `2bb7bfdfb`, about 23:15 on 2026-11-01. Valid until about **23:15 on 2026-11-02**. Main touched `ProductDetail.tsx` (#1271) after it, so the landing session must check whether the carry-forward still holds.
 - #1272: clean on `3feefee69`, about 03:59 on 2026-11-02. Valid until about **03:59 on 2026-11-03**.
 
 ## Decision for you
-- Land #1266 before the next wave, and approve its apply.
-- Say yes or no to a fourth round for WP-PM-3.
-- Land #1272 after #1266, or hold it until WP-PM-8b lands, if you'd rather ship setup checks as one change.
+- Nothing is open from the original list: #1266 and #1272 landed, and you approved rounds 4 to 6 for WP-PM-3.
+- Next: land #1276. Its migration adds guards and removes no data.
 
 ## Private review lists
 `Products\Product Master review\2026-11-02 PM-8 setup check cleanup list.md` in your private vault: 16 products that don't meet the new setup checks. Only one needs a real decision: an EPA number missing its second part.

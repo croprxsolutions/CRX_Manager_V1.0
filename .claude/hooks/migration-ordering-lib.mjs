@@ -67,6 +67,24 @@ export function migrationTimestamp(raw) {
 }
 
 /**
+ * Turn live ledger rows ({version, name} or strings) into the names this module
+ * compares: keep a name that embeds a timestamp, otherwise prefix the version
+ * (`<version>_<name>`) so a timestamp-less row still carries an ordering signal.
+ */
+export function ledgerRowsToNames(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((r) => {
+      if (typeof r === "string") return r;
+      const name = (r?.name ?? "").toString().trim();
+      const version = (r?.version ?? "").toString().trim();
+      if (name && TS_RE.test(name)) return name;
+      if (version && name) return `${version}_${name}`;
+      return version || name || "";
+    })
+    .filter(Boolean);
+}
+
+/**
  * An explicit, auditable escape hatch. A migration that genuinely must carry an
  * older timestamp states so in its own SQL:
  *
@@ -144,4 +162,32 @@ export function checkMigrationOrdering({ name, sql, appliedNames }) {
       `If this really is a deliberate replay, say so in the migration's own SQL:\n` +
       `  -- ordering-guard: intentional-replay <why this is safe, 8+ chars>`,
   };
+}
+
+/**
+ * The same ordering rule, judged against the LIVE ledger read right before an
+ * apply transmits (the local snapshot can be hours old). Fails closed: a failed
+ * or empty read is a refusal, never an abstention.
+ */
+export async function checkLiveMigrationOrdering({ fetchImpl, projectId, token, name, sql }) {
+  let rows;
+  try {
+    const res = await fetchImpl(`https://api.supabase.com/v1/projects/${projectId}/database/query`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "select version, name from supabase_migrations.schema_migrations order by version;" }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    rows = await res.json();
+  } catch (err) {
+    return { ok: false, reason: `LIVE ORDERING RE-CHECK FAILED: could not read the live migration ledger (${err?.message || err}). Refusing to transmit.` };
+  }
+  const appliedNames = ledgerRowsToNames(rows);
+  if (!appliedNames.length) {
+    return { ok: false, reason: "LIVE ORDERING RE-CHECK FAILED: the live migration ledger came back empty or unreadable. Refusing to transmit." };
+  }
+  const verdict = checkMigrationOrdering({ name, sql, appliedNames });
+  return verdict.ok
+    ? { ok: true, count: appliedNames.length, newestApplied: verdict.newestApplied }
+    : { ok: false, reason: `LIVE ${verdict.reason}` };
 }

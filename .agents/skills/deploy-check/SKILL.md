@@ -130,7 +130,7 @@ If ready, state the remaining landing steps explicitly — this skill does **not
 2. Open the PR once implementation is finished and Luna is clean: **ready** when it touches no file on
    `docs/reference/sol-required-paths.md`, otherwise as a **draft** (Mason, 2026-11-02). The Codex
    GitHub App reviews a PR when it opens ready or is marked ready, not on later pushes.
-3. Bring the branch up to date only to resolve a conflict, and wait for required checks;
+3. Bring the branch up to date, and wait for required checks;
    **Vercel is a required check**.
 4. Once required checks are green, freeze the candidate and record its head SHA. A draft: mark it
    ready now. An off-list PR is already ready; a fix pushed after it opened (for a failing check or a

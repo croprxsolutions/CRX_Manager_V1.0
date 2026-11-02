@@ -692,6 +692,17 @@ try {
     assert.equal(scalar(`SELECT count(*) FROM public.${table} WHERE ${column} = '${parent}'
       AND product_id = '${idemProduct}';`), '0', `${table} swap must roll back`);
   }
+  // Moving a retained inactive line to another parent is a new line there.
+  const cancelledLine = scalar(`SELECT id FROM public.order_items WHERE order_id = '${cancelledInactiveOrder.orderId}';`);
+  for (const [table, column, line, parent, product] of [
+    ['order_items', 'order_id', cancelledLine, swapOrder.orderId, 'PM3 Idempotency'],
+    ['quote_items', 'quote_id', heldQuoteLine, swapQuote, 'PM3 Quotes'],
+    ['purchase_order_items', 'purchase_order_id', retainedPoLine, swapPo, 'PM3 Idempotency'],
+  ]) {
+    denied(ADMIN, `UPDATE public.${table} SET ${column} = '${parent}' WHERE id = '${line}';`,
+      table === 'quote_items' ? /QUOTE_ITEM_QUOTE_IMMUTABLE|PRODUCT_INACTIVE/
+        : new RegExp(`PRODUCT_INACTIVE:.*${product}`), 'postgres');
+  }
   const held = seedOrderLine(idemProduct, 'PM3-HELD', 'confirmed', 231);
   const otherLine = scalar(`SELECT id FROM public.order_items WHERE order_id = '${held.orderId}' AND product_id = '${idemProduct}';`);
   seed(`INSERT INTO public.order_items(order_id, product_id, product_name, price_per_unit,

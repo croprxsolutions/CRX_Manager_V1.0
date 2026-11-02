@@ -813,6 +813,7 @@ export default function QuickReceivePanel() {
               <div className="mt-6 flex justify-end">
                 <Button
                   onClick={handleReview}
+                  showChevron
                   disabled={matching || validItems.length === 0 || productsFailed}
                   icon={<PackageCheck className="w-4 h-4" />}
                 >

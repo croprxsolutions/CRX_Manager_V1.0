@@ -17,7 +17,7 @@ test('a new product keeps the unit picked for it after a reload', async ({ page 
   await expect(page.getByText('Product created')).toBeVisible();
   await expect(page).toHaveURL(/\/products$/);
 
-  await page.getByPlaceholder(/search/i).first().fill(name);
+  await page.getByPlaceholder(/search/i).filter({ visible: true }).first().fill(name);
   await page.getByText(name).filter({ visible: true }).first().click();
   await expect(page).toHaveURL(/\/products\/[0-9a-f-]{36}$/);
   await page.reload();

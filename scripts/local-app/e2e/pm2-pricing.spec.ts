@@ -90,7 +90,7 @@ test('margins type cleanly on all tiers, save exactly, and reopen priced', async
 
   // The list opens the same row in the same mode, ready to edit.
   await page.goto('/products');
-  await page.getByPlaceholder(/search/i).first().fill(productName);
+  await page.getByPlaceholder(/search/i).filter({ visible: true }).first().fill(productName);
   await page.getByRole('button', { name: /edit/i }).first().click();
   await expect(page.getByRole('combobox', { name: `Pricing mode for ${productName}` })).toHaveValue('price_driven');
   await expect(page.getByRole('spinbutton', { name: `Tier 1 price for ${productName}` })).toBeVisible();

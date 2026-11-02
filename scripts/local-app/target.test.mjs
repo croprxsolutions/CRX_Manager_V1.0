@@ -145,7 +145,7 @@ describe('running frontend', () => {
 });
 
 describe('private folders', () => {
-  for (const parent of ['C:/CRX_Manager', 'C:/CRX (old) [1]/a+b']) {
+  for (const parent of ['/CRX_Manager', '/CRX (old) [1]/a+b'].map((folder) => path.resolve(folder).replaceAll('\\', '/'))) {
     it(`serves a checkout under ${parent}/.claude but not its own .claude`, async () => {
       const root = `${parent}/.claude/worktrees/one`;
       const config = await resolveConfig({

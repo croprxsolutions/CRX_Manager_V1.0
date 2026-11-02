@@ -54,7 +54,7 @@ export default defineConfig({
         description: 'Crop RX Solutions - Agricultural Distribution Management',
         id: '/',
         lang: 'en-US',
-        theme_color: '#28A26A',
+        theme_color: '#1A7A50',
         background_color: '#F9F7F2',
         display: 'standalone',
         orientation: 'any',

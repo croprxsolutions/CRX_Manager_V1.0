@@ -23,11 +23,11 @@ If no paths are provided, grep `src/` for `jspdf` (generators import it dynamica
 ## Your Checks
 
 ### CHECK 1 — Brand consistency
-The CRX palette is defined in `src/lib/pdfTheme.ts` (`CRX_GREEN`, `CHARCOAL`, `GRAY`, `LIGHT_BG`, `RED`, `AMBER`, `TABLE_HEADER_BG`, `ALT_ROW_BG`, `BLUE`). Flag a color only if it is a hard-coded `set*Color` triplet that does NOT match one of those constants AND is not imported from `pdfTheme.ts` — prefer flagging "inline RGB literal instead of the `pdfTheme` constant" over "off-brand". The `40, 162, 106` = `#28A26A` check stays.
+The CRX palette is defined in `src/lib/pdfTheme.ts` (`CRX_GREEN`, `CHARCOAL`, `GRAY`, `LIGHT_BG`, `RED`, `AMBER`, `TABLE_HEADER_BG`, `ALT_ROW_BG`, `BLUE`). Flag a color only if it is a hard-coded `set*Color` triplet that does NOT match one of those constants AND is not imported from `pdfTheme.ts` — prefer flagging "inline RGB literal instead of the `pdfTheme` constant" over "off-brand". The `26, 122, 80` = `#1A7A50` check stays (the green before 2026-11-02, `40, 162, 106` = `#28A26A`, is now off-brand).
 
 Flag:
 - A hard-coded `setFillColor` / `setTextColor` / `setDrawColor` triplet that does NOT match one of the `pdfTheme.ts` constants AND is not imported from `pdfTheme.ts`. Severity = **MED** — flag it as "inline RGB literal instead of the `pdfTheme` constant".
-- Hard-coded RGB triplets that don't match the primary green `40, 162, 106` (`#28A26A`). Severity = **MED**.
+- Hard-coded RGB triplets that don't match the primary green `26, 122, 80` (`#1A7A50`). Severity = **MED**.
 - Logo references via `addImage` where the path/data-URI isn't verifiable. Severity = **HIGH** — broken image renders as a blank box.
 
 ### CHECK 2 — Page sizing and margins
@@ -130,7 +130,7 @@ LOW:  <count>
 [M1] CHECK 1 — Inline RGB literal instead of the pdfTheme constant
   File: src/lib/quotePdf.ts:88
   Code:  doc.setFillColor(50, 200, 100);
-  Issue: Inline RGB triplet not imported from pdfTheme.ts and not the CRX green (40, 162, 106 = #28A26A). May be intentional accent.
+  Issue: Inline RGB triplet not imported from pdfTheme.ts and not the CRX green (26, 122, 80 = #1A7A50). May be intentional accent.
   Fix:   Confirm with Mason. If branding header, import and use CRX_GREEN from pdfTheme.ts.
 
 ─── LOW ────────────────────────────────────────────

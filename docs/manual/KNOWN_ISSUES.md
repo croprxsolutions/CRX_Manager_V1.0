@@ -82,7 +82,7 @@ so the earlier gap where an applicator sent to one field of a split job got no w
 should be gone (not checked in the app; 0 split assignments live, 2026-10-22).
 
 ### KI-02 — Product cost and margin: server functions audited and fixed live 2026-11-02
-**MED · PARTIAL · security/money · fix migration `20261102200000` live 2026-11-02; retiring `admin_set_application_service_cost` remains**
+**MED · PARTIAL · security/money · fix migration `20261102200000` live 2026-11-02; `admin_set_application_service_cost` retired by `20261103090000`**
 Mason decided cost and margin are admin-only. Screens and report functions were changed (migrations
 `20261019010000`, `20261019230000`) and purchase-order cost is locked (`20261021140000`, `20261021141000`,
 PR #980). **The column lock is live:** `20261022101000_cost_columns_admin_only` (PR #1089, applied 2026-10-25
@@ -94,7 +94,7 @@ by either role; the server-only `service_role` key is unchanged); admins read co
 Two residuals stay accepted by Mason (2026-10-21): commission amount and rate together imply profit, and below-cost
 refusals let a rep narrow a cost by trial and error. Includes the older sub-items "reps can recover
 application-service cost" and "retire the old `admin_set_application_service_cost` function" (no caller left in
-`src/`; no DROP migration exists).
+`src/`; dropped by `20261103090000_retire_admin_set_application_service_cost`).
 **Function audit done 2026-11-02** (report: `docs/audits/2026-11-02-cost-margin-definer-function-audit.md`): every
 signed-in-executable owner-rights (SECURITY DEFINER) function that names cost, reaches it through an inner helper, or
 turns a cost-bearing row into JSON was traced live. Migration `20261102200000_cost_definer_leaks_closed` changes the ones

@@ -1,0 +1,5 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20261103090000_retire_admin_set_application_service_cost.sql` (SQL sha256: `5c0b5311c109c5a7895620a5011bef02e0b2eed00484f4996b09443b2922f539`). Drops the unused `admin_set_application_service_cost(uuid, bigint, text)`, the last open item of KI-02 / To-Do 11.3; admins save service cost through `admin_save_application_service` since `20260729035923`. No table, row or other grant changes; a check after the drop confirms no version is left.
+
+Rollback: a reviewed migration re-creating the function from `20260729015706` with its grants.
+
+**Live capture — 2026-11-02 (read-only catalog):** one version, `admin_set_application_service_cost(p_service_id uuid, p_cost_per_acre_cents bigint, p_idempotency_key text)`, SECURITY DEFINER, executable by `postgres`, `authenticated` and `service_role`; no `pg_depend` dependents, no trigger, and no other function body names it. No `src/` caller. Candidate timestamp follows every open candidate seen (latest `20261102234500`).

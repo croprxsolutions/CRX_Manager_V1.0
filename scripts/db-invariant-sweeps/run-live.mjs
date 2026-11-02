@@ -10,9 +10,9 @@
  * `Supabase CLI:supabase`). It is never printed, logged or written to disk. Mason approved this
  * read-only use on 2026-11-02 (docs/manual/SERVICES_AND_ACCOUNTS.md).
  *
- * Usage: node scripts/db-invariant-sweeps/run-live.mjs [--out <capture.json>]
- * The capture holds business data (see README "Output containment"), so the default lives in the
- * git-ignored .claude/session-state/ folder. Exit: the adjudicator's code (0 pass, 1 violation,
+ * Usage: node scripts/db-invariant-sweeps/run-live.mjs
+ * The capture holds business data (see README "Output containment"), so it is always written to
+ * the git-ignored .claude/session-state/ folder, never a caller-chosen path. Exit: the adjudicator's code (0 pass, 1 violation,
  * 2 invalid), or 3 when a query is refused or the live run fails before adjudication.
  */
 import { spawnSync } from 'node:child_process';
@@ -108,8 +108,7 @@ function readToken() {
 }
 
 async function main() {
-  const outIndex = process.argv.indexOf('--out');
-  const out = resolve(outIndex === -1 ? join(ROOT, '.claude', 'session-state', 'db-sweeps-live-capture.json') : process.argv[outIndex + 1] ?? '');
+  const out = join(ROOT, '.claude', 'session-state', 'db-sweeps-live-capture.json');
   // An empty SUPABASE_DB_URL keeps run-sweeps in print mode, so we always get the queries to send.
   const printed = spawnSync(process.execPath, [RUNNER], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, SUPABASE_DB_URL: '' } });
   if (printed.status !== 0) throw new Error(`run-sweeps failed (exit ${printed.status}): ${printed.stderr}`);

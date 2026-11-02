@@ -168,6 +168,13 @@ Two modes, auto-selected:
   node scripts/db-invariant-sweeps/run-sweeps.mjs
   ```
 
+- **Live script (preferred on Mason's PC).** `npm run db-sweeps:live` runs
+  `run-live.mjs`: it takes the wrapped queries from this runner's print, refuses any that fails
+  `isKnownSweepQuery`, POSTs each to the Management API with `read_only: true`, saves every
+  `sweep_result` untouched to a git-ignored capture under `.claude/` (`--out <path>` to move
+  it), then runs `--adjudicate` over it. The token is read in memory from Windows Credential
+  Manager and never printed or saved. Any HTTP error or missing packet stops it.
+
 - **psql / CI mode.** If `SUPABASE_DB_URL` is set and `psql` is on PATH, the runner executes each
   predicate itself and exits non-zero on any unallowlisted violation.
 

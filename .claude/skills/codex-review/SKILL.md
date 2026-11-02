@@ -106,10 +106,12 @@ or a single commit — that silently reviews the wrong diff.
 Same hard rule as `codex-cross-review`: a security/migration/money review must start from
 executed live evidence, not claims. Before invoking Codex on a change that touches the DB:
 
-1. `npm run db-sweeps` → execute each predicate read-only via Supabase MCP `execute_sql`
-   (project `rhyzpcqhnizqbxphqdkr`). Capture each actual `sweep_result` packet (`predicate`,
-   `rows`, `function_contracts`) as a private local JSON array, then run
-   `node scripts/db-invariant-sweeps/run-sweeps.mjs --adjudicate <capture.json>`.
+1. `npm run db-sweeps:live` (on Mason's PC) runs every predicate read-only against live
+   (project `rhyzpcqhnizqbxphqdkr`), byte-exact, saves each `sweep_result` packet to a private
+   capture and runs `--adjudicate` over the full set. Without it (cloud, no Credential Manager),
+   run `npm run db-sweeps`, execute each printed block read-only via Supabase MCP `execute_sql`,
+   capture each actual packet (`predicate`, `rows`, `function_contracts`) as a private local
+   JSON array, then run `node scripts/db-invariant-sweeps/run-sweeps.mjs --adjudicate <capture.json>`.
    Do not compare violation keys alone: the adjudicator applies the same parameter and
    function/dependency contract matcher as linked execution, and missing, duplicate, unknown or
    drifting packets fail.

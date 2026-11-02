@@ -46,7 +46,7 @@ const LEDGER_ONLY = new Set([
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate changes.
-const TOUCHED = /FUNCTION\s+(public\.)?"?(complete_cycle_count|create_cycle_count|_complete_cycle_count_impl|_freeze_inventory_during_cycle_count_20261102)\b|trg_freeze_inventory_during_cycle_count/i;
+const TOUCHED = /FUNCTION\s+(public\.)?"?(complete_cycle_count|create_cycle_count|_complete_cycle_count_impl|_freeze_inventory_during_cycle_count_20261102|_guard_cycle_count_status_20261102|_guard_open_cycle_count_items_20261102)\b|trg_freeze_inventory_during_cycle_count|trg_guard_cycle_count_status|trg_guard_open_cycle_count_items/i;
 const PINS = {
   'public.complete_cycle_count(uuid,uuid,text,bigint)': 'ad7249f15027bd75084cb0cfbf8b6bab',
 };
@@ -249,13 +249,19 @@ function security() {
       has_function_privilege('service_role', p.oid, 'EXECUTE'), p.prosecdef, array_to_string(p.proconfig, ';'), pg_get_userbyid(p.proowner)
     FROM pg_proc p WHERE p.oid IN ('public.complete_cycle_count(uuid,uuid,text,bigint)'::regprocedure,
       'public.create_cycle_count(text,text,text)'::regprocedure,
-      'public._freeze_inventory_during_cycle_count_20261102()'::regprocedure) ORDER BY 1;` }).stdout.trim().split(/\r?\n/);
+      'public._freeze_inventory_during_cycle_count_20261102()'::regprocedure,
+      'public._guard_cycle_count_status_20261102()'::regprocedure,
+      'public._guard_open_cycle_count_items_20261102()'::regprocedure) ORDER BY 1;` }).stdout.trim().split(/\r?\n/);
   assert.deepEqual(rows, [
     '_freeze_inventory_during_cycle_count_20261102()|f|f|f|t|search_path=public, pg_temp|postgres',
+    '_guard_cycle_count_status_20261102()|f|f|f|t|search_path=public, pg_temp|postgres',
+    '_guard_open_cycle_count_items_20261102()|f|f|f|t|search_path=public, pg_temp|postgres',
     'complete_cycle_count(uuid,uuid,text,bigint)|f|t|t|t|search_path=public, pg_temp|postgres',
     'create_cycle_count(text,text,text)|f|t|f|t|search_path=public, pg_temp|postgres',
   ]);
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_freeze_inventory_during_cycle_count' AND tgrelid = 'public.inventory'::regclass;"), 'O');
+  assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_guard_cycle_count_status' AND tgrelid = 'public.cycle_counts'::regclass;"), 'O');
+  assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_guard_open_cycle_count_items' AND tgrelid = 'public.cycle_count_items'::regclass;"), 'O');
   console.log('[prover] SECURITY: owners, EXECUTE grants, SECURITY DEFINER, search_path and the trigger as intended');
 }
 

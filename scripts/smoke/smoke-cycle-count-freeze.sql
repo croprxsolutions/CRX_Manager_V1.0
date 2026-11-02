@@ -45,6 +45,33 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (b) a direct second open count was accepted';
   EXCEPTION WHEN unique_violation THEN NULL;
   END;
+  BEGIN
+    INSERT INTO public.cycle_counts (count_number, warehouse, status, initiated_by)
+      VALUES ('CC-SMOKE-DUP2', 'main warehouse ', 'in_progress', v_admin);
+    RAISE EXCEPTION 'SMOKE_FAIL: (b) a second open count with different spacing and case was accepted';
+  EXCEPTION WHEN unique_violation THEN NULL;
+  END;
+
+  -- (b2) direct writes cannot close the open count or drop or change its lines.
+  BEGIN
+    UPDATE public.cycle_counts SET status = 'completed' WHERE id = v_cc;
+    RAISE EXCEPTION 'SMOKE_FAIL: (b2) an open count was marked completed directly';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_STATUS_LOCKED: cycle count CC-% can only be completed with Complete Count%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (b2) %', SQLERRM; END IF;
+  END;
+  SELECT id INTO v_item FROM public.cycle_count_items WHERE cycle_count_id = v_cc AND inventory_id = i1;
+  BEGIN
+    DELETE FROM public.cycle_count_items WHERE id = v_item;
+    RAISE EXCEPTION 'SMOKE_FAIL: (b2) a line of an open count was deleted';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_LINE_LOCKED:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (b2) %', SQLERRM; END IF;
+  END;
+  BEGIN
+    UPDATE public.cycle_count_items SET expected_qty = expected_qty + 1 WHERE id = v_item;
+    RAISE EXCEPTION 'SMOKE_FAIL: (b2) the expected quantity of an open count line changed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_LINE_LOCKED:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (b2) %', SQLERRM; END IF;
+  END;
 
   -- (c) counted rows are frozen, through an RPC and through a direct write.
   BEGIN
@@ -141,6 +168,12 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (g) the refused completion moved stock';
   END IF;
   PERFORM public.cancel_cycle_count(v_cc2, v_admin, 'smoke-freeze-cancel2');
+  BEGIN
+    UPDATE public.cycle_counts SET status = 'completed' WHERE id = v_cc2;
+    RAISE EXCEPTION 'SMOKE_FAIL: (g) a cancelled count was reopened as completed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_STATUS_LOCKED: cycle count CC-SMOKE-OLD is cancelled%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (g) %', SQLERRM; END IF;
+  END;
 
   -- (h) refusals before any work.
   BEGIN

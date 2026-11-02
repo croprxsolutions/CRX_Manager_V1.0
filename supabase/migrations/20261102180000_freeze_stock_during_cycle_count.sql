@@ -41,6 +41,15 @@
 --    2026-11-02) is compared at 2 decimals and may land up to 0.005 off the counted quantity,
 --    as it did before this migration.
 --
+-- 4. Count-table guards. Only the count functions change a count's status or its lines, but
+--    admins can also write those tables directly. Two triggers keep such writes from undoing the
+--    freeze: trg_guard_cycle_count_status refuses (CYCLE_COUNT_STATUS_LOCKED) marking an open
+--    count completed except inside its own Complete Count, and any change out of cancelled or
+--    from completed to anything but cancelled (reversal); trg_guard_open_cycle_count_items refuses
+--    (CYCLE_COUNT_LINE_LOCKED) deleting a line of an open count or changing its expected_qty,
+--    inventory_id or cycle_count_id. Entering counted_qty and cancelling stay allowed. The
+--    one-open-count index compares lower(btrim(warehouse)) so spacing or case cannot dodge it.
+--
 -- Live state 2026-11-02: 17 cycle counts, all cancelled; none in_progress, so nothing is frozen
 -- on apply and no data is repaired. Non-destructive: no rows change. Grants: the new functions
 -- are locked down at creation; complete_cycle_count keeps its owner and grants
@@ -49,6 +58,10 @@
 -- Rollback (new reviewed migration): DROP TRIGGER trg_freeze_inventory_during_cycle_count ON
 -- public.inventory; DROP FUNCTION public._freeze_inventory_during_cycle_count_20261102();
 -- DROP INDEX public.cycle_counts_one_open_per_warehouse;
+-- DROP TRIGGER trg_guard_cycle_count_status ON public.cycle_counts;
+-- DROP FUNCTION public._guard_cycle_count_status_20261102();
+-- DROP TRIGGER trg_guard_open_cycle_count_items ON public.cycle_count_items;
+-- DROP FUNCTION public._guard_open_cycle_count_items_20261102();
 -- restore complete_cycle_count from 20260908120000; DROP FUNCTION public.create_cycle_count(text,
 -- text, text) only after the page stops calling it.
 
@@ -67,6 +80,10 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.inventory'::regclass
               AND tgname = 'trg_freeze_inventory_during_cycle_count') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_PREFLIGHT: the freeze trigger already exists';
+  END IF;
+  IF to_regprocedure('public._guard_cycle_count_status_20261102()') IS NOT NULL
+     OR to_regprocedure('public._guard_open_cycle_count_items_20261102()') IS NOT NULL THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_PREFLIGHT: a count-table guard already exists';
   END IF;
   IF EXISTS (SELECT 1 FROM public.cycle_counts WHERE status = 'in_progress') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_PREFLIGHT: a cycle count is open; finish or cancel it before applying';
@@ -115,7 +132,72 @@ CREATE TRIGGER trg_freeze_inventory_during_cycle_count
 -- One open count per warehouse, enforced for every write path (admins can still insert
 -- cycle_counts rows directly). No count is open live, so this builds on no rows.
 CREATE UNIQUE INDEX cycle_counts_one_open_per_warehouse
-  ON public.cycle_counts (warehouse) WHERE status = 'in_progress';
+  ON public.cycle_counts (lower(btrim(warehouse))) WHERE status = 'in_progress';
+
+-- Admins keep direct table access to the count tables (changing that is a permission change), so
+-- the freeze is protected here instead. Only complete_cycle_count may mark an open count
+-- completed; an open count may still be cancelled, which lifts its freeze; a cancelled count is
+-- final. While a count is open its lines cannot be deleted or re-pointed, and their snapshot
+-- cannot be edited. Every live writer (_complete_cycle_count_impl, cancel_cycle_count,
+-- _reverse_completed_cycle_count_impl, update_cycle_count_item, bump_cycle_count_item_revision)
+-- stays inside these rules.
+CREATE FUNCTION public._guard_cycle_count_status_20261102()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF OLD.status = 'in_progress' AND NEW.status = 'completed'
+     AND NEW.id::text IS DISTINCT FROM NULLIF(current_setting('crx.cycle_count_applying', true), '') THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: cycle count % can only be completed with Complete Count, which applies it.', OLD.count_number;
+  END IF;
+  IF OLD.status = 'cancelled' OR (OLD.status = 'completed' AND NEW.status <> 'cancelled') THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: cycle count % is % and cannot change to %.', OLD.count_number, OLD.status, NEW.status;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public._guard_cycle_count_status_20261102() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._guard_cycle_count_status_20261102()
+  FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+
+CREATE TRIGGER trg_guard_cycle_count_status
+  BEFORE UPDATE OF status ON public.cycle_counts
+  FOR EACH ROW
+  WHEN (OLD.status IS DISTINCT FROM NEW.status)
+  EXECUTE FUNCTION public._guard_cycle_count_status_20261102();
+
+CREATE FUNCTION public._guard_open_cycle_count_items_20261102()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_count_number text;
+BEGIN
+  IF TG_OP = 'UPDATE' AND OLD.expected_qty IS NOT DISTINCT FROM NEW.expected_qty
+     AND OLD.inventory_id IS NOT DISTINCT FROM NEW.inventory_id
+     AND OLD.cycle_count_id IS NOT DISTINCT FROM NEW.cycle_count_id THEN
+    RETURN NEW;
+  END IF;
+  SELECT count_number INTO v_count_number
+    FROM public.cycle_counts WHERE id = OLD.cycle_count_id AND status = 'in_progress';
+  IF FOUND THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_LINE_LOCKED: lines of open cycle count % cannot be removed or have their expected quantity or product changed. Cancel the count instead.', v_count_number;
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$function$;
+ALTER FUNCTION public._guard_open_cycle_count_items_20261102() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._guard_open_cycle_count_items_20261102()
+  FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+
+CREATE TRIGGER trg_guard_open_cycle_count_items
+  BEFORE UPDATE OR DELETE ON public.cycle_count_items
+  FOR EACH ROW
+  EXECUTE FUNCTION public._guard_open_cycle_count_items_20261102();
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. Atomic start.
@@ -160,7 +242,7 @@ BEGIN
 
   SELECT count_number INTO v_open
     FROM public.cycle_counts
-   WHERE warehouse = v_warehouse AND status = 'in_progress'
+   WHERE lower(btrim(warehouse)) = lower(v_warehouse) AND status = 'in_progress'
    ORDER BY count_number
    LIMIT 1;
   IF FOUND THEN
@@ -321,6 +403,12 @@ BEGIN
                   AND tgname = 'trg_freeze_inventory_during_cycle_count' AND tgenabled = 'O') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_POSTFLIGHT: the freeze trigger is missing or disabled';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.cycle_counts'::regclass
+                  AND tgname = 'trg_guard_cycle_count_status' AND tgenabled = 'O')
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.cycle_count_items'::regclass
+                  AND tgname = 'trg_guard_open_cycle_count_items' AND tgenabled = 'O') THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_POSTFLIGHT: a count-table guard trigger is missing or disabled';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_index x
                   WHERE x.indexrelid = to_regclass('public.cycle_counts_one_open_per_warehouse')
                     AND x.indisunique AND x.indisvalid AND x.indrelid = 'public.cycle_counts'::regclass) THEN
@@ -347,10 +435,18 @@ BEGIN
      OR has_function_privilege('metabase_ro', 'public._freeze_inventory_during_cycle_count_20261102()', 'EXECUTE') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_POSTFLIGHT: the freeze trigger function is callable';
   END IF;
+  IF EXISTS (SELECT 1 FROM unnest(ARRAY['public._guard_cycle_count_status_20261102()',
+                                        'public._guard_open_cycle_count_items_20261102()']) f,
+                           unnest(ARRAY['anon', 'authenticated', 'service_role', 'metabase_ro']) r
+              WHERE has_function_privilege(r, f, 'EXECUTE')) THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_POSTFLIGHT: a count-table guard function is callable';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_proc p
               WHERE p.oid IN ('public.complete_cycle_count(uuid,uuid,text,bigint)'::regprocedure,
                               'public.create_cycle_count(text,text,text)'::regprocedure,
-                              'public._freeze_inventory_during_cycle_count_20261102()'::regprocedure)
+                              'public._freeze_inventory_during_cycle_count_20261102()'::regprocedure,
+                              'public._guard_cycle_count_status_20261102()'::regprocedure,
+                              'public._guard_open_cycle_count_items_20261102()'::regprocedure)
                 AND (pg_get_userbyid(p.proowner) <> 'postgres' OR NOT p.prosecdef
                      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp'])) THEN
     RAISE EXCEPTION 'CYCLE_COUNT_FREEZE_POSTFLIGHT: an owner, SECURITY DEFINER or search_path setting is wrong';

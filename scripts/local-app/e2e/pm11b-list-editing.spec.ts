@@ -13,6 +13,11 @@ async function addProducts(page: Page, prefix: string, count: number) {
   await page.evaluate(async ({ namePrefix, total }) => {
     const path = '/src/lib/db.ts';
     const { supabase } = await import(/* @vite-ignore */ path);
+    const { error: categoryError } = await supabase.rpc('upsert_product_category', {
+      p_name: namePrefix, p_is_active: true, p_sort_order: 900,
+      p_idempotency_key: `pm11b-${namePrefix}`,
+    });
+    if (categoryError) throw new Error(categoryError.message);
     const rows = Array.from({ length: total }, (_, index) => ({
       product_name: `${namePrefix} ${String(index + 1).padStart(3, '0')}`,
       product_form: 'liquid',

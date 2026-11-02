@@ -292,7 +292,7 @@ BEGIN
     product_name, unit_size, epa_registration, product_form
   ) VALUES (
     '[SMOKE] Aggregate Stock Product ' || v_suffix,
-    'GL', '[SMOKE]-AGG-' || v_suffix, 'liquid'
+    'GL', '999999-99999', 'liquid'
   ) RETURNING id INTO v_product;
   v_result := public.preview_product_pricing_changes(
     'product_page',

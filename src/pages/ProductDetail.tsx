@@ -55,6 +55,8 @@ import {
   type SupplierCostBasisCandidate,
 } from '../lib/productCostBasis';
 import { PRODUCT_COLUMNS, withAdminCost } from '../lib/costFields';
+import { listProductCategories, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories } from '../lib/productSetup';
+import type { ProductCategory } from '../types';
 
 const PRODUCT_NONPRICING_FIELDS = [
   'product_name', 'sku', 'category', 'vendor', 'manufacturer',
@@ -222,7 +224,11 @@ export default function ProductDetail() {
   });
   const [costHistory, setCostHistory] = useState<CostHistory[]>([]);
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
-  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>([]);
+  const [categoryLoadFailed, setCategoryLoadFailed] = useState(false);
+  const [nameRequired, setNameRequired] = useState(false);
+  const [reiDraft, setReiDraft] = useState('');
+  const [phiDraft, setPhiDraft] = useState('');
   const [vendorOptions, setVendorOptions] = useState<string[]>([]);
   const [manufacturerOptions, setManufacturerOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(!isNew);
@@ -316,6 +322,9 @@ export default function ProductDetail() {
     if (withCost) {
       const loadedProduct = withCost;
       setProduct(loadedProduct);
+      setNameRequired(false);
+      setReiDraft(loadedProduct.rei_hours == null ? '' : String(loadedProduct.rei_hours));
+      setPhiDraft(loadedProduct.phi_days == null ? '' : String(loadedProduct.phi_days));
       setPersistedProduct(loadedProduct);
       setPricingMode(defaultPricingMode(loadedProduct));
       setPricingMoneyDrafts({});
@@ -407,26 +416,36 @@ export default function ProductDetail() {
       if (error) { Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_unit_conversions' } }); return; }
       setUnitConversions((data || []) as UnitConversion[]);
     });
-    // Fetch distinct values for combobox dropdowns
-    supabase.from('products').select('category, vendor, manufacturer').then(({ data, error }) => {
+    listProductCategories().then(setCategoryOptions).catch((error: unknown) => {
+      Sentry.captureException(error);
+      setCategoryLoadFailed(true);
+      toast('error', 'Could not load product categories. Refresh before saving a category.');
+    });
+    // Vendor and manufacturer remain free-text choices.
+    supabase.from('products').select('vendor, manufacturer').then(({ data, error }) => {
       if (error) { Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_product_options' } }); return; }
       if (!data) return;
-      const cats = [...new Set(data.map((p) => p.category).filter(Boolean) as string[])].sort();
       const vends = [...new Set(data.map((p) => p.vendor).filter(Boolean) as string[])].sort();
       const mfrs = [...new Set(data.map((p) => p.manufacturer).filter(Boolean) as string[])].sort();
-      setCategoryOptions(cats);
       setVendorOptions(vends);
       setManufacturerOptions(mfrs);
     });
-  }, []);
+  }, [toast]);
 
   const saveExistingProductDetails = async () => {
+    const validation = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
+    if (validation) throw new Error(validation);
+    if ((persistedProduct?.product_form && product.product_form !== persistedProduct.product_form)
+      || (persistedProduct?.container_unit && product.container_unit !== persistedProduct.container_unit)
+      || (persistedProduct?.inventory_unit && product.inventory_unit !== persistedProduct.inventory_unit)) {
+      throw new Error("This can't change on a saved product yet; it waits for the reviewed unit change.");
+    }
     if (!persistedProduct || persistedProduct.id !== id || !Number.isInteger(persistedProduct.pricing_version)) {
       throw new Error('Reload this Product before saving details.');
     }
     const result = await supabaseUntyped
       .from('products')
-      .update(nonpricingProductPayload(product))
+      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct)))
       .eq('id', id!)
       .eq('pricing_version', persistedProduct.pricing_version)
       .select('id');
@@ -607,12 +626,6 @@ export default function ProductDetail() {
       toast('error', 'Reload this Product before making another change.');
       return;
     }
-    if (!product.product_name) {
-      toast('error', 'Product name is required');
-      revealPhoneSection('information');
-      return;
-    }
-
     for (const [field, label] of [
       ['current_cost', 'Cost'],
       ['tier1_price', 'Tier 1 price'],
@@ -627,25 +640,6 @@ export default function ProductDetail() {
       }
     }
 
-    // Container size must be positive if set
-    if (product.container_size != null && product.container_size <= 0) {
-      toast('error', 'Container size must be greater than 0');
-      revealPhoneSection('information');
-      return;
-    }
-
-    // Label intervals must be non-negative (printed on WPS compliance notices)
-    if (product.rei_hours != null && product.rei_hours < 0) {
-      toast('error', 'REI (hours) cannot be negative');
-      revealPhoneSection('information');
-      return;
-    }
-    if (product.phi_days != null && product.phi_days < 0) {
-      toast('error', 'PHI (days) cannot be negative');
-      revealPhoneSection('information');
-      return;
-    }
-
     // Warn (but allow) if price < cost. The server preview remains authoritative.
     const costCents = pricingDollarInputToCents(pricingMoneyInput(product, pricingMoneyDrafts, 'current_cost')) ?? 0n;
     const priceCents = (['tier1_price', 'tier2_price', 'tier3_price'] as const)
@@ -655,12 +649,65 @@ export default function ProductDetail() {
       toast('warning', 'Warning: One or more tier prices are below cost (negative margin)');
     }
 
+    const hasPricingChanges = !isNew && pricingChanged(product, persistedProduct, pricingMoneyDrafts);
+    const hasProductDetailChanges = !isNew && productDetailsChanged(product, persistedProduct);
+    if (hasPricingChanges && hasProductDetailChanges) {
+      toast('error', 'Fix and save the product details first, then change the price.');
+      revealPhoneSection('information');
+      return;
+    }
+    if (hasPricingChanges) {
+      try { openPricingReview(); } catch (error) { toast('error', sanitizeError(error)); }
+      return;
+    }
+    const setupError = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
+    if (setupError) {
+      setNameRequired(setupError === 'Enter a product name.');
+      toast('error', setupError);
+      revealPhoneSection('information');
+      return;
+    }
+    if (categoryLoadFailed && Boolean(product.category) && product.category !== persistedProduct?.category) {
+      toast('error', 'Could not load product categories. Refresh before saving a category.');
+      revealPhoneSection('information');
+      return;
+    }
+    if ((persistedProduct?.product_form && product.product_form !== persistedProduct.product_form)
+      || (persistedProduct?.container_unit && product.container_unit !== persistedProduct.container_unit)
+      || (persistedProduct?.inventory_unit && product.inventory_unit !== persistedProduct.inventory_unit)) {
+      toast('error', "This can't change on a saved product yet; it waits for the reviewed unit change.");
+      revealPhoneSection('information');
+      return;
+    }
+
+    // Container size must be positive if set
+    if (product.container_size != null && product.container_size <= 0
+      && (!persistedProduct || product.container_size !== persistedProduct.container_size)) {
+      toast('error', 'Container size must be greater than 0');
+      revealPhoneSection('information');
+      return;
+    }
+
+    // Label intervals must be non-negative (printed on WPS compliance notices)
+    if (product.rei_hours != null && product.rei_hours < 0
+      && (!persistedProduct || product.rei_hours !== persistedProduct.rei_hours)) {
+      toast('error', 'REI (hours) cannot be negative');
+      revealPhoneSection('information');
+      return;
+    }
+    if (product.phi_days != null && product.phi_days < 0
+      && (!persistedProduct || product.phi_days !== persistedProduct.phi_days)) {
+      toast('error', 'PHI (days) cannot be negative');
+      revealPhoneSection('information');
+      return;
+    }
+
     setSaving(true);
     try {
       if (isNew) {
         const productInsertResult = await supabaseUntyped
           .from('products')
-          .insert([nonpricingProductPayload(product)])
+          .insert([nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft))])
           .select('id');
         if (productInsertResult.error) throw productInsertResult.error;
         checkMutationResult(productInsertResult, 'Insert product');
@@ -669,18 +716,6 @@ export default function ProductDetail() {
         logActivity({ event: 'product_created', description: `Product ${product.product_name} created`, performedBy: profile!.id, entityType: 'product' });
         skipUnsavedPromptRef.current = true;
         navigate('/products');
-        return;
-      }
-
-      const hasPricingChanges = pricingChanged(product, persistedProduct, pricingMoneyDrafts);
-      const hasProductDetailChanges = productDetailsChanged(product, persistedProduct);
-      if (hasPricingChanges && hasProductDetailChanges) {
-        throw new Error('Save Product details and pricing in separate review steps. Revert one kind of change, save the other, then make the remaining change.');
-      }
-
-      if (hasPricingChanges) {
-        // Ask where the new numbers came from and why; the preview runs from that prompt.
-        openPricingReview();
         return;
       }
 
@@ -960,6 +995,7 @@ export default function ProductDetail() {
 
   const update = (field: string, value: unknown) => {
     if (pricingReloadRequired) return;
+    if (field === 'product_name') setNameRequired(false);
     setProduct((p) => ({ ...p, [field]: value }));
     setIsDirty(true);
     if (field === 'epa_registration'
@@ -1074,9 +1110,20 @@ export default function ProductDetail() {
 
             {/* Basic Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Input label="Product Name" required value={product.product_name || ''} onChange={(e) => update('product_name', e.target.value)} disabled={!isAdmin} />
+              <Input label="Product Name" required value={product.product_name || ''} onChange={(e) => update('product_name', e.target.value)} disabled={!isAdmin} error={nameRequired ? 'Product name is required' : undefined} />
               <Input label="SKU" value={product.sku || ''} onChange={(e) => update('sku', e.target.value)} disabled={!isAdmin} />
-              <Combobox label="Category" value={product.category || ''} onChange={(v) => update('category', v)} options={categoryOptions} disabled={!isAdmin} placeholder="Type or select..." />
+              <div>
+                <label htmlFor="product-category" className="block text-sm font-medium text-secondary mb-1">Category</label>
+                <select id="product-category" value={product.category || ''}
+                  onChange={(e) => update('category', e.target.value || null)}
+                  disabled={!isAdmin || categoryLoadFailed}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-nav-dark focus-visible:ring-2 focus-visible:ring-crx-green disabled:opacity-50">
+                  <option value="">-- Select --</option>
+                  {visibleProductCategories(categoryOptions, product.category).map((item) => (
+                    <option key={item.name} value={item.name}>{item.name}{item.is_active ? '' : ' (retired)'}</option>
+                  ))}
+                </select>
+              </div>
               {(product.category === 'Herbicide' || product.category === 'Foliar Fertilizer') && (
                 <Combobox
                   label="Use Timing"
@@ -1152,8 +1199,13 @@ export default function ProductDetail() {
                 label="REI (hours)"
                 type="number"
                 min={0}
-                value={product.rei_hours ?? ''}
-                onChange={(e) => update('rei_hours', e.target.value === '' ? null : parseInt(e.target.value, 10))}
+                step={1}
+                value={reiDraft}
+                onChange={(e) => {
+                  if (pricingReloadRequired) return;
+                  setReiDraft(e.target.value);
+                  update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
+                }}
                 disabled={!isAdmin}
                 placeholder="From label, e.g. 12"
               />
@@ -1161,8 +1213,13 @@ export default function ProductDetail() {
                 label="PHI (days)"
                 type="number"
                 min={0}
-                value={product.phi_days ?? ''}
-                onChange={(e) => update('phi_days', e.target.value === '' ? null : parseInt(e.target.value, 10))}
+                step={1}
+                value={phiDraft}
+                onChange={(e) => {
+                  if (pricingReloadRequired) return;
+                  setPhiDraft(e.target.value);
+                  update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
+                }}
                 disabled={!isAdmin}
                 placeholder="From label, e.g. 30"
               />
@@ -1311,25 +1368,33 @@ export default function ProductDetail() {
 
             {/* Product Form */}
             <div className="border-t border-gray-100 pt-4 mt-4">
-              <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Product Form</p>
+              <label htmlFor="product-form" className="block text-xs font-semibold text-secondary uppercase tracking-wide">Product Form</label>
               <p className="text-xs text-gray-400 mt-0.5 mb-3">Determines which units are available below</p>
               <div className="max-w-xs">
                 <select
+                  id="product-form"
                   value={product.product_form || ''}
                   onChange={(e) => {
-                    const form = e.target.value || null;
-                    update('product_form', form);
-                    if (form !== product.product_form) {
-                      setProduct((p) => ({ ...p, product_form: form as Product['product_form'], inventory_unit: null, container_unit: null }));
-                    }
+                    const form = (e.target.value || null) as Product['product_form'];
+                    if (pricingReloadRequired) return;
+                    setProduct((current) => ({
+                      ...current,
+                      product_form: form,
+                      container_unit: current.container_unit === persistedProduct?.container_unit || isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
+                      inventory_unit: current.inventory_unit === persistedProduct?.inventory_unit || isKnownUnit(unitConversions, form, current.inventory_unit) ? current.inventory_unit : null,
+                    }));
+                    setIsDirty(true);
                   }}
-                  disabled={!isAdmin}
+                  disabled={!isAdmin || Boolean(persistedProduct?.product_form)}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
                   <option value="">-- Select --</option>
                   <option value="liquid">Liquid</option>
                   <option value="dry">Dry</option>
                 </select>
+                {persistedProduct?.product_form && (
+                  <p className="mt-1 text-xs text-secondary">This can't change on a saved product yet; it waits for the reviewed unit change.</p>
+                )}
               </div>
             </div>
 
@@ -1340,14 +1405,18 @@ export default function ProductDetail() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Input label="Size" type="number" value={product.container_size ?? ''} onChange={(e) => update('container_size', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin} placeholder="e.g. 2.5" />
                 <div>
-                  <label className="block text-sm font-medium text-secondary mb-1">Unit</label>
+                  <label htmlFor="product-container-unit" className="block text-sm font-medium text-secondary mb-1">Unit</label>
                   <select
+                    id="product-container-unit"
                     value={product.container_unit || ''}
                     onChange={(e) => update('container_unit', e.target.value || null)}
-                    disabled={!isAdmin}
+                    disabled={!isAdmin || Boolean(persistedProduct?.container_unit)}
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                   >
                     <option value="">-- Select --</option>
+                    {product.container_unit && !isKnownUnit(unitConversions, product.product_form, product.container_unit) && (
+                      <option value={product.container_unit}>{product.container_unit} (existing)</option>
+                    )}
                     {unitConversions
                       .filter((uc) => {
                         const form = product.product_form;
@@ -1390,13 +1459,13 @@ export default function ProductDetail() {
                 <select
                   value={product.inventory_unit || ''}
                   onChange={(e) => update('inventory_unit', e.target.value || null)}
-                  disabled={!isAdmin}
+                  disabled={!isAdmin || Boolean(persistedProduct?.inventory_unit)}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
                   <option value="">-- Select --</option>
                   {/* WaveB: grandfather a legacy value the form filter would otherwise hide, so a save can't blank it */}
-                  {!isKnownUnit(unitConversions, product.product_form, product.inventory_unit) && (
-                    <option value={product.inventory_unit || ''}>{product.inventory_unit} (existing)</option>
+                  {product.inventory_unit && !isKnownUnit(unitConversions, product.product_form, product.inventory_unit) && (
+                    <option value={product.inventory_unit}>{product.inventory_unit} (existing)</option>
                   )}
                   {unitOptionsForForm(unitConversions, product.product_form).map((uc) => (
                     <option key={uc.id} value={uc.unit}>{uc.unit}</option>

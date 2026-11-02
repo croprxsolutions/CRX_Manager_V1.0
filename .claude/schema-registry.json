@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json> (queries documented in the script header)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261102144057",
+    "migrations_high_water": "20261102155933",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -471,6 +471,7 @@
       "20261101100000_quote_price_trail_and_expiry_grant",
       "20261101120000_allocate_payment_error_shows_dollars",
       "20261102100000_product_change_history",
+      "20261102102000_product_setup_checks",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -3986,6 +3987,12 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "product_categories",
+      "constraint": "product_categories_name_check",
+      "def": "CHECK (((btrim(name) <> ''::text) AND (name = btrim(name)) AND (length(name) <= 100) AND (name !~ '[[:space:]]{2,}'::text)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "product_change_history",
       "constraint": "product_change_history_check",
       "def": "CHECK ((((change_type = 'created'::text) AND (field_name IS NULL)) OR ((change_type = 'updated'::text) AND (field_name IS NOT NULL))))",
@@ -5945,6 +5952,17 @@
         "id",
         "is_currently_sourced",
         "row_version",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "product_categories": {
+      "no_default": [
+        "name",
+        "sort_order"
+      ],
+      "with_default": [
+        "is_active",
         "created_at",
         "updated_at"
       ]
@@ -8401,6 +8419,13 @@
       "row_version",
       "created_by",
       "updated_by",
+      "created_at",
+      "updated_at"
+    ],
+    "product_categories": [
+      "name",
+      "is_active",
+      "sort_order",
       "created_at",
       "updated_at"
     ],

@@ -30,7 +30,7 @@ BEGIN
   IF v_admin IS NULL THEN RAISE EXCEPTION 'SMOKE_SETUP: no admin'; END IF;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] RT A '||v_sfx) RETURNING id INTO v_cust;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] RT B '||v_sfx) RETURNING id INTO v_cust2;
-  INSERT INTO products (product_name, unit_size, epa_registration, product_form) VALUES ('[SMOKE] RT Prod '||v_sfx,'GL','[SMOKE]-EPA-RT','liquid') RETURNING id INTO v_prodA;
+  INSERT INTO products (product_name, unit_size, epa_registration, product_form) VALUES ('[SMOKE] RT Prod '||v_sfx,'GL','999999-99999','liquid') RETURNING id INTO v_prodA;
   INSERT INTO fields (customer_id, field_name, crop_type) VALUES (v_cust,'[SMOKE] RT F1 '||v_sfx,'corn') RETURNING id INTO v_field;
   INSERT INTO fields (customer_id, field_name, crop_type) VALUES (v_cust,'[SMOKE] RT F2 '||v_sfx,'corn') RETURNING id INTO v_field2;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);

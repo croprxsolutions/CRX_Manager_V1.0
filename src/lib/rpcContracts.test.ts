@@ -1550,6 +1550,7 @@ const MUTATING_RPCS_WITH_IDEMPOTENCY: string[] = [
   'update_blend_ticket_billing_status',
   'update_cycle_count_item',
   'update_order_items',
+  'upsert_product_category',
   'upsert_product_supplier_link', // Supplier Pricing 1b — see approve_supplier_price_import note
   'void_commission_payment',
   'void_delivery',

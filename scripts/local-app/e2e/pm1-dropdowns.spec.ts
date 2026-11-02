@@ -2,8 +2,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 // WP-PM-1 proof: the shared dropdown, on the two pages that use it. Invented data only.
 const run = Date.now();
-const categories = ['Adjuvant', 'Fungicide', 'Growth Regulator', 'Herbicide', 'Insecticide', 'Micronutrient', 'Nitrogen', 'Soil Fertility'];
-const vendors = [`Vendor A ${run}`, `Vendor B ${run}`];
+const categories = ['Adjuvant', 'Biological', 'Foliar Fertilizer', 'Herbicide', 'Insecticide', 'Liquid Fertilizer', 'Seed', 'Seed Treatment'];
+const vendors = Array.from({ length: 8 }, (_, i) => `Vendor ${i + 1} ${run}`);
 const makers = [`Maker A ${run}`, `Maker B ${run}`];
 let batch = 0;
 const timings = ['Post-Emergence', 'Pre-Emerge Corn', 'Pre-Emerge Soybean', 'Volunteer Corn', 'Range/Pasture/Turf'];
@@ -23,7 +23,7 @@ async function addProducts(page: Page) {
     product_name: `Dropdown ${category} ${run} ${batch}`,
     product_form: 'liquid',
     category,
-    vendor: vendors[i % 2],
+    vendor: vendors[i],
     manufacturer: makers[i % 2],
     use_timing: category === 'Herbicide' ? 'Pre-Emerge Corn' : null,
   }));
@@ -54,12 +54,11 @@ test('product page dropdowns show the full list, mark the saved choice, and save
   await expect(page.getByLabel(/product name/i)).toHaveValue(`Dropdown Herbicide ${run} ${batch}`);
 
   const category = box(page, 'Category');
-  await expectFullList(page, category, 'Herbicide', categories);
-  await page.keyboard.press('Tab');
-  // Focus moves to the next box, which opens by itself, so this one is what must have closed.
-  await expect(category).toHaveAttribute('aria-expanded', 'false');
+  await expect(category).toHaveValue('Herbicide');
+  await expect.poll(() => category.locator('option').allTextContents())
+    .toEqual(expect.arrayContaining(categories));
 
-  await expectFullList(page, box(page, 'Vendor'), vendors[1], vendors);
+  await expectFullList(page, box(page, 'Vendor'), vendors[3], vendors);
   await page.keyboard.press('Tab');
   await expectFullList(page, box(page, 'Manufacturer'), makers[1], makers);
   await page.keyboard.press('Tab');
@@ -92,15 +91,17 @@ test('product page dropdowns show the full list, mark the saved choice, and save
   await expect(maker).toHaveValue(`Typed Maker ${run}`);
 
   // Keyboard: down to the last option, then Enter.
-  await category.click();
+  const vendor = box(page, 'Vendor');
+  await vendor.click();
   await page.keyboard.press('ArrowUp');
   const last = await page.getByRole('listbox').getByRole('option').last().innerText();
-  for (let i = 0; i < 40 && (await category.getAttribute('aria-activedescendant')) !== await page.getByRole('listbox').getByRole('option').last().getAttribute('id'); i += 1) {
+  const optionCount = await page.getByRole('listbox').getByRole('option').count();
+  for (let i = 0; i < optionCount && (await vendor.getAttribute('aria-activedescendant')) !== await page.getByRole('listbox').getByRole('option').last().getAttribute('id'); i += 1) {
     await page.keyboard.press('ArrowDown');
   }
   await expect(page.getByRole('listbox').getByRole('option').last()).toBeInViewport();
   await page.keyboard.press('Enter');
-  await expect(category).toHaveValue(last.trim());
+  await expect(vendor).toHaveValue(last.trim());
   await expect(page.getByRole('listbox')).toHaveCount(0);
 
   await page.screenshot({ path: 'scripts/local-app/.state/pm1-product-page.png' });
@@ -110,8 +111,8 @@ test('the list scrolls by wheel and hovering does not move it', async ({ page })
   await signIn(page);
   const id = await addProducts(page);
   await page.goto(`/products/${id}`);
-  const category = box(page, 'Category');
-  await category.click();
+  const vendor = box(page, 'Vendor');
+  await vendor.click();
   const list = page.getByRole('listbox');
   const scrollTop = () => list.evaluate((el) => el.scrollTop);
   await list.evaluate((el) => { el.scrollTop = 0; });
@@ -137,7 +138,7 @@ test('the list scrolls by wheel and hovering does not move it', async ({ page })
   await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   const last = (await page.getByRole('listbox').getByRole('option').last().innerText()).trim();
   await page.getByRole('listbox').getByRole('option').last().click();
-  await expect(category).toHaveValue(last);
+  await expect(vendor).toHaveValue(last);
   await expect(page.getByRole('listbox')).toHaveCount(0);
 });
 

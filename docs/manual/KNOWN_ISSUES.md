@@ -82,7 +82,7 @@ so the earlier gap where an applicator sent to one field of a split job got no w
 should be gone (not checked in the app; 0 split assignments live, 2026-10-22).
 
 ### KI-02 — Product cost and margin: server functions audited and fixed live 2026-11-02
-**MED · PARTIAL · security/money · fix migration `20261102200000` live 2026-11-02; `admin_set_application_service_cost` retired by `20261103090000`**
+**MED · ACCEPTED · security/money · Mason (2026-10-21: the two residuals below) · fixes live 2026-11-02 (`20261102200000`); `admin_set_application_service_cost` retired by `20261103090000`**
 Mason decided cost and margin are admin-only. Screens and report functions were changed (migrations
 `20261019010000`, `20261019230000`) and purchase-order cost is locked (`20261021140000`, `20261021141000`,
 PR #980). **The column lock is live:** `20261022101000_cost_columns_admin_only` (PR #1089, applied 2026-10-25

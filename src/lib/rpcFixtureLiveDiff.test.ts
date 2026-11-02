@@ -41,7 +41,8 @@ import * as ts from 'typescript';
 
 // -------------------------------------------------------------------------
 // Checked-in live snapshot — re-read in full from live 2026-11-02 after the
-// 20261102102000 apply (ledger 20261102155933): 758 public functions; the list md5 matched live.
+// 20261102102000 apply (ledger 20261102155933): 758 public functions; the list md5 matched live. Less admin_set_application_service_cost
+// (dropped by 20261103090000, applied before this list merges): 757.
 // (see LIVE_PG_PROC_COUNT below, which is authoritative; includes trigger/helper
 // functions and supersets the user-facing RPCs).
 // Kept as the raw comma-joined DB output to make regeneration a single paste.

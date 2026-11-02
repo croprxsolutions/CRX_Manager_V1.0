@@ -2,4 +2,6 @@
 
 Rollback: a reviewed migration re-creating the function from `20260729015706` with its grants.
 
-**Live capture — 2026-11-02 (read-only catalog):** one version, `admin_set_application_service_cost(p_service_id uuid, p_cost_per_acre_cents bigint, p_idempotency_key text)`, SECURITY DEFINER, executable by `postgres`, `authenticated` and `service_role`; no `pg_depend` dependents, no trigger, and no other function body names it. No `src/` caller. Candidate timestamp follows every open candidate seen (latest `20261102234500`).
+**Live capture — 2026-11-02 ~19:55 UTC (read-only catalog):** one version, `admin_set_application_service_cost(p_service_id uuid, p_cost_per_acre_cents bigint, p_idempotency_key text)`, SECURITY DEFINER, executable by `postgres`, `authenticated` and `service_role`; no `pg_depend` dependents, no trigger, and no other function body names it. No `src/` caller. Candidate timestamp follows every open candidate seen (latest `20261102235000`).
+
+**Live ledger — 2026-11-02 20:14 UTC (read-only):** 1094 rows; effective high-water `20261102200000` (`cost_definer_leaks_closed`); highest version `20261102184730`; no row name contains `retire_admin_set`. Re-read before applying.

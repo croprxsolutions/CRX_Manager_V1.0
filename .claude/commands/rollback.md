@@ -8,7 +8,7 @@ Read `docs/runbooks/incident-rollback.md` in full. It defines the three scenario
 
 Ask Mason what he's seeing (in his words), then confirm against real evidence. Run whichever of these apply, in parallel where possible:
 
-- **Frontend deploy?** List the project's recent Vercel deployments via the Vercel MCP (`list_deployments`) — a deploy in the last hours that lines up with when the problem started points to scenario (a). Note the last-known-good READY deployment.
+- **Frontend deploy?** List recent production deployments from GitHub, where Vercel reports each one (`gh api "repos/croprxsolutions/CRX_Manager_V1.0/deployments?environment=Production%20%E2%80%93%20crx-manager-v1-0&per_page=10"`, then `.../deployments/<id>/statuses` for each state) — a deploy in the last hours that lines up with when the problem started points to scenario (a). Note the last-known-good READY deployment.
 - **Live migration?** `list_migrations` via the Supabase MCP — a migration applied around when things broke points to scenario (b). Cross-check `git log --oneline -10` for what shipped.
 - **Edge function?** `list_edge_functions` via the Supabase MCP — check each function's version and updated timestamp; a fresh version on any deployable function in `supabase/functions/` (the directories containing an `index.ts` are authoritative; `_shared/` is a helper library, not a function) points to scenario (c). The Supabase dashboard shows the full version history.
 

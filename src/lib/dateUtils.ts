@@ -83,10 +83,15 @@ export function todayInBusinessTz(now: Date = new Date()): string {
 }
 
 /**
- * Whole days since a YYYY-MM-DD date-only value, counted from local midnight
- * (0 for today, 1 for yesterday). Timestamps must not be passed: their UTC date
- * can differ from the local day.
+ * Calendar days from a YYYY-MM-DD date-only value to today's BUSINESS_TIMEZONE
+ * date (0 for today, 1 for yesterday), on any device clock and across DST.
+ * Timestamps must not be passed: their UTC date can differ from the business day.
  */
-export function daysSinceLocalDate(dateStr: string, now: Date = new Date()): number {
-  return dateStr ? Math.floor((now.getTime() - parseLocalDate(dateStr).getTime()) / 86400000) : 0;
+export function daysSinceBusinessDate(dateStr: string, now: Date = new Date()): number {
+  if (!dateStr) return 0;
+  const utcDay = (ymd: string) => {
+    const [year, month, day] = ymd.split('-').map(Number);
+    return Date.UTC(year, month - 1, day) / 86400000;
+  };
+  return utcDay(todayInBusinessTz(now)) - utcDay(dateStr);
 }

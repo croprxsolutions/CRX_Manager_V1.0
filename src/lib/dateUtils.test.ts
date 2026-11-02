@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { todayInBusinessTz } from './dateUtils';
 
 describe('todayInBusinessTz', () => {
@@ -84,19 +84,17 @@ describe('todayInBusinessTz', () => {
   });
 });
 
-describe('daysSinceLocalDate', () => {
-  it('keeps a delivery scheduled today at 0 days after 7pm Central', async () => {
-    vi.stubEnv('TZ', 'America/Chicago');
-    try {
-      const { daysSinceLocalDate } = await import('./dateUtils');
-      const evening = new Date('2026-10-02T00:30:00Z'); // Oct 1, 7:30pm Central
-      // The former `new Date(dateOnly)` count read Oct 1 as UTC midnight: 1 day, "overdue".
-      expect(Math.floor((evening.getTime() - new Date('2026-10-01').getTime()) / 86400000)).toBe(1);
-      expect(daysSinceLocalDate('2026-10-01', evening)).toBe(0);
-      expect(daysSinceLocalDate('2026-09-30', evening)).toBe(1);
-      expect(daysSinceLocalDate('', evening)).toBe(0);
-    } finally {
-      vi.unstubAllEnvs();
-    }
+describe('daysSinceBusinessDate', () => {
+  it('counts Chicago calendar days on any device clock', async () => {
+    const { daysSinceBusinessDate } = await import('./dateUtils');
+    const evening = new Date('2026-10-02T00:30:00Z'); // Oct 1, 7:30pm Central
+    // The former count read Oct 1 as UTC midnight: 1 day, so "overdue" on its own day.
+    expect(Math.floor((evening.getTime() - Date.UTC(2026, 9, 1)) / 86400000)).toBe(1);
+    expect(daysSinceBusinessDate('2026-10-01', evening)).toBe(0);
+    expect(daysSinceBusinessDate('2026-09-30', evening)).toBe(1);
+    expect(daysSinceBusinessDate('2026-10-02', evening)).toBe(-1);
+    // Fall-back night: 11:30pm Central on Nov 1 is still day 0.
+    expect(daysSinceBusinessDate('2026-11-01', new Date('2026-11-02T05:30:00Z'))).toBe(0);
+    expect(daysSinceBusinessDate('', evening)).toBe(0);
   });
 });

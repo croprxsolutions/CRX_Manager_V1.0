@@ -33,4 +33,4 @@ same results, plus a non-array `p_items` still refused by the inner body. Afterw
 confirmed unchanged. A rolled-back Add Inventory replay on live (same key and payload twice) created
 one stock row of 1 unit and returned the same answer both times, so the saved-replay path does not add stock twice. The Main-only version was re-run the same way with a temporary active Cold Storage row: Cold Storage, blank and
 mixed items, Add Inventory at Cold Storage and Add Inventory after Main was deactivated were all refused; Main
-Warehouse and a missing location reached the inner checks. Not yet applied to production when written.
+Warehouse and a missing location reached the inner checks. Applied live 2026-11-02 at 2:37 PM Central (ledger version `20261102203702`), before the merge.

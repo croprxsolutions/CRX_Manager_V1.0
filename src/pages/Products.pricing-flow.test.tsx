@@ -126,6 +126,12 @@ vi.mock('../components/ui/EditableDataTable', () => ({
       >
         Test default pricing save
       </button>
+      <button disabled={data.length === 0} onClick={() => void onSave(new Map([[
+        data[0].id, { product_name: '  Trimmed Name  ', vendor: '', category: '' },
+      ]])).catch(() => {})}>Test detail normalization</button>
+      <button disabled={data.length === 0} onClick={() => void onSave(new Map([[
+        data[0].id, { product_name: '   ' },
+      ]])).catch(() => {})}>Test blank detail name</button>
       <button
         disabled={data.length === 0}
         onClick={() => void onSave(new Map([[
@@ -262,6 +268,21 @@ describe('Products governed inline pricing flow', () => {
       applied_count: 1,
       rows: [],
     });
+  });
+
+  it('trims an inline name and saves blank vendor and category as NULL', async () => {
+    render(<Products />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Test detail normalization' }));
+    await waitFor(() => expect(mockProductUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      product_name: 'Trimmed Name', vendor: null, category: null,
+    })));
+  });
+
+  it('refuses an inline blank name before an update', async () => {
+    render(<Products />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Test blank detail name' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Enter a product name before saving.'));
+    expect(mockProductUpdate).not.toHaveBeenCalled();
   });
 
   it('opens saved prices for editing and saves price-driven without a manual mode choice', async () => {

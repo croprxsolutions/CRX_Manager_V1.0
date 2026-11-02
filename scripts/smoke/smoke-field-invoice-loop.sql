@@ -71,11 +71,11 @@ BEGIN
   RETURNING id INTO v_customer;
 
   INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Loop Chem A ' || v_sfx, 'GL', '[SMOKE]-EPA-LA', 'liquid')
+  VALUES ('[SMOKE] Loop Chem A ' || v_sfx, 'GL', '999999-99999', 'liquid')
   RETURNING id INTO v_prod_a;
 
   INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Loop Chem B ' || v_sfx, 'GL', '[SMOKE]-EPA-LB', 'liquid')
+  VALUES ('[SMOKE] Loop Chem B ' || v_sfx, 'GL', '999999-99999', 'liquid')
   RETURNING id INTO v_prod_b;
 
   -- Since 20260812115237 a sale needs a positive catalog cost (COST_BASIS_REQUIRED), and a product

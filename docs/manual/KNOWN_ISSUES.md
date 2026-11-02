@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-02 for the live ledger only (see the WP-PM-3 changelog note); other evidence retains its stated dates.
+**Last verified:** 2026-11-02 for the live ledger only (see the WP-PM-8a changelog note); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -332,6 +332,7 @@ invoice, five empty deliveries). Counts are older records' claims, not re-measur
 **Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). About 105 of 204 stored EPA registration numbers are wrong (MED, compliance data; the
 `LabelDataQuality` screen exists, data entry is not done). CRM has no data entered; 146 of 150 customers lack a
 sales rep (older counts).
+WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup checks. They stay unchanged and keep working; the list is in Mason's private Product Master review notes.
 
 ### KI-31 — Field Setup and field-save loose ends
 **LOW · OPEN · UI/database · unassigned**

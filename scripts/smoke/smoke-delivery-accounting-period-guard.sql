@@ -104,7 +104,7 @@ BEGIN
     product_name, unit_size, epa_registration, product_form
   ) VALUES (
     '[SMOKE] Delivery Period Product ' || v_suffix,
-    'GL', '[SMOKE]-DEL-PERIOD-' || v_suffix, 'liquid'
+    'GL', '999999-99999', 'liquid'
   ) RETURNING id INTO v_product;
 
   INSERT INTO public.inventory (

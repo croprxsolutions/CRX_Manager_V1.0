@@ -30,7 +30,8 @@
 --   _get_inventory_position_cost_impl_20261019() ae638950347495d311e4e386a9353362;
 --   _get_inventory_cost_report_cost_impl_20261019() ae5899cb4c27fe0ea28a39ced278265b;
 --   get_inventory_cost_report() 2fdd283e39482add63e075ab84a7e52d.
--- ORDERING: apply after WP-PM-12a and every older pending migration; recheck the ledger.
+-- ORDERING: apply after WP-PM-12a, 20261102102000_product_setup_checks (WP-PM-8a, applied live)
+--   and every older pending migration; recheck the ledger.
 SET LOCAL lock_timeout = '5s';
 CREATE TEMP TABLE product_active_guard_tx ON COMMIT DROP AS
 SELECT pg_current_xact_id()::text AS transaction_id;

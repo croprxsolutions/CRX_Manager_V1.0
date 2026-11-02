@@ -17,7 +17,7 @@ import { Link, Outlet, RouterProvider, createMemoryRouter } from 'react-router';
 // (see QuoteBuilder.saveNavigation.test.tsx).
 vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
-const { mockFrom, mockToast } = vi.hoisted(() => ({ mockFrom: vi.fn(), mockToast: vi.fn() }));
+const { mockFrom, mockToast, mockInsert } = vi.hoisted(() => ({ mockFrom: vi.fn(), mockToast: vi.fn(), mockInsert: vi.fn() }));
 
 vi.mock('../lib/db', async () => {
   const { assertRpcResult } = await vi.importActual<typeof import('../lib/db')>('../lib/db');
@@ -54,6 +54,7 @@ function chain(data: unknown) {
   for (const m of ['select', 'insert', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'range', 'ilike']) {
     self[m] = () => self;
   }
+  self.insert = (value: unknown) => { mockInsert(value); return self; };
   self.maybeSingle = () => Promise.resolve({ data: null, error: null });
   const promise = Promise.resolve({ data, error: null });
   self.then = promise.then.bind(promise);
@@ -122,5 +123,70 @@ describe('ProductDetail — leaving a new product', () => {
     fireEvent.click(screen.getByRole('button', { name: /Stay/ }));
     await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe('/products/new');
+  });
+
+  it.each([
+    ['Product Name', '   ', 'Enter a product name.'],
+    ['Rate Per Acre', '-1', 'Rate Per Acre must be zero or greater.'],
+    ['REI (hours)', '12.5', 'REI (hours) must be a whole number of zero or greater.'],
+    ['PHI (days)', '12.5', 'PHI (days) must be a whole number of zero or greater.'],
+    ['EPA Registration', 'bad-epa', 'Enter an EPA number in a format like 524-475 or 100-1234-5905. This checks format only, not registration validity.'],
+  ])('refuses invalid %s before requesting a save', async (label, value, message) => {
+    renderNewProduct();
+    if (label !== 'Product Name') {
+      fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'Valid Chem' } });
+    }
+    fireEvent.change(screen.getByLabelText(label === 'Product Name' ? /Product Name/ : label), { target: { value } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
+    expect(mockToast).toHaveBeenCalledWith('error', message);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it('offers active categories including Seed without free typing and keeps a first form choice', async () => {
+    mockFrom.mockImplementation((table: string) => chain(table === 'product_categories'
+      ? [{ name: 'Herbicide', is_active: true, sort_order: 10 },
+        { name: 'Seed', is_active: true, sort_order: 20 },
+        { name: 'Old', is_active: false, sort_order: 30 }]
+      : [{ id: 'product-1' }]));
+    renderNewProduct();
+    const category = await screen.findByLabelText('Category');
+    await waitFor(() => expect(category.querySelectorAll('option').length).toBe(3));
+    expect(category).toHaveTextContent('Seed');
+    expect(category).not.toHaveTextContent('Old');
+    fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: '  Seed Chem  ' } });
+    fireEvent.change(category, { target: { value: 'Seed' } });
+    fireEvent.change(screen.getByLabelText('SKU'), { target: { value: '  SKU-1  ' } });
+    fireEvent.change(screen.getByLabelText('EPA Registration'), { target: { value: '' } });
+    const form = screen.getByText('Product Form').parentElement!.querySelector('select')!;
+    fireEvent.change(form, { target: { value: 'dry' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
+    await screen.findByText('Products list page');
+    expect(mockInsert).toHaveBeenCalledWith([expect.objectContaining({
+      product_name: 'Seed Chem', sku: 'SKU-1', category: 'Seed', epa_registration: null,
+      product_form: 'dry',
+    })]);
+  });
+
+  it('clears only incompatible units when choosing a form for the first time', async () => {
+    mockFrom.mockImplementation((table: string) => chain(table === 'unit_conversions'
+      ? [
+        { id: 'gal', unit: 'Gal', unit_type: 'liquid' },
+        { id: 'lb', unit: 'Lb', unit_type: 'dry' },
+      ] : [{ id: 'product-1' }]));
+    renderNewProduct();
+    const container = await screen.findByLabelText('Unit');
+    await waitFor(() => expect(container.querySelectorAll('option').length).toBe(3));
+    const inventory = screen.getByText('Inventory Unit').parentElement!.querySelector('select')!;
+    const rate = screen.getByText('Rate Unit').parentElement!.querySelector('select')!;
+    fireEvent.change(container, { target: { value: 'Gal' } });
+    fireEvent.change(inventory, { target: { value: 'Lb' } });
+    fireEvent.change(rate, { target: { value: 'Lb' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'dry' } });
+    expect(container).toHaveValue('');
+    expect(inventory).toHaveValue('Lb');
+    expect(rate).toHaveValue('Lb');
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    expect(inventory).toHaveValue('');
+    expect(rate).toHaveValue('Lb');
   });
 });

@@ -2987,6 +2987,8 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 }
 
 const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
+  // Local product setup candidate is unapplied; generated types reflect live only.
+  'upsert_product_category',
   // The live registry/type regeneration through 20260903202611 moved every
   // former entry into
   // MUTATING_RPCS_WITH_IDEMPOTENCY. This bucket remains for the normal pre-apply
@@ -3120,8 +3122,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20261027050000 re-emitted it, applied live 2026-10-27 (migration-history row
   // 993), and the registry high-water moved past it, so the entry went stale. It
   // RETURNS trigger, so no API role can call it.
-  write_product_change_history:
-    'local product-history candidate trigger records product changes in the parent write transaction; RETURNS trigger and direct API-role EXECUTE is revoked',
+  // write_product_change_history (20261102100000) was pruned on 2026-11-02, when it
+  // applied live and the registry high-water moved past it. It RETURNS trigger.
 };
 
 

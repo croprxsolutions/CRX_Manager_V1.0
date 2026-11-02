@@ -16,6 +16,14 @@ describe('sanitizeError', () => {
       .toBe('This product cannot be turned off while required work is open. Review its blockers.');
   });
 
+  it('explains product setup refusals without leaking constraint names', () => {
+    expect(sanitizeError({ message: 'PRODUCT_CATEGORY_RETIRED: choose an active category' }))
+      .toBe('This category is retired. Choose an active category');
+    expect(sanitizeError({ message: 'new row violates check constraint "product_setup_epa_check"' }))
+      .toContain('This checks format only');
+    expect(sanitizeError({ message: 'insert or update violates foreign key constraint "product_setup_category_fk"' }))
+      .toBe('Choose a category from the product category list');
+  });
   // The RAISE text of 20261022087000_job_chemicals_refuse_unpriced_zero_price_line.sql with the product filled in.
   it('explains a CHEM_PRICE_REQUIRED save refusal without the raw token', () => {
     const sentence = "Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter a price for the line (on a quote, the quote line's price), tick Customer supplied if the grower supplied it, or give the product a $0 price if you give it away.";

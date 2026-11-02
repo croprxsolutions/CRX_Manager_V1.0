@@ -49,6 +49,12 @@ export type ProductSearchResult = Pick<Product,
   | 'inventory_unit' | 'return_policy' | 'is_full_tote_only' | 'rate_unit' | 'rate_per_acre'
 > & { product_family?: { name?: string | null } | null };
 
+export interface ProductCategory {
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+}
+
 export interface Product {
   id: string;
   product_name: string;

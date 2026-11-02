@@ -2,7 +2,7 @@ Check for recent errors in the CRX Manager production app and suggest fixes.
 
 Steps:
 1. If Sentry MCP tools are available, search for unresolved issues in the last 7 days for the CRX Manager project
-2. If Vercel MCP tools are available, check runtime logs for errors in the last 24 hours
+2. Check the last production deploys succeeded: `gh api "repos/croprxsolutions/CRX_Manager_V1.0/deployments?environment=Production%20%E2%80%93%20crx-manager-v1-0&per_page=3"`, then `.../deployments/<id>/statuses` (Vercel runtime logs need the Vercel dashboard; the connector is disconnected)
 3. If Supabase MCP tools are available, check postgres and edge-function logs for errors
 
 For each error found:

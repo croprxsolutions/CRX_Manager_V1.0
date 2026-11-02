@@ -62,7 +62,7 @@ BEGIN
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] IMMUT '||v_sfx) RETURNING id INTO v_cust;
   INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-    VALUES ('[SMOKE] IMMUT Prod '||v_sfx,'GL','[SMOKE]-EPA-IM','liquid') RETURNING id INTO v_prodA;
+    VALUES ('[SMOKE] IMMUT Prod '||v_sfx,'GL','999999-99999','liquid') RETURNING id INTO v_prodA;
   INSERT INTO fields (customer_id, field_name, crop_type)
     VALUES (v_cust,'[SMOKE] IMMUT F1 '||v_sfx,'corn') RETURNING id INTO v_field;
 

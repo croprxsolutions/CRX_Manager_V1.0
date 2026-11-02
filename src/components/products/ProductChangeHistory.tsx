@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Card, { CardHeader } from '../ui/Card';
 import { LoadFailedState } from '../ui/EmptyState';
-import { supabaseUntyped } from '../../lib/db';
+import { supabase } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { BUSINESS_TIMEZONE } from '../../lib/dateUtils';
@@ -44,7 +44,7 @@ export default function ProductChangeHistory({ productId, reloadToken = 0 }: { p
     let cancelled = false;
     setLoaded({ status: 'loading' });
     void (async () => {
-      const { data, error } = await supabaseUntyped.from('product_change_history')
+      const { data, error } = await supabase.from('product_change_history')
         .select('id, product_id, change_type, field_name, old_value, new_value, changed_by, changed_by_name, changed_at')
         .eq('product_id', productId)
         .order('changed_at', { ascending: false })

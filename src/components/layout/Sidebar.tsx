@@ -477,7 +477,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     return (
       <div>
         <div className="px-4 pt-1 pb-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Frequent</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Frequent</span>
         </div>
         {frequentItems.map((item) => {
           const active = isRouteActive(item.path, item.activePaths);
@@ -562,7 +562,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
         return (
           <div key={category.id}>
             <div className="px-4 pt-4 pb-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{category.label}</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{category.label}</span>
             </div>
             {visibleItems.map((item) => {
               const active = isRouteActive(item.path, item.activePaths);
@@ -681,13 +681,13 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
         <div className="border-t border-white/10 p-4" data-testid="user-menu">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-8 h-8 rounded-full bg-crx-green-on-dark/20 flex items-center justify-center">
-              <span className="text-xs font-semibold text-crx-green-on-dark">
+              <span className="text-xs font-semibold text-white">
                 {profile?.full_name?.split(' ').map((n) => n[0]).join('') || '?'}
               </span>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm text-white truncate">{profile?.full_name || 'User'}</p>
-              <p className="text-xs text-gray-500 capitalize">{profile?.role?.replace('_', ' ')}</p>
+              <p className="text-xs text-gray-400 capitalize">{profile?.role?.replace('_', ' ')}</p>
             </div>
           </div>
           <button
@@ -757,13 +757,13 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             <>
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-8 h-8 rounded-full bg-crx-green-on-dark/20 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-semibold text-crx-green-on-dark">
+                  <span className="text-xs font-semibold text-white">
                     {profile?.full_name?.split(' ').map((n) => n[0]).join('') || '?'}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white truncate">{profile?.full_name || 'User'}</p>
-                  <p className="text-xs text-gray-500 capitalize">{profile?.role?.replace('_', ' ')}</p>
+                  <p className="text-xs text-gray-400 capitalize">{profile?.role?.replace('_', ' ')}</p>
                 </div>
               </div>
               <button
@@ -778,7 +778,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
           ) : (
             <div className="flex flex-col items-center gap-2">
               <div className="group relative w-8 h-8 rounded-full bg-crx-green-on-dark/20 flex items-center justify-center cursor-default">
-                <span className="text-xs font-semibold text-crx-green-on-dark">
+                <span className="text-xs font-semibold text-white">
                   {profile?.full_name?.split(' ').map((n) => n[0]).join('') || '?'}
                 </span>
                 <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded shadow-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[60]">

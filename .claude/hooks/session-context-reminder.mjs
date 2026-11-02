@@ -30,7 +30,9 @@
 //
 // FAIL-OPEN: any error → emit nothing. A reminder must never brick a session.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 function emit(text) {
   if (text) {
@@ -81,4 +83,25 @@ const SESSION_ONBOARDING =
   "A change touching no file on docs/reference/sol-required-paths.md needs no Sol proof; the merge gates check its file list. " +
   "Clearly identify the rare action or business decision only Mason can make.";
 
-emit(source === "compact" ? COMPACT_REANCHOR : SESSION_ONBOARDING);
+// A side session's hooks and skills can load from the folder its parent started in, not its own
+// worktree. On 2026-11-01 that made a merge guard enforce a rule replaced two days earlier.
+function staleGuardsWarning(cwd) {
+  if (!cwd) return "";
+  const git = (dir, ...args) => execFileSync("git", ["-C", dir, ...args], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 1_000, // three calls must fit Codex's 5-second hook limit
+  }).trim();
+  try {
+    const guardsRoot = git(fileURLToPath(new URL(".", import.meta.url)), "rev-parse", "--show-toplevel");
+    if (guardsRoot.toLowerCase() === git(cwd, "rev-parse", "--show-toplevel").toLowerCase()) return "";
+    if (!git(guardsRoot, "diff", "--name-only", "HEAD", "origin/main", "--", ".claude/hooks", ".claude/skills")) return "";
+    return ` WARNING: this session's guards and skills run from ${guardsRoot}, not this worktree, and differ from ` +
+      "origin/main. A refusal may quote a replaced rule and newer guards may not run. Follow the gate anyway, " +
+      "and tell Mason.";
+  } catch {
+    return "";
+  }
+}
+
+emit((source === "compact" ? COMPACT_REANCHOR : SESSION_ONBOARDING) + staleGuardsWarning(payload?.cwd));

@@ -1,6 +1,6 @@
 # Product Master: Wave 2 morning report (2026-11-02)
 
-**Status:** 2 drafted (change history; the first half of setup checks), 1 parked, 8 not attempted, of 11. Run: 2026-11-01 21:50 to RUN_END Central (Wave 2, attempt 1).
+**Status:** 2 drafted (change history; the first half of setup checks), 1 parked, 8 not attempted, of 11. Run: 2026-11-01 21:50 to 04:25 Central. No new package may start after 03:50, so the run ended there, inside the 05:50 wrap (Wave 2, attempt 1).
 
 **Recommended next step:** land **#1266 (change history)** first. It passed every check, and every other database package in this wave stacks on it. Its live apply needs your own `I approve`, for the reason under "Mason-gated migrations". Its Sol proof stays valid until about 11:15 PM Central tonight (2026-11-02).
 
@@ -43,9 +43,9 @@ Each package took about two and a half hours, including three independent review
 
 ### WP-PM-8a Setup checks: DRAFTED, [#1272](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1272)
 - **What it does:** Category is a pick list from a new admin-maintained table: the 11 categories in use plus **Seed**. The database refuses a blank or space-padded name, an empty SKU or EPA string, a badly formatted EPA number, a negative or non-finite rate, and negative REI/PHI, but only when that field changes. The 16 old products that don't meet these rules keep working, so a price change, notes edit or deactivation on them succeeds. An existing product's form and units are locked until the reviewed unit change (WP-PM-6a); a first-time choice is allowed. Bulk import follows the same rules.
-- **Proof:** the real-schema database proof passed; 7,043 unit tests passed, none failed; all 24 browser tests passed, including a blank name and a bad EPA number refused on the product page and Seed saved with a first form choice.
+- **Proof:** all 20 CI checks are green. The real-schema database proof passed; 7,043 unit tests passed, none failed; all 24 browser tests passed, including a blank name and a bad EPA number refused on the product page and Seed saved with a first form choice.
 - **Smaller safe variant (said plainly):** the sheet's "a Form change asks before clearing units" is a lock on saved products for now, as the sheet's dependency rule requires. The incomplete badge and filter, the near-match warnings for vendor and manufacturer, and the rate help text are **WP-PM-8b**, not started.
-- **Owed:** a Mason-session click-through on the Vercel preview; CI and CodeRabbit (still running at closeout). At apply, keep the time between apply and deploy short, because until the new screen deploys the old screen can type an off-list category and would get a database error.
+- **Owed:** a Mason-session click-through on the Vercel preview; the three open CodeRabbit fixes (below), then exact-head Sol. At apply, keep the time between apply and deploy short, because until the new screen deploys the old screen can type an off-list category and would get a database error.
 - **Migration:** routine; applies after #1266's. Sol clean on `3feefee69`.
 - **Reviews:** three Codex rounds. Compliance found 2 HIGH, and drift and security found 2 HIGH. The worst would have blocked price changes on the 16 old products. All fixed, and a re-review confirmed each fix. Claude fixed a unit name in the proof's test data.
 
@@ -69,7 +69,7 @@ Every PR targets `main`. After a prerequisite lands, refresh and recheck the dep
 
 ## CodeRabbit
 - #1266: requested after Sol; one comment, refuted; no fixes kept.
-- #1272: requested after Sol at 04:03; results at closeout are in the ledger.
+- #1272: requested after Sol at 04:03 and reviewed, with 5 comments. **Refuted and resolved (2):** the live-function list (trigger functions are not RPCs) and product hard-deletes (no app path deletes products). **Valid, left open for the landing session (3):** trim a category name after collapsing its whitespace (a raw error instead of a clear message for a tab-padded name); bound a browser test's keyboard loop by the vendor option count; a KNOWN_ISSUES note. These go in one reviewed Codex round, then exact-head Sol before apply, because tonight's three build rounds were used.
 - WP-PM-3: not requested (parked before a PR).
 
 ## Sol proofs (each stays valid for 24 hours)

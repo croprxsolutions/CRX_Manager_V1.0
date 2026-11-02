@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
-import { exportToCSV, fmtCSV, fmtDateCSV, formatCSVCell } from './csvExport';
+import { exportToCSV, fmtCSV, fmtDateCSV, formatCSVCell, formatProductMoneyCSV } from './csvExport';
 
 describe('fmtCSV', () => {
   it('formats a positive number as USD', () => {
@@ -28,6 +28,18 @@ describe('fmtCSV', () => {
 
   it('returns $0.00 for undefined', () => {
     expect(fmtCSV(undefined)).toBe('$0.00');
+  });
+});
+
+describe('formatProductMoneyCSV', () => {
+  it('leaves a missing price blank instead of $0.00', () => {
+    expect(formatProductMoneyCSV(null)).toBe('');
+    expect(formatProductMoneyCSV(undefined)).toBe('');
+  });
+
+  it('keeps a real zero and real prices', () => {
+    expect(formatProductMoneyCSV(0)).toBe('$0.00');
+    expect(formatProductMoneyCSV('12.5')).toBe('$12.50');
   });
 });
 

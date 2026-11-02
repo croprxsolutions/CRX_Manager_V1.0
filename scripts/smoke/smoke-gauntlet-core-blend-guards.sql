@@ -117,6 +117,12 @@ BEGIN
     FROM public.products
    WHERE is_active = true
      AND id <> v_product
+     AND NOT EXISTS (
+       SELECT 1 FROM public.order_items oi JOIN public.orders o ON o.id = oi.order_id
+       WHERE oi.product_id = products.id AND o.deleted_at IS NULL)
+     AND NOT EXISTS (
+       SELECT 1 FROM public.purchase_order_items poi JOIN public.purchase_orders po ON po.id = poi.purchase_order_id
+       WHERE poi.product_id = products.id AND po.status IN ('draft', 'submitted', 'partially_received'))
      AND NULLIF(btrim(inventory_unit), '') IS NOT NULL
      AND public.field_app_priced_quantity(
            1,

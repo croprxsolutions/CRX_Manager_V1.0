@@ -6,7 +6,6 @@ import Button from '../components/ui/Button';
 import EditableDataTable, { type EditableColumn } from '../components/ui/EditableDataTable';
 import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
-import ConfirmModal from '../components/ui/ConfirmModal';
 import Modal from '../components/ui/Modal';
 import CustomerSalesSheetModal from '../components/products/CustomerSalesSheetModal';
 import BulkProductImport from '../components/products/BulkProductImport';
@@ -15,7 +14,7 @@ import PricingChangePreviewModal from '../components/products/PricingChangePrevi
 import PricingSourceReasonModal, { type PricingSourceReason } from '../components/products/PricingSourceReasonModal';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, supabaseUntyped, sanitizeError, checkMutationResult, assertRpcResult } from '../lib/db';
+import { supabase, supabaseUntyped, sanitizeError, checkMutationResult, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
@@ -159,7 +158,8 @@ export default function Products() {
   const [categories, setCategories] = useState<string[]>([]);
   const [vendors, setVendors] = useState<string[]>([]);
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
-  const [activeReview, setActiveReview] = useState<{ ids: string[]; active: boolean; key: string; result: ActiveReview } | null>(null);
+  const [activeReview, setActiveReview] = useState<{ ids: string[]; active: boolean; scope: string; result: ActiveReview } | null>(null);
+  const activeReviewSeq = useRef(0);
   const [deactivating, setDeactivating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showSensitive, setShowSensitive] = useState(false);
@@ -185,6 +185,7 @@ export default function Products() {
   const applyPricingIdem = useIdempotencyKey('apply_product_pricing_change_set', profile?.id || '');
   const exportPricingIdem = useIdempotencyKey('create_pricing_workbook_export', profile?.id || '');
   const marginFloorIdem = useIdempotencyKey('set_product_margin_floors', profile?.id || '');
+  const productActiveIdem = useIdempotencyKey('set_product_active', profile?.id || '');
   const [marginFloors, setMarginFloorsByProduct] = useState<Map<string, number>>(new Map());
   const [marginFloorsLoadFailed, setMarginFloorsLoadFailed] = useState(false);
   // Products whose floor this page just saved, so it is known even while the floors failed to load.
@@ -201,6 +202,7 @@ export default function Products() {
     // A failed load hides the rows, so an open Deactivate dialog for a hidden selection closes too.
     const failLoad = () => {
       setLoadError(true);
+      activeReviewSeq.current += 1;
       setActiveReview(null);
     };
     // Paginate so the master catalog never silently truncates as the catalog grows.
@@ -462,36 +464,61 @@ export default function Products() {
   };
 
   const startActiveReview = async (ids: string[], active: boolean) => {
-    if (!isAdmin || loadError || ids.length === 0) return;
+    if (!isAdmin || loadError || isEditingProducts || ids.length === 0) return;
+    const seq = ++activeReviewSeq.current;
     try {
       const { data, error } = await supabaseUntyped.rpc('preview_product_active_change', {
         p_product_ids: ids, p_active: active,
       });
       if (error) throw error;
       const result = assertRpcResult<ActiveReview>(data, 'preview_product_active_change');
+      if (seq !== activeReviewSeq.current) return;
       if (!result || !Array.isArray(result.blockers) || !Array.isArray(result.warnings) || !result.review_token) {
         throw new Error('Product review was incomplete. Try again.');
       }
-      setActiveReview({ ids, active, key: crypto.randomUUID(), result });
+      const scope = JSON.stringify([ids.slice().sort(), active, result.review_token]);
+      setActiveReview({ ids, active, scope, result });
     } catch (err) {
+      if (seq !== activeReviewSeq.current) return;
+      Sentry.captureException(err, { extra: { context: 'preview_product_active_change' } });
       toast('error', sanitizeError(err));
     }
   };
 
+  const closeActiveReview = () => {
+    activeReviewSeq.current += 1;
+    setActiveReview(null);
+  };
+
   const applyActiveReview = async () => {
     if (!activeReview || activeReview.result.blockers.length > 0 || loadError || deactivating) return;
-    const { ids, active, key, result } = activeReview;
+    const { ids, active, scope, result } = activeReview;
     await runCriticalAction({
       action: async () => {
         const response = await supabaseUntyped.rpc('set_product_active', {
           p_product_ids: ids, p_active: active, p_review_token: result.review_token,
-          p_idempotency_key: key,
+          p_idempotency_key: productActiveIdem.getKeyFor(scope),
         });
         if (response.error) {
-          if (response.error.message.includes('PRODUCT_ACTIVE_REVIEW_STALE')) {
-            setActiveReview(null);
+          if (hasRpcCode(response.error, RpcErrorCodes.PRODUCT_ACTIVE_REVIEW_STALE)
+            || hasRpcCode(response.error, RpcErrorCodes.PRODUCT_DEACTIVATION_BLOCKED)) {
+            productActiveIdem.resetKeyFor(scope);
+            closeActiveReview();
             toast('warning', 'Product details changed since this review. Review the selection again.');
+            void startActiveReview(ids, active);
             throw new CriticalActionHandledError('Product review changed');
+          }
+          if (hasRpcCode(response.error, RpcErrorCodes.PRODUCT_INACTIVE)) {
+            productActiveIdem.resetKeyFor(scope);
+            toast('error', sanitizeError(response.error));
+            throw new CriticalActionHandledError('Product is inactive');
+          }
+          if (hasRpcCode(response.error, RpcErrorCodes.NOT_AUTHORIZED)
+            || hasRpcCode(response.error, RpcErrorCodes.AUTH_REQUIRED)) {
+            productActiveIdem.resetKeyFor(scope);
+            closeActiveReview();
+            toast('error', 'Your admin access changed. Sign in again, then review the products.');
+            throw new CriticalActionHandledError('Admin access changed');
           }
           throw response.error;
         }
@@ -502,9 +529,10 @@ export default function Products() {
       successMessage: `${active ? 'Reactivated' : 'Deactivated'} ${ids.length} product(s)`,
       sentryTag: 'set_product_active',
       onSuccess: () => {
+        productActiveIdem.resetKeyFor(scope);
         clearSelection();
         fetchProducts();
-        setActiveReview(null);
+        closeActiveReview();
       },
     });
   };
@@ -1089,9 +1117,10 @@ export default function Products() {
       render: (row) => (
         <div className="flex items-center gap-2">
           <Badge variant={row.is_active ? 'success' : 'default'}>{row.is_active ? 'Active' : 'Inactive'}</Badge>
-          {isAdmin && <button type="button"
+          {isAdmin && <button type="button" disabled={isEditingProducts}
             className="min-h-8 rounded px-2 text-xs font-medium text-crx-green focus-visible:outline focus-visible:outline-2 focus-visible:outline-crx-green"
-            onClick={() => void startActiveReview([row.id], !row.is_active)}>
+            onClick={(event) => { event.stopPropagation(); void startActiveReview([row.id], !row.is_active); }}
+            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); }}>
             {row.is_active ? 'Deactivate' : 'Reactivate'}
           </button>}
         </div>
@@ -1384,19 +1413,32 @@ export default function Products() {
       )}
 
       <Modal open={activeReview !== null && activeReview.result.blockers.length > 0}
-        onClose={() => setActiveReview(null)} title="Cannot deactivate products"
-        footer={<Button variant="secondary" onClick={() => setActiveReview(null)}>Close</Button>}>
+        onClose={closeActiveReview} title="Cannot deactivate products"
+        footer={<Button variant="secondary" onClick={closeActiveReview}>Close</Button>}>
         <ul className="list-disc space-y-1 pl-5 text-sm text-red-800">
           {activeReview?.result.blockers.map((entry, index) => <li key={`${entry.product_id}-${entry.kind}-${entry.number}-${index}`}>{entry.message}</li>)}
         </ul>
       </Modal>
-      <ConfirmModal open={activeReview !== null && activeReview.result.blockers.length === 0}
-        onClose={() => setActiveReview(null)} onConfirm={() => void applyActiveReview()}
+      <Modal open={activeReview !== null && activeReview.result.blockers.length === 0}
+        onClose={closeActiveReview} closeDisabled={deactivating}
         title={activeReview?.active ? 'Reactivate products' : 'Deactivate products'}
-        message={`${activeReview?.ids.length ?? 0} product(s) will be ${activeReview?.active ? 'reactivated' : 'deactivated'}.${activeReview?.result.warnings.length
-          ? ` Review: ${activeReview.result.warnings.map((entry) => entry.message).join('; ')}` : ''}`}
-        confirmLabel={activeReview?.active ? 'Reactivate' : 'Deactivate'}
-        variant={activeReview?.active ? 'info' : 'warning'} loading={deactivating} />
+        footer={<div className="flex justify-end gap-3">
+          <Button variant="secondary" onClick={closeActiveReview} disabled={deactivating}>Cancel</Button>
+          <Button variant={activeReview?.active ? 'primary' : 'danger'} onClick={() => void applyActiveReview()}
+            loading={deactivating}>{activeReview?.active ? 'Reactivate' : 'Deactivate'}</Button>
+        </div>}>
+        <p className="text-sm text-nav-dark">{activeReview?.active ? 'Reactivate' : 'Deactivate'} these products:</p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-nav-dark">
+          {activeReview?.result.products.map((product) => <li key={product.id}>{product.product_name}</li>)}
+        </ul>
+        {activeReview && activeReview.result.warnings.length > 0 && <>
+          <p className="mt-4 text-sm font-semibold text-amber-800">Review before continuing:</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-800">
+            {activeReview.result.warnings.map((entry, index) =>
+              <li key={`${entry.product_id}-${entry.kind}-${entry.number}-${index}`}>{entry.message}</li>)}
+          </ul>
+        </>}
+      </Modal>
     </div>
   );
 }

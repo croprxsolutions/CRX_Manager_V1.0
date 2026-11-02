@@ -2996,7 +2996,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // check_idempotency/save_idempotency calls behind the required-key public wrapper. Prune once the
   // registry high-water passes 20261020210000 (the body never reaches the generated types).
   '_create_order_from_blend_ticket_replay_impl_20261015',
-  'set_product_active',
+  'set_product_active', // WP-PM-3 local migration: admin-only mutator, receipt-bound through check_idempotency_intent.
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their

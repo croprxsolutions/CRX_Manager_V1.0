@@ -23,7 +23,8 @@ function chainable(result: unknown) {
   builder.then = vi.fn((resolve: (value: unknown) => void) => Promise.resolve(result).then(resolve));
   return builder;
 }
-vi.mock('../lib/db', () => ({
+vi.mock('../lib/db', async (original) => ({
+  ...(await original<typeof import('../lib/db')>()),
   supabase: { from: vi.fn(() => chainable({ data: mocks.products, error: null })) },
   supabaseUntyped: { rpc: (...args: unknown[]) => mocks.rpc(...args) },
   assertRpcResult: (data: unknown) => data,
@@ -118,13 +119,27 @@ describe('product active review flow', () => {
 
   it('closes a stale review and asks for a fresh one', async () => {
     mocks.rpc.mockResolvedValueOnce({ data: review(), error: null })
-      .mockResolvedValueOnce({ data: null, error: { message: 'PRODUCT_ACTIVE_REVIEW_STALE' } });
+      .mockResolvedValueOnce({ data: null, error: { message: 'PRODUCT_ACTIVE_REVIEW_STALE' } })
+      .mockResolvedValueOnce({ data: review([{ message: 'Test Chemical: order PM3-NEW' }]), error: null });
     await loaded();
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('warning',
       'Product details changed since this review. Review the selection again.'));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(await screen.findByText('Test Chemical: order PM3-NEW')).toBeInTheDocument();
+    expect(mocks.rpc).toHaveBeenCalledTimes(3);
+  });
+
+  it('reopens the review when an order becomes a blocker after preview', async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: review(), error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'PRODUCT_DEACTIVATION_BLOCKED: order PM3-NEW' } })
+      .mockResolvedValueOnce({ data: review([{ message: 'Test Chemical: order PM3-NEW' }]), error: null });
+    await loaded();
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
+    expect(await screen.findByText('Test Chemical: order PM3-NEW')).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('Deactivate these products:');
+    expect(mocks.rpc).toHaveBeenCalledTimes(3);
   });
 
   it('bulk actions review only rows whose status will change', async () => {
@@ -136,7 +151,7 @@ describe('product active review flow', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Deactivate' })[0]);
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('preview_product_active_change',
       { p_product_ids: [active.id], p_active: false }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('1 product(s) will be deactivated.');
+    expect(screen.getByRole('dialog')).toHaveTextContent('Deactivate these products:Test Chemical');
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getAllByRole('button', { name: 'Reactivate' })[0]);
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('preview_product_active_change',

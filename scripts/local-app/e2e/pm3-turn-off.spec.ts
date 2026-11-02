@@ -16,18 +16,24 @@ test('blocked order, stock warning, and admin reactivation', async ({ page }) =>
     if (held.error || !held.data) throw new Error(held.error?.message ?? 'held product seed failed');
     const stock = await supabase.from('products').insert({ product_name: `PM3 Stock ${suffix}` }).select('id, product_name').single();
     if (stock.error || !stock.data) throw new Error(stock.error?.message ?? 'stock product seed failed');
-    const order = await supabase.from('orders').insert({ order_number: `PM3-${suffix}`, customer_id: customer.data.id,
-      status: 'confirmed' }).select('id, order_number').single();
-    if (order.error || !order.data) throw new Error(order.error?.message ?? 'order seed failed');
-    const line = await supabase.from('order_items').insert({ order_id: order.data.id,
-      product_id: held.data.id, product_name: held.data.product_name,
-      total_units_needed: 1, quantity_remaining: 1, price_per_unit: 0, total_price: 0,
-      pricing_pending: true });
-    if (line.error) throw new Error(line.error.message);
+    const actor = (await supabase.auth.getUser()).data.user?.id;
+    if (!actor) throw new Error('signed-in admin missing');
+    const order = await supabase.rpc('create_direct_order', {
+      p_customer_id: customer.data.id,
+      p_order_date: new Date().toISOString().slice(0, 10),
+      p_order_name: `PM3-${suffix}`,
+      p_items: [{ product_id: held.data.id, product_name: held.data.product_name,
+        quantity: 1, price_per_unit: 2, unit_cost: 1, unit_size: 'gal' }],
+      p_performed_by: actor,
+      p_idempotency_key: `pm3-e2e-order-${suffix}`,
+    });
+    if (order.error || !order.data?.order_id) throw new Error(order.error?.message ?? 'order seed failed');
+    const savedOrder = await supabase.from('orders').select('order_number').eq('id', order.data.order_id).single();
+    if (savedOrder.error || !savedOrder.data) throw new Error(savedOrder.error?.message ?? 'order read failed');
     const balance = await supabase.from('inventory').insert({ product_id: stock.data.id,
       location: `PM3-${suffix}`, quantity_available: 2 });
     if (balance.error) throw new Error(balance.error.message);
-    return { held: held.data, stock: stock.data, orderNumber: order.data.order_number };
+    return { held: held.data, stock: stock.data, orderNumber: savedOrder.data.order_number };
   });
 
   await page.goto('/products');

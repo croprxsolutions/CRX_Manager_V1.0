@@ -1,4 +1,5 @@
 import { ArrowDownToLine, FileText, Pencil, Trash2 } from 'lucide-react';
+import Badge from '../ui/Badge';
 
 export type MobileInventoryPosition = {
   id: string;
@@ -14,6 +15,7 @@ export type MobileInventoryPosition = {
 
 type Props = {
   rows: MobileInventoryPosition[];
+  inactiveProductIds: Set<string>;
   isAdmin: boolean;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
@@ -28,6 +30,7 @@ const formatQuantity = (value: number) =>
 
 export default function InventoryPositionMobileCards({
   rows,
+  inactiveProductIds,
   isAdmin,
   selectedIds,
   onToggleSelect,
@@ -62,6 +65,7 @@ export default function InventoryPositionMobileCards({
                   aria-label={`View transaction history for ${row.product_name}`}
                 >
                   <span className="truncate font-semibold text-nav-dark">{row.product_name}</span>
+                  {inactiveProductIds.has(row.product_id) && <Badge variant="default">Inactive</Badge>}
                   <FileText className="h-4 w-4 shrink-0 text-secondary" />
                 </button>
                 <p className="truncate text-xs text-secondary">{row.location || 'No location'} · {unit}</p>

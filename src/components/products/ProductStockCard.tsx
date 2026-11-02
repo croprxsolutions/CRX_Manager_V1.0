@@ -37,7 +37,7 @@ export default function ProductStockCard({ productId, isActive }: ProductStockCa
   return <ProductStockCardContent productId={productId} isActive={isActive} />;
 }
 
-function ProductStockCardContent({ productId, isActive }: ProductStockCardProps) {
+function ProductStockCardContent({ productId }: ProductStockCardProps) {
   const [rows, setRows] = useState<InventoryPositionRow[]>([]);
   const [asOf, setAsOf] = useState<Date | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'failed'>('loading');
@@ -102,9 +102,7 @@ function ProductStockCardContent({ productId, isActive }: ProductStockCardProps)
         <div className="space-y-4">
           {rows.length === 0 ? (
             <p className="text-sm text-secondary">
-              {isActive
-                ? 'No stock recorded for this product.'
-                : 'Inventory does not list inactive products, so stock cannot be shown here.'}
+              No stock recorded for this product.
             </p>
           ) : (
             <>

@@ -34,7 +34,7 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
-const TOUCHED = /product_active_guard|write_product_active_guard/;
+const TOUCHED = /product_active_guard|write_product_active_guard|set_product_active|preview_product_active_change|guard_product_deactivation|guard_inactive_product_line|guard_order_reopen_inactive_product/;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -257,12 +257,18 @@ function backgroundSql(sql) {
   child.stdin.end(sql);
   return new Promise((resolve) => child.on('close', (status) => resolve({ status, output })));
 }
-async function waitForLock() {
+async function waitForLock(productId) {
   for (let i = 0; i < 35; i += 1) {
-    if (Number(scalar(`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock';`)) > 0) return;
+    const blocked = Number(scalar(`SELECT count(*) FROM pg_stat_activity waiting
+      WHERE waiting.wait_event_type = 'Lock'
+        AND EXISTS (SELECT 1 FROM pg_locks holder
+          WHERE holder.pid = ANY(pg_blocking_pids(waiting.pid))
+            AND holder.relation = 'public.products'::regclass);`)) > 0;
+    const probe = psql(`SELECT 1 FROM public.products WHERE id = '${productId}' FOR NO KEY UPDATE NOWAIT;`, { allowFailure: true });
+    if (blocked && probe.status !== 0 && /could not obtain lock on row/.test(probe.stderr)) return;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error('concurrent transaction did not wait on a row lock');
+  throw new Error(`concurrent transaction did not wait on product ${productId}`);
 }
 
 try {
@@ -286,6 +292,17 @@ try {
     assert.notEqual(result.status, 0, `${label} mutation was accepted`);
     assert.ok(result.output.includes(expected), result.output);
   }
+  for (const [label, mutated] of [
+    ['line-lock', candidate.replace('WHERE id = NEW.product_id FOR SHARE;', 'WHERE id = NEW.product_id;')],
+    ['admin-gate', candidate.replace("IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;\n  IF NOT public.is_admin()",
+      "IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;\n  IF false")],
+  ]) {
+    assert.notEqual(mutated, candidate, `${label} mutation target missing`);
+    stageText(`mutation-${label}.sql`, mutated);
+    const result = apply(`mutation-${label}.sql`);
+    assert.notEqual(result.status, 0, `${label} mutation was accepted`);
+    assert.match(result.output, /PRODUCT_ACTIVE_GUARD_POSTFLIGHT: guards/);
+  }
   const applied = apply('candidate.sql');
   assert.equal(applied.status, 0, `candidate failed to apply:\n${applied.output}`);
   const again = apply('candidate.sql');
@@ -301,6 +318,9 @@ try {
   denied(ADMIN, `SELECT public.set_product_active(ARRAY['${p}']::uuid[], false, '${blocked.review_token}', 'pm3-blocked');`, /PRODUCT_DEACTIVATION_BLOCKED:.*PM3-OPEN/);
   denied(REP, `SELECT public.preview_product_active_change(ARRAY['${p}']::uuid[], false);`, /NOT_AUTHORIZED/);
   denied(REP, `SELECT public.set_product_active(ARRAY['${p}']::uuid[], false, 'x', 'pm3-rep');`, /NOT_AUTHORIZED/);
+  const triggerRep = denied(REP, `UPDATE public.products SET is_active = false WHERE id = '${p}';`,
+    /NOT_AUTHORIZED/, 'postgres');
+  assert.doesNotMatch(triggerRep, /AUTH_REQUIRED/);
   denied(ADMIN, `SELECT public.preview_product_active_change(ARRAY['${p}']::uuid[], false);`, /permission denied/, 'anon');
   denied(ADMIN, `SELECT public.set_product_active(ARRAY['${p}']::uuid[], false, 'x', 'pm3-anon');`,
     /permission denied/, 'anon');
@@ -350,6 +370,8 @@ try {
   const billedProduct = product('[PROVER] PM3 Billed');
   const billed = seedOrderLine(billedProduct, 'PM3-BILLED', 'fulfilled', 210);
   seedDelivery(billed.orderId, billed.lineId, billedProduct, 211, false, true);
+  seed(`UPDATE public.invoice_items SET order_item_id = NULL
+    WHERE invoice_id = '${uid(1211)}';`);
   // Another product's unbilled line must not affect this product's billed line.
   seed(`INSERT INTO public.order_items(order_id, product_id, product_name, total_units_needed,
     quantity_remaining, price_per_unit, cost_per_unit)
@@ -374,8 +396,28 @@ try {
   assert.deepEqual(preview(outsideProduct).blockers, []);
   turn(outsideProduct, false, 'pm3-outside');
   const unknownProduct = product('[PROVER] PM3 Unknown');
-  seedOrderLine(unknownProduct, 'PM3-NO-DELIVERY', 'fulfilled', 214);
+  const unknown = seedOrderLine(unknownProduct, 'PM3-NO-DELIVERY', 'fulfilled', 214);
+  seed(`UPDATE public.order_items SET quantity_delivered = 1, quantity_remaining = 0
+    WHERE id = '${unknown.lineId}';`);
   assert.equal(preview(unknownProduct).blockers[0].number, 'PM3-NO-DELIVERY');
+  const cancelRemainingProduct = product('[PROVER] PM3 Cancel Remaining');
+  const cancelledRemainder = seedOrderLine(cancelRemainingProduct, 'PM3-CANCEL-REMAINING', 'fulfilled', 215);
+  seed(`UPDATE public.order_items SET quantity_remaining = 0 WHERE id = '${cancelledRemainder.lineId}';`);
+  assert.deepEqual(preview(cancelRemainingProduct).blockers, []);
+  const fragmentProduct = product('[PROVER] PM3 Fragment');
+  const fragment = seedOrderLine(fragmentProduct, 'PM3-FRAGMENT', 'fulfilled', 216);
+  const fragmentDelivery = seedDelivery(fragment.orderId, fragment.lineId, fragmentProduct, 217, false, true);
+  seed(`UPDATE public.delivery_items SET quantity_delivered = 1.23456 WHERE delivery_id = '${fragmentDelivery}';
+    UPDATE public.invoice_items SET quantity = 1.23456 WHERE invoice_id = '${uid(1217)}';`);
+  assert.deepEqual(preview(fragmentProduct).blockers, []);
+  const thirdsProduct = product('[PROVER] PM3 Thirds');
+  const thirds = seedOrderLine(thirdsProduct, 'PM3-THIRDS', 'fulfilled', 218);
+  for (const n of [219, 237, 238]) {
+    const deliveryId = seedDelivery(thirds.orderId, thirds.lineId, thirdsProduct, n, false, n === 219);
+    seed(`UPDATE public.delivery_items SET quantity_delivered = 0.33335 WHERE delivery_id = '${deliveryId}';`);
+  }
+  seed(`UPDATE public.invoice_items SET quantity = 1.00005 WHERE invoice_id = '${uid(1219)}';`);
+  assert.deepEqual(preview(thirdsProduct).blockers, []);
 
   const quoteProduct = product('[PROVER] PM3 Quotes');
   for (const [status, n] of [['draft', 220], ['sent', 221], ['revised', 222],
@@ -384,9 +426,19 @@ try {
   }
   seed(`INSERT INTO public.orders(id, order_number, quote_id, customer_id, status)
     VALUES ('${uid(227)}', 'PM3-CONVERTED', '${uid(223)}',
-      (SELECT id FROM public.customers LIMIT 1), 'cancelled');`);
+      (SELECT id FROM public.customers LIMIT 1), 'cancelled');
+    INSERT INTO public.orders(id, order_number, quote_id, customer_id, status)
+    VALUES ('${uid(233)}', 'PM3-PARTLY-DRAWN', '${uid(220)}',
+      (SELECT id FROM public.customers LIMIT 1), 'confirmed');
+    INSERT INTO public.quote_product_draws(quote_id, product_id, quantity_drawn)
+    VALUES ('${uid(220)}', '${quoteProduct}', 0.4);
+    INSERT INTO public.orders(id, order_number, quote_id, customer_id, status)
+    VALUES ('${uid(239)}', 'PM3-VOIDED-QUOTE-ORDER', '${uid(224)}',
+      (SELECT id FROM public.customers LIMIT 1), 'voided');
+    INSERT INTO public.quote_templates(template_name, sections, created_by)
+    VALUES ('PM3 Template', '[{"items":[{"product_id":"${quoteProduct}"}]}]'::jsonb, '${ADMIN}');`);
   const quoteWarnings = preview(quoteProduct).warnings.map((w) => w.number);
-  assert.deepEqual(quoteWarnings, ['PM3-Q-220', 'PM3-Q-221', 'PM3-Q-222', 'PM3-Q-224']);
+  assert.deepEqual(quoteWarnings, ['PM3-Q-220', 'PM3-Q-221', 'PM3-Q-222', 'PM3-Q-223', 'PM3-Q-224', 'PM3 Template']);
   assert.deepEqual(preview(quoteProduct).blockers, []);
   turn(quoteProduct, false, 'pm3-quotes');
   const quietProduct = product('[PROVER] PM3 Soft Deleted');
@@ -414,6 +466,22 @@ try {
   assert.deepEqual(preview(warningProduct).warnings.map((w) => w.kind),
     ['job', 'stock', 'crop program']);
   turn(warningProduct, false, 'pm3-warnings');
+  const positions = JSON.parse(scalar(`BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
+    SELECT public.get_inventory_position(); ROLLBACK;`));
+  assert.ok(positions.some((row) => row.product_id === warningProduct
+    && Number(row.quantity_available) === 3 && row.is_low_stock === false));
+  assert.ok(!positions.some((row) => row.product_id === outsideProduct), 'zero-stock inactive product must not be listed');
+  assert.equal(scalar(`BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
+    SELECT count(*) FROM public.get_inventory_cost_report() WHERE product_id = '${warningProduct}'
+      AND quantity_available = 3 AND total_cost_value > 0; ROLLBACK;`), '1');
+  assert.equal(scalar(`BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
+    SELECT count(*) FROM public.get_inventory_cost_report() WHERE product_id = '${outsideProduct}'; ROLLBACK;`), '0');
+  seed(`UPDATE public.app_settings SET setting_value = '' WHERE setting_key = 'crop_programs';`);
+  assert.deepEqual(preview(quietProduct).warnings, [], 'blank crop programs means no programs');
+  seed(`UPDATE public.app_settings SET setting_value = 'not-json' WHERE setting_key = 'crop_programs';`);
+  denied(ADMIN, `SELECT public.preview_product_active_change(ARRAY['${quietProduct}']::uuid[], false);`,
+    /invalid input syntax for type json/);
+  seed(`UPDATE public.app_settings SET setting_value = '' WHERE setting_key = 'crop_programs';`);
 
   const idemProduct = product('[PROVER] PM3 Idempotency');
   const idemToken = preview(idemProduct).review_token;
@@ -425,6 +493,74 @@ try {
   assert.equal(scalar(`SELECT count(*) FROM public.product_change_history WHERE product_id = '${idemProduct}'
     AND field_name = 'is_active';`), '1', 'replay must not make a second write');
 
+  // Delivery reversals restore each line before they recalculate the order status.
+  // A completed inactive line with no remaining quantity must not block an
+  // active-only sibling delivery correction.
+  for (const [operation, n] of [['void_delivery', 260], ['cancel_delivery', 270]]) {
+    const mixedOrder = seedOrderLine(idemProduct, `PM3-${operation}`, 'fulfilled', n);
+    seed(`INSERT INTO public.order_items(order_id, product_id, product_name,
+      total_units_needed, quantity_delivered, quantity_remaining, price_per_unit, cost_per_unit)
+      VALUES ('${mixedOrder.orderId}', '${p}', 'Active sibling', 1, 1, 0, 2, 1);
+      UPDATE public.order_items SET quantity_delivered = 1, quantity_remaining = 0
+      WHERE id = '${mixedOrder.lineId}';`);
+    const activeLineId = scalar(`SELECT id FROM public.order_items WHERE order_id = '${mixedOrder.orderId}' AND product_id = '${p}';`);
+    seedDelivery(mixedOrder.orderId, mixedOrder.lineId, idemProduct, n + 1);
+    const activeDelivery = seedDelivery(mixedOrder.orderId, activeLineId, p, n + 2);
+    if (operation === 'void_delivery') {
+      withActor(ADMIN, `SELECT public.void_delivery('${activeDelivery}', 'PM3 correction', '${ADMIN}', 'pm3-void-active');`);
+      assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${activeDelivery}';`), 'voided');
+    } else {
+      withActor(ADMIN, `SELECT public.cancel_delivery('${activeDelivery}', 'PM3 correction', '${ADMIN}', 'pm3-cancel-active');`);
+      assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${activeDelivery}';`), 'cancelled');
+    }
+    assert.equal(scalar(`SELECT quantity_remaining FROM public.order_items WHERE id = '${mixedOrder.lineId}';`), '0');
+    assert.equal(scalar(`SELECT status FROM public.orders WHERE id = '${mixedOrder.orderId}';`), 'partially_fulfilled');
+    assert.equal(scalar(`SELECT is_active FROM public.products WHERE id = '${idemProduct}';`), 'f');
+  }
+  const completionOrder = seedOrderLine(idemProduct, 'PM3-COMPLETE-ACTIVE', 'partially_fulfilled', 275);
+  seed(`UPDATE public.order_items SET quantity_delivered = 1, quantity_remaining = 0
+    WHERE id = '${completionOrder.lineId}';
+    INSERT INTO public.order_items(order_id, product_id, product_name, total_units_needed,
+      quantity_delivered, quantity_remaining, price_per_unit, cost_per_unit)
+      VALUES ('${completionOrder.orderId}', '${p}', 'Active to complete', 1, 0, 1, 2, 1);`);
+  const completionLine = scalar(`SELECT id FROM public.order_items WHERE order_id = '${completionOrder.orderId}' AND product_id = '${p}';`);
+  const completionDelivery = seedDelivery(completionOrder.orderId, completionLine, p, 276);
+  seed(`UPDATE public.deliveries SET status = 'in_progress', scheduled_date = current_date
+    WHERE id = '${completionDelivery}';
+    UPDATE public.delivery_items SET quantity_delivered = 0 WHERE delivery_id = '${completionDelivery}';`);
+  psql(`INSERT INTO public.inventory(product_id, location, quantity_available, quantity_prebooked)
+    VALUES ('${p}', 'Main Warehouse', 10, 1)
+    ON CONFLICT (product_id, location) DO UPDATE SET quantity_available = 10, quantity_prebooked = 1;`);
+  withActor(ADMIN, `SELECT public.complete_delivery('${completionDelivery}',
+    'No proof — recorded by office', '${ADMIN}', NULL, NULL, NULL, 'pm3-complete-active',
+    NULL, 'no_proof', 'PM3 local proof recorded without customer signature');`);
+  assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${completionDelivery}';`), 'completed');
+  assert.equal(scalar(`SELECT is_active FROM public.products WHERE id = '${idemProduct}';`), 'f');
+  const inactiveVoid = seedOrderLine(idemProduct, 'PM3-VOID-INACTIVE', 'fulfilled', 280);
+  seed(`UPDATE public.order_items SET quantity_delivered = 1, quantity_remaining = 0 WHERE id = '${inactiveVoid.lineId}';`);
+  const inactiveDelivery = seedDelivery(inactiveVoid.orderId, inactiveVoid.lineId, idemProduct, 281);
+  denied(ADMIN, `SELECT public.void_delivery('${inactiveDelivery}', 'PM3 reversal', '${ADMIN}', 'pm3-void-inactive');`,
+    /PRODUCT_INACTIVE:.*reactivate.*reopening order/);
+  assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${inactiveDelivery}';`), 'completed');
+
+  const cancelledInactiveOrder = seedOrderLine(idemProduct, 'PM3-CANCEL-ORDER', 'confirmed', 282);
+  withActor(ADMIN, `SELECT public.cancel_order('${cancelledInactiveOrder.orderId}', '${ADMIN}', 'pm3-cancel-order');`);
+  assert.equal(scalar(`SELECT status FROM public.orders WHERE id = '${cancelledInactiveOrder.orderId}';`), 'cancelled');
+  const voidedInactiveOrder = seedOrderLine(idemProduct, 'PM3-VOID-ORDER', 'fulfilled', 283);
+  seed(`UPDATE public.order_items SET quantity_delivered = 1, quantity_remaining = 0 WHERE id = '${voidedInactiveOrder.lineId}';`);
+  withActor(ADMIN, `SELECT public.void_order('${voidedInactiveOrder.orderId}', '${ADMIN}', 'PM3 correction', 'pm3-void-order');`);
+  assert.equal(scalar(`SELECT status FROM public.orders WHERE id = '${voidedInactiveOrder.orderId}';`), 'voided');
+  assert.equal(scalar(`SELECT is_active FROM public.products WHERE id = '${idemProduct}';`), 'f');
+  const retainedPo = seedPoLine(idemProduct, 'PM3-RETAINED-PO', 'draft', 284);
+  const retainedPoLine = scalar(`SELECT id FROM public.purchase_order_items WHERE purchase_order_id = '${retainedPo}';`);
+  const retainedItems = JSON.stringify([{ id: retainedPoLine, product_id: idemProduct,
+    product_name: 'Retained inactive', quantity_ordered: 2, quantity_received: 0,
+    unit_cost: 1, unit_cost_cents: 100 }]);
+  withActor(ADMIN, `SELECT public.save_purchase_order('${retainedPo}',
+    '{"vendor":"[PROVER] vendor","status":"draft","notes":"retained edit"}'::jsonb,
+    '${retainedItems}'::jsonb, '${ADMIN}', 'pm3-retained-po');`);
+  assert.equal(scalar(`SELECT quantity_ordered FROM public.purchase_order_items WHERE id = '${retainedPoLine}';`), '2');
+
   for (const table of ['order_items', 'quote_items', 'purchase_order_items']) {
     const parent = table === 'order_items' ? `order_id, product_name, price_per_unit, cost_per_unit, total_units_needed`
       : table === 'quote_items' ? `quote_id, section_id, price_per_unit, current_cost, total_units_needed`
@@ -434,6 +570,20 @@ try {
         : `'${uid(204)}', 'Inactive', 1, 1`;
     denied(ADMIN, `INSERT INTO public.${table}(product_id, ${parent})
       VALUES ('${idemProduct}', ${values});`, /PRODUCT_INACTIVE:.*PM3 Idempotency/, 'postgres');
+  }
+  const swapOrder = seedOrderLine(p, 'PM3-SWAP-ORDER', 'confirmed', 234);
+  const swapQuote = seedQuoteLine(p, 'PM3-SWAP-QUOTE', 'draft', 235);
+  const swapPo = seedPoLine(p, 'PM3-SWAP-PO', 'draft', 236);
+  for (const [table, column, parent] of [
+    ['order_items', 'order_id', swapOrder.orderId],
+    ['quote_items', 'quote_id', swapQuote],
+    ['purchase_order_items', 'purchase_order_id', swapPo],
+  ]) {
+    denied(ADMIN, `UPDATE public.${table} SET product_id = '${idemProduct}'
+      WHERE ${column} = '${parent}';`, table === 'quote_items'
+      ? /QUOTE_ITEM_PRODUCT_IMMUTABLE|PRODUCT_INACTIVE/ : /PRODUCT_INACTIVE:.*PM3 Idempotency/, 'postgres');
+    assert.equal(scalar(`SELECT count(*) FROM public.${table} WHERE ${column} = '${parent}'
+      AND product_id = '${idemProduct}';`), '0', `${table} swap must roll back`);
   }
   const held = seedOrderLine(idemProduct, 'PM3-HELD', 'confirmed', 231);
   const otherLine = scalar(`SELECT id FROM public.order_items WHERE order_id = '${held.orderId}' AND product_id = '${idemProduct}';`);
@@ -456,7 +606,8 @@ try {
   const newVersion = scalar(`SELECT row_version FROM public.orders WHERE id = '${held.orderId}';`);
   denied(ADMIN, `SELECT public.update_order_items('${held.orderId}', '${added}'::jsonb,
     '${ADMIN}', 'pm3-held-add', ${newVersion});`, /PRODUCT_INACTIVE:.*PM3 Second Inactive/);
-  denied(ADMIN, `UPDATE public.orders SET status = 'partially_fulfilled' WHERE id = '${outside.orderId}';`,
+  denied(ADMIN, `SELECT set_config('app.admin_override', 'true', true);
+    UPDATE public.orders SET status = 'partially_fulfilled' WHERE id = '${outside.orderId}';`,
     /PRODUCT_INACTIVE:.*reactivate.*reopening order/, 'postgres');
 
   const failure = psql(`BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
@@ -473,9 +624,16 @@ try {
     quantity: 1, price_per_unit: 2, unit_cost: 1, unit_size: 'gal' }]);
   denied(ADMIN, `SELECT public.create_direct_order('${customerId}', current_date, 'PM3 direct', NULL,
     '${directPayload}'::jsonb, '${ADMIN}', 'pm3-direct', NULL);`, /PRODUCT_INACTIVE:.*PM3 Idempotency/);
-  const quoteVersion = scalar(`SELECT row_version FROM public.quotes WHERE id = '${uid(224)}';`);
-  denied(ADMIN, `SELECT public.convert_quote_to_order('${uid(224)}', '${ADMIN}',
+  const unconvertedInactiveQuote = seedQuoteLine(quoteProduct, 'PM3-UNCONVERTED-INACTIVE', 'accepted', 242);
+  const quoteVersion = scalar(`SELECT row_version FROM public.quotes WHERE id = '${unconvertedInactiveQuote}';`);
+  denied(ADMIN, `SELECT public.convert_quote_to_order('${unconvertedInactiveQuote}', '${ADMIN}',
     'pm3-convert', ${quoteVersion}, NULL);`, /PRODUCT_INACTIVE:.*PM3 Quotes/);
+  seed(`UPDATE public.quotes SET status = 'sent', is_planned = true WHERE id = '${uid(220)}';`);
+  denied(ADMIN, `SELECT public.draw_down_quote('${uid(220)}',
+    '[{"product_id":"${quoteProduct}","quantity":0.2}]'::jsonb,
+    '${ADMIN}', 'pm3-inactive-draw', NULL);`, /PRODUCT_INACTIVE:.*PM3 Quotes/);
+  denied(ADMIN, `SELECT public.rollover_quote_to_season('${uid(220)}', 2027,
+    '${ADMIN}', 'pm3-inactive-rollover');`, /PRODUCT_INACTIVE:.*PM3 Quotes/);
 
   // A return references the already delivered line; it does not create a new sale.
   seed(`UPDATE public.order_items SET quantity_delivered = 1, quantity_remaining = 0
@@ -485,6 +643,13 @@ try {
   const returnItems = JSON.stringify([{ order_item_id: outside.lineId, quantity: 1 }]);
   withActor(ADMIN, `SELECT public.create_return('${returnPayload}'::jsonb,
     '${returnItems}'::jsonb, 'pm3-return');`);
+  const returnId = scalar(`SELECT id FROM public.returns WHERE order_id = '${outside.orderId}';`);
+  psql(`INSERT INTO public.inventory(product_id, location, quantity_available)
+    VALUES ('${outsideProduct}', 'Main Warehouse', 0);`);
+  withActor(ADMIN, `SELECT public.approve_return('${returnId}', '${ADMIN}', 'pm3-approve-return');`);
+  withActor(ADMIN, `SELECT public.receive_return('${returnId}', '${ADMIN}', 'pm3-receive-return');`);
+  withActor(ADMIN, `SELECT public.issue_return_credit('${returnId}', '${ADMIN}', 'pm3-credit-return');`);
+  assert.equal(scalar(`SELECT status FROM public.returns WHERE id = '${returnId}';`), 'credited');
   assert.equal(scalar(`SELECT is_active FROM public.products WHERE id = '${outsideProduct}';`), 'f');
 
   // Both arrival orders use independent psql connections and an observed lock wait.
@@ -500,7 +665,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 350));
   const laterOff = backgroundSql(`BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
     UPDATE public.products SET is_active = false WHERE id = '${raceA}'; COMMIT;`);
-  await waitForLock();
+  await waitForLock(raceA);
   assert.equal((await firstLine).status, 0, 'line-first transaction must commit');
   const refusedOff = await laterOff;
   assert.notEqual(refusedOff.status, 0, 'deactivation must wait and then refuse the committed order');
@@ -521,12 +686,37 @@ try {
       cost_per_unit, total_units_needed, quantity_remaining)
       VALUES ('${raceOrderB}', '${raceB}', 'Race B', 2, 1, 1, 1);
     COMMIT;`);
-  await waitForLock();
+  await waitForLock(raceB);
   assert.equal((await firstOff).status, 0, 'deactivation-first transaction must commit');
   const refusedLine = await laterLine;
   assert.notEqual(refusedLine.status, 0);
   assert.match(refusedLine.output, /PRODUCT_INACTIVE:.*Race Deactivation First/);
   assert.equal(scalar(`SELECT count(*) FROM public.order_items WHERE order_id = '${raceOrderB}';`), '0');
+  for (const [arrival, n] of [['reopen-first', 290], ['deactivate-first', 291]]) {
+    const raceProduct = product(`[PROVER] PM3 ${arrival}`);
+    const raceOrder = seedOrderLine(raceProduct, `PM3-${arrival}`, 'fulfilled', n);
+    const reopenSql = `BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
+      SELECT set_config('app.admin_override', 'true', true);
+      UPDATE public.orders SET status = 'partially_fulfilled' WHERE id = '${raceOrder.orderId}';
+      ${arrival === 'reopen-first' ? 'SELECT pg_sleep(4);' : ''} COMMIT;`;
+    const deactivateSql = `BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
+      UPDATE public.products SET is_active = false WHERE id = '${raceProduct}';
+      ${arrival === 'deactivate-first' ? 'SELECT pg_sleep(4);' : ''} COMMIT;`;
+    const first = backgroundSql(arrival === 'reopen-first' ? reopenSql : deactivateSql);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const second = backgroundSql(arrival === 'reopen-first' ? deactivateSql : reopenSql);
+    await waitForLock(raceProduct);
+    const firstResult = await first;
+    const secondResult = await second;
+    assert.equal(firstResult.status, 0, `${arrival} first transaction: ${firstResult.output}`);
+    assert.notEqual(secondResult.status, 0, `${arrival} second transaction should refuse`);
+    assert.match(secondResult.output, arrival === 'reopen-first'
+      ? /PRODUCT_DEACTIVATION_BLOCKED/ : /PRODUCT_INACTIVE:.*reopening order/);
+    assert.equal(scalar(`SELECT count(*) FROM public.order_items oi JOIN public.orders o ON o.id = oi.order_id
+      JOIN public.products p ON p.id = oi.product_id WHERE o.id = '${raceOrder.orderId}'
+      AND o.status IN ('confirmed', 'partially_fulfilled') AND NOT p.is_active
+      AND oi.quantity_remaining > 0;`), '0');
+  }
   console.log('PRODUCT_ACTIVE_GUARD_PROOF_PASS');
 } finally {
   if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true });

@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const name = `crx-season-statement-${process.pid}`;
-const candidate = '20261102230000_chicago_season_and_statement_dates.sql';
+const candidate = '20261103120000_chicago_season_and_statement_dates.sql';
 const actor = 'ac680000-0000-4000-8000-000000000001';
 const customer = 'ac680000-0000-4000-8000-000000000002';
 const file = (relative) => readFileSync(path.join(root, relative), 'utf8').replaceAll('\r\n', '\n');

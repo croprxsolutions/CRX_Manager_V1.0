@@ -417,7 +417,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // private namespace would strand existing receipts and could replay a credit.
   _issue_return_credit_impl: ['issue_return_credit'],
   // The header-only body (postgres-only EXECUTE) behind _issue_return_credit_impl keeps the same
-  // legacy namespace; 20261102230000 re-emits it only to date the credit memo by the Chicago day.
+  // legacy namespace; 20261103120000 re-emits it only to date the credit memo by the Chicago day.
   _issue_return_credit_header_only_impl_20260825: ['issue_return_credit'],
   // Same legacy-operation contract for the private inventory receipt body.
   // The intent-bound public wrapper owns the actor+return fingerprint while

@@ -126,6 +126,14 @@ function renderTicket(id = 'tk-1') {
   );
 }
 
+// The page starts counting edits as unsaved one animation frame after a load finishes. An edit made
+// before that frame is treated as part of the load, so the unsaved lock never engages. On a busy
+// machine the frame lands late and the edit slips in first. Frames run in order, so waiting for one
+// of our own guarantees the page's frame has already run.
+async function waitForEditTracking() {
+  await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))); });
+}
+
 const baseTicket = {
   id: 'tk-1',
   ticket_number: 'BT-2001',
@@ -439,7 +447,9 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     });
 
     renderTicket();
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove product' }));
+    const removeProduct = await screen.findByRole('button', { name: 'Remove product' });
+    await waitForEditTracking();
+    fireEvent.click(removeProduct);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
 
     await waitFor(() => {
@@ -450,7 +460,9 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
 
   it('blocks application-record creation while a local product edit is unsaved', async () => {
     renderTicket();
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Product' }));
+    const addProduct = await screen.findByRole('button', { name: 'Add Product' });
+    await waitForEditTracking();
+    fireEvent.click(addProduct);
     fireEvent.change(await screen.findByPlaceholderText('Lot #'), {
       target: { value: 'UNSAVED-LEGAL-SNAPSHOT' },
     });
@@ -1305,14 +1317,13 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     renderTicket();
     const approve = await screen.findByRole('button', { name: 'Approve' });
     await waitFor(() => expect(approve).toBeEnabled());
-    // Let the post-load animation frame re-arm dirty tracking.
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    await waitForEditTracking();
 
     fireEvent.click(screen.getByRole('button', { name: /Re-process OCR/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Re-process' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to load blend ticket. Please try again.'));
     expect(mockInvoke).toHaveBeenCalledWith('process-blend-ticket', expect.anything());
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    await waitForEditTracking();
 
     // The reload failed, so the page still shows the old ticket: an edit must count as unsaved.
     fireEvent.change(screen.getByPlaceholderText('Add notes...'), { target: { value: 'edited after a failed reload' } });

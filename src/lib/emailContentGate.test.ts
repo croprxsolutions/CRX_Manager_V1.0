@@ -98,6 +98,7 @@ describe('emailContentProblem refuses anything beyond plain formatting', () => {
     ['lookalike host', '<a href="https://croprxsolutions.app.evil.example/">x</a>'],
     ['http link', '<a href="http://croprxsolutions.app/">x</a>'],
     ['userinfo link', '<a href="https://user@croprxsolutions.app/">x</a>'],
+    ['other port', '<img src="https://croprxsolutions.app:8443/x.png">'],
     ['entity-hidden scheme', '<a href="&#106;avascript:alert(1)">x</a>'],
     ['tracking image', '<img src="https://evil.example/pixel.gif">'],
     ['css url', '<p style="background:url(https://evil.example/x)">x</p>'],
@@ -139,6 +140,7 @@ describe('attachmentProblem', () => {
     expect(attachmentProblem('invoice.html', 'JVBERi0x')).not.toBeNull();
     expect(attachmentProblem('../x.pdf', 'JVBERi0x')).not.toBeNull();
     expect(attachmentProblem('x.pdf', 'PGh0bWw+')).not.toBeNull();
+    expect(attachmentProblem('x.pdf', 'JVBERi0x\n<html>')).not.toBeNull();
     expect(attachmentProblem(undefined, 'JVBERi0x')).not.toBeNull();
   });
 });

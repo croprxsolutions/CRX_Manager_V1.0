@@ -56,7 +56,7 @@ function urlProblem(value: string): string | null {
   } catch {
     return "Email link is not a full web address";
   }
-  if (url.protocol !== "https:" || url.username || url.password || !ALLOWED_URL_HOSTS.has(url.hostname)) {
+  if (url.protocol !== "https:" || url.username || url.password || url.port || !ALLOWED_URL_HOSTS.has(url.hostname)) {
     return `Email links and images may only point to ${[...ALLOWED_URL_HOSTS].join(", ")}`;
   }
   return null;
@@ -110,8 +110,9 @@ export function attachmentProblem(filename: unknown, content: unknown): string |
   if (typeof filename !== "string" || !/^[^\\/:*?"<>|\u0000-\u001f]{1,150}\.pdf$/i.test(filename)) {
     return "Each attachment must be a PDF with a plain file name";
   }
-  // "%PDF" encodes to "JVBER" in base64.
-  if (typeof content !== "string" || !content.startsWith("JVBER")) {
+  // "%PDF" encodes to "JVBER" in base64. Only the file type is checked: a valid
+  // PDF can say anything, so parsing it deeper would add no safety.
+  if (typeof content !== "string" || !content.startsWith("JVBER") || !/^[A-Za-z0-9+/]*={0,2}$/.test(content)) {
     return "Each attachment must be a base64 PDF";
   }
   return null;

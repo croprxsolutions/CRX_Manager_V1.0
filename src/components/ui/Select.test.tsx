@@ -65,7 +65,7 @@ describe('Select', () => {
   it('applies error styling when error is present', () => {
     render(<Select options={options} error="Error" />);
     const select = screen.getByRole('combobox');
-    expect(select.className).toContain('border-red-400');
+    expect(select.className).toContain('border-red-500');
   });
 
   it('handles onChange events', () => {

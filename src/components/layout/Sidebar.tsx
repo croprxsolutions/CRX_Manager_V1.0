@@ -477,7 +477,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     return (
       <div>
         <div className="px-4 pt-1 pb-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Frequent</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Frequent</span>
         </div>
         {frequentItems.map((item) => {
           const active = isRouteActive(item.path, item.activePaths);
@@ -489,8 +489,8 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
               className={`block transition-colors ${active ? 'text-white bg-white/5' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
             >
               <div className="relative flex items-center gap-3 px-4 py-2">
-                {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green rounded-r" />}
-                <span className={active ? 'text-crx-green' : 'text-gray-400'}>{item.icon}</span>
+                {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green-on-dark rounded-r" />}
+                <span className={active ? 'text-crx-green-on-dark' : 'text-gray-400'}>{item.icon}</span>
                 <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>
               </div>
             </NavLink>
@@ -519,8 +519,8 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
               className={`block transition-colors ${active ? 'text-white bg-white/5' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
             >
               <div className="relative flex items-center gap-3 px-4 py-2.5">
-                {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green rounded-r" />}
-                <span className={active ? 'text-crx-green' : 'text-gray-400'}>{link.icon}</span>
+                {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green-on-dark rounded-r" />}
+                <span className={active ? 'text-crx-green-on-dark' : 'text-gray-400'}>{link.icon}</span>
                 <span className="text-sm font-medium">{link.label}</span>
               </div>
             </NavLink>
@@ -535,8 +535,8 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             className={`group relative block transition-colors ${active ? 'text-white bg-white/5' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
           >
             <div className={`relative flex items-center gap-3 py-2.5 ${isExpanded ? 'px-4' : 'px-0 justify-center'}`}>
-              {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green rounded-r" />}
-              <span className={active ? 'text-crx-green' : 'text-gray-400'}>{link.icon}</span>
+              {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green-on-dark rounded-r" />}
+              <span className={active ? 'text-crx-green-on-dark' : 'text-gray-400'}>{link.icon}</span>
               {isExpanded && <span className="text-sm font-medium whitespace-nowrap">{link.label}</span>}
             </div>
             {/* Tooltip when collapsed */}
@@ -562,7 +562,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
         return (
           <div key={category.id}>
             <div className="px-4 pt-4 pb-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{category.label}</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{category.label}</span>
             </div>
             {visibleItems.map((item) => {
               const active = isRouteActive(item.path, item.activePaths);
@@ -574,8 +574,8 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                   className={`block transition-colors ${active ? 'text-white bg-white/5' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
                 >
                   <div className="relative flex items-center gap-3 px-4 py-2.5 pl-6">
-                    {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green rounded-r" />}
-                    <span className={active ? 'text-crx-green' : 'text-gray-400'}>{item.icon}</span>
+                    {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green-on-dark rounded-r" />}
+                    <span className={active ? 'text-crx-green-on-dark' : 'text-gray-400'}>{item.icon}</span>
                     <span className="text-sm font-medium">{item.label}</span>
                   </div>
                 </NavLink>
@@ -597,8 +597,8 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
               isExpanded ? 'px-4' : 'px-0 justify-center'
             } ${hasActive ? 'text-white bg-white/5' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
           >
-            {hasActive && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green rounded-r" />}
-            <span className={hasActive ? 'text-crx-green' : 'text-gray-400'}>{category.icon}</span>
+            {hasActive && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green-on-dark rounded-r" />}
+            <span className={hasActive ? 'text-crx-green-on-dark' : 'text-gray-400'}>{category.icon}</span>
             {isExpanded && (
               <span className="text-sm font-medium whitespace-nowrap flex-1 text-left">{category.label}</span>
             )}
@@ -622,8 +622,8 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                     className={`block transition-colors ${active ? 'text-white bg-white/5' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
                   >
                     <div className="relative flex items-center gap-3 px-4 py-2 pl-10">
-                      {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green rounded-r" />}
-                      <span className={active ? 'text-crx-green' : 'text-gray-400'}>{item.icon}</span>
+                      {active && <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-crx-green-on-dark rounded-r" />}
+                      <span className={active ? 'text-crx-green-on-dark' : 'text-gray-400'}>{item.icon}</span>
                       <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>
                     </div>
                   </NavLink>
@@ -680,14 +680,14 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
         {/* User section — mobile */}
         <div className="border-t border-white/10 p-4" data-testid="user-menu">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-8 h-8 rounded-full bg-crx-green/20 flex items-center justify-center">
-              <span className="text-xs font-semibold text-crx-green">
+            <div className="w-8 h-8 rounded-full bg-crx-green-on-dark/20 flex items-center justify-center">
+              <span className="text-xs font-semibold text-white">
                 {profile?.full_name?.split(' ').map((n) => n[0]).join('') || '?'}
               </span>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm text-white truncate">{profile?.full_name || 'User'}</p>
-              <p className="text-xs text-gray-500 capitalize">{profile?.role?.replace('_', ' ')}</p>
+              <p className="text-xs text-gray-400 capitalize">{profile?.role?.replace('_', ' ')}</p>
             </div>
           </div>
           <button
@@ -756,14 +756,14 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
           {isExpanded ? (
             <>
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-8 h-8 rounded-full bg-crx-green/20 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-semibold text-crx-green">
+                <div className="w-8 h-8 rounded-full bg-crx-green-on-dark/20 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-semibold text-white">
                     {profile?.full_name?.split(' ').map((n) => n[0]).join('') || '?'}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white truncate">{profile?.full_name || 'User'}</p>
-                  <p className="text-xs text-gray-500 capitalize">{profile?.role?.replace('_', ' ')}</p>
+                  <p className="text-xs text-gray-400 capitalize">{profile?.role?.replace('_', ' ')}</p>
                 </div>
               </div>
               <button
@@ -777,8 +777,8 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             </>
           ) : (
             <div className="flex flex-col items-center gap-2">
-              <div className="group relative w-8 h-8 rounded-full bg-crx-green/20 flex items-center justify-center cursor-default">
-                <span className="text-xs font-semibold text-crx-green">
+              <div className="group relative w-8 h-8 rounded-full bg-crx-green-on-dark/20 flex items-center justify-center cursor-default">
+                <span className="text-xs font-semibold text-white">
                   {profile?.full_name?.split(' ').map((n) => n[0]).join('') || '?'}
                 </span>
                 <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded shadow-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[60]">

@@ -14,7 +14,7 @@ export type JsPDFWithAutoTable = InstanceType<typeof jsPDF> & {
 };
 
 // ── CRX brand palette (RGB tuples, spread into jsPDF set*Color calls) ────────
-export const CRX_GREEN: [number, number, number] = [40, 162, 106]; // #28A26A
+export const CRX_GREEN: [number, number, number] = [26, 122, 80]; // #1A7A50 (crx-green in src/index.css)
 export const CHARCOAL: [number, number, number] = [46, 46, 46]; // #2E2E2E
 export const GRAY: [number, number, number] = [78, 78, 78]; // #4E4E4E
 export const LIGHT_BG: [number, number, number] = [245, 250, 247]; // light green tint

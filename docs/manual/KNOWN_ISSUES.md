@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 51 |
+| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 52 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
@@ -355,6 +355,15 @@ name matching, and the Field Customer Assignment dropdown. A customer-name searc
 matching customers (alphabetical) without saying so. Past a cap, a record cannot be chosen.
 
 ---
+
+### KI-85 — Receiving offers warehouses that cannot ship
+**MED · OPEN · UI/database/inventory · unassigned (fix 1 Part A from the 2026-11-02 audit)**
+`src/pages/PurchaseOrderDetail.tsx` (~L1855) and `src/components/receiving/QuickReceivePanel.tsx` (~L69) offer
+four hard-coded locations; only Main Warehouse is in `warehouses`. `receive_po_items` stores whatever location is
+sent, but every outbound path uses Main Warehouse only and no transfer exists, so stock received elsewhere can never
+ship. A live check on 2026-11-02 found all 117 inventory rows at Main Warehouse, so nothing has been stranded yet.
+Fix: list active `warehouses` rows only, refuse unknown locations on the server, and print the real location.
+Multi-warehouse support stays (`docs/manual/DECISION_LOG.md`, 2026-11-02; checklist in `docs/workflows/INVENTORY_RULES.md`).
 
 ### KI-86 — Direct admin turn-off skips warnings
 **LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**

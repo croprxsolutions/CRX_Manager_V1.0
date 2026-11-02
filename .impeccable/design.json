@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-02T00:00:00Z",
+  "title": "Design System: CRX Manager",
+  "extensions": {
+    "colorMeta": {
+      "crx-green": { "role": "primary", "displayName": "CRX Field Green", "canonical": "#1a7a50", "tonalRamp": ["#0b3322", "#114a32", "#166340", "#1a7a50", "#3e9670", "#7dbf9f", "#c3e3d2", "#e8f5ee"] },
+      "crx-green-hover": { "role": "primary", "displayName": "Field Green Deep", "canonical": "#166340" },
+      "crx-green-on-dark": { "role": "primary", "displayName": "Field Green Bright", "canonical": "#28a26a" },
+      "crx-green-light": { "role": "primary", "displayName": "Green Wash", "canonical": "#e8f5ee" },
+      "crx-green-tint": { "role": "primary", "displayName": "Green Mist", "canonical": "#f0faf5" },
+      "nav-dark": { "role": "neutral", "displayName": "Charcoal", "canonical": "#2e2e2e", "tonalRamp": ["#1a1a1a", "#2e2e2e", "#3a3a3a", "#4e4e4e", "#6b7280", "#9ca3af", "#e5e7eb", "#f9fafb"] },
+      "nav-dark-hover": { "role": "neutral", "displayName": "Charcoal Lift", "canonical": "#3a3a3a" },
+      "secondary": { "role": "neutral", "displayName": "Slate Ink", "canonical": "#4e4e4e" },
+      "cream": { "role": "neutral", "displayName": "Harvest Cream", "canonical": "#f9f7f2", "tonalRamp": ["#5c564a", "#8a8273", "#b3ab9b", "#d6d0c3", "#e8e4da", "#f0ede6", "#f9f7f2", "#fdfcf9"] },
+      "cream-dark": { "role": "neutral", "displayName": "Cream Shadow", "canonical": "#f0ede6" },
+      "border-gray": { "role": "neutral", "displayName": "Hairline", "canonical": "#e5e7eb" },
+      "field-border": { "role": "neutral", "displayName": "Field Edge", "canonical": "#d1d5db" },
+      "danger": { "role": "error", "displayName": "Danger Red", "canonical": "#dc2626" },
+      "danger-hover": { "role": "error", "displayName": "Danger Red Deep", "canonical": "#b91c1c" }
+    },
+    "typographyMeta": {
+      "page-title": { "displayName": "Page title", "purpose": "One per page via PageHeader." },
+      "section-title": { "displayName": "Section title", "purpose": "Card headers and modal titles." },
+      "accent-word": { "displayName": "Accent word", "purpose": "Light crx-green second half of a split heading." },
+      "body": { "displayName": "Body", "purpose": "Almost all UI text, tables included." },
+      "label": { "displayName": "Label", "purpose": "Form labels, tabs, buttons." },
+      "badge": { "displayName": "Badge / small", "purpose": "Badges, helper and error text." }
+    },
+    "shadows": [
+      { "name": "card", "value": "0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.05)", "purpose": "Resting cards." },
+      { "name": "card-hover", "value": "0 2px 4px rgba(0, 0, 0, 0.04), 0 8px 20px rgba(0, 0, 0, 0.07)", "purpose": "Clickable cards on hover only." },
+      { "name": "sm", "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)", "purpose": "Filled buttons (pinned Tailwind 3 value)." },
+      { "name": "lg", "value": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)", "purpose": "Toasts." },
+      { "name": "xl", "value": "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)", "purpose": "Modal panels." }
+    ],
+    "motion": [
+      { "name": "control-transition", "value": "150ms ease-in-out", "purpose": "Button and input colour changes." },
+      { "name": "card-hover", "value": "200ms", "purpose": "Shadow change on clickable cards." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px", "purpose": "Sidebar replaces bottom nav; .phone-touch rules stop; modals stop being full-screen." },
+      { "name": "lg", "value": "1024px", "purpose": "Page padding grows to 1.5rem." },
+      { "name": "root-17px", "value": "1920px" },
+      { "name": "root-18px", "value": "2560px" },
+      { "name": "root-20px", "value": "3200px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main action on a screen; trailing chevron by default.",
+      "html": "<button class=\"ds-btn ds-btn-primary\"><span>Create quote</span><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m9 18 6-6-6-6\"/></svg></button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; font: 500 0.875rem/1.25rem Inter, system-ui, sans-serif; border-radius: 0.5rem; border: none; cursor: pointer; transition: all 150ms ease-in-out; } .ds-btn-primary { background: #1a7a50; color: #fff; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); } .ds-btn-primary:hover, .ds-btn-primary:active { background: #166340; } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgb(26 122 80 / 0.3); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Alternative actions next to a primary button.",
+      "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; padding: 0.5rem 1rem; font: 500 0.875rem/1.25rem Inter, system-ui, sans-serif; border-radius: 0.5rem; background: #fff; color: #2e2e2e; border: 1px solid #d1d5db; cursor: pointer; transition: all 150ms ease-in-out; } .ds-btn-secondary:hover { background: #f9fafb; } .ds-btn-secondary:active { background: #f3f4f6; } .ds-btn-secondary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgb(26 122 80 / 0.3); }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive actions, usually inside ConfirmModal.",
+      "html": "<button class=\"ds-btn-danger\">Void invoice</button>",
+      "css": ".ds-btn-danger { display: inline-flex; align-items: center; padding: 0.5rem 1rem; font: 500 0.875rem/1.25rem Inter, system-ui, sans-serif; border-radius: 0.5rem; background: #dc2626; color: #fff; border: none; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); cursor: pointer; transition: all 150ms ease-in-out; } .ds-btn-danger:hover { background: #b91c1c; } .ds-btn-danger:active { background: #991b1b; } .ds-btn-danger:focus-visible { outline: none; box-shadow: 0 0 0 3px rgb(220 38 38 / 0.3); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labelled field with green focus ring.",
+      "html": "<label class=\"ds-label\">Customer name<input class=\"ds-input\" placeholder=\"Search customers\" /></label>",
+      "css": ".ds-label { display: block; font: 500 0.875rem/1.25rem Inter, system-ui, sans-serif; color: #4e4e4e; } .ds-input { display: block; width: 100%; margin-top: 0.25rem; padding: 0.625rem 0.75rem; font: 400 0.875rem/1.25rem Inter, system-ui, sans-serif; color: #2e2e2e; background: #fff; border: 1px solid #d1d5db; border-radius: 0.5rem; transition: border-color 150ms, box-shadow 150ms; } .ds-input::placeholder { color: #9ca3af; } .ds-input:focus { outline: none; border-color: #1a7a50; box-shadow: 0 0 0 2px rgb(26 122 80 / 0.2); }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "description": "Pill showing a record status; colours come from the Badge variant map.",
+      "html": "<span class=\"ds-badge ds-badge-success\">Paid</span> <span class=\"ds-badge ds-badge-warning\">Pending</span> <span class=\"ds-badge ds-badge-error\">Overdue</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; padding: 0.125rem 0.5rem; font: 500 0.75rem/1rem Inter, system-ui, sans-serif; border-radius: 9999px; } .ds-badge-success { background: #d1fae5; color: #065f46; box-shadow: inset 0 0 0 1px #a7f3d0; } .ds-badge-warning { background: #fef3c7; color: #92400e; box-shadow: inset 0 0 0 1px #fde68a; } .ds-badge-error { background: #fee2e2; color: #991b1b; box-shadow: inset 0 0 0 1px #fecaca; }"
+    },
+    {
+      "name": "Card with Split Heading",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "White card with a section title and light green accent word.",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-title\">Open <span class=\"ds-accent\">Orders</span></h3><p class=\"ds-card-body\">12 orders waiting to ship.</p></div>",
+      "css": ".ds-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem; box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.05); transition: box-shadow 200ms; } .ds-card:hover { box-shadow: 0 2px 4px rgba(0,0,0,0.04), 0 8px 20px rgba(0,0,0,0.07); } .ds-card-title { margin: 0 0 1rem; font: 600 1.125rem/1.2 'Barlow Semi Condensed', sans-serif; color: #2e2e2e; } .ds-accent { font-weight: 300; color: #1a7a50; } .ds-card-body { margin: 0; font: 400 0.875rem/1.5 Inter, system-ui, sans-serif; color: #4e4e4e; }"
+    },
+    {
+      "name": "Underline Tabs",
+      "kind": "nav",
+      "refersTo": "tab-active",
+      "description": "Switches views within one page; active tab underlined in crx-green.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab ds-tab-active\" role=\"tab\">Open <span class=\"ds-count ds-count-active\">4</span></button><button class=\"ds-tab\" role=\"tab\">Closed <span class=\"ds-count\">18</span></button></div>",
+      "css": ".ds-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid #e5e7eb; } .ds-tab { display: inline-flex; align-items: center; gap: 0.5rem; margin-bottom: -1px; padding: 0.5rem 1rem; font: 500 0.875rem/1.25rem Inter, system-ui, sans-serif; color: #4e4e4e; background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: color 150ms; } .ds-tab:hover { color: #2e2e2e; } .ds-tab:focus-visible { outline: none; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgb(26 122 80 / 0.3); } .ds-tab-active { color: #1a7a50; border-bottom-color: #1a7a50; } .ds-count { padding: 0.125rem 0.375rem; font-size: 0.75rem; line-height: 1; border-radius: 9999px; background: #f3f4f6; color: #4b5563; } .ds-count-active { background: #e8f5ee; color: #1a7a50; }"
+    },
+    {
+      "name": "Workspace Link Bar",
+      "kind": "nav",
+      "refersTo": "workspace-tab-active",
+      "description": "Pill links between sibling pages of one workspace.",
+      "html": "<nav class=\"ds-wsbar\"><a class=\"ds-ws ds-ws-active\" href=\"#\">Quotes</a><a class=\"ds-ws\" href=\"#\">Orders</a><a class=\"ds-ws\" href=\"#\">Deliveries</a></nav>",
+      "css": ".ds-wsbar { display: flex; gap: 0.375rem; padding: 0.5rem 1rem; background: #f9f7f2; border-bottom: 1px solid #f0ede6; } .ds-ws { display: flex; align-items: center; min-height: 2.25rem; padding: 0 0.875rem; font: 500 0.875rem/1.25rem Inter, system-ui, sans-serif; color: #4e4e4e; text-decoration: none; border-radius: 9999px; transition: background 150ms, color 150ms; } .ds-ws:hover { background: #f0ede6; color: #111827; } .ds-ws:focus-visible { outline: 2px solid #1a7a50; outline-offset: 2px; } .ds-ws-active, .ds-ws-active:hover { background: #1a7a50; color: #fff; }"
+    },
+    {
+      "name": "Sidebar Item",
+      "kind": "nav",
+      "refersTo": "sidebar",
+      "description": "Desktop navigation on charcoal; active item gets a green left marker.",
+      "html": "<nav class=\"ds-side\"><a class=\"ds-side-item ds-side-active\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\"/></svg><span>Today</span></a><a class=\"ds-side-item\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\"/></svg><span>Quotes</span></a></nav>",
+      "css": ".ds-side { width: 16rem; background: #2e2e2e; padding: 0.5rem 0; } .ds-side-item { position: relative; display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 1rem; font: 500 0.875rem/1.25rem Inter, system-ui, sans-serif; color: #9ca3af; text-decoration: none; transition: color 150ms, background 150ms; } .ds-side-item:hover { color: #fff; background: rgb(255 255 255 / 0.05); } .ds-side-item:focus-visible { outline: 2px solid #fff; outline-offset: -2px; } .ds-side-active { color: #fff; background: rgb(255 255 255 / 0.05); } .ds-side-active::before { content: ''; position: absolute; left: 0; top: 0.25rem; bottom: 0.25rem; width: 3px; background: #28a26a; border-radius: 0 0.25rem 0.25rem 0; } .ds-side-active svg { color: #28a26a; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Farm Office Ledger",
+    "overview": "CRX Manager is an operations tool, not a showcase. Office staff work in it all day on desktop; drivers and applicators use it on phones in trucks and fields. Every screen favours scanability and consistency over expression: a warm cream page, white cards with hairline borders, one deep brand green that marks action and the current place, and a condensed heading face that keeps titles compact.\n\nThe brand is fixed. In November 2026 the owner approved deepening the green for readability (from #28A26A to the current crx-green) while keeping everything else. New screens extend this system; they never restyle it. Any visual change beyond what a task needs requires the owner's approval.",
+    "keyCharacteristics": [
+      "Light theme only: cream page, white surfaces, near-black text.",
+      "One brand green, used for primary actions, active navigation and the heading accent word.",
+      "Status is shown with soft, pill-shaped badges in stock Tailwind hues, never in the brand green.",
+      "Dark charcoal sidebar on desktop; a bottom navigation bar on phones.",
+      "Lucide line icons only."
+    ],
+    "rules": [
+      { "name": "The One Green Rule", "body": "The brand green is the crx-green token family and nothing else. Never use raw Tailwind `green-*` or `emerald-*` classes to mean \"brand\" or \"primary\". Emerald is reserved for the success status colour.", "section": "colors" },
+      { "name": "The Named Token Rule", "body": "Colours come from named tokens. Raw hex values appear only in `src/index.css` and `src/lib/pdfTheme.ts` (plus the pre-render loading screen in `index.html`). PDFs use `CRX_GREEN` from `pdfTheme.ts`, which mirrors crx-green.", "section": "colors" },
+      { "name": "The Status Is Not Brand Rule", "body": "A green badge means \"done/paid/success\", never \"this is CRX\". Keep status colours on the Badge map so a status looks the same on every screen.", "section": "colors" },
+      { "name": "The Split Heading Rule", "body": "Titles may pair a Charcoal semibold word with a light crx-green accent word (\"Customer **Detail**\"), through `PageHeader`, `SplitHeading`, `CardHeader` or `Modal`'s `accent` prop, all of which use the `.split-heading-accent` class. Use the prop; don't hand-style the accent.", "section": "typography" }
+    ],
+    "dos": [
+      "**Do** use the crx-green tokens for every brand or primary-action colour, and `CRX_GREEN` in PDFs.",
+      "**Do** use the shared components (`Button`, `Card`, `Badge`, `Tabs`, `Input`, `PageHeader`, `Modal`, `ConfirmModal`, toasts, `EmptyState`) before writing new markup.",
+      "**Do** style with Tailwind classes and named tokens, and use Lucide icons only.",
+      "**Do** wrap phone-edited screens in `.phone-touch` and give every phone control a 44px target.",
+      "**Do** keep the light theme: cream page, white surfaces, Charcoal text."
+    ],
+    "donts": [
+      "**Don't** use raw `green-*` or `emerald-*` classes for brand meaning, and don't copy them from older screens (see the drift list below).",
+      "**Don't** type hex colour codes in components or pages; add or reuse a token in `src/index.css` instead.",
+      "**Don't** hand-roll tab buttons; use `Tabs` (views in a page) or `WorkspaceTabs` (links between pages).",
+      "**Don't** use `window.confirm`, `window.alert`, another icon set, or another styling system.",
+      "**Don't** add a dark theme, new brand colours, or restyle existing screens without the owner's approval."
+    ]
+  }
+}

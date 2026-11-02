@@ -20,7 +20,8 @@ export const PRODUCT_FORM_OPTIONS: readonly { value: ProductForm; label: string 
   { value: 'each', label: 'Each / unit' },
 ];
 
-export const FORM_UNIT_RULES: Record<'seed' | 'each', readonly string[]> = {
+// product_form_units is authoritative; the parity test keeps this UI mirror equal.
+export const FORM_UNIT_RULES: Record<Exclude<ProductForm, 'liquid' | 'dry'>, readonly string[]> = {
   seed: ['Lb', 'Unit'],
   each: ['Ea', 'Unit'],
 };
@@ -28,10 +29,6 @@ export const FORM_UNIT_RULES: Record<'seed' | 'each', readonly string[]> = {
 export function asProductForm(value: string | null | undefined): ProductForm | null {
   const normalized = value?.trim().toLowerCase();
   return PRODUCT_FORM_OPTIONS.find((option) => option.value === normalized)?.value ?? null;
-}
-
-export function isProductForm(value: string | null | undefined): value is ProductForm {
-  return PRODUCT_FORM_OPTIONS.some((option) => option.value === value);
 }
 
 /**

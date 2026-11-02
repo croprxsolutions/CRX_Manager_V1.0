@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, blockedUnitSaveMessage, FORM_UNIT_RULES, asProductForm, isProductForm } from './units';
+import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, blockedUnitSaveMessage, FORM_UNIT_RULES, asProductForm } from './units';
 import type { UnitConversion } from '../types';
 
 const CONV = [
@@ -29,11 +29,9 @@ describe('unitOptionsForForm', () => {
     expect(unitOptionsForForm(CONV, 'each').map((u) => u.unit)).toEqual(['Ea', 'Unit']);
     expect(asProductForm(' Each ')).toBe('each');
     expect(asProductForm('grain')).toBeNull();
-    expect(isProductForm('each')).toBe(true);
-    expect(isProductForm(' Each ')).toBe(false);
   });
   it('matches the SQL seed rows exactly', () => {
-    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261102200000_product_forms_seed_each.sql'), 'utf8');
+    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261102210000_product_forms_seed_each.sql'), 'utf8');
     const values = migration.match(/FROM \(VALUES ([^\n]+)\) v\(form, unit\)/)?.[1];
     expect(values).toBeDefined();
     const rows = [...(values ?? '').matchAll(/\('([^']+)','([^']+)'\)/g)];

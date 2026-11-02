@@ -1936,7 +1936,8 @@ export default function QuoteBuilder() {
               current_cost: product.current_cost || 0,
               suggested_rate: product.suggested_rate || null,
               actual_rate: product.rate_per_acre ?? item.actual_rate ?? null,
-              rate_unit: product.rate_unit || null,
+              rate_unit: product.product_form === 'seed' || product.product_form === 'each'
+                ? product.inventory_unit : product.rate_unit || null,
               unit_size: product.inventory_unit || product.unit_size || null,
               price_unit: product.inventory_unit || null,
             };
@@ -5261,8 +5262,8 @@ export default function QuoteBuilder() {
                                 aria-label="Price unit"
                                 className="w-20 px-1 py-0.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green mt-0.5"
                               >
-                                <option value="">--</option>
-                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit || prod?.unit_size)
+                                {prod?.product_form !== 'seed' && prod?.product_form !== 'each' && <option value="">--</option>}
+                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit)
                                   .map((uc) => (
                                     <option key={uc.id} value={uc.unit}>
                                       per {uc.unit}
@@ -5315,8 +5316,8 @@ export default function QuoteBuilder() {
                                 aria-label="Rate unit"
                                 className="w-20 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
                               >
-                                <option value="">--</option>
-                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit || prod?.unit_size)
+                                {prod?.product_form !== 'seed' && prod?.product_form !== 'each' && <option value="">--</option>}
+                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit)
                                   .map((uc) => (
                                     <option key={uc.id} value={uc.unit}>
                                       {uc.unit}

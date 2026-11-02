@@ -1377,12 +1377,19 @@ export default function ProductDetail() {
                   onChange={(e) => {
                     const form = (e.target.value || null) as Product['product_form'];
                     if (pricingReloadRequired) return;
-                    setProduct((current) => ({
-                      ...current,
-                      product_form: form,
-                      container_unit: current.container_unit === persistedProduct?.container_unit || isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
-                      inventory_unit: current.inventory_unit === persistedProduct?.inventory_unit || isKnownUnit(unitConversions, form, current.inventory_unit) ? current.inventory_unit : null,
-                    }));
+                    setProduct((current) => {
+                      const inventoryUnit = current.inventory_unit === persistedProduct?.inventory_unit || isKnownUnit(unitConversions, form, current.inventory_unit)
+                        ? current.inventory_unit : null;
+                      return {
+                        ...current,
+                        product_form: form,
+                        container_unit: current.container_unit === persistedProduct?.container_unit || isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
+                        inventory_unit: inventoryUnit,
+                        rate_unit: (form === 'seed' || form === 'each') && current.rate_unit?.trim()
+                          && current.rate_unit.trim().toLowerCase() !== inventoryUnit?.trim().toLowerCase()
+                          ? '' : current.rate_unit,
+                      };
+                    });
                     setIsDirty(true);
                   }}
                   disabled={!isAdmin || Boolean(persistedProduct?.product_form)}

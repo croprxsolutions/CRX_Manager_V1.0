@@ -745,6 +745,7 @@ export default function BlendRecipes() {
                       // NOT the page's `form` state (that is recipe metadata) — this is the
                       // selected product's form, which filters the unit list.
                       form={products.find((p) => p.id === item.product_id)?.product_form ?? null}
+                      inventoryUnit={products.find((p) => p.id === item.product_id)?.inventory_unit}
                       value={item.unit}
                       onChange={(value) => updateItem(idx, 'unit', value)}
                       disabled={saving}

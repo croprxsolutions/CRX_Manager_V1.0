@@ -1,4 +1,3 @@
-import type { ProductForm } from '../types';
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, useMemo, lazy, Suspense } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Save, Plus, Trash2, Check, FileText, Beaker, Ban, MessageSquarePlus, Printer, CloudSun, MapPin, Truck, ClipboardList, FlaskConical, Bell, History, BookmarkPlus, GripVertical, ChevronUp, ChevronDown, Map as MapIcon, ShieldAlert, CalendarClock, AlertTriangle, Sprout, Send } from 'lucide-react';
@@ -49,7 +48,8 @@ import { localToday, parseLocalDate } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
 import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
-import { unitOptionsForForm, isKnownUnit, asProductForm } from '../lib/units';
+import { rateUnitOptionsForProduct, asProductForm } from '../lib/units';
+import type { ProductForm } from '../types';
 import {
   LABEL_RATE_GUARDRAIL_MODE_KEY,
   DEFAULT_GUARDRAIL_MODE,
@@ -3799,7 +3799,8 @@ export default function JobDetail() {
           updated[i].rate_per_acre = p.rate_per_acre.toString();
           updated[i].driver = 'rate';
         }
-        if (p.rate_unit && !updated[i].rate_unit) updated[i].rate_unit = p.rate_unit;
+        if (p.product_form === 'seed' || p.product_form === 'each') updated[i].rate_unit = p.inventory_unit || '';
+        else if (p.rate_unit && !updated[i].rate_unit) updated[i].rate_unit = p.rate_unit;
         // P1 MONEY fix: quantity = rate × acres comes out in the RATE's base unit
         // (e.g. pt), but the STOCK unit (unit_size, e.g. GAL) and per-unit cost/price
         // are per stock unit. Reconcile them into ONE measure (the rate's base unit)
@@ -3821,6 +3822,7 @@ export default function JobDetail() {
           p.product_form,
         );
         updated[i].unit = reconciled.unit;
+        if (p.product_form === 'seed' || p.product_form === 'each') updated[i].unit = p.inventory_unit || '';
         updated[i].cost_per_unit_cents = reconciled.costPerUnitCents.toString();
         // A product that states no price, or one whose price is not whole cents in the line's
         // unit, blanks the line's price rather than keeping the previous product's (or a rounded
@@ -4508,6 +4510,7 @@ export default function JobDetail() {
                 // Inactive-safe (Codex P2, 2026-08-23): a discontinued product read straight
                 // out of allProducts has no form, which silently takes the liquid branch.
                 const previewForm = productFormFor(c.product_id);
+                const previewStockUnit = allProducts.find((p) => p.id === c.product_id)?.inventory_unit;
                 const conv = toGallonOrLbEquivalent(totalApplied, c.unit, previewForm);
                 const hazard = chemBillingHazards.get(i);
                 const rowDefect = chemRowDefects.get(i);
@@ -4568,12 +4571,12 @@ export default function JobDetail() {
                         <label className="block text-xs font-medium text-secondary mb-1">Rate Unit</label>
                         <select value={c.rate_unit} onChange={(e) => updateChemRow(i, 'rate_unit', e.target.value)}
                           disabled={!canEdit} className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50">
-                          <option value="">-- unit --</option>
+                          <option value="" disabled={previewForm === 'seed' || previewForm === 'each'}>-- unit --</option>
                           {/* WaveB: canonical bare units filtered by product form (Codex P2); grandfather a legacy/mismatched value */}
-                          {c.rate_unit && !isKnownUnit(unitConversions, previewForm, c.rate_unit) && (
+                          {c.rate_unit && !rateUnitOptionsForProduct(unitConversions, previewForm, previewStockUnit).some((uc) => uc.unit === c.rate_unit) && (
                             <option value={c.rate_unit}>{c.rate_unit} (existing)</option>
                           )}
-                          {unitOptionsForForm(unitConversions, previewForm).map((uc) => (
+                          {rateUnitOptionsForProduct(unitConversions, previewForm, previewStockUnit).map((uc) => (
                             <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                           ))}
                         </select>
@@ -4599,12 +4602,12 @@ export default function JobDetail() {
                         <label className="block text-xs font-medium text-secondary mb-1">Unit</label>
                         <select value={c.unit} onChange={(e) => updateChemRow(i, 'unit', e.target.value)}
                           disabled={!canEdit} className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50">
-                          <option value="">-- unit --</option>
+                          <option value="" disabled={previewForm === 'seed' || previewForm === 'each'}>-- unit --</option>
                           {/* WaveB: canonical bare units filtered by product form (Codex P2); grandfather a legacy/mismatched value */}
-                          {c.unit && !isKnownUnit(unitConversions, previewForm, c.unit) && (
+                          {c.unit && !rateUnitOptionsForProduct(unitConversions, previewForm, previewStockUnit).some((uc) => uc.unit === c.unit) && (
                             <option value={c.unit}>{c.unit} (existing)</option>
                           )}
-                          {unitOptionsForForm(unitConversions, previewForm).map((uc) => (
+                          {rateUnitOptionsForProduct(unitConversions, previewForm, previewStockUnit).map((uc) => (
                             <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                           ))}
                         </select>

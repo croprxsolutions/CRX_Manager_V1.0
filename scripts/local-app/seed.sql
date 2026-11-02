@@ -9,15 +9,15 @@ INSERT INTO public.unit_conversions (unit, factor_oz, unit_type, notes)
 VALUES
   ('Gal', 128, 'liquid', 'Test unit (invented)'),
   ('fl oz', 1, 'liquid', 'Test unit (invented)'),
-  ('Lb', 16, 'dry', 'Test unit (invented)')
+  ('Lb', 16, 'dry', 'Test unit (invented)'),
+  ('Ea', 1, 'both', 'Test unit (invented)')
 ON CONFLICT (unit) DO UPDATE SET
   factor_oz = EXCLUDED.factor_oz,
   unit_type = EXCLUDED.unit_type,
   notes = EXCLUDED.notes;
 
 INSERT INTO public.unit_conversions (unit, factor_oz, unit_type, notes)
-VALUES ('Ea', 1, 'both', 'Each / unit'),
-       ('Unit', 1, 'both', 'Each / unit (alias for Ea)')
+VALUES ('Unit', 1, 'both', 'Each / unit (alias for Ea)')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.product_form_units (product_form, unit)

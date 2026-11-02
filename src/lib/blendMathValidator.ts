@@ -293,7 +293,7 @@ export function validateBlendMath(
       if (expected === null) {
         unchecked(
           form === 'seed' || form === 'each'
-            ? `Not checked — ${name}: Weight and volume can't be worked out for seed or each products. Please verify this line by hand.`
+            ? `Not checked — ${name}: seed and each products can't convert between units; the rate is in ${rateUnit} but the quantity is in ${qtyUnit}. Please verify this line by hand.`
             : `Not checked — ${name}: the rate is in ${rateUnit} but the quantity is in ${qtyUnit}, which can't be converted${form === 'dry' ? ' for a dry product' : ''}. Please verify this line by hand.`
         );
       } else if (expected > 0) {
@@ -340,7 +340,7 @@ export function validateBlendMath(
     if (rateUnit !== '' && soldUnit !== '' && fieldAppPricedQuantity(1, rateUnit, soldUnit, form) === null) {
       mismatch(
         form === 'seed' || form === 'each'
-          ? `${name}: Weight and volume can't be worked out for seed or each products. The rate unit (${rateUnit}) differs from the sold unit (${soldUnit}), so this ticket will fail when you invoice it.`
+          ? `${name}: seed and each products can't convert between units; the rate is in ${rateUnit} but the sold unit is ${soldUnit}, so this ticket will fail when you invoice it.`
           : `${name}: the rate unit (${rateUnit}) can't be converted to the unit this product is sold in (${soldUnit}), so this ticket will fail when you invoice it.`
       );
     }

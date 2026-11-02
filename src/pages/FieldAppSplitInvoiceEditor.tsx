@@ -1177,6 +1177,7 @@ export default function FieldAppSplitInvoiceEditor() {
                           <UnitSelect
                             unitConversions={unitConversions}
                             form={l.product?.product_form ?? null}
+                            inventoryUnit={l.product?.inventory_unit}
                             value={l.rateUnit}
                             onChange={(value) => patchLine(l.uid, { rateUnit: value })}
                             disabled={saving}

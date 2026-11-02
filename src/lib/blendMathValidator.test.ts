@@ -9,7 +9,7 @@ describe('validateBlendMath', () => {
       product_inventory_unit: 'Lb' };
     expect(validateBlendMath(ticket, [seed])).toEqual([]);
     const mismatched = validateBlendMath(ticket, [{ ...seed, rate_per_acre_unit: 'oz' }]);
-    expect(mismatched.some((warning) => warning.message.includes("Weight and volume can't be worked out for seed or each products."))).toBe(true);
+    expect(mismatched.some((warning) => warning.message.includes("seed and each products can't convert between units; the rate is in"))).toBe(true);
     expect(mismatched.some((warning) => warning.message.includes('fail when you invoice'))).toBe(true);
   });
   describe('per-product rate × acres validation', () => {

@@ -25,9 +25,9 @@
  * silently drop them from this compliance PDF. If resolution is incomplete the fetch
  * THROWS so the caller aborts and never stamps printed_at (#11 compliance fix).
  */
+import { supabase } from './db';
 import { asProductForm } from './units';
 import type { ProductForm } from '../types';
-import { supabase } from './db';
 import { resolveBilledCustomers } from './billedCustomersResolver';
 import {
   buildApplicatorSheetData,

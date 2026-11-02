@@ -197,12 +197,15 @@ describe('ProductDetail — per-acre price display', () => {
   });
 
   it('clears a Seed rate unit when its stock unit changes', async () => {
-    mockSavedForm.value = 'seed';
+    mockSavedForm.value = null;
     mockStockUnit.value = null;
     render(<ProductDetail />);
     await screen.findByText('Rate Unit');
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'seed' } });
     const inventory = screen.getByText('Inventory Unit').parentElement!.querySelector('select')!;
     const rate = screen.getByText('Rate Unit').parentElement!.querySelector('select')!;
+    fireEvent.change(inventory, { target: { value: 'Lb' } });
+    fireEvent.change(rate, { target: { value: 'Lb' } });
     fireEvent.change(inventory, { target: { value: 'Unit' } });
     expect(rate).toHaveValue('');
     expect([...rate.querySelectorAll('option')].map((option) => option.value)).toEqual(['', 'Unit']);

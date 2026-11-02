@@ -1710,6 +1710,7 @@ export function BlendTicketDetail() {
                 <UnitSelect
                   unitConversions={unitConversions}
                   form={productForm}
+                  inventoryUnit={product.product?.inventory_unit}
                   value={product.unit || ''}
                   onChange={(value) => updateProduct(index, 'unit', value)}
                   disabled={contentLocked}
@@ -1736,6 +1737,7 @@ export function BlendTicketDetail() {
                 <UnitSelect
                   unitConversions={unitConversions}
                   form={productForm}
+                  inventoryUnit={product.product?.inventory_unit}
                   value={product.rate_per_acre_unit || ''}
                   onChange={(value) => updateProduct(index, 'rate_per_acre_unit', value)}
                   disabled={contentLocked}

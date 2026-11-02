@@ -9,6 +9,17 @@
 -- drop trg_guard_seed_each_quote_item_units on public.quote_items and
 -- public.guard_seed_each_quote_item_units(); then drop public.product_form_units.
 
+SET LOCAL lock_timeout = '5s';
+
+DO $preflight$
+BEGIN
+  IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = to_regprocedure('public.field_app_priced_quantity(numeric,text,text,text)')) IS DISTINCT FROM 'bc91a52577840973f18f1710e47edf2b'
+     OR (SELECT md5(prosrc) FROM pg_proc WHERE oid = to_regprocedure('public.convert_to_gl_lb(numeric,text,text)')) IS DISTINCT FROM 'ce9265521821c09b0cf74de45afb375b'
+     OR (SELECT md5(prosrc) FROM pg_proc WHERE oid = to_regprocedure('public.validate_product_units()')) IS DISTINCT FROM '83a51c58c83cd83bea760bd117410a38' THEN
+    RAISE EXCEPTION 'PRODUCT_FORMS_SOURCE_BODY_DRIFT';
+  END IF;
+END $preflight$;
+
 ALTER TABLE public.products DROP CONSTRAINT products_product_form_check;
 ALTER TABLE public.products ADD CONSTRAINT products_product_form_check
   CHECK (product_form = ANY (ARRAY['liquid','dry','seed','each']));
@@ -19,10 +30,11 @@ CREATE TABLE public.product_form_units (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (product_form, unit)
 );
+ALTER TABLE public.product_form_units OWNER TO postgres;
 COMMENT ON TABLE public.product_form_units IS 'Exact allowed inventory and container units for seed and each products; changed only by migration.';
 ALTER TABLE public.product_form_units ENABLE ROW LEVEL SECURITY;
 CREATE POLICY product_form_units_select ON public.product_form_units
-  FOR SELECT TO authenticated USING (true);
+  FOR SELECT TO authenticated USING ((SELECT public.is_active_profile()));
 REVOKE ALL ON TABLE public.product_form_units FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 GRANT SELECT ON TABLE public.product_form_units TO authenticated, service_role;
 
@@ -38,6 +50,28 @@ RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = public, pg_temp AS $$
 BEGIN
+  -- Normalise blank seed/each rate units as well as validating their stock units.
+  IF NEW.product_form IN ('seed','each') THEN
+    IF NULLIF(btrim(NEW.inventory_unit), '') IS NULL THEN
+      RAISE EXCEPTION 'A seed or each product needs a stock unit (inventory_unit).'
+        USING ERRCODE = '22023';
+    END IF;
+    IF NULLIF(btrim(NEW.rate_unit), '') IS NULL THEN
+      NEW.rate_unit := NEW.inventory_unit;
+    END IF;
+    -- BEFORE triggers run in name order: trg_validate_product_units precedes
+    -- trigger_recalc_product_price_per_acre, so pricing sees the filled rate.
+    IF TG_OP = 'UPDATE' AND OLD.product_form IS NULL AND EXISTS (
+      SELECT 1 FROM public.quote_items qi WHERE qi.product_id = NEW.id
+        AND ((NULLIF(btrim(qi.rate_unit), '') IS NOT NULL
+              AND lower(btrim(qi.rate_unit)) <> lower(btrim(NEW.inventory_unit)))
+          OR (NULLIF(btrim(qi.price_unit), '') IS NOT NULL
+              AND lower(btrim(qi.price_unit)) <> lower(btrim(NEW.inventory_unit))))
+    ) THEN
+      RAISE EXCEPTION 'Existing quote lines use another unit; fix them before setting this form.'
+        USING ERRCODE = '22023';
+    END IF;
+  END IF;
   -- Validate inventory_unit matches product_form
   IF NEW.product_form IS NOT NULL AND NEW.inventory_unit IS NOT NULL THEN
     IF NOT EXISTS (
@@ -71,8 +105,6 @@ BEGIN
   END IF;
 
   IF NEW.product_form IN ('seed','each')
-     AND NULLIF(btrim(NEW.rate_unit), '') IS NOT NULL
-     AND NULLIF(btrim(NEW.inventory_unit), '') IS NOT NULL
      AND lower(btrim(NEW.rate_unit)) <> lower(btrim(NEW.inventory_unit)) THEN
     RAISE EXCEPTION 'rate_unit "%" must match inventory_unit "%" for product_form "%"',
       NEW.rate_unit, NEW.inventory_unit, NEW.product_form;
@@ -98,6 +130,10 @@ BEGIN
     FROM public.products p WHERE p.id = NEW.product_id;
 
   IF v_product_form IN ('seed','each') THEN
+    IF NULLIF(btrim(NEW.rate_unit), '') IS NULL OR NULLIF(btrim(NEW.price_unit), '') IS NULL THEN
+      RAISE EXCEPTION 'Seed and each quote lines need their unit set (%).', v_inventory_unit
+        USING ERRCODE = '22023';
+    END IF;
     IF (NULLIF(btrim(NEW.rate_unit), '') IS NOT NULL
         AND lower(btrim(NEW.rate_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit)))
        OR (NULLIF(btrim(NEW.price_unit), '') IS NOT NULL
@@ -114,7 +150,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.guard_seed_each_quote_item_units() FROM PUBLIC, anon, authenticated, service_role;
+ALTER FUNCTION public.guard_seed_each_quote_item_units() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_seed_each_quote_item_units() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 CREATE TRIGGER trg_guard_seed_each_quote_item_units
   BEFORE INSERT OR UPDATE OF product_id, rate_unit, price_unit ON public.quote_items
@@ -192,6 +229,12 @@ BEGIN
 END;
 $function$;
 
+COMMENT ON FUNCTION public.convert_to_gl_lb(numeric, text, text) IS
+  'Field-app gal/lb equivalent for tank planning (display only). Liquid: OZ=q/128, '
+  'PT=q/8, QT=q/4, GL/GAL/GALLON/GALLONS=q. Dry: OZ=q/16, LB=q. An unrecognized unit '
+  'returns NULL value+unit (UI shows a dash) — never a guessed number. Seed/each return NULL value+unit. Matches '
+  'src/lib/chemCalculator.ts toGallonOrLbEquivalent.';
+
 DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.products'::regclass
@@ -210,5 +253,31 @@ BEGIN
   END IF;
   IF has_table_privilege('anon', 'public.product_form_units', 'SELECT') THEN
     RAISE EXCEPTION 'PRODUCT_FORM_UNITS_ANON_ACCESS';
+  END IF;
+  IF has_table_privilege('metabase_ro', 'public.product_form_units', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
+     OR has_function_privilege('metabase_ro', 'public.guard_seed_each_quote_item_units()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'PRODUCT_FORM_UNITS_METABASE_ACCESS';
+  END IF;
+  IF has_table_privilege('authenticated', 'public.product_form_units', 'INSERT, UPDATE, DELETE, TRUNCATE') THEN
+    RAISE EXCEPTION 'PRODUCT_FORM_UNITS_WRITE_ACCESS';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = 'public.guard_seed_each_quote_item_units()'::regprocedure
+      AND prosecdef AND proconfig @> ARRAY['search_path=public, pg_temp']) THEN
+    RAISE EXCEPTION 'PRODUCT_FORM_QUOTE_GUARD_UNSAFE';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.quote_items'::regclass
+      AND tgname = 'trg_guard_seed_each_quote_item_units' AND tgenabled IN ('O','A') AND NOT tgisinternal) THEN
+    RAISE EXCEPTION 'PRODUCT_FORM_QUOTE_GUARD_MISSING';
+  END IF;
+  IF (SELECT count(*) FROM public.unit_conversions WHERE unit IN ('Lb','Unit','Ea')) = 3 THEN
+    IF (SELECT count(*) FROM public.product_form_units) <> 4
+       OR EXISTS (
+         (VALUES ('seed','Lb'),('seed','Unit'),('each','Ea'),('each','Unit'))
+         EXCEPT SELECT product_form, unit FROM public.product_form_units
+       ) THEN
+      RAISE EXCEPTION 'PRODUCT_FORM_UNITS_RULE_ROWS_DRIFT';
+    END IF;
+  ELSE
+    RAISE NOTICE 'Skipping product_form_units exact-row postflight: Lb, Unit, Ea are not all present';
   END IF;
 END $postflight$;

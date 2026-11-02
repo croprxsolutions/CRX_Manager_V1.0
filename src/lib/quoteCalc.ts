@@ -87,7 +87,8 @@ export function recalcItem(
   const mode = item.calc_mode || 'rate_acres';
   // Fall back to unit_size if inventory_unit is not set on the product
   const inventoryUnitFactorOz = getConversionFactor(
-    product.inventory_unit || product.unit_size,
+    product.product_form === 'seed' || product.product_form === 'each'
+      ? product.inventory_unit : product.inventory_unit || product.unit_size,
     conversions
   );
 
@@ -125,7 +126,11 @@ export function recalcItem(
   const actualRate = item.actual_rate || 0;
   const acres = item.acres || 0;
 
-  const rateUnitFactorOz = getConversionFactor(item.rate_unit, conversions);
+  const rateUnitFactorOz = getConversionFactor(
+    (product.product_form === 'seed' || product.product_form === 'each') && !item.rate_unit?.trim()
+      ? product.inventory_unit : item.rate_unit,
+    conversions
+  );
   const rateInOz = actualRate * rateUnitFactorOz;
   const ozPerAcre = rateInOz;
 
@@ -178,11 +183,14 @@ export function catalogPricePerAcre(
   const rate = product.rate_per_acre;
   if (rate == null || !Number.isFinite(rate) || rate <= 0) return null;
   const inventoryUnitFactorOz = getConversionFactor(
-    product.inventory_unit || product.unit_size,
+    product.product_form === 'seed' || product.product_form === 'each'
+      ? product.inventory_unit : product.inventory_unit || product.unit_size,
     conversions
   );
   if (!(inventoryUnitFactorOz > 0)) return null;
-  const rateInOz = rate * getConversionFactor(product.rate_unit, conversions);
+  const rateUnit = (product.product_form === 'seed' || product.product_form === 'each') && !product.rate_unit?.trim()
+    ? product.inventory_unit : product.rate_unit;
+  const rateInOz = rate * getConversionFactor(rateUnit, conversions);
   const perAcre = getQuoteTierPrice(product, tierNum) * (rateInOz / inventoryUnitFactorOz);
   return Math.round(perAcre * 100) / 100;
 }

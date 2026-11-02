@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261102200000_product_forms_seed_each.
+ * Real-schema proof for 20261102210000_product_forms_seed_each.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17
  * container and replays ordered post-baseline migrations up to this candidate. It exercises
@@ -22,7 +22,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261102200000_product_forms_seed_each.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261102210000_product_forms_seed_each.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -42,6 +42,11 @@ const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
   + '  )::uuid\n';
 const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
+const LIVE_BODY_MD5 = {
+  'public.field_app_priced_quantity(numeric,text,text,text)': 'bc91a52577840973f18f1710e47edf2b',
+  'public.convert_to_gl_lb(numeric,text,text)': 'ce9265521821c09b0cf74de45afb375b',
+  'public.validate_product_units()': '83a51c58c83cd83bea760bd117410a38',
+};
 
 function docker(args, options = {}) {
   const r = spawnSync('docker', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...options });
@@ -113,6 +118,37 @@ function installLiveAuthUid() {
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
 }
+function bodyFrom(file, expression) {
+  const match = expression.exec(readFileSync(path.join(MIGRATIONS, file), 'utf8'));
+  assert.ok(match, `${file} no longer contains its pinned function body`);
+  return match[1];
+}
+function restoreLiveBodies() {
+  // Historical replay uses LF staging; validate_product_units had CRLF in live prosrc.
+  const validate = bodyFrom('20260211000000_unit_tracking_pricing_overhaul.sql',
+    /CREATE OR REPLACE FUNCTION validate_product_units\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/);
+  const field = bodyFrom('20260630180000_field_app_pricing_unit_fix.sql',
+    /CREATE OR REPLACE FUNCTION public.field_app_priced_quantity\([\s\S]*?AS \$fapq\$([\s\S]*?)\$fapq\$;/);
+  const seededConvert = bodyFrom(path.basename(CANDIDATE),
+    /CREATE OR REPLACE FUNCTION public.convert_to_gl_lb\([\s\S]*?AS \$function\$([\s\S]*?)\$function\$;/).replaceAll('\r\n', '\n');
+  const seedArm = "  IF lower(coalesce(p_product_form, '')) IN ('seed','each') THEN RETURN QUERY SELECT NULL::numeric, NULL::text; RETURN; END IF;\n";
+  assert.equal(seededConvert.split(seedArm).length - 1, 1);
+  const convert = seededConvert.replace(seedArm, '');
+  psql(`CREATE OR REPLACE FUNCTION public.validate_product_units() RETURNS trigger LANGUAGE plpgsql
+    SET search_path = public, pg_temp AS $live_validate$${validate}$live_validate$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.field_app_priced_quantity(
+      p_applied_qty numeric, p_rate_unit text, p_inventory_unit text, p_product_form text)
+    RETURNS numeric LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp
+    AS $live_field$${field}$live_field$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.convert_to_gl_lb(
+      p_total_applied numeric, p_rate_unit text, p_product_form text)
+    RETURNS TABLE(converted_value numeric, converted_unit text) LANGUAGE plpgsql IMMUTABLE
+    SET search_path = public AS $live_convert$${convert}$live_convert$;`);
+  for (const [signature, expected] of Object.entries(LIVE_BODY_MD5)) {
+    assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = '${signature}'::regprocedure;`),
+      expected, `${signature} is not the pinned live body before the candidate`);
+  }
+}
 function buildContainer() {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   ready();
@@ -148,6 +184,7 @@ function buildContainer() {
     replayed += 1;
   }
   installLiveAuthUid();
+  restoreLiveBodies();
   // The checked-in database baseline predates these Auth service objects. Current profile
   // deactivation updates banned_until and deletes sessions; restore their local shape only.
   psql(`ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
@@ -174,7 +211,7 @@ function quoteLine(productName, rateUnit, priceUnit) {
   return `INSERT INTO public.quote_items (quote_id, section_id, product_id, price_per_unit,
     current_cost, rate_unit, price_unit, total_units_needed, unit_size, total_price)
     SELECT 'aa110000-0000-0000-0000-000000000003', 'aa110000-0000-0000-0000-000000000004',
-      id, 12.50, 5.00, '${rateUnit}', '${priceUnit}', 2, inventory_unit, 25.00
+      id, 12.50, 5.00, ${rateUnit === null ? 'NULL' : `'${rateUnit}'`}, ${priceUnit === null ? 'NULL' : `'${priceUnit}'`}, 2, inventory_unit, 25.00
     FROM public.products WHERE product_name = '${productName}';`;
 }
 function priced(qty, rate, inventory, form) {
@@ -226,6 +263,10 @@ try {
     AND NOT tgisinternal;`), '1');
 
   assert.equal(scalar('SELECT count(*) FROM public.product_form_units;'), '4');
+  const postflight = /DO \$postflight\$[\s\S]*?END \$postflight\$;/.exec(lf(CANDIDATE))?.[0];
+  assert.ok(postflight, 'candidate postflight body missing');
+  refused(`BEGIN; DELETE FROM public.product_form_units WHERE product_form = 'seed' AND unit = 'Lb'; ${postflight}`,
+    /PRODUCT_FORM_UNITS_RULE_ROWS_DRIFT/);
   assert.equal(scalar("SELECT relrowsecurity FROM pg_class WHERE oid = 'public.product_form_units'::regclass;"), 't');
   assert.equal(scalar("SELECT count(*) FROM pg_policy WHERE polrelid = 'public.product_form_units'::regclass;"), '1');
   for (const [role, privilege, expected] of [
@@ -233,6 +274,7 @@ try {
     ['authenticated', 'SELECT', 't'], ['authenticated', 'INSERT', 'f'],
     ['authenticated', 'UPDATE', 'f'], ['authenticated', 'DELETE', 'f'],
     ['service_role', 'SELECT', 't'],
+    ['authenticated', 'TRUNCATE', 'f'], ['metabase_ro', 'SELECT', 'f'],
   ]) {
     assert.equal(scalar(`SELECT has_table_privilege('${role}', 'public.product_form_units', '${privilege}');`), expected);
   }
@@ -240,7 +282,8 @@ try {
     const result = docker([...psqlArgs(), '-A', '-t'], {
       input: `BEGIN; SET LOCAL ROLE ${role}; SELECT count(*) FROM public.product_form_units; ROLLBACK;`,
     });
-    assert.equal(result.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1), '4');
+    assert.equal(result.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1),
+      role === 'service_role' ? '4' : '0');
   }
   for (const statement of [
     'INSERT INTO public.product_form_units(product_form, unit) VALUES (\'seed\', \'Ea\');',
@@ -256,6 +299,12 @@ try {
     ['Liquid Gal', 'liquid', 'Gal', 'Gal'], ['Liquid Ea', 'liquid', 'Ea', 'Ea'],
     ['Dry Lb', 'dry', 'Lb', 'Lb'], ['Dry Unit', 'dry', 'Unit', 'Unit'],
   ]) psql(product(name, form, inventory, container));
+  refused("INSERT INTO public.products(product_name, category, product_form, inventory_unit) VALUES ('Seed missing stock', 'Herbicide', 'seed', NULL);",
+    /A seed or each product needs a stock unit \(inventory_unit\)\./);
+  refused("INSERT INTO public.products(product_name, category, product_form, inventory_unit) VALUES ('Seed blank stock', 'Herbicide', 'seed', ' ');",
+    /A seed or each product needs a stock unit \(inventory_unit\)\./);
+  assert.equal(mutation('DROP TRIGGER trg_validate_product_units ON public.products;',
+    "INSERT INTO public.products(product_name, category, product_form, inventory_unit) VALUES ('Mutated blank stock', 'Herbicide', 'seed', NULL); SELECT count(*) FROM public.products WHERE product_name = 'Mutated blank stock';"), '1');
   for (const [name, form, inventory, rate] of [
     ['Seed rate Lb', 'seed', 'Lb', 'Lb'], ['Seed rate lb', 'seed', 'Lb', 'lb'],
     ['Each rate Ea', 'each', 'Ea', 'Ea'], ['Liquid rate oz', 'liquid', 'Gal', 'oz'],
@@ -278,6 +327,7 @@ try {
   refused("UPDATE public.products SET product_form = 'each' WHERE product_name = 'Seed Lb';", /This can't change on a saved product yet/);
 
   psql("UPDATE public.products SET rate_unit = 'Lb', rate_per_acre = 2 WHERE product_name = 'Seed Lb';");
+  assert.equal(scalar("SELECT rate_unit FROM public.products WHERE product_name = 'Seed Unit';"), 'Unit');
   psql("UPDATE public.products SET rate_unit = 'lb' WHERE product_name = 'Seed Lb';");
   refused("UPDATE public.products SET rate_unit = 'Unit' WHERE product_name = 'Seed Lb';", /rate_unit "Unit" must match inventory_unit "Lb" for product_form "seed"/);
   refused("UPDATE public.products SET rate_unit = 'oz' WHERE product_name = 'Seed Lb';", /rate_unit "oz" must match inventory_unit "Lb" for product_form "seed"/);
@@ -291,7 +341,11 @@ try {
     UPDATE public.products SET current_cost = 5.00, tier1_price = 12.50
       WHERE product_name IN ('Seed Lb', 'Liquid Gal');
     COMMIT;`);
-  psql("UPDATE public.products SET rate_unit = 'Lb' WHERE product_name = 'Seed Lb';");
+  psql("UPDATE public.products SET rate_unit = '', rate_per_acre = 2 WHERE product_name = 'Seed Lb';");
+  assert.equal(scalar("SELECT rate_unit FROM public.products WHERE product_name = 'Seed Lb';"), 'Lb');
+  assert.equal(scalar(`SELECT array_position(array_agg(tgname ORDER BY tgname), 'trg_validate_product_units')
+    < array_position(array_agg(tgname ORDER BY tgname), 'trigger_recalc_product_price_per_acre')
+    FROM pg_trigger WHERE tgrelid = 'public.products'::regclass;`), 't');
   assert.equal(scalar("SELECT tier1_price_per_acre::text FROM public.products WHERE product_name = 'Seed Lb';"), '25.00');
 
   psql(`INSERT INTO auth.users (id, email) VALUES
@@ -301,6 +355,9 @@ try {
     UPDATE public.profiles SET role = 'admin', is_active = true
       WHERE id = 'aa110000-0000-0000-0000-000000000001';
     COMMIT;`);
+  assert.equal(scalar(`BEGIN; SET LOCAL ROLE authenticated;
+    SET LOCAL request.jwt.claim.sub = 'aa110000-0000-0000-0000-000000000001';
+    SELECT count(*) FROM public.product_form_units; ROLLBACK;`), '4');
   psql(`INSERT INTO public.customers (id, farm_name) VALUES
       ('aa110000-0000-0000-0000-000000000002', '[PROVER] Forms Farm');
     INSERT INTO public.quotes (id, quote_number, customer_id, created_by, salesman_id)
@@ -311,11 +368,32 @@ try {
       VALUES ('aa110000-0000-0000-0000-000000000004',
         'aa110000-0000-0000-0000-000000000003', 'Seed');`);
   psql(quoteLine('Seed Lb', 'Lb', 'Lb'));
+  refused(quoteLine('Seed Lb', '', 'Lb'), /Seed and each quote lines need their unit set \(Lb\)\./);
+  refused(quoteLine('Seed Lb', null, 'Lb'), /Seed and each quote lines need their unit set \(Lb\)\./);
+  refused(quoteLine('Seed Lb', 'Lb', ''), /Seed and each quote lines need their unit set \(Lb\)\./);
+  refused(quoteLine('Seed Lb', 'Lb', null), /Seed and each quote lines need their unit set \(Lb\)\./);
+  assert.equal(mutation('DROP TRIGGER trg_guard_seed_each_quote_item_units ON public.quote_items;',
+    `${quoteLine('Seed Lb', '', 'Lb')} SELECT count(*) FROM public.quote_items WHERE rate_unit = '' AND price_unit = 'Lb';`), '1');
+  assert.equal(mutation('DROP TRIGGER trg_guard_seed_each_quote_item_units ON public.quote_items;',
+    `${quoteLine('Seed Lb', 'Lb', '')} SELECT count(*) FROM public.quote_items WHERE rate_unit = 'Lb' AND price_unit = '';`), '1');
   const quotedUnitError = /Seed and each products are quoted only in their own unit \(Lb\); "(?:Unit|oz)" can't be converted\./;
   refused(quoteLine('Seed Lb', 'Unit', 'Lb'), quotedUnitError);
   refused(quoteLine('Seed Lb', 'Lb', 'oz'), quotedUnitError);
   refused("UPDATE public.quote_items SET price_unit = 'Unit' WHERE rate_unit = 'Lb' AND price_unit = 'Lb';", quotedUnitError);
   psql(quoteLine('Liquid Gal', 'oz', 'Gal'));
+  psql("INSERT INTO public.products(product_name, category, product_form, inventory_unit, container_unit) VALUES ('Legacy quote form', 'Herbicide', NULL, 'Lb', 'Lb');");
+  // Quote cost snapshots require a governed positive catalog cost; fixture it without
+  // inventing a pricing approval, then exercise quote and form triggers normally.
+  psql(`BEGIN; SET LOCAL session_replication_role = replica;
+    UPDATE public.products SET current_cost = 5.00 WHERE product_name = 'Legacy quote form'; COMMIT;`);
+  psql(quoteLine('Legacy quote form', 'Unit', 'Lb'));
+  refused("UPDATE public.products SET product_form = 'seed' WHERE product_name = 'Legacy quote form';",
+    /Existing quote lines use another unit; fix them before setting this form\./);
+  assert.equal(mutation('DROP TRIGGER trg_validate_product_units ON public.products;',
+    "UPDATE public.products SET product_form = 'seed' WHERE product_name = 'Legacy quote form'; SELECT product_form FROM public.products WHERE product_name = 'Legacy quote form';"), 'seed');
+  psql("UPDATE public.quote_items SET rate_unit = 'Lb' WHERE product_id = (SELECT id FROM public.products WHERE product_name = 'Legacy quote form');");
+  psql("UPDATE public.products SET product_form = 'seed' WHERE product_name = 'Legacy quote form';");
+  assert.equal(scalar("SELECT rate_unit FROM public.products WHERE product_name = 'Legacy quote form';"), 'Lb');
   assert.equal(mutation('DROP TRIGGER trg_guard_seed_each_quote_item_units ON public.quote_items;',
     `${quoteLine('Seed Lb', 'Unit', 'Lb')} SELECT count(*) FROM public.quote_items WHERE rate_unit = 'Unit' AND price_unit = 'Lb';`), '1');
   assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_guard_seed_each_quote_item_units';"), '1');

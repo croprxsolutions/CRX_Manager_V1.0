@@ -72,18 +72,15 @@ export function formatProductMoneyCSV(value: unknown): string {
 }
 
 /**
- * Format a date string for CSV export.
+ * Format a date or timestamp for CSV export. PostgreSQL date-only values are
+ * read as local calendar days, not UTC midnight (which shows the day before).
  */
 export function fmtDateCSV(d: unknown): string {
-  if (!d) return '';
-  return new Date(String(d)).toLocaleDateString();
-}
-
-/** Format PostgreSQL date-only values without interpreting them as UTC. */
-export function fmtDateOnlyCSV(d: unknown): string {
   if (!d) return '';
   const text = String(d);
   return /^\d{4}-\d{2}-\d{2}$/.test(text)
     ? parseLocalDate(text).toLocaleDateString()
-    : fmtDateCSV(d);
+    : new Date(text).toLocaleDateString();
 }
+
+export const fmtDateOnlyCSV = fmtDateCSV;

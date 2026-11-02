@@ -18,7 +18,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, sanitizeError } from '../lib/db';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
-import { parseLocalDate, localToday, todayInBusinessTz } from '../lib/dateUtils';
+import { parseLocalDate, localToday, localDatePlusDays, todayInBusinessTz } from '../lib/dateUtils';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import RelatedNotes from '../components/team/RelatedNotes';
 import type { Customer, CustomerAddress, CommissionSplit, Quote, Order, Delivery, DeliveryRemainder, Field, LinkedEntityType, ActivityFeedItem } from '../types';
@@ -641,7 +641,7 @@ export default function CustomerDetail() {
       setFinancialsLoading(true);
       try {
         const today = localToday();
-        const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+        const ninetyDaysAgo = localDatePlusDays(-90);
         // Sequential awaits (not Promise.all) per the assertRpcResult coverage
         // convention documented in src/lib/assertRpcCoverage.test.ts:76-79 — the
         // regex requires `= await supabase.rpc(...)` immediately, which

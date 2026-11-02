@@ -78,6 +78,7 @@ describe('fmtDateOnlyCSV', () => {
       // the former `new Date(dateOnly)` implementation returns 8/19 here.
       expect(new Date('2026-08-20').toLocaleDateString()).toBe('8/19/2026');
       expect(fmtDateOnlyCSV('2026-08-20')).toBe('8/20/2026');
+      expect(fmtDateCSV('2026-08-20')).toBe('8/20/2026');
     } finally {
       vi.unstubAllEnvs();
     }

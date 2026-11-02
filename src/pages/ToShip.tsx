@@ -20,6 +20,7 @@ import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
+import { parseLocalDate } from '../lib/dateUtils';
 import type { InventoryPositionRow } from '../types';
 
 const OPEN_STATUSES = ['confirmed', 'partially_fulfilled'];
@@ -88,7 +89,7 @@ type PORow = {
 
 const fmtUnits = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 1 });
 const fmtMoney = (n: number) => '$' + Math.round(n).toLocaleString();
-const daysAgo = (d: string) => (d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : 0);
+const daysAgo = (d: string) => (d ? Math.floor((Date.now() - parseLocalDate(d.slice(0, 10)).getTime()) / 86400000) : 0);
 
 export default function ToShip() {
   const navigate = useNavigate();
@@ -678,7 +679,7 @@ export default function ToShip() {
                       return (
                         <tr key={d.id} className="border-b border-gray-50 last:border-0">
                           <td className="py-2">
-                            {d.scheduled_date ? new Date(d.scheduled_date).toLocaleDateString() : '—'}
+                            {d.scheduled_date ? parseLocalDate(d.scheduled_date).toLocaleDateString() : '—'}
                             {overdue && <span className="ml-2 align-middle"><Badge variant="error">Overdue</Badge></span>}
                           </td>
                           <td>{d.customer_name}{d.unassigned && <span className="text-amber-600 text-xs ml-1">· unassigned</span>}</td>
@@ -731,7 +732,7 @@ export default function ToShip() {
                         {po.vendor} <span className="text-secondary font-normal">· PO {po.po_number}</span>
                       </div>
                       <div className="text-sm text-secondary">
-                        {po.expected_delivery_date ? `arrives ${new Date(po.expected_delivery_date).toLocaleDateString()}` : 'no arrival date'}
+                        {po.expected_delivery_date ? `arrives ${parseLocalDate(po.expected_delivery_date).toLocaleDateString()}` : 'no arrival date'}
                         {overdue && <span className="ml-2 align-middle"><Badge variant="error">Overdue</Badge></span>}
                       </div>
                     </div>

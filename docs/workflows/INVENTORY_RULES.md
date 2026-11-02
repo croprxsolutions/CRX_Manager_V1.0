@@ -268,7 +268,7 @@ Crop RX operates from Main Warehouse only; more warehouses are planned, so the `
 ### Quick Receive (shortcut)
 - 3-step wizard: select vendor + products -> auto-match to oldest open POs -> confirm
 - Uses `match_quick_receive_items()` RPC to automatically allocate items to the right POs
-- Never over-receives: extra units beyond the open POs are skipped; an admin over-receives on the PO page with a reason. When a product is on several POs at different prices, the PO you pick receives at most what that line has left and the review shows how many are skipped
+- Never over-receives: extra units beyond the open POs are skipped; an admin over-receives on the PO page with a reason. When a product is on several POs at different prices, the PO you pick receives at most what that line has left, and you must confirm skipping the rest before Confirm works
 - Source: `src/components/receiving/QuickReceivePanel.tsx`
 
 ### Key RPCs

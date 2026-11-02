@@ -128,6 +128,11 @@ export default function QuickReceivePanel() {
   const [matching, setMatching] = useState(false);
   const [overrides, setOverrides] = useState<Record<string, string>>({}); // productId -> poItemId
   const [unmatchedActions, setUnmatchedActions] = useState<Record<string, 'skip'>>({});
+  // Units this receipt will not record: beyond every open PO, or beyond the one PO line picked for a price variance.
+  const skippedUnits = (match: QuickReceiveMatchResult) => {
+    const chosen = match.allocations.find((allocation) => allocation.po_item_id === overrides[match.product_id]);
+    return chosen ? Math.max(0, match.quantity_requested - chosen.po_remaining_before) : match.quantity_unmatched;
+  };
 
   /* ─── step 3 / submission ─── */
   const [saving, setSaving] = useState(false);
@@ -447,12 +452,12 @@ export default function QuickReceivePanel() {
       }
 
       const unresolvedUnmatched = matchResults.find(
-        (match) => match.allocations.length > 0 && match.quantity_unmatched > 0 && !unmatchedActions[match.product_id],
+        (match) => match.allocations.length > 0 && skippedUnits(match) > 0 && !unmatchedActions[match.product_id],
       );
       if (unresolvedUnmatched) {
         toast(
           'error',
-          `Confirm skipping the ${unresolvedUnmatched.quantity_unmatched} extra ${unresolvedUnmatched.product_name} unit(s). To receive them, use Receive on the PO page.`,
+          `Confirm skipping the ${skippedUnits(unresolvedUnmatched)} extra ${unresolvedUnmatched.product_name} unit(s). To receive them, use Receive on the PO page.`,
         );
         return;
       }
@@ -835,7 +840,7 @@ export default function QuickReceivePanel() {
             <div className="space-y-4">
               {matchResults.map((match) => {
                 const sourceItem = validItems.find((i) => i.product_id === match.product_id);
-                const hasUnmatched = match.quantity_unmatched > 0;
+                const hasUnmatched = skippedUnits(match) > 0;
                 const allUnmatched = match.allocations.length === 0;
 
                 // Find max cost to identify no-return (cheaper) POs. The server now says so
@@ -940,12 +945,14 @@ export default function QuickReceivePanel() {
                                 value={alloc.po_item_id}
                                 checked={overrides[match.product_id] === alloc.po_item_id}
                                 disabled={receiveIntent.isIntentLocked}
-                                onChange={() =>
+                                onChange={() => {
                                   setOverrides((prev) => ({
                                     ...prev,
                                     [match.product_id]: alloc.po_item_id,
-                                  }))
-                                }
+                                  }));
+                                  // A different PO line skips a different number of units, so confirm again.
+                                  setUnmatchedActions(({ [match.product_id]: _cleared, ...rest }) => rest);
+                                }}
                                 className="accent-crx-green"
                               />
                               <div className="flex-1">
@@ -991,7 +998,7 @@ export default function QuickReceivePanel() {
                             <p className="text-sm font-medium text-amber-800">
                               {allUnmatched
                                 ? `No open PO found for ${match.quantity_unmatched} units`
-                                : `${match.quantity_unmatched} units exceed open PO capacity`}
+                                : `${skippedUnits(match)} units exceed ${overrides[match.product_id] ? 'what the picked PO line has left' : 'open PO capacity'}`}
                             </p>
                             <div className="mt-2 space-y-1.5">
                               {/* Quick Receive never over-receives: that needs an admin and a reason on the PO page. */}
@@ -1033,7 +1040,7 @@ export default function QuickReceivePanel() {
             );
             // F6 fix: symmetric guard for partially-unmatched products
             const hasUnresolvedUnmatched = matchResults.some(
-              (m) => m.allocations.length > 0 && m.quantity_unmatched > 0 && !unmatchedActions[m.product_id],
+              (m) => m.allocations.length > 0 && skippedUnits(m) > 0 && !unmatchedActions[m.product_id],
             );
             const blocked = !receiveIntent.isIntentLocked && (hasUnresolvedVariance || hasUnresolvedUnmatched);
             const blockReason = hasUnresolvedVariance

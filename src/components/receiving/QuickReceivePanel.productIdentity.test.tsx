@@ -480,6 +480,9 @@ describe('QuickReceivePanel Product identity', () => {
     fireEvent.click(screen.getByRole('button', { name: /review & match \(1 item\)/i }));
     fireEvent.click(await screen.findByRole('radio', { name: /PO-LOW/ }));
     expect(screen.getByText(/receives 2; skips 1/)).toBeInTheDocument();
+    expect(screen.getByText(/1 units exceed what the picked PO line has left/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirm & receive/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: /skip the extra units/i }));
     fireEvent.click(screen.getByRole('button', { name: /confirm & receive/i }));
 
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('receive_po_items', expect.objectContaining({

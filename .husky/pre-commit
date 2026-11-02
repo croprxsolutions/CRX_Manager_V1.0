@@ -39,6 +39,10 @@ bash scripts/validate-sql.sh || exit 1
 # name; these tests failed only in CI on PR #1298. They read the working tree.
 if printf '%s\n' "$STAGED_FILES" | grep -Eq '^supabase/migrations/'; then
   echo "🧾 Checking RPC idempotency and contract registries..."
+  if ! git diff --quiet -- src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts; then
+    echo "❌ RPC registry test files have unstaged edits — stage them so the commit matches what was tested."
+    exit 1
+  fi
   npx vitest run src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts || {
     echo ""
     echo "❌ RPC REGISTRY TESTS FAILED — add the registry entry this migration needs."

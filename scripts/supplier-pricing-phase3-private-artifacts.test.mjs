@@ -1485,10 +1485,13 @@ git() { return 0; }
     assert.equal(runPrePushHook('node() { return 0; }; npm() { if [ "$2" = "test:supplier-pricing-phase3c-packet" ]; then return 42; fi; return 0; };', ['origin', 'https://example.invalid/repository.git'], 'refs/heads/test deadbeef refs/heads/test deadbeef\n').status, 0, 'pre-push must not invoke the packet suite; CI retains that explicit gate');
     assert(!prePush.includes('graphify'), 'pre-push must not refresh Graphify; it is on demand (npm run graph:refresh)');
     const preCommitPath = path.join(REPO_ROOT, '.husky', 'pre-commit');
-    const runPreCommitHook = (staged, npx) => spawnSync(fixtureBash(), ['-c', `git() { printf '%s\\n' ${staged}; }; node() { return 0; }; bash() { return 0; }; ${npx}\nHOOK=$1; shift; source "$HOOK"`, 'synthetic-pre-commit', preCommitPath], { cwd: REPO_ROOT, encoding: 'utf8', env: sanitizedFixtureGitEnv() });
+    // git(): `diff --cached` lists the staged paths; `diff --quiet` reports unstaged edits via $unstaged.
+    const runPreCommitHook = (staged, npx, unstaged = 0) => spawnSync(fixtureBash(), ['-c', `git() { [ "$2" = "--quiet" ] && return ${unstaged}; printf '%s\\n' ${staged}; }; node() { return 0; }; bash() { return 0; }; ${npx}\nHOOK=$1; shift; source "$HOOK"`, 'synthetic-pre-commit', preCommitPath], { cwd: REPO_ROOT, encoding: 'utf8', env: sanitizedFixtureGitEnv() });
     const registryFails = 'npx() { [ "$2" = "run" ] && return 42; return 0; };';
+    const registryPasses = 'npx() { [ "$*" = "vitest run src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts" ] && return 0; return 42; };';
     assert.equal(runPreCommitHook('supabase/migrations/20990101000000_x.sql', registryFails).status, 1, 'a staged migration must block the commit when the RPC registry tests fail');
-    assert.equal(runPreCommitHook('supabase/migrations/20990101000000_x.sql', 'npx() { return 0; };').status, 0, 'a staged migration commits when the RPC registry tests pass');
+    assert.equal(runPreCommitHook('supabase/migrations/20990101000000_x.sql', registryPasses).status, 0, 'a staged migration commits when both RPC registry tests pass');
+    assert.equal(runPreCommitHook('supabase/migrations/20990101000000_x.sql', registryPasses, 1).status, 1, 'unstaged registry test edits must block a migration commit');
     assert.equal(runPreCommitHook('src/lib/x.ts', registryFails).status, 0, 'a commit without a migration must skip the RPC registry tests');
     assert.equal(runPrePushHook('', [], '').status, 1, 'a missing pre-push remote must fail closed before typecheck/build');
   }

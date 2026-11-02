@@ -34,7 +34,7 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
-const TOUCHED = /product_active_guard|write_product_active_guard|set_product_active|preview_product_active_change|guard_product_deactivation|guard_inactive_product_line|guard_order_reopen_inactive_product/;
+const TOUCHED = /product_active_guard|write_product_active_guard|set_product_active|preview_product_active_change|guard_product_deactivation|guard_inactive_product_line|guard_order_reopen_inactive_product|_get_inventory_position_cost_impl_20261019|_get_inventory_cost_report_cost_impl_20261019|get_inventory_cost_report/;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -455,7 +455,7 @@ try {
   assert.deepEqual(preview(quietProduct).warnings, []);
 
   const warningProduct = product('[PROVER] PM3 Warnings');
-  seed(`INSERT INTO public.inventory(product_id, quantity_available) VALUES ('${warningProduct}', 3);
+  seed(`INSERT INTO public.inventory(product_id, quantity_available, reorder_point) VALUES ('${warningProduct}', 3, 5);
     INSERT INTO public.app_settings(setting_key, setting_value)
       VALUES ('crop_programs', '[{"items":[{"product_id":"${warningProduct}"}]}]');
     INSERT INTO public.jobs(id, job_number, customer_id, status, job_date, created_by)
@@ -473,7 +473,7 @@ try {
   assert.ok(!positions.some((row) => row.product_id === outsideProduct), 'zero-stock inactive product must not be listed');
   assert.equal(scalar(`BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
     SELECT count(*) FROM public.get_inventory_cost_report() WHERE product_id = '${warningProduct}'
-      AND quantity_available = 3 AND total_cost_value > 0; ROLLBACK;`), '1');
+      AND quantity_available = 3 AND total_cost_value > 0 AND below_reorder = false; ROLLBACK;`), '1');
   assert.equal(scalar(`BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
     SELECT count(*) FROM public.get_inventory_cost_report() WHERE product_id = '${outsideProduct}'; ROLLBACK;`), '0');
   seed(`UPDATE public.app_settings SET setting_value = '' WHERE setting_key = 'crop_programs';`);
@@ -543,6 +543,19 @@ try {
     /PRODUCT_INACTIVE:.*reactivate.*reopening order/);
   assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${inactiveDelivery}';`), 'completed');
 
+  const openVoid = seedOrderLine(idemProduct, 'PM3-OPEN-VOID', 'partially_fulfilled', 285);
+  seed(`UPDATE public.order_items SET quantity_delivered = 1, quantity_remaining = 0
+    WHERE id = '${openVoid.lineId}';
+    INSERT INTO public.order_items(order_id, product_id, product_name, total_units_needed,
+      quantity_delivered, quantity_remaining, price_per_unit, cost_per_unit)
+    VALUES ('${openVoid.orderId}', '${p}', 'Active remaining', 2, 1, 1, 2, 1);`);
+  const openInactiveDelivery = seedDelivery(openVoid.orderId, openVoid.lineId, idemProduct, 286);
+  withActor(ADMIN, `SELECT public.void_delivery('${openInactiveDelivery}', 'PM3 open correction',
+    '${ADMIN}', 'pm3-void-open-inactive');`);
+  assert.equal(scalar(`SELECT quantity_remaining FROM public.order_items WHERE id = '${openVoid.lineId}';`), '1');
+  assert.equal(scalar(`SELECT status FROM public.orders WHERE id = '${openVoid.orderId}';`), 'partially_fulfilled');
+  assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${openInactiveDelivery}';`), 'voided');
+
   const cancelledInactiveOrder = seedOrderLine(idemProduct, 'PM3-CANCEL-ORDER', 'confirmed', 282);
   withActor(ADMIN, `SELECT public.cancel_order('${cancelledInactiveOrder.orderId}', '${ADMIN}', 'pm3-cancel-order');`);
   assert.equal(scalar(`SELECT status FROM public.orders WHERE id = '${cancelledInactiveOrder.orderId}';`), 'cancelled');
@@ -554,12 +567,23 @@ try {
   const retainedPo = seedPoLine(idemProduct, 'PM3-RETAINED-PO', 'draft', 284);
   const retainedPoLine = scalar(`SELECT id FROM public.purchase_order_items WHERE purchase_order_id = '${retainedPo}';`);
   const retainedItems = JSON.stringify([{ id: retainedPoLine, product_id: idemProduct,
-    product_name: 'Retained inactive', quantity_ordered: 2, quantity_received: 0,
+    product_name: 'Retained inactive', quantity_ordered: 1, quantity_received: 0,
     unit_cost: 1, unit_cost_cents: 100 }]);
   withActor(ADMIN, `SELECT public.save_purchase_order('${retainedPo}',
     '{"vendor":"[PROVER] vendor","status":"draft","notes":"retained edit"}'::jsonb,
     '${retainedItems}'::jsonb, '${ADMIN}', 'pm3-retained-po');`);
-  assert.equal(scalar(`SELECT quantity_ordered FROM public.purchase_order_items WHERE id = '${retainedPoLine}';`), '2');
+  assert.equal(scalar(`SELECT product_name FROM public.purchase_order_items WHERE id = '${retainedPoLine}';`), 'Retained inactive');
+  denied(ADMIN, `UPDATE public.purchase_order_items SET quantity_ordered = 2
+    WHERE id = '${retainedPoLine}';`, /PRODUCT_INACTIVE:.*PM3 Idempotency/, 'postgres');
+  psql(`UPDATE public.purchase_order_items SET quantity_ordered = 0.5 WHERE id = '${retainedPoLine}';`);
+  assert.equal(scalar(`SELECT quantity_ordered FROM public.purchase_order_items WHERE id = '${retainedPoLine}';`), '0.5');
+  const quantityQuote = seedQuoteLine(quoteProduct, 'PM3-QTY-QUOTE', 'draft', 287);
+  const heldQuoteLine = scalar(`SELECT id FROM public.quote_items WHERE quote_id = '${quantityQuote}'
+    AND product_id = '${quoteProduct}';`);
+  denied(ADMIN, `UPDATE public.quote_items SET total_units_needed = 2
+    WHERE id = '${heldQuoteLine}';`, /PRODUCT_INACTIVE:.*PM3 Quotes/, 'postgres');
+  psql(`UPDATE public.quote_items SET total_units_needed = 0.5 WHERE id = '${heldQuoteLine}';`);
+  assert.equal(scalar(`SELECT total_units_needed FROM public.quote_items WHERE id = '${heldQuoteLine}';`), '0.5');
 
   for (const table of ['order_items', 'quote_items', 'purchase_order_items']) {
     const parent = table === 'order_items' ? `order_id, product_name, price_per_unit, cost_per_unit, total_units_needed`
@@ -599,9 +623,21 @@ try {
   withActor(ADMIN, `SELECT public.update_order_items('${held.orderId}', '${editItems}'::jsonb,
     '${ADMIN}', 'pm3-held-edit', ${version});`);
   assert.equal(scalar(`SELECT product_name FROM public.order_items WHERE id = '${activeLine}';`), 'Active edited');
+  const raisedItems = JSON.stringify(JSON.parse(editItems).map((item) =>
+    item.id === otherLine ? { ...item, total_units_needed: 2 } : item));
+  const raisedVersion = scalar(`SELECT row_version FROM public.orders WHERE id = '${held.orderId}';`);
+  denied(ADMIN, `SELECT public.update_order_items('${held.orderId}', '${raisedItems}'::jsonb,
+    '${ADMIN}', 'pm3-held-raise', ${raisedVersion});`, /PRODUCT_INACTIVE:.*PM3 Idempotency/);
+  assert.equal(scalar(`SELECT total_units_needed FROM public.order_items WHERE id = '${otherLine}';`), '1');
+  const loweredItems = JSON.stringify(JSON.parse(editItems).map((item) =>
+    item.id === otherLine ? { ...item, total_units_needed: 0.5 } : item));
+  const loweredVersion = scalar(`SELECT row_version FROM public.orders WHERE id = '${held.orderId}';`);
+  withActor(ADMIN, `SELECT public.update_order_items('${held.orderId}', '${loweredItems}'::jsonb,
+    '${ADMIN}', 'pm3-held-lower', ${loweredVersion});`);
+  assert.equal(scalar(`SELECT total_units_needed FROM public.order_items WHERE id = '${otherLine}';`), '0.5');
   const secondOff = product('[PROVER] PM3 Second Inactive');
   turn(secondOff, false, 'pm3-second-off');
-  const added = JSON.stringify([...JSON.parse(editItems),
+  const added = JSON.stringify([...JSON.parse(loweredItems),
     { product_id: secondOff, product_name: 'Second inactive', price_per_unit: 2, total_units_needed: 1 }]);
   const newVersion = scalar(`SELECT row_version FROM public.orders WHERE id = '${held.orderId}';`);
   denied(ADMIN, `SELECT public.update_order_items('${held.orderId}', '${added}'::jsonb,

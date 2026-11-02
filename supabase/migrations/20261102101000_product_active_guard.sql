@@ -11,7 +11,7 @@
 --   Retired stock with a nonzero balance remains in inventory and increases the admin
 --   inventory value by that stock's cost.
 -- NOT CHANGED: business rows are not rewritten. Existing inactive lines may be edited
---   by id on their order or purchase order. Saving a quote rebuilds its lines, so a
+--   by id on their order or purchase order unless ordered quantity increases. Saving a quote rebuilds its lines, so a
 --   quote holding an inactive product cannot be edited until reactivation or removal.
 --   New sales through duplicate_quote, create_quote_from_template,
 --   restore_quote_version, draw-down and rollover_quote_to_season refuse inactive products.
@@ -25,6 +25,7 @@ CREATE TEMP TABLE product_active_guard_tx ON COMMIT DROP AS
 SELECT pg_current_xact_id()::text AS transaction_id;
 
 DO $preflight$
+DECLARE r record;
 BEGIN
   IF to_regclass('pg_temp.product_active_guard_tx') IS NULL THEN
     RAISE EXCEPTION 'PRODUCT_ACTIVE_GUARD_NOT_IN_TRANSACTION';
@@ -48,6 +49,18 @@ BEGIN
      OR to_regprocedure('public._replay_fingerprint_20261015(jsonb)') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_ACTIVE_GUARD_DEPENDENCY_MISSING';
   END IF;
+  -- These are the bodies named above: the 2026-10-25 position implementation,
+  -- the 2026-10-19 renamed cost implementation, and its admin wrapper.
+  FOR r IN SELECT * FROM (VALUES
+    ('public._get_inventory_position_cost_impl_20261019()', 'ae638950347495d311e4e386a9353362'),
+    ('public._get_inventory_cost_report_cost_impl_20261019()', 'ae5899cb4c27fe0ea28a39ced278265b'),
+    ('public.get_inventory_cost_report()', '2fdd283e39482add63e075ab84a7e52d')
+  ) AS t(sig, pin) LOOP
+    IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
+        WHERE oid = to_regprocedure(r.sig)) IS DISTINCT FROM r.pin THEN
+      RAISE EXCEPTION 'PREFLIGHT_PRODUCT_ACTIVE_GUARD_BODY_DRIFT: %', r.sig;
+    END IF;
+  END LOOP;
 END;
 $preflight$;
 
@@ -278,10 +291,19 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS 
 DECLARE v_active boolean; v_name text;
 BEGIN
   IF NEW.product_id IS NULL THEN RETURN NEW; END IF;
-  -- update_order_items and save_purchase_order update retained ids in place. Their
-  -- newly inserted lines reach the lock below. save_quote rebuilds every line, so
-  -- editing a quote with an inactive product requires removing or reactivating it.
-  IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id THEN RETURN NEW; END IF;
+  -- Retained lines may decrease or edit other fields. An increase is a new sale.
+  -- New lines and product swaps reach the same locked product check below.
+  IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id THEN
+    IF TG_TABLE_NAME IN ('order_items', 'quote_items') THEN
+      IF COALESCE(NEW.total_units_needed, 0) <= COALESCE(OLD.total_units_needed, 0) THEN
+        RETURN NEW;
+      END IF;
+    ELSIF TG_TABLE_NAME = 'purchase_order_items' THEN
+      IF COALESCE(NEW.quantity_ordered, 0) <= COALESCE(OLD.quantity_ordered, 0) THEN
+        RETURN NEW;
+      END IF;
+    END IF;
+  END IF;
   SELECT is_active, product_name INTO v_active, v_name FROM public.products
     WHERE id = NEW.product_id FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND: %', NEW.product_id; END IF;
@@ -293,11 +315,11 @@ END;
 $function$;
 ALTER FUNCTION public.guard_inactive_product_line() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.guard_inactive_product_line() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
-CREATE TRIGGER trigger_a_guard_inactive_order_item BEFORE INSERT OR UPDATE OF product_id ON public.order_items
+CREATE TRIGGER trigger_a_guard_inactive_order_item BEFORE INSERT OR UPDATE OF product_id, total_units_needed ON public.order_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_product_line();
-CREATE TRIGGER trigger_a_guard_inactive_quote_item BEFORE INSERT OR UPDATE OF product_id ON public.quote_items
+CREATE TRIGGER trigger_a_guard_inactive_quote_item BEFORE INSERT OR UPDATE OF product_id, total_units_needed ON public.quote_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_product_line();
-CREATE TRIGGER trigger_a_guard_inactive_po_item BEFORE INSERT OR UPDATE OF product_id ON public.purchase_order_items
+CREATE TRIGGER trigger_a_guard_inactive_po_item BEFORE INSERT OR UPDATE OF product_id, quantity_ordered ON public.purchase_order_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_product_line();
 
 CREATE FUNCTION public.guard_order_reopen_inactive_product() RETURNS trigger
@@ -507,7 +529,7 @@ BEGIN
     COALESCE(pr.current_cost, 0),
     ROUND((COALESCE(inv.quantity_available, 0) * COALESCE(pr.current_cost, 0))::numeric, 2),
     COALESCE(inv.reorder_point, 0),
-    COALESCE(inv.quantity_available, 0) < COALESCE(inv.reorder_point, 0)
+    pr.is_active AND COALESCE(inv.quantity_available, 0) < COALESCE(inv.reorder_point, 0)
   FROM products pr LEFT JOIN inventory inv ON inv.product_id = pr.id
   -- BEGIN DELTA inventory_cost_report_column_fix (2026-06-10): the live filter
   -- referenced a soft-delete timestamp column that does not exist on products
@@ -569,7 +591,7 @@ BEGIN
        IS DISTINCT FROM '22c79c8cc58d2e575ca353511e38c291'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public.guard_inactive_product_line()'::regprocedure)
-       IS DISTINCT FROM '751b8bf3b665d7cdc167ab5b50631443' THEN
+       IS DISTINCT FROM '9b5ff9a3182969f9f13f3e0411edd7ac' THEN
     RAISE EXCEPTION 'PRODUCT_ACTIVE_GUARD_POSTFLIGHT: guards';
   END IF;
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
@@ -577,7 +599,7 @@ BEGIN
        IS DISTINCT FROM '6043fa5c13f508bf4c123ccad5d0cb12'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public._get_inventory_cost_report_cost_impl_20261019()'::regprocedure)
-       IS DISTINCT FROM 'df762a36611acd4eaf67755237152204'
+       IS DISTINCT FROM 'fb77a0d38ee1bb31a3c5a43dd1a0da59'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public.get_inventory_cost_report()'::regprocedure)
        IS DISTINCT FROM '2fdd283e39482add63e075ab84a7e52d'

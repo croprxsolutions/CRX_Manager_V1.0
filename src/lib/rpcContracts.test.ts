@@ -2996,6 +2996,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // check_idempotency/save_idempotency calls behind the required-key public wrapper. Prune once the
   // registry high-water passes 20261020210000 (the body never reaches the generated types).
   '_create_order_from_blend_ticket_replay_impl_20261015',
+  // 20261102110000 (replay-binding batch 4a) re-emits this renamed body so it unposts each member
+  // through the private _unpost_invoice_replay_impl_20261015; it keeps p_idempotency_key behind the
+  // required-key public wrapper and never reaches the generated types.
+  '_unpost_invoice_group_replay_impl_20261015',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their

@@ -231,7 +231,6 @@ export default function InventoryPage() {
   const [addLocation, setAddLocation] = useState('Main Warehouse');
   const [addQty, setAddQty] = useState('');
   const [addUnitSize, setAddUnitSize] = useState('');
-  const [addUnitCost, setAddUnitCost] = useState('');
   const [addReorderPoint, setAddReorderPoint] = useState('');
   const [addMinStock, setAddMinStock] = useState('');
   const [adding, setAdding] = useState(false);
@@ -548,7 +547,6 @@ export default function InventoryPage() {
     setAddLocation('Main Warehouse');
     setAddQty('');
     setAddUnitSize('');
-    setAddUnitCost('');
     setAddReorderPoint('');
     setAddMinStock('');
     setProductSearch('');
@@ -832,7 +830,6 @@ export default function InventoryPage() {
     }
     setAdding(true);
 
-    const unitCost = addUnitCost ? parseFloat(addUnitCost) : null;
     const reorderPoint = addReorderPoint ? parseFloat(addReorderPoint) : null;
     const minStock = addMinStock ? parseFloat(addMinStock) : null;
     const { data: manualAddData, error } = await supabase.rpc('manual_inventory_add', {
@@ -842,7 +839,6 @@ export default function InventoryPage() {
       p_unit_size: addUnitSize || undefined,
       p_performed_by: profile?.id || undefined,
       p_notes: qty > 0 ? `Initial inventory record created with ${qty} units` : undefined,
-      p_unit_cost: unitCost && unitCost > 0 ? unitCost : undefined,
       p_reorder_point: reorderPoint != null && reorderPoint >= 0 ? reorderPoint : undefined,
       p_min_stock_level: minStock != null && minStock >= 0 ? minStock : undefined,
       p_idempotency_key: manualAddIdem.getKey(),
@@ -2097,20 +2093,6 @@ export default function InventoryPage() {
             onChange={(e) => setAddUnitSize(e.target.value)}
             placeholder="e.g. Gal, Qt, Lb"
           />
-          <div>
-            <Input
-              label="Unit Cost (optional)"
-              type="number"
-              min="0"
-              step="0.01"
-              value={addUnitCost}
-              onChange={(e) => setAddUnitCost(e.target.value)}
-              placeholder="e.g. 12.50"
-            />
-            <p className="text-xs text-secondary mt-1">
-              For record-keeping only — does not change the product's pricing or cost.
-            </p>
-          </div>
           <div>
             <div className="grid grid-cols-2 gap-3">
               <Input

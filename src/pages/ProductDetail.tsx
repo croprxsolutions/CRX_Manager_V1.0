@@ -28,8 +28,10 @@ import type { CostHistory, EpaLookupResult, Product, UnitConversion } from '../t
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
+  defaultPricingMode,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
+  pricingMarginTextIsValid,
   previewProductPricingChanges,
   type PricingAcknowledgement,
   type PricingMode,
@@ -66,21 +68,14 @@ const PRODUCT_PRICING_FIELDS = [
 
 type ProductPricingMoneyField = 'current_cost' | 'tier1_price' | 'tier2_price' | 'tier3_price';
 type ProductPricingMoneyDrafts = Partial<Record<ProductPricingMoneyField, string>>;
+type ProductPricingMarginField = 'tier1_margin' | 'tier2_margin' | 'tier3_margin';
+type ProductPricingMarginDrafts = Partial<Record<ProductPricingMarginField, string>>;
 
 function nonpricingProductPayload(product: Partial<Product>): Record<string, unknown> {
   return Object.fromEntries([
     ...PRODUCT_NONPRICING_FIELDS.map((field) => [field, product[field]] as const),
     ['updated_at', new Date().toISOString()],
   ]);
-}
-
-function pricingModeFor(product: Partial<Product>): PricingMode | '' {
-  const hasMargins = [product.tier1_margin, product.tier2_margin, product.tier3_margin]
-    .every((value) => value !== null && value !== undefined);
-  const hasPrices = [product.tier1_price, product.tier2_price, product.tier3_price]
-    .every((value) => value !== null && value !== undefined);
-  if (hasMargins === hasPrices) return '';
-  return hasMargins ? 'margin_driven' : 'price_driven';
 }
 
 function pricingMoneyInput(
@@ -112,6 +107,7 @@ function pricingPreviewRow(
   mode: PricingMode,
   note: PricingSourceReason,
   moneyDrafts: ProductPricingMoneyDrafts,
+  marginDrafts: ProductPricingMarginDrafts,
   costOverride?: string,
 ): PricingPreviewInputRow {
   if (!Number.isInteger(persisted.pricing_version) || (persisted.pricing_version ?? 0) < 1) {
@@ -135,7 +131,11 @@ function pricingPreviewRow(
       if (value === null || value === undefined) {
         throw new Error('Margin-driven pricing requires all three net margins.');
       }
-      row[`tier${tier}_margin_percent` as const] = formatPricingMarginPercent(value);
+      const draft = marginDrafts[`tier${tier}_margin` as ProductPricingMarginField];
+      if (draft && !pricingMarginTextIsValid(draft)) {
+        throw new Error('Enter each net margin as a plain number below 100.');
+      }
+      row[`tier${tier}_margin_percent` as const] = draft ? draft : formatPricingMarginPercent(value);
     }
   } else {
     for (const tier of [1, 2, 3] as const) {
@@ -229,6 +229,7 @@ export default function ProductDetail() {
   const [persistedProduct, setPersistedProduct] = useState<Product | null>(null);
   const [pricingMode, setPricingMode] = useState<PricingMode | ''>('');
   const [pricingMoneyDrafts, setPricingMoneyDrafts] = useState<ProductPricingMoneyDrafts>({});
+  const [pricingMarginDrafts, setPricingMarginDrafts] = useState<ProductPricingMarginDrafts>({});
   const [pricingPreview, setPricingPreview] = useState<PricingPreviewResult | null>(null);
   const [pricingPreviewTitle, setPricingPreviewTitle] = useState('Review Product Pricing');
   // A pricing change waiting for its source and reason before the preview.
@@ -302,15 +303,15 @@ export default function ProductDetail() {
       setLoading(false);
       return false;
     }
-    // The admin cost read is a second await: if the route moved to another product meanwhile,
-    // this older load must not install its product on the new page (Luna round 2).
+    // The admin cost read is a second await: an older load must not install its product.
     if (productIdRef.current !== id) return false;
     if (withCost) {
       const loadedProduct = withCost;
       setProduct(loadedProduct);
       setPersistedProduct(loadedProduct);
-      setPricingMode(pricingModeFor(loadedProduct));
+      setPricingMode(defaultPricingMode(loadedProduct));
       setPricingMoneyDrafts({});
+      setPricingMarginDrafts({});
       setPricingReloadRequired(false);
       setIsDirty(false);
       setPersistedLabelFields({
@@ -412,7 +413,7 @@ export default function ProductDetail() {
   }, []);
 
   const saveExistingProductDetails = async () => {
-    if (!persistedProduct || !Number.isInteger(persistedProduct.pricing_version)) {
+    if (!persistedProduct || persistedProduct.id !== id || !Number.isInteger(persistedProduct.pricing_version)) {
       throw new Error('Reload this Product before saving details.');
     }
     const result = await supabaseUntyped
@@ -443,7 +444,7 @@ export default function ProductDetail() {
     if (pricingMode !== 'margin_driven' && pricingMode !== 'price_driven') {
       throw new Error('Choose margin-driven or price-driven before reviewing pricing.');
     }
-    return pricingPreviewRow(product, persistedProduct, pricingMode, note, pricingMoneyDrafts, costOverride);
+    return pricingPreviewRow(product, persistedProduct, pricingMode, note, pricingMoneyDrafts, pricingMarginDrafts, costOverride);
   };
 
   // Check everything but the source and reason before asking for them, so nobody types them for nothing.
@@ -525,7 +526,7 @@ export default function ProductDetail() {
 
   const ensureCostBasisSelectionReady = () => {
     if (!costBasisWorkspace?.enabled) {
-      throw new Error('Cost-basis selection is OFF until the Phase 2 release gate is completed.');
+      throw new Error('Choosing a cost basis is turned off for now.');
     }
     if (pricingReloadRequired) throw new Error('Reload this Product before making another change.');
     if (!id || costBasisWorkspace.product.id !== id || persistedProduct?.id !== id) {
@@ -953,6 +954,12 @@ export default function ProductDetail() {
     }
   };
 
+  const updatePricingMargin = (field: ProductPricingMarginField, text: string) => {
+    if (pricingReloadRequired) return;
+    setPricingMarginDrafts((drafts) => ({ ...drafts, [field]: text }));
+    update(field, text ? parseFloat(text) / 100 : null);
+  };
+
   const updatePricingMoney = (field: ProductPricingMoneyField, value: string) => {
     if (pricingReloadRequired) return;
     const persistedValue = persistedProduct?.[field] ?? product[field];
@@ -964,6 +971,23 @@ export default function ProductDetail() {
       return next;
     });
     setIsDirty(true);
+  };
+
+  const changePricingMode = (mode: PricingMode | '') => {
+    if (mode === 'price_driven') {
+      setPricingMarginDrafts({});
+      if (persistedProduct) {
+        setProduct((current) => ({
+          ...current,
+          tier1_margin: persistedProduct.tier1_margin,
+          tier2_margin: persistedProduct.tier2_margin,
+          tier3_margin: persistedProduct.tier3_margin,
+        }));
+      }
+    } else if (mode === 'margin_driven') {
+      setPricingMoneyDrafts(({ current_cost }) => current_cost === undefined ? {} : { current_cost });
+    }
+    setPricingMode(mode);
   };
 
   if (loading) {
@@ -1460,14 +1484,14 @@ export default function ProductDetail() {
                   <select
                     id="product-pricing-mode"
                     value={pricingMode}
-                    onChange={(event) => setPricingMode(event.target.value as PricingMode | '')}
+                    onChange={(event) => changePricingMode(event.target.value as PricingMode | '')}
                     className="w-full sm:max-w-xs px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                   >
                     <option value="">Choose a mode</option>
                     <option value="margin_driven">Margin-driven — cost + margins set prices</option>
                     <option value="price_driven">Price-driven — cost + prices set margins</option>
                   </select>
-                  <p className="mt-1 text-xs text-gray-500">Only the selected input family is editable. The server shows every resulting price before Apply.</p>
+                  <p className="mt-1 text-xs text-gray-500">Only the selected input family is editable. The server shows every resulting price before Apply. A product with all three prices saved opens price-driven, and nothing changes until you edit.</p>
                 </div>
               )}
               <div className="p-3 mb-4 bg-blue-50 border border-blue-100 rounded-lg">
@@ -1475,8 +1499,8 @@ export default function ProductDetail() {
                   <span className="font-medium">All prices are per inventory unit</span> (e.g., per gallon, per pound). Margin-driven mode keeps your three net margins and recalculates prices; price-driven mode keeps your three entered prices and reconciles the margins.
                 </p>
                 <div className="text-xs text-gray-600 space-y-1">
-                  <p><span className="font-medium">Net Margin</span> = Profit % of price (e.g., 20% net → $100 price on $80 cost)</p>
-                  <p><span className="font-medium">Gross Margin</span> = Markup % (auto-calculated, e.g., 25%)</p>
+                  <p><span className="font-medium">Net margin</span> = Profit as a % of price (e.g., 20% net → $100 price on $80 cost)</p>
+                  <p><span className="font-medium">Markup %</span> = Profit as a % of cost (auto-calculated, e.g., 25%)</p>
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1494,10 +1518,10 @@ export default function ProductDetail() {
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-secondary">Tier 1</h4>
                   <Input id="tier1-price" aria-label="Tier 1 price" label="Price" type="number" value={pricingMoneyInput(product, pricingMoneyDrafts, 'tier1_price')} onChange={(e) => updatePricingMoney('tier1_price', e.target.value)} disabled={isNew || pricingMode !== 'price_driven'} />
-                  <Input id="tier1-net-margin" aria-label="Tier 1 net margin percent" label="Net Margin %" type="number" value={product.tier1_margin != null ? (product.tier1_margin * 100).toFixed(1) : ''} onChange={(e) => update('tier1_margin', e.target.value ? parseFloat(e.target.value) / 100 : null)} placeholder="e.g., 20 for 20%" disabled={isNew || pricingMode !== 'margin_driven'} />
+                  <Input id="tier1-net-margin" aria-label="Tier 1 net margin percent" label="Net margin %" type="number" value={pricingMarginDrafts.tier1_margin ?? (product.tier1_margin != null ? (product.tier1_margin * 100).toFixed(1) : '')} onChange={(e) => updatePricingMargin('tier1_margin', e.target.value)} placeholder="e.g., 20 for 20%" disabled={isNew || pricingMode !== 'margin_driven'} />
                   {product.tier1_gross_margin != null && (
                     <div className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
-                      <span className="text-xs text-gray-500">Gross Margin: </span>
+                      <span className="text-xs text-gray-500">Markup %: </span>
                       <span className="text-sm font-medium text-secondary">{(product.tier1_gross_margin * 100).toFixed(1)}%</span>
                     </div>
                   )}
@@ -1514,10 +1538,10 @@ export default function ProductDetail() {
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-secondary">Tier 2</h4>
                   <Input id="tier2-price" aria-label="Tier 2 price" label="Price" type="number" value={pricingMoneyInput(product, pricingMoneyDrafts, 'tier2_price')} onChange={(e) => updatePricingMoney('tier2_price', e.target.value)} disabled={isNew || pricingMode !== 'price_driven'} />
-                  <Input id="tier2-net-margin" aria-label="Tier 2 net margin percent" label="Net Margin %" type="number" value={product.tier2_margin != null ? (product.tier2_margin * 100).toFixed(1) : ''} onChange={(e) => update('tier2_margin', e.target.value ? parseFloat(e.target.value) / 100 : null)} placeholder="e.g., 25 for 25%" disabled={isNew || pricingMode !== 'margin_driven'} />
+                  <Input id="tier2-net-margin" aria-label="Tier 2 net margin percent" label="Net margin %" type="number" value={pricingMarginDrafts.tier2_margin ?? (product.tier2_margin != null ? (product.tier2_margin * 100).toFixed(1) : '')} onChange={(e) => updatePricingMargin('tier2_margin', e.target.value)} placeholder="e.g., 25 for 25%" disabled={isNew || pricingMode !== 'margin_driven'} />
                   {product.tier2_gross_margin != null && (
                     <div className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
-                      <span className="text-xs text-gray-500">Gross Margin: </span>
+                      <span className="text-xs text-gray-500">Markup %: </span>
                       <span className="text-sm font-medium text-secondary">{(product.tier2_gross_margin * 100).toFixed(1)}%</span>
                     </div>
                   )}
@@ -1537,10 +1561,10 @@ export default function ProductDetail() {
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-secondary">Tier 3</h4>
                   <Input id="tier3-price" aria-label="Tier 3 price" label="Price" type="number" value={pricingMoneyInput(product, pricingMoneyDrafts, 'tier3_price')} onChange={(e) => updatePricingMoney('tier3_price', e.target.value)} disabled={isNew || pricingMode !== 'price_driven'} />
-                  <Input id="tier3-net-margin" aria-label="Tier 3 net margin percent" label="Net Margin %" type="number" value={product.tier3_margin != null ? (product.tier3_margin * 100).toFixed(1) : ''} onChange={(e) => update('tier3_margin', e.target.value ? parseFloat(e.target.value) / 100 : null)} placeholder="e.g., 30 for 30%" disabled={isNew || pricingMode !== 'margin_driven'} />
+                  <Input id="tier3-net-margin" aria-label="Tier 3 net margin percent" label="Net margin %" type="number" value={pricingMarginDrafts.tier3_margin ?? (product.tier3_margin != null ? (product.tier3_margin * 100).toFixed(1) : '')} onChange={(e) => updatePricingMargin('tier3_margin', e.target.value)} placeholder="e.g., 30 for 30%" disabled={isNew || pricingMode !== 'margin_driven'} />
                   {product.tier3_gross_margin != null && (
                     <div className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
-                      <span className="text-xs text-gray-500">Gross Margin: </span>
+                      <span className="text-xs text-gray-500">Markup %: </span>
                       <span className="text-sm font-medium text-secondary">{(product.tier3_gross_margin * 100).toFixed(1)}%</span>
                     </div>
                   )}
@@ -1614,7 +1638,7 @@ export default function ProductDetail() {
 
                     {!costBasisWorkspace.enabled && (
                       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                        Cost-basis selection is OFF until the Phase 2 release gate is completed. You can review evidence below, but selection controls remain disabled.
+                        Choosing a cost basis is turned off for now. You can review evidence below, but selection controls remain disabled.
                       </div>
                     )}
 
@@ -1755,7 +1779,7 @@ export default function ProductDetail() {
             <select
               id="cost-update-pricing-mode"
               value={pricingMode}
-              onChange={(event) => setPricingMode(event.target.value as PricingMode | '')}
+              onChange={(event) => changePricingMode(event.target.value as PricingMode | '')}
               disabled={pricingReloadRequired}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >

@@ -204,7 +204,7 @@ describe('PricingChangePreviewModal', () => {
     expect(within(rows[0]).getByText('$12.00')).toBeInTheDocument();
     expect(within(rows[0]).getByText('$12.50')).toBeInTheDocument();
     expect(within(rows[0]).getByText('$5.75 / acre')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('Gross / markup: 25%')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('Markup %: 25%')).toBeInTheDocument();
     expect(within(rows[0]).getByText('Warning: this price is below cost.')).toBeInTheDocument();
 
     expect(within(rows[1]).getByText('Later Product')).toBeInTheDocument();

@@ -25,6 +25,19 @@ export interface CostBasisPreviewMetadata {
   purchase_order_item_id?: string;
 }
 
+export function defaultPricingMode(product: {
+  tier1_price?: number | null; tier2_price?: number | null; tier3_price?: number | null;
+  tier1_margin?: number | null; tier2_margin?: number | null; tier3_margin?: number | null;
+}): PricingMode | '' {
+  const prices = [product.tier1_price, product.tier2_price, product.tier3_price];
+  if (prices.every((value) => value != null)) return 'price_driven';
+  if (prices.some((value) => value != null)) return '';
+  if ([product.tier1_margin, product.tier2_margin, product.tier3_margin].every((value) => value != null)) {
+    return 'margin_driven';
+  }
+  return '';
+}
+
 const MAX_PRICING_CENTS = 9_223_372_036_854_775_807n;
 const PRICING_DOLLAR_INPUT = /^([0-9]+)(?:\.([0-9]{1,2}))?$/;
 
@@ -45,6 +58,10 @@ export function pricingDollarInputToCents(value: string): bigint | null {
 export function formatPricingMarginPercent(value: number): string {
   if (!Number.isFinite(value)) throw new Error('Pricing margin must be a finite number.');
   return (value * 100).toFixed(8).replace(/\.?0+$/, '');
+}
+
+export function pricingMarginTextIsValid(text: string): boolean {
+  return /^[0-9]+([.][0-9]+)?$/.test(text) && Number(text) < 100;
 }
 
 export function assertPricingPreviewRowsSafe(

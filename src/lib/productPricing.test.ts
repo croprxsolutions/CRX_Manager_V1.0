@@ -18,11 +18,39 @@ import {
   approvePricingChangeSet,
   assertPricingPreviewRowsSafe,
   createPricingWorkbookExport,
+  defaultPricingMode,
   formatPricingMarginPercent,
   pricingDollarInputToCents,
+  pricingMarginTextIsValid,
   previewProductPricingChanges,
   sha256Hex,
 } from './productPricing';
+
+describe('defaultPricingMode', () => {
+  const prices = { tier1_price: 100, tier2_price: 90, tier3_price: 80 };
+  const margins = { tier1_margin: 0.2, tier2_margin: 0.15, tier3_margin: 0.1 };
+
+  it('prefers complete saved prices even when all margins are saved', () => {
+    expect(defaultPricingMode({ ...prices, ...margins })).toBe('price_driven');
+    expect(defaultPricingMode(prices)).toBe('price_driven');
+  });
+
+  it('uses complete margins only when no prices are saved', () => {
+    expect(defaultPricingMode(margins)).toBe('margin_driven');
+    expect(defaultPricingMode({ ...margins, tier1_price: 100 })).toBe('');
+    expect(defaultPricingMode({ ...margins, tier1_price: 100, tier2_price: 90 })).toBe('');
+  });
+
+  it('leaves incomplete pricing without a mode', () => {
+    expect(defaultPricingMode({})).toBe('');
+    expect(defaultPricingMode({ tier1_price: 100, tier1_margin: 0.2 })).toBe('');
+  });
+
+  it('counts zero as a saved price or margin', () => {
+    expect(defaultPricingMode({ ...prices, tier1_price: 0 })).toBe('price_driven');
+    expect(defaultPricingMode({ ...margins, tier1_margin: 0 })).toBe('margin_driven');
+  });
+});
 
 describe('price sheet approval (To-Do 0.1)', () => {
   beforeEach(() => {
@@ -125,6 +153,16 @@ describe('formatPricingMarginPercent', () => {
 
   it('rejects non-finite values before they reach the pricing RPC', () => {
     expect(() => formatPricingMarginPercent(Number.NaN)).toThrow('finite number');
+  });
+});
+
+describe('pricingMarginTextIsValid', () => {
+  it.each(['25', '22.5', '0', '99.99'])('accepts %s', (text) => {
+    expect(pricingMarginTextIsValid(text)).toBe(true);
+  });
+
+  it.each(['.5', '100', '1e1', ''])('rejects %s', (text) => {
+    expect(pricingMarginTextIsValid(text)).toBe(false);
   });
 });
 

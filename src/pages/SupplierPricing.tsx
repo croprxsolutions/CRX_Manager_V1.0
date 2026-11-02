@@ -1013,7 +1013,7 @@ export default function SupplierPricing() {
 
               {!basisWorkspace.enabled && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                  Supplier cost-basis selection is OFF until the Phase 2 release gate is completed.
+                  Choosing a supplier cost basis is turned off for now.
                   Comparison remains read-only.
                 </div>
               )}

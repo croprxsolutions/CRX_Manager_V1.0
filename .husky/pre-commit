@@ -40,7 +40,7 @@ bash scripts/validate-sql.sh || exit 1
 if printf '%s\n' "$STAGED_FILES" | grep -Eq '^supabase/migrations/'; then
   echo "🧾 Checking RPC idempotency and contract registries..."
   if ! git diff --quiet -- supabase/migrations/ src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts ||
-    [ -n "$(git ls-files --others --exclude-standard -- supabase/migrations/)" ]; then
+    [ -n "$(git ls-files --others -- supabase/migrations/ src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts)" ]; then
     echo "❌ Migrations or RPC registry tests have unstaged or untracked edits — stage or remove them so the commit matches what was tested."
     exit 1
   fi

@@ -352,6 +352,32 @@ try {
     eq(JSON.parse(readFileSync(cacheN, "utf8")).ok, false, "OFFSITE(g): the no-success sample is cached as unverified");
   }
 
+  // ── HOOKSPATH (2026-11-01): a worktree whose core.hooksPath points at another
+  // checkout silently runs that checkout's older guards. ─────────────────────
+  {
+    const hooksRepo = path.join(tmpRoot, "hooks-repo");
+    const foreign = path.join(tmpRoot, "other-checkout", ".husky");
+    for (const dir of [path.join(hooksRepo, ".husky"), foreign]) {
+      mkdirSync(dir, { recursive: true });
+      for (const hook of ["pre-commit", "pre-push"]) writeFileSync(path.join(dir, hook), "#!/bin/sh\n", { mode: 0o755 });
+    }
+    execFileSync("git", ["init", "-b", "main", hooksRepo], { env: isolatedGitEnv, stdio: "ignore" });
+
+    execFileSync("git", ["-C", hooksRepo, "config", "core.hooksPath", foreign], { env: isolatedGitEnv });
+    r = runHook(hooksRepo);
+    eq(r.status, 0, "HOOKSPATH: foreign hooksPath still exits 0");
+    const ctxForeign = additionalContextOf(r);
+    ok(ctxForeign.includes("guards are NOT this checkout's"), "HOOKSPATH: foreign hooksPath is warned about");
+    ok(ctxForeign.includes("--worktree --unset core.hooksPath"), "HOOKSPATH: warning names the fix");
+
+    execFileSync("git", ["-C", hooksRepo, "config", "core.hooksPath", ".husky"], { env: isolatedGitEnv });
+    r = runHook(hooksRepo);
+    ok(!additionalContextOf(r).includes("guards are NOT"), "HOOKSPATH: own .husky gives no warning");
+
+    r = runHook(path.join(tmpRoot, "a"));
+    ok(!additionalContextOf(r).includes("guards are NOT"), "HOOKSPATH: a folder outside git gives no warning");
+  }
+
   console.log(`session-staleness: ${pass} assertions passed`);
 } finally {
   rmSync(tmpRoot, { recursive: true, force: true });

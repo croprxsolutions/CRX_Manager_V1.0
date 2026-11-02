@@ -109,8 +109,11 @@ function readToken() {
 
 async function main() {
   const out = join(ROOT, '.claude', 'session-state', 'db-sweeps-live-capture.json');
-  // An empty SUPABASE_DB_URL keeps run-sweeps in print mode, so we always get the queries to send.
-  const printed = spawnSync(process.execPath, [RUNNER], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, SUPABASE_DB_URL: '' } });
+  // This script is the live execution, so the helpers run in print/adjudicate mode: an empty
+  // SUPABASE_DB_URL and no DB_SWEEPS_REQUIRE_LIVE (which would refuse both modes).
+  const env = { ...process.env, SUPABASE_DB_URL: '' };
+  delete env.DB_SWEEPS_REQUIRE_LIVE;
+  const printed = spawnSync(process.execPath, [RUNNER], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
   if (printed.status !== 0) throw new Error(`run-sweeps failed (exit ${printed.status}): ${printed.stderr}`);
   const queries = extractQueries(printed.stdout);
   const token = readToken();
@@ -128,7 +131,7 @@ async function main() {
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, `${JSON.stringify(capture, null, 2)}\n`);
   console.log(`\nSaved ${capture.length} packets to ${out} (private: may hold business data).\n`);
-  const verdict = spawnSync(process.execPath, [RUNNER, '--adjudicate', out], { stdio: 'inherit' });
+  const verdict = spawnSync(process.execPath, [RUNNER, '--adjudicate', out], { stdio: 'inherit', env });
   process.exitCode = verdict.status ?? 2;
 }
 

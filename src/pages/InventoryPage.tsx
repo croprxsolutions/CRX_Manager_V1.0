@@ -19,6 +19,7 @@ import { LoadFailedState } from '../components/ui/EmptyState';
 import { exportToCSV } from '../lib/csvExport';
 import { downloadReportPdf } from '../lib/reportPdf';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useActiveWarehouses, warehouseOptions } from '../hooks/useActiveWarehouses';
 import {
   UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE,
   UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE,
@@ -229,6 +230,7 @@ export default function InventoryPage() {
   const [customersLoading, setCustomersLoading] = useState(false);
   const [addProductId, setAddProductId] = useState('');
   const [addLocation, setAddLocation] = useState('Main Warehouse');
+  const activeWarehouses = useActiveWarehouses();
   const [addQty, setAddQty] = useState('');
   const [addUnitSize, setAddUnitSize] = useState('');
   const [addUnitCost, setAddUnitCost] = useState('');
@@ -2077,11 +2079,11 @@ export default function InventoryPage() {
               )}
             </div>
           </div>
-          <Input
+          <Select
             label="Location"
             value={addLocation}
             onChange={(e) => setAddLocation(e.target.value)}
-            placeholder="e.g. Main Warehouse"
+            options={warehouseOptions(activeWarehouses, addLocation).map((name) => ({ value: name, label: name }))}
           />
           <Input
             label="Initial Quantity"

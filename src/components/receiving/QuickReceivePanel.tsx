@@ -26,6 +26,7 @@ import {
 } from '../../hooks/useUncertainMutationIntent';
 import { getIdempotencyMismatchResult } from '../../lib/idempotency';
 import { Sentry } from '../../lib/sentry';
+import { useActiveWarehouses, warehouseOptions } from '../../hooks/useActiveWarehouses';
 import HelpTip from '../ui/HelpTip';
 import { notifyDamagedReceiving } from '../../lib/notificationTriggers';
 import { formatUSD as fmt } from '../../lib/money';
@@ -66,13 +67,6 @@ let keyCounter = 0;
 function nextKey() {
   return `qr_${++keyCounter}`;
 }
-const STORAGE_LOCATIONS = [
-  'Main Warehouse',
-  'Secondary Storage',
-  'Cold Storage',
-  'Field Storage',
-];
-
 const CONDITIONS: { value: ReceivingCondition; label: string }[] = [
   { value: 'good', label: 'Good' },
   { value: 'damaged', label: 'Damaged' },
@@ -113,6 +107,7 @@ export default function QuickReceivePanel() {
   /* ─── step 1 state ─── */
   const [vendor, setVendor] = useState('');
   const [storageLocation, setStorageLocation] = useState('Main Warehouse');
+  const activeWarehouses = useActiveWarehouses();
   const [items, setItems] = useState<QuickReceiveItem[]>([]);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [products, setProducts] = useState<PickerProduct[]>([]);
@@ -132,7 +127,7 @@ export default function QuickReceivePanel() {
   const [matchResults, setMatchResults] = useState<QuickReceiveMatchResult[] | null>(null);
   const [matching, setMatching] = useState(false);
   const [overrides, setOverrides] = useState<Record<string, string>>({}); // productId -> poItemId
-  const [unmatchedActions, setUnmatchedActions] = useState<Record<string, 'over_receive' | 'skip'>>({});
+  const [unmatchedActions, setUnmatchedActions] = useState<Record<string, 'skip'>>({});
 
   /* ─── step 3 / submission ─── */
   const [saving, setSaving] = useState(false);
@@ -457,7 +452,7 @@ export default function QuickReceivePanel() {
       if (unresolvedUnmatched) {
         toast(
           'error',
-          `Choose what to do with the ${unresolvedUnmatched.quantity_unmatched} extra ${unresolvedUnmatched.product_name} unit(s) — over-receive or skip.`,
+          `Confirm skipping the ${unresolvedUnmatched.quantity_unmatched} extra ${unresolvedUnmatched.product_name} unit(s). To receive them, use Receive on the PO page.`,
         );
         return;
       }
@@ -471,9 +466,13 @@ export default function QuickReceivePanel() {
 
         const manualOverride = overrides[match.product_id];
         if (manualOverride) {
+          // Never more than the chosen line has left: Quick Receive never over-receives (KI-85).
+          const chosen = match.allocations.find((allocation) => allocation.po_item_id === manualOverride);
+          const quantity = Math.min(match.quantity_requested, chosen?.po_remaining_before ?? 0);
+          if (quantity <= 0) continue;
           itemsPayload.push({
             po_item_id: manualOverride,
-            quantity: match.quantity_requested,
+            quantity,
             condition: sourceItem.condition,
             lot_number: sourceItem.lot_number || null,
             notes: sourceItem.notes || null,
@@ -489,20 +488,6 @@ export default function QuickReceivePanel() {
               notes: sourceItem.notes || null,
               storage_location: storageLocation,
             });
-          }
-
-          if (match.quantity_unmatched > 0 && unmatchedActions[match.product_id] === 'over_receive') {
-            const lastAllocation = match.allocations[match.allocations.length - 1];
-            if (lastAllocation) {
-              itemsPayload.push({
-                po_item_id: lastAllocation.po_item_id,
-                quantity: match.quantity_unmatched,
-                condition: sourceItem.condition,
-                lot_number: sourceItem.lot_number || null,
-                notes: `Quick Receive over-receive: ${match.quantity_unmatched} extra units`,
-                storage_location: storageLocation,
-              });
-            }
           }
         }
       }
@@ -626,13 +611,14 @@ export default function QuickReceivePanel() {
                 </datalist>
               </div>
               <div>
-                <label className="block text-sm font-medium text-secondary mb-1">Storage Location</label>
+                <label htmlFor="qr-storage-location" className="block text-sm font-medium text-secondary mb-1">Storage Location</label>
                 <select
+                  id="qr-storage-location"
                   value={storageLocation}
                   onChange={(e) => setStorageLocation(e.target.value)}
                   className="min-h-11 w-full px-3 py-2.5 text-base md:text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
-                  {STORAGE_LOCATIONS.map((loc) => (
+                  {warehouseOptions(activeWarehouses, storageLocation).map((loc) => (
                     <option key={loc} value={loc}>
                       {loc}
                     </option>
@@ -984,6 +970,11 @@ export default function QuickReceivePanel() {
                               </div>
                               <span className="text-xs text-secondary">
                                 {alloc.po_remaining_before} remaining
+                                {alloc.po_remaining_before < match.quantity_requested && (
+                                  <span className="block text-amber-700">
+                                    receives {alloc.po_remaining_before}; skips {match.quantity_requested - alloc.po_remaining_before}
+                                  </span>
+                                )}
                               </span>
                             </label>
                           );
@@ -1003,25 +994,7 @@ export default function QuickReceivePanel() {
                                 : `${match.quantity_unmatched} units exceed open PO capacity`}
                             </p>
                             <div className="mt-2 space-y-1.5">
-                              {!allUnmatched && (
-                                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                  <input
-                                    type="radio"
-                                    name={`unmatched_${match.product_id}`}
-                                    value="over_receive"
-                                    checked={unmatchedActions[match.product_id] === 'over_receive'}
-                                    disabled={receiveIntent.isIntentLocked}
-                                    onChange={() =>
-                                      setUnmatchedActions((prev) => ({
-                                        ...prev,
-                                        [match.product_id]: 'over_receive',
-                                      }))
-                                    }
-                                    className="accent-crx-green"
-                                  />
-                                  <span>Over-receive the last matched PO</span>
-                                </label>
-                              )}
+                              {/* Quick Receive never over-receives: that needs an admin and a reason on the PO page. */}
                               <label className="flex items-center gap-2 text-sm cursor-pointer">
                                 <input
                                   type="radio"
@@ -1040,7 +1013,7 @@ export default function QuickReceivePanel() {
                                   }
                                   className="accent-crx-green"
                                 />
-                                <span>{allUnmatched ? 'Skip this product entirely' : 'Skip the extra units'}</span>
+                                <span>{allUnmatched ? 'Skip this product entirely' : 'Skip the extra units (receive them on the PO page)'}</span>
                               </label>
                             </div>
                           </div>
@@ -1066,7 +1039,7 @@ export default function QuickReceivePanel() {
             const blockReason = hasUnresolvedVariance
               ? 'Pick a PO for each price-variance product before continuing.'
               : hasUnresolvedUnmatched
-                ? 'Choose over-receive or skip for each product with extra units before continuing.'
+                ? 'Confirm skipping the extra units for each product before continuing.'
                 : undefined;
             return (
               <div className="flex justify-between">

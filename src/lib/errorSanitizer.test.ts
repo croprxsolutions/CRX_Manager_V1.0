@@ -10,6 +10,11 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'insert or update violates foreign key constraint "product_setup_category_fk"' }))
       .toBe('Choose a category from the product category list');
   });
+  it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
+    const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: every storage_location must name an active warehouse' });
+    expect(message).toContain('not an active warehouse');
+    expect(message).not.toContain('UNKNOWN_STORAGE_LOCATION');
+  });
   // The RAISE text of 20261022087000_job_chemicals_refuse_unpriced_zero_price_line.sql with the product filled in.
   it('explains a CHEM_PRICE_REQUIRED save refusal without the raw token', () => {
     const sentence = "Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter a price for the line (on a quote, the quote line's price), tick Customer supplied if the grower supplied it, or give the product a $0 price if you give it away.";

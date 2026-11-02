@@ -64,6 +64,8 @@ DECLARE
   v_quantity numeric;
   v_updated_at timestamptz;
 BEGIN
+  -- Receiving accepts only an active warehouse (KI-85, 20261102180000).
+  INSERT INTO public.warehouses (name, is_active) VALUES (v_location, true);
   SELECT id INTO v_admin
     FROM public.profiles
    WHERE role = 'admin' AND is_active = true

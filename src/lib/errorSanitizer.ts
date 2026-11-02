@@ -5,6 +5,8 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  // KI-85: stock may be placed only at an active warehouse; nothing was received or added.
+  [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. That location is not an active warehouse. Go back and choose a warehouse from the list'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],
   [/^PRODUCT_CATEGORY_FIELDS_REQUIRED\b/, 'Choose a category status and sort order'],

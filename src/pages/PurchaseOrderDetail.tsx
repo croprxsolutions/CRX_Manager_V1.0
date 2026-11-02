@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, assertRpcResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useActiveWarehouses, warehouseOptions } from '../hooks/useActiveWarehouses';
 import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import {
   UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE,
@@ -150,6 +151,7 @@ export default function PurchaseOrderDetail() {
   const [receiveCleanupFailed, setReceiveCleanupFailed] = useState(false);
   const [receiveItems, setReceiveItems] = useState<Record<string, ReceiveItemState>>({});
   const [storageLocation, setStorageLocation] = useState('Main Warehouse');
+  const activeWarehouses = useActiveWarehouses();
   const [receiveStep, setReceiveStep] = useState<'fill' | 'review'>('fill');
   // Phase 21 — Cleanup G2: over-receive is now opt-in (admin-only) with a required reason.
   // The previous default `p_allow_over_receive: true` produced 15 actual over-receive
@@ -1850,16 +1852,12 @@ export default function PurchaseOrderDetail() {
           <div className="space-y-4">
             {/* Storage location */}
             <div>
-              <label className="block text-sm font-medium text-nav-dark mb-1">Storage Location</label>
+              <label htmlFor="po-storage-location" className="block text-sm font-medium text-nav-dark mb-1">Storage Location</label>
               <Select
+                id="po-storage-location"
                 value={storageLocation}
                 onChange={(e) => setStorageLocation(e.target.value)}
-                options={[
-                  { value: 'Main Warehouse', label: 'Main Warehouse' },
-                  { value: 'Secondary Storage', label: 'Secondary Storage' },
-                  { value: 'Cold Storage', label: 'Cold Storage' },
-                  { value: 'Field Storage', label: 'Field Storage' },
-                ]}
+                options={warehouseOptions(activeWarehouses, storageLocation).map((name) => ({ value: name, label: name }))}
               />
             </div>
 

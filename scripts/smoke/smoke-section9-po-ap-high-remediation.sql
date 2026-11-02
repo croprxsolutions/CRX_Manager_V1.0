@@ -49,6 +49,9 @@ DECLARE
   v_due_date date;
   v_suffix text := substr(md5(random()::text), 1, 8);
 BEGIN
+  -- Receiving accepts only an active warehouse (KI-85, 20261102180000).
+  INSERT INTO public.warehouses (name, is_active) VALUES ('Secondary Warehouse', true)
+  ON CONFLICT (name) DO UPDATE SET is_active = true;
   SELECT id INTO v_admin
   FROM public.profiles
   WHERE role = 'admin' AND is_active = true

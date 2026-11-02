@@ -258,7 +258,7 @@ The normal path is `draft` → `submitted` → `fully_received`, passing through
    - Updates PO status to `partially_received` or `fully_received`
 
 ### Warehouses: only Main Warehouse ships (decision 2026-11-02)
-Crop RX operates from Main Warehouse only; more warehouses are planned, so the `warehouses` table and per-location `inventory` rows are kept on purpose (`docs/manual/DECISION_LOG.md`, 2026-11-02). Deliveries, jobs, blends and holds read and write `location = 'Main Warehouse'` only, and there is no transfer function. Stock received anywhere else cannot ship (KI-85).
+Crop RX operates from Main Warehouse only; more warehouses are planned, so the `warehouses` table and per-location `inventory` rows are kept on purpose (`docs/manual/DECISION_LOG.md`, 2026-11-02). Deliveries, jobs, blends and holds read and write `location = 'Main Warehouse'` only, and there is no transfer function. Receiving (`receive_po_items`) and Add Inventory (`manual_inventory_add`) accept only an active `warehouses` row as the location, and the receiving screens list only those (KI-85, `20261102180000`), so stock can no longer be received somewhere it cannot ship from. Adding a warehouse makes it pickable, so do the checklist below first. Never rename or deactivate the `Main Warehouse` row: receives that send no location (Receiving Hub, the Inventory page, offline sync) default to it and would all be refused.
 
 **Before adding a second warehouse**, ship these three together, or stock received there is stranded:
 1. A way for an admin to add a warehouse to `warehouses`.
@@ -268,6 +268,7 @@ Crop RX operates from Main Warehouse only; more warehouses are planned, so the `
 ### Quick Receive (shortcut)
 - 3-step wizard: select vendor + products -> auto-match to oldest open POs -> confirm
 - Uses `match_quick_receive_items()` RPC to automatically allocate items to the right POs
+- Never over-receives: extra units beyond the open POs are skipped; an admin over-receives on the PO page with a reason. When a product is on several POs at different prices, the PO you pick receives at most what that line has left and the review shows how many are skipped
 - Source: `src/components/receiving/QuickReceivePanel.tsx`
 
 ### Key RPCs

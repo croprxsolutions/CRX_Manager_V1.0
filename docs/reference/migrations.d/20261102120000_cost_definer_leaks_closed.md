@@ -1,5 +1,0 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20261102120000_cost_definer_leaks_closed.sql` (SQL sha256: `f1b79c4a9e8dc3b7c6e077c0d259790a33cb67b50d202f4db72a7a2a1723ec3b`). Changes four owner-rights function bodies so cost reaches admins only (KI-02, KI-74, To-Do 11.3; the 2026-11-02 cost audit report is published once this is applied). No table, grant or data changes; each function body (md5) and exact argument list are pinned before the edit, so nothing can add a second version; after it, a check confirms each change is present and each function still has exactly one version.
-
-Rollback: a reviewed migration restoring the four pinned bodies. Proof: `scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs` (`COST_DEFINER_LEAKS_PROOF_PASS`). Existing inventory notes are not changed (Mason, 2026-11-02).
-
-**Live capture — 2026-11-02 (read-only ledger query for candidate `20261102120000`):** 1091 ledger rows. Effective high-water is `20261102102000` (`product_setup_checks`, recorded as version `20261102155933`); no ledger name contains `cost_definer`, so the candidate follows the high-water. Re-read this before applying.

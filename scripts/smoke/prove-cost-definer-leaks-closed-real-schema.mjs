@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261102120000_cost_definer_leaks_closed (KI-02 / KI-74, To-Do 11.3):
+ * Real-schema proof for 20261102200000_cost_definer_leaks_closed (KI-02 / KI-74, To-Do 11.3):
  * four owner-rights functions stop handing cost to non-admins.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17
@@ -38,7 +38,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1' || REUSE;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261102120000_cost_definer_leaks_closed.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261102200000_cost_definer_leaks_closed.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

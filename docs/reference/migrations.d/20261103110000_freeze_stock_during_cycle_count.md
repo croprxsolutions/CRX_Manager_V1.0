@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, NOT APPLIED when written (2026-11-02).** `20261102234500_freeze_stock_during_cycle_count.sql`.
+**LOCAL CANDIDATE, NOT APPLIED when written (2026-11-02).** `20261103110000_freeze_stock_during_cycle_count.sql`.
 
 Mason's decision (2026-11-02): while a cycle count is open, the warehouse stops shipping and receiving the products being counted. Before this, stock that moved during an open count was counted twice. The count kept the snapshot from the start, the shelf count already included the movement, and completion added the difference on top of the moved stock.
 

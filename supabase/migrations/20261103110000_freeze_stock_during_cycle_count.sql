@@ -433,7 +433,7 @@ BEGIN
    FOR UPDATE OF i;
 
   -- Applying counted - expected on top of stock that moved since the start would count that
-  -- movement twice (20261102234500). expected_qty is numeric(10,2), so compare at that scale.
+  -- movement twice (20261103110000). expected_qty is numeric(10,2), so compare at that scale.
   SELECT p.product_name, cci.expected_qty, i.quantity_available, cc.count_number
     INTO v_moved
     FROM public.cycle_count_items cci

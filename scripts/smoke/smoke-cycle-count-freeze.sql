@@ -1,6 +1,6 @@
 -- CONTAINER ONLY (plants [SMOKE] products and inventory): run through
 -- scripts/smoke/prove-cycle-count-freeze-real-schema.mjs, never against the live database.
--- Covers 20261102234500: an open cycle count freezes on-hand stock of its rows; completion applies
+-- Covers 20261103110000: an open cycle count freezes on-hand stock of its rows; completion applies
 -- the counted quantity once; the freeze lifts on complete and cancel; a stale snapshot is refused.
 -- Always ends in SMOKE_PASS_ROLLBACK (= PASS) or SMOKE_FAIL.
 DO $smoke$

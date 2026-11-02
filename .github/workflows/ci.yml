@@ -459,21 +459,20 @@ jobs:
           VITE_MAPBOX_TOKEN: ${{ secrets.VITE_MAPBOX_TOKEN }}
         run: npm run build
 
-  unit-test-shards:
-    name: Unit Tests (Vitest shard ${{ matrix.shard }} of 3)
+  # 2026-11-01: one Vitest job set the whole CI run's length (7.6 of 9 min). Three
+  # shards run the same files side by side; unit-tests below merges them. These are
+  # plain jobs, not a matrix: a matrix job cancelled before it expands reports a
+  # check under its raw unexpanded name, which no later run replaces, so
+  # the merge gates' newest-run-per-check rule would stay red for that commit.
+  unit-test-shard-1:
+    name: Unit Tests (Vitest shard 1 of 3)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [phase3-private-artifact-containment, ci-scope]
-    # 2026-11-01: one Vitest job set the whole CI run's length (7.6 of 9 min).
-    # Three shards run the same files side by side; unit-tests below merges them.
     if: ${{ needs.phase3-private-artifact-containment.result == 'success' && needs.ci-scope.result == 'success' && needs.ci-scope.outputs.full_ci == 'true' }}
-    strategy:
-      # Report every failing shard in one run rather than cancelling the others.
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-
-    steps:
+    env:
+      VITEST_SHARD: 1
+    steps: &vitest-shard-steps
       - name: Checkout code
         uses: actions/checkout@v7
         with:
@@ -505,22 +504,42 @@ jobs:
         # One shard holds a third of the tests, so its coverage cannot meet the
         # ratchet: these zeros apply here only, and unit-tests enforces the real
         # thresholds from vite.config.ts on the merged total.
-        run: npx vitest run --coverage --shard=${{ matrix.shard }}/3 --reporter=default --reporter=blob --coverage.reporter=text-summary --coverage.thresholds.lines=0 --coverage.thresholds.branches=0 --coverage.thresholds.functions=0 --coverage.thresholds.statements=0
+        run: npx vitest run --coverage --shard=${{ env.VITEST_SHARD }}/3 --reporter=default --reporter=blob --coverage.reporter=text-summary --coverage.thresholds.lines=0 --coverage.thresholds.branches=0 --coverage.thresholds.functions=0 --coverage.thresholds.statements=0
 
       - name: Upload shard results
         uses: actions/upload-artifact@v4
         with:
-          name: vitest-blob-${{ matrix.shard }}
+          name: vitest-blob-${{ env.VITEST_SHARD }}
           path: .vitest/blob
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
 
+  unit-test-shard-2:
+    name: Unit Tests (Vitest shard 2 of 3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [phase3-private-artifact-containment, ci-scope]
+    if: ${{ needs.phase3-private-artifact-containment.result == 'success' && needs.ci-scope.result == 'success' && needs.ci-scope.outputs.full_ci == 'true' }}
+    env:
+      VITEST_SHARD: 2
+    steps: *vitest-shard-steps
+
+  unit-test-shard-3:
+    name: Unit Tests (Vitest shard 3 of 3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [phase3-private-artifact-containment, ci-scope]
+    if: ${{ needs.phase3-private-artifact-containment.result == 'success' && needs.ci-scope.result == 'success' && needs.ci-scope.outputs.full_ci == 'true' }}
+    env:
+      VITEST_SHARD: 3
+    steps: *vitest-shard-steps
+
   unit-tests:
     name: Unit Tests and Coverage (Vitest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [phase3-private-artifact-containment, ci-scope, unit-test-shards]
+    needs: [phase3-private-artifact-containment, ci-scope, unit-test-shard-1, unit-test-shard-2, unit-test-shard-3]
     # Full lane only. The required check below accepts this job as skipped
     # only when the trusted classifier chose the documentation-only route. A
     # failed or cancelled shard also skips this job, which the required check

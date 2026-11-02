@@ -427,7 +427,7 @@ equal(
   equal(gate.indexOf('Bind all prerequisite results') < gate.indexOf('Write exact full-CI proof'), true, 'gate binds part results before writing the proof');
   equal(workflow.split('name: Publish exact full-CI proof').length, 2, 'exactly one job publishes the full-CI proof');
   equal(gate.includes('name: Publish exact full-CI proof'), true, 'the required gate publishes the full-CI proof');
-  for (const id of ['unit-test-shards', 'unit-tests', 'regression-tests']) {
+  for (const id of ['unit-test-shard-1', 'unit-test-shard-2', 'unit-test-shard-3', 'unit-tests', 'regression-tests']) {
     equal(
       jobSlice(id).includes("if: ${{ needs.phase3-private-artifact-containment.result == 'success' && needs.ci-scope.result == 'success' && needs.ci-scope.outputs.full_ci == 'true' }}"),
       true,
@@ -452,10 +452,15 @@ equal(
   // An older trusted-base classifier emits no windows_ci; both fallbacks run Windows.
   equal(workflow.split("echo 'windows_ci=true'").length, 3, 'bootstrap and pre-seeded routes run Windows');
   equal(jobSlice('lint-typecheck-build').includes("if: ${{ needs.phase3-private-artifact-containment.result == 'success' && needs.ci-scope.result == 'success' }}"), true, 'lint/build part runs in both lanes');
-  equal(jobSlice('unit-tests').includes('needs: [phase3-private-artifact-containment, ci-scope, unit-test-shards]'), true, 'unit-tests cannot pass unless every shard passed');
-  equal(jobSlice('unit-test-shards').includes('shard: [1, 2, 3]'), true, 'Vitest runs in three shards');
-  equal(jobSlice('unit-test-shards').includes('--shard=${{ matrix.shard }}/3'), true, 'each shard runs its own third of the files');
-  equal(jobSlice('unit-test-shards').includes('fail-fast: false'), true, 'one failing shard does not hide the others');
+  equal(jobSlice('unit-tests').includes('needs: [phase3-private-artifact-containment, ci-scope, unit-test-shard-1, unit-test-shard-2, unit-test-shard-3]'), true, 'unit-tests cannot pass unless every shard passed');
+  for (const shard of [1, 2, 3]) {
+    equal(jobSlice(`unit-test-shard-${shard}`).includes(`VITEST_SHARD: ${shard}`), true, `shard ${shard} runs its own third of the files`);
+    equal(jobSlice(`unit-test-shard-${shard}`).includes(`name: Unit Tests (Vitest shard ${shard} of 3)`), true, `shard ${shard} has a fixed check name`);
+  }
+  equal(jobSlice('unit-test-shard-1').includes('--shard=${{ env.VITEST_SHARD }}/3'), true, 'the shared steps run the shard that job names');
+  // A matrix job cancelled before it expands reports a check named with the raw
+  // expression. No later run replaces that name, so the merge gates stay red.
+  equal(workflow.includes('matrix'.concat('.')), false, 'no job name depends on a matrix expansion');
   equal(jobSlice('unit-tests').includes('npx vitest run --merge-reports --coverage'), true, 'merged Vitest coverage runs in the unit-tests part');
   equal(jobSlice('unit-tests').includes('find .vitest/blob -type f | wc -l)" -eq 3'), true, 'the merge requires all three shards');
   equal(/--coverage\.thresholds\./.test(jobSlice('unit-tests')), false, 'the real coverage ratchet applies to the merged total');

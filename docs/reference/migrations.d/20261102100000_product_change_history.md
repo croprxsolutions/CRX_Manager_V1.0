@@ -5,3 +5,5 @@ Rollback requires a reviewed migration removing the products trigger, both funct
 The apply gate reads this file as deleting data, because of the word TRUNCATE in the append-only guard and its privilege checks. Nothing is deleted. It needs Mason's own `I approve` for this exact file at apply.
 
 Every product created after apply has a history row and cannot be hard-deleted, so a data clean-up must retire a product, never delete it.
+
+**Live capture — 2026-11-02 13:50 UTC (7:50 AM Central; read-only `list_migrations` for candidate `20261102100000`):** The ledger has 1089 rows. Its effective high-water is `20261101120000`, using the first 14 digits of the recorded name when present and the version otherwise; the highest raw apply-time version is `20261101181836`. No row sits at or after `20261102100000`, and no ledger name contains `change_history`, so the candidate follows the effective high-water. Re-read this before applying.

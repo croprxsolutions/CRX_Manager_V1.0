@@ -6,6 +6,8 @@ import { useToast } from '../ui/Toast';
 import { supabase, checkMutationResult } from '../../lib/db';
 import { isCSVFile } from '../../lib/documentOCR';
 import { Sentry } from '../../lib/sentry';
+import { sanitizeError } from '../../lib/errorSanitizer';
+import { EPA_REGISTRATION_PATTERN } from '../../lib/productBrands';
 import {
   buildProductInsert,
   isProductImportStringField,
@@ -51,7 +53,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [uploadResults, setUploadResults] = useState<{ success: number; failed: number } | null>(null);
+  const [uploadResults, setUploadResults] = useState<{ success: number; failed: number; errors: string[] } | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -124,7 +126,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
 
     for (let i = 1; i < lines.length; i++) {
       const cols = parseCSVLine(lines[i]);
-      if (cols.length > 0 && cols[0]) {
+      if (cols.some((value) => value.trim() !== '')) {
         rows.push(cols);
       }
     }
@@ -182,6 +184,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       rows.forEach((cols, idx) => {
         const product: Partial<ParsedProduct> = {};
         const rowData: Record<string, string> = {};
+        let rateError: string | null = null;
 
         cols.forEach((value, colIdx) => {
           const field = fieldMapping[colIdx];
@@ -191,20 +194,36 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
             if (isProductImportStringField(field)) {
               if (value) product[field] = value;
             } else if (field === 'container_size' || field === 'rate_per_acre') {
-              const num = parseFloat(value);
-              if (!isNaN(num) && num >= 0) {
+              const num = Number(value);
+              if (value !== '' && Number.isFinite(num)) {
                 product[field] = num;
+              } else if (field === 'rate_per_acre' && value !== '') {
+                rateError = 'Rate Per Acre must be a number of zero or greater.';
               }
             }
           }
         });
 
-        if (!product.product_name) {
+        if (!product.product_name?.trim()) {
           invalid.push({
             row: idx + 2,
             error: 'Missing product name',
             data: rowData,
           });
+          return;
+        }
+        if (rateError) {
+          invalid.push({ row: idx + 2, error: rateError, data: rowData });
+          return;
+        }
+
+        if (product.rate_per_acre != null && product.rate_per_acre < 0) {
+          invalid.push({ row: idx + 2, error: 'Rate Per Acre must be zero or greater.', data: rowData });
+          return;
+        }
+        if (product.epa_registration && !EPA_REGISTRATION_PATTERN.test(product.epa_registration.trim())) {
+          invalid.push({ row: idx + 2,
+            error: 'EPA number must look like 524-475 or 100-1234-5905. This checks format only.', data: rowData });
           return;
         }
 
@@ -224,6 +243,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
 
     let success = 0;
     let failed = 0;
+    const errors: string[] = [];
 
     for (const product of validation.valid) {
       const productResult = await supabase.from('products').insert(buildProductInsert(product)).select('id');
@@ -231,13 +251,19 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       if (productResult.error) {
         Sentry.captureException(productResult.error instanceof Error ? productResult.error : new Error(String(productResult.error)), { extra: { context: 'Failed to insert product' } });
         failed++;
+        errors.push(`${product.product_name}: ${sanitizeError(productResult.error)}`);
       } else {
-        try { checkMutationResult(productResult, 'Insert product'); } catch (e) { Sentry.captureException(e instanceof Error ? e : new Error(String(e))); failed++; continue; }
+        try { checkMutationResult(productResult, 'Insert product'); } catch (e) {
+          Sentry.captureException(e instanceof Error ? e : new Error(String(e)));
+          failed++;
+          errors.push(`${product.product_name}: ${sanitizeError(e)}`);
+          continue;
+        }
         success++;
       }
     }
 
-    setUploadResults({ success, failed });
+    setUploadResults({ success, failed, errors });
     setUploading(false);
 
     if (success > 0) {
@@ -367,6 +393,12 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
               Successfully imported {uploadResults.success} product(s)
               {uploadResults.failed > 0 && `, ${uploadResults.failed} failed`}
             </p>
+          </div>
+        )}
+        {uploadResults && uploadResults.errors.length > 0 && (
+          <div className="max-h-40 overflow-y-auto rounded-lg border border-red-200 bg-red-50 p-3" role="status">
+            <p className="text-sm font-medium text-red-800">Products that need a correction</p>
+            {uploadResults.errors.map((error, index) => <p key={index} className="mt-1 text-xs text-red-800">{error}</p>)}
           </div>
         )}
 

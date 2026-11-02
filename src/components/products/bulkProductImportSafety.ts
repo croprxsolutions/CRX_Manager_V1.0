@@ -75,15 +75,15 @@ export function isRetiredPricingColumn(header: string): boolean {
 /** Explicit allowlist: no future ParsedProduct property can be spread into products. */
 export function buildProductInsert(product: ParsedProduct) {
   return {
-    product_name: product.product_name,
-    sku: product.sku,
+    product_name: product.product_name.trim(),
+    sku: product.sku?.trim() || null,
     category: product.category,
     use_timing: product.use_timing,
-    vendor: product.vendor,
-    manufacturer: product.manufacturer,
+    vendor: product.vendor?.trim() || null,
+    manufacturer: product.manufacturer?.trim() || null,
     container_size: product.container_size,
     unit_size: product.unit_size,
-    epa_registration: product.epa_registration,
+    epa_registration: product.epa_registration?.trim() || null,
     suggested_rate: product.suggested_rate,
     rate_per_acre: product.rate_per_acre,
     rate_unit: product.rate_unit,

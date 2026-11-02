@@ -162,4 +162,39 @@ describe('BulkProductImport', () => {
     expect(insert).not.toHaveProperty('tier1_price_per_acre');
     expect(insert).not.toHaveProperty('pricing_version');
   });
+
+  it('trims identity fields and sends blank optional text as NULL', () => {
+    expect(buildProductInsert({
+      product_name: '  Chem  ', sku: '  ', epa_registration: '', vendor: ' ', manufacturer: '  Acme  ',
+    })).toMatchObject({
+      product_name: 'Chem', sku: null, epa_registration: null, vendor: null, manufacturer: 'Acme',
+    });
+  });
+
+  it('shows a plain database refusal for an imported row', async () => {
+    vi.mocked(supabase.from).mockImplementation(() => chainable({
+      data: null,
+      error: { message: 'insert or update on table "products" violates foreign key constraint "product_setup_category_fk"' },
+    }) as unknown as ReturnType<typeof supabase.from>);
+    render(<BulkProductImport {...defaultProps} />);
+    const csv = 'product_name,category\nChem,Unknown';
+    const file = new File([csv], 'products.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText('Valid Products');
+    fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
+    expect(await screen.findByText(/Chem: Choose a category from the product category list/)).toBeInTheDocument();
+  });
+
+  it.each(['-1', 'not-a-number'])('refuses invalid imported Rate Per Acre %s', async (rate) => {
+    render(<BulkProductImport {...defaultProps} />);
+    const csv = `product_name,rate_per_acre\nChem,${rate}`;
+    const file = new File([csv], 'products.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    expect(await screen.findByText(/Row 2: Rate Per Acre must be/)).toBeInTheDocument();
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
 });

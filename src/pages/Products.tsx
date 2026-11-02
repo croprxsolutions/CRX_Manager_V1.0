@@ -16,6 +16,7 @@ import PricingSourceReasonModal, { type PricingSourceReason } from '../component
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult } from '../lib/db';
+import { listProductCategories } from '../lib/productSetup';
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
@@ -26,7 +27,7 @@ import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
-import type { Product, SalesSheetFormat } from '../types';
+import type { Product, ProductCategory, SalesSheetFormat } from '../types';
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
@@ -150,6 +151,7 @@ export default function Products() {
   const [vendorFilter, setVendorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [categories, setCategories] = useState<string[]>([]);
+  const [categoryChoices, setCategoryChoices] = useState<ProductCategory[]>([]);
   const [vendors, setVendors] = useState<string[]>([]);
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false);
@@ -267,6 +269,13 @@ export default function Products() {
   useEffect(() => {
     void fetchProducts();
   }, [fetchProducts]);
+
+  useEffect(() => {
+    listProductCategories().then(setCategoryChoices).catch((error: unknown) => {
+      Sentry.captureException(error);
+      toast('error', 'Could not load product categories. Refresh before editing a category.');
+    });
+  }, [toast]);
 
   const retryProducts = () => {
     setLoading(true);
@@ -500,7 +509,7 @@ export default function Products() {
     { key: 'deactivate', label: 'Deactivate', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeactivateModalOpen(true), variant: 'danger' as const },
   ];
 
-  const categoryOptions = categories.map((c) => ({ value: c, label: c }));
+  const filterCategoryNames = [...new Set([...categories, ...categoryChoices.filter((choice) => choice.is_active).map((choice) => choice.name)])].sort();
   const vendorOptions = vendors.map((v) => ({ value: v, label: v }));
 
   /** Render the one input family selected for this row. The server computes every effect. */
@@ -896,7 +905,19 @@ export default function Products() {
       sortable: true,
       editable: isAdmin,
       editType: 'select',
-      editOptions: categoryOptions,
+      editRender: (row, getCellValue, setCellValue) => (
+        <select aria-label="Category" value={String(getCellValue('category') ?? '')}
+          onChange={(event) => setCellValue('category', event.target.value || null)}
+          disabled={categoryChoices.length === 0}
+          className="w-full rounded border border-gray-200 bg-white px-2 py-1 text-sm text-nav-dark focus-visible:ring-2 focus-visible:ring-crx-green disabled:opacity-50">
+          <option value="">—</option>
+          {categoryChoices.filter((choice) => choice.is_active || choice.name === row.category).map((choice) => (
+            <option key={choice.name} value={choice.name}>
+              {choice.name}{choice.is_active ? '' : ' (retired)'}
+            </option>
+          ))}
+        </select>
+      ),
     },
     {
       key: 'vendor',
@@ -1223,7 +1244,7 @@ export default function Products() {
         >
           <ProductsMobileList
             products={products}
-            categories={categories}
+            categories={filterCategoryNames}
             vendors={vendors}
             categoryFilter={categoryFilter}
             vendorFilter={vendorFilter}
@@ -1296,7 +1317,7 @@ export default function Products() {
                   className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
                   <option value="">All Categories</option>
-                  {categories.map((c) => (
+                  {filterCategoryNames.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
   exportToCSV: vi.fn(),
   downloadReportPdf: vi.fn(),
+  customer: { id: 'c-1', farm_name: 'Smith Farm', assigned_tier: 2 as number | null },
 }));
 
 const activeProduct = {
@@ -95,6 +96,12 @@ vi.mock('../components/products/ProductsMobileList', async () => {
   );
   return { ...actual, default: () => null };
 });
+vi.mock('../components/customers/CustomerSearchPicker', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../components/customers/CustomerSearchPicker')>()),
+  default: ({ onSelect }: { onSelect: (customer: typeof mocks.customer) => void }) => (
+    <button type="button" onClick={() => onSelect(mocks.customer)}>Pick customer</button>
+  ),
+}));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/csvExport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/csvExport')>()),
@@ -116,8 +123,20 @@ function openDownload() {
 }
 
 function salesOption(format: 'PDF' | 'CSV') {
-  const options = screen.getAllByRole('button', { name: 'Sales Sheet (prices only)' });
+  const options = screen.getAllByRole('button', { name: 'Customer Sales Sheet' });
   fireEvent.click(options[format === 'PDF' ? 0 : 1]);
+}
+
+async function finishSalesSheet(format: 'PDF' | 'CSV') {
+  fireEvent.click(await screen.findByRole('button', { name: 'Pick customer' }));
+  fireEvent.click(screen.getByRole('button', { name: `Download ${format}` }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Pick customer' })).not.toBeInTheDocument());
+}
+
+async function downloadSalesSheet(format: 'PDF' | 'CSV') {
+  openDownload();
+  salesOption(format);
+  await finishSalesSheet(format);
 }
 
 function internalOption(format: 'PDF' | 'CSV') {
@@ -129,6 +148,7 @@ describe('Products list and exports', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.role = 'admin';
+    mocks.customer.assigned_tier = 2;
     mocks.products.splice(0, mocks.products.length, activeProduct, inactiveProduct);
     mocks.downloadReportPdf.mockResolvedValue(undefined);
   });
@@ -168,29 +188,46 @@ describe('Products list and exports', () => {
   it('exports only active rows to customer CSV and PDF even when All is selected', async () => {
     await loadProducts();
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'all' } });
-    openDownload();
-    salesOption('CSV');
+    await downloadSalesSheet('CSV');
     const [csvRows, csvColumns, filename] = vi.mocked(exportToCSV).mock.calls[0];
-    expect(csvRows.map((row) => row.id)).toEqual([activeProduct.id]);
-    expect(filename).toBe('product-sales-sheet');
+    expect(csvRows.map((row) => row.product_name)).toEqual([activeProduct.product_name]);
+    expect(csvRows[0].price).toBe(activeProduct.tier2_price);
+    expect(filename).toBe('sales-sheet-smith-farm');
     expect(csvColumns.map((column) => column.key)).toEqual([
-      'product_name', 'sku', 'category', 'vendor', 'container_size', 'unit_size',
-      'tier1_price', 'tier2_price', 'tier3_price',
+      'product_name', 'sku', 'category', 'vendor', 'container_size', 'unit_size', 'price',
     ]);
-    expect(csvColumns.map((column) => column.key).join(' ')).not.toMatch(/cost|margin|notes|is_rup|signal_word|rei_hours|phi_days|product_form|is_active/);
-    expect(mocks.toast).toHaveBeenCalledWith('success', 'Exported 1 product(s) to CSV');
+    expect(JSON.stringify(csvColumns.map((column) => column.header))).not.toMatch(/tier|\bT[123]\b/i);
+    expect(JSON.stringify(csvRows)).not.toMatch(/62\.5|66\.67|tier|cost|margin/i);
+    expect(mocks.toast).toHaveBeenCalledWith('success', 'Downloaded sales sheet for Smith Farm');
 
-    openDownload();
-    salesOption('PDF');
+    await downloadSalesSheet('PDF');
     await waitFor(() => expect(downloadReportPdf).toHaveBeenCalledTimes(1));
     const [pdf] = vi.mocked(downloadReportPdf).mock.calls[0];
-    expect(pdf.data.map((row) => row.id)).toEqual([activeProduct.id]);
-    expect(pdf.subtitle).toMatch(/^1 active product\(s\) — /);
+    expect(pdf.data.map((row) => row.product_name)).toEqual([activeProduct.product_name]);
+    expect(pdf.subtitle).toMatch(/^Prepared for Smith Farm — /);
     expect(pdf.columns.map((column) => column.key)).toEqual([
-      'product_name', 'sku', 'category', 'container_size', 'unit_size',
-      'tier1_price', 'tier2_price', 'tier3_price',
+      'product_name', 'sku', 'category', 'container_size', 'unit_size', 'price',
     ]);
-    expect(pdf.columns.map((column) => column.key).join(' ')).not.toMatch(/cost|margin|notes|is_rup|signal_word|rei_hours|phi_days|product_form|is_active/);
+    expect(JSON.stringify(pdf.columns.map((column) => column.header))).not.toMatch(/tier|\bT[123]\b/i);
+    expect(JSON.stringify(pdf.data)).not.toMatch(/62\.5|66\.67|tier|cost|margin/i);
+  });
+
+  it('uses the price level the customer is assigned', async () => {
+    mocks.customer.assigned_tier = 3;
+    await loadProducts();
+    await downloadSalesSheet('CSV');
+    expect(vi.mocked(exportToCSV).mock.calls[0][0][0].price).toBe(activeProduct.tier3_price);
+  });
+
+  it('refuses a customer with no price level and downloads nothing', async () => {
+    mocks.customer.assigned_tier = null;
+    await loadProducts();
+    openDownload();
+    salesOption('CSV');
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick customer' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Smith Farm has no price level set');
+    expect(screen.getByRole('button', { name: 'Download CSV' })).toBeDisabled();
+    expect(exportToCSV).not.toHaveBeenCalled();
   });
 
   it('adds Status to the end of the internal PDF columns but not the sales sheet PDF', async () => {
@@ -205,8 +242,7 @@ describe('Products list and exports', () => {
     expect(lastInternalColumn).toMatchObject({ header: 'Status', key: 'is_active' });
     expect(lastInternalColumn.format?.(false)).toBe('Inactive');
 
-    openDownload();
-    salesOption('PDF');
+    await downloadSalesSheet('PDF');
     await waitFor(() => expect(downloadReportPdf).toHaveBeenCalledTimes(2));
     const [salesSheet] = vi.mocked(downloadReportPdf).mock.calls[1];
     expect(salesSheet.columns.map((column) => column.key)).not.toContain('is_active');
@@ -219,7 +255,7 @@ describe('Products list and exports', () => {
     salesOption('CSV');
     expect(mocks.toast).toHaveBeenCalledWith('warning', 'No active products to include on the sales sheet.');
     expect(exportToCSV).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'Sales Sheet (prices only)' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Customer Sales Sheet' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Download$/ })).toBeEnabled();
 
     openDownload();
@@ -255,21 +291,19 @@ describe('Products list and exports', () => {
     expect(selectedColumns[selectedColumns.length - 1]?.key).toBe('is_active');
   });
 
-  it('leaves missing customer prices blank while preserving a real zero', async () => {
-    mocks.products.splice(0, mocks.products.length, { ...activeProduct, tier1_price: null, tier2_price: 0 });
+  it('leaves a missing customer price blank while preserving a real zero', async () => {
+    mocks.products.splice(0, mocks.products.length, { ...activeProduct, tier2_price: 0 });
     await loadProducts();
-    openDownload();
-    salesOption('CSV');
+    await downloadSalesSheet('CSV');
+    const [rows, columns] = vi.mocked(exportToCSV).mock.calls[0];
+    const price = columns.find((column) => column.key === 'price');
+    expect(price?.format?.(rows[0].price, rows[0])).toBe('$0.00');
+    expect(price?.format?.(null, rows[0])).toBe('');
+
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
-
-    expect(exportToCSV).toHaveBeenCalledTimes(2);
-    for (const [rows, columns] of vi.mocked(exportToCSV).mock.calls) {
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ tier1_price: null, tier2_price: 0 });
-      expect(columns.find((column) => column.key === 'tier1_price')?.format?.(rows[0].tier1_price, rows[0])).toBe('');
-      expect(columns.find((column) => column.key === 'tier2_price')?.format?.(rows[0].tier2_price, rows[0])).toBe('$0.00');
-    }
+    const [selected, selectedColumns] = vi.mocked(exportToCSV).mock.calls[1];
+    expect(selectedColumns.find((column) => column.key === 'tier2_price')?.format?.(selected[0].tier2_price, selected[0])).toBe('$0.00');
   });
 
   it('leaves missing internal cost blank on both CSV paths', async () => {
@@ -373,9 +407,10 @@ describe('Products list and exports', () => {
     await loadProducts();
     openDownload();
     expect(screen.queryByRole('button', { name: 'Internal (cost + margin)' })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Sales Sheet (prices only)' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Customer Sales Sheet' })).toHaveLength(2);
     salesOption('CSV');
-    expect(vi.mocked(exportToCSV).mock.calls[0][2]).toBe('product-sales-sheet');
+    await finishSalesSheet('CSV');
+    expect(vi.mocked(exportToCSV).mock.calls[0][2]).toBe('sales-sheet-smith-farm');
     expect(downloadReportPdf).not.toHaveBeenCalled();
   });
 

@@ -9,6 +9,18 @@ if ! STAGED_FILES="$(git diff --cached --no-renames --name-only --diff-filter=AC
   exit 1
 fi
 
+# Dependency integrity is relevant only when the dependency contract changed.
+# It runs first so a worktree without node_modules stops here, not after every
+# other step (scripts/precommit-deps-first.test.mjs).
+if printf '%s\n' "$STAGED_FILES" | grep -Eq '^(package(-lock)?\.json|\.nvmrc)$'; then
+  echo "🔗 Verifying dependency integrity..."
+  node scripts/verify-deps.mjs || {
+    echo ""
+    echo "❌ DEPENDENCY PROBLEMS — run npm ci or fix peer ranges before committing."
+    exit 1
+  }
+fi
+
 echo "📒 Checking ledger requirement..."
 node scripts/check-ledger-update.mjs || {
   echo ""
@@ -45,16 +57,6 @@ if printf '%s\n' "$STAGED_FILES" | grep -Eq '^(\.agents/|(\.claude|\.codex)/(hoo
   node scripts/check-agent-workflows.mjs || {
     echo ""
     echo "❌ AGENT WORKFLOW PARITY FAILED — keep the effective Claude/Codex guard sets aligned."
-    exit 1
-  }
-fi
-
-# Dependency integrity is relevant only when the dependency contract changed.
-if printf '%s\n' "$STAGED_FILES" | grep -Eq '^(package(-lock)?\.json|\.nvmrc)$'; then
-  echo "🔗 Verifying dependency integrity..."
-  node scripts/verify-deps.mjs || {
-    echo ""
-    echo "❌ DEPENDENCY PROBLEMS — run npm ci or fix peer ranges before committing."
     exit 1
   }
 fi

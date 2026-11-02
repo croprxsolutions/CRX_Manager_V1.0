@@ -1,5 +1,5 @@
 -- ============================================================================
--- SMOKE TEST (rolled back by design) for 20261102235000_bind_order_replay_receipts_batch4b.
+-- SMOKE TEST (rolled back by design) for 20261103130000_bind_order_replay_receipts_batch4b.
 --
 -- CONTAINER ONLY: run through scripts/smoke/prove-order-replay-binding-batch4b-real-schema.mjs,
 -- never against the live database. The fixtures create rush orders, which draw customer-visible

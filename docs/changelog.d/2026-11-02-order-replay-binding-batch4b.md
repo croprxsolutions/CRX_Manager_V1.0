@@ -1,6 +1,6 @@
 ## 2026-11-02 — replay-binding batch 4b: order pricing, order edits and inventory verification (KI-10)
 
-- New migration `20261102235000_bind_order_replay_receipts_batch4b.sql` (not yet applied): three
+- New migration `20261103130000_bind_order_replay_receipts_batch4b.sql` (not yet applied): three
   functions now hand back a saved retry answer only to the same person for the exact same request —
   `price_order`, `update_order_items` and `mark_inventory_row_verified`. A retry key reused for a
   different order, inventory row, set of prices or order lines is refused with nothing changed,

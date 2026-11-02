@@ -1,5 +1,5 @@
 -- Written 2026-11-02. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261102235000_bind_order_replay_receipts_batch4b.md.
+-- docs/reference/migrations.d/20261103130000_bind_order_replay_receipts_batch4b.md.
 --
 -- WHAT: batch 4b of the system-wide idempotency replay-binding fix (KNOWN_ISSUES.md KI-10, "live
 --   functions replay a saved result matched on the retry key alone"). This cut binds the two order
@@ -100,11 +100,12 @@
 --   * A retry under the same key with a DIFFERENT below-cost reason replays the first answer: the
 --     reason only records the approval of a request that already committed.
 --
--- ORDERING: strict. Live high-water when written: 20261102200000 (PR #1290, ledger 20261102183928),
---   then 20261102180000 (batch 4a, ledger 20261102184730). Open PRs hold 20261102210000 (#1276),
---   20261102220000 (#1289) and 20261102230000; none touches these functions, their implementations
---   or the guard trigger. Renumbered from 20261102220000 to a stamp no open PR holds. Re-read the
---   live ledger before applying.
+-- ORDERING: strict. Live high-water when restamped (read 2026-11-02): 20261103090000 (PR #1300,
+--   ledger 20261102205903); 20261102220000 (PR #1289) is also applied (ledger 20261102203702). The
+--   assigned landing order after that is PR #1276 (20261103100000), Fix 2 (20261103110000), PR #1298
+--   (20261103120000), then this file (20261103130000); none of them touches these functions, their
+--   implementations or the guard trigger. Stamped 20261102220000, then 20261103130000, then this
+--   stamp as the live high-water moved. Re-read the live ledger before applying.
 --
 -- idempotency-body-check: exempt. Every wrapper reads idempotency_keys through
 --   check_idempotency_intent with its own operation literal and writes it through

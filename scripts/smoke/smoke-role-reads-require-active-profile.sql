@@ -121,7 +121,7 @@ BEGIN
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_who, 'role', 'authenticated')::text, true);
     v_err := NULL;
     BEGIN
-      -- Batch 4b (20261102235000) requires a key: every other case sends a fresh one.
+      -- Batch 4b (20261103130000) requires a key: every other case sends a fresh one.
       v_res := public.mark_inventory_row_verified(gen_random_uuid(), NULL,
         CASE WHEN v_case = 'rep_cached' THEN v_key ELSE 'smk-rra-c-' || v_case || '-' || gen_random_uuid()::text END);
     EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;

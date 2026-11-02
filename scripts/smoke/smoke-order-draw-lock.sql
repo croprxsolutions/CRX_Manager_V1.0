@@ -97,7 +97,7 @@ BEGIN
     EXECUTE
       'SELECT public.update_order_items($1, $2, $3, $4, $5)'
       INTO v_result
-      -- Batch 4b (20261102235000) requires a key: a NULL one stands for a fresh call.
+      -- Batch 4b (20261103130000) requires a key: a NULL one stands for a fresh call.
       USING p_order_id, p_items, p_performed_by, coalesce(p_idempotency_key, 'smk-draw-lock-' || gen_random_uuid()::text),
         (SELECT (to_jsonb(o)->>'row_version')::bigint FROM public.orders o WHERE o.id = p_order_id);
     RETURN v_result;

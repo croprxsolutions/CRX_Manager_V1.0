@@ -75,19 +75,23 @@ actionable and report the exact failed or blocked check.
 
 ## Step 3: Vercel — last build status
 
-The Vercel plugin (`vercel@claude-plugins-official`) is **enabled** in `.claude/settings.json`.
-Its tools are connector-scoped and UUID-prefixed, so locate them by name suffix
-(`list_deployments`, `get_deployment`, `get_deployment_build_logs`) rather than by a hard-coded
-prefix — a reinstall rebinds the UUID.
+The Vercel connector is disconnected (2026-11-02, to save tokens). Vercel's GitHub app reports
+every deploy to GitHub, so read it with `gh`:
 
-- `list_deployments` for the croprxsolutions.app project
-- Capture: last deploy status (READY / ERROR / BUILDING), commit SHA, time
-- If status = ERROR, capture the build log excerpt, then check the **production alias** — a
-  failed build usually leaves the previous good deployment still serving production, so a red
-  build is not by itself a production outage.
+```bash
+R=croprxsolutions/CRX_Manager_V1.0
+gh api "repos/$R/deployments?environment=Production%20%E2%80%93%20crx-manager-v1-0&per_page=3" \
+  --jq '.[] | [.id,.sha[0:9],.created_at] | @tsv'
+gh api "repos/$R/deployments/<id>/statuses" --jq '.[0] | [.state,.environment_url,.created_at] | @tsv'
+```
 
-If the tools are not reachable, mark this section UNAVAILABLE and say so; do not assume the
-plugin is disabled.
+- Capture: last production deploy state (`success` / `failure` / `error` / `in_progress`),
+  commit SHA, time (in Central)
+- If it failed, the `target_url` on `gh api "repos/$R/commits/<sha>/status"` links to the
+  Vercel build log for Mason to open; a failed build usually leaves the previous good
+  deployment serving production, so a red build is not by itself a production outage.
+
+If `gh` cannot reach GitHub, mark this section UNAVAILABLE and say so.
 
 ## Step 4: Edge Functions — deploy state
 

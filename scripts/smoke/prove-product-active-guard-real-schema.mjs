@@ -436,6 +436,15 @@ try {
   }
   seed(`UPDATE public.invoice_items SET quantity = 1.00005 WHERE invoice_id = '${uid(1219)}';`);
   assert.deepEqual(preview(thirdsProduct).blockers, []);
+  // Each delivery invoice rounds its own row: 0.33334 twice bills 0.3333 twice, which is fully billed.
+  const perDeliveryProduct = product('[PROVER] PM3 Per Delivery Rounding');
+  const perDelivery = seedOrderLine(perDeliveryProduct, 'PM3-PER-DELIVERY', 'fulfilled', 901);
+  for (const n of [902, 903]) {
+    const deliveryId = seedDelivery(perDelivery.orderId, perDelivery.lineId, perDeliveryProduct, n, false, true);
+    seed(`UPDATE public.delivery_items SET quantity_delivered = 0.33334 WHERE delivery_id = '${deliveryId}';
+      UPDATE public.invoice_items SET quantity = 0.3333 WHERE invoice_id = '${uid(n + 1000)}';`);
+  }
+  assert.deepEqual(preview(perDeliveryProduct).blockers, []);
 
   const quoteProduct = product('[PROVER] PM3 Quotes');
   for (const [status, n] of [['draft', 220], ['sent', 221], ['revised', 222],
@@ -545,8 +554,11 @@ try {
       withActor(ADMIN, `SELECT public.void_delivery('${activeDelivery}', 'PM3 correction', '${ADMIN}', 'pm3-void-active');`);
       assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${activeDelivery}';`), 'voided');
     } else {
-      withActor(ADMIN, `SELECT public.cancel_delivery('${activeDelivery}', 'PM3 correction', '${ADMIN}', 'pm3-cancel-active');`);
-      assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${activeDelivery}';`), 'cancelled');
+      // Since 20261102140000 a completed delivery is voided, never cancelled.
+      denied(ADMIN, `SELECT public.cancel_delivery('${activeDelivery}', 'PM3 correction', '${ADMIN}', 'pm3-cancel-active');`,
+        /DELIVERY_COMPLETED_USE_VOID/);
+      assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${activeDelivery}';`), 'completed');
+      continue;
     }
     assert.equal(scalar(`SELECT quantity_remaining FROM public.order_items WHERE id = '${mixedOrder.lineId}';`), '0');
     assert.equal(scalar(`SELECT status FROM public.orders WHERE id = '${mixedOrder.orderId}';`), 'partially_fulfilled');

@@ -101,7 +101,10 @@ BEGIN
                    WHERE di.order_item_id = oi.id AND d.order_id = o.id
                      AND d.status = 'completed' AND d.deleted_at IS NULL))
                 OR coalesce((
-                  SELECT round(sum(coalesce(di.quantity_delivered, 0)), 4)
+                  -- Delivery invoices round each row; order invoices round the line
+                  -- (_order_invoice_overbilling). Either billing shape counts as fully billed.
+                  SELECT least(sum(round(coalesce(di.quantity_delivered, 0), 4)),
+                               round(sum(coalesce(di.quantity_delivered, 0)), 4))
                     FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
                    WHERE di.product_id = v_product.id AND d.order_id = o.id
                      AND d.status = 'completed' AND d.deleted_at IS NULL

@@ -354,6 +354,8 @@ try {
   assert.equal(roleScalar('authenticated', INACTIVE, "SELECT count(*) FROM public.product_categories;"), '0');
   session(ADMIN, "SELECT public.upsert_product_category(' New   Category ', true, 140, 'proof-inner-space');");
   assert.equal(scalar("SELECT count(*) FROM public.product_categories WHERE name = 'New Category';"), '1');
+  session(ADMIN, "SELECT public.upsert_product_category(E'\\tTabbed Category\\n', true, 141, 'proof-tab-pad');");
+  assert.equal(scalar("SELECT count(*) FROM public.product_categories WHERE name = 'Tabbed Category';"), '1');
   refused("INSERT INTO public.products(product_name, category) VALUES ('Retired category', 'Seed');", /PRODUCT_CATEGORY_RETIRED/);
   refused("UPDATE public.products SET category = 'Seed' WHERE product_name = 'Valid setup row';", /PRODUCT_CATEGORY_RETIRED/);
   psql("UPDATE public.products SET notes = 'still valid' WHERE product_name = 'Seed row';");

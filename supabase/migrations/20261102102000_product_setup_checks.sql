@@ -171,7 +171,7 @@ CREATE FUNCTION public.upsert_product_category(
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
   v_actor uuid := auth.uid();
-  v_name text := regexp_replace(btrim(p_name), '[[:space:]]+', ' ', 'g');
+  v_name text := btrim(regexp_replace(p_name, '[[:space:]]+', ' ', 'g'));
   v_fingerprint text;
   v_replay jsonb;
   v_saved public.product_categories%ROWTYPE;

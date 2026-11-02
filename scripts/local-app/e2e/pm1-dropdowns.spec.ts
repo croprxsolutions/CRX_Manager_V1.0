@@ -95,7 +95,8 @@ test('product page dropdowns show the full list, mark the saved choice, and save
   await vendor.click();
   await page.keyboard.press('ArrowUp');
   const last = await page.getByRole('listbox').getByRole('option').last().innerText();
-  for (let i = 0; i < 40 && (await vendor.getAttribute('aria-activedescendant')) !== await page.getByRole('listbox').getByRole('option').last().getAttribute('id'); i += 1) {
+  const optionCount = await page.getByRole('listbox').getByRole('option').count();
+  for (let i = 0; i < optionCount && (await vendor.getAttribute('aria-activedescendant')) !== await page.getByRole('listbox').getByRole('option').last().getAttribute('id'); i += 1) {
     await page.keyboard.press('ArrowDown');
   }
   await expect(page.getByRole('listbox').getByRole('option').last()).toBeInViewport();

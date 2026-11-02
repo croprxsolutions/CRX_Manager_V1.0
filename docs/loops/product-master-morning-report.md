@@ -1,6 +1,6 @@
 # Product Master: Wave 2 morning report (2026-11-02)
 
-**Status:** 2 drafted (change history; the first half of setup checks), 1 parked, 8 not attempted, of 11. Run: 2026-11-01 21:50 to 04:25 Central. No new package may start after 03:50, so the run ended there, inside the 05:50 wrap (Wave 2, attempt 1).
+**Status:** 3 drafted (change history; turning products off, after your approved rounds 4-6; the first half of setup checks), 0 parked, 8 not attempted, of 11. Run: 2026-11-01 21:50 to 04:25 Central. No new package may start after 03:50, so the run ended there, inside the 05:50 wrap (Wave 2, attempt 1).
 
 **Recommended next step:** land **#1266 (change history)** first. It passed every check, and every other database package in this wave stacks on it. Its live apply needs your own `I approve`, for the reason under "Mason-gated migrations". Its Sol proof stays valid until about 11:15 PM Central tonight (2026-11-02).
 
@@ -9,7 +9,7 @@
 | Package | Status | PR / where |
 |---|---|---|
 | WP-PM-12a Change history | **DRAFTED** | [#1266](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1266) |
-| WP-PM-3 Turning products off safely | **PARKED** (rounds 4 and 5, which you approved, each fixed a Sol HIGH; Sol then found a third) | branch `pm/wp-pm-3-turn-off-safely` at `5d3a5ff10`, on this computer only |
+| WP-PM-3 Turning products off safely | **DRAFTED** after rounds 4-6, which you approved; Sol clean on round 6 | [#1276](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1276), head `86d88007f`; its migration applies after #1266's |
 | WP-PM-8 Setup checks (split: 8a now, 8b later) | **DRAFTED** (8a); 8b not attempted | [#1272](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1272) |
 | WP-PM-9 Forms, units, containers | not attempted (time; needs PM-8) | |
 | DM-0 Data hygiene | not attempted (time; needs PM-8, PM-9) | |
@@ -33,6 +33,7 @@ Each package took about two and a half hours, including three independent review
 ### WP-PM-3 Turning products off safely: PARKED
 - **Update 05:25:** round 4, which you approved, fixed the quantity-increase gap, pinned the inventory function bodies, and made a retired product never show as below reorder. The proof, 7,013 tests and all 24 browser tests passed. Sol then found one new HIGH: two lines of the same product on one order can hide a missing delivery record on one of them. **Next step:** a fifth round checks each line by its own delivery record, if you say yes.
 - **Update 07:05:** round 5, which you approved, fixed that gap. The proof, 7,015 tests and all 25 browser tests passed. Two new high-severity gaps were found. Sol: the database doesn't stop a new stock hold on a turned-off product, and only the screen does. Luna: on an order that is still part-delivered, voiding a delivery can put a turned-off product's line back as owed. **Next step:** a sixth round closes both, if you say yes.
+- **Update 08:15:** round 6, which you approved, closed both gaps. The proof, 7,016 tests and all 25 browser tests passed, and **Sol came back clean**. The three Claude reviewers found no blockers. It is now draft PR [#1276](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1276), with CodeRabbit requested. Its live database update applies after #1266's.
 - **Why:** after the three build rounds the mission allows, Sol found one HIGH. Raising the ordered quantity of a turned-off product on an existing order line is not blocked, and that is a new sale. The guard deliberately left held lines editable, so the one live open order that holds a turned-off product keeps working, and the quantity case slipped through.
 - **Everything else passed:** three independent reviews found 1 BLOCKER and 13 HIGH between them, all fixed and confirmed by a re-review. The database proof passed (including two real sessions racing a deactivation in both orders), 6,996 unit tests passed, and all 24 browser tests passed. In the browser, the row button refuses with the order named, a stock warning is confirmed, and an inactive product is reactivated.
 - **Exact next step (needs your OK for a fourth round):** refuse an *increase* in ordered quantity on order, quote and PO lines for a turned-off product (decreases and other edits stay allowed), add a proof case, rerun Sol, then open the draft PR. The branch stacks on #1266.

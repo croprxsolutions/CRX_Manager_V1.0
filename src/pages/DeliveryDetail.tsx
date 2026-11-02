@@ -1875,7 +1875,7 @@ export default function DeliveryDetail() {
                     setUsePaperTicket(e.target.checked);
                     if (e.target.checked) setSignatureDataUrl(null);
                   }}
-                  className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green-on-dark bg-gray-700"
+                  className="w-4 h-4 rounded border-gray-600 text-crx-green-on-dark focus:ring-crx-green-on-dark bg-gray-700"
                 />
                 Customer signed a paper ticket (no signal at the site)
               </label>
@@ -1941,7 +1941,7 @@ export default function DeliveryDetail() {
                     type="checkbox"
                     checked={emailOnComplete}
                     onChange={(e) => setEmailOnComplete(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-600 text-crx-green focus:ring-crx-green-on-dark bg-gray-700"
+                    className="w-4 h-4 rounded border-gray-600 text-crx-green-on-dark focus:ring-crx-green-on-dark bg-gray-700"
                   />
                   Email delivery receipt to customer
                   <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />

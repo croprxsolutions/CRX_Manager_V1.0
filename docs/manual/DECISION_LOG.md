@@ -10,6 +10,14 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-02 — Keep the multi-warehouse features; only Main Warehouse is used today
+
+**Decision (Mason, in chat):** Crop RX works out of Main Warehouse only today, but other warehouses are planned. The `warehouses` table and per-location stock rows in `inventory` stay, even though the live `warehouses` table holds only Main Warehouse.
+
+**Why.** A Ponytail audit (2026-11-02) found that the receiving screens offer four hard-coded locations, three of which are not in `warehouses`. Deliveries, jobs, blends and holds read and write Main Warehouse only, and no transfer function exists (`record_inventory_transfer` was dropped in `20260311200000`). So stock received elsewhere could never ship. A live check that day found all stock in Main Warehouse, so no data was harmed.
+
+**What this forbids/implies:** cleanup passes must not delete the warehouse list or per-location stock tracking as unused. Receiving must offer only active rows from `warehouses`; until that fix lands, it does not (KI-85). A second warehouse may be added only together with a stock-transfer function and per-warehouse low/negative-stock alerts: see "Before adding a second warehouse" in `docs/workflows/INVENTORY_RULES.md`.
+
 ## 2026-11-01 — Customers see only their own price, and never a tier
 
 **Decision (Mason, in chat):** what a customer is handed shows only the price tier assigned to them, and nothing on it may say Tier 1, 2 or 3. The sales sheet is now made for one chosen customer and shows one "Price" column, from that customer's `assigned_tier`. The printed quote and the year-end customer summary no longer print the tier.

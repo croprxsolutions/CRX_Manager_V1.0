@@ -336,6 +336,9 @@ export function sanitizeError(error: unknown): string {
   if (chemPriceRequired) return `Nothing was saved. ${chemPriceRequired[1].trim()}`;
   const cycleCount = message.match(/^(?:INVENTORY_FROZEN_FOR_CYCLE_COUNT|CYCLE_COUNT_ALREADY_OPEN|CYCLE_COUNT_STOCK_MOVED|CYCLE_COUNT_NO_INVENTORY|CYCLE_COUNT_WAREHOUSE_REQUIRED|CYCLE_COUNT_STATUS_LOCKED|CYCLE_COUNT_LINE_LOCKED):\s*(.+)$/s);
   if (cycleCount) return `Nothing was saved. ${cycleCount[1].trim()}`;
+  if (/^CYCLE_COUNT_REVISION_REQUIRED(?::|$)/.test(message)) {
+    return 'Nothing was saved. This page is out of date. Reload it, then complete the count again.';
+  }
   if (/^INVOICE_POSTED_LOCKED(?::|$)/.test(message)) {
     return 'This invoice was posted, so its lines, billing shares and field locations cannot change. Unpost it first, then edit.';
   }

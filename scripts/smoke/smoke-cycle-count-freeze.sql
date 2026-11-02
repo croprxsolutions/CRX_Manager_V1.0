@@ -126,6 +126,13 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (d) the completion exemption outlived the completion';
   END IF;
 
+  BEGIN
+    UPDATE public.cycle_counts SET status = 'cancelled' WHERE id = v_cc;
+    RAISE EXCEPTION 'SMOKE_FAIL: (d) a completed count was cancelled directly without undoing it';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_STATUS_LOCKED: cycle count CC-% can only be cancelled after completion with Reverse Count%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (d) %', SQLERRM; END IF;
+  END;
+
   -- (e) the freeze lifts on completion.
   PERFORM public.adjust_inventory(i1, 5, 'smoke after count', v_admin, 'smoke-freeze-adj2');
 
@@ -154,6 +161,19 @@ BEGIN
     VALUES ('CC-SMOKE-OLD', 'Main Warehouse', 'in_progress', v_admin) RETURNING id INTO v_cc2;
   INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
     VALUES (v_cc2, p1, i1, 10) RETURNING id INTO v_item;
+  BEGIN
+    UPDATE public.cycle_count_items SET product_id = p2 WHERE id = v_item;
+    RAISE EXCEPTION 'SMOKE_FAIL: (g) the product of an open count line changed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_LINE_LOCKED:%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (g) %', SQLERRM; END IF;
+  END;
+  BEGIN
+    UPDATE public.cycle_count_items SET cycle_count_id = v_cc2 WHERE cycle_count_id = v_cc AND inventory_id = i2;
+    RAISE EXCEPTION 'SMOKE_FAIL: (g) a closed count line was moved into an open count';
+  EXCEPTION WHEN OTHERS THEN
+    -- the older reparent trigger (CYCLE_COUNT_ITEM_REPARENT_FORBIDDEN) may refuse first
+    IF SQLERRM NOT LIKE 'CYCLE_COUNT_LINE_LOCKED:%' AND SQLERRM NOT LIKE 'CYCLE_COUNT_ITEM_REPARENT_FORBIDDEN%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (g) %', SQLERRM; END IF;
+  END;
   PERFORM public.update_cycle_count_item(v_item, 14, NULL, v_admin, 'smoke-freeze-item2');
   SELECT item_revision INTO v_rev FROM public.cycle_counts WHERE id = v_cc2;
   BEGIN

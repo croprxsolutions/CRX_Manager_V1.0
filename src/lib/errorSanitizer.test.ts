@@ -23,6 +23,8 @@ describe('sanitizeError', () => {
     const sentence = 'Atrazine 4L at Main Warehouse is being counted in cycle count CC-2026-00018. Shipping and receiving for it are paused until that count is completed or cancelled.';
     expect(sanitizeError({ code: 'P0001', message: `INVENTORY_FROZEN_FOR_CYCLE_COUNT: ${sentence}` }))
       .toBe(`Nothing was saved. ${sentence}`);
+    expect(sanitizeError({ code: 'P0001', message: 'CYCLE_COUNT_REVISION_REQUIRED: complete_cycle_count requires p_expected_item_revision' }))
+      .toBe('Nothing was saved. This page is out of date. Reload it, then complete the count again.');
   });
 
   it.each(['IN_PROGRESS', 'ISOLATION', 'STALE_CALL'])('explains exhausted %s cutover refusals without raw database tokens', (token) => {

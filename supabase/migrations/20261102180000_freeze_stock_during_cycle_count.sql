@@ -45,9 +45,10 @@
 --    admins can also write those tables directly. Two triggers keep such writes from undoing the
 --    freeze: trg_guard_cycle_count_status refuses (CYCLE_COUNT_STATUS_LOCKED) marking an open
 --    count completed except inside its own Complete Count, and any change out of cancelled or
---    from completed to anything but cancelled (reversal); trg_guard_open_cycle_count_items refuses
+--    from completed to anything but cancelled, and completed -> cancelled unless Reverse Count has
+--    written its ledger rows in the same transaction; trg_guard_open_cycle_count_items refuses
 --    (CYCLE_COUNT_LINE_LOCKED) deleting a line of an open count or changing its expected_qty,
---    inventory_id or cycle_count_id. Entering counted_qty and cancelling stay allowed. The
+--    inventory_id, product_id or cycle_count_id, including moving a line into an open count. Entering counted_qty and cancelling stay allowed. The
 --    one-open-count index compares lower(btrim(warehouse)) so spacing or case cannot dodge it.
 --
 -- Live state 2026-11-02: 17 cycle counts, all cancelled; none in_progress, so nothing is frozen
@@ -155,6 +156,18 @@ BEGIN
   IF OLD.status = 'cancelled' OR (OLD.status = 'completed' AND NEW.status <> 'cancelled') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: cycle count % is % and cannot change to %.', OLD.count_number, OLD.status, NEW.status;
   END IF;
+  -- completed -> cancelled is reversal, which first writes one 'REVERSED cycle count' ledger row
+  -- per adjusted line in this same transaction (created_at = now()); without them it is refused.
+  IF OLD.status = 'completed'
+     AND (SELECT count(*) FROM public.cycle_count_items cci
+           WHERE cci.cycle_count_id = OLD.id AND cci.is_counted AND cci.inventory_id IS NOT NULL
+             AND EXISTS (SELECT 1 FROM public.inventory i WHERE i.id = cci.inventory_id AND i.quantity_available IS NOT NULL)
+             AND cci.variance IS NOT NULL AND cci.variance <> 0)
+       > (SELECT count(*) FROM public.inventory_transactions t
+           WHERE t.transaction_type = 'adjusted' AND t.created_at = now()
+             AND starts_with(t.notes, 'REVERSED cycle count ' || OLD.count_number || ': ')) THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_STATUS_LOCKED: cycle count % can only be cancelled after completion with Reverse Count, which undoes its adjustments.', OLD.count_number;
+  END IF;
   RETURN NEW;
 END;
 $function$;
@@ -179,11 +192,16 @@ DECLARE
 BEGIN
   IF TG_OP = 'UPDATE' AND OLD.expected_qty IS NOT DISTINCT FROM NEW.expected_qty
      AND OLD.inventory_id IS NOT DISTINCT FROM NEW.inventory_id
+     AND OLD.product_id IS NOT DISTINCT FROM NEW.product_id
      AND OLD.cycle_count_id IS NOT DISTINCT FROM NEW.cycle_count_id THEN
     RETURN NEW;
   END IF;
+  -- The new count matters too: moving a line from a closed count into an open one is refused.
   SELECT count_number INTO v_count_number
-    FROM public.cycle_counts WHERE id = OLD.cycle_count_id AND status = 'in_progress';
+    FROM public.cycle_counts
+   WHERE status = 'in_progress'
+     AND (id = OLD.cycle_count_id OR (TG_OP = 'UPDATE' AND id = NEW.cycle_count_id))
+   LIMIT 1;
   IF FOUND THEN
     RAISE EXCEPTION 'CYCLE_COUNT_LINE_LOCKED: lines of open cycle count % cannot be removed or have their expected quantity or product changed. Cancel the count instead.', v_count_number;
   END IF;

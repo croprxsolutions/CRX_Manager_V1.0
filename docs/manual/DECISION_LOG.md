@@ -10,6 +10,14 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-02 — Mason may turn on auto-merge himself; agents still may not
+
+**Decision (Mason, in chat):** "make it where I can enable auto merge on PR work so I don't have to babysit." The repository's "Allow auto-merge" setting is turned on, so the auto-merge toggle on a PR in the Claude app works. Only Mason turns it on.
+
+**Why.** Waiting for checks to finish before merging meant watching every PR. Once auto-merge is armed, GitHub merges as soon as its required checks (Vercel, lint/type-check/test/build, SQL migration validation) pass. It does not wait for a Sol proof, the Codex GitHub App's comments, a review that asks for changes, or checks GitHub does not require. Arming it is therefore Mason's own decision, made per PR.
+
+**What this forbids/implies:** `pr-merge-guard.mjs` refuses an agent turning auto-merge on (`gh pr merge --auto`, the app's `set_auto_merge` tool, or the GraphQL `enablePullRequestAutoMerge` mutation). Agents may turn it off. Agent merges keep every gate in `.claude/commands/ship.md`. Mason should arm it after the agent reports the PR ready (Sol clean where the Sol list needs it); a commit pushed after he arms it lands on green checks alone.
+
 ## 2026-11-02 — Keep the multi-warehouse features; only Main Warehouse is used today
 
 **Decision (Mason, in chat):** Crop RX works out of Main Warehouse only today, but other warehouses are planned. The `warehouses` table and per-location stock rows in `inventory` stay, even though the live `warehouses` table holds only Main Warehouse.

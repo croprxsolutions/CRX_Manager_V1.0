@@ -22,7 +22,7 @@ test('blocked order, stock warning, and admin reactivation', async ({ page }) =>
   // An order line needs a cost basis, which only the governed pricing review sets.
   await page.goto(`/products/${seeded.held.id}`);
   await page.getByLabel('Pricing mode', { exact: true }).selectOption('margin_driven');
-  await page.locator('#product-current-cost').fill('80');
+  await page.locator('#product-current-cost').fill('50');
   for (const box of ['#tier1-net-margin', '#tier2-net-margin', '#tier3-net-margin']) {
     await page.locator(box).pressSequentially('20', { delay: 40 });
   }
@@ -44,15 +44,18 @@ test('blocked order, stock warning, and admin reactivation', async ({ page }) =>
       p_order_date: new Date().toISOString().slice(0, 10),
       p_order_name: `PM3-${suffix}`,
       p_items: [{ product_id: held.id, product_name: held.product_name,
-        quantity: 1, price_per_unit: 100, unit_cost: 80, unit_size: 'gal' }],
+        quantity: 1, price_per_unit: 62.5, unit_cost: 50, unit_size: 'gal' }],
       p_performed_by: actor,
       p_idempotency_key: `pm3-e2e-order-${suffix}`,
     });
     if (order.error || !order.data?.order_id) throw new Error(order.error?.message ?? 'order seed failed');
     const savedOrder = await supabase.from('orders').select('order_number').eq('id', order.data.order_id).single();
     if (savedOrder.error || !savedOrder.data) throw new Error(savedOrder.error?.message ?? 'order read failed');
-    const balance = await supabase.from('inventory').insert({ product_id: stock.id,
-      location: `PM3-${suffix}`, quantity_available: 2 });
+    const balance = await supabase.rpc('manual_inventory_add', {
+      p_product_id: stock.id, p_location: `PM3-${suffix}`, p_quantity: 2,
+      p_performed_by: actor, p_notes: 'Turn-off proof stock', p_unit_cost: 1,
+      p_idempotency_key: `pm3-e2e-stock-${suffix}`,
+    });
     if (balance.error) throw new Error(balance.error.message);
     return { held, stock, orderNumber: savedOrder.data.order_number };
   }, seeded);
@@ -62,12 +65,12 @@ test('blocked order, stock warning, and admin reactivation', async ({ page }) =>
   await heldRow.getByRole('button', { name: 'Deactivate' }).click();
   await expect(page.getByRole('dialog')).toContainText(fixture.orderNumber);
   await expect(page.getByRole('dialog').getByRole('button', { name: 'Deactivate' })).toHaveCount(0);
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).last().click();
 
   await heldRow.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Deactivate' }).first().click();
   await expect(page.getByRole('dialog')).toContainText(fixture.orderNumber);
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).last().click();
 
   const stockRow = page.locator('tr').filter({ hasText: fixture.stock.product_name });
   await stockRow.getByRole('button', { name: 'Deactivate' }).click();

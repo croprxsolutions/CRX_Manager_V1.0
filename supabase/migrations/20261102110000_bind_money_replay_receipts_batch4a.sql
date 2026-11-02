@@ -111,10 +111,10 @@
 --   * The fingerprint covers the arguments as sent. save_field_app_invoice's non-admin chemical cost
 --     is replaced by the server inside the body; the replaced value is not part of the request.
 --
--- ORDERING: strict. Live high-water when written: ledger 20261102144057 (20261102100000). Numbered
---   above the two open, unapplied candidates 20261102101000 (PR #1276) and 20261102102000 (PR #1272),
---   neither of which touches these functions or the guard trigger. Re-read the live ledger before
---   applying.
+-- ORDERING: strict. Live high-water when written: ledger 20261102144057 (20261102100000); then
+--   20261102102000 (PR #1272) applied as ledger 20261102155933. Numbered above it and the open
+--   candidate 20261102101000 (PR #1276); neither touches these functions or the guard trigger.
+--   Re-read the live ledger before applying.
 --
 -- idempotency-body-check: exempt. Every wrapper reads idempotency_keys through
 --   check_idempotency_intent with its own operation literal and writes it through

@@ -96,8 +96,8 @@ BEGIN
   VALUES ('[SMOKE] Money Replay Farm B ' || v_suffix, '[SMOKE]-MRB4A-B-' || v_suffix)
   RETURNING id INTO v_customer_b;
   -- A pricing-free shell (pricing goes only through the governed path); every line sets its price.
-  INSERT INTO public.products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Money Replay Product ' || v_suffix, 'GL', '[SMOKE]-EPA-MRB4A-' || v_suffix, 'liquid')
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[SMOKE] Money Replay Product ' || v_suffix, 'GL', 'liquid')
   RETURNING id INTO v_product;
   -- Its cost and tier prices go through the governed preview -> approve -> apply path.
   v_pricing := public.preview_product_cost_basis_changes('product_page', NULL,

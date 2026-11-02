@@ -13,6 +13,7 @@ import ProductSellPriceHistory from '../components/products/ProductSellPriceHist
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
+import ProductStockCard from '../components/products/ProductStockCard';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -1610,6 +1611,7 @@ export default function ProductDetail() {
 
         {!isNew && id && (
           <div className="space-y-4">
+            <ProductStockCard key={id} productId={id} isActive={product.is_active !== false} />
             {isAdmin && (
               <Card>
                 <CardHeader title="Select" accent="Cost Basis" />

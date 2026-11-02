@@ -1,5 +1,5 @@
 import { useEffect, useState , useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Package, ArrowDownToLine, Pencil, Plus, AlertTriangle, ChevronDown, ChevronUp, Trash2, Download, FileText, TrendingUp, ShoppingCart } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -82,6 +82,9 @@ function inventoryIntentErrorMessage(error: unknown): string {
 
 export default function InventoryPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const hasProductFilter = searchParams.has('product');
+  const productIdFilter = searchParams.get('product');
   const { role, profile } = useAuth();
   const receivePoIntent = useUncertainMutationIntent<{
     items: Array<{ po_item_id: string; quantity: number }>;
@@ -245,6 +248,10 @@ export default function InventoryPage() {
   // Batch adjust
   const [batchAdjustOpen, setBatchAdjustOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [productIdFilter]);
 
   // Delete confirm modal
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -1154,10 +1161,14 @@ export default function InventoryPage() {
   };
 
   const filtered = inventory.filter((i) => {
+    if (hasProductFilter && i.product_id !== productIdFilter) return false;
     if (locationFilter && i.location !== locationFilter) return false;
     if (reorderFilter && !i.is_low_stock) return false;
     return true;
   });
+  const selectedProductName = productIdFilter
+    ? inventory.find((item) => item.product_id === productIdFilter)?.product_name
+    : undefined;
   const mobileFiltered = filtered.filter((item) =>
     item.product_name.toLowerCase().includes(mobileSearch.trim().toLowerCase())
   );
@@ -1481,7 +1492,7 @@ export default function InventoryPage() {
 
 
       {/* Hidden after a failed read, where every total would read 0 */}
-      {!inventoryFailed && (
+      {!inventoryFailed && !hasProductFilter && (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3 sm:gap-4">
         {summaryCards.map((c) => (
           <Card key={c.label}>
@@ -1500,7 +1511,7 @@ export default function InventoryPage() {
       )}
 
       {/* Enhanced Reorder Alerts — grouped by vendor */}
-      {(() => {
+      {!hasProductFilter && (() => {
         const lowStockItems = inventory.filter((i) => i.is_low_stock);
         if (lowStockItems.length === 0) return null;
 
@@ -1585,6 +1596,26 @@ export default function InventoryPage() {
         );
       })()}
 
+      {hasProductFilter && (
+        <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2">
+          <p className="text-sm text-secondary" role="status">
+            Showing one product{selectedProductName ? `: ${selectedProductName}` : ''}
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-11 shrink-0"
+            onClick={() => setSearchParams((current) => {
+              current.delete('product');
+              return current;
+            })}
+          >
+            Show all
+          </Button>
+        </div>
+      )}
+
       <Card padding={false}>
         <div className="border-b border-gray-100 p-3 md:hidden">
           <label htmlFor="inventory-mobile-search" className="sr-only">Search products</label>
@@ -1641,6 +1672,7 @@ export default function InventoryPage() {
 
         <div className="hidden p-5 md:block">
           <EditableDataTable<InventoryRow>
+            key={productIdFilter ?? 'all'}
             data={filtered}
             columns={columns}
             rowKey="id"
@@ -1678,7 +1710,7 @@ export default function InventoryPage() {
                   Needs Reorder
                   {(() => {
                     const count = inventory.filter((i) => i.is_low_stock).length;
-                    return count > 0 ? (
+                    return !hasProductFilter && count > 0 ? (
                       <span className={`ml-1.5 px-1.5 py-0.5 text-xs rounded-full ${
                         reorderFilter ? 'bg-red-200 text-red-800' : 'bg-red-100 text-red-600'
                       }`}>

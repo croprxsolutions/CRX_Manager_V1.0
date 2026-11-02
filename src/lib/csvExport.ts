@@ -1,6 +1,6 @@
 import { localToday, parseLocalDate } from './dateUtils';
 
-const FORMULA_LEADING_CHAR = /^[=+\-@\t\r]/;
+const FORMULA_LEADING_CHAR = /^[=+\-@\t\r\n]/;
 
 function quoteCsv(value: string): string {
   const safeValue = FORMULA_LEADING_CHAR.test(value) ? `'${value}` : value;

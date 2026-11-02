@@ -80,13 +80,18 @@ describe('formatCSVCell', () => {
     expect(formatCSVCell('@cmd')).toBe('"\'@cmd"');
   });
 
-  it('neutralizes tab and carriage-return leading values', () => {
+  it('neutralizes tab, carriage-return, and line-feed leading values', () => {
     expect(formatCSVCell('\t=SUM(A1:A2)')).toBe('"\'\t=SUM(A1:A2)"');
     expect(formatCSVCell('\r=SUM(A1:A2)')).toBe('"\'\r=SUM(A1:A2)"');
+    expect(formatCSVCell('\n=SUM(A1:A2)')).toBe('"\'\n=SUM(A1:A2)"');
   });
 
   it('escapes quotes after neutralizing values', () => {
     expect(formatCSVCell('="hello"')).toBe('"\'=""hello"""');
+  });
+
+  it('keeps a product name with a comma and quote safe when it starts like a formula', () => {
+    expect(formatCSVCell('=Grower, "Special"')).toBe('"\'=Grower, ""Special"""');
   });
 });
 

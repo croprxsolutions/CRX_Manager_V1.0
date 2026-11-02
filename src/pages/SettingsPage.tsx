@@ -624,15 +624,18 @@ export default function SettingsPage() {
   // #40/#41: persist the changed notice templates. Subject + body must all be non-blank
   // (a blank template would email an empty notice).
   const saveNoticeTemplates = async () => {
-    if (!preNoticeTemplate.subject.trim() || !preNoticeTemplate.body.trim()) {
+    const changed = changedKeys('notices');
+    // Only the templates being saved are checked, as when each had its own Save.
+    if (changed.includes('pre_application_notice_template')
+      && (!preNoticeTemplate.subject.trim() || !preNoticeTemplate.body.trim())) {
       toast('error', 'The pre-notification subject and message cannot be blank.');
       return;
     }
-    if (!postNoticeTemplate.subject.trim() || !postNoticeTemplate.body.trim()) {
+    if (changed.includes('post_application_notice_template')
+      && (!postNoticeTemplate.subject.trim() || !postNoticeTemplate.body.trim())) {
       toast('error', 'The post-notification subject and message cannot be blank.');
       return;
     }
-    const changed = changedKeys('notices');
     setSavingNotices(true);
     // Each template saves on its own, so one that saved is marked and logged even if the other fails.
     const results = await Promise.allSettled(changed.map((key) => saveSetting(key, values[key])));
@@ -804,11 +807,16 @@ export default function SettingsPage() {
   const pagesGranted = editingUser && editRole !== 'admin'
     ? (editingUser.denied_pages || []).filter((key) => !editDeniedPages.includes(key)).length
     : 0;
+  const pagesRemoved = editingUser && editRole !== 'admin'
+    ? editDeniedPages.filter((key) => !(editingUser.denied_pages || []).includes(key)).length
+    : 0;
   const editWarnings = editingUser ? [
     editRole !== editingUser.role
       && `Change ${editName}'s role from ${ROLE_LABELS[editingUser.role]} to ${ROLE_LABELS[editRole]}; the pages they can open change with it.`,
     editRole === editingUser.role && pagesGranted > 0
       && `Give ${editName} access to ${pagesGranted} more page${pagesGranted === 1 ? '' : 's'}.`,
+    editRole === editingUser.role && pagesRemoved > 0
+      && `Remove ${editName}'s access to ${pagesRemoved} page${pagesRemoved === 1 ? '' : 's'}.`,
     editIsActive && !editingUser.is_active
       && `Reactivate ${editName}: they will be able to sign in again.`,
     !editIsActive && editingUser.is_active

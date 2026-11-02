@@ -950,6 +950,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["3c1f93e2a1fe90b8e8aad9145f981904906116fae175696eecd9dce1b2061ed8", "audit-log-completeness.sql"],
   ["5c49a1f5d8afca87439cf87fc1a74ffebaa38de68cb5eb1790109fc0a8dce1e6", "auth-bound-role-ungated.sql"],
   ["c9a03c9a022912fdbf263251f3ec48155cf49259cf097f23a3daf28d445d4a54", "commission-admin-active.sql"],
+  ["8a84f68c552dd6dfe98f2614febcfc0b34dfb3e581c97674229a9c5c4ae9b805", "cost-exposure-review.sql"],
   ["c769b15bf97485e4d8b1d7457a8ed9a726627a57ec1c16c06c198308d8984f0d", "dispatch-sync-nonqualifying-profile.sql"],
   ["b15716e33a3061f3ebced1eb6b4ca20b90ec53c5967f4a34531ec8e56088ff08", "fin-allocations-bounded.sql"],
   ["61e703c79b85374001fd80719e0faa00bda1b5f899cb66d5cd4b04ba5a1693b6", "fin-ar-statement-balance.sql"],

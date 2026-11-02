@@ -15,6 +15,8 @@ import {
   migrationTimestamp,
   hasIntentionalReplayMarker,
   checkMigrationOrdering,
+  checkLiveMigrationOrdering,
+  ledgerRowsToNames,
 } from "./migration-ordering-lib.mjs";
 
 let passed = 0;
@@ -284,5 +286,56 @@ check("the band is refused against the COMMITTED registry's applied names", () =
     `newest applied stamp ${res.newestApplied} must cover the 2026-09-15 apply of 20260908130000`
   );
 });
+
+// ---------------------------------------------------------------------------
+// checkLiveMigrationOrdering — the 2026-11-02 out-of-order apply. A peer applied
+// 20261102200000 after this checkout's snapshot; 20261102180000 then passed the
+// snapshot-based gate. The live re-read must refuse it.
+// ---------------------------------------------------------------------------
+const liveLedger = [
+  { version: "20261102174004", name: "20261102140000_completed_delivery_cancel_requires_void" },
+  { version: "20261102183928", name: "20261102200000_cost_definer_leaks_closed" },
+  { version: "20250101000000", name: "initial_schema" },
+];
+const fakeFetch = (body, status = 200) => async () => ({ ok: status < 400, status, json: async () => body });
+const live = (fetchImpl, name, sql = "SELECT 1;") =>
+  checkLiveMigrationOrdering({ fetchImpl, projectId: "p", token: "t", name, sql });
+
+const behind = await live(fakeFetch(liveLedger), "20261102180000_bind_money_replay_receipts_batch4a");
+assert.equal(behind.ok, false, "a migration below the LIVE high-water is refused");
+assert.match(behind.reason, /LIVE MIGRATION ORDERING GUARD/);
+assert.match(behind.reason, /20261102200000/);
+passed += 1;
+
+const ahead = await live(fakeFetch(liveLedger), "20261102210000_next");
+assert.equal(ahead.ok, true, "a migration above the live high-water passes");
+assert.equal(ahead.newestApplied, "20261102200000");
+assert.equal(ahead.count, 3);
+passed += 1;
+
+const replay = await live(fakeFetch(liveLedger), "20261102180000_x",
+  "-- ordering-guard: intentional-replay restoring an index dropped by hand\nSELECT 1;");
+assert.equal(replay.ok, true, "the same intentional-replay marker still works live");
+passed += 1;
+
+assert.equal((await live(fakeFetch(null, 503), "20261102210000_next")).ok, false, "a failed live read refuses");
+assert.equal((await live(fakeFetch([]), "20261102210000_next")).ok, false, "an empty live ledger refuses");
+assert.equal((await live(async () => { throw new Error("offline"); }, "20261102210000_next")).ok, false,
+  "a network error refuses");
+passed += 1;
+
+assert.deepEqual(ledgerRowsToNames([{ version: "20250101000000", name: "initial_schema" }, "x", {}]),
+  ["20250101000000_initial_schema", "x"], "a timestamp-less row keeps its version as the ordering signal");
+passed += 1;
+
+// The apply script must run the live re-check BEFORE it transmits the migration.
+{
+  const script = readFileSync(new URL("../../scripts/apply-migration-file.mjs", import.meta.url), "utf8");
+  const call = script.indexOf("await checkLiveMigrationOrdering(");
+  const send = script.indexOf("Transmitting ${");
+  assert.ok(call > 0, "apply-migration-file.mjs calls checkLiveMigrationOrdering");
+  assert.ok(call < send, "the live re-check runs before transmission");
+  passed += 1;
+}
 
 console.log(`migration-ordering-lib: ${passed} assertions passed`);

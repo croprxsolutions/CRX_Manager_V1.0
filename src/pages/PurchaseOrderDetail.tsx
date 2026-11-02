@@ -1951,6 +1951,7 @@ export default function PurchaseOrderDetail() {
               </Button>
               <Button
                 onClick={() => setReceiveStep('review')}
+                showChevron
                 disabled={reviewItems.length === 0}
               >
                 Review ({reviewItems.length} item{reviewItems.length !== 1 ? 's' : ''})

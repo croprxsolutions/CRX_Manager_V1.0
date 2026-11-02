@@ -37,7 +37,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       size = 'md',
       loading = false,
       icon,
-      showChevron,
+      showChevron = false,
       children,
       className = '',
       disabled,
@@ -45,8 +45,6 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
-    const isChevron = showChevron ?? variant === 'primary';
-
     return (
       <button
         ref={ref}
@@ -65,7 +63,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         {loading && <Loader2 className="w-4 h-4 animate-spin" />}
         {!loading && icon}
         <span>{children}</span>
-        {isChevron && !loading && <ChevronRight className="w-4 h-4" />}
+        {showChevron && !loading && <ChevronRight className="w-4 h-4" />}
       </button>
     );
   }

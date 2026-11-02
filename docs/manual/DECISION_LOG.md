@@ -12,9 +12,9 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 ## 2026-11-01 — A product with saved prices opens price-driven
 
-**Decision (WP-PM-2, option a of the build sheet, as the mission's Wave 1 scope sets it).** The pricing mode is not stored. A product with all three prices saved opens price-driven, on the product page and in the list, whether or not its margins are saved too. A product with no prices and all three margins opens margin-driven. A partly priced product, or one with neither, opens with no mode, so someone chooses before a cost change can rewrite a saved price.
+**Decision:** The pricing mode is not stored, so a product opens price-driven when all three prices are saved, even if margins are saved too; margin-driven when it has no prices and all three margins; and with no mode otherwise.
 
-**Why.** Prices are the customer-facing number, and this default changes nothing until someone edits. Option b, storing the last-used mode, needs a column and a grant on `products`, which is a Mason-gated migration.
+**Why.** This is WP-PM-2 option a of the build sheet, as the mission's Wave 1 scope sets it. Prices are the customer-facing number, and this default changes nothing until someone edits. A partly priced product, or one with neither, opens with no mode, so someone chooses before a cost change can rewrite a saved price. Option b, storing the last-used mode, needs a column and a grant on `products`, which is a Mason-gated migration.
 
 **What this forbids/implies:** a cost change on a product whose margins used to set its prices now starts on "keep prices", so its margins move unless someone switches the mode. The preview still shows every result before Apply. A change to this default is a new entry here.
 

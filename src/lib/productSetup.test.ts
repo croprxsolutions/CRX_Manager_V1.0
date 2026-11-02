@@ -20,11 +20,11 @@ describe('product setup validation and options', () => {
 
   it('trims text, saves empty optional text as NULL, and keeps whole intervals', () => {
     const source: Partial<Product> = {
-      product_name: '  Chem  ', sku: '   ', epa_registration: '  ', vendor: '', manufacturer: '  ',
+      product_name: '  Chem  ', category: ' ', sku: '   ', epa_registration: '  ', vendor: '', manufacturer: '  ',
     };
     expect(productSetupValidationMessage(source, '12', '0')).toBeNull();
     expect(normalizedProductSetup(source, '12', '0')).toMatchObject({
-      product_name: 'Chem', sku: null, epa_registration: null, vendor: null,
+      product_name: 'Chem', category: null, sku: null, epa_registration: null, vendor: null,
       manufacturer: null, rei_hours: 12, phi_days: 0,
     });
   });

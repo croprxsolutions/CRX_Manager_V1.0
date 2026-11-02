@@ -61,6 +61,7 @@ export function normalizedProductSetup(
   const normalized: Partial<Product> = {
     ...product,
     product_name: product.product_name?.trim() ?? '',
+    category: product.category?.trim() || null,
     sku: product.sku?.trim() || null,
     epa_registration: product.epa_registration?.trim() || null,
     vendor: product.vendor?.trim() || null,
@@ -72,6 +73,7 @@ export function normalizedProductSetup(
   return {
     ...normalized,
     product_name: keepUnchanged(product.product_name, persisted.product_name, normalized.product_name),
+    category: keepUnchanged(product.category, persisted.category, normalized.category),
     sku: keepUnchanged(product.sku, persisted.sku, normalized.sku),
     epa_registration: keepUnchanged(product.epa_registration, persisted.epa_registration, normalized.epa_registration),
     vendor: keepUnchanged(product.vendor, persisted.vendor, normalized.vendor),

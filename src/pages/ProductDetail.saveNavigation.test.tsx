@@ -185,5 +185,8 @@ describe('ProductDetail — leaving a new product', () => {
     expect(container).toHaveValue('');
     expect(inventory).toHaveValue('Lb');
     expect(rate).toHaveValue('Lb');
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    expect(inventory).toHaveValue('');
+    expect(rate).toHaveValue('Lb');
   });
 });

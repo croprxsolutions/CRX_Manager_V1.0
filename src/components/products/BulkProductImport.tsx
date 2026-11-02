@@ -59,7 +59,7 @@ function validateImportRow(
     if (!field) return;
     data[field] = value;
     if (isProductImportStringField(field)) {
-      if (value) product[field] = value;
+      if (value.trim()) product[field] = value;
     } else if (field === 'container_size' || field === 'rate_per_acre') {
       const trimmed = value.trim();
       if (!trimmed) return;

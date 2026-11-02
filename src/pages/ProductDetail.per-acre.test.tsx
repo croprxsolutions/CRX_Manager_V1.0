@@ -4,7 +4,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+
+const mockSavedForm = vi.hoisted(() => ({ value: 'liquid' as 'liquid' | 'dry' | null }));
 
 vi.mock('../lib/db', () => {
   const mockProduct = {
@@ -53,7 +55,7 @@ vi.mock('../lib/db', () => {
     ];
     for (const m of methods) builder[m] = vi.fn(self);
     builder.maybeSingle = vi.fn(() => {
-      _resolve = { data: mockProduct, error: null };
+      _resolve = { data: { ...mockProduct, product_form: mockSavedForm.value }, error: null };
       return builder;
     });
     builder.then = vi.fn((resolve: (v: unknown) => void) => {
@@ -122,6 +124,7 @@ import ProductDetail from './ProductDetail';
 describe('ProductDetail — per-acre price display', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSavedForm.value = 'liquid';
   });
 
   it('shows the corrected per-acre price under each tier', async () => {
@@ -143,5 +146,19 @@ describe('ProductDetail — per-acre price display', () => {
     expect(container).toHaveTextContent('jug (existing)');
     const inventory = screen.getByText('Inventory Unit').parentElement!.querySelector('select');
     expect(inventory).toBeDisabled();
+    expect(inventory).toHaveTextContent('gal (existing)');
+  });
+
+  it('keeps saved units and the rate unit when a first form is chosen', async () => {
+    mockSavedForm.value = null;
+    render(<ProductDetail />);
+    const form = await screen.findByLabelText('Product Form');
+    const container = screen.getByLabelText('Unit');
+    const inventory = screen.getByText('Inventory Unit').parentElement!.querySelector('select');
+    const rate = screen.getByText('Rate Unit').parentElement!.querySelector('select');
+    fireEvent.change(form, { target: { value: 'dry' } });
+    expect(container).toHaveValue('jug');
+    expect(inventory).toHaveValue('gal');
+    expect(rate).toHaveValue('oz');
   });
 });

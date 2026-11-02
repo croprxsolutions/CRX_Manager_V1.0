@@ -235,4 +235,20 @@ describe('BulkProductImport', () => {
       container_size: undefined, rate_per_acre: undefined,
     }));
   });
+
+  it('treats whitespace-only category and EPA cells as blank', async () => {
+    render(<BulkProductImport {...defaultProps} />);
+    const csv = 'product_name,category,epa_registration\nChem,   ,   ';
+    const file = new File([csv], 'products.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText('Valid Products');
+    fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
+    await waitFor(() => expect(supabase.from).toHaveBeenCalledWith('products'));
+    const builder = vi.mocked(supabase.from).mock.results[0]?.value;
+    expect(builder.insert).toHaveBeenCalledWith(expect.objectContaining({
+      category: null, epa_registration: null,
+    }));
+  });
 });

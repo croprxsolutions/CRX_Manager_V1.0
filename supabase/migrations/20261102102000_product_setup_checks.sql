@@ -60,7 +60,8 @@ BEGIN
       WHERE btrim(product_name) = '' OR product_name <> btrim(product_name)
     UNION ALL SELECT id, 'sku' FROM public.products
       WHERE sku IS NOT NULL AND (btrim(sku) = '' OR sku <> btrim(sku))
-    UNION ALL SELECT id, 'rate_per_acre' FROM public.products WHERE rate_per_acre < 0 OR rate_per_acre = 'NaN'::numeric
+    UNION ALL SELECT id, 'rate_per_acre' FROM public.products WHERE rate_per_acre < 0
+      OR rate_per_acre IN ('Infinity'::numeric, '-Infinity'::numeric, 'NaN'::numeric)
     UNION ALL SELECT id, 'epa_registration' FROM public.products
       WHERE epa_registration IS NOT NULL AND
         epa_registration !~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$'
@@ -120,7 +121,8 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_SETUP_INVALID: SKU' USING ERRCODE = '22023';
   END IF;
   IF (TG_OP = 'INSERT' OR NEW.rate_per_acre IS DISTINCT FROM OLD.rate_per_acre)
-     AND NEW.rate_per_acre IS NOT NULL AND (NEW.rate_per_acre < 0 OR NEW.rate_per_acre = 'NaN'::numeric) THEN
+     AND NEW.rate_per_acre IS NOT NULL AND (NEW.rate_per_acre < 0
+       OR NEW.rate_per_acre IN ('Infinity'::numeric, '-Infinity'::numeric, 'NaN'::numeric)) THEN
     RAISE EXCEPTION 'PRODUCT_SETUP_INVALID: rate per acre' USING ERRCODE = '22023';
   END IF;
   IF (TG_OP = 'INSERT' OR NEW.epa_registration IS DISTINCT FROM OLD.epa_registration)

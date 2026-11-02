@@ -226,6 +226,7 @@ export default function ProductDetail() {
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>([]);
   const [categoryLoadFailed, setCategoryLoadFailed] = useState(false);
+  const [nameRequired, setNameRequired] = useState(false);
   const [reiDraft, setReiDraft] = useState('');
   const [phiDraft, setPhiDraft] = useState('');
   const [vendorOptions, setVendorOptions] = useState<string[]>([]);
@@ -321,6 +322,7 @@ export default function ProductDetail() {
     if (withCost) {
       const loadedProduct = withCost;
       setProduct(loadedProduct);
+      setNameRequired(false);
       setReiDraft(loadedProduct.rei_hours == null ? '' : String(loadedProduct.rei_hours));
       setPhiDraft(loadedProduct.phi_days == null ? '' : String(loadedProduct.phi_days));
       setPersistedProduct(loadedProduct);
@@ -660,6 +662,7 @@ export default function ProductDetail() {
     }
     const setupError = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
     if (setupError) {
+      setNameRequired(setupError === 'Enter a product name.');
       toast('error', setupError);
       revealPhoneSection('information');
       return;
@@ -992,6 +995,7 @@ export default function ProductDetail() {
 
   const update = (field: string, value: unknown) => {
     if (pricingReloadRequired) return;
+    if (field === 'product_name') setNameRequired(false);
     setProduct((p) => ({ ...p, [field]: value }));
     setIsDirty(true);
     if (field === 'epa_registration'
@@ -1106,7 +1110,7 @@ export default function ProductDetail() {
 
             {/* Basic Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Input label="Product Name" required value={product.product_name || ''} onChange={(e) => update('product_name', e.target.value)} disabled={!isAdmin} />
+              <Input label="Product Name" required value={product.product_name || ''} onChange={(e) => update('product_name', e.target.value)} disabled={!isAdmin} error={nameRequired ? 'Product name is required' : undefined} />
               <Input label="SKU" value={product.sku || ''} onChange={(e) => update('sku', e.target.value)} disabled={!isAdmin} />
               <div>
                 <label htmlFor="product-category" className="block text-sm font-medium text-secondary mb-1">Category</label>
@@ -1376,9 +1380,8 @@ export default function ProductDetail() {
                     setProduct((current) => ({
                       ...current,
                       product_form: form,
-                      container_unit: isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
-                      inventory_unit: isKnownUnit(unitConversions, form, current.inventory_unit) ? current.inventory_unit : null,
-                      rate_unit: isKnownUnit(unitConversions, form, current.rate_unit) ? current.rate_unit : '',
+                      container_unit: current.container_unit === persistedProduct?.container_unit || isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
+                      inventory_unit: current.inventory_unit === persistedProduct?.inventory_unit || isKnownUnit(unitConversions, form, current.inventory_unit) ? current.inventory_unit : null,
                     }));
                     setIsDirty(true);
                   }}
@@ -1461,8 +1464,8 @@ export default function ProductDetail() {
                 >
                   <option value="">-- Select --</option>
                   {/* WaveB: grandfather a legacy value the form filter would otherwise hide, so a save can't blank it */}
-                  {!isKnownUnit(unitConversions, product.product_form, product.inventory_unit) && (
-                    <option value={product.inventory_unit || ''}>{product.inventory_unit} (existing)</option>
+                  {product.inventory_unit && !isKnownUnit(unitConversions, product.product_form, product.inventory_unit) && (
+                    <option value={product.inventory_unit}>{product.inventory_unit} (existing)</option>
                   )}
                   {unitOptionsForForm(unitConversions, product.product_form).map((uc) => (
                     <option key={uc.id} value={uc.unit}>{uc.unit}</option>

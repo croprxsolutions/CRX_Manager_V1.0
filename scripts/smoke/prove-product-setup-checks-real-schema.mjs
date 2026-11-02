@@ -278,6 +278,8 @@ try {
     ['sku', "' padded '", 'PRODUCT_SETUP_INVALID: SKU'],
     ['rate_per_acre', '-1', 'PRODUCT_SETUP_INVALID: rate per acre'],
     ['rate_per_acre', "'NaN'::numeric", 'PRODUCT_SETUP_INVALID: rate per acre'],
+    ['rate_per_acre', "'Infinity'::numeric", 'PRODUCT_SETUP_INVALID: rate per acre'],
+    ['rate_per_acre', "'-Infinity'::numeric", 'PRODUCT_SETUP_INVALID: rate per acre'],
     ['epa_registration', "''", 'PRODUCT_SETUP_INVALID: EPA number'],
     ['epa_registration', "'bad-epa'", 'PRODUCT_SETUP_INVALID: EPA number'],
     ['rei_hours', '-1', 'PRODUCT_SETUP_INVALID: REI hours'],

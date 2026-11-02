@@ -1484,7 +1484,7 @@ git() { return 0; }
     }
     assert.equal(runPrePushHook('node() { return 0; }; npm() { if [ "$2" = "test:supplier-pricing-phase3c-packet" ]; then return 42; fi; return 0; };', ['origin', 'https://example.invalid/repository.git'], 'refs/heads/test deadbeef refs/heads/test deadbeef\n').status, 0, 'pre-push must not invoke the packet suite; CI retains that explicit gate');
     assert(!prePush.includes('graphify'), 'pre-push must not refresh Graphify; it is on demand (npm run graph:refresh)');
-    const preCommitPath = path.join(REPO_ROOT, '.husky', 'pre-commit');
+    const preCommitPath = '.husky/pre-commit'; // relative to cwd REPO_ROOT, so no absolute path reaches the shell
     // git(): `diff --cached` lists the staged paths; `diff --quiet` reports unstaged edits via $unstaged; `ls-files` lists $untracked.
     const runPreCommitHook = (staged, npx, unstaged = 0, untracked = '') => spawnSync(fixtureBash(), ['-c', `git() { [ "$2" = "--quiet" ] && return ${unstaged}; [ "$1" = "ls-files" ] && { printf '%s' '${untracked}'; return 0; }; printf '%s\\n' ${staged}; }; node() { return 0; }; bash() { return 0; }; ${npx}\nHOOK=$1; shift; source "$HOOK"`, 'synthetic-pre-commit', preCommitPath], { cwd: REPO_ROOT, encoding: 'utf8', env: sanitizedFixtureGitEnv() });
     const registryFails = 'npx() { [ "$2" = "run" ] && return 42; return 0; };';

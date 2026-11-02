@@ -181,7 +181,7 @@ BEGIN
       v_actual;
   END IF;
 
-  -- KI-85 (20261102180000): receiving accepts only Main Warehouse until stock
+  -- KI-85 (20261102220000): receiving accepts only Main Warehouse until stock
   -- transfers exist, even when another warehouse row is active.
   INSERT INTO public.warehouses (name, is_active) VALUES ('Secondary Warehouse', true)
   ON CONFLICT (name) DO UPDATE SET is_active = true;

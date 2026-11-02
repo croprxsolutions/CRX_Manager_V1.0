@@ -6,7 +6,7 @@ only and no transfer exists, so that stock would be stranded. Now:
 - The Purchase Order receive modal, Quick Receive and the Inventory page's Add Inventory form list active
   `warehouses` rows (today only Main Warehouse) instead of a hard-coded list or free text
   (`src/hooks/useActiveWarehouses.ts`).
-- Migration `20261102180000_receive_po_items_active_warehouse_only` makes `receive_po_items` and
+- Migration `20261102220000_receive_po_items_active_warehouse_only` makes `receive_po_items` and
   `manual_inventory_add` refuse any location but an active Main Warehouse with `UNKNOWN_STORAGE_LOCATION` instead of
   storing it, even if another `warehouses` row is activated, because stock elsewhere cannot ship until a transfer
   function exists (DECISION_LOG 2026-11-02); the migration that adds transfers must lift this guard. A missing

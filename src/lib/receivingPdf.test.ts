@@ -219,7 +219,7 @@ describe('generateReceivingPdf', () => {
 
     // Should have green (good), red (damaged), and amber (short) color calls
     const greenCalls = mockDoc.setTextColor.mock.calls.filter(
-      (call) => call[0] === 40 && call[1] === 162 && call[2] === 106
+      (call) => call[0] === 26 && call[1] === 122 && call[2] === 80
     );
     const redCalls = mockDoc.setTextColor.mock.calls.filter(
       (call) => call[0] === 220 && call[1] === 38 && call[2] === 38

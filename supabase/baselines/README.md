@@ -117,9 +117,9 @@ repair <version> --status applied`, which changes only migration history, not
 business rows. The order matters in both directions: `20260807215532` refuses a
 ledger holding anything newer than itself, and `20261010120000` refuses to run
 until `20261007150200_release_reservations_of_deleted_spring_orders` is in the
-ledger under that whole name. So do not run the `--one-shot-repair-plan` commands
-on their own against a restore. They record everything at once, and from the
-repository they store the short name.
+ledger under that whole name. So do not repair these by hand from the repository:
+that records everything at once, under the short name. `--one-shot-repair-plan`
+only lists them, in order, under their whole names.
 
 Do not execute the emitted files directly with `psql`: that changes the schema
 without recording the migrations in `supabase_migrations.schema_migrations`.
@@ -277,28 +277,83 @@ Two things sit outside the block and differ by target:
   and before allowing writes, run this read-only query. Every row must say `t`. If
   any says `f`, the restore has failed: do not open it. A backup taken before a
   correction went live fails here, as it should. The expected values come from the
-  migrations themselves. If a later reviewed migration changes these rows, update this
-  query in that change.
+  migrations themselves, row by row, so the right totals over the wrong deliveries or
+  products also fail. Each release row is checked by order and product. If a later
+  reviewed migration changes these rows, update this query in that change.
+  `npm run test:schema-baseline` fails if its delivery list stops matching
+  `20261007150100`.
 
   ```sql
+  WITH chem_man_listed (delivery_number, order_number) AS (VALUES
+      ('DEL-00060', 'ORD-2026-0152'), ('DEL-00050', 'ORD-2026-0153'), ('DEL-00080', 'ORD-2026-0153'),
+      ('DEL-00048', 'ORD-2026-0160'), ('DEL-00078', 'ORD-2026-0160'), ('DEL-00035', 'ORD-2026-0161'),
+      ('DEL-00071', 'ORD-2026-0161'), ('DEL-00081', 'ORD-2026-0161'), ('DEL-00024', 'ORD-2026-0162'),
+      ('DEL-00040', 'ORD-2026-0162'), ('DEL-00066', 'ORD-2026-0169'), ('DEL-00056', 'ORD-2026-0170'),
+      ('DEL-00057', 'ORD-2026-0171'), ('DEL-00055', 'ORD-2026-0172'), ('DEL-00037', 'ORD-2026-0174'),
+      ('DEL-00054', 'ORD-2026-0174'), ('DEL-00004', 'ORD-2026-0176'), ('DEL-00034', 'ORD-2026-0176'),
+      ('DEL-00076', 'ORD-2026-0176'), ('DEL-00012', 'ORD-2026-0177'), ('DEL-00044', 'ORD-2026-0178'),
+      ('DEL-00046', 'ORD-2026-0178'), ('DEL-00061', 'ORD-2026-0178'), ('DEL-00039', 'ORD-2026-0179'),
+      ('DEL-00047', 'ORD-2026-0179'), ('DEL-00013', 'ORD-2026-0182'), ('DEL-00079', 'ORD-2026-0182'),
+      ('DEL-00014', 'ORD-2026-0183'), ('DEL-00031', 'ORD-2026-0186'), ('DEL-00030', 'ORD-2026-0188'),
+      ('DEL-00053', 'ORD-2026-0188'), ('DEL-00032', 'ORD-2026-0331'), ('DEL-00042', 'ORD-2026-0331'),
+      ('DEL-00067', 'ORD-2026-0331'), ('DEL-00033', 'ORD-2026-0343'), ('DEL-00052', 'ORD-2026-0343'),
+      ('DEL-00088', 'ORD-2026-0343'), ('DEL-00092', 'ORD-2026-0343'), ('DEL-00026', 'ORD-2026-0344'),
+      ('DEL-00041', 'ORD-2026-0344'), ('DEL-00051', 'ORD-2026-0344'), ('DEL-00062', 'ORD-2026-0347'),
+      ('DEL-00063', 'ORD-2026-0348'), ('DEL-00064', 'ORD-2026-0349'), ('DEL-00068', 'ORD-2026-0350'),
+      ('DEL-00069', 'ORD-2026-0351'), ('DEL-00070', 'ORD-2026-0352'), ('DEL-00072', 'ORD-2026-0353'),
+      ('DEL-00089', 'ORD-2026-0358'), ('DEL-00090', 'ORD-2026-0359'), ('DEL-00091', 'ORD-2026-0360'),
+      ('DEL-00093', 'ORD-2026-0361'), ('DEL-00094', 'ORD-2026-0362')
+  ), chem_man_recorded AS (
+    SELECT d.delivery_number, o.order_number
+      FROM public.delivery_external_billings b
+      LEFT JOIN public.deliveries d ON d.id = b.delivery_id
+      LEFT JOIN public.orders o ON o.id = d.order_id
+     WHERE b.reason = 'Billed outside CRX in Chem Man (spring 2026, before CRX invoicing was in use); owner confirmed 2026-10-07'
+  ), release_expected (order_id, product_id, quantity) AS (
+    SELECT o.id, oi.product_id, sum(oi.quantity_remaining)
+      FROM public.order_items oi
+      JOIN public.orders o ON o.id = oi.order_id
+     WHERE o.order_number IN ('ORD-2026-0181', 'ORD-2026-0184', 'ORD-2026-0185', 'ORD-2026-0187')
+       AND o.deleted_at IS NOT NULL
+       AND o.status = 'confirmed'
+       AND oi.quantity_remaining > 0
+     GROUP BY o.id, oi.product_id
+    UNION ALL
+    SELECT o.id, i.product_id, 36
+      FROM public.inventory i
+      JOIN public.orders o ON o.order_number = 'ORD-2026-0345'
+     WHERE i.id = '768ff8b5-dd45-4efa-b0b5-48b2c91036f2'
+       AND o.deleted_at IS NOT NULL
+  ), release_recorded AS (
+    SELECT order_id, product_id, -quantity AS quantity
+      FROM public.inventory_transactions
+     WHERE transaction_type = 'prebook_reconciliation'
+       AND notes LIKE 'CRX-2026-10-07 release of deleted-order reservation%'
+  )
   SELECT 'line profit rule' AS correction, count(*) = 0 AS proven
     FROM public.order_items
    WHERE total_price IS NOT NULL
      AND profit IS DISTINCT FROM (ROUND(total_price, 2)
          - ROUND(COALESCE(cost_per_unit, 0) * COALESCE(total_units_needed, 0), 2))
   UNION ALL
-  SELECT 'spring deliveries billed in Chem Man', count(*) = 53
-    FROM public.delivery_external_billings
-   WHERE reason LIKE 'Billed outside CRX in Chem Man (spring 2026%'
+  SELECT 'spring deliveries billed in Chem Man',
+         (SELECT count(*) FROM chem_man_listed) = 53
+         AND (SELECT count(*) FROM chem_man_recorded) = 53
+         AND NOT EXISTS (SELECT * FROM chem_man_listed EXCEPT SELECT * FROM chem_man_recorded)
+         AND NOT EXISTS (SELECT * FROM chem_man_recorded EXCEPT SELECT * FROM chem_man_listed)
   UNION ALL
-  SELECT 'deleted-order reservations released', sum(quantity) IS NOT DISTINCT FROM -4643.1
-    FROM public.inventory_transactions
-   WHERE transaction_type = 'prebook_reconciliation'
-     AND notes LIKE 'CRX-2026-10-07 release of deleted-order reservation%';
+  SELECT 'deleted-order reservations released',
+         (SELECT count(*) FROM release_expected) = 32
+         AND (SELECT count(DISTINCT product_id) FROM release_expected) = 28
+         AND (SELECT sum(quantity) FROM release_expected) = 4643.1
+         AND (SELECT count(*) FROM release_recorded) = 32
+         AND NOT EXISTS (SELECT * FROM release_expected EXCEPT SELECT * FROM release_recorded)
+         AND NOT EXISTS (SELECT * FROM release_recorded EXCEPT SELECT * FROM release_expected);
   ```
 
   The test copy has no business rows, so this order has only been run on an empty
-  database.
+  database. The query itself has also been run on invented rows in a rolled-back
+  transaction.
 
 ## Data recovery
 

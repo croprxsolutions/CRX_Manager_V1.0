@@ -319,6 +319,12 @@ function main() {
     VALUES ('[PROVER] Loose', 'PV-3', 'Nobody We Know', 'gal', true) RETURNING id;`);
   assert.deepEqual([preferredOf(P.LOOSE), vendorOf(P.LOOSE)], ['-', 'Nobody We Know']);
   console.log('[prover] new products still save; text naming one vendor becomes its preferred link and exact name');
+  // A non-admin's new product (where RLS lets one in at all) never gets a confirmed link in their name.
+  as(REP, `INSERT INTO public.products (product_name, sku, vendor, inventory_unit, is_active)
+    VALUES ('[PROVER] Rep made', 'PV-REP', '[PROVER] Acme Ag', 'gal', true);`);
+  assert.equal(scalar(`SELECT count(*) FROM public.product_supplier_links l JOIN public.products p ON p.id = l.product_id
+    WHERE p.sku = 'PV-REP';`), '0');
+  console.log('[prover] a new product from a non-admin gets no confirmed vendor link');
 
   // A full link replaces that vendor's vendor-only link and inherits its preferred flag.
   ok(ADMIN, `SELECT public.upsert_product_supplier_link('${P.NEW}', '${V.A}', 'ACME-9', 'Acme Nine', 'case', '2x2.5 gal',

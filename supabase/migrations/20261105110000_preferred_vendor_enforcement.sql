@@ -187,7 +187,8 @@ DECLARE
   v_actor uuid := auth.uid();
   v_vendor_id uuid;
 BEGIN
-  IF v_actor IS NULL OR NULLIF(btrim(NEW.vendor), '') IS NULL THEN RETURN NULL; END IF;
+  -- Only an admin's new product gets a confirmed link; anyone else's keeps its text, unlinked.
+  IF v_actor IS NULL OR NOT public.is_admin() OR NULLIF(btrim(NEW.vendor), '') IS NULL THEN RETURN NULL; END IF;
   v_vendor_id := public._vendor_id_for_text(NEW.vendor);
   IF v_vendor_id IS NULL THEN RETURN NULL; END IF;
   INSERT INTO public.product_supplier_links(

@@ -85,8 +85,9 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       });
       setPickedVendorId('');
       // A first vendor becomes preferred even when not asked, so report whichever vendor now is.
-      // If the re-read fails, a vendor just made preferred is still the one to show.
-      const preferred = (await reload())?.find((v) => v.is_preferred)?.vendor_name ?? (makePreferred ? name : null);
+      // If the re-read fails, a vendor just made preferred (or the first one, preferred by default) is still the one to show.
+      const wasFirst = !vendors?.some((v) => v.is_preferred);
+      const preferred = (await reload())?.find((v) => v.is_preferred)?.vendor_name ?? (makePreferred || wasFirst ? name : null);
       if (preferred) onPreferredChanged(preferred);
     } catch (error) {
       toast('error', productVendorErrorMessage(error));

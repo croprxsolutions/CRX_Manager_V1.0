@@ -39,7 +39,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { isValidDeliveredOn, isValidNoProofReason, MAX_PAPER_TICKET_PHOTOS, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
 import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
@@ -901,23 +901,30 @@ export default function Deliveries() {
     }
     await runCriticalAction({
       action: async () => {
-        const cancelKey = batchCancelIdem.getKey();
+        // One key per set of deliveries, in any order: the server binds this key to its request, so edited details after a lost reply are refused with the committed result.
+        const cancelScope = fingerprintIntentPayload([...ids].sort());
         const { data, error } = await supabase.rpc('batch_cancel_deliveries', {
           p_delivery_ids: ids,
           p_cancel_reason: reason,
           p_performed_by: profile.id,
-          p_idempotency_key: cancelKey,
+          p_idempotency_key: batchCancelIdem.getKeyFor(cancelScope),
         });
         if (error) {
           // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
           // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
           const bindingRejection = getIdempotencyBindingRejection(error);
-          if (bindingRejection === 'intent' || bindingRejection === 'actor') batchCancelIdem.resetKey();
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') batchCancelIdem.resetKeyFor(cancelScope);
+          // A changed reason after a lost reply: the earlier cancel already committed, so show the current list.
+          if (bindingRejection === 'intent') {
+            setSelected(new Set());
+            await fetchDeliveries();
+            throw new Error('An earlier cancel of these deliveries already went through. The list has been refreshed.');
+          }
           throw error;
         }
-        batchCancelIdem.resetKey();
         // The server skips any delivery that completed or was cancelled since this list loaded.
         const cancelled = assertRpcResult<number>(data, 'batch_cancel_deliveries');
+        batchCancelIdem.resetKeyFor(cancelScope);
         if (cancelled > 0) logActivity({ event: 'batch_cancel_deliveries', description: `Batch cancelled ${cancelled} of ${ids.length} selected delivery(ies). Reason: ${reason}`, performedBy: profile.id });
         return cancelled;
       },
@@ -1165,7 +1172,9 @@ export default function Deliveries() {
       }
       await runCriticalAction({
         action: async () => {
-          const reassignKey = reassignIdem.getKey();
+          // One key per delivery: reassign_delivery does not bind its request, so a shared key would
+          // replay delivery A's result for delivery B after a lost reply.
+          const reassignKey = reassignIdem.getKeyFor(deliveryId);
           const { data, error } = await supabase.rpc('reassign_delivery', {
             p_delivery_id: deliveryId,
             p_new_driver: profile.id,
@@ -1174,7 +1183,7 @@ export default function Deliveries() {
           });
           if (error) throw error;
           assertRpcResult(data, 'reassign_delivery');
-          reassignIdem.resetKey();
+          reassignIdem.resetKeyFor(deliveryId);
           logActivity({ event: 'reassign_delivery', description: `Took delivery ${deliveryId}`, performedBy: profile.id, entityType: 'delivery', entityId: deliveryId });
         },
         toast,

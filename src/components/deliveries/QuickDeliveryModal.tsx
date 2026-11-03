@@ -392,7 +392,6 @@ export default function QuickDeliveryModal({
 
     setSubmitting(true);
     try {
-      const key = quickDeliveryIdem.getKey();
       const requestItems = items.map((i) => ({
         product_id: i.product_id,
         quantity: i.quantity,
@@ -407,6 +406,9 @@ export default function QuickDeliveryModal({
         delivery_notes: deliveryNotes || null,
         skip_invoice: !createInvoice,
       });
+      // One key for this form until a save is confirmed. create_quick_delivery binds the key to its
+      // request, so an edited retry after a lost reply is refused with the committed delivery below.
+      const key = quickDeliveryIdem.getKey();
       const capability = await supabase
         .from('idempotency_keys')
         .select('request_fingerprint')
@@ -445,10 +447,9 @@ export default function QuickDeliveryModal({
         }
         throw error;
       }
+      const result = assertRpcResult<{ delivery_id: string; delivery_number: string; invoice_number: string | null; credit_warning?: boolean; stock_warning?: boolean; short_stock_count?: number }>(data, 'create_quick_delivery');
       quickDeliveryIdem.resetKey();
       legacyQuickIntentRef.current = null;
-
-      const result = assertRpcResult<{ delivery_id: string; delivery_number: string; invoice_number: string | null; credit_warning?: boolean; stock_warning?: boolean; short_stock_count?: number }>(data, 'create_quick_delivery');
       const invoiceMsg = result.invoice_number
         ? ` with draft invoice ${result.invoice_number}`
         : ' (no invoice created)';

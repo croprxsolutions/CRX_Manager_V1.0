@@ -438,6 +438,8 @@ jobs:
         run: deno test --no-prompt --node-modules-dir=none supabase/functions
 
       - name: Documentation consistency
+        env:
+          DOCS_FRESHNESS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: npm run check:docs
 
       - name: Workflow map freshness (ignore generated date stamp)

@@ -1,13 +1,25 @@
 #!/usr/bin/env sh
 echo "🛡️ Pre-push safety check..."
 echo ""
+# git passes the pushed refs on stdin once; keep them for both checks below.
+PUSH_REFS="$(cat)"
+
 echo "Checking Phase 3C private-artifact containment..."
 # Read the real pre-push ref updates from stdin and inspect every outgoing
 # commit, including a packet that was committed and later deleted at tip.
-if ! node scripts/check-supplier-pricing-phase3-private-artifacts.mjs --pre-push "${1:-}" "${2:-}" 2>&1; then
+if ! node scripts/check-supplier-pricing-phase3-private-artifacts.mjs --pre-push "${1:-}" "${2:-}" 2>&1 <<PUSH_REFS_EOF; then
+$PUSH_REFS
+PUSH_REFS_EOF
   echo ""
   echo "❌ PRIVATE ARTIFACT CONTAINMENT FAILED — push blocked."
   exit 1
+fi
+
+# Type check and build read only app files; CI builds every PR regardless.
+if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs)" = "skip" ]; then
+  echo ""
+  echo "✅ Phase 3C containment passed; no app files changed, so type check and build are left to CI — pushing to GitHub."
+  exit 0
 fi
 
 echo "Running TypeScript type check..."

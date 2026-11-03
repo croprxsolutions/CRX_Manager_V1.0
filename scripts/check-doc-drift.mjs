@@ -3,11 +3,13 @@
 // Machine-checkable reference-doc claims vs repository reality.
 // Always-loaded AGENTS.md and CLAUDE.md intentionally contain no volatile counts.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   chicagoCalendarStamp,
+  freshnessEnforcedFor,
   frozenHistoryProblems,
   manualFreshnessBoundary,
   manualStampProblems,
@@ -165,6 +167,15 @@ const newestMigDate = migrations
   .at(-1); // YYYYMMDD of the newest migration
 const todayChicago = chicagoCalendarStamp();
 const freshnessDate = manualFreshnessBoundary(newestMigDate, todayChicago);
+// Files changed since the base (CI passes the PR base or push-before sha). An
+// unreadable base enforces, so a broken diff can never silence the gate.
+const freshnessBase = process.env.DOCS_FRESHNESS_BASE || "origin/main";
+let staleStatus = "FAIL";
+try {
+  const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
+  const changed = git("diff", "--name-only", git("merge-base", freshnessBase, "HEAD"), "HEAD").split(/\r?\n/).filter(Boolean);
+  if (!freshnessEnforcedFor(changed)) staleStatus = "WARN";
+} catch { /* keep FAIL */ }
 for (const doc of ["CURRENT_STATE.md", "KNOWN_ISSUES.md"]) {
   const rel = `docs/manual/${doc}`;
   if (!existsSync(path.join(ROOT, rel))) continue; // the "stamp present" check above already failed this
@@ -173,8 +184,8 @@ for (const doc of ["CURRENT_STATE.md", "KNOWN_ISSUES.md"]) {
   const stampDate = `${m[1]}${m[2]}${m[3]}`; // YYYYMMDD
   const fresh = !freshnessDate || stampDate >= freshnessDate;
   row(`manual freshness ${doc}`, `stamp >= freshness boundary (${freshnessDate ?? "none"})`, `stamp ${stampDate}`,
-    fresh ? "PASS" : "FAIL",
-    fresh ? "" : `migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.`);
+    fresh ? "PASS" : staleStatus,
+    fresh ? "" : `migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.${staleStatus === "WARN" ? " (warning only: this change adds no migration and leaves both docs alone)" : ""}`);
 }
 
 console.log("check-doc-drift");

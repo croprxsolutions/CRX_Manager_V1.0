@@ -8,12 +8,12 @@
 
 | Package | Status | PR / where |
 |---|---|---|
-| WP-PM-5 Use Timing | **DRAFTED** (see CI note below) | [#1316](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1316), head `0b90a1767`; **Mason-gated** migration `20261103140000` |
-| WP-PM-9 Seed and each forms | **PARKED**: failed review after 3 build rounds (Sol found 2 HIGH) | branch `pm/wp-pm-9-forms-seed-each` at `19551a7ba`, on this PC only |
+| WP-PM-5 Use Timing | **DRAFTED** (see CI note below) | [#1316](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1316), head `9f5b63928`; **Mason-gated** migration `20261103210000` |
+| WP-PM-9 Seed and each forms | **PARKED**: failed review after 3 build rounds (Sol found 2 HIGH) | branch `pm/wp-pm-9-forms-seed-each` at `19551a7ba`, backed up to GitHub (no PR) |
 | DM-0 Data clean-up lists | **PARKED**: the lists are done; the data step is yours | your vault: `Products\Product Master review\2026-11-02 DM-0 data hygiene review list.md` |
 | WP-PM-6a Unit audit | **PARKED**: waits on WP-PM-9; audit half done | your vault: `Products\Product Master review\2026-11-02 PM-6a unit mismatch list.md` |
 | WP-PM-6b New-product flow, Duplicate 💲 | **PARKED**: waits on WP-PM-6a | |
-| WP-PM-7 One cost path, tier-order warning 💲 | **PARKED**: time; one build round done, review fixes owed | branch `pm/wp-pm-7-cost-path` at `31436cc01`, on this PC only |
+| WP-PM-7 One cost path, tier-order warning 💲 | **PARKED**: time; one build round done, review fixes owed | branch `pm/wp-pm-7-cost-path` at `31436cc01`, backed up to GitHub (no PR) |
 | WP-PM-15a Vendor proposals 💲 | **PARKED**: waits on WP-PM-7 | |
 | WP-PM-12b Corrections | not attempted (no new package after 18:32) | |
 | WP-PM-8b Incomplete badge, near-match warnings, rate help | not attempted (no new package after 18:32) | |
@@ -26,10 +26,12 @@
 - the database proof (`PRODUCT_USE_TIMINGS_PROOF_PASS`) shows all 317 existing timings copied exactly;
 - a real workbook export, preview and apply keeps both timings with prices unchanged;
 - the full test suite passed on the round-2 head (7,069 tests);
-- Sol is clean on `0b90a1767`.
+- the guard regression suite passed 49 of 49 locally on the final fix;
+- Sol is clean on `fcf1260ce`.
 
 **Owed:**
-- **CI:** at 19:10 Central, CI on `0b90a1767` was still running (10 passed, 6 pending); the earlier head `3c8b77f5f` passed all 20.
+- **CI:** CI on `0b90a1767` failed one guard check: the migration's record carried the Windows line-ending hash of the file instead of the repo's LF hash. Corrected in `62c349481`, then main merged in as `fcf1260ce`, re-checked locally (49 of 49 guard suites) and pushed at 7:24 PM Central. **Every CI check on `fcf1260ce` passed** (read at 9:01 PM Central).
+- **New date stamp (after the run):** at 7:57 PM Central another PR's migration, stamped `20261103150000`, was applied live, which put #1316's original `20261103140000` below the live high-water. At 9:40 PM Central it was pushed re-stamped `20261103210000` (`160000` and `170000` were already taken by other sessions), with the latest main merged in. The proof was re-run and passed (`PRODUCT_USE_TIMINGS_PROOF_PASS`; its test database now gets live's active Main Warehouse before replaying KI-85), the docs check passed, and Sol re-ran (below). CI on the new head runs after this report.
 - **Clicks:** a browser click-through on the Vercel preview after the live apply. The exact clicks are in the PR.
 
 **CodeRabbit:** 2 comments, both fixed by Codex and their threads resolved.
@@ -72,21 +74,21 @@ Its proof shows the five existing warnings are unchanged. Only 3 active products
 
 **Fixes owed (round 2 is written, not run):**
 - a test file whose special characters were garbled;
-- a timestamp that collides with PR #1313;
+- a new timestamp above `20261103210000` (its `20261103150000` is now taken by a live migration from PR #1313);
 - a stated $0 tier must count as a real price, per your 2026-10-27 decision;
 - more proof cases.
 
 ## Suggested merge order
 
 1. **#1276** (turning products off; another session is landing it).
-2. **#1316** (Use Timing): apply its migration first, with your `I approve`, then merge.
+2. **#1316** (Use Timing): wait for CI on `9f5b63928`, then apply its migration first, with your `I approve`, then merge.
 3. Later, after their next rounds: WP-PM-9 (new timestamp), then WP-PM-6a, WP-PM-7, WP-PM-15a.
 
 Every PR targets `main`, so after one lands, the next must merge `main` in and re-check before landing.
 
 ## Mason-gated migrations
 
-- `20261103140000_product_use_timings.sql` (#1316): adds column grants on `products` matching `use_timing`'s grants. Needs your `I approve`.
+- `20261103210000_product_use_timings.sql` (#1316): adds column grants on `products` matching `use_timing`'s grants. Needs your `I approve`.
 
 ## Tests, builds and events
 
@@ -96,7 +98,7 @@ Every PR targets `main`, so after one lands, the next must merge `main` in and r
 - **Codex:**
   - WP-PM-5 round 1 hit the 50-minute limit while re-running its own final check, with the work complete.
   - WP-PM-7's Codex ran one read-only `git fetch` despite the no-network instruction; nothing changed.
-- **Schema registry:** refreshed read-only from live at the start, and left uncommitted in this session's worktree for you.
+- **Schema registry:** refreshed read-only from live at the start and again at 9:08 PM Central (high-water `20261103015728`; only the applied-migration list changed), and left uncommitted in this session's worktree for you.
 - **Shared test app:** port 5199 is held by a test-app frontend nobody claims (node PID 45156, started 10:20 today). Neither this run nor the #1276 session stopped it, so **no browser proof ran this run**. If it isn't yours, it is safe to close.
 
 ## CodeRabbit
@@ -106,8 +108,8 @@ Every PR targets `main`, so after one lands, the next must merge `main` in and r
 
 ## Sol proofs
 
-- #1316: clean on `0b90a1767` at 2026-11-03 00:06 UTC (7:06 PM Central, 11-02); **it passes 24 hours at 7:06 PM Central on 2026-11-03.**
-- The earlier clean proof on `3c8b77f5f` (5:04 PM Central) no longer matches the head.
+- #1316: clean on `604b763e5` at about 9:35 PM Central (11-02). It was carried to head `9f5b63928` by the collision check, because main's new commits touched only `ship.md`, `package.json` and `scripts/sol-needed.mjs`. **It passes 24 hours at about 9:35 PM Central on 2026-11-03.** The live apply needs Sol on the exact final head, so the landing session re-runs Sol right before the apply.
+- Earlier clean proofs on `3c8b77f5f`, `0b90a1767` and `fcf1260ce` no longer match the head.
 
 ## Decision for you
 

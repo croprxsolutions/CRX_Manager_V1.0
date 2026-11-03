@@ -212,4 +212,54 @@ describe('statement PDF real renderer', () => {
     expect(pageCommands).toContain('Phone: 618-843-0413');
     expect(pageCommands).toContain('Website: www.croprxsolutions.com');
   });
+
+  it('draws exactly one footer on every page', async () => {
+    const chemicalItem = {
+      product_name: 'Chemical',
+      epa_registration: null,
+      rate_per_acre: null,
+      rate_unit: null,
+      total_applied: null,
+      total_applied_unit: null,
+      total_applied_gl_lb: null,
+      gl_lb_unit: null,
+      unit_price_cents: 1_000,
+      total_cost_cents: 1_000,
+      is_application_fee: false,
+      quantity: 1,
+      unit_size: 'gal',
+      product_form: 'liquid',
+    };
+    const manyInvoices = (count: number, items: typeof chemicalItem[]) =>
+      Array.from({ length: count }, (_, index) => ({
+        ...renderedStatement.transactions[0],
+        invoice_number: `INV-FOOTER-${index + 1}`,
+        items,
+      }));
+    const cases: Array<[string, DetailedStatementData, number]> = [
+      ['summary, one page', renderedStatement, 1],
+      ['summary, no transactions', { ...renderedStatement, transactions: [] }, 1],
+      ['summary, stub pushed to new page', { ...renderedStatement, transactions: manyInvoices(16, []) }, 2],
+      ['summary, account position pushed to new page', { ...renderedStatement, transactions: manyInvoices(21, []) }, 2],
+      ['summary, multi-page', { ...renderedStatement, transactions: manyInvoices(60, []) }, 3],
+      ['detailed, one page', { ...renderedStatement, mode: 'detailed' }, 1],
+      ['detailed, no transactions', { ...renderedStatement, mode: 'detailed', transactions: [] }, 1],
+      [
+        'detailed, multi-page',
+        { ...renderedStatement, mode: 'detailed', transactions: manyInvoices(12, Array(8).fill(chemicalItem)) },
+        3,
+      ],
+    ];
+
+    for (const [label, statement, minPages] of cases) {
+      const doc = await generateStatementPdf(statement);
+      const pageCount = doc.getNumberOfPages();
+      expect(pageCount, label).toBeGreaterThanOrEqual(minPages);
+      const pages = doc.internal.pages as unknown as string[][];
+      for (let page = 1; page <= pageCount; page++) {
+        const footers = pages[page].join('\n').match(/Statement generated .*? Page \d+/g) ?? [];
+        expect(footers, `${label} page ${page}`).toEqual([expect.stringMatching(new RegExp(`Page ${page}$`))]);
+      }
+    }
+  });
 });

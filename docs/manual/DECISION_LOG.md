@@ -10,6 +10,13 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-02 — Draft invoice lines keep the EPA number they copied
+
+**Decision (Mason, in chat):** "I’m not worried about it the original epa line can carry". An invoice line keeps the EPA registration number copied when it was made, even while the invoice is still unposted. Only open jobs offer to update after a product label correction (WP-PM-12b).
+
+**Why.** Asked whether unposted invoices should also offer an EPA update after a product correction, Mason chose to leave invoice lines as copied.
+
+**What this forbids/implies:** no "update EPA" offer is built for draft or unposted invoices. Posted invoices never change (2026-10-28). Record map: `docs/reference/product-corrections-record-map.md`.
 ## 2026-11-02 — Invoice emails ship with server-written text; server-built PDFs are a later project
 
 **Decision (Mason, in chat):** "option A but make sure and note this everywhere so we don't forget it and document well to follow up in separate session with bigger work". KI-97 ships with the email service writing the invoice email's text and Amount Due from the saved invoice and checking the app's summary of its PDF. It does not wait for the server to draw the PDF itself.

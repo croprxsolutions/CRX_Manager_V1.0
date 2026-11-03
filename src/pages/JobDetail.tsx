@@ -88,6 +88,7 @@ import type { JobStatus, Customer, Product, Field, Vehicle, Profile, BlendRecipe
 import type { Json } from '../types/supabase';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductPicker';
+import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
 import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
 import { JOB_CHEMICAL_COLUMNS, JOB_COLUMNS, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import { sendEmail } from '../lib/emailService';
@@ -1333,6 +1334,7 @@ export default function JobDetail() {
   // the applicator route order (null when no drag is in progress).
   const [dragFieldIndex, setDragFieldIndex] = useState<number | null>(null);
   const [chemRows, setChemRows] = useState<ChemRow[]>([]);
+  const [labelDismissal, setLabelDismissal] = useState<string | null>(null);
   // §5 (Label-Rate Guardrails): policy mode (warn default, never blocks) + earliest
   // planned harvest across the job's fields (for the PHI-vs-harvest warning) + the
   // block-mode admin-override modal state.
@@ -4512,6 +4514,13 @@ export default function JobDetail() {
               )}
             </div>
           </div>
+          <JobLabelCorrectionsNotice
+            rows={chemRows}
+            canEdit={canEdit && !isNew}
+            onApply={setChemRows}
+            dismissedSignature={labelDismissal}
+            onDismiss={setLabelDismissal}
+          />
           {chemRows.length === 0 ? (
             <p className="text-sm text-secondary text-center py-4">No chemicals added.</p>
           ) : (

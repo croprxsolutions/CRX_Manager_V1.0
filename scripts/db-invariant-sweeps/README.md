@@ -246,6 +246,13 @@ node scripts/db-invariant-sweeps/run-sweeps.mjs --explain <predicate>  # header 
   must actually allow forged attribution in the disposable mutant and remain unallowlisted. New
   direct/inherited EXECUTE permission, owner, identity-source and missing-dependency drift must
   also fail closed. No live schema/data or detector predicate is changed by this proof.
+- **Re-keying after a shared-helper change** (`cost-exposure-review` keys hash every reached helper):
+  first re-read the changed chain live, then save the sweep output and re-key from it:
+  `npm run db-sweeps:live > sweep-output.txt`, then
+  `node scripts/db-invariant-sweeps/rekey-allowlist.mjs sweep-output.txt --note "Re-read live <date> after <migration> (PR #<n>, ledger <version>): ..."`
+  (`--predicate` defaults to `cost-exposure-review`). It swaps each key and appends the note, and
+  refuses, writing nothing, on an empty note or any violation that is not exactly one existing
+  same-signature entry; a new function still needs a review. Test: `rekey-allowlist.test.mjs`.
 - The allowlist is itself a Codex artifact: hand Codex the allowlist **diff** to attack (per §5 of the
   review) — adjudicating exemptions is exactly what a second model is good at.
 

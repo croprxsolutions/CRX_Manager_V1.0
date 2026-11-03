@@ -526,7 +526,7 @@ equal(
   }
 }
 equal(
-  /name: Documentation consistency\r?\n\s+run: npm run check:docs/.test(workflow),
+  /name: Documentation consistency\r?\n(?:\s+env:\r?\n\s+DOCS_FRESHNESS_BASE: [^\r\n]+\r?\n)?\s+run: npm run check:docs/.test(workflow),
   true,
   'documentation consistency must run in both lanes',
 );

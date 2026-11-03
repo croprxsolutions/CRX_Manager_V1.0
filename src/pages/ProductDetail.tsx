@@ -73,6 +73,11 @@ const PRODUCT_NONPRICING_FIELDS = [
   'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit', 'use_timings',
 ] as const satisfies ReadonlyArray<keyof Product>;
 
+// Other screens write these (commit_label_draft writes the six label fields).
+const PRODUCT_FIELDS_WRITTEN_ELSEWHERE = [
+  'vendor', 'signal_word', 'rei_hours', 'phi_days', 'epa_registration', 'max_label_rate', 'max_label_rate_unit',
+] as const satisfies ReadonlyArray<(typeof PRODUCT_NONPRICING_FIELDS)[number]>;
+
 const PRODUCT_PRICING_FIELDS = [
   'current_cost', 'tier1_margin', 'tier2_margin', 'tier3_margin',
   'tier1_price', 'tier2_price', 'tier3_price',
@@ -88,9 +93,13 @@ function nonpricingProductPayload(product: Partial<Product>, persisted?: Product
     ...PRODUCT_NONPRICING_FIELDS.map((field) => [field, product[field]] as const),
     ['updated_at', new Date().toISOString()],
   ]);
-  // Send the vendor only when it was edited here, so a page left open never re-saves an old
-  // vendor over one changed elsewhere (WP-PM-15: the vendor becomes the preferred vendor's copy).
-  if (persisted && payload.vendor === (persisted.vendor ?? null)) delete payload.vendor;
+  // Send these only when edited here, so a page left open never re-saves an old value over one
+  // changed elsewhere: the vendor by WP-PM-15 (preferred vendor's copy), the rest by Label Review's commit.
+  if (persisted) {
+    for (const field of PRODUCT_FIELDS_WRITTEN_ELSEWHERE) {
+      if (payload[field] === (persisted[field] ?? null)) delete payload[field];
+    }
+  }
   return payload;
 }
 

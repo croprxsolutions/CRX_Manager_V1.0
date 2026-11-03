@@ -592,8 +592,10 @@ Deno.serve(async (req: Request) => {
     //    successfully under this key.
     //    The stored key is scoped to type + record (audit finding 8), and is
     //    shared by every caller so a second staff member cannot re-send the
-    //    same email. Rows written before this change hold the raw key; they
-    //    still count, but only for the same email_type and customer.
+    //    same email. Rows written before this change hold the raw key and no
+    //    record id, so one counts only when that raw key names this record
+    //    (the app's keys embed the record id); any other raw-key row is
+    //    refused as ambiguous rather than reported as already sent.
     let emailLogId: string | null = null;
     const scopedIdempotencyKey = idempotency_key
       ? `${email_type}:${recordRef}:${idempotency_key}`
@@ -607,7 +609,15 @@ Deno.serve(async (req: Request) => {
       if (existingErr) {
         return jsonResponse({ error: `Idempotency lookup failed: ${existingErr.message}` }, 503);
       }
-      const existing = keyRows?.find((row) => row.idempotency_key === scopedIdempotencyKey) ?? keyRows?.[0];
+      const scopedRow = keyRows?.find((row) => row.idempotency_key === scopedIdempotencyKey);
+      const legacyRow = scopedRow ? undefined : keyRows?.find((row) => row.idempotency_key === idempotency_key);
+      const recordId = recordRef.slice(recordRef.indexOf(":") + 1);
+      if (legacyRow && (!recordId || !idempotency_key.includes(recordId))) {
+        return jsonResponse({
+          error: "This idempotency_key was used before keys were tied to a record and cannot be matched to this one. Send again with a new key.",
+        }, 409);
+      }
+      const existing = scopedRow ?? legacyRow;
       if (existing && (existing.email_type !== email_type || existing.customer_id !== (customer_id ?? null))) {
         return jsonResponse({ error: "This idempotency_key was already used for a different email" }, 409);
       }
@@ -642,9 +652,10 @@ Deno.serve(async (req: Request) => {
         }, 409);
       }
 
-      // If existing failed row: reuse its id, update to pending below, and
-      // overwrite the result after the next send attempt.
-      if (existing) emailLogId = existing.id;
+      // If existing failed scoped row: reuse its id, update to pending below,
+      // and overwrite the result after the next send attempt. A failed legacy
+      // row keeps its own audit details; this attempt gets a new scoped row.
+      if (scopedRow) emailLogId = scopedRow.id;
     }
 
     // 10. Write-ahead log (2026-05-16 ultra-review P2 #5): insert/update the

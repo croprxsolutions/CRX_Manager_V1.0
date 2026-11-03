@@ -69,6 +69,10 @@ describe('send-email content and replay contracts (audit findings 7 and 8)', () 
     expect(source).toContain('.in("idempotency_key", [scopedIdempotencyKey, idempotency_key])');
     expect(source).toContain('existing.email_type !== email_type || existing.customer_id !== (customer_id ?? null)');
     expect(source).toContain('idempotency_key: scopedIdempotencyKey,');
+    // A raw pre-scoping key counts only when it names this record; a failed legacy row is never overwritten (Sol HIGH).
+    expect(source).toContain('if (legacyRow && (!recordId || !idempotency_key.includes(recordId))) {');
+    expect(source).toContain('if (scopedRow) emailLogId = scopedRow.id;');
+    expect(source).not.toContain('?? keyRows?.[0]');
     expect(source).not.toContain('.from("email_log")\n        .select("id, resend_message_id, status")\n        .eq("idempotency_key", idempotency_key)');
   });
 });

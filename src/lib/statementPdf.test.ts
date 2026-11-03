@@ -28,6 +28,8 @@ const mockDoc = {
   getTextWidth: vi.fn(() => 50),
   setLineDashPattern: vi.fn(),
   addPage: vi.fn(),
+  getNumberOfPages: vi.fn(() => 1),
+  setPage: vi.fn(),
   save: vi.fn(),
   lastAutoTable: { finalY: 300 },
 };

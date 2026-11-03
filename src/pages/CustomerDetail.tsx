@@ -44,6 +44,7 @@ import {
 } from '../lib/recordVersionConcurrency';
 import { ALLOWED_CROPS, type CropValue } from '../lib/crops';
 import { logActivity } from '../lib/activityLogger';
+import { loadDefaultTier } from '../lib/appSettingDefaults';
 import CustomerSummaryBar from '../components/customers/CustomerSummaryBar';
 import YearEndSummaryDialog from '../components/reports/YearEndSummaryDialog';
 import CustomerContacts, { CustomerInteractionsHistory } from '../components/customers/CustomerContacts';
@@ -425,14 +426,19 @@ export default function CustomerDetail() {
     if (!isNew && id) {
       void fetchCustomerSnapshot();
     } else {
-      // New customer — mark ready immediately. Same deferred-flag hazard as the
-      // snapshot loader above: navigating from /customers/new to an existing
-      // customer while this timer is pending would otherwise re-arm the flag
-      // and mark that customer's loaded snapshot dirty.
-      setTimeout(() => {
+      // New customer — start on the Settings Default Tier (unless the tier was already
+      // changed), then mark ready, so the default does not count as an unsaved edit.
+      // Same deferred-flag hazard as the snapshot loader above: navigating from
+      // /customers/new to an existing customer while this is pending would otherwise
+      // re-arm the flag and mark that customer's loaded snapshot dirty.
+      void loadDefaultTier().then((tier) => {
         if (currentIdRef.current !== id) return;
-        initialLoadDone.current = true;
-      }, 0);
+        setCustomer((c) => (c.assigned_tier === 1 ? { ...c, assigned_tier: tier } : c));
+        setTimeout(() => {
+          if (currentIdRef.current !== id) return;
+          initialLoadDone.current = true;
+        }, 0);
+      });
     }
   }, [id, isNew, fetchCustomerSnapshot]);
 

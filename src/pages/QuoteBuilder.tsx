@@ -74,6 +74,7 @@ import { sendOrderConfirmedEmail } from '../lib/orderConfirmedEmail';
 import { trackBusinessEvent } from '../lib/metrics';
 import { localDatePlusDays, localToday, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { computeSeason, seasonEndDate } from '../utils/season';
+import { loadQuoteValidDays, pickedExpiryStart } from '../lib/appSettingDefaults';
 import { downloadQuotePdf, generateQuotePdf } from '../lib/quotePdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { escapeHtml } from '../lib/proofNotification';
@@ -460,6 +461,13 @@ export default function QuoteBuilder() {
   // applies it at each send (20261029100000).
   const [chosenExpiryDate, setChosenExpiryDate] = useState<string | null>(null);
   const seasonEnd = seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz())));
+  // Settings "Default Quote Valid Days": where "Pick a date" starts (null = season end).
+  const [quoteValidDays, setQuoteValidDays] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void loadQuoteValidDays().then((days) => { if (!cancelled) setQuoteValidDays(days); });
+    return () => { cancelled = true; };
+  }, []);
   const [headerNotes, setHeaderNotes] = useState('');
   const [footerNotes, setFooterNotes] = useState('');
   const [commissionSplit, setCommissionSplit] = useState<CommissionSplit>({
@@ -4871,7 +4879,9 @@ export default function QuoteBuilder() {
             <select
               id="quote-expires"
               value={chosenExpiryDate ? 'date' : 'season'}
-              onChange={(e) => setChosenExpiryDate(e.target.value === 'date' ? seasonEnd : null)}
+              onChange={(e) => setChosenExpiryDate(
+                e.target.value === 'date' ? pickedExpiryStart(todayInBusinessTz(), quoteValidDays, seasonEnd) : null,
+              )}
               className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >
               <option value="season">

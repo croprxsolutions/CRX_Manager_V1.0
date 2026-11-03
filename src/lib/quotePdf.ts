@@ -7,7 +7,8 @@
 // jsPDF and autoTable are dynamically imported inside each function
 // to keep them out of the main bundle (~500KB each)
 import { CRX_GREEN, CHARCOAL, GRAY, LIGHT_BG, type JsPDFWithAutoTable } from './pdfTheme';
-import { COMPANY_TAGLINE_HEADER_NO_PHONE } from './companyInfo';
+import { COMPANY_WEBSITE, companyTaglineHeader } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatUSD as fmt } from './money';
 
 
@@ -85,6 +86,7 @@ const DEFAULT_PDF_COLUMNS = ['product', 'actual_rate', 'acres', 'qty', 'price_un
 export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
   const pageW = doc.internal.pageSize.getWidth();
@@ -97,10 +99,10 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
-  doc.text('CROP RX SOLUTIONS', margin, 35);
+  doc.text(company.name.toUpperCase(), margin, 35);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(COMPANY_TAGLINE_HEADER_NO_PHONE, margin, 53);
+  doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2), margin, 53);
 
   // Quote number badge on right
   doc.setFontSize(14);
@@ -276,7 +278,9 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
   doc.text(
-    'Crop RX Solutions  •  www.croprxsolutions.com  •  Prices valid for the period shown above. Subject to product availability.',
+    [company.name, COMPANY_WEBSITE, company.email, 'Prices valid for the period shown above. Subject to product availability.']
+      .filter(Boolean)
+      .join('  •  '),
     pageW / 2,
     footerY,
     { align: 'center' }

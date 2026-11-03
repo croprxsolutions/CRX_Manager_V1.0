@@ -8,10 +8,12 @@
  * summaries said "Robinson, IL". A customer could receive a quote from one town
  * and an invoice from another. Now the location lives here once.
  *
- * FUTURE: SettingsPage already stores company_name/phone/email/address; a later
- * change should thread those values in here so the address is editable from the
- * UI without a code change.
+ * Quote and invoice PDFs take the name, phone, email and address saved on the
+ * Settings page (app_settings) through loadCompanyInfo(); the constants below
+ * are the fallback for any blank setting and still feed the other PDFs.
  */
+
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 
 export const COMPANY_NAME = 'Crop RX Solutions';
 export const COMPANY_LEGAL_NAME = 'Crop RX Solutions, Inc.';
@@ -27,9 +29,55 @@ export const COMPANY_WEBSITE = 'www.croprxsolutions.com';
  */
 export const COMPANY_ORDERING_EMAIL = 'mason@croprxsolutions.com';
 
+/** The company details Settings controls; email is blank (not printed) unless saved. */
+export interface CompanyInfo {
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+}
+
+export const DEFAULT_COMPANY_INFO: CompanyInfo = {
+  name: COMPANY_NAME,
+  phone: COMPANY_PHONE,
+  email: '',
+  address: COMPANY_CITY,
+};
+
+const COMPANY_SETTING_FIELDS: Record<string, keyof CompanyInfo> = {
+  company_name: 'name',
+  company_phone: 'phone',
+  company_email: 'email',
+  company_address: 'address',
+};
+
+/** Settings rows -> CompanyInfo; a blank or missing setting keeps its default. */
+export function companyInfoFromSettings(
+  rows: ReadonlyArray<{ setting_key: string; setting_value: string | null }>,
+): CompanyInfo {
+  const info = { ...DEFAULT_COMPANY_INFO };
+  for (const row of rows) {
+    const field = COMPANY_SETTING_FIELDS[row.setting_key];
+    const value = row.setting_value?.trim();
+    if (field && value) info[field] = value;
+  }
+  return info;
+}
+
+/** Reads the Settings company details; throws when the read fails so no caller guesses. */
+export async function loadCompanyInfo(db: SupabaseClient): Promise<CompanyInfo> {
+  const { data, error } = await db
+    .from('app_settings')
+    .select('setting_key, setting_value')
+    .in('setting_key', Object.keys(COMPANY_SETTING_FIELDS));
+  if (error) throw error;
+  return companyInfoFromSettings(data ?? []);
+}
+
 // ── Composed strings used by the PDF footers/headers ──────────────────────
 // Letterhead tagline WITH phone (invoice, statement, year-end summary headers).
-export const COMPANY_TAGLINE_HEADER = `${COMPANY_TAGLINE}  •  ${COMPANY_CITY}  •  ${COMPANY_PHONE}`;
+export const companyTaglineHeader = (c: CompanyInfo) => `${COMPANY_TAGLINE}  •  ${c.address}  •  ${c.phone}`;
+export const COMPANY_TAGLINE_HEADER = companyTaglineHeader(DEFAULT_COMPANY_INFO);
 // Letterhead tagline WITHOUT phone (quote, report headers — preserve prior format).
 export const COMPANY_TAGLINE_HEADER_NO_PHONE = `${COMPANY_TAGLINE}  •  ${COMPANY_CITY}`;
 // Centered footer on receipts / ops docs.

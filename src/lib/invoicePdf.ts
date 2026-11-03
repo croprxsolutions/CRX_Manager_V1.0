@@ -12,7 +12,8 @@
 
 import { supabase } from './db';
 import { Sentry } from './sentry';
-import { COMPANY_TAGLINE_HEADER, COMPANY_LEGAL_NAME } from './companyInfo';
+import { COMPANY_LEGAL_NAME, companyTaglineHeader, DEFAULT_COMPANY_INFO } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatCents as fmt } from './money';
 import type jsPDF from 'jspdf';
 import { generatedDateLabel, type JsPDFWithAutoTable } from '../../supabase/functions/_shared/pdf/theme.ts';
@@ -62,6 +63,7 @@ export function buildInvoicePdfDataFromRow(
 }
 
 export async function generateInvoicePdf(data: InvoicePdfData): Promise<JsPDFWithAutoTable> {
+  if (!data.company) data = { ...data, company: await loadCompanyInfoForPdf() };
   // Field-app parity #30: route to the legacy ("Old Print") layout when asked.
   // Both formats consume the SAME InvoicePdfData, so the money lines are
   // identical — no recompute, Total/Payments/Prepay/Balance Due reconcile.
@@ -151,6 +153,7 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 48;
   const opts = data.options ?? { show_shares: true, show_price_per_acre: true, show_epa_registration: true };
+  const company = data.company ?? DEFAULT_COMPANY_INFO;
   const isFieldApp = data.invoice_type === 'field_application';
 
   const black: [number, number, number] = [0, 0, 0];
@@ -162,7 +165,7 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
       doc.setFont('courier', 'normal');
       doc.setTextColor(120, 120, 120);
       doc.text(
-        `${COMPANY_LEGAL_NAME}   (Old Print format)   Generated ${generatedDateLabel()}`,
+        [COMPANY_LEGAL_NAME, company.email, '(Old Print format)', `Generated ${generatedDateLabel()}`].filter(Boolean).join('   '),
         pageW / 2,
         footerY,
         { align: 'center' },
@@ -179,10 +182,11 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
   doc.setFont('courier', 'bold');
   doc.setFontSize(13);
   doc.setTextColor(...black);
-  doc.text('CROP RX SOLUTIONS', margin, y);
+  doc.text(company.name.toUpperCase(), margin, y);
   doc.setFont('courier', 'normal');
   doc.setFontSize(8);
-  doc.text(COMPANY_TAGLINE_HEADER, margin, y + 13);
+  // A long Settings address wraps instead of running under the invoice number.
+  doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 100), margin, y + 13);
 
   doc.setFont('courier', 'bold');
   doc.setFontSize(11);
@@ -461,7 +465,8 @@ export async function generateBatchInvoicePdf(dataList: InvoicePdfData[]): Promi
   // remaining as individual saves with requestAnimationFrame to avoid
   // popup blockers.
   // Use allSettled so one bad invoice doesn't crash the entire batch
-  const results = await Promise.allSettled(dataList.map((d) => generateInvoicePdf(d)));
+  const company = await loadCompanyInfoForPdf();
+  const results = await Promise.allSettled(dataList.map((d) => generateInvoicePdf({ ...d, company })));
 
   const docs: { doc: jsPDF; name: string }[] = [];
   const failures: string[] = [];
@@ -497,4 +502,4 @@ export async function generateBatchInvoicePdf(dataList: InvoicePdfData[]): Promi
 
   return { doc: docs[docs.length - 1].doc, failures };
 }
-
+

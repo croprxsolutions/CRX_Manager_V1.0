@@ -11,6 +11,7 @@
 // go to the customer's own address on file), and the moment between send-email's
 // final re-read of the invoice and the provider call (a payment saved in it still
 // goes out with the earlier Amount Due; the purchase-order copy has the same window).
+// Both are accepted for now and tracked as KNOWN_ISSUES KI-98 (follow-up: server-built PDFs).
 //
 // Pure, with no Deno or Supabase imports, so the app's Vitest suite tests it
 // directly (src/lib/invoiceEmailGate.test.ts).

@@ -174,8 +174,32 @@ still drawn by the app, so the app also sends the money the PDF prints; the serv
 matches the saved invoice, and checks again just before sending (same method as the purchase-order copy). Left
 open: the PDF file itself is drawn by the signed-in user's app, not the server; and the last check is a read
 before the send, so a payment saved in that split second can still go out with the earlier Amount Due (the
-purchase-order copy has the same window). Becomes FIXED when the new
-`send-email` version is deployed and one real invoice email is checked.
+purchase-order copy has the same window). Both are accepted for now and tracked as KI-98 (Mason, 2026-11-02).
+Becomes FIXED when the new `send-email` version is deployed and one real invoice email is checked.
+
+---
+
+### KI-98 — Emailed invoice and purchase-order PDFs are drawn by the sender's app, not the server
+**LOW · OPEN · ACCEPTED FOR NOW, FOLLOW-UP PLANNED · money · unassigned**
+Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_LOG.md`, same date). It is a
+known limit, not an oversight.
+- **What is true today.** After KI-97, `send-email` writes the invoice email's text and Amount Due from the saved
+  invoice. It refuses the send unless the dollar figures the app says its PDF shows match the saved invoice.
+- **What is not covered.** The PDF file itself is still built in the signed-in staff member's app (jsPDF). The
+  server checks that summary, not the file's contents. The purchase-order email works the same way
+  (`purchaseOrderEmailGate.ts`).
+- **Why it was accepted.** Only signed-in admin or sales staff can send, and only to the customer's or supplier's
+  address on file. The email text always states the saved balance. The complete fix is a large port.
+- **Also accepted.** `send-email`'s last check is a read just before the provider call, not an atomic step. A
+  payment saved in that split second still goes out with the earlier Amount Due.
+- **Follow-up (its own session and PR).** Build invoice and purchase-order PDFs on the server from the saved
+  records, and drop the app-sent summary.
+  - The work: port the needed parts of `src/lib/invoicePdf.ts` (about 1,600 lines: jsPDF + autotable, and a data
+    loader that reads through the browser client) and the PO PDF builder to a Deno-safe shared module. Load data
+    with the service client; prove the output matches today's PDFs page for page.
+  - Done when: `send-email` attaches only a server-built PDF for `invoice` and `purchase_order` emails, the old
+    app-built path is refused, and one real email of each type is checked after deploy.
+  - Risk: the PDF must look identical to customers. It needs an Edge Function deploy (Mason's yes) and Sol.
 
 ---
 

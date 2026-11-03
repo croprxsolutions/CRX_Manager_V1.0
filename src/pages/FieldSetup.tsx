@@ -641,7 +641,16 @@ function FieldSetupPage() {
             .eq('id', savedFieldId as string)
             .maybeSingle();
           const sent: Record<string, unknown> = { ...fieldPayload };
-          createdBySave = !!saved && Object.entries(saved).every(([k, v]) => (v ?? null) === (sent[k] ?? null));
+          const { data: savedSplits, error: splitsError } = await supabase
+            .from('field_billing_defaults')
+            .select('customer_id, split_pct, is_primary, notes, price_override_cents, pricing_note')
+            .eq('field_id', savedFieldId as string);
+          // Unreadable splits cannot prove this save created the field, so the screen takes the safe warning path.
+          if (splitsError) Sentry.captureException(splitsError, { tags: { source: 'fetch', action: 'verify_new_field_billing' } });
+          const splitKey = (rows: Array<{ customer_id: string; split_pct: number; is_primary: boolean; notes: string | null; price_override_cents: number | null; pricing_note: string | null }>) =>
+            JSON.stringify(rows.map((r) => [r.customer_id, Number(r.split_pct), r.is_primary, r.notes ?? null, r.price_override_cents ?? null, r.pricing_note ?? null]).sort());
+          createdBySave = !!saved && Object.entries(saved).every(([k, v]) => (v ?? null) === (sent[k] ?? null))
+            && !splitsError && Array.isArray(savedSplits) && splitKey(savedSplits) === splitKey(billingPayload);
         }
         if (!createdBySave) {
           toast('warning', 'An earlier save may already have created this field. Opening it now; check its details and re-enter any acreage or boundary.');

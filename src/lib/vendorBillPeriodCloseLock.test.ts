@@ -156,7 +156,18 @@ describe('vendor-bill accounting-period close serialization', () => {
       .map((match) => match[1])
       .filter((relation) => !relation.startsWith('pg_catalog.'));
     expect(nonCatalogRelations).toEqual(['public.accounting_periods']);
+    // This 2026-07-30 body had no lock; KI-19 (20261103220000) adds it, pinned below.
     expect(check).not.toContain('_lock_accounting_months');
+  });
+
+  it('KI-19: check_period_open takes the shared month lock before it reads', () => {
+    const name = readdirSync(migrationDir).find((file) => file.endsWith('_period_check_takes_month_lock.sql'));
+    expect(name).toBeDefined();
+    const sql = readFileSync(join(migrationDir, name!), 'utf8').replace(/\r\n/g, '\n');
+    const check = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.check_period_open('), sql.indexOf('CREATE OR REPLACE FUNCTION public.allocate_payment('));
+    const lock = check.indexOf('PERFORM public._lock_accounting_months(ARRAY[p_date], false);');
+    expect(lock).toBeGreaterThan(0);
+    expect(lock).toBeLessThan(check.indexOf('FROM public.accounting_periods'));
   });
 
   it('holds writer shared locks across the actual period checks in safe order', () => {

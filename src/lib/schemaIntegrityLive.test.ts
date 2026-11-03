@@ -501,8 +501,14 @@ const ACCOUNTING_MONTH_LOCK_CONTRACTS = [
     call: /public\._lock_accounting_months\s*\(\s*ARRAY\s*\[\s*v_bill\.bill_date\s*,\s*p_bill_date\s*\]\s*,\s*false\s*\)/i,
   },
   {
-    name: 'close_accounting_period',
+    // KI-10 batch 4a moved the close body behind a replay wrapper.
+    name: '_close_accounting_period_replay_impl_20261015',
     call: /public\._lock_accounting_months\s*\(\s*ARRAY\s*\[\s*v_period_start\s*\]\s*,\s*true\s*\)/i,
+  },
+  {
+    // KI-19: every check_period_open caller takes the shared month lock through it.
+    name: 'check_period_open',
+    call: /public\._lock_accounting_months\s*\(\s*ARRAY\s*\[\s*p_date\s*\]\s*,\s*false\s*\)/i,
   },
 ] as const;
 

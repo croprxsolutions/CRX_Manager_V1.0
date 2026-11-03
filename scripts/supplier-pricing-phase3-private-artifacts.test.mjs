@@ -1473,9 +1473,9 @@ git() { return 0; }
     'CI must run the packet suite explicitly in the trusted full-CI route',
   );
   if (fixtureBash()) {
-    const hookPath = path.join(REPO_ROOT, '.husky', 'pre-push');
-    // $0 is the hook's own (relative) path, so the sourced hook and its stubs do not hand off to a fresh shell.
-    const runPrePushHook = (functions, args = [], input = '') => spawnSync(fixtureBash(), ['-c', `${functions}\nHOOK=$1; shift; source "$HOOK"`, '.husky/pre-push', hookPath, ...args], { cwd: REPO_ROOT, encoding: 'utf8', input, env: sanitizedFixtureGitEnv() });
+    const hookPath = '.husky/pre-push'; // relative to cwd REPO_ROOT, so no absolute path reaches the shell
+    // $0 is the hook's own path, so the sourced hook and its stubs do not hand off to a fresh shell.
+    const runPrePushHook = (functions, args = [], input = '') => spawnSync(fixtureBash(), ['-c', `${functions}\nHOOK=$1; shift; source "$HOOK"`, hookPath, hookPath, ...args], { cwd: REPO_ROOT, encoding: 'utf8', input, env: sanitizedFixtureGitEnv() });
     for (const [name, functions] of [
       ['containment', 'node() { return 42; }; npm() { return 0; };'],
       ['typecheck', 'node() { return 0; }; npm() { if [ "$2" = "typecheck" ]; then return 42; fi; return 0; };'],

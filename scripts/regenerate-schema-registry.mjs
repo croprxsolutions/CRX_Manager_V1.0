@@ -10,10 +10,15 @@
 //       "Stamp" mode (v1 behavior preserved): refresh _meta.generated_at only.
 //       Warns if the registry is still v1-shaped.
 //
+//   node scripts/regenerate-schema-registry.mjs --live
+//       Full rebuild straight from live: runs Q1-Q6 through the Supabase Management API with
+//       read_only: true, using Mason's token from Windows Credential Manager
+//       (scripts/lib/supabase-credential.mjs; approved use, docs/manual/SERVICES_AND_ACCOUNTS.md).
+//       The default for /regen-schema-registry.
+//
 //   node scripts/regenerate-schema-registry.mjs --from-introspection <file.json | ->
-//       Full rebuild from a JSON file of query results (use "-" to read stdin).
-//       Claude Code runs the queries below via the Supabase MCP execute_sql tool,
-//       saves the rows into one JSON object, and invokes this mode.
+//       Full rebuild from a JSON file of query results (use "-" to read stdin). The fallback
+//       when the token is unavailable (cloud sessions, another machine).
 //
 // INTROSPECTION INPUT FORMAT (one JSON object; each key = raw row array from its query):
 //   {
@@ -28,66 +33,79 @@
 //   Input without applied_names is tolerated only for backward compatibility. It carries
 //   the previous name list forward with a warning, so Q6 must run on every real refresh.
 //
-// QUERIES TO RUN (read-only, public schema, via Supabase MCP execute_sql):
-//
-// (Q1) migrations_high_water:
-//     SELECT max(version) AS high_water FROM supabase_migrations.schema_migrations;
-//
-// (Q2) sequences:
-//     SELECT sequence_name FROM information_schema.sequences
-//     WHERE sequence_schema = 'public' ORDER BY 1;
-//
-// (Q3) generated_columns:
-//     SELECT table_name, column_name, generation_expression
-//     FROM information_schema.columns
-//     WHERE table_schema = 'public' AND is_generated = 'ALWAYS'
-//     ORDER BY 1, 2;
-//
-// (Q4) check_constraints (EVERY CHECK, not just status):
-//     SELECT conrelid::regclass::text AS table_name,
-//            conname AS constraint_name,
-//            pg_get_constraintdef(oid) AS def
-//     FROM pg_constraint
-//     WHERE contype = 'c' AND connamespace = 'public'::regnamespace
-//     ORDER BY 1, 2;
-//
-// (Q5) columns (full list + NOT NULL split by has-default; excludes GENERATED cols
-//      from the NOT NULL sets — those are covered by generated_columns):
-//     SELECT c.table_name,
-//       jsonb_agg(c.column_name ORDER BY c.ordinal_position) AS cols,
-//       COALESCE(jsonb_agg(c.column_name ORDER BY c.ordinal_position)
-//         FILTER (WHERE c.is_nullable = 'NO' AND c.is_generated <> 'ALWAYS'
-//                 AND c.column_default IS NULL AND c.is_identity = 'NO'), '[]'::jsonb) AS not_null_no_default,
-//       COALESCE(jsonb_agg(c.column_name ORDER BY c.ordinal_position)
-//         FILTER (WHERE c.is_nullable = 'NO' AND c.is_generated <> 'ALWAYS'
-//                 AND (c.column_default IS NOT NULL OR c.is_identity = 'YES')), '[]'::jsonb) AS not_null_with_default
-//     FROM information_schema.columns c
-//     JOIN information_schema.tables t
-//       ON t.table_schema = c.table_schema AND t.table_name = c.table_name AND t.table_type = 'BASE TABLE'
-//     WHERE c.table_schema = 'public'
-//     GROUP BY c.table_name ORDER BY c.table_name;
-//     -- If the MCP response is too large, split with `AND c.table_name <= 'mmm'` /
-//     -- `AND c.table_name > 'mmm'` and concatenate the row arrays.
-//
-// (Q6) applied_names (REQUIRED — powers name-based staleness comparison in
-//      session-staleness.mjs; server-assigned `version` can be LOWER than the
-//      migration filename's timestamp for migrations applied via the Supabase
-//      MCP, which makes the numeric high-water compare false-positive forever
-//      on those migrations. Name matching sidesteps that):
-//     SELECT name FROM supabase_migrations.schema_migrations ORDER BY name;
-//
-// CHEAPEST WORKFLOW:
-//   Open Claude Code in this repo and say: "regenerate the schema-registry from Supabase"
-//   (the /regen-schema-registry skill). Claude runs Q1–Q6 via MCP, assembles the input
-//   JSON, and runs this script with --from-introspection.
+// QUERIES: Q1-Q6 live in INTROSPECTION_QUERIES below (read-only, public schema). `--live`
+// runs them itself; for `--from-introspection`, run each one separately (e.g. MCP execute_sql,
+// one statement per call) and save the rows under its key.
 
 import { writeFileSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { readCredentialToken } from "./lib/supabase-credential.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const registryPath = path.join(here, "..", ".claude", "schema-registry.json");
 const today = new Date().toISOString().slice(0, 10);
+const QUERY_URL = "https://api.supabase.com/v1/projects/rhyzpcqhnizqbxphqdkr/database/query";
+
+// Q1-Q6. Each key is the input key its rows are stored under.
+export const INTROSPECTION_QUERIES = {
+  // Q1
+  migrations_high_water: "SELECT max(version) AS high_water FROM supabase_migrations.schema_migrations",
+  // Q2
+  sequences: "SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public' ORDER BY 1",
+  // Q3
+  generated_columns: `SELECT table_name, column_name, generation_expression
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND is_generated = 'ALWAYS'
+    ORDER BY 1, 2`,
+  // Q4: EVERY CHECK, not just status
+  check_constraints: `SELECT conrelid::regclass::text AS table_name,
+           conname AS constraint_name,
+           pg_get_constraintdef(oid) AS def
+    FROM pg_constraint
+    WHERE contype = 'c' AND connamespace = 'public'::regnamespace
+    ORDER BY 1, 2`,
+  // Q5: full column list + NOT NULL split by has-default; GENERATED columns are left out of the
+  // NOT NULL sets (generated_columns covers them). Over MCP, a response too large to return can be
+  // split with `AND c.table_name <= 'mmm'` / `> 'mmm'` and the row arrays concatenated.
+  columns: `SELECT c.table_name,
+      jsonb_agg(c.column_name ORDER BY c.ordinal_position) AS cols,
+      COALESCE(jsonb_agg(c.column_name ORDER BY c.ordinal_position)
+        FILTER (WHERE c.is_nullable = 'NO' AND c.is_generated <> 'ALWAYS'
+                AND c.column_default IS NULL AND c.is_identity = 'NO'), '[]'::jsonb) AS not_null_no_default,
+      COALESCE(jsonb_agg(c.column_name ORDER BY c.ordinal_position)
+        FILTER (WHERE c.is_nullable = 'NO' AND c.is_generated <> 'ALWAYS'
+                AND (c.column_default IS NOT NULL OR c.is_identity = 'YES')), '[]'::jsonb) AS not_null_with_default
+    FROM information_schema.columns c
+    JOIN information_schema.tables t
+      ON t.table_schema = c.table_schema AND t.table_name = c.table_name AND t.table_type = 'BASE TABLE'
+    WHERE c.table_schema = 'public'
+    GROUP BY c.table_name ORDER BY c.table_name`,
+  // Q6 (REQUIRED): powers the name-based staleness comparison in session-staleness.mjs. A
+  // server-assigned `version` can be LOWER than the filename's stamp for MCP-applied migrations,
+  // which makes a numeric high-water compare false-positive forever; matching names avoids that.
+  applied_names: "SELECT name FROM supabase_migrations.schema_migrations ORDER BY name",
+};
+
+/** Runs Q1-Q6 against live, read-only, and returns the introspection input object. Fails closed. */
+export async function liveIntrospection({ fetchImpl = fetch, token = readCredentialToken() } = {}) {
+  const data = {};
+  for (const [key, query] of Object.entries(INTROSPECTION_QUERIES)) {
+    const res = await fetchImpl(QUERY_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ query, read_only: true }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    const text = await res.text();
+    let rows;
+    try { rows = JSON.parse(text); } catch { throw new Error(`${key}: HTTP ${res.status}, response is not JSON`); }
+    if (!res.ok || !Array.isArray(rows)) throw new Error(`${key}: HTTP ${res.status}: ${text.slice(0, 300)}`);
+    if (rows.length === 0) throw new Error(`${key}: returned no rows; refusing to write a registry from an empty result`);
+    data[key] = rows;
+  }
+  return data;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CHECK-constraint parser.
@@ -128,7 +146,7 @@ function skipReason(def) {
   return "unparseable — hooks do NOT validate this constraint";
 }
 
-function rebuildFromIntrospection(inputArg) {
+function readIntrospectionFile(inputArg) {
   let raw;
   try {
     raw = inputArg === "-" ? readFileSync(0, "utf8") : readFileSync(inputArg, "utf8");
@@ -143,6 +161,10 @@ function rebuildFromIntrospection(inputArg) {
     console.error(`Introspection input is not valid JSON: ${e.message}`);
     process.exit(1);
   }
+  return data;
+}
+
+function rebuildFromIntrospection(data) {
   for (const key of ["migrations_high_water", "sequences", "generated_columns", "check_constraints", "columns"]) {
     if (!Array.isArray(data[key])) {
       console.error(`Introspection input missing array key "${key}" — see header of this script for the format.`);
@@ -228,7 +250,7 @@ function rebuildFromIntrospection(inputArg) {
       registry_version: 2,
       generated_at: today,
       generated_from: "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
-      regenerate_with: "node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json> (queries documented in the script header)",
+      regenerate_with: "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
       purpose: "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
       note: "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
       migrations_high_water: highWater,
@@ -298,15 +320,27 @@ function stampMode() {
   console.log(`To pull fresh schema data, ask Claude Code: "regenerate the schema-registry from Supabase".`);
 }
 
-const args = process.argv.slice(2);
-const fiIdx = args.indexOf("--from-introspection");
-if (fiIdx !== -1) {
-  const inputArg = args[fiIdx + 1];
-  if (!inputArg) {
-    console.error("Usage: node scripts/regenerate-schema-registry.mjs --from-introspection <file.json | ->");
-    process.exit(1);
+async function main(args) {
+  if (args.includes("--live")) {
+    rebuildFromIntrospection(await liveIntrospection());
+    return;
   }
-  rebuildFromIntrospection(inputArg);
-} else {
-  stampMode();
+  const fiIdx = args.indexOf("--from-introspection");
+  if (fiIdx !== -1) {
+    const inputArg = args[fiIdx + 1];
+    if (!inputArg) {
+      console.error("Usage: node scripts/regenerate-schema-registry.mjs --from-introspection <file.json | ->");
+      process.exit(1);
+    }
+    rebuildFromIntrospection(readIntrospectionFile(inputArg));
+  } else {
+    stampMode();
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(`regenerate-schema-registry: ${error.message}`);
+    process.exitCode = 1;
+  });
 }

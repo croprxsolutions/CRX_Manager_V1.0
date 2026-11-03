@@ -552,7 +552,7 @@ rules prompt in every mode, including `bypassPermissions`; the desktop app ignor
 
 **Full audit (manual):** `scripts/validate-sql-migrations.sh` — scans ALL migration files. Run with `--idempotency-only` for focused check.
 
-**Refresh schema registry after schema changes:** run the `regen-schema-registry` skill, which collects all six live Supabase introspection results and invokes `node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json>`. Never substitute the no-argument timestamp-only mode.
+**Refresh schema registry after schema changes:** run the `regen-schema-registry` skill, which runs `node scripts/regenerate-schema-registry.mjs --live` (all six introspection queries, read-only, in one command; `--from-introspection <queries.json>` is the fallback without the token). Never substitute the no-argument timestamp-only mode.
 
 **Shared guidance:** edit `AGENTS.md` intentionally. `CLAUDE.md` imports it and contains only Claude-specific routing. Verify with `npm run check:agent-guidance`.
 

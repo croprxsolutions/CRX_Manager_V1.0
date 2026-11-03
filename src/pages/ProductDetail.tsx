@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, DollarSign, ExternalLink, Search, Save } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
+import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Combobox from '../components/ui/Combobox';
 import Input from '../components/ui/Input';
@@ -57,7 +58,9 @@ import {
   type SupplierCostBasisCandidate,
 } from '../lib/productCostBasis';
 import { PRODUCT_COLUMNS, withAdminCost } from '../lib/costFields';
-import { listProductCategories, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories } from '../lib/productSetup';
+import {
+  listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories,
+} from '../lib/productSetup';
 import { listProductUseTimingOptions, visibleProductUseTimingOptions } from '../lib/productUseTimings';
 import type { ProductCategory, UseTimingOption } from '../types';
 
@@ -1103,6 +1106,8 @@ export default function ProductDetail() {
     ? persistedLabelFields.epaRegistration.trim()
     : null;
 
+  const missingSetup = missingProductSetup(product);
+
   return (
     <div className={`phone-touch space-y-4 ${isAdmin ? 'max-md:pb-10' : ''}`}>
       <div className="flex items-center gap-3">
@@ -1112,7 +1117,13 @@ export default function ProductDetail() {
         <h2 className="text-lg font-semibold font-heading text-nav-dark">
           {isNew ? 'New Product' : product.product_name}
         </h2>
+        {missingSetup.length > 0 && <Badge variant="warning">Incomplete setup</Badge>}
       </div>
+      {missingSetup.length > 0 && (
+        <p className="text-sm text-secondary" data-testid="product-setup-missing">
+          Still needed for complete setup: {missingSetup.join(', ')}.{isAdmin ? ' You can still save and price this product.' : ''}
+        </p>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
@@ -1179,8 +1190,14 @@ export default function ProductDetail() {
                   </div>
                 </fieldset>
               )}
-              <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin} placeholder="Type or select..." />
-              <Combobox label="Manufacturer" value={product.manufacturer || ''} onChange={(v) => update('manufacturer', v)} options={manufacturerOptions} disabled={!isAdmin} placeholder="Type or select..." />
+              <div>
+                <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin} placeholder="Type or select..." />
+                {isAdmin && <NearMatchWarning kind="vendor" matches={nearMatchNames(product.vendor, vendorOptions)} onPick={(name) => update('vendor', name)} />}
+              </div>
+              <div>
+                <Combobox label="Manufacturer" value={product.manufacturer || ''} onChange={(v) => update('manufacturer', v)} options={manufacturerOptions} disabled={!isAdmin} placeholder="Type or select..." />
+                {isAdmin && <NearMatchWarning kind="manufacturer" matches={nearMatchNames(product.manufacturer, manufacturerOptions)} onPick={(name) => update('manufacturer', name)} />}
+              </div>
               <div>
                 <div className="flex items-end gap-2">
                   <Input
@@ -1537,8 +1554,14 @@ export default function ProductDetail() {
               <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Application Rates</p>
               <p className="text-xs text-gray-400 mt-0.5 mb-3">Per-acre application information</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin} />
-                <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin} />
+                <div>
+                  <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin} />
+                  <p className="mt-1 text-xs text-secondary">Free text shown on quote lines and the quote PDF, such as a rate range. Not used in any calculation.</p>
+                </div>
+                <div>
+                  <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin} />
+                  <p className="mt-1 text-xs text-secondary">The product's default rate, in the Rate Unit. Zero or more.</p>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-secondary mb-1">Rate Unit</label>
                   <select
@@ -1558,6 +1581,16 @@ export default function ProductDetail() {
                     ))}
                   </select>
                 </div>
+              </div>
+              <div className="mt-3">
+                <p className="text-sm font-medium text-secondary">Max Label Rate</p>
+                <p className="text-sm text-nav-dark" data-testid="product-max-label-rate">
+                  {product.max_label_rate != null ? `${product.max_label_rate} ${product.max_label_rate_unit ?? ''}`.trim() : 'Not recorded'}
+                </p>
+                <p className="mt-1 text-xs text-secondary">
+                  The highest rate the label allows, read only here. Update it through{' '}
+                  {isAdmin ? <button type="button" onClick={() => navigate('/label-review')} className="text-crx-green underline hover:text-crx-green-dark">Label Review</button> : 'Label Review'}.
+                </p>
               </div>
             </div>
 
@@ -2002,5 +2035,21 @@ export default function ProductDetail() {
         }}
       />
     </div>
+  );
+}
+
+function NearMatchWarning({ kind, matches, onPick }: { kind: 'vendor' | 'manufacturer'; matches: string[]; onPick: (name: string) => void }) {
+  if (matches.length === 0) return null;
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-amber-800" role="status">
+      <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+      This creates a new {kind}. Did you mean
+      {matches.map((name, index) => (
+        <span key={name}>
+          <button type="button" onClick={() => onPick(name)} className="font-semibold underline hover:text-amber-900">{name}</button>
+          {index < matches.length - 1 ? ',' : '?'}
+        </span>
+      ))}
+    </p>
   );
 }

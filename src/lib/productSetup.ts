@@ -1,6 +1,7 @@
 import type { Product, ProductCategory } from '../types';
 import { supabaseUntyped } from './db';
 import { EPA_REGISTRATION_PATTERN } from './productBrands';
+import { calculateSimilarity } from './productIdentityResolver';
 
 export async function listProductCategories(): Promise<ProductCategory[]> {
   const { data, error } = await supabaseUntyped
@@ -81,4 +82,57 @@ export function normalizedProductSetup(
     rei_hours: keepUnchangedInterval(reiDraft, persisted.rei_hours, normalized.rei_hours),
     phi_days: keepUnchangedInterval(phiDraft, persisted.phi_days, normalized.phi_days),
   };
+}
+
+export type ProductSetupFields = Pick<Product,
+  'category' | 'product_form' | 'inventory_unit' | 'container_size' | 'container_unit'
+  | 'epa_registration' | 'signal_word' | 'rei_hours' | 'phi_days'>;
+
+const PESTICIDE_CATEGORIES = new Set(['Herbicide', 'Fungicide', 'Insecticide']);
+
+// A product with an EPA number, or in a pesticide category, is treated as a registered pesticide.
+// Everything else (fertilizer, adjuvant, seed, biological without an EPA number) needs only the base fields.
+function isRegisteredPesticide(product: Partial<Pick<Product, 'category' | 'epa_registration'>>): boolean {
+  return Boolean(product.epa_registration?.trim()) || PESTICIDE_CATEGORIES.has(product.category?.trim() ?? '');
+}
+
+/** Setup fields still blank. A blank REI/PHI is unknown; a saved 0 is a real 0 and counts as set. RUP is a yes/no that always has a value. */
+export function missingProductSetup(product: Partial<ProductSetupFields>): string[] {
+  const missing: string[] = [];
+  if (!product.category?.trim()) missing.push('Category');
+  if (!product.product_form) missing.push('Form');
+  if (!product.inventory_unit?.trim()) missing.push('Inventory unit');
+  if (product.container_size == null || !(product.container_size > 0)) missing.push('Container size');
+  if (!product.container_unit?.trim()) missing.push('Container unit');
+  if (isRegisteredPesticide(product)) {
+    if (!product.epa_registration?.trim()) missing.push('EPA number');
+    if (!product.signal_word) missing.push('Signal word');
+    if (product.rei_hours == null) missing.push('REI');
+    if (product.phi_days == null) missing.push('PHI');
+  }
+  return missing;
+}
+
+/** Existing names a typed vendor or manufacturer is probably a misspelling of; empty when it matches one exactly. */
+export function nearMatchNames(value: string | null | undefined, existing: readonly string[]): string[] {
+  const typed = value?.trim().toLowerCase();
+  if (!typed || typed.length < 3) return [];
+  if (existing.some((name) => name.trim() === value?.trim())) return [];
+  return existing
+    .map((name) => {
+      const known = name.trim().toLowerCase();
+      // A fragment of a longer name is mid-typing (the dropdown already lists those), not a misspelling.
+      if (known !== typed && (known.includes(typed) || typed.includes(known))) return { name, score: 0 };
+      return { name, score: calculateSimilarity(typed, known) };
+    })
+    .filter(({ score }) => score >= 0.75)
+    .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name))
+    .slice(0, 3)
+    .map(({ name }) => name);
+}
+
+export type SetupFilter = '' | 'incomplete';
+
+export function isSetupIncomplete(product: Partial<ProductSetupFields>): boolean {
+  return missingProductSetup(product).length > 0;
 }

@@ -359,6 +359,12 @@ ${unnamed}`);
     SET price_per_unit = price_per_unit, product_id = product_id WHERE id = '${OI_LEGACY}';`, { isolate: false });
   refused('order: a legacy $0 line moved to another unpriced product', `UPDATE public.order_items SET product_id = '${P.T2ONLY}' WHERE id = '${OI_LEGACY}';`, 'ORDER_PRICE_MISSING', 'Tier Two Only');
   allowed('order: a delivery against a legacy $0 line', `UPDATE public.order_items SET quantity_delivered = 2, quantity_remaining = 3 WHERE id = '${OI_LEGACY}';`);
+  refused('order: more $0 units on a legacy line', `UPDATE public.order_items
+    SET total_units_needed = 8, price_per_unit = price_per_unit WHERE id = '${OI_LEGACY}';`, 'ORDER_PRICE_MISSING', 'Unpriced');
+  refused('order: more $0 units on a legacy line, full stack', `UPDATE public.order_items
+    SET total_units_needed = 8 WHERE id = '${OI_LEGACY}';`, 'ORDER_PRICE_MISSING', 'Unpriced', { isolate: false });
+  allowed('order: fewer units on a legacy $0 line', `UPDATE public.order_items SET total_units_needed = 4 WHERE id = '${OI_LEGACY}';`);
+  refused('quote: more $0 units on a legacy line', `UPDATE public.quote_items SET total_units_needed = 9 WHERE id = '${QI_LEGACY}';`, 'QUOTE_PRICE_MISSING', 'Unpriced');
   console.log('[prover] order lines: missing refused by name (incl. tier at sale); stated $0, priced, price-later, a quote-set $0 copy and delivery updates allowed; a quote-copied line moved to an unpriced product refused');
 
   // Invoice lines priced from the tier (the field-app path).

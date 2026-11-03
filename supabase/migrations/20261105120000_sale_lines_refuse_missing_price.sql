@@ -25,7 +25,7 @@
 --   and the job rule. The tier is quotes.tier; for orders and invoices the line's
 --   price_tier_at_sale, else the customer's assigned_tier, else 1.
 --
--- HOW: BEFORE INSERT OR UPDATE OF the pricing columns, FOR EACH ROW. Named trigger_b_* so it runs
+-- HOW: BEFORE INSERT OR UPDATE OF the pricing and quantity columns, FOR EACH ROW. Named trigger_b_* so it runs
 --   after trigger_a_guard_inactive_* and before zz_crx_below_cost_*, whose "below cost" refusal
 --   would otherwise be the message for a missing price. SECURITY DEFINER so the caller's row-level
 --   security cannot hide the product or customer and make a priced product look unpriced; no API
@@ -34,13 +34,13 @@
 --
 -- NOT CHANGED: every RPC and its body; RLS policies; grants on existing objects; existing rows. An
 --   UPDATE that touches none of the listed columns (a delivery's quantity_delivered, a status, a
---   posting) does not fire the trigger, and an UPDATE that rewrites them with the same values (the
+--   posting) does not fire the trigger, and an UPDATE that rewrites them with the same values and no more units (the
 --   order editor re-sends every line on each save) passes without a check.
 --
 -- LIVE EVIDENCE (read-only execute_sql, 2026-11-03, counts only): rows the rule would catch today:
 --   quote_items 0 (any quote); invoice_items with price_source 'tier' 0 (any invoice); order_items 2,
 --   both on fulfilled orders; 0 quote-version snapshot lines. Those two stay as they are, and saving those orders with them unchanged
---   still works; changing their price to $0 again, their product, or their price-later flag is
+--   still works; changing their price to $0 again, their product, or their price-later flag, or adding units, is
 --   refused until a price is entered. Active products with no tier price at all: 2.
 --
 -- LIMITS (accepted): checked when a line is written, like the job rule. A line saved at $0 for a
@@ -168,7 +168,10 @@ BEGIN
              to_jsonb(NEW) -> 'price_tier_at_sale')
             IS NOT DISTINCT FROM
             (to_jsonb(OLD) -> 'invoice_id', to_jsonb(OLD) -> 'product_id', to_jsonb(OLD) -> 'unit_price_cents', to_jsonb(OLD) -> 'price_source',
-             to_jsonb(OLD) -> 'price_tier_at_sale'))) THEN
+             to_jsonb(OLD) -> 'price_tier_at_sale')))
+     -- More units at $0 is a new decision, even when the price is unchanged.
+     AND COALESCE((to_jsonb(NEW) ->> CASE TG_TABLE_NAME WHEN 'invoice_items' THEN 'quantity' ELSE 'total_units_needed' END)::numeric, 0)
+         <= COALESCE((to_jsonb(OLD) ->> CASE TG_TABLE_NAME WHEN 'invoice_items' THEN 'quantity' ELSE 'total_units_needed' END)::numeric, 0) THEN
     RETURN NEW;
   END IF;
   -- Only a line that would show or bill $0 (to the cent) is checked.
@@ -227,12 +230,12 @@ ALTER FUNCTION public._sale_line_price_required() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._sale_line_price_required() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER trigger_b_quote_item_price_required
-  BEFORE INSERT OR UPDATE OF quote_id, product_id, price_per_unit, price_override
+  BEFORE INSERT OR UPDATE OF quote_id, product_id, price_per_unit, price_override, total_units_needed
   ON public.quote_items
   FOR EACH ROW EXECUTE FUNCTION public._sale_line_price_required();
 
 CREATE TRIGGER trigger_b_order_item_price_required
-  BEFORE INSERT OR UPDATE OF order_id, product_id, quote_item_id, price_per_unit, pricing_pending, price_tier_at_sale
+  BEFORE INSERT OR UPDATE OF order_id, product_id, quote_item_id, price_per_unit, pricing_pending, price_tier_at_sale, total_units_needed
   ON public.order_items
   FOR EACH ROW EXECUTE FUNCTION public._sale_line_price_required();
 
@@ -242,7 +245,7 @@ CREATE TRIGGER trigger_b_quote_tier_price_required
   FOR EACH ROW EXECUTE FUNCTION public._sale_line_price_required();
 
 CREATE TRIGGER trigger_b_invoice_item_price_required
-  BEFORE INSERT OR UPDATE OF invoice_id, product_id, unit_price_cents, price_source, price_tier_at_sale
+  BEFORE INSERT OR UPDATE OF invoice_id, product_id, unit_price_cents, price_source, price_tier_at_sale, quantity
   ON public.invoice_items
   FOR EACH ROW EXECUTE FUNCTION public._sale_line_price_required();
 

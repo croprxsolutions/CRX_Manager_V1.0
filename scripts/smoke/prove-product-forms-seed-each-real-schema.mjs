@@ -374,6 +374,17 @@ try {
   // A padded unit is stored as the stock unit, so pricing still finds the pound.
   psql("UPDATE public.products SET rate_unit = ' Lb ', rate_per_acre = 2 WHERE product_name = 'Seed Lb';");
   assert.equal(scalar("SELECT rate_unit || ':' || tier1_price_per_acre FROM public.products WHERE product_name = 'Seed Lb';"), 'Lb:25.00');
+  // A form-only update that fills the rate unit must re-price per acre too.
+  psql(`INSERT INTO public.products(product_name, category, inventory_unit, container_unit)
+    VALUES ('Legacy priced', 'Herbicide', 'Lb', 'Lb');`);
+  psql(`BEGIN;
+    SET LOCAL session_replication_role = replica;
+    UPDATE public.products SET current_cost = 5.00, tier1_price = 12.50 WHERE product_name = 'Legacy priced';
+    COMMIT;`);
+  psql("UPDATE public.products SET rate_unit = '', rate_per_acre = 2 WHERE product_name = 'Legacy priced';");
+  assert.equal(scalar("SELECT tier1_price_per_acre::text FROM public.products WHERE product_name = 'Legacy priced';"), '1.56');
+  psql("UPDATE public.products SET product_form = 'seed' WHERE product_name = 'Legacy priced';");
+  assert.equal(scalar("SELECT rate_unit || ':' || tier1_price_per_acre FROM public.products WHERE product_name = 'Legacy priced';"), 'Lb:25.00');
 
   psql(`INSERT INTO auth.users (id, email) VALUES
     ('aa110000-0000-0000-0000-000000000001', 'forms-prover@example.invalid');`);

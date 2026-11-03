@@ -127,6 +127,16 @@ BEGIN
 END;
 $$;
 
+-- A form-only update can fill rate_unit above; add product_form so per-acre prices follow.
+CREATE OR REPLACE TRIGGER trigger_recalc_product_price_per_acre
+  BEFORE INSERT OR UPDATE OF
+    current_cost, tier1_margin, tier2_margin, tier3_margin,
+    tier1_price, tier2_price, tier3_price,
+    rate_per_acre, rate_unit, inventory_unit, unit_size, product_form
+  ON public.products
+  FOR EACH ROW
+  EXECUTE FUNCTION public.recalc_product_price_per_acre();
+
 CREATE FUNCTION public.guard_seed_each_quote_item_units()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -335,6 +345,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.job_chemicals'::regclass
       AND tgname = 'trg_guard_seed_each_job_chemical_units' AND tgenabled IN ('O','A') AND NOT tgisinternal) THEN
     RAISE EXCEPTION 'PRODUCT_FORM_JOB_GUARD_MISSING';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_attribute a
+      ON a.attrelid = t.tgrelid AND a.attname = 'product_form' AND a.attnum = ANY (t.tgattr::int2[])
+      WHERE t.tgrelid = 'public.products'::regclass AND t.tgname = 'trigger_recalc_product_price_per_acre'
+        AND t.tgenabled IN ('O','A')) THEN
+    RAISE EXCEPTION 'PRODUCT_PER_ACRE_TRIGGER_MISSING_FORM';
   END IF;
   IF (SELECT count(*) FROM public.unit_conversions WHERE unit IN ('Lb','Unit','Ea')) = 3 THEN
     IF (SELECT count(*) FROM public.product_form_units) <> 4

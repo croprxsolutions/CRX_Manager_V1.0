@@ -297,9 +297,9 @@ tiers is not built; the linkage field is not used for money today.
 - Two AR-aging views bucket a 30-day-old invoice differently; invoice dates have no future-date limit; three
   filters cut the day at UTC midnight. UNVERIFIED (PR #991 fixed the AR strip; the rest not re-checked). MED.
 
-### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103170000`)
+### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED IN CODE (2026-11-02) · money · live status: its `docs/reference/migrations.d/` record**
-`20261103170000_period_check_takes_month_lock` makes `check_period_open` itself take the shared month lock that
+`20261103220000_period_check_takes_month_lock` makes `check_period_open` itself take the shared month lock that
 vendor-bill edits already took (`20260730114102`), so all 32 callers (26 had no lock) and a close of the same month now
 wait for each other: an edit racing a close waits and is then refused; a close waits for an in-flight edit. Proof:
 `scripts/smoke/prove-period-check-month-lock-real-schema.mjs` (real psql sessions racing a real close, fail-first).
@@ -345,7 +345,7 @@ local replay's screen (a new line added after its product's cost rose shows the 
 ---
 
 ### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
-**MED · FIXED IN CODE (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (PR #1313, applied live 2026-11-02); payment half: migration `20261103170000` (live status: its `docs/reference/migrations.d/` record)**
+**MED · FIXED IN CODE (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (PR #1313, applied live 2026-11-02); payment half: migration `20261103220000` (live status: its `docs/reference/migrations.d/` record)**
 **Report half — fixed by `20261103150000_ar_aging_flags_unrebuildable_customers`** (live status: its
 `docs/reference/migrations.d/` record). `get_ar_aging` still refuses to rebuild a customer whose later activity makes
 the chosen date unknowable, but now returns everyone else and lists that customer with no amounts and an
@@ -354,7 +354,7 @@ they are excluded. Proof: `scripts/smoke/prove-ar-aging-flags-unrebuildable-real
 rare `HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE` (two posting events with the same audit timestamp) is raised
 outside the per-customer check and still fails the whole report; `get_customer_balance_listing` keeps the
 fail-for-everyone behaviour.
-**Payment half — fixed by `20261103170000_period_check_takes_month_lock`:** `allocate_payment` refuses a
+**Payment half — fixed by `20261103220000_period_check_takes_month_lock`:** `allocate_payment` refuses a
 `p_payment_date` after today in Central time (`PAYMENT_DATE_IN_FUTURE`), so a payment can no longer make a customer
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 

@@ -156,7 +156,7 @@ describe('vendor-bill accounting-period close serialization', () => {
       .map((match) => match[1])
       .filter((relation) => !relation.startsWith('pg_catalog.'));
     expect(nonCatalogRelations).toEqual(['public.accounting_periods']);
-    // This 2026-07-30 body had no lock; KI-19 (20261103170000) adds it, pinned below.
+    // This 2026-07-30 body had no lock; KI-19 (20261103220000) adds it, pinned below.
     expect(check).not.toContain('_lock_accounting_months');
   });
 

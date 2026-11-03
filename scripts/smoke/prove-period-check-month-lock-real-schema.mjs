@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// KI-19 + KI-95 (payment half) proof for 20261103170000_period_check_takes_month_lock on a disposable,
+// KI-19 + KI-95 (payment half) proof for 20261103220000_period_check_takes_month_lock on a disposable,
 // network-disabled PostgreSQL 17 built from the checked-in production baseline plus every migration
 // before the candidate. No live URLs or writes. Two real psql sessions race a real month close
 // (close_accounting_period) against a real payment (allocate_payment). Proves, fail-first:
@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const name = `crx-period-lock-${process.pid}`;
 let created = false;
-const candidate = '20261103170000_period_check_takes_month_lock.sql';
+const candidate = '20261103220000_period_check_takes_month_lock.sql';
 const baseline = path.join(root, 'supabase/baselines');
 const skippedStorage = new Set(['20260914100700_customer_document_bytes_server_only.sql', '20261015230000_staff_photo_storage_access.sql', '20261016030000_staff_photo_buckets_private.sql']);
 const ledgerOnly = new Set(['20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql', '20261007150200_release_reservations_of_deleted_spring_orders.sql']);

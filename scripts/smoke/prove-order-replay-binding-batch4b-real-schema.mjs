@@ -184,7 +184,8 @@ function buildContainer() {
     if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
     // KI-85's postcondition needs live's active Main Warehouse row, which the schema-only baseline lacks.
     if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') {
-      psql(`INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
+      psql(`UPDATE public.warehouses SET is_active = true WHERE name = 'Main Warehouse';
+        INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
         WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse');`);
     }
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);

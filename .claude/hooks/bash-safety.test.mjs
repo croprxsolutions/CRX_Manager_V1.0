@@ -63,6 +63,7 @@ ok(checkDangerousCommand(`git -c "alias.wipe=!$P --command 'TRUNCATE customers'"
 ok(!checkDangerousCommand('grep -l -i "DROP SCHEMA\\|docker exec psql" *.md'), "grep pattern naming psql and DROP SCHEMA allowed");
 ok(!checkDangerousCommand('grep -E "DROP SCHEMA|psql" notes.md'), "a pipe inside the quoted pattern does not split the command");
 ok(!checkDangerousCommand("rg -n 'psql.*DROP SCHEMA' docs"), "rg pattern naming psql and DROP SCHEMA allowed");
+ok(!checkDangerousCommand('grep -n "DROP SCHEMA" notes.md # psql docs'), "a comment naming psql after a reader is not a client call");
 ok(checkDangerousCommand('psql -c "DROP SCHEMA x"'), "psql DROP SCHEMA still blocked");
 ok(checkDangerousCommand('docker exec c psql -c "TRUNCATE t"'), "docker exec psql TRUNCATE still blocked");
 ok(checkDangerousCommand("cat <<'SQL' | psql\nDROP TABLE customers;\nSQL"), "cat piped into psql with DROP TABLE still blocked");
@@ -71,10 +72,12 @@ ok(checkDangerousCommand(`grep "$(psql -c 'DROP SCHEMA x')" f`), "a client run f
 ok(checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git stays a non-reader");
 ok(checkDangerousCommand('rg --pre psql "DROP SCHEMA" db.sql'), "rg --pre running a client stays refused (Codex App, PR #1337)");
 ok(checkDangerousCommand(`rg --p''re=psql "DROP SCHEMA" db.sql`), "a quote-split --pre= spelling stays refused");
-ok(checkDangerousCommand(`grep "DROP TABLE" f # it's\npsql < wipe.sql`), "a quote in a comment cannot hide the next line's client (Codex App, PR #1337)");
+// A reader spanning a line break is never exempt (Codex App, PR #1337).
+ok(checkDangerousCommand(`grep "DROP TABLE" f # it's\npsql < wipe.sql`), "a quote in a comment cannot hide the next line's client");
+ok(checkDangerousCommand(`grep "DROP TABLE" \\\n# it's\npsql < wipe.sql`), "a line continuation before the comment cannot hide it either");
+ok(checkDangerousCommand(`grep "DROP TABLE" f # it's\rpsql < wipe.sql`), "a carriage return counts as a line break for the exemption");
 ok(checkDangerousCommand('grep foo\\ #; psql --command="DROP TABLE customers"'), "an escaped space cannot fake a comment that hides psql (Luna, PR #1337)");
-ok(checkDangerousCommand('grep foo #; psql --command="DROP TABLE customers"'), "a no-break space cannot fake a comment that hides psql");
-ok(!checkDangerousCommand('grep -n "DROP SCHEMA" notes.md # psql docs'), "a comment naming psql after a reader is not a client call");
+ok(checkDangerousCommand('grep foo\u00a0#; psql --command="DROP TABLE customers"'), "a no-break space cannot fake a comment that hides psql");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
 ok(!checkDangerousCommand("git push origin feature/x"), "ordinary feature push allowed");
@@ -347,14 +350,6 @@ eq(splitShellSegments("rg -n 'a; b | c' docs; node x").length, 2, "quoted separa
 eq(splitShellSegments('echo "a; \\" b"; node x').length, 2, "an escaped quote inside double quotes does not end the quote");
 eq(splitShellSegments("echo a\\; node x").length, 1, "a backslash-escaped separator does not split");
 eq(splitShellSegments("echo 'unterminated; node x").length, 1, "an unterminated quote swallows the rest of the line");
-eq(splitShellSegments("rg x # it's\nnode y").length, 2, "a quote inside a comment opens nothing");
-eq(splitShellSegments("echo a#b; node y").length, 2, "a # inside a word is not a comment");
-eq(splitShellSegments("echo foo\\ #; node y").length, 2, "an escaped space before # is not a word break (Luna, PR #1337)");
-eq(splitShellSegments("echo 'a'#; node y").length, 2, "a # right after a closing quote is not a comment");
-eq(splitShellSegments("echo foo #; node y").length, 2, "a no-break space is not a bash blank, so # is not a comment");
-eq(splitShellSegments("echo foo\v#; node y").length, 2, "a vertical tab is not a bash blank either");
-eq(splitShellSegments("echo foo\r#; node y").length, 3, "a carriage return never starts a comment");
-eq(splitShellSegments("echo foo\t# x; node y").length, 1, "a tab is a bash blank, so # starts a comment");
 //     4. Round 2 (Codex App P2 on 939c2d3cf): a quoted redirection target with
 //        whitespace is ONE word, both in the token walk after the runtime and
 //        in the head-word scan, so skipping the target cannot expose half of it

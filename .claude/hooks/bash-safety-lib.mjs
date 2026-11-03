@@ -83,7 +83,6 @@ export function splitShellSegments(text) {
   const segments = [];
   let current = "";
   let quote = null;
-  let wordStart = true;
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
     if (quote) {
@@ -99,20 +98,11 @@ export function splitShellSegments(text) {
     if (char === "\\" && index + 1 < text.length) {
       current += char + text[index + 1];
       index += 1;
-      wordStart = false;
       continue;
     }
     if (char === '"' || char === "'") {
       quote = char;
       current += char;
-      wordStart = false;
-      continue;
-    }
-    // A `#` starting a word comments out the rest of the line, so a quote in
-    // `grep x f # it's` cannot swallow the next line's command (Codex App, PR #1337).
-    // An escaped space (`foo\ #`) is not a word break (Luna, PR #1337).
-    if (char === "#" && wordStart) {
-      while (index + 1 < text.length && text[index + 1] !== "\n" && text[index + 1] !== "\r") index += 1;
       continue;
     }
     // `>&2`, `2>&1`, `<&0`, and `&>file` are redirections; every other `&`
@@ -122,13 +112,9 @@ export function splitShellSegments(text) {
     if ((char === "&" && !redirectionAmpersand) || char === ";" || char === "|" || char === "\r" || char === "\n") {
       segments.push(current);
       current = "";
-      // Bash treats `\r` as an ordinary character, so it never starts a comment.
-      wordStart = char !== "\r";
       continue;
     }
     current += char;
-    // Only bash's own blanks count: a no-break space or `\v` is part of the word.
-    wordStart = char === " " || char === "\t" || char === "(";
   }
   segments.push(current);
   return segments;
@@ -378,10 +364,12 @@ export function checkDestructiveSql(cmd) {
   // pattern is a search, not a call (retro on PR #1333). The split respects
   // quotes; a reader holding a command substitution, or `rg --pre` (which runs
   // a program on each file, Codex App on PR #1337), can still run a client.
+  // A reader spanning a line break is never exempt: a quote opened inside a
+  // comment or continuation can swallow the next line's command (Codex App).
   const clientOutsideReader = splitShellSegments(text).some((segment) => {
     const unquoted = segment.replace(/["'`^\\]/g, "");
     return (SQL_CLIENT_RE.test(segment) || SQL_CLIENT_RE.test(unquoted)) &&
-      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || /\$\(|`|[<>]\(/.test(segment) || /(?:^|\s)--pre\b/.test(unquoted));
+      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || /[\r\n]|\$\(|`|[<>]\(/.test(segment) || /(?:^|\s)--pre\b/.test(unquoted));
   });
   if (clientOutsideReader || flagOutsideReader) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";

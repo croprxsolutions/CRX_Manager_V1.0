@@ -337,7 +337,7 @@ function oversizedAdvice(git, frozen) {
 
 // Any mention of BLOCKER or HIGH withholds the hint, so a missed severity errs toward another round.
 export function nextStepHint(text) {
-  if (/\b(?:BLOCKER|HIGH)\b/.test(text)) return null;
+  if (/\b(?:BLOCKER|HIGH)\b/i.test(text)) return null;
   return "Next: no BLOCKER or HIGH. Fix the cheap MED/LOW items (or refute them) in one commit, then go "
     + "straight to Sol if the change is on the Sol list. Do not run Luna again just for these.";
 }

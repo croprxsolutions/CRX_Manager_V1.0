@@ -365,13 +365,14 @@ export function checkDestructiveSql(cmd) {
   // quotes; a reader holding a command substitution, or `rg --pre` (which runs
   // a program on each file, Codex App on PR #1337), can still run a client.
   // `$'…'`/`$"…"` quoting escapes quotes the splitter cannot follow, and `\"`
-  // escapes a quote in bash but closes it in PowerShell (Codex App).
+  // escapes a quote in bash but closes it in PowerShell; likewise an unquoted
+  // `\;` `\|` `\&` is one word in bash but a separator in PowerShell (Codex App).
   // A reader spanning a line break is never exempt: a quote opened inside a
   // comment or continuation can swallow the next line's command (Codex App).
   const clientOutsideReader = splitShellSegments(text).some((segment) => {
     const unquoted = segment.replace(/["'`^\\]/g, "");
     return (SQL_CLIENT_RE.test(segment) || SQL_CLIENT_RE.test(unquoted)) &&
-      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || /[\r\n]|\$[('"]|\\["']|`|[<>]\(/.test(segment) || /(?:^|\s)--pre\b/.test(unquoted));
+      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || /[\r\n]|\$[('"]|\\["']|`|[<>]\(/.test(segment) || /\\[;|&]/.test(segment.replace(/'[^']*'|"[^"]*"/g, "")) || /(?:^|\s)--pre\b/.test(unquoted));
   });
   if (clientOutsideReader || flagOutsideReader) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";

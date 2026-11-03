@@ -81,6 +81,8 @@ ok(checkDangerousCommand('grep foo\u00a0#; psql --command="DROP TABLE customers"
 ok(checkDangerousCommand(`grep $'it\\'s' f; psql < wipe.sql # DROP TABLE x`), "ANSI-C quoting cannot hide a client in a reader segment (Codex App, PR #1337)");
 ok(checkDangerousCommand('Select-String "DROP TABLE" "C:\\logs\\"; psql < wipe.sql; echo "x"'), "a PowerShell path ending in a backslash cannot hide a client (Codex App, PR #1337)");
 ok(checkDangerousCommand('grep "DROP TABLE" "C:\\logs\\"; psql < wipe.sql; echo "x"'), "the same quoting after grep stays refused");
+ok(checkDangerousCommand('grep "DROP TABLE" C:\\logs\\; psql < wipe.sql'), "an unquoted backslash before a separator cannot hide a client (Codex App, PR #1337)");
+ok(checkDangerousCommand('rg "DROP TABLE" x\\| psql < wipe.sql'), "an unquoted backslash before a pipe cannot hide a client either");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
 ok(!checkDangerousCommand("git push origin feature/x"), "ordinary feature push allowed");

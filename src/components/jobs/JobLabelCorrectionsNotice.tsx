@@ -68,7 +68,7 @@ function EditableNotice<T extends LabelCorrectionRow>({ rows, onApply }: Omit<Pr
     return <p className="mb-4 text-xs text-secondary">Could not check this job's lines against the product label.</p>;
   }
   const signature = corrections.map(({ rowIndex, field, jobValue, productValue }) =>
-    `${rowIndex}:${field}:${jobValue}:${productValue}`).join('|');
+    `${rowIndex}:${rows[rowIndex]?.product_id}:${field}:${jobValue}:${productValue}`).join('|');
   if (corrections.length === 0 || signature === dismissedSignature) return null;
 
   return (

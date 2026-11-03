@@ -62,6 +62,21 @@ describe('JobLabelCorrectionsNotice', () => {
     expect(mocks.from).toHaveBeenCalledTimes(1);
   });
 
+  it('Keep job values does not carry over to a different product on the same line', async () => {
+    const query = { select: vi.fn(), in: vi.fn() };
+    query.select.mockReturnValue(query);
+    query.in.mockImplementation(async (_col: string, ids: string[]) => ({
+      data: ids.map((id) => ({ id, rei_hours: 24, phi_days: 30 })),
+      error: null,
+    }));
+    mocks.from.mockReturnValue(query);
+    const view = render(<JobLabelCorrectionsNotice rows={[row]} canEdit onApply={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep job values' }));
+
+    view.rerender(<JobLabelCorrectionsNotice rows={[{ ...row, product_id: 'product-2' }]} canEdit onApply={vi.fn()} />);
+    expect(await screen.findByText('Atrazine 4L — REI: 12 hr → 24 hr')).toBeInTheDocument();
+  });
+
   it('blank job value shows nothing', async () => {
     returnLabels(12);
     const view = render(<JobLabelCorrectionsNotice rows={[{ ...row, phi_days: ' ' }]} canEdit onApply={vi.fn()} />);

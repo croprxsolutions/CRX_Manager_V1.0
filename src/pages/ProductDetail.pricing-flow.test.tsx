@@ -148,6 +148,13 @@ vi.mock('../lib/productPricing', async (importOriginal) => {
   };
 });
 
+vi.mock('../lib/productUseTimings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productUseTimings')>()),
+  listProductUseTimingOptions: async () => [
+    { code: 'pre_emerge_corn', label: 'Pre-Emerge Corn', timing_code: 'pre_emergence', crop: 'corn', category: 'Herbicide', sort_order: 20, is_active: true },
+  ],
+}));
+
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }));
@@ -964,5 +971,17 @@ describe('ProductDetail governed pricing flow', () => {
     ));
     expect(mockPreviewPricing).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Grower Description')).toHaveValue('Unsaved grower-facing description');
+  });
+
+  it('lets pricing review open after ticking and unticking a timing', async () => {
+    render(<ProductDetail />);
+    const timing = await screen.findByRole('checkbox', { name: 'Pre-Emerge Corn' });
+    fireEvent.click(timing);
+    fireEvent.click(timing);
+    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
+    expect(await screen.findByLabelText('Source (supplier, document, date)')).toBeInTheDocument();
+    expect(mockToast).not.toHaveBeenCalledWith('error', 'Save or discard the unsaved Product details before reviewing a pricing change.');
   });
 });

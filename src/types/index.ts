@@ -55,12 +55,23 @@ export interface ProductCategory {
   sort_order: number;
 }
 
+export interface UseTimingOption {
+  code: string;
+  label: string;
+  timing_code: string;
+  crop: string | null;
+  category: 'Herbicide' | 'Foliar Fertilizer';
+  sort_order: number;
+  is_active: boolean;
+}
+
 export interface Product {
   id: string;
   product_name: string;
   sku: string | null;
   category: string | null;
   use_timing?: string | null;
+  use_timings: string[];
   vendor: string | null;
   manufacturer: string | null;
   container_size: number | null;
@@ -2793,7 +2804,8 @@ export interface RebateClaim {
   product?: Product;
 }
 
-export interface ARAgingRow {
+/** A get_ar_aging row whose balance could be rebuilt as of the date. */
+export interface ARAgingPricedRow {
   customer_id: string;
   farm_name: string;
   current_amount: number;
@@ -2802,10 +2814,28 @@ export interface ARAgingRow {
   days_90: number;
   over_90: number;
   total_outstanding: number;
-  /** Set when this customer's balance cannot be rebuilt as of the date (KI-95): every amount above is then
-   *  null at runtime, so filter these rows out before summing; never read them as $0. */
-  unavailable_reason?: string | null;
+  prepay_balance_cents: number;
+  open_credit_cents: number;
+  unavailable_reason: null;
 }
+
+/** KI-95: a customer whose balance cannot be rebuilt as of the date. Every amount is null; never read one as $0. */
+export interface ARAgingUnavailableRow {
+  customer_id: string;
+  farm_name: string;
+  current_amount: null;
+  days_30: null;
+  days_60: null;
+  days_90: null;
+  over_90: null;
+  total_outstanding: null;
+  prepay_balance_cents: null;
+  open_credit_cents: null;
+  unavailable_reason: string;
+}
+
+/** What get_ar_aging(date) returns: narrow with isPricedAgingRow before summing or formatting an amount. */
+export type ARAgingRow = ARAgingPricedRow | ARAgingUnavailableRow;
 
 export interface CustomerStatementRow {
   transaction_date: string;

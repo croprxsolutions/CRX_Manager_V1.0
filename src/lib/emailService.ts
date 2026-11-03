@@ -1,5 +1,6 @@
 import { supabase } from './db';
 import { COMPANY_ORDERING_EMAIL } from './companyInfo';
+import type { InvoicePdfData } from './invoicePdf';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -42,6 +43,28 @@ export interface PurchaseOrderEmailSnapshot {
   }>;
 }
 
+/** The money an invoice email's PDF prints, in whole cents; the server refuses the send unless it is the saved invoice. */
+export interface InvoiceEmailSnapshot {
+  invoice_number: string;
+  total_amount_cents: number;
+  paid_amount_cents: number;
+  prepay_applied_cents: number;
+  balance_cents: number;
+  lines_total_cents: number;
+}
+
+/** What this invoice PDF prints, for the send-email server's check (KNOWN_ISSUES KI-97). */
+export function invoiceEmailSnapshot(pdf: InvoicePdfData): InvoiceEmailSnapshot {
+  return {
+    invoice_number: pdf.invoice_number,
+    total_amount_cents: pdf.total_amount_cents,
+    paid_amount_cents: pdf.paid_amount_cents,
+    prepay_applied_cents: pdf.prepay_applied_cents,
+    balance_cents: pdf.balance_cents,
+    lines_total_cents: pdf.items.reduce((sum, item) => sum + item.extended_cents, 0),
+  };
+}
+
 interface SendEmailBase {
   to: string;
   subject: string;
@@ -57,9 +80,14 @@ interface SendEmailBase {
   attachments?: Array<{ filename: string; content: string }>; // base64
 }
 
-/** Every customer email names its customer; a PO copy names none and carries its snapshot. */
+/**
+ * Every customer email names its customer; a PO copy names none and carries its snapshot.
+ * For an invoice the server writes the subject and body from the saved invoice and ignores
+ * these (still sent so an older server keeps working).
+ */
 export type SendEmailParams =
-  | (SendEmailBase & { email_type: Exclude<EmailType, 'purchase_order'>; customer_id: string })
+  | (SendEmailBase & { email_type: Exclude<EmailType, 'purchase_order' | 'invoice'>; customer_id: string })
+  | (SendEmailBase & { email_type: 'invoice'; customer_id: string; invoice_snapshot: InvoiceEmailSnapshot })
   | (SendEmailBase & {
       email_type: 'purchase_order';
       customer_id?: undefined;
@@ -137,6 +165,8 @@ export interface InvoiceEmailInput {
   balanceCents: number;
   /** Base64 PDF (no data-URI prefix) — see pdfToBase64(). */
   attachmentBase64: string;
+  /** What that PDF prints — see invoiceEmailSnapshot(). */
+  snapshot: InvoiceEmailSnapshot;
   /** Unique-per-send token; defaults to a per-invoice + timestamp key. */
   nowMs?: number;
 }
@@ -178,6 +208,7 @@ export function buildInvoiceEmailPayload(input: InvoiceEmailInput): SendEmailPar
     resource_id: input.invoiceId,
     idempotency_key: `invoice-email-${input.invoiceId}-${input.nowMs ?? Date.now()}`,
     attachments: [{ filename: `Invoice-${input.invoiceNumber}.pdf`, content: input.attachmentBase64 }],
+    invoice_snapshot: input.snapshot,
   };
 }
 

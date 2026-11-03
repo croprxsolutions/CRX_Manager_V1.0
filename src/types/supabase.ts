@@ -8292,6 +8292,39 @@ export type Database = {
           },
         ]
       }
+      product_use_timing_options: {
+        Row: {
+          category: string
+          code: string
+          created_at: string
+          crop: string | null
+          is_active: boolean
+          label: string
+          sort_order: number
+          timing_code: string
+        }
+        Insert: {
+          category: string
+          code: string
+          created_at?: string
+          crop?: string | null
+          is_active?: boolean
+          label: string
+          sort_order: number
+          timing_code: string
+        }
+        Update: {
+          category?: string
+          code?: string
+          created_at?: string
+          crop?: string | null
+          is_active?: boolean
+          label?: string
+          sort_order?: number
+          timing_code?: string
+        }
+        Relationships: []
+      }
       products: {
         Row: {
           category: string | null
@@ -8341,6 +8374,7 @@ export type Database = {
           unit_size: string | null
           updated_at: string
           use_timing: string | null
+          use_timings: string[]
           vendor: string | null
         }
         Insert: {
@@ -8391,6 +8425,7 @@ export type Database = {
           unit_size?: string | null
           updated_at?: string
           use_timing?: string | null
+          use_timings?: string[]
           vendor?: string | null
         }
         Update: {
@@ -8441,6 +8476,7 @@ export type Database = {
           unit_size?: string | null
           updated_at?: string
           use_timing?: string | null
+          use_timings?: string[]
           vendor?: string | null
         }
         Relationships: [
@@ -13636,17 +13672,17 @@ export type Database = {
       get_ar_aging: {
         Args: { p_as_of_date?: string }
         Returns: {
-          current_amount: number
+          current_amount: number | null
           customer_id: string
-          days_30: number
-          days_60: number
-          days_90: number
+          days_30: number | null
+          days_60: number | null
+          days_90: number | null
           farm_name: string
-          open_credit_cents: number
-          over_90: number
-          prepay_balance_cents: number
-          total_outstanding: number
-          unavailable_reason: string
+          open_credit_cents: number | null
+          over_90: number | null
+          prepay_balance_cents: number | null
+          total_outstanding: number | null
+          unavailable_reason: string | null
         }[]
       }
       get_ar_reminder_candidates: { Args: never; Returns: Json }

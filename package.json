@@ -37,6 +37,7 @@
     "db-sweeps": "node scripts/db-invariant-sweeps/run-sweeps.mjs",
     "db-sweeps:strict": "node scripts/db-invariant-sweeps/run-sweeps.mjs --strict",
     "db-sweeps:live": "node scripts/db-invariant-sweeps/run-live.mjs",
+    "sol-needed": "node scripts/sol-needed.mjs",
     "smoke": "node scripts/smoke/run-smoke.mjs",
     "proof:vendor-bill-period-close": "node scripts/smoke/vendor-bill-period-close-readiness.test.mjs && node scripts/smoke/prove-vendor-bill-period-close-concurrency.mjs",
     "proof:pricing-phase1a": "node scripts/smoke/prove-supplier-pricing-phase1a.mjs",

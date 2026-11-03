@@ -47,7 +47,10 @@ exactly one backticked `<version>_<name>.sql` in the first paragraph, and at mos
 
 `npm run check:docs` fails when a migration from 2026-09-15 on has no record or more than one,
 when a record and a `.sql` file do not match by name in either direction, and when a new row or
-live capture lands in the frozen file. A misnamed or empty record, or one that lacks its status or
+live capture lands in the frozen file. It also fails when a `LOCAL CANDIDATE` record's
+`SQL sha256` pin is not the hash of its `.sql` file as git stores it (LF line endings), the
+check CI's guard-regression suite runs; on Windows, hash the LF text, not the CRLF copy on disk.
+A misnamed or empty record, or one that lacks its status or
 file name, stops the check, and parked-migration reports show UNKNOWN rather than a false clean
 count.
 

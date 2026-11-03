@@ -4,6 +4,7 @@
 // Always-loaded AGENTS.md and CLAUDE.md intentionally contain no volatile counts.
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,7 @@ import {
   migrationRecordNames,
   readCombinedMigrationHistory,
 } from "../.claude/hooks/migration-records-lib.mjs";
+import { validateParkedMigrationCrossReferences } from "../.claude/hooks/worktree-awareness-lib.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const rows = [];
@@ -55,6 +57,14 @@ row("migration records match migration files by name", 0, recordFiles.orphans.le
   [recordFiles.orphans.length ? `no matching .sql: ${recordFiles.orphans.join(", ")}` : "",
     recordFiles.unrecorded.length ? `no record file: ${recordFiles.unrecorded.join(", ")}` : ""]
     .filter(Boolean).join("; "));
+
+// The CI guard-regression suite's check, run on disk before a push. A Windows checkout holds
+// CRLF copies, so hash the LF text git stores; a CRLF hash pin otherwise fails only in CI.
+const lfSha256 = (text) => createHash("sha256").update(text.replace(/\r\n/g, "\n"), "utf8").digest("hex");
+const pins = validateParkedMigrationCrossReferences(
+  migrations.map((name) => `supabase/migrations/${name}`), history, read, lfSha256);
+row("candidate records' SQL sha256 pins match the LF migration files", "known", pins.state,
+  pins.state === "known" ? "PASS" : "FAIL", pins.reason);
 
 const missingMigrations = migrations.filter((filename) => {
   const base = filename.replace(/\.sql$/, "");

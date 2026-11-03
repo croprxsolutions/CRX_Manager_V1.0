@@ -651,9 +651,9 @@ pipeline: fix merged (PR #885, `20261006200000`, applied live per the old record
 live-sweep predicate (`quote-versions-rpc-owned`) was declined at its prompt, and the live smoke chains need
 Mason's REAL-DATA-OK.
 
-Purchase order copy (To-Do 0.15, PR #1114 merged 2026-10-27): the PDF download is built. Migration `20261027070000` is absent from the live ledger read 2026-10-27; PR #1147's email snapshot/retry fixes merged 2026-10-27; the service still needs deployment. The
-**Email PO Copy (to mason@croprxsolutions.com) stays off until Mason approves deploying the `send-email`
-edge function** (the live function answers "Unknown email_type: purchase_order").
+Purchase order copy (To-Do 0.15, PRs #1114 and #1147): DONE. The `send-email` service has handled
+`purchase_order` since v20 (2026-10-27) and still does on v21 (2026-11-03 02:16 UTC); Email PO Copy on
+PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production deployments.
 
 ### KI-73 — More field-access holes (extends KI-01; To-Do row 11.4, plus row 11.7)
 **HIGH · PARTIAL · security · Mason approval to narrow permissions**

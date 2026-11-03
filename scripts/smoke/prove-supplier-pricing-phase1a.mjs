@@ -2,10 +2,10 @@
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import { buildSync } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
+import { bundleNodeEsm } from './bundle-node-esm.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const baseSql = path.join(
@@ -291,14 +291,7 @@ try {
   const workbookRoundtripBundle = path.join(proofOutputDir, '.roundtrip-workbook.mjs');
   const editedWorkbookPath = path.join(proofOutputDir, 'phase1a-xlsx-to-real-db.xlsx');
   fs.writeFileSync(exportJsonPath, JSON.stringify(exportPayload));
-  buildSync({
-    entryPoints: [workbookRoundtripScript],
-    outfile: workbookRoundtripBundle,
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    packages: 'external',
-  });
+  await bundleNodeEsm(workbookRoundtripScript, workbookRoundtripBundle);
   run(process.execPath, [
     workbookRoundtripBundle,
     exportJsonPath, parsedPayloadPath, exportedWorkbookPath, editedWorkbookPath,

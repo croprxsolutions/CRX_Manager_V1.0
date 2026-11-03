@@ -59,6 +59,8 @@ describe('warnIfOverCreditLimit', () => {
       100000,
       'customer-1'
     );
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(mockCaptureException).not.toHaveBeenCalled();
   });
 
   it('stays silent when the credit limit is not exceeded', async () => {

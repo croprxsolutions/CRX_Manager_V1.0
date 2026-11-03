@@ -55,7 +55,7 @@ describe('send-email invoice authority contracts', () => {
 
 describe('send-email content and replay contracts (audit findings 7 and 8)', () => {
   it('refuses unverified content and ties each customer email to a record its customer owns', () => {
-    const contentCheck = source.indexOf('const contentProblem = emailContentProblem(subject, html);');
+    const contentCheck = source.indexOf('const contentProblem = isInvoiceEmail ? null : emailContentProblem(subject, html);');
     const outboundSend = source.indexOf('await fetch("https://api.resend.com/emails"');
     expect(contentCheck).toBeGreaterThan(-1);
     expect(contentCheck).toBeLessThan(outboundSend);
@@ -79,5 +79,30 @@ describe('send-email content and replay contracts (audit findings 7 and 8)', () 
     expect(source).toContain('if (scopedRow) emailLogId = scopedRow.id;');
     expect(source).not.toContain('?? keyRows?.[0]');
     expect(source).not.toContain('.from("email_log")\n        .select("id, resend_message_id, status")\n        .eq("idempotency_key", idempotency_key)');
+  });
+});
+
+describe('send-email builds invoice content from the saved invoice (KI-97)', () => {
+  it('replaces the caller subject, body and file name before logging or sending', () => {
+    const build = source.indexOf('const built = await loadInvoiceEmail(adminClient, resource_id, invoiceSnapshot);');
+    const logInsert = source.indexOf('.from("email_log")\n        .insert({');
+    expect(build).toBeGreaterThan(-1);
+    expect(build).toBeLessThan(logInsert);
+    expect(source).toContain('subject = built.subject;\n      html = built.html;\n      attachments = [{ filename: built.filename, content: attachments[0]?.content }];');
+    expect(source).toContain('if (isInvoiceEmail && !invoiceSnapshot) {');
+    expect(source).toContain('const builtProblem = emailContentProblem(built.subject, built.html);');
+    expect(source).toContain('if (!Array.isArray(attachments) || attachments.length !== 1) {');
+    // The amount comes from the stored row and its lines, never the request body.
+    expect(source).toContain('.select("invoice_number, invoice_type, invoice_date, due_date, total_amount_cents, paid_amount_cents, prepay_applied_cents, balance_cents")');
+    expect(source).toContain('.from("invoice_items")\n    .select("extended_cents")');
+  });
+
+  it('rebuilds the invoice email at the final gate and refuses if it changed', () => {
+    const finalGate = source.indexOf('const finalGateLookup');
+    const outboundSend = source.indexOf('await fetch("https://api.resend.com/emails"');
+    const rebuild = source.indexOf('const rebuilt = await loadInvoiceEmail(adminClient, invoiceGateId, invoiceSnapshot);');
+    expect(rebuild).toBeGreaterThan(finalGate);
+    expect(rebuild).toBeLessThan(outboundSend);
+    expect(source).toContain('rebuilt.subject !== subject || rebuilt.html !== html');
   });
 });

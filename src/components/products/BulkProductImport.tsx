@@ -295,6 +295,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
               epa_registration, suggested_rate, rate_per_acre, rate_unit, product_form,
               inventory_unit, container_unit, container_type, use_timing, notes
             </p>
+            <p className="text-xs text-gray-500 mt-2">For several use timings, separate labels with a semicolon (for example, Pre-Emerge; Post-Emergence).</p>
             <p className="text-xs text-amber-700 mt-2">
               Pricing columns are rejected. Update cost, margins, and tier prices from the Product page or governed pricing worksheet.
             </p>

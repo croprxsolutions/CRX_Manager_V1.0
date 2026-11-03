@@ -8,6 +8,7 @@ const createProduct = (id: string, overrides: Partial<Product> = {}): Product =>
   product_name: `Product ${id}`,
   sku: `SKU-${id}`,
   category: 'Herbicide',
+  use_timings: [],
   use_timing: null,
   vendor: `Vendor ${id}`,
   manufacturer: `Manufacturer ${id}`,

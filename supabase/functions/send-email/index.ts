@@ -335,6 +335,8 @@ Deno.serve(async (req: Request) => {
         400,
       );
     }
+    // shortcut: the invoice email's wording, amount and PDF still come from the caller; building them
+    // from the saved invoice here is the planned follow-up (KNOWN_ISSUES KI-97).
     let invoiceGateId = resource_type === "invoice" ? resource_id : null;
     let invoiceGateCustomerId: string | null = null;
 

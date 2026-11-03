@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
+| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
@@ -161,6 +161,15 @@ No snapshot/guard migration was found, but the live row count could not be check
   2026-10-25 10:52 PM Central).
   They need `extensions` for PostGIS. Either document a PostGIS exception to the rule or schema-qualify the
   PostGIS calls and drop `extensions` from the path. Promised to CodeRabbit on PR #1065 (thread 4373018174) — LOW.
+
+---
+
+### KI-97 — Invoice email content is built by the app screen, not by the email service
+**MED · OPEN (planned follow-up from PR #1302, 2026-11-02) · money · unassigned**
+The `send-email` service checks who may send an invoice email, to whom, and when, and limits the links and map
+images it may carry (PR #1302). The email's wording, amount and attached PDF still come from the app screen.
+Planned: the service builds the invoice email's amount, wording and PDF from the saved invoice itself. #1302 does
+not change this behaviour either way.
 
 ---
 

@@ -396,7 +396,7 @@ export default function EditableDataTable<T extends Record<string, any>>({
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="flex flex-col sm:flex-row gap-3 flex-1">
           {searchable && (
-            <div className="relative flex-1">
+            <div className="relative flex-1 sm:min-w-48 sm:self-start">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"

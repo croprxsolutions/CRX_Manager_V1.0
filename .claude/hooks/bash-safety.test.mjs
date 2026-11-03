@@ -59,6 +59,16 @@ ok(checkDangerousCommand('docker exec db sh -c "TRUNCATE customers"'), "unknown 
 ok(!checkDangerousCommand('grep -c "TRUNCATE" supabase/migrations/x.sql'), "grep -c for TRUNCATE allowed");
 ok(!checkDangerousCommand('git log --grep "drop table" -- supabase'), "git log naming DROP TABLE without a -c/-f flag allowed");
 ok(checkDangerousCommand(`git -c "alias.wipe=!$P --command 'TRUNCATE customers'" wipe`), "a git alias beside TRUNCATE stays refused (Sol, PR #1193)");
+// A client name inside a search pattern is not a client call (retro on PR #1333).
+ok(!checkDangerousCommand('grep -l -i "DROP SCHEMA\\|docker exec psql" *.md'), "grep pattern naming psql and DROP SCHEMA allowed");
+ok(!checkDangerousCommand('grep -E "DROP SCHEMA|psql" notes.md'), "a pipe inside the quoted pattern does not split the command");
+ok(!checkDangerousCommand("rg -n 'psql.*DROP SCHEMA' docs"), "rg pattern naming psql and DROP SCHEMA allowed");
+ok(checkDangerousCommand('psql -c "DROP SCHEMA x"'), "psql DROP SCHEMA still blocked");
+ok(checkDangerousCommand('docker exec c psql -c "TRUNCATE t"'), "docker exec psql TRUNCATE still blocked");
+ok(checkDangerousCommand("cat <<'SQL' | psql\nDROP TABLE customers;\nSQL"), "cat piped into psql with DROP TABLE still blocked");
+ok(checkDangerousCommand('grep -l "DROP TABLE" f | xargs cat | psql'), "readers feeding psql still blocked");
+ok(checkDangerousCommand(`grep "$(psql -c 'DROP SCHEMA x')" f`), "a client run from a reader's command substitution still blocked");
+ok(checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git stays a non-reader");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
 ok(!checkDangerousCommand("git push origin feature/x"), "ordinary feature push allowed");

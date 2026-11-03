@@ -1,0 +1,5 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20261104190000_job_invoice_lines_keep_job_unit.sql` (LF SQL sha256: `77b0cf87c723d06ea5976cd5cf668b0f5e12168b8c8174c2703c17a75ce91e65`). Job-to-invoice transfer now labels each new invoice line with the job line's own unit (and its rate unit, else its unit) instead of the product's Unit; amounts, cost, quantity and commissions are unchanged, and existing invoices keep their labels.
+
+Live capture (read-only, 2026-11-03 about 2:30 PM Central): private body `_transfer_job_to_invoice_intent_impl_20260908` md5 `85cd07a0a6b978cb066edab7df369fea` (the 20260914100500 Chicago-date body), owner `postgres`, ACL `{postgres=X/postgres}`; ledger 1,106 rows, highest stamped name `20261104150000_product_forms_seed_each`, no row for this candidate. Re-read the ledger at apply time. Proof: `node scripts/smoke/prove-job-invoice-lines-keep-job-unit-real-schema.mjs`.
+
+Rollback: re-create the private body from 20260914100500's `transfer_job_to_invoice` body (md5 `85cd07a0a6b978cb066edab7df369fea`) under the private name, then re-run this file's REVOKE/GRANT.

@@ -45,6 +45,7 @@ BEGIN
     SELECT normalized,
            count(DISTINCT vendor_id) AS vendor_count,
            min(vendor_id::text)::uuid AS vendor_id,
+           array_agg(DISTINCT vendor_id) AS candidate_vendor_ids,
            array_agg(DISTINCT source ORDER BY source) AS sources
     FROM name_map
     GROUP BY normalized
@@ -52,7 +53,7 @@ BEGIN
   product_base AS (
     SELECT p.id, p.product_name, p.sku, p.inventory_unit,
            NULLIF(btrim(p.vendor), '') AS legacy_vendor_text,
-           r.vendor_count, r.vendor_id AS text_vendor_id, r.sources
+           r.vendor_count, r.vendor_id AS text_vendor_id, r.candidate_vendor_ids, r.sources
     FROM public.products p
     LEFT JOIN resolved r
       ON r.normalized = public.normalize_vendor_alias(NULLIF(btrim(p.vendor), ''))
@@ -63,7 +64,11 @@ BEGIN
            count(*) FILTER (WHERE l.is_active AND l.link_status = 'confirmed') AS confirmed_links,
            count(*) FILTER (WHERE l.is_active AND l.link_status = 'pending') AS pending_links,
            (array_agg(l.vendor_id) FILTER (WHERE l.is_active AND l.link_status = 'confirmed' AND l.is_preferred))[1]
-             AS preferred_vendor_id
+             AS preferred_vendor_id,
+           -- Every active link by name, so a reviewer sees existing vendors before proposing another.
+           jsonb_agg(jsonb_build_object('vendor_name', lv.name, 'link_status', l.link_status,
+               'is_preferred', l.is_preferred, 'supplier_sku', l.supplier_sku)
+             ORDER BY l.is_preferred DESC, lower(lv.name), l.id) FILTER (WHERE l.is_active) AS links
     FROM public.product_supplier_links l
     -- A link to a deleted vendor counts as no link: it could never become the vendor copy.
     JOIN public.vendors lv ON lv.id = l.vendor_id AND lv.deleted_at IS NULL
@@ -74,6 +79,7 @@ BEGIN
            COALESCE(ls.confirmed_links, 0) AS confirmed_links,
            COALESCE(ls.pending_links, 0) AS pending_links,
            ls.preferred_vendor_id,
+           COALESCE(ls.links, '[]'::jsonb) AS links,
            CASE
              WHEN ls.preferred_vendor_id IS NOT NULL
                   AND (b.legacy_vendor_text IS NULL OR (b.text_vendor_id = ls.preferred_vendor_id AND b.vendor_count = 1))
@@ -137,6 +143,10 @@ BEGIN
            'proposed_vendor_id', c.evidence_vendor_id,
            'proposed_vendor_name', ev.name,
            'text_vendor_name', tv.name,
+           -- Every vendor an ambiguous text names, so the reviewer can choose between them.
+           'candidate_vendor_names', (SELECT COALESCE(jsonb_agg(cv.name ORDER BY lower(cv.name)), '[]'::jsonb)
+                                      FROM public.vendors cv WHERE cv.id = ANY (c.candidate_vendor_ids)),
+           'links', c.links,
            'confirmed_links', c.confirmed_links,
            'pending_links', c.pending_links,
            'po_count', COALESCE(pe.po_count, 0),

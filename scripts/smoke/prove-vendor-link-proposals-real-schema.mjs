@@ -363,6 +363,11 @@ function main() {
   assert.equal(rows[P.NOPREF].status, 'linked_no_preferred');
   assert.equal(rows[P.AMBIG].status, 'ambiguous');
   assert.equal(rows[P.AMBIG].proposed_vendor_id, null, 'an ambiguous name proposes nothing');
+  assert.deepEqual(rows[P.AMBIG].candidate_vendor_names, ['[PROVER] Delta', '[PROVER] Gamma'], 'an ambiguous row names its candidates');
+  assert.deepEqual(rows[P.NOPREF].links.map((l) => [l.vendor_name, l.link_status, l.is_preferred, l.supplier_sku]),
+    [['[PROVER] Beta Supply', 'confirmed', false, 'B-7']], 'existing links are listed by name');
+  assert.deepEqual(rows[P.DELETED].links, [], 'a link to a deleted vendor is not listed');
+  assert.deepEqual(rows[P.ALIAS].links, []);
   assert.deepEqual(result.ok.summary, {
     proposed: 2, unresolved: 2, no_vendor: 1, linked: 1, linked_text_differs: 1, linked_no_preferred: 1, ambiguous: 1,
   });

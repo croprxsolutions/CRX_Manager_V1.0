@@ -3,7 +3,7 @@
 Local candidate migration `20261104180000_vendor_link_proposals.sql` adds `get_vendor_link_proposals()`, a read-only, admin-only report for DATA-11. For each active product it shows:
 
 - how the legacy `products.vendor` text resolves to an active vendor (by name, an approved alias or an approved legacy resolution);
-- the product's existing links;
+- the product's existing links, by vendor name, and every vendor an ambiguous name could mean;
 - a status: `linked`, `linked_text_differs`, `linked_no_preferred`, `proposed`, `ambiguous`, `unresolved` or `no_vendor`;
 - purchasing evidence: sent (not draft or cancelled) POs from that vendor, and the newest approved quote-sheet row (these exist only where a link exists or once existed);
 - the link fields that no record supplies.

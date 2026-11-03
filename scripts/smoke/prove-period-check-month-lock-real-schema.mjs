@@ -54,7 +54,7 @@ function build() {
   }
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
   sql(read('supabase/baselines/20260727174805_extensions.sql'));
-  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: root, encoding: 'utf8', maxBuffer: 64*1024*1024 });
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], { cwd: root, encoding: 'utf8', maxBuffer: 64*1024*1024 });
   assert.equal(schema.status, 0, schema.stderr);
   sql(schema.stdout);
   sql(`CREATE SCHEMA IF NOT EXISTS storage;
@@ -86,8 +86,6 @@ function build() {
       sql(`CREATE OR REPLACE FUNCTION public._close_undelivered_order_remainder_20260718(p_order_id uuid,p_actor uuid) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $body$${body}$body$;`);
     }
     if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installAuthUid();
-    // The schema-only baseline has no seed rows; KI-85's postflight requires live's Main Warehouse.
-    if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') sql(`INSERT INTO public.warehouses (name, code, is_active, is_default) VALUES ('Main Warehouse', 'MW', true, true) ON CONFLICT (name) DO NOTHING;`);
     const result = sql(`BEGIN;\n${read(file)}\nCOMMIT;`, 'postgres', true);
     assert.equal(result.status, 0, `${base}: ${result.stderr}`);
     ledger(base.slice(0,-4));

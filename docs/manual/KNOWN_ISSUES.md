@@ -372,7 +372,11 @@ matching customers (alphabetical) without saying so. Past a cap, a record cannot
 ---
 
 ### KI-85 — Receiving offers warehouses that cannot ship
-**MED · OPEN · UI/database/inventory · unassigned (fix 1 Part A from the 2026-11-02 audit)**
+**MED · FIXED (Part A, `20261102220000` live 2026-11-02) · UI/database/inventory · Claude (2026-11-02)**
+Fix: the receiving pickers and Add Inventory list only active `warehouses` rows; `receive_po_items` and
+`manual_inventory_add` refuse any location but Main Warehouse with `UNKNOWN_STORAGE_LOCATION` until transfers exist; Quick Receive no longer offers
+its over-receive option, which always failed (no admin reason was sent). Part B (add-warehouse admin, transfer RPC,
+per-location alerts) stays deferred until a second warehouse opens. Original report:
 `src/pages/PurchaseOrderDetail.tsx` (~L1855) and `src/components/receiving/QuickReceivePanel.tsx` (~L69) offer
 four hard-coded locations; only Main Warehouse is in `warehouses`. `receive_po_items` stores whatever location is
 sent, but every outbound path uses Main Warehouse only and no transfer exists, so stock received elsewhere can never

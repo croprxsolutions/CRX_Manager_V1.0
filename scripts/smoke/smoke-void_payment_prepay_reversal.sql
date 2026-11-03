@@ -143,7 +143,7 @@ BEGIN
   -- --------------------------------------------------------------------
   v_res := allocate_payment(
     v_customer_id, 80000, 'check',
-    '[SMOKE]-VPP-REF-' || v_suffix, NULL, CURRENT_DATE,
+    '[SMOKE]-VPP-REF-' || v_suffix, NULL, (now() AT TIME ZONE 'America/Chicago')::date,
     '[SMOKE] vpp payment 1',
     jsonb_build_array(jsonb_build_object('invoice_id', v_invoice_id, 'amount_cents', 30000)),
     v_admin, 'smk-vpp-' || v_suffix || '-a1');
@@ -198,7 +198,7 @@ BEGIN
 
   v_res := allocate_payment(
     v_customer_id, 20000, 'cash',
-    NULL, NULL, CURRENT_DATE,
+    NULL, NULL, (now() AT TIME ZONE 'America/Chicago')::date,
     '[SMOKE] vpp payment 2',
     '[]'::jsonb,
     v_admin, 'smk-vpp-' || v_suffix || '-a2');

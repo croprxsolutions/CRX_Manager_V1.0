@@ -260,16 +260,18 @@ The normal path is `draft` → `submitted` → `fully_received`, passing through
    - Updates PO status to `partially_received` or `fully_received`
 
 ### Warehouses: only Main Warehouse ships (decision 2026-11-02)
-Crop RX operates from Main Warehouse only; more warehouses are planned, so the `warehouses` table and per-location `inventory` rows are kept on purpose (`docs/manual/DECISION_LOG.md`, 2026-11-02). Deliveries, jobs, blends and holds read and write `location = 'Main Warehouse'` only, and there is no transfer function. Stock received anywhere else cannot ship (KI-85).
+Crop RX operates from Main Warehouse only; more warehouses are planned, so the `warehouses` table and per-location `inventory` rows are kept on purpose (`docs/manual/DECISION_LOG.md`, 2026-11-02). Deliveries, jobs, blends and holds read and write `location = 'Main Warehouse'` only, and there is no transfer function. Receiving (`receive_po_items`) and Add Inventory (`manual_inventory_add`) accept only an active Main Warehouse as the location, even if another `warehouses` row is active, and the receiving screens list active `warehouses` rows (KI-85, `20261102220000`), so stock can no longer be received somewhere it cannot ship from. Adding a warehouse makes it pickable but the server still refuses it, so do the checklist below first. Never rename or deactivate the `Main Warehouse` row: receives that send no location (Receiving Hub, the Inventory page, offline sync) default to it and would all be refused.
 
-**Before adding a second warehouse**, ship these three together, or stock received there is stranded:
+**Before adding a second warehouse**, ship these together, or stock received there is stranded:
 1. A way for an admin to add a warehouse to `warehouses`.
 2. A stock-transfer RPC that moves quantity between locations, writes `transferred` ledger rows at both ends, locks rows in a fixed order, and takes `p_idempotency_key`.
 3. Low-stock and negative-stock checks per location. The negative-inventory sentinel (`20261025090000`) sums across locations today, so Main −5 and another warehouse +5 raise no alert.
+4. In the same migration as the transfer RPC, lift the KI-85 Main-only guard in `receive_po_items` and `manual_inventory_add` (`20261102220000`) to accept any active warehouse.
 
 ### Quick Receive (shortcut)
 - 3-step wizard: select vendor + products -> auto-match to oldest open POs -> confirm
 - Uses `match_quick_receive_items()` RPC to automatically allocate items to the right POs
+- Never over-receives: extra units beyond the open POs are skipped; an admin over-receives on the PO page with a reason. When a product is on several POs at different prices, the PO you pick receives at most what that line has left, and you must confirm skipping the rest before Confirm works
 - Source: `src/components/receiving/QuickReceivePanel.tsx`
 
 ### Key RPCs

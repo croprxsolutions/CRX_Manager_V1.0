@@ -46,7 +46,8 @@ DECLARE
   v_ocr_queue_id uuid;
   v_ocr_lease uuid := gen_random_uuid();
   v_key_prefix text := 'gauntlet-' || gen_random_uuid()::text;
-  v_location text := '[E2E] gauntlet ' || gen_random_uuid()::text;
+  -- Receiving accepts only Main Warehouse until stock transfers exist (KI-85, 20261102220000).
+  v_location text := 'Main Warehouse';
   v_result jsonb;
   v_pricing jsonb;
   v_replay jsonb;
@@ -878,6 +879,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL(ocr): lifecycle rejection did not roll back atomically';
   END IF;
 
+  PERFORM set_config('app.product_active_rpc', 'on', true); -- stands in for set_product_active
   UPDATE public.products SET is_active = false WHERE id = v_product2;
   BEGIN
     PERFORM public.commit_blend_ticket_ocr_result(
@@ -901,6 +903,7 @@ BEGIN
     END IF;
   END;
   UPDATE public.products SET is_active = true WHERE id = v_product2;
+  PERFORM set_config('app.product_active_rpc', '', true);
   IF (SELECT status FROM public.ocr_processing_queue WHERE id = v_ocr_queue_id) <> 'processing'
      OR (SELECT count(*) FROM public.blend_ticket_products WHERE blend_ticket_id = v_ocr_ticket) <> 2 THEN
     RAISE EXCEPTION 'SMOKE_FAIL(ocr): inactive-product rejection leaked effects';

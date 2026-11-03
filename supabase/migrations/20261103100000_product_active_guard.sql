@@ -269,8 +269,10 @@ BEGIN
   END IF;
   v_token := md5(array_to_string(v_ids, ',') || '|' || p_active::text || '|' || (v_review->'warnings')::text);
   IF p_review_token IS DISTINCT FROM v_token THEN RAISE EXCEPTION 'PRODUCT_ACTIVE_REVIEW_STALE'; END IF;
+  PERFORM set_config('app.product_active_rpc', 'on', true);
   UPDATE public.products SET is_active = p_active, updated_at = now()
     WHERE id = ANY(v_ids) AND is_active IS DISTINCT FROM p_active;
+  PERFORM set_config('app.product_active_rpc', '', true);
   v_result := jsonb_build_object('products', (SELECT jsonb_agg(jsonb_build_object('id', id,
     'product_name', product_name, 'is_active', is_active) ORDER BY id)
     FROM public.products WHERE id = ANY(v_ids)), 'warnings', v_review->'warnings');
@@ -291,6 +293,11 @@ BEGIN
     IF auth.uid() IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
     IF NOT public.is_admin() THEN
       RAISE EXCEPTION 'NOT_AUTHORIZED: admin required' USING ERRCODE = '42501';
+    END IF;
+    -- Only set_product_active may flip the flag, so every change passes its preview and confirm.
+    IF current_setting('app.product_active_rpc', true) IS DISTINCT FROM 'on' THEN
+      RAISE EXCEPTION 'PRODUCT_ACTIVE_RPC_REQUIRED: turn products on or off from the Products screen'
+        USING ERRCODE = '42501';
     END IF;
   END IF;
   IF OLD.is_active AND NOT NEW.is_active THEN
@@ -317,18 +324,22 @@ BEGIN
   -- New lines and product swaps reach the same locked product check below.
   IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id THEN
     IF TG_TABLE_NAME = 'order_items' THEN
-      -- Any rise in remaining (a void/cancel reopen or a direct edit) frees units to deliver.
-      IF COALESCE(NEW.quantity_remaining, 0) > COALESCE(OLD.quantity_remaining, 0) THEN
+      -- A move to another order is a new sale there. Any rise in remaining (a void/cancel
+      -- reopen or a direct edit) frees units to deliver.
+      IF NEW.order_id IS DISTINCT FROM OLD.order_id
+         OR COALESCE(NEW.quantity_remaining, 0) > COALESCE(OLD.quantity_remaining, 0) THEN
         NULL; -- Continue to the locked product check.
       ELSIF COALESCE(NEW.total_units_needed, 0) <= COALESCE(OLD.total_units_needed, 0) THEN
         RETURN NEW;
       END IF;
     ELSIF TG_TABLE_NAME = 'quote_items' THEN
-      IF COALESCE(NEW.total_units_needed, 0) <= COALESCE(OLD.total_units_needed, 0) THEN
+      IF NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id
+         AND COALESCE(NEW.total_units_needed, 0) <= COALESCE(OLD.total_units_needed, 0) THEN
         RETURN NEW;
       END IF;
     ELSIF TG_TABLE_NAME = 'purchase_order_items' THEN
-      IF COALESCE(NEW.quantity_ordered, 0) <= COALESCE(OLD.quantity_ordered, 0) THEN
+      IF NEW.purchase_order_id IS NOT DISTINCT FROM OLD.purchase_order_id
+         AND COALESCE(NEW.quantity_ordered, 0) <= COALESCE(OLD.quantity_ordered, 0) THEN
         RETURN NEW;
       END IF;
     END IF;
@@ -344,11 +355,11 @@ END;
 $function$;
 ALTER FUNCTION public.guard_inactive_product_line() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.guard_inactive_product_line() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
-CREATE TRIGGER trigger_a_guard_inactive_order_item BEFORE INSERT OR UPDATE OF product_id, total_units_needed, quantity_remaining ON public.order_items
+CREATE TRIGGER trigger_a_guard_inactive_order_item BEFORE INSERT OR UPDATE OF order_id, product_id, total_units_needed, quantity_remaining ON public.order_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_product_line();
-CREATE TRIGGER trigger_a_guard_inactive_quote_item BEFORE INSERT OR UPDATE OF product_id, total_units_needed ON public.quote_items
+CREATE TRIGGER trigger_a_guard_inactive_quote_item BEFORE INSERT OR UPDATE OF quote_id, product_id, total_units_needed ON public.quote_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_product_line();
-CREATE TRIGGER trigger_a_guard_inactive_po_item BEFORE INSERT OR UPDATE OF product_id, quantity_ordered ON public.purchase_order_items
+CREATE TRIGGER trigger_a_guard_inactive_po_item BEFORE INSERT OR UPDATE OF purchase_order_id, product_id, quantity_ordered ON public.purchase_order_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_product_line();
 
 CREATE FUNCTION public.guard_inactive_manual_hold() RETURNS trigger
@@ -650,10 +661,10 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public.set_product_active(uuid[],boolean,text,text)'::regprocedure)
-       IS DISTINCT FROM '22c79c8cc58d2e575ca353511e38c291'
+       IS DISTINCT FROM 'c7e45da9db5697b12709daa419d04a1c'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public.guard_inactive_product_line()'::regprocedure)
-       IS DISTINCT FROM '0b5e96c6d3bcb1c114ff997f69116da6' THEN
+       IS DISTINCT FROM 'f57174af7612e724a14a3c035a7c1deb' THEN
     RAISE EXCEPTION 'PRODUCT_ACTIVE_GUARD_POSTFLIGHT: guards';
   END IF;
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc

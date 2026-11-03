@@ -313,7 +313,7 @@ try {
   const o = '7c620000-0000-4000-8000-0000000000c1';
   order(o, 'PM3-OPEN'); orderLine(o, p);
   assert.equal(preview(p).blockers[0].number, 'PM3-OPEN');
-  denied(ADMIN, `UPDATE public.products SET is_active = false WHERE id = '${p}';`, /PRODUCT_DEACTIVATION_BLOCKED:.*PM3-OPEN/, 'postgres');
+  denied(ADMIN, `SELECT set_config('app.product_active_rpc', 'on', true); UPDATE public.products SET is_active = false WHERE id = '${p}';`, /PRODUCT_DEACTIVATION_BLOCKED:.*PM3-OPEN/, 'postgres');
   const blocked = preview(p);
   denied(ADMIN, `SELECT public.set_product_active(ARRAY['${p}']::uuid[], false, '${blocked.review_token}', 'pm3-blocked');`, /PRODUCT_DEACTIVATION_BLOCKED:.*PM3-OPEN/);
   denied(REP, `SELECT public.preview_product_active_change(ARRAY['${p}']::uuid[], false);`, /NOT_AUTHORIZED/);
@@ -330,8 +330,11 @@ try {
   psql(`INSERT INTO public.inventory(product_id, quantity_available) VALUES ('${clean}', 2);`);
   denied(ADMIN, `SELECT public.set_product_active(ARRAY['${clean}']::uuid[], false, '${old.review_token}', 'pm3-stale');`, /PRODUCT_ACTIVE_REVIEW_STALE/);
   assert.equal(preview(clean).warnings[0].kind, 'stock');
+  // A direct write skips the preview and its warnings, so only the RPC may flip the flag.
+  denied(ADMIN, `UPDATE public.products SET is_active = false WHERE id = '${clean}';`, /PRODUCT_ACTIVE_RPC_REQUIRED/);
   turn(clean, false, 'pm3-clean');
   assert.equal(scalar(`SELECT is_active FROM public.products WHERE id = '${clean}';`), 'f');
+  denied(ADMIN, `UPDATE public.products SET is_active = true WHERE id = '${clean}';`, /PRODUCT_ACTIVE_RPC_REQUIRED/);
   denied(ADMIN, `INSERT INTO public.order_items(order_id, product_id, product_name, total_units_needed)
     VALUES ('${o}', '${clean}', 'inactive', 1);`, /PRODUCT_INACTIVE:.*PM3 Clean/, 'postgres');
   denied(ADMIN, `SELECT public.set_product_active(ARRAY['${clean}']::uuid[], true, 'different', 'pm3-clean');`, /IDEMPOTENCY/);
@@ -351,7 +354,7 @@ try {
   const blockerNames = preview(blockedProduct).blockers.map((b) => b.number);
   for (const number of ['PM3-PARTIAL', 'PM3-UNBILLED', 'PM3-PO-draft',
     'PM3-PO-submitted', 'PM3-PO-partially_received']) assert.ok(blockerNames.includes(number), number);
-  const directBlockers = denied(ADMIN, `UPDATE public.products SET is_active = false WHERE id = '${blockedProduct}';`,
+  const directBlockers = denied(ADMIN, `SELECT set_config('app.product_active_rpc', 'on', true); UPDATE public.products SET is_active = false WHERE id = '${blockedProduct}';`,
     /PRODUCT_DEACTIVATION_BLOCKED:.*PM3-UNBILLED/, 'postgres');
   const blockedToken = preview(blockedProduct).review_token;
   const rpcBlockers = denied(ADMIN, `SELECT public.set_product_active(ARRAY['${blockedProduct}']::uuid[],
@@ -692,6 +695,17 @@ try {
     assert.equal(scalar(`SELECT count(*) FROM public.${table} WHERE ${column} = '${parent}'
       AND product_id = '${idemProduct}';`), '0', `${table} swap must roll back`);
   }
+  // Moving a retained inactive line to another parent is a new line there.
+  const cancelledLine = scalar(`SELECT id FROM public.order_items WHERE order_id = '${cancelledInactiveOrder.orderId}';`);
+  for (const [table, column, line, parent, product] of [
+    ['order_items', 'order_id', cancelledLine, swapOrder.orderId, 'PM3 Idempotency'],
+    ['quote_items', 'quote_id', heldQuoteLine, swapQuote, 'PM3 Quotes'],
+    ['purchase_order_items', 'purchase_order_id', retainedPoLine, swapPo, 'PM3 Idempotency'],
+  ]) {
+    denied(ADMIN, `UPDATE public.${table} SET ${column} = '${parent}' WHERE id = '${line}';`,
+      table === 'quote_items' ? /QUOTE_ITEM_QUOTE_IMMUTABLE|PRODUCT_INACTIVE/
+        : new RegExp(`PRODUCT_INACTIVE:.*${product}`), 'postgres');
+  }
   const held = seedOrderLine(idemProduct, 'PM3-HELD', 'confirmed', 231);
   const otherLine = scalar(`SELECT id FROM public.order_items WHERE order_id = '${held.orderId}' AND product_id = '${idemProduct}';`);
   seed(`INSERT INTO public.order_items(order_id, product_id, product_name, price_per_unit,
@@ -733,7 +747,7 @@ try {
     CREATE OR REPLACE FUNCTION public._product_active_review(p_product_ids uuid[]) RETURNS jsonb
       LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp
       AS $$ BEGIN RAISE EXCEPTION 'PM3_REVIEW_FAILURE'; END $$;
-    UPDATE public.products SET is_active = false WHERE id = '${quietProduct}'; ROLLBACK;`, { allowFailure: true });
+    SELECT set_config('app.product_active_rpc', 'on', true); UPDATE public.products SET is_active = false WHERE id = '${quietProduct}'; ROLLBACK;`, { allowFailure: true });
   assert.notEqual(failure.status, 0);
   assert.match(`${failure.stdout}\n${failure.stderr}`, /PM3_REVIEW_FAILURE/);
   assert.equal(scalar(`SELECT is_active FROM public.products WHERE id = '${quietProduct}';`), 't');
@@ -783,7 +797,7 @@ try {
     SELECT pg_sleep(4); COMMIT;`);
   await new Promise((resolve) => setTimeout(resolve, 350));
   const laterOff = backgroundSql(`BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
-    UPDATE public.products SET is_active = false WHERE id = '${raceA}'; COMMIT;`);
+    SELECT set_config('app.product_active_rpc', 'on', true); UPDATE public.products SET is_active = false WHERE id = '${raceA}'; COMMIT;`);
   await waitForLock(raceA);
   assert.equal((await firstLine).status, 0, 'line-first transaction must commit');
   const refusedOff = await laterOff;
@@ -797,7 +811,7 @@ try {
   seed(`INSERT INTO public.orders(id, order_number, customer_id, status)
     VALUES ('${raceOrderB}', 'PM3-RACE-B', '${customerId}', 'confirmed');`);
   const firstOff = backgroundSql(`BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
-    UPDATE public.products SET is_active = false WHERE id = '${raceB}';
+    SELECT set_config('app.product_active_rpc', 'on', true); UPDATE public.products SET is_active = false WHERE id = '${raceB}';
     SELECT pg_sleep(4); COMMIT;`);
   await new Promise((resolve) => setTimeout(resolve, 350));
   const laterLine = backgroundSql(`BEGIN;
@@ -819,7 +833,7 @@ try {
       UPDATE public.orders SET status = 'partially_fulfilled' WHERE id = '${raceOrder.orderId}';
       ${arrival === 'reopen-first' ? 'SELECT pg_sleep(4);' : ''} COMMIT;`;
     const deactivateSql = `BEGIN; SELECT set_config('request.jwt.claim.sub','${ADMIN}', true);
-      UPDATE public.products SET is_active = false WHERE id = '${raceProduct}';
+      SELECT set_config('app.product_active_rpc', 'on', true); UPDATE public.products SET is_active = false WHERE id = '${raceProduct}';
       ${arrival === 'deactivate-first' ? 'SELECT pg_sleep(4);' : ''} COMMIT;`;
     const first = backgroundSql(arrival === 'reopen-first' ? reopenSql : deactivateSql);
     await new Promise((resolve) => setTimeout(resolve, 350));

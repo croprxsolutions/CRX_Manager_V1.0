@@ -194,6 +194,10 @@ export default function CustomerDetail() {
   interface TxnRow { transaction_date: string; transaction_type: string; reference_number: string; amount_cents: number; running_balance: number }
   interface PrepayRow { id: string; bucket_label: string; original_amount_cents: number; balance_cents: number }
   const [aging, setAging] = useState<AgingRow | null>(null);
+  // KI-95: today's balance can't be rebuilt for this customer, so there is no Outstanding figure.
+  const [agingUnavailable, setAgingUnavailable] = useState(false);
+  // The balance read failed: the tab says so instead of showing $0 figures.
+  const [financialsFailed, setFinancialsFailed] = useState(false);
   const [transactions, setTransactions] = useState<TxnRow[]>([]);
   const [prepayCredits, setPrepayCredits] = useState<PrepayRow[]>([]);
   const [financialsLoading, setFinancialsLoading] = useState(false);
@@ -450,6 +454,8 @@ export default function CustomerDetail() {
     setCustomerRemainders([]);
     setTimeline([]);
     setAging(null);
+    setAgingUnavailable(false);
+    setFinancialsFailed(false);
     setTransactions([]);
     setPrepayCredits([]);
     // Without this reset the financials tab short-circuits on the cached flag and
@@ -639,6 +645,8 @@ export default function CustomerDetail() {
     } else if (selectedTab === 'financials') {
       if (financialsFetched.current) { setTabLoading(false); return; }
       setFinancialsLoading(true);
+      // Set once this customer's balance is read; a later read failing leaves it on screen.
+      let agingRead = false;
       try {
         const today = localToday();
         const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
@@ -658,10 +666,11 @@ export default function CustomerDetail() {
           .eq('customer_id', id!);
         if (agingError) throw agingError;
         const myAging = assertRpcResult<AgingRow[]>(agingData, 'get_ar_aging').find((a) => a.customer_id === id) || null;
-        // KI-95: no amounts for a balance that can't be rebuilt; fail as before rather than show $0.
-        if (myAging?.unavailable_reason) throw new Error(`get_ar_aging: ${myAging.unavailable_reason}`);
         if (isStale()) return;
-        setAging(myAging);
+        // KI-95: a flagged row has no amounts; show "not available", never $0.
+        setAgingUnavailable(Boolean(myAging?.unavailable_reason));
+        setAging(myAging?.unavailable_reason ? null : myAging);
+        agingRead = true;
 
         // Every statement row, page by page (src/lib/customerStatement.ts); the
         // card below shows the most recent of them.
@@ -681,11 +690,13 @@ export default function CustomerDetail() {
         if (prepayError) throw prepayError;
         if (isStale()) return;
         setPrepayCredits((prepayData || []) as PrepayRow[]);
+        setFinancialsFailed(false);
         financialsFetched.current = true;
       } catch (err: unknown) {
         if (isStale()) return;
         Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'customer_financials_tab' } });
         toast('error', 'Failed to load financials');
+        if (!agingRead) setFinancialsFailed(true);
       } finally {
         if (!isStale()) setFinancialsLoading(false);
       }
@@ -1914,6 +1925,11 @@ export default function CustomerDetail() {
                 <div key={i} className="h-24 bg-gray-100 rounded-lg animate-pulse" />
               ))}
             </div>
+          ) : financialsFailed ? (
+            // A failed read must not show $0 owed and 0% credit used.
+            <Card>
+              <p role="alert" className="text-sm text-red-600">Financials could not be loaded. Reload the page to try again.</p>
+            </Card>
           ) : (
             <>
               {/* Section A: AR Summary */}
@@ -1922,7 +1938,14 @@ export default function CustomerDetail() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-3">
                   <div>
                     <p className="text-xs text-secondary">Outstanding</p>
-                    <p className="text-lg font-semibold text-nav-dark">{fmt(aging?.total_outstanding || 0)}</p>
+                    {agingUnavailable ? (
+                      <>
+                        <p className="text-lg font-semibold text-secondary">Not available</p>
+                        <p className="text-xs text-amber-700">Today's balance can't be rebuilt exactly (a payment, prepay, write-off, void or unpost is dated later); see AR Aging</p>
+                      </>
+                    ) : (
+                      <p className="text-lg font-semibold text-nav-dark">{fmt(aging?.total_outstanding || 0)}</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs text-secondary">Credit Limit</p>
@@ -1938,7 +1961,7 @@ export default function CustomerDetail() {
                   </div>
                 </div>
                 {/* Credit utilization bar */}
-                {(customer.credit_limit_cents || 0) > 0 && (() => {
+                {(customer.credit_limit_cents || 0) > 0 && !agingUnavailable && (() => {
                   const limitDollars = (customer.credit_limit_cents || 0) / 100;
                   const outstandingDollars = aging?.total_outstanding || 0;
                   const pct = Math.min((outstandingDollars / limitDollars) * 100, 100);

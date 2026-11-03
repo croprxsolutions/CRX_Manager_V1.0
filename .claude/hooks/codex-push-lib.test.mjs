@@ -8,7 +8,7 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { scratchHookEnvironment } from "./git-test-env.mjs";
-import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded } from "./codex-push-lib.mjs";
+import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded, nativeFolder } from "./codex-push-lib.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const now = Date.parse("2026-07-13T18:00:00.000Z");
@@ -97,8 +97,31 @@ assert.equal(pushUsesBulkMode("git push origin --branches"), true);
 assert.equal(pushUsesBulkMode("git push origin --mirror"), true);
 assert.equal(pushUsesBulkMode("git push origin --prune"), true);
 assert.equal(pushUsesBulkMode("git push origin feature"), false);
-assert.equal(pushContextIsAmbiguous("cd C:/other && git push origin main"), true);
+// A push beside any directory change stays refused, as on main (P2's cd binding
+// was dropped, Mason "ship safe parts" 2026-11-03); a bare `cd` now counts too.
+assert.equal(pushContextIsAmbiguous("cd C:/other && git commit -m x"), false);
+for (const command of [
+  "cd C:/other && git push origin main",
+  "cd /c/other; git add a && git push origin main",
+  'W="C:/other"; cd "$W" && git push origin main',
+  "cd C:/a && git -C C:/b push origin x; cd C:/c",
+  "git -C C:/b push origin x; cd C:/c",
+  "(cd C:/a && git push origin main)",
+  "git push origin main; cd C:/c",
+  // Luna final review, 2026-11-03: a bare cd/popd.
+  "cd && git push origin main",
+  "cd - && git push origin feature",
+  "cd; git push origin main",
+  "git push origin main; popd",
+  "cd C:/a && GIT_DIR=C:/b/.git git push origin main",
+]) assert.equal(pushContextIsAmbiguous(command), true, command);
 assert.equal(pushContextIsAmbiguous("Set-Location C:/other; git.exe push origin main"), true);
+// P1 (2026-11-03): Git Bash `/c/...` paths name the real drive on Windows.
+assert.equal(nativeFolder("/c/CRX_Manager/x", "win32"), "C:/CRX_Manager/x");
+assert.equal(nativeFolder("/d", "win32"), "D:/");
+assert.equal(nativeFolder("/d/", "win32"), "D:/");
+assert.equal(nativeFolder("/cx/y", "win32"), "/cx/y");
+assert.equal(nativeFolder("/c/x", "linux"), "/c/x");
 assert.equal(pushContextIsAmbiguous("$env:GIT_DIR='C:/other/.git'; git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("GIT_WORK_TREE=/tmp/other git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("git -C C:/other push origin main"), false);

@@ -26,7 +26,7 @@ import { localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
-import { unitOptionsForForm, isKnownUnit } from '../lib/units';
+import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, PRODUCT_FORM_OPTIONS } from '../lib/units';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { usePhoneSections } from '../hooks/usePhoneSections';
@@ -1416,20 +1416,28 @@ export default function ProductDetail() {
                   onChange={(e) => {
                     const form = (e.target.value || null) as Product['product_form'];
                     if (pricingReloadRequired) return;
-                    setProduct((current) => ({
-                      ...current,
-                      product_form: form,
-                      container_unit: current.container_unit === persistedProduct?.container_unit || isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
-                      inventory_unit: current.inventory_unit === persistedProduct?.inventory_unit || isKnownUnit(unitConversions, form, current.inventory_unit) ? current.inventory_unit : null,
-                    }));
+                    setProduct((current) => {
+                      const inventoryUnit = current.inventory_unit === persistedProduct?.inventory_unit || isKnownUnit(unitConversions, form, current.inventory_unit)
+                        ? current.inventory_unit : null;
+                      return {
+                        ...current,
+                        product_form: form,
+                        container_unit: current.container_unit === persistedProduct?.container_unit || isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
+                        inventory_unit: inventoryUnit,
+                        rate_unit: (form === 'seed' || form === 'each') && current.rate_unit?.trim()
+                          && current.rate_unit.trim().toLowerCase() !== inventoryUnit?.trim().toLowerCase()
+                          ? '' : current.rate_unit,
+                      };
+                    });
                     setIsDirty(true);
                   }}
                   disabled={!isAdmin || Boolean(persistedProduct?.product_form)}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
                   <option value="">-- Select --</option>
-                  <option value="liquid">Liquid</option>
-                  <option value="dry">Dry</option>
+                  {PRODUCT_FORM_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
                 </select>
                 {persistedProduct?.product_form && (
                   <p className="mt-1 text-xs text-secondary">This can't change on a saved product yet; it waits for the reviewed unit change.</p>
@@ -1456,12 +1464,7 @@ export default function ProductDetail() {
                     {product.container_unit && !isKnownUnit(unitConversions, product.product_form, product.container_unit) && (
                       <option value={product.container_unit}>{product.container_unit} (existing)</option>
                     )}
-                    {unitConversions
-                      .filter((uc) => {
-                        const form = product.product_form;
-                        if (!form) return true;
-                        return uc.unit_type === form || uc.unit_type === 'both';
-                      })
+                    {unitOptionsForForm(unitConversions, product.product_form)
                       .map((uc) => (
                         <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                       ))}
@@ -1497,7 +1500,19 @@ export default function ProductDetail() {
               <div className="max-w-xs">
                 <select
                   value={product.inventory_unit || ''}
-                  onChange={(e) => update('inventory_unit', e.target.value || null)}
+                  onChange={(e) => {
+                    const inventoryUnit = e.target.value || null;
+                    if (pricingReloadRequired) return;
+                    setProduct((current) => ({
+                      ...current,
+                      inventory_unit: inventoryUnit,
+                      rate_unit: (current.product_form === 'seed' || current.product_form === 'each')
+                        && current.rate_unit?.trim()
+                        && current.rate_unit.trim().toLowerCase() !== inventoryUnit?.trim().toLowerCase()
+                        ? '' : current.rate_unit,
+                    }));
+                    setIsDirty(true);
+                  }}
                   disabled={!isAdmin || Boolean(persistedProduct?.inventory_unit)}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
@@ -1530,10 +1545,11 @@ export default function ProductDetail() {
                   >
                     <option value="">-- Select --</option>
                     {/* WaveB: grandfather a legacy value the form filter would otherwise hide, so a save can't blank it */}
-                    {!isKnownUnit(unitConversions, product.product_form, product.rate_unit) && (
+                    {product.rate_unit && !rateUnitOptionsForProduct(unitConversions, product.product_form, product.inventory_unit)
+                      .some((uc) => uc.unit === product.rate_unit) && (
                       <option value={product.rate_unit || ''}>{product.rate_unit} (existing)</option>
                     )}
-                    {unitOptionsForForm(unitConversions, product.product_form).map((uc) => (
+                    {rateUnitOptionsForProduct(unitConversions, product.product_form, product.inventory_unit).map((uc) => (
                       <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                     ))}
                   </select>

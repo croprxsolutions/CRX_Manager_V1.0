@@ -39,6 +39,8 @@ interface POItemDraft {
   /** True once unit_cost came from an admin's costed catalog or an admin's typing. A rep's line holds a
    * placeholder 0 that must never be sent as an admin's cost if the session is promoted (Codex). */
   costFromAdmin?: boolean;
+  /** The user typed this line's unit cost, so no suggestion replaces it. */
+  costEdited?: boolean;
 }
 
 let keyCounter = 0;
@@ -185,7 +187,7 @@ export default function NewPurchaseOrder() {
   const updateItem = (key: string, field: keyof POItemDraft, value: string | number) => {
     setItems((prev) =>
       prev.map((i) => (i.key === key
-        ? { ...i, [field]: value, ...(field === 'unit_cost' ? { costFromAdmin: isAdmin } : {}) }
+        ? { ...i, [field]: value, ...(field === 'unit_cost' ? { costFromAdmin: isAdmin, costEdited: true } : {}) }
         : i))
     );
   };
@@ -200,6 +202,7 @@ export default function NewPurchaseOrder() {
               unit_cost: product.current_cost || 0,
               unit_size: product.unit_size || '',
               costFromAdmin: isAdmin,
+              costEdited: false,
             }
           : i
       )
@@ -208,22 +211,25 @@ export default function NewPurchaseOrder() {
     if (product.vendor) setVendor((v) => v || product.vendor || '');
     setProductSearchOpen(null);
     setProductQuery('');
-    if (isAdmin) void suggestPreferredVendorCost(itemKey, product);
+    if (isAdmin) void suggestPreferredVendorCost(itemKey, product, vendor.trim() || product.vendor || '');
   };
 
   // An admin's line starts at the preferred vendor's newest price per inventory unit, when one is
-  // known, instead of the catalog cost. Skipped once the line changed product or cost meanwhile.
-  const suggestPreferredVendorCost = async (itemKey: string, product: Product) => {
+  // known and the PO is for that vendor, instead of the catalog cost. Skipped once the line changed
+  // product or cost meanwhile.
+  const suggestPreferredVendorCost = async (itemKey: string, product: Product, poVendor: string) => {
     let cents: number | null = null;
     try {
-      cents = (await listProductVendors(product.id)).find((v) => v.is_preferred)?.last_cost_cents ?? null;
+      const preferred = (await listProductVendors(product.id)).find((v) => v.is_preferred);
+      if (preferred?.vendor_name !== poVendor) return;
+      cents = preferred.last_cost_cents;
     } catch (err) {
       Sentry.captureException(err);
       return;
     }
-    if (cents === null) return;
+    if (cents === null || !Number.isSafeInteger(cents)) return;
     setItems((prev) => prev.map((i) => (
-      i.key === itemKey && i.product_id === product.id && i.unit_cost === (product.current_cost || 0)
+      i.key === itemKey && i.product_id === product.id && !i.costEdited && i.unit_cost === (product.current_cost || 0)
         ? { ...i, unit_cost: cents / 100, costFromAdmin: true }
         : i
     )));

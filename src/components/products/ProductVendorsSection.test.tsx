@@ -75,7 +75,9 @@ describe('ProductVendorsSection', () => {
 
   it('makes another vendor preferred and reports the new name', async () => {
     const onPreferredChanged = renderSection(true);
-    fireEvent.click(await screen.findByRole('button', { name: 'Make preferred' }));
+    const button = await screen.findByRole('button', { name: 'Make preferred' });
+    mocks.listProductVendors.mockResolvedValue([{ ...spare, is_preferred: true }, { ...preferred, is_preferred: false }]);
+    fireEvent.click(button);
     await waitFor(() => expect(onPreferredChanged).toHaveBeenCalledWith('Spinner Ag'));
     expect(mocks.linkProductVendor).toHaveBeenCalledWith('p1', 'v2', true, 'u1', expect.any(String));
     expect(mocks.logActivity).toHaveBeenCalledWith(expect.objectContaining({ event: 'product_preferred_vendor_changed' }));
@@ -89,7 +91,7 @@ describe('ProductVendorsSection', () => {
     fireEvent.change(picker, { target: { value: 'v3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add vendor' }));
     await waitFor(() => expect(mocks.linkProductVendor).toHaveBeenCalledWith('p1', 'v3', false, 'u1', expect.any(String)));
-    expect(onPreferredChanged).not.toHaveBeenCalled();
+    expect(onPreferredChanged).toHaveBeenCalledWith('Wells Ag Supply');
   });
 
   it('removes a non-preferred vendor after confirming', async () => {

@@ -53,7 +53,7 @@ export function productVendorErrorMessage(error: unknown): string {
     || hasRpcCode(error, RpcErrorCodes.PRODUCT_NOT_FOUND)) {
     return 'This vendor or product no longer exists. Reload the page.';
   }
-  if (hasRpcCode(error, RpcErrorCodes.IDEMPOTENCY_INTENT_MISMATCH)) {
+  if (hasRpcCode(error, RpcErrorCodes.IDEMPOTENCY_INTENT_MISMATCH) || hasRpcCode(error, RpcErrorCodes.IDEMPOTENCY_PAYLOAD_MISMATCH)) {
     return 'This change conflicts with an earlier attempt. Reload the page and try again.';
   }
   return sanitizeError(error);

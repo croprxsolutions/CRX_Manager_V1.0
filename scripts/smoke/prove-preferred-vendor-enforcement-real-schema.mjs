@@ -6,7 +6,7 @@
  * the candidate, seeds invented rows, and checks: it refuses to install until every product with
  * links has one preferred link; preferring, renaming, unlinking and deleting keep the copy in sync
  * or refuse with an actionable message; product inserts still work and auto-link; a full link
- * replaces a vendor-only one; the vendor list reaches staff with cost for admins only.
+ * replaces a vendor-only one; the vendor list reaches admins and sales reps, with cost for admins only.
  *
  * Run: node scripts/smoke/prove-preferred-vendor-enforcement-real-schema.mjs   (needs local Docker image)
  * Prints PREFERRED_VENDOR_ENFORCEMENT_PROOF_PASS on success.
@@ -343,7 +343,18 @@ function main() {
   assert.deepEqual(repView.map((v) => [v.vendor_name, v.last_cost_cents, v.last_quoted_package_cost_cents, v.last_cost_as_of]),
     [['[PROVER] Acme Ag', null, null, null]]);
   refused(null, `SELECT public.get_product_vendors('${P.NEW}');`, /permission denied/);
-  console.log('[prover] the vendor list reaches staff, cost reaches admins only, a signed-out visitor is refused');
+  refused(id('a3'), `SELECT public.get_product_vendors('${P.NEW}');`, /NOT_AUTHORIZED/);
+  refused(id('a5'), `SELECT public.get_product_vendors('${P.NEW}');`, /NOT_AUTHORIZED/);
+  console.log('[prover] the vendor list reaches admins and sales reps, cost reaches admins only; drivers, recipients and signed-out visitors are refused');
+
+  // Deleting a product's only (preferred) link outright is refused at commit, like unlinking it.
+  const lone = ok(ADMIN, `INSERT INTO public.products (product_name, sku, vendor, inventory_unit, is_active)
+    VALUES ('[PROVER] Lone', 'PV-L', '[PROVER] Acme Ag', 'gal', true) RETURNING id;`);
+  assert.equal(preferredOf(lone), V.A);
+  const del = psql(`DELETE FROM public.product_supplier_links WHERE product_id = '${lone}';`, { allowFailure: true });
+  assert.match(`${del.stdout}${del.stderr}`, /PREFERRED_VENDOR_REQUIRED/);
+  assert.equal(preferredOf(lone), V.A);
+  console.log('[prover] deleting the only preferred link is refused');
 
   // The proposals report tells vendor-only links apart and still lists their missing item fields.
   const report = JSON.parse(ok(ADMIN, 'SELECT public.get_vendor_link_proposals();'));
@@ -354,8 +365,10 @@ function main() {
   console.log('[prover] the proposals report marks vendor-only links and their missing item fields');
 
   // A rename reaches every product that prefers the vendor; a preferred vendor cannot be deleted.
+  const stampBefore = scalar(`SELECT updated_at FROM public.products WHERE id = '${P.ONE}';`);
   ok(ADMIN, `SELECT public.save_vendor('${V.B}', '{"name":"[PROVER] Beta Renamed"}'::jsonb, 'k-rename');`);
   assert.equal(vendorOf(P.ONE), '[PROVER] Beta Renamed');
+  assert.notEqual(scalar(`SELECT updated_at FROM public.products WHERE id = '${P.ONE}';`), stampBefore, 'the copy stamps updated_at');
   refused(ADMIN, `SELECT public.delete_vendor('${V.B}', 'k-del-b');`, /VENDOR_IS_PREFERRED: 1 products/);
   ok(ADMIN, `SELECT public.delete_vendor('${V.C}', 'k-del-c');`);
   console.log('[prover] a vendor rename reaches its products; a preferred vendor cannot be deleted, a spare one can');

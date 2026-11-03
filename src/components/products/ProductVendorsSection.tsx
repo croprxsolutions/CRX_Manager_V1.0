@@ -38,19 +38,23 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   const [vendors, setVendors] = useState<ProductVendor[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [allVendors, setAllVendors] = useState<{ id: string; name: string }[]>([]);
+  const [pickerError, setPickerError] = useState(false);
   const [pickedVendorId, setPickedVendorId] = useState('');
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<ProductVendor | null>(null);
   const linkKeys = useIdempotencyKey('link_product_vendor', userId ?? '');
   const unlinkKeys = useIdempotencyKey('unlink_product_vendor', userId ?? '');
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (): Promise<ProductVendor[] | null> => {
     try {
-      setVendors(await listProductVendors(productId));
+      const list = await listProductVendors(productId);
+      setVendors(list);
       setLoadError(null);
+      return list;
     } catch (error) {
       Sentry.captureException(error);
       setLoadError(productVendorErrorMessage(error));
+      return null;
     }
   }, [productId]);
 
@@ -59,7 +63,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   useEffect(() => {
     if (!isAdmin) return;
     supabase.from('vendors').select('id, name').is('deleted_at', null).order('name').then(({ data, error }) => {
-      if (error) { Sentry.captureException(error); return; }
+      if (error) { Sentry.captureException(error); setPickerError(true); return; }
       setAllVendors(data ?? []);
     });
   }, [isAdmin]);
@@ -80,8 +84,9 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
         entityId: productId,
       });
       setPickedVendorId('');
-      await reload();
-      if (makePreferred) onPreferredChanged(name);
+      // A first vendor becomes preferred even when not asked, so report whichever vendor now is.
+      const preferred = (await reload())?.find((v) => v.is_preferred);
+      if (preferred) onPreferredChanged(preferred.vendor_name);
     } catch (error) {
       toast('error', productVendorErrorMessage(error));
     } finally {
@@ -173,6 +178,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
           <Button size="sm" disabled={busy || !pickedVendorId} onClick={() => void link(pickedVendorId, false)}>
             Add vendor
           </Button>
+          {pickerError && <p className="w-full text-sm text-red-700">Could not load the vendor list. Reload the page to add a vendor.</p>}
         </div>
       )}
       <ConfirmModal

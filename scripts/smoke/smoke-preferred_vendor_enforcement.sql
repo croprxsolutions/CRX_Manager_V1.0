@@ -32,7 +32,7 @@ BEGIN
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_unlink), chr(13), '')) <> 'bb1d7141eb1a08806f42c0a30f8cdd12' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: unlink_product_vendor is not the body of 20261105110000';
   END IF;
-  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_list), chr(13), '')) <> '834a55af36a3641a59e2f001ce1a9818' THEN
+  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_list), chr(13), '')) <> '8511e8a2c94d3b5aa5ebb6ad217a1495' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: get_product_vendors is not the body of 20261105110000';
   END IF;
   IF has_function_privilege('anon', v_unlink, 'EXECUTE') OR has_function_privilege('anon', v_list, 'EXECUTE') THEN

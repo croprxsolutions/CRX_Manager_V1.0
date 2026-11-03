@@ -1606,7 +1606,7 @@ export default function ProductDetail() {
           </Card>
           </PhoneSection>
 
-          {!isNew && id && persistedProduct?.id === id && (
+          {!isNew && id && persistedProduct?.id === id && (isAdmin || role === 'sales_rep') && (
             <PhoneSection title="Vendors" {...sectionProps('vendors', pricingReloadRequired)}>
               <ProductVendorsSection
                 key={id}

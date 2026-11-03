@@ -402,6 +402,7 @@ export const RpcErrorCodes = {
   IDEMPOTENCY_KEY_REQUIRED: 'IDEMPOTENCY_KEY_REQUIRED',
   IDEMPOTENCY_ACTOR_MISMATCH: 'IDEMPOTENCY_ACTOR_MISMATCH',
   IDEMPOTENCY_INTENT_MISMATCH: 'IDEMPOTENCY_INTENT_MISMATCH',
+  IDEMPOTENCY_PAYLOAD_MISMATCH: 'IDEMPOTENCY_PAYLOAD_MISMATCH',
   // Raised by soft_delete_customer_document when the shared idempotency helper
   // answers 22023 with anything other than an intent mismatch: an internal
   // fault, raised BEFORE any mutation, so it must not be shown as an

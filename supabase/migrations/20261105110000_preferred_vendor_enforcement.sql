@@ -54,7 +54,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
   UPDATE public.products p
-  SET vendor = v.name
+  SET vendor = v.name, updated_at = now()
   FROM public.product_supplier_links l
   JOIN public.vendors v ON v.id = l.vendor_id
   WHERE p.id = p_product_id
@@ -139,7 +139,11 @@ BEGIN
       INTO v_links, v_preferred
     FROM public.product_supplier_links
     WHERE product_id = v_product_id;
-    IF v_links > 0 AND v_preferred <> 1 THEN
+    -- Deleting a product's only (preferred) link is refused too, unless the product itself is gone.
+    IF (v_links > 0 AND v_preferred <> 1)
+       OR (TG_OP = 'DELETE' AND OLD.product_id = v_product_id AND OLD.is_preferred AND OLD.is_active
+           AND OLD.link_status = 'confirmed' AND v_links = 0
+           AND EXISTS (SELECT 1 FROM public.products WHERE id = v_product_id)) THEN
       RAISE EXCEPTION 'PREFERRED_VENDOR_REQUIRED: this product has vendors but no preferred vendor; make another vendor preferred before removing this one'
         USING ERRCODE = 'check_violation';
     END IF;
@@ -194,7 +198,7 @@ AS $function$
 BEGIN
   IF NEW.name IS DISTINCT FROM OLD.name THEN
     UPDATE public.products p
-    SET vendor = NEW.name
+    SET vendor = NEW.name, updated_at = now()
     FROM public.product_supplier_links l
     WHERE l.product_id = p.id AND l.vendor_id = NEW.id
       AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred
@@ -338,7 +342,9 @@ DECLARE
   v_result jsonb;
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
-  IF NOT public.is_active_profile() THEN RAISE EXCEPTION 'NOT_AUTHORIZED'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active AND role IN ('admin', 'sales_rep')) THEN
+    RAISE EXCEPTION 'NOT_AUTHORIZED';
+  END IF;
   v_admin := public.is_admin();
 
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -357,7 +363,7 @@ BEGIN
          ) ORDER BY l.is_preferred DESC, lower(v.name), l.id), '[]'::jsonb)
     INTO v_result
   FROM public.product_supplier_links l
-  JOIN public.vendors v ON v.id = l.vendor_id
+  JOIN public.vendors v ON v.id = l.vendor_id AND v.deleted_at IS NULL
   LEFT JOIN LATERAL (
     SELECT obs.cost_cents, obs.effective_from,
            CASE WHEN l.comparison_status = 'comparable' AND l.inventory_units_per_supplier_unit > 0

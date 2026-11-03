@@ -584,7 +584,7 @@ if (shellTool) {
   if (worktreeWiper || destructiveViews.map(withWorktreeVariables).some((v) =>
     (hitsDestructiveVerb(v) && (namesStateDir(withoutWorktreeFolders(v)) || WORKTREE_DEEP_UNSURE_RE.test(v))) ||
     deletesRegistry(v) || redirectTargetsStateDir(v))) {
-    deny("REVIEW PROOF GUARD: destructive or overwriting shell commands touching the .claude review state directory (or its parent) are blocked — it holds wrapper-owned proofs and the applied-source ledger. Stale ledger entries are removed with node scripts/remove-applied-ledger-entry.mjs after verifying the live migration ledger.");
+    deny("REVIEW PROOF GUARD: destructive or overwriting shell commands touching the .claude review state directory (or its parent) are blocked — it holds wrapper-owned proofs and the applied-source ledger. Stale ledger entries are removed with node scripts/remove-applied-ledger-entry.mjs after verifying the live migration ledger. The folder name anywhere in the command counts, even in a read-only search or filter such as `grep -v session-state`: run the move or delete and the search as separate commands.");
   }
   // A destructive verb anywhere in a command that cds into the repo's `.claude`
   // (or below it: hooks, commands, agents, skills, workflows, the state dir) keeps

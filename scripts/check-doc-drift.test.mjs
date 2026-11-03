@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   chicagoCalendarStamp,
+  freshnessEnforcedFor,
   frozenHistoryProblems,
   FROZEN_LIVE_CAPTURES,
   manualFreshnessBoundary,
@@ -62,5 +63,13 @@ assert.equal(
   '20260903',
   'an ordinary migration still defines the minimum freshness boundary',
 );
+
+assert.equal(freshnessEnforcedFor(['scripts/a.mjs', 'docs/changelog.d/x.md']), false,
+  'a change with no migration and no live-state doc only warns on a stale stamp');
+assert.equal(freshnessEnforcedFor(['supabase/migrations/20261103000000_x.sql']), true,
+  'a new migration must carry a fresh stamp');
+assert.equal(freshnessEnforcedFor(['docs/manual/KNOWN_ISSUES.md']), true,
+  'touching a live-state doc must leave its stamp fresh');
+assert.equal(freshnessEnforcedFor([]), false, 'an empty diff only warns');
 
 console.log('PASS - check-doc-drift helpers keep one record per migration, a frozen history file, short single stamps and Chicago-date freshness.');

@@ -34,6 +34,8 @@ BEGIN
   -- Serialize with every link and product writer for the length of the step.
   LOCK TABLE public.product_supplier_links IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE public.products IN SHARE ROW EXCLUSIVE MODE;
+  -- The names the plan resolves through stay put until it is written.
+  LOCK TABLE public.vendors, public.vendor_aliases, public.legacy_vendor_resolution IN SHARE MODE;
 
   CREATE TEMP TABLE data11_plan ON COMMIT DROP AS
   WITH name_map AS (

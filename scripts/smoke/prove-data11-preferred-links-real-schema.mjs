@@ -42,7 +42,7 @@ const LEDGER_ONLY = new Set([
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(product_supplier_links|vendor_aliases|legacy_vendor_resolution|normalize_vendor_alias|FUNCTION\s+(public\.)?"?is_admin)/i;
+const TOUCHED = /(product_supplier_links|vendor_aliases|legacy_vendor_resolution|normalize_vendor_alias|FUNCTION\s+(public\.)?"?is_admin\b)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'

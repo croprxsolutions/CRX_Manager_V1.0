@@ -76,6 +76,13 @@ const job = (
 };
 
 describe('buildProjectedUseReportData — scheduled job projection (criterion 2 + 6)', () => {
+  it('projects each units without a weight or volume equivalent', () => {
+    const out = buildProjectedUseReportData([job('j1', {
+      fields: [field({ acres: 10 })],
+      products: [product({ product_name: 'Each', rate_per_acre: 2, rate_unit: 'Ea', unit: 'Ea', product_form: 'each' })],
+    })]);
+    expect(out.rows[0]).toMatchObject({ projected_quantity: 20, gl_lb_display: '—' });
+  });
   it('a pure scheduled job projects planned rate × full scheduled acres (factor 1)', () => {
     // 2 pt/ac × 100 scheduled ac = 200 pt projected; 200 pt → 25 gal (8 pt/gal).
     const j = job('j1', {

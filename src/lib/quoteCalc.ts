@@ -76,6 +76,20 @@ export function getConversionFactor(
   return conv ? conv.factor_oz : 1;
 }
 
+/** Seed and each have no conversions, so their stock unit never falls back to unit_size. */
+function stockUnitOf(product: Product): string | null {
+  return product.product_form === 'seed' || product.product_form === 'each'
+    ? product.inventory_unit
+    : product.inventory_unit || product.unit_size;
+}
+
+/** A blank seed/each rate unit means the stock unit, never the 1-oz default. */
+function rateUnitOf(rateUnit: string | null | undefined, product: Product): string | null {
+  return (product.product_form === 'seed' || product.product_form === 'each') && !rateUnit?.trim()
+    ? product.inventory_unit
+    : rateUnit ?? null;
+}
+
 /** Core pricing recalculation — pure function (no React deps) */
 export function recalcItem(
   item: CalcItem,
@@ -85,11 +99,8 @@ export function recalcItem(
 ): CalcItem {
   const pricePerUnit = getQuoteTierPrice(product, tierNum);
   const mode = item.calc_mode || 'rate_acres';
-  // Fall back to unit_size if inventory_unit is not set on the product
-  const inventoryUnitFactorOz = getConversionFactor(
-    product.inventory_unit || product.unit_size,
-    conversions
-  );
+  // Stock unit: inventory_unit, falling back to unit_size for liquid/dry only
+  const inventoryUnitFactorOz = getConversionFactor(stockUnitOf(product), conversions);
 
   if (mode === 'units_direct') {
     // User entered total_units_needed directly — skip rate×acres computation
@@ -125,7 +136,7 @@ export function recalcItem(
   const actualRate = item.actual_rate || 0;
   const acres = item.acres || 0;
 
-  const rateUnitFactorOz = getConversionFactor(item.rate_unit, conversions);
+  const rateUnitFactorOz = getConversionFactor(rateUnitOf(item.rate_unit, product), conversions);
   const rateInOz = actualRate * rateUnitFactorOz;
   const ozPerAcre = rateInOz;
 
@@ -177,12 +188,9 @@ export function catalogPricePerAcre(
 ): number | null {
   const rate = product.rate_per_acre;
   if (rate == null || !Number.isFinite(rate) || rate <= 0) return null;
-  const inventoryUnitFactorOz = getConversionFactor(
-    product.inventory_unit || product.unit_size,
-    conversions
-  );
+  const inventoryUnitFactorOz = getConversionFactor(stockUnitOf(product), conversions);
   if (!(inventoryUnitFactorOz > 0)) return null;
-  const rateInOz = rate * getConversionFactor(product.rate_unit, conversions);
+  const rateInOz = rate * getConversionFactor(rateUnitOf(product.rate_unit, product), conversions);
   const perAcre = getQuoteTierPrice(product, tierNum) * (rateInOz / inventoryUnitFactorOz);
   return Math.round(perAcre * 100) / 100;
 }
@@ -244,12 +252,14 @@ export function validateCommissionSplits(
  * Convert total applied quantity to gallons (liquid) or pounds (dry).
  * Liquid: OZ→GL (/128), PT→GL (/8), QT→GL (/4), GL stays.
  * Dry:    OZ→LB (/16), LB stays.
+ * Seed/each: no weight or volume equivalent.
  */
 export function convertToGlLb(
   totalApplied: number,
   unit: string | null | undefined,
   productForm: 'liquid' | 'dry' | string,
-): { value: number; unit: string } {
+): { value: number; unit: string } | null {
+  if (productForm === 'seed' || productForm === 'each') return null;
   const u = (unit || 'OZ').toUpperCase();
 
   if (productForm === 'dry') {

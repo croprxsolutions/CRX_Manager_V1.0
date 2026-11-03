@@ -173,7 +173,7 @@ const freshnessBase = process.env.DOCS_FRESHNESS_BASE || "origin/main";
 let staleStatus = "FAIL";
 try {
   const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
-  const changed = git("diff", "--name-only", git("merge-base", freshnessBase, "HEAD"), "HEAD").split(/\r?\n/).filter(Boolean);
+  const changed = git("diff", "--name-only", "--no-renames", git("merge-base", freshnessBase, "HEAD"), "HEAD").split(/\r?\n/).filter(Boolean);
   if (!freshnessEnforcedFor(changed)) staleStatus = "WARN";
 } catch { /* keep FAIL */ }
 for (const doc of ["CURRENT_STATE.md", "KNOWN_ISSUES.md"]) {

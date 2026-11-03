@@ -24,7 +24,7 @@ function changedPaths(refLines) {
     let base;
     try { base = !zero.test(remoteSha) && git('cat-file', '-t', remoteSha) === 'commit' ? remoteSha : null; } catch { base = null; }
     base ??= git('merge-base', localSha, 'origin/main');
-    paths.push(...git('diff', '--name-only', base, localSha).split('\n').filter(Boolean));
+    paths.push(...git('diff', '--name-only', '--no-renames', base, localSha).split('\n').filter(Boolean));
   }
   return paths;
 }

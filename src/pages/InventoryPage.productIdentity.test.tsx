@@ -251,11 +251,13 @@ describe('InventoryPage Product identity writers', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /add.*inventory/i })).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /add inventory/i }));
     dialog = screen.getByRole('dialog', { name: /add.*inventory/i });
-    expect(releases).toHaveLength(2);
+    // Mount, first Add open, and second Add open each start a read.
+    expect(releases).toHaveLength(3);
 
     // The newer read succeeds first, then the older one fails.
-    releases[1]({ data: siblings, error: null, count: siblings.length });
+    releases[2]({ data: siblings, error: null, count: siblings.length });
     expect(await within(dialog).findByRole('button', { name: /SKU-A.*Family: Family A/i })).toBeInTheDocument();
+    releases[1]({ data: null, error: { message: 'connection reset' }, count: null });
     releases[0]({ data: null, error: { message: 'connection reset' }, count: null });
     await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -308,6 +310,20 @@ describe('InventoryPage Product identity writers', () => {
       'create_inventory_hold',
       expect.objectContaining({ p_product_id: 'product-b' }),
     ));
+  });
+
+  it('offers inactive products for Add Stock but not a new customer hold', async () => {
+    mocks.from.mockImplementation((table: string) => table === 'products'
+      ? query([siblings[0], { ...siblings[1], is_active: false }]) : query([]));
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /create hold/i }));
+    const hold = screen.getByRole('dialog', { name: /create.*hold/i });
+    expect(await within(hold).findByRole('button', { name: /SKU-A/i })).toBeInTheDocument();
+    expect(within(hold).queryByRole('button', { name: /SKU-B/i })).not.toBeInTheDocument();
+    fireEvent.click(within(hold).getByRole('button', { name: /^cancel$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add inventory/i }));
+    const add = screen.getByRole('dialog', { name: /add.*inventory/i });
+    expect(await within(add).findByRole('button', { name: /SKU-B/i })).toBeInTheDocument();
   });
 
   it('filters the grid and phone cards by product, then Show all clears only that parameter', async () => {

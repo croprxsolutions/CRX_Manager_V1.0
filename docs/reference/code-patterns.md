@@ -49,7 +49,7 @@ All numbers are generated server-side. The year-bearing `next_*_number` generato
 - LogbookReport component: 4 sub-tabs (by Customer/Applicator/Field/FAA)
 
 ## Financial Patterns
-- AR aging uses Supabase RPC `get_ar_aging(p_as_of_date)` — admin-only gross AR aging over posted invoices as of a cutoff (it does not read `orders`); fails closed when a past cutoff can no longer be reconstructed. See `rpc-functions.md`.
+- AR aging uses Supabase RPC `get_ar_aging(p_as_of_date)` — admin-only gross AR aging over posted invoices as of a cutoff (it does not read `orders`); flags (with no amounts, `unavailable_reason` set) each customer whose balance cannot be reconstructed at that cutoff instead of failing the whole report. See `rpc-functions.md`.
 - Customer statement uses RPC `get_customer_statement()` — running balance via window function
 - Season comparison uses RPC `get_season_comparison()` — YoY metrics (October 1-September 30 seasons)
 - Financial audit log: immutable append-only table, logged via `financial_audit_log` inserts

@@ -5,6 +5,8 @@
  */
 
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
+  // KI-85: stock may be placed only at Main Warehouse until transfers exist; nothing was received or added.
+  [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],
   [/^PRODUCT_CATEGORY_FIELDS_REQUIRED\b/, 'Choose a category status and sort order'],
@@ -252,6 +254,18 @@ export function sanitizeError(error: unknown): string {
       : typeof error === 'object' && error !== null && 'message' in error && typeof (error as Record<string, unknown>).message === 'string'
         ? (error as Record<string, unknown>).message as string
         : 'An unexpected error occurred';
+
+  if (/^PRODUCT_INACTIVE(?::|$)/.test(message)) {
+    return message.slice('PRODUCT_INACTIVE'.length).replace(/^:\s*/, '').trim()
+      || 'This product is turned off. Ask an admin to reactivate it.';
+  }
+  if (/^PRODUCT_DEACTIVATION_BLOCKED(?::|$)/.test(message)) {
+    return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
+      || 'This product cannot be turned off while required work is open. Review its blockers.';
+  }
+  if (/^PRODUCT_ACTIVE_REVIEW_STALE(?::|$)/.test(message)) {
+    return 'Product details changed since the review. Review the selection again.';
+  }
 
   const returnStatus = message.match(/^RETURN_NOT_APPROVED:([a-z_]+)$/i)?.[1];
   if (returnStatus) {

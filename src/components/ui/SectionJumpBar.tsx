@@ -37,6 +37,10 @@ export default function SectionJumpBar({ sections, ariaLabel = 'Jump to section'
         const element = document.getElementById(id);
         if (element && element.getBoundingClientRect().top <= SCROLL_OFFSET_PX) current = id;
       }
+      // A short last section can never reach the bars; once the page is scrolled to its end, it is the one in view.
+      const atBottom = window.scrollY > 0
+        && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      if (atBottom && document.getElementById(order[order.length - 1])) current = order[order.length - 1];
       setActiveId(current);
     };
     update();

@@ -108,8 +108,9 @@ describe('historical AR report migration', () => {
       'v_listing.invoice_count IS DISTINCT FROM 2::bigint',
     );
     expect(smoke).toContain('HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE');
+    // KI-95: AR Aging flags the unrebuildable customer instead of failing everyone.
     expect(smoke).toContain(
-      'PERFORM 1 FROM public.get_ar_aging(v_cutoff);',
+      "v_ar.unavailable_reason IS DISTINCT FROM 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE'",
     );
     expect(smoke).toContain(
       'PERFORM 1 FROM public.get_customer_balance_listing(v_cutoff);',

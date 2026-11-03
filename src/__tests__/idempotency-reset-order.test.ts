@@ -156,8 +156,11 @@ describe('F1 — the key survives until the reply is confirmed', () => {
  *    There is no payload to assert.
  *  - `intent-rotation` — the reset runs from a JSX `onClick`/`onChange`, deliberately
  *    minting a new key because the payload genuinely varies with what the user typed.
+ *  - `supersede` — `if (lastRef.current && lastRef.current !== scope) idem.resetKeyFor(lastRef.current);`
+ *    on one line: it retires the PREVIOUS attempt's key, never the one about to be sent, so
+ *    going back to an older edit applies it instead of replaying a stale result (KI-11).
  */
-type Reason = 'recovery' | 'throw-on-error' | 'intent-rotation';
+type Reason = 'recovery' | 'throw-on-error' | 'intent-rotation' | 'supersede';
 
 const ALLOWED_REASONS: Record<string, Reason[]> = {
   'src/components/deliveries/QuickDeliveryModal.tsx': ['recovery'],
@@ -184,7 +187,8 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   // Replay-binding batch 2 (20261016140000): the same intent/actor recovery reset at each stock
   // call site. These four stay pinned below for their OTHER sites; 'recovery' excuses only the
   // binding-rejection reset, which classify() verifies on its own line.
-  'src/pages/BlendTicketDetail.tsx': ['recovery'],
+  // KI-11: linking to another order retires the previous attempt's key ('supersede').
+  'src/pages/BlendTicketDetail.tsx': ['recovery', 'supersede'],
   'src/pages/NewOrder.tsx': ['recovery'],
   'src/pages/QuoteBuilder.tsx': ['recovery'],
   // Replay-binding batch 3a (20261019200000): complete_delivery's intent/actor recovery reset
@@ -343,6 +347,9 @@ function classify(lines: string[], lineNo: number): Reason | null {
   // unclassifiable and every instance of it read as a defect.
   const cleanSelf = masked[lineNo - 1] ?? '';
   if (SAME_LINE_RECOVERY_GUARD.test(cleanSelf)) return 'recovery';
+  if (/^\s*if\s*\(\s*([\w$]+)\.current\s*&&\s*\1\.current\s*!==\s*[\w$]+\s*\)\s*[\w$]+\.resetKeyFor\(\s*\1\.current\s*\)\s*;?\s*$/.test(cleanSelf)) {
+    return 'supersede';
+  }
 
   const aboveLines = above.split('\n');
   const markerIdx = lastIndexMatching(aboveLines, RECOVERY_MARKER);

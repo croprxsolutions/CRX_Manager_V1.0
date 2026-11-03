@@ -205,8 +205,8 @@ key is scoped depends on whether the server binds the key to its request (KI-10)
   `rollover_quote_to_season`, `reassign_delivery`): a save that creates a record (new field, quote from
   template, season rollover) keeps one key per form or source until confirmed, so an edited retry after a lost
   reply replays the record already created instead of making a second one (a changed new-field retry opens that
-  field and applies none of the edit; a retry changing only acreage applies it); an edit to an existing record uses one key per record,
-  exact request and count of confirmed saves, so a retry never replays another record's result or an older,
+  field and applies none of the edit; a retry changing only acreage applies it); an edit to an existing record uses one key per record
+  and exact request, and only the latest attempt keeps its key, so a retry never replays another record's result or an older,
   already-superseded edit.
 - NewOrder (`create_direct_order`, `create_rush_order`, both bound) keeps one key per exact request on purpose:
   its below-cost approval is remembered per key, and a shared key could carry an approval to a different order.

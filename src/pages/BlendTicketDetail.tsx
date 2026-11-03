@@ -53,9 +53,9 @@ export function BlendTicketDetail() {
   const ocrThresholds = useOCRThresholds();
   const saveIdem = useIdempotencyKey('save_blend_ticket', profile?.id || '');
   const linkIdem = useIdempotencyKey('link_blend_ticket_to_order', profile?.id || '');
-  // Counts confirmed saves: a later confirmed edit settles any older lost attempt, so returning to that
-  // older edit must get a fresh key and apply, not replay its stale result.
-  const confirmedLinksRef = useRef(0);
+  // Only the latest attempt keeps its retry key: going back to an older edit applies it again instead of
+  // replaying a result that a later edit may have replaced.
+  const lastLinkScopeRef = useRef<string | null>(null);
   const unlinkIdem = useIdempotencyKey('unlink_blend_ticket_from_order', profile?.id || '');
   const createOrderIdem = useIdempotencyKey('create_order_from_blend_ticket', profile?.id || '');
   const appRecordIdem = useIdempotencyKey('create_application_record_from_blend_ticket', profile?.id || '');
@@ -942,7 +942,9 @@ export function BlendTicketDetail() {
     }
     setLinking(true);
     try {
-      const linkScope = fingerprintIntentPayload([ticket.id, selectedOrderId, confirmedLinksRef.current]);
+      const linkScope = fingerprintIntentPayload([ticket.id, selectedOrderId]);
+      if (lastLinkScopeRef.current && lastLinkScopeRef.current !== linkScope) linkIdem.resetKeyFor(lastLinkScopeRef.current);
+      lastLinkScopeRef.current = linkScope;
       const { data, error } = await supabase.rpc('link_blend_ticket_to_order', {
         p_blend_ticket_id: ticket.id,
         p_order_id: selectedOrderId,
@@ -952,7 +954,6 @@ export function BlendTicketDetail() {
       if (error) throw error;
       const result = assertRpcResult<{ success: boolean; error?: string; order_number?: string; items_linked?: number }>(data, 'link_blend_ticket_to_order');
       linkIdem.resetKeyFor(linkScope);
-      confirmedLinksRef.current += 1;
       if (!result.success) throw new Error(result.error);
       toast('success', `Linked to order ${result.order_number} (${result.items_linked} items matched)`);
       setShowLinkModal(false);
@@ -1954,7 +1955,9 @@ export function BlendTicketDetail() {
                   if (!ticket || !profile || linking) return;
                   setLinking(true);
                   try {
-                    const linkScope = fingerprintIntentPayload([ticket.id, suggestedOrder.id, confirmedLinksRef.current]);
+                    const linkScope = fingerprintIntentPayload([ticket.id, suggestedOrder.id]);
+                    if (lastLinkScopeRef.current && lastLinkScopeRef.current !== linkScope) linkIdem.resetKeyFor(lastLinkScopeRef.current);
+                    lastLinkScopeRef.current = linkScope;
                     const { data, error } = await supabase.rpc('link_blend_ticket_to_order', {
                       p_blend_ticket_id: ticket.id,
                       p_order_id: suggestedOrder.id,
@@ -1964,7 +1967,6 @@ export function BlendTicketDetail() {
                     if (error) throw error;
                     const result = assertRpcResult<{ success: boolean; error?: string; order_number?: string; items_linked?: number }>(data, 'link_blend_ticket_to_order');
                     linkIdem.resetKeyFor(linkScope);
-                    confirmedLinksRef.current += 1;
                     if (!result.success) throw new Error(result.error);
                     toast('success', `Linked to order ${result.order_number} (${result.items_linked} items matched)`);
                     await loadTicketData();

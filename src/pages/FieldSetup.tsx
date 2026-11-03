@@ -111,9 +111,9 @@ function FieldSetupPage() {
   const { toast } = useToast();
   const { profile } = useAuth();
   const saveFieldIdem = useIdempotencyKey('save_field', profile?.id || '');
-  // Counts confirmed saves: a later confirmed edit settles any older lost attempt, so returning to that
-  // older edit must get a fresh key and apply, not replay its stale result.
-  const confirmedFieldSavesRef = useRef(0);
+  // Only the latest attempt keeps its retry key: going back to an older edit applies it again instead of
+  // replaying a result that a later edit may have replaced.
+  const lastFieldSaveScopeRef = useRef<string | null>(null);
   // The details the first attempt of a new field sent: if a retry changes them, its reply may be the earlier field.
   const firstNewAttemptRef = useRef<string | null>(null);
   const saveFieldBoundaryIdem = useIdempotencyKey('set_field_boundary', profile?.id || '');
@@ -609,7 +609,9 @@ function FieldSetupPage() {
 
       // save_field checks only the key. A new field keeps one key until confirmed, so an edited retry after a lost
       // reply replays the field it already created; an edit to an existing field gets a key per exact payload.
-      const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, confirmedFieldSavesRef.current, fieldPayload, billingPayload]);
+      const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, fieldPayload, billingPayload]);
+      if (lastFieldSaveScopeRef.current && lastFieldSaveScopeRef.current !== saveScope) saveFieldIdem.resetKeyFor(lastFieldSaveScopeRef.current);
+      lastFieldSaveScopeRef.current = saveScope;
       // Acreage is left out: applying the latest acreage to a field with the same details is what the user wants.
       const attempt = fingerprintIntentPayload([fieldPayload, billingPayload]);
       if (isNew && !saveFieldIdem.hasKeyFor('new')) firstNewAttemptRef.current = attempt;
@@ -627,7 +629,6 @@ function FieldSetupPage() {
       } else {
         assertRpcResult(data, 'save_field');
         saveFieldIdem.resetKeyFor(saveScope);
-        confirmedFieldSavesRef.current += 1;
         const savedFieldId = isNew ? data : id;
 
         if (changedNewRetry) {

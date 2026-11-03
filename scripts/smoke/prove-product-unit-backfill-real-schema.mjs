@@ -361,6 +361,13 @@ ${r.stderr}`, /PRODUCT_UNIT_STALE/);
   const both = (unit, inv) => psql(`BEGIN; ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;
     UPDATE public.products SET unit_size = '${unit}', inventory_unit = '${inv}' WHERE id = '${BLANK1}'; ROLLBACK;`, { allowFailure: true });
   assert.equal(both('Qt', 'Qt').status, 0, 'a matching pair change was refused');
+  // A pair of blank units is not a match: giving such a product its first inventory unit, while the page
+  // still sends a blank Unit, goes through (setup guard set aside, rolled back).
+  const firstSetup = psql(`BEGIN; ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;
+    UPDATE public.products SET unit_size = '', inventory_unit = '', product_form = NULL, container_unit = NULL WHERE id = '${BYSTANDER}';
+    UPDATE public.products SET inventory_unit = 'Gal' WHERE id = '${BYSTANDER}'; ROLLBACK;`, { allowFailure: true });
+  assert.equal(firstSetup.status, 0, `a first unit setup on a blank pair was refused:
+${firstSetup.stderr}`);
   const split = both('Qt', 'Gal');
   assert.notEqual(split.status, 0, 'a mismatched pair change went through');
   assert.match(`${split.stdout}

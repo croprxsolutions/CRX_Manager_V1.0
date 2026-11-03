@@ -73,7 +73,9 @@ $unit_backfill$;
 CREATE FUNCTION public.guard_product_unit_matches_inventory_unit() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $function$
 BEGIN
-  IF OLD.unit_size = OLD.inventory_unit
+  -- A blank inventory unit is not a unit: only a real, matching pair is kept.
+  IF NULLIF(btrim(OLD.inventory_unit), '') IS NOT NULL
+     AND OLD.unit_size = OLD.inventory_unit
      AND NEW.unit_size IS DISTINCT FROM NEW.inventory_unit THEN
     RAISE EXCEPTION 'PRODUCT_UNIT_STALE: this product''s Unit was updated; reload the page and save again'
       USING ERRCODE = '22023';

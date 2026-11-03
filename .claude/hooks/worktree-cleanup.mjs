@@ -272,6 +272,9 @@ try {
 
   if (!REPORT_ONLY) {
     for (const w of plan.removeWorktrees) {
+      // git does not refuse over ignored files, so re-count them now: one made
+      // since the scan (a new .env, a backup) keeps the worktree.
+      if (preciousIgnoredCount(w.path) !== 0) continue;
       // Plain `remove` (no --force): git itself refuses if the tree became dirty
       // or locked in a race — a second safety net under the classifier.
       let rm = gitTry(["worktree", "remove", w.path]);
@@ -388,7 +391,7 @@ try {
     r.kind === "husk"
       ? `  ✓ removed left-over folder ${r.path} (no real files)`
       : r.kind === "worktree"
-        ? `  ✓ removed ${r.path} (${r.branch ? `branch ${r.branch}` : "detached"} — merged; recover: git branch ${r.branch || "<name>"} ${r.sha})`
+        ? `  ✓ removed ${r.path} (${r.branch ? `branch ${r.branch}` : "detached"} — merged; recover: ${r.branch ? `git branch ${r.branch} ${r.sha}` : `git worktree add --detach "${r.path}" ${r.sha}`})`
         : `  ✓ deleted branch ${r.branch} (merged; recover: git branch ${r.branch} ${r.sha})`);
   const fLines = failed.map((f) => `  ⚠ could not remove ${f.kind} ${f.branch || f.path} (skipped — investigate)`);
 

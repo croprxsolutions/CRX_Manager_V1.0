@@ -298,7 +298,7 @@ tiers is not built; the linkage field is not used for money today.
   filters cut the day at UTC midnight. UNVERIFIED (PR #991 fixed the AR strip; the rest not re-checked). MED.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
-**HIGH-risk lane, dormant · FIXED IN CODE (2026-11-02) · money · live status: its `docs/reference/migrations.d/` record**
+**HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**
 `20261103220000_period_check_takes_month_lock` makes `check_period_open` itself take the shared month lock that
 vendor-bill edits already took (`20260730114102`), so all 32 callers (26 had no lock) and a close of the same month now
 wait for each other: an edit racing a close waits and is then refused; a close waits for an in-flight edit. Proof:

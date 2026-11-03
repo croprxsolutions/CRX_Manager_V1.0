@@ -118,6 +118,10 @@ BEGIN
     RAISE EXCEPTION 'rate_unit "%" must match inventory_unit "%" for product_form "%"',
       NEW.rate_unit, NEW.inventory_unit, NEW.product_form;
   END IF;
+  -- Store the stock unit's own spelling: per-acre pricing looks up lower(rate_unit) untrimmed.
+  IF NEW.product_form IN ('seed','each') THEN
+    NEW.rate_unit := NEW.inventory_unit;
+  END IF;
 
   RETURN NEW;
 END;

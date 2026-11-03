@@ -352,6 +352,7 @@ try {
   psql("UPDATE public.products SET rate_unit = 'Lb', rate_per_acre = 2 WHERE product_name = 'Seed Lb';");
   assert.equal(scalar("SELECT rate_unit FROM public.products WHERE product_name = 'Seed Unit';"), 'Unit');
   psql("UPDATE public.products SET rate_unit = 'lb' WHERE product_name = 'Seed Lb';");
+  assert.equal(scalar("SELECT rate_unit FROM public.products WHERE product_name = 'Seed Lb';"), 'Lb');
   refused("UPDATE public.products SET rate_unit = 'Unit' WHERE product_name = 'Seed Lb';", /rate_unit "Unit" must match inventory_unit "Lb" for product_form "seed"/);
   refused("UPDATE public.products SET rate_unit = 'oz' WHERE product_name = 'Seed Lb';", /rate_unit "oz" must match inventory_unit "Lb" for product_form "seed"/);
   psql("UPDATE public.products SET rate_unit = 'Ea' WHERE product_name = 'Each Ea';");
@@ -370,6 +371,9 @@ try {
     < array_position(array_agg(tgname ORDER BY tgname), 'trigger_recalc_product_price_per_acre')
     FROM pg_trigger WHERE tgrelid = 'public.products'::regclass;`), 't');
   assert.equal(scalar("SELECT tier1_price_per_acre::text FROM public.products WHERE product_name = 'Seed Lb';"), '25.00');
+  // A padded unit is stored as the stock unit, so pricing still finds the pound.
+  psql("UPDATE public.products SET rate_unit = ' Lb ', rate_per_acre = 2 WHERE product_name = 'Seed Lb';");
+  assert.equal(scalar("SELECT rate_unit || ':' || tier1_price_per_acre FROM public.products WHERE product_name = 'Seed Lb';"), 'Lb:25.00');
 
   psql(`INSERT INTO auth.users (id, email) VALUES
     ('aa110000-0000-0000-0000-000000000001', 'forms-prover@example.invalid');`);

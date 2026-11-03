@@ -284,6 +284,20 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **2026-11-03 12:55 UTC (6:55 AM Central; invoice and PO email PDFs drawn by the server, KI-98, PR #1346):**
+  the `send-email` Edge Function was deployed live as v23 (was v22) on Mason's in-chat approval ("Yes deploy"),
+  with `supabase functions deploy send-email --use-api` from PR head `b20b4b863`. The app half merged as
+  `e53fa1440` about 20 seconds later.
+  - ACTIVE, with JWT checking on.
+  - All 13 deployed files match main `e53fa1440`, downloaded back and hashed: `index.ts`, plus `_shared/` cors,
+    auth, sentry, the three email gates, and the six `_shared/pdf/` files.
+  - Caller path exercised on croprxsolutions.app, with both calls returning 200:
+    - The PO-2026-0030 copy email's `email_log` row is `sent`.
+    - Test invoice INV-2026-1522 ([E2E] Farm Alpha) was posted and emailed; its row is `sent` with
+      `Invoice-INV-2026-1522.pdf`. The invoice was then voided.
+  - The rollback is redeploying v22 together with reverting PR #1346. Either half alone refuses invoice and PO
+    sends.
+
 - **2026-11-03 ~05:37 UTC (about 11:37 PM Central, 2026-11-02; invoice email content built by the server, KI-97, PR #1340):**
   the `send-email` Edge Function was deployed live as v22 (was v21) on Mason's in-chat approval ("Yes, merge and
   deploy"). The deploy used `supabase functions deploy send-email --use-api` from main `4b745fdcc`, after the app

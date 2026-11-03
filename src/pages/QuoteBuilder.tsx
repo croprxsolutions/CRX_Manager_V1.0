@@ -2481,6 +2481,10 @@ export default function QuoteBuilder() {
           setStaleSaveOpen(true);
           return null;
         }
+        if (hasRpcCode(error, RpcErrorCodes.QUOTE_PRICE_ONLY_FOR_OTHER_REPS)) {
+          toast('error', 'This is another rep\'s booking, so you can change its prices only. Undo your other changes and save again, or ask the booking\'s rep or an admin to make them.');
+          return null;
+        }
         toast('error', error.message || 'Failed to save quote');
         return null;
       }

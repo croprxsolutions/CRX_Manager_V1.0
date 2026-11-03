@@ -3573,6 +3573,13 @@ export default function QuoteBuilder() {
         toast('error', `${closed.product_name}: nothing left on this booking`);
         return;
       }
+      // S02: bookings are saved to 0.01, so a finer draw (333.333) would leave a remainder nothing can draw.
+      // Read from the typed text, not the float: 333.33 * 100 is not exactly 33333.
+      const tooFine = draws.find((d) => !/^\d*(\.\d{0,2})?$/.test(d.qty.trim()));
+      if (tooFine) {
+        toast('error', `${tooFine.product_name}: use at most 2 decimal places (for example 333.33), the same as the booking.`);
+        return;
+      }
       // The price choice is sent only for a quantity over what is left, so every other draw
       // is the same request as before.
       drawPayload = draws.map((d) => ({
@@ -3694,6 +3701,8 @@ export default function QuoteBuilder() {
         toast('error', errMsg);
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_PRODUCT_INVALID)) {
         toast('error', 'A draw line has an invalid product reference. Refresh the booking and try again.');
+      } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_QUANTITY_PRECISION)) {
+        toast('error', 'Use at most 2 decimal places for each quantity (for example 333.33), the same as the booking.');
       } else if (hasRpcCode(error, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
         toast('error', resendRequiredMessage(error));
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKED_PRICE_REQUIRED)) {
@@ -5846,7 +5855,7 @@ export default function QuoteBuilder() {
                             <input
                               type="number"
                               min={0}
-                              step="any"
+                              step="0.01"
                               value={row.qty}
                               // Locked while the order is created: a later change would not be in it.
                               disabled={drawing || row.remaining <= 0}

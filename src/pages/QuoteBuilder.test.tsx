@@ -1448,6 +1448,20 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 3, extra_price: 'booked' }]));
     });
 
+    // S02: bookings are saved to 0.01, so a draw of 333.333 would leave 0.001 that nothing can draw.
+    it('refuses a quantity with more than 2 decimal places before sending', async () => {
+      const dialog = await openDrawAndEnter('1.555');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('at most 2 decimal places')));
+      expect(mockRpc.mock.calls.some(([name]) => name === 'draw_down_quote')).toBe(false);
+    });
+
+    it('sends a quantity in whole hundredths', async () => {
+      const dialog = await openDrawAndEnter('1.55');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 1.55 }]));
+    });
+
     it('a draw within what is left sends no price choice and shows no over line', async () => {
       const dialog = await openDrawAndEnter('1');
       expect(within(dialog).queryByText(/over the booking/)).not.toBeInTheDocument();

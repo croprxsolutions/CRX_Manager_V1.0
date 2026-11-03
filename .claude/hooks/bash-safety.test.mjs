@@ -88,6 +88,8 @@ ok(checkDangerousCommand('grep "DROP TABLE" f --% "; psql < wipe.sql'), "PowerSh
 ok(checkDangerousCommand(`rg 'DROP TABLE' psql.log @opts`), "PowerShell splatting can hide --pre, so it is not a plain reader (Luna, PR #1337)");
 ok(checkDangerousCommand('./grep "DROP TABLE" psql -c "DROP TABLE customers"'), "a path-qualified reader name may be any program (Luna, PR #1337)");
 ok(checkDangerousCommand(`grep() { psql -c 'DROP TABLE customers'; }; grep x f`), "a function shadowing a reader in the same command stays refused");
+ok(checkDangerousCommand(`rg 'DROP TABLE' psql.log *`), "an unquoted glob can expand into rg --pre, so rg loses the exemption (Codex App, PR #1337)");
+ok(!checkDangerousCommand(`rg 'DROP TABLE|psql' '*.sql'`), "a quoted glob is passed to rg as text and stays allowed");
 ok(!checkDangerousCommand(`grep -n 'psql $(x) DROP TABLE' notes.md`), "a single-quoted $( in a reader pattern runs nothing and stays allowed");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");

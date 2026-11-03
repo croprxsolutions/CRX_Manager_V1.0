@@ -364,7 +364,11 @@ function sqlSegmentProgram(segment) {
 function plainReaderSegment(segment) {
   // A path-qualified head (`./grep`) may be any program, not the real reader (Luna).
   if (/[\r\n]|\\["']/.test(segment) || /^\s*\S*[/\\]/.test(segment)) return false;
-  return /^[\w\s./\\:*=,+#?-]*$/.test(segment.replace(/'[^']*'|"[^"$`]*"/g, ""));
+  const outside = segment.replace(/'[^']*'|"[^"$`]*"/g, "");
+  // A glob can expand to a file named `--pre=…`, and only rg has an option that
+  // runs a program, so an unquoted `*`/`?` costs rg its exemption (Codex App).
+  if (/[*?]/.test(outside) && sqlSegmentProgram(segment) === "rg") return false;
+  return /^[\w\s./\\:*=,+#?-]*$/.test(outside);
 }
 export function checkDestructiveSql(cmd) {
   const text = String(cmd || "");

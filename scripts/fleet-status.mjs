@@ -11,7 +11,8 @@
 // Run from ANY worktree:   node scripts/fleet-status.mjs
 // Optional freshness:      node scripts/fleet-status.mjs --fetch   (one `git fetch origin main` first)
 //
-// Read-only, no network unless --fetch, degrades gracefully: a missing folder or a
+// Read-only, no network unless --fetch (which also refreshes the merged-PR list the
+// SessionStart banner caches), degrades gracefully: a missing folder or a
 // git error on one worktree is noted and the report continues.
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
@@ -29,6 +30,7 @@ import {
   originMainParkedMigrationGrepArgs, originMainParkedMigrationPrefilter,
   ORIGIN_MAIN_CAT_FILE_MAX_BUFFER, originMainSqlBlobMap as parseOriginMainSqlBlobMap,
   originMainForwardBlobPaths,
+  mergedPrHeadsFromCache, withMergedPrLabel, MERGED_PR_CACHE_FILE, MERGED_PR_CACHE_MAX_AGE_MS,
 } from "../.claude/hooks/worktree-awareness-lib.mjs";
 import { combinedMigrationHistoryAtRev, readCombinedMigrationHistory } from "../.claude/hooks/migration-records-lib.mjs";
 
@@ -149,6 +151,31 @@ for (const e of entries) {
   if (cwdNorm === p || cwdNorm.startsWith(p + "/")) currentPath = p;
 }
 
+// A squash merge never makes a branch an ancestor of main, so also match HEAD against
+// the merged-PR heads the SessionStart banner caches. Only --fetch refreshes a stale
+// list (synchronously, through the banner's own refresh mode); otherwise /fleet stays
+// offline and uses what is cached, or says "landed? unknown".
+function readMergedPrHeads() {
+  let cachePath;
+  try {
+    cachePath = path.resolve(repoRoot, git(["rev-parse", "--git-common-dir"]).trim(), MERGED_PR_CACHE_FILE);
+  } catch { return null; }
+  const read = () => { try { return readFileSync(cachePath, "utf8"); } catch { return null; } };
+  let text = read();
+  if (process.argv.includes("--fetch")) {
+    let fetchedAt = 0;
+    try { fetchedAt = Number(JSON.parse(text).fetchedAt) || 0; } catch { /* refresh below */ }
+    if (Math.abs(Date.now() - fetchedAt) > MERGED_PR_CACHE_MAX_AGE_MS) {
+      spawnSync(process.execPath, [path.join(repoRoot, ".claude", "hooks", "worktree-awareness.mjs"), "--refresh-merged-pr-heads"], {
+        cwd: repoRoot, timeout: 130_000, stdio: "ignore", windowsHide: true,
+      });
+      text = read();
+    }
+  }
+  return mergedPrHeadsFromCache(text);
+}
+const mergedPrHeads = readMergedPrHeads();
+
 function mergedLabel(sha) {
   if (!hasOriginMain || !sha) return mergedLabelFromStatus(null, false);
   // Pinned like every other mainline read: `--is-ancestor <sha> <rev>` tests sha against rev,
@@ -158,7 +185,7 @@ function mergedLabel(sha) {
   const r = spawnSync("git", ["merge-base", "--is-ancestor", sha, originMainRev], {
     encoding: "utf8", timeout: 5000, cwd: repoRoot,
   });
-  return mergedLabelFromStatus(r.status, true);
+  return withMergedPrLabel(mergedLabelFromStatus(r.status, true), sha, mergedPrHeads);
 }
 
 // The drafts a worktree is actually pending: everything it changed since its branch
@@ -426,7 +453,7 @@ if (mainlineParkedState === "unknown") {
 // ── 4. Print the report ──
 const now = new Date();
 console.log(`CRX FLEET STATUS — ${now.toISOString().slice(0, 16).replace("T", " ")} UTC`);
-console.log(`${entries.length} worktree${entries.length === 1 ? "" : "s"} (parallel work folders). "MERGED into origin/main" = that branch's commits are already in live main.`);
+console.log(`${entries.length} worktree${entries.length === 1 ? "" : "s"} (parallel work folders). "MERGED into origin/main" = that branch's commits are already in live main; "LANDED via merged PR #N" = it was squash-merged as that PR.`);
 console.log("");
 console.log(wtLines.join("\n"));
 console.log("");

@@ -64,6 +64,9 @@ export function mergedLabelFromStatus(status, hasOriginMain = true) {
 // origin/main and ancestry alone calls it UNMERGED (2026-11-03: ~48 worktrees
 // were exactly a merged PR's head). The SessionStart hook caches GitHub's
 // merged-PR heads; these two helpers read that cache and correct the label.
+// The cache lives in the shared git common dir; /fleet reads the same file.
+export const MERGED_PR_CACHE_FILE = "crx-merged-pr-heads.json";
+export const MERGED_PR_CACHE_MAX_AGE_MS = 10 * 60_000;
 // Cache text → Map(lowercase head sha → PR number), or null when unreadable.
 export function mergedPrHeadsFromCache(text) {
   let data;

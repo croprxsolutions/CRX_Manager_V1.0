@@ -23,7 +23,7 @@ import {
   ORIGIN_MAIN_CAT_FILE_MAX_BUFFER, originMainSqlBlobMap, originMainForwardBlobPaths,
   createOwnDraftPathsReader,
   isCodexImportDirtLine, classifyDirt, shortWorktreeName, describeDirt,
-  formatSiblingReport, groupUnknownReasons, mergedPrHeadsFromCache, withMergedPrLabel,
+  formatSiblingReport, groupUnknownReasons, mergedPrHeadsFromCache, withMergedPrLabel, MERGED_PR_CACHE_FILE,
 } from "./worktree-awareness-lib.mjs";
 import { MIGRATION_HISTORY_FILE, MIGRATION_RECORDS_DIR, combineMigrationHistory, combinedMigrationHistoryAtRev } from "./migration-records-lib.mjs";
 
@@ -188,6 +188,19 @@ ok(formatSiblingReport([{ ...reportInput[2], dirt: { total: 25, importer: 24, re
     ok(banner[0].includes("squashed-dirty") && banner[0].includes("LANDED") && banner[0].includes("1 dirty file"), "a landed worktree with real changes keeps its detailed entry");
     ok(banner[1].includes("unshipped") && banner[1].includes("UNMERGED"), "the truly unmerged worktree is still flagged UNMERGED");
     ok(banner[2].includes("1 finished worktree") && banner[2].includes("squashed") && !banner[2].includes("unshipped"), `a clean squash-landed worktree folds as finished: ${banner[2]}`);
+
+    // End to end through the real hook, so its concurrent git prefetch is exercised
+    // against real worktrees (a fresh cache means it spawns no GitHub refresh).
+    g("checkout", "-q", "main");
+    g("update-ref", "refs/remotes/origin/main", mainRev);
+    g("worktree", "add", "-q", path.join(repo, "wt-squashed"), "squashed");
+    g("worktree", "add", "-q", path.join(repo, "wt-unshipped"), "unshipped");
+    writeFileSync(path.join(repo, ".git", MERGED_PR_CACHE_FILE), JSON.stringify({ fetchedAt: Date.now(), prs: [{ number: 42, headRefOid: squashedHead }] }));
+    const hookOut = JSON.parse(execFileSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), "worktree-awareness.mjs")], {
+      cwd: repo, input: "{}", encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+    })).hookSpecificOutput.additionalContext;
+    ok(/wt-unshipped[^\n]*\n[^\n]*UNMERGED \(not in origin\/main\)/.test(hookOut), `the real hook still flags the unshipped worktree UNMERGED:\n${hookOut}`);
+    ok(/1 finished worktree[^\n]*wt-squashed/.test(hookOut), `the real hook folds the squash-landed worktree as finished:\n${hookOut}`);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1494,6 +1507,13 @@ const MAINLINE_HISTORY_SETTLES_CANDIDATE = "| 886 | 20260101000000 | **APPLIED L
       `${label}: every revision-consuming git read must use the pinned origin/main id, not the symbolic ref`,
     );
   }
+}
+
+// Both readers label through withMergedPrLabel, so /fleet and the banner cannot drift
+// back apart on squash-merged branches (/fleet was left on ancestry alone until 2026-11-03).
+for (const rel of [["..", "..", "scripts", "fleet-status.mjs"], ["worktree-awareness.mjs"]]) {
+  const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), ...rel), "utf8");
+  ok(src.includes("withMergedPrLabel(mergedLabelFromStatus("), `${rel.at(-1)} labels merge state through withMergedPrLabel`);
 }
 
 console.log(`worktree-awareness-lib: ${pass} assertions passed`);

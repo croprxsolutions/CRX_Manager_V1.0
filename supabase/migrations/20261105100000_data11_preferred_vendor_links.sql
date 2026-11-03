@@ -34,6 +34,8 @@ DECLARE
   v_named bigint;
   v_bad bigint;
 BEGIN
+  -- Give up quickly (changing nothing) rather than queue live product and vendor writes behind it.
+  PERFORM set_config('lock_timeout', '5s', true);
   -- Held until commit, so the approver stays an active admin while the links name them.
   PERFORM 1 FROM public.profiles WHERE id = c_approver AND role = 'admin' AND is_active FOR SHARE;
   IF NOT FOUND THEN

@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json> (queries documented in the script header)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261103013009",
+    "migrations_high_water": "20261103052726",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -480,6 +480,8 @@
       "20261103100000_product_active_guard",
       "20261103120000_chicago_season_and_statement_dates",
       "20261103130000_bind_order_replay_receipts_batch4b",
+      "20261103150000_ar_aging_flags_unrebuildable_customers",
+      "20261103210000_product_use_timings",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1462,6 +1464,7 @@
     "product_cost_basis_rollout",
     "product_info_change_set_rows",
     "product_margin_floor_changes",
+    "product_use_timing_options",
     "profile_public_directory",
     "purchase_order_import_intents",
     "purchase_order_item_cost_changes",
@@ -2539,6 +2542,15 @@
       ],
       "constraints": [
         "product_supplier_links_link_status_check"
+      ]
+    },
+    "product_use_timing_options.category": {
+      "values": [
+        "Herbicide",
+        "Foliar Fertilizer"
+      ],
+      "constraints": [
+        "product_use_timing_options_category_check"
       ]
     },
     "products.container_type": {
@@ -4160,6 +4172,18 @@
       "table": "product_supplier_links",
       "constraint": "product_supplier_links_supplier_sku_nonblank",
       "def": "CHECK (((supplier_sku IS NULL) OR (btrim(supplier_sku) <> ''::text)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_use_timing_options",
+      "constraint": "product_use_timing_options_code_check",
+      "def": "CHECK ((code ~ '^[a-z][a-z0-9_]*$'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_use_timing_options",
+      "constraint": "product_use_timing_options_label_check",
+      "def": "CHECK (((label = btrim(label)) AND (label <> ''::text) AND (POSITION((';'::text) IN (label)) = 0)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6097,6 +6121,19 @@
         "updated_at"
       ]
     },
+    "product_use_timing_options": {
+      "no_default": [
+        "code",
+        "label",
+        "timing_code",
+        "category",
+        "sort_order"
+      ],
+      "with_default": [
+        "is_active",
+        "created_at"
+      ]
+    },
     "products": {
       "no_default": [
         "product_name"
@@ -6109,7 +6146,8 @@
         "is_rup",
         "pricing_version",
         "return_policy",
-        "is_full_tote_only"
+        "is_full_tote_only",
+        "use_timings"
       ]
     },
     "profile_public_directory": {
@@ -8564,6 +8602,16 @@
       "created_at",
       "updated_at"
     ],
+    "product_use_timing_options": [
+      "code",
+      "label",
+      "timing_code",
+      "crop",
+      "category",
+      "sort_order",
+      "is_active",
+      "created_at"
+    ],
     "products": [
       "id",
       "product_name",
@@ -8612,7 +8660,8 @@
       "product_family_id",
       "return_policy",
       "packaging_variant",
-      "is_full_tote_only"
+      "is_full_tote_only",
+      "use_timings"
     ],
     "profile_public_directory": [
       "id",

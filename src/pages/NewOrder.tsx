@@ -22,7 +22,7 @@ import { createBelowCostReasonMemo, withBelowCostReason } from '../lib/belowCost
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { getCommittedOrderIdFromMismatch, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { fingerprintIntentPayload, getCommittedOrderIdFromMismatch, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { useFormDraft } from '../hooks/useFormDraft';
 import { useCreditLimitCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
@@ -134,10 +134,10 @@ export default function NewOrder() {
   // B1 (deep-dive H1): RUP point-of-sale warning — same pattern as QuoteBuilder
   const [rupWarnings, setRupWarnings] = useState<string[]>([]);
 
-  // Codex P2 fix (PR #59, 2026-05-16): reset createOrderIdem when form intent
-  // changes. Page stays mounted after a failed/lost-response submit; without
-  // reset, editing customer/items/date and resubmitting would replay the
-  // prior cached order_id. Stable form = idempotent retry; changed = fresh key.
+  // Codex P2 fix (PR #59, 2026-05-16): each key is scoped to the form's intent.
+  // Page stays mounted after a failed/lost-response submit; editing
+  // customer/items/date and resubmitting must not replay the prior cached
+  // order_id. Same intent = same key (even after editing away and back); changed = its own key.
   // Hash MUST cover every submitted field (RPC sends customer/date/name/notes
   // + items[product_id,product_name,quantity,price,cost,unit_size]). Codex
   // 2026-05-16 follow-up: omitting any field replays prior success silently.
@@ -171,18 +171,10 @@ export default function NewOrder() {
   // The below-cost reason approved under each retry key is sent again on a retry under that key:
   // without it the retry no longer matches the committed request, the replay is refused, and a
   // later resubmit could duplicate the order (Codex, PR #951). Keys live only while this page is
-  // mounted and rotate whenever the form changes, so a reason never reaches a different request.
+  // mounted and each is scoped to one intent, so a reason never reaches a different request.
   const [belowCostReasonFor] = useState(createBelowCostReasonMemo);
-  const directOrderIntentHash = JSON.stringify(directOrderArgs);
-  const rushOrderIntentHash = JSON.stringify(rushOrderArgs);
-  useEffect(() => {
-    createOrderIdem.resetKey();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [directOrderIntentHash]);
-  useEffect(() => {
-    rushOrderIdem.resetKey();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rushOrderIntentHash]);
+  const directOrderScope = fingerprintIntentPayload(directOrderArgs);
+  const rushOrderScope = fingerprintIntentPayload(rushOrderArgs);
 
   // Draft persistence: auto-saves form to sessionStorage so data survives
   // a PWA reload when the user switches away on mobile (e.g. to the calculator).
@@ -616,7 +608,7 @@ export default function NewOrder() {
         // Ship-now/price-later (#2): create an UNPRICED rush order (needs_pricing);
         // prices are finalized later via the order's Set Pricing panel → price_order.
         if (priceLater) {
-          const rushKey = rushOrderIdem.getKey();
+          const rushKey = rushOrderIdem.getKeyFor(rushOrderScope);
           // Codex round-9 P2: pass the customer PO INTO the SECDEF RPC (it sets it on the
           // INSERT as owner). The old follow-up `orders.update({customer_po_number})` hit
           // the is_admin()-only orders UPDATE RLS, so a sales_rep got a false failure
@@ -630,7 +622,7 @@ export default function NewOrder() {
             // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
             // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
             const bindingRejection = getIdempotencyBindingRejection(error);
-            if (bindingRejection === 'intent' || bindingRejection === 'actor') rushOrderIdem.resetKey();
+            if (bindingRejection === 'intent' || bindingRejection === 'actor') rushOrderIdem.resetKeyFor(rushOrderScope);
             // An intent refusal carries the order an earlier attempt under this key already created: open it
             // instead of letting the next click, with a fresh key, create a second order.
             const committedOrderId = getCommittedOrderIdFromMismatch(error, 'create_rush_order');
@@ -648,7 +640,7 @@ export default function NewOrder() {
           }
           const rushResult = assertRpcResult<{ order_id: string; order_number: string; warnings?: string[] }>(data, 'create_rush_order');
           const rushOrderId = rushResult.order_id;
-          rushOrderIdem.resetKey();
+          rushOrderIdem.resetKeyFor(rushOrderScope);
           clearDraft();
           if (rushResult.warnings && rushResult.warnings.length > 0) {
             for (const w of rushResult.warnings) toast('warning', 'Inventory: ' + w);
@@ -663,7 +655,7 @@ export default function NewOrder() {
           navigate(`/orders/${rushOrderId}`);
           return;
         }
-        const idemKey = createOrderIdem.getKey();
+        const idemKey = createOrderIdem.getKeyFor(directOrderScope);
 
         const { data, error } = await runWithBelowCostApproval((reason) => supabase.rpc('create_direct_order', withBelowCostReason('create_direct_order', {
           ...directOrderArgs,
@@ -675,7 +667,7 @@ export default function NewOrder() {
           // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
           // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
           const bindingRejection = getIdempotencyBindingRejection(error);
-          if (bindingRejection === 'intent' || bindingRejection === 'actor') createOrderIdem.resetKey();
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') createOrderIdem.resetKeyFor(directOrderScope);
           // An intent refusal carries the order an earlier attempt under this key already created: open it
           // instead of letting the next click, with a fresh key, create a second order.
           const committedOrderId = getCommittedOrderIdFromMismatch(error, 'create_direct_order');
@@ -693,7 +685,7 @@ export default function NewOrder() {
         }
 
         const result = assertRpcResult<{ order_id: string; warnings?: string[] }>(data, 'create_direct_order');
-        createOrderIdem.resetKey();
+        createOrderIdem.resetKeyFor(directOrderScope);
         const orderId = result.order_id;
 
         clearDraft();

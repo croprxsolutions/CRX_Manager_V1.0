@@ -66,12 +66,14 @@ function collect() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  // Every argument must be a known flag followed by its value, so a typo like --lve is refused, not ignored.
   const args = process.argv.slice(2);
-  // A flag given without a value comes back as "" and fails validation instead of being ignored.
-  const opt = (name) => { const i = args.indexOf(name); return i === -1 ? undefined : (args[i + 1] ?? ""); };
-  const live = opt("--live");
-  const gap = opt("--gap-minutes") ?? "60";
-  if ((live !== undefined && !/^\d{14}$/.test(live)) || !/^\d+$/.test(gap)) {
+  const flags = {};
+  for (let i = 0; i < args.length; i += 2) flags[args[i]] = args[i + 1] ?? "";
+  const live = flags["--live"];
+  const gap = flags["--gap-minutes"] ?? "60";
+  const known = Object.keys(flags).every((k) => k === "--live" || k === "--gap-minutes");
+  if (!known || (live !== undefined && !/^\d{14}$/.test(live)) || !/^[1-9]\d*$/.test(gap)) {
     console.error("usage: npm run next-migration-stamp -- [--live <14-digit version>] [--gap-minutes <n>]");
     process.exit(2);
   }

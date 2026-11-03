@@ -4,13 +4,13 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ledgerCheck } from "./check-ledger-update.mjs";
 import { entryContentVerdict, isCountableFragmentFile } from "../.claude/hooks/changelog-entry-lib.mjs";
 import { scratchHookEnvironment } from "../.claude/hooks/git-test-env.mjs";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 let pass = 0;
 function ok(c, m) { assert.ok(c, m); pass++; }
@@ -290,7 +290,7 @@ eq(ledgerCheck([MIG, "README.md"]).ok, false, "README is not a ledger — still 
 
 // A rename must expose both the protected source and unprotected destination.
 // Without --no-renames, --name-only reports only src/moved.mjs and the CLI exits 0.
-const renameRepo = mkdtempSync(join(tmpdir(), "crx-ledger-rename-"));
+const renameRepo = tempDir("crx-ledger-rename-");
 try {
   // A git hook exports the repository-local GIT_* variables (GIT_DIR,
   // GIT_INDEX_FILE, GIT_CONFIG_*, ...) pointing at the REAL repository, and
@@ -338,7 +338,7 @@ try {
 // malformed-fragment refusal never saw it and a source-only commit carried junk into
 // the folder (fail-open). The CLI reads both diff passes NUL-delimited (-z), where
 // paths are never quoted, so the validator always sees the real name.
-const quoteRepo = mkdtempSync(join(tmpdir(), "crx-ledger-quotepath-"));
+const quoteRepo = tempDir("crx-ledger-quotepath-");
 try {
   const fixtureEnv = scratchHookEnvironment(quoteRepo);
   const git = (...args) =>
@@ -367,7 +367,7 @@ try {
 // ── the stop hook's surviving-fragment checks (shared lib; CodeRabbit + Codex, PR #482) ──
 // Counted-without-validated, round 3: an added fragment later truncated/emptied still
 // counted (existence-only), and a DIRECTORY named like a fragment satisfied existsSync.
-const survivorDir = mkdtempSync(join(tmpdir(), "crx-ledger-survivor-"));
+const survivorDir = tempDir("crx-ledger-survivor-");
 try {
   // A directory with a fragment-shaped name is NOT a countable fragment file.
   const dirNamedLikeFragment = join(survivorDir, "2026-08-26-dir.md");

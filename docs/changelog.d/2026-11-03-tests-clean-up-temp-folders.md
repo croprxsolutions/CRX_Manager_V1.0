@@ -1,0 +1,6 @@
+## 2026-11-03 - Tests remove their own temp folders, and CI fails a suite that leaves one
+
+- New `scripts/lib/test-temp-dir.mjs`: `tempDir(prefix)` makes a folder in the OS temp folder and removes it when the test process exits, pass or fail. `removeTree()` unlinks links and junctions without entering them, so a fixture junctioned to a real folder loses only the link.
+- 124 `mkdtempSync(path.join(os.tmpdir(), ...))` calls across 47 test files now use `tempDir()`. Before, most tests cleaned up only on their last line, so a failed or interrupted run left every fixture behind (about 31,000 `crx-*` folders sat in `%TEMP%` on 2026-11-03, over half from code removed in September).
+- `scripts/run-correction-guards.mjs` gives each suite a private temp folder and fails any suite that leaves something in it. It also runs another `package.json` chain one suite at a time when named (`node scripts/run-correction-guards.mjs test:agent-workflows`), and CI's agent-workflow step now uses that. Before this change the check failed on `hook-router.test.mjs` (two router folders) and `stop-wrap-ledger.test.mjs` (the shared `crx-claude-hooks` folder, now removed only when empty).
+- The existing folders in `%TEMP%` are not deleted by this change.

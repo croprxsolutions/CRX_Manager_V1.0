@@ -2,7 +2,7 @@
 // Tests for the Codex push-proof wrapper (scripts/write-codex-push-proof.mjs).
 // Run: node scripts/write-codex-push-proof.test.mjs
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -62,6 +62,7 @@ import { gitLocalEnvironmentNames } from "../.claude/hooks/git-test-env.mjs";
 // Cross-check against the REAL guard validator so the minted proof shape can
 // never silently drift from what codex-push-guard actually accepts.
 import { proofValid, proofValidForMerge } from "../.claude/hooks/codex-push-lib.mjs";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 // Git hooks export repository-local GIT_* variables. A scratch `git init`
 // must never inherit them or it can target/reinitialize the caller's real
@@ -383,7 +384,7 @@ assert.equal(
 );
 
 {
-  const source = mkdtempSync(path.join(tmpdir(), "crx-review-source-"));
+  const source = tempDir("crx-review-source-");
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: source, stdio: "ignore" });
   writeFileSync(path.join(source, ".gitignore"), ".env\n.claude/session-state/\n");
   writeFileSync(path.join(source, "tracked.txt"), "base\n");
@@ -412,8 +413,8 @@ assert.equal(
   // would fail to launch for an entirely boring reason — and "the marker was
   // never written" would then prove nothing about isolation. Quoting is what
   // makes the assertion mean what it claims.
-  const hostileGlobalHome = mkdtempSync(path.join(tmpdir(), "crx-review-hostile home-"));
-  const controlRepo = mkdtempSync(path.join(tmpdir(), "crx-review-control-"));
+  const hostileGlobalHome = tempDir("crx-review-hostile home-");
+  const controlRepo = tempDir("crx-review-control-");
   const originalHome = process.env.HOME;
   const originalUserProfile = process.env.USERPROFILE;
   let globallyIsolatedPacket;
@@ -678,7 +679,7 @@ assert.equal(
 // than as an error. Issue a real call from deep inside a SEPARATE checkout and
 // prove it returns that checkout's own top level.
 {
-  const nestedSource = mkdtempSync(path.join(tmpdir(), "crx-review-nested-"));
+  const nestedSource = tempDir("crx-review-nested-");
   try {
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: nestedSource, stdio: "ignore" });
     const nestedDir = path.join(nestedSource, "supabase", "migrations", "deep");
@@ -933,7 +934,7 @@ assert.equal(
   const FALLBACK = "C:\\fake\\npm\\codex.exe";
   const HEAD_SHA = "c".repeat(40);
   const BASE_SHA = "d".repeat(40);
-  const captureRoot = mkdtempSync(path.join(tmpdir(), "crx-review-fallback-"));
+  const captureRoot = tempDir("crx-review-fallback-");
   const reviewArgs = buildCodexExecArgs({ root: "C:\\packet", prompt: "p", platform: "win32", permissionConfig: "x" });
 
   const runCase = ({ primary, fallback, fallbackBin = FALLBACK }) => {
@@ -1037,7 +1038,7 @@ assert.equal(
 // started from; every other change of context refuses. Real Git, because run() is
 // not injectable: the block below pins run() to this same decision.
 {
-  const repo = mkdtempSync(path.join(tmpdir(), "crx-review-base-"));
+  const repo = tempDir("crx-review-base-");
   const git = (...args) => execFileSync("git", ["-c", "user.name=Review Test", "-c", "user.email=review@example.invalid", ...args], { cwd: repo, encoding: "utf8" }).trim();
   const commit = (file, text) => {
     writeFileSync(path.join(repo, file), text);
@@ -1263,7 +1264,7 @@ function collisionPromptSkipsWork(prompt) {
 // real script can mint (or refuse) here.
 {
   const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
-  const repo = mkdtempSync(path.join(tmpdir(), "crx-carry-forward-"));
+  const repo = tempDir("crx-carry-forward-");
   const git = (...args) => execFileSync("git", ["-c", "user.name=Carry Test", "-c", "user.email=carry@example.invalid", ...args], {
     cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
   }).trim();
@@ -1419,7 +1420,7 @@ function collisionPromptSkipsWork(prompt) {
 
   // Against real Git: a head that lacks origin/main is caught before any GitHub read.
   {
-    const repo = mkdtempSync(path.join(tmpdir(), "crx-preflight-base-"));
+    const repo = tempDir("crx-preflight-base-");
     const git = (...args) => execFileSync("git", ["-c", "user.name=Review Test", "-c", "user.email=review@example.invalid", ...args], { cwd: repo, encoding: "utf8" }).trim();
     try {
       git("init", "-q", "-b", "main");
@@ -1704,7 +1705,7 @@ function collisionPromptSkipsWork(prompt) {
 
   // End to end through readSolPreflightFacts, with a real git repository whose origin is the canonical repository.
   {
-    const repo = mkdtempSync(path.join(tmpdir(), "crx-preflight-lookup-"));
+    const repo = tempDir("crx-preflight-lookup-");
     const git = (...args) => execFileSync("git", ["-c", "user.name=Review Test", "-c", "user.email=review@example.invalid", ...args], { cwd: repo, encoding: "utf8" }).trim();
     try {
       git("init", "-q", "-b", "main");

@@ -649,7 +649,8 @@ jobs:
 
       - name: Agent workflow truth-state and sync tests
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}
-        run: npm run test:agent-workflows
+        # Same chain as `npm run test:agent-workflows`, one suite at a time, failing any suite that leaves temp folders behind.
+        run: node scripts/run-correction-guards.mjs test:agent-workflows
 
       - name: RPC contract and idempotency inventory tests
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}

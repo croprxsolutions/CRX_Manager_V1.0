@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { chmodSync, closeSync, copyFileSync, existsSync, ftruncateSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { chmodSync, closeSync, copyFileSync, existsSync, ftruncateSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { assertHarmlessSupabaseStderr, buildPostStageASnapshot, CAPTURE_SQL, capturePostStageASnapshot, parseSupabaseJson, POST_STAGE_A_SNAPSHOT_FORMAT } from './capture-supplier-pricing-phase3-post-stage-a-snapshot.mjs';
@@ -11,8 +10,9 @@ import { verifyManifest } from './verify-supplier-pricing-phase3-classification-
 import { verifyOwnerDecisionSheet } from './verify-supplier-pricing-phase3-owner-decision-sheet.mjs';
 import { checkCommitMessagePrivateArtifactContainment, checkGitHubEventPrivateArtifactContainment, checkPrePushPrivateArtifactContainment, checkPrivateArtifactContainment, forbiddenArtifactReason, GITHUB_EVENT_HANDOFF_PROTOCOL, GIT_OUTPUT_MAX_BUFFER, gitOutput, hermeticGitEnvironment, ignoredLargeCandidateHasPrivateSignal, isStructuralSignatureExempt, MAX_HISTORY_COMMITS, MAX_STRUCTURAL_SCAN_BYTES, MAX_STRUCTURAL_SCAN_CANDIDATES, MAX_TOTAL_STRUCTURAL_SCAN_BYTES, ownWorktreeMarker, parseCli, readWorktreeCandidate, ScanBudget, structuralPrivateArtifactReason, structuralPrivateArtifactStreamReason, STRUCTURAL_SIGNATURE_EXEMPTIONS, STRUCTURAL_SIGNATURE_HISTORY_EXEMPTIONS, STRUCTURAL_SIGNATURE_REASON, validateStructuralSignatureExemptions, validateStructuralSignatureHistoryExemptions } from './check-supplier-pricing-phase3-private-artifacts.mjs';
 import { assertExternalArtifactPath, assertExternalPrivateDirectory, CONTAINER_TYPE_ALLOWLIST, loadValidatedSnapshot, MAX_PRIVATE_ARTIFACT_BYTES, OWNER_DECISION_HEADERS, OWNER_DECISION_SHEET_NAME, POST_STAGE_A_MANIFEST_NAME, POST_STAGE_A_SNAPSHOT_NAME, PRE_STAGE_A_SNAPSHOT_NAME, PRODUCT_FORM_ALLOWLIST, readValidatedPrivateArtifact, REPO_ROOT, validatePostStageASnapshot, without, writePrivateArtifactAtomic } from './supplier-pricing-phase3-private-artifacts.mjs';
+import { tempDir } from './lib/test-temp-dir.mjs';
 
-const temp = mkdtempSync(path.join(os.tmpdir(), 'crx-phase3c-synthetic-'));
+const temp = tempDir('crx-phase3c-synthetic-');
 const external = path.join(temp, 'external'); mkdirSync(external);
 const fakeRepo = path.join(temp, 'fake-repository'); mkdirSync(fakeRepo);
 const id1 = '11111111-1111-4111-8111-111111111111';

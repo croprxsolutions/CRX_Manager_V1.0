@@ -1319,9 +1319,11 @@ export function evaluateProductionAction({
   if (liveApplyScriptMentioned(command)) {
     return denied(
       "CODEX PRODUCTION GATE: scripts/apply-migration-file.mjs applies a migration to the LIVE database and is " +
-      "blocked, exactly like the MCP apply_migration and Supabase CLI migration paths. Its internal gate checks " +
-      "review evidence but cannot verify Mason's required in-chat approval, so it is not an alternative spelling " +
-      "for the reviewed migration path. Live migrations remain outside Codex's standing authorization.");
+      "blocked, dry runs included, exactly like the MCP apply_migration and Supabase CLI migration paths. Hand the " +
+      "apply to Claude: a qualifying routine migration uses the autonomous-landing proof gate, and a protected " +
+      "migration requires Mason's approval of that exact file. A migration that changes permissions, routine " +
+      "grants included, also requires Mason's explicit approval in the current conversation, even when the " +
+      "classifier treats it as eligible. Live migrations remain outside Codex's standing authorization.");
   }
   const maintenanceProducerGate = gateMaintenanceProducerExecution({ command, repoDir: actionRepoDir, nowMs, runGit });
   if (maintenanceProducerGate.blocked) return maintenanceProducerGate;

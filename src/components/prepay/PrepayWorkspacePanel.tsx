@@ -257,6 +257,12 @@ export default function PrepayWorkspacePanel() {
           // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
           const bindingRejection = getIdempotencyBindingRejection(error);
           if (bindingRejection === 'intent' || bindingRejection === 'actor') batchApplyIdem.resetKey();
+          // A changed batch after a lost reply: the earlier batch already applied, so show current balances and
+          // keep this batch pending for review.
+          if (bindingRejection === 'intent') {
+            fetchData();
+            throw new Error('An earlier batch already went through. Balances have been refreshed; review the pending allocations before saving again.');
+          }
           throw error;
         }
         const result = assertRpcResult<{ applied_count: number; total_applied_cents: number }>(data, 'batch_apply_prepayments');

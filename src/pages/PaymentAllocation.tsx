@@ -34,7 +34,6 @@ import {
 import { ilikeOrPattern } from '../lib/recordSearch';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { fingerprintIntentPayload } from '../lib/idempotency';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import { formatCents as fmt } from '../lib/money';
@@ -401,17 +400,17 @@ export default function PaymentAllocation() {
         p_reference_number: payment.reference || undefined,
         p_notes: payment.notes || undefined,
       };
-      // One key per exact check: a retry reuses it, a different customer, amount or split gets its own.
-      const scope = fingerprintIntentPayload(args);
+      // One key for this check until it is confirmed: allocate_payment compares a retry's arguments with the
+      // first attempt's, so an edited retry after a lost reply is refused instead of saving a second payment.
       const { data, error } = await supabase.rpc('allocate_payment', {
         ...args,
         p_performed_by: profile.id,
-        p_idempotency_key: allocatePaymentIdem.getKeyFor(scope),
+        p_idempotency_key: allocatePaymentIdem.getKey(),
       });
 
       if (error) throw error;
       const result = assertRpcResult<PaymentAllocationResult>(data, 'allocate_payment');
-      allocatePaymentIdem.resetKeyFor(scope);
+      allocatePaymentIdem.resetKey();
       setLastResult(result);
 
       const parts = [`Applied ${fmt(result.total_allocated_cents)} to ${result.invoices_paid} invoice(s)`];

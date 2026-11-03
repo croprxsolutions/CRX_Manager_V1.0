@@ -60,11 +60,13 @@ try {
     check(entry?.suspect_param === 'p_performed_by', `${added}: reviewed cost/margin step-2 exception present on p_performed_by`);
   }
   // Each justification relies on these exact pins (wrapper, private body, inner writer, identity and role
-  // helpers); dropping one would let a change on the unpinned path keep clearing the row.
+  // helpers); dropping one would let a change on the unpinned path keep clearing the row. Since KI-10 batch 4a
+  // (20261102180000) the step-2 wrapper is renamed _save_field_app_invoice_replay_impl_20261015 behind a new wrapper.
   const fieldArgs = '(p_invoice_id uuid, p_invoice jsonb, p_locations jsonb, p_chemicals jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text)';
   const jobArgs = '(p_job_id uuid, p_job_payload jsonb, p_fields jsonb, p_chemicals jsonb, p_performed_by uuid, p_idempotency_key text)';
   for (const [prefix, pins] of [
-    ['save_field_app_invoice(', [`public.save_field_app_invoice${fieldArgs}`, `public._save_field_app_invoice_cost_step2_impl${fieldArgs}`,
+    ['save_field_app_invoice(', [`public.save_field_app_invoice${fieldArgs}`, `public._save_field_app_invoice_replay_impl_20261015${fieldArgs}`,
+      `public._save_field_app_invoice_cost_step2_impl${fieldArgs}`,
       `public._save_field_app_invoice_impl_20260714${fieldArgs}`, 'auth.uid()', 'public.is_admin()', 'public.is_sales_rep()']],
     ['save_job(', [`public.save_job${jobArgs}`, `public._save_job_cost_step2_impl${jobArgs}`, 'auth.uid()', 'public.is_admin()']],
   ]) {

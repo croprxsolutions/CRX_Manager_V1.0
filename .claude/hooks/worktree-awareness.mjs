@@ -11,7 +11,7 @@
 // It is silent when there are no sibling worktrees (a solo session), so it never nags.
 // Fail-open: any error → emit nothing.
 
-import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, renameSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -61,11 +61,13 @@ function mergedPrCachePath() {
 if (process.argv[2] === REFRESH_FLAG) {
   const cachePath = mergedPrCachePath();
   try {
+    // shortcut: capped at 5,000 merged PRs (about 1,000 today); an older PR past the cap reads UNMERGED, raise the cap when it nears.
     const prs = JSON.parse(execFileSync("gh", ["pr", "list", "--state", "merged", "--base", "main", "--limit", "5000", "--json", "number,headRefOid"], {
       cwd: projectDir, encoding: "utf8", timeout: 120_000, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 16 * 1024 * 1024,
     }));
-    writeFileSync(`${cachePath}.tmp`, JSON.stringify({ fetchedAt: Date.now(), prs }));
-    renameSync(`${cachePath}.tmp`, cachePath);
+    const tmp = `${cachePath}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ fetchedAt: Date.now(), prs }));
+    renameSync(tmp, cachePath);
   } catch { /* offline or gh missing: the banner keeps saying "landed? unknown" */ }
   process.exit(0);
 }
@@ -85,7 +87,8 @@ function readMergedPrHeads() {
     try { lockAge = Date.now() - statSync(lock).mtimeMs; } catch { /* no lock */ }
     if (lockAge > REFRESH_LOCK_MAX_AGE_MS) {
       try {
-        writeFileSync(lock, "");
+        try { unlinkSync(lock); } catch { /* no stale lock */ }
+        writeFileSync(lock, "", { flag: "wx" }); // exclusive: a session that loses the race skips the spawn
         spawn(process.execPath, [fileURLToPath(import.meta.url), REFRESH_FLAG], {
           cwd: projectDir, detached: true, stdio: "ignore", windowsHide: true,
         }).unref();

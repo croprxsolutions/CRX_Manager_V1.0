@@ -82,7 +82,7 @@ export function withMergedPrLabel(label, sha, heads) {
   if (!/^UNMERGED /.test(String(label || ""))) return label;
   if (!heads) return "UNMERGED (not in origin/main; landed? unknown — merged-PR list not cached yet)";
   const pr = heads.get(String(sha || "").toLowerCase());
-  return pr === undefined ? label : `LANDED via merged PR #${pr} (squash)`;
+  return pr === undefined ? label : `LANDED via merged PR #${pr}`;
 }
 
 // Is this filename a loop LEDGER doc (docs/loops/*ledger*.md)?
@@ -1046,7 +1046,7 @@ export function formatSiblingReport(siblings) {
   for (const s of siblings || []) {
     // Only a label that POSITIVELY says origin/main contains the commit folds;
     // UNMERGED, unknown, a bare "detached", or anything unexpected stays detailed.
-    const notFinished = !/^(MERGED into origin\/main|LANDED via merged PR #\d+ \(squash\))$/.test(String(s.mergedLabel || ""));
+    const notFinished = !/^(MERGED into origin\/main|LANDED via merged PR #\d+)$/.test(String(s.mergedLabel || ""));
     const realDirt = !s.dirt || s.dirt.real > 0;
     if (notFinished || realDirt) {
       detailed.push(`  • ${s.path}\n      branch: ${s.branchLabel} — ${s.mergedLabel} — ${describeDirt(s.dirt)}`);

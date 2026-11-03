@@ -173,7 +173,7 @@ ok(formatSiblingReport([{ ...reportInput[2], dirt: { total: 25, importer: 24, re
     eq(ancestryLabel(squashedHead), "UNMERGED (not in origin/main)", "fixture reproduces the bug: ancestry alone calls a squash-merged branch UNMERGED");
 
     const heads = mergedPrHeadsFromCache(JSON.stringify({ fetchedAt: Date.now(), prs: [{ number: 42, headRefOid: squashedHead.toUpperCase() }] }));
-    eq(withMergedPrLabel(ancestryLabel(squashedHead), squashedHead, heads), "LANDED via merged PR #42 (squash)", "a branch whose HEAD is a merged PR's head reads as landed");
+    eq(withMergedPrLabel(ancestryLabel(squashedHead), squashedHead, heads), "LANDED via merged PR #42", "a branch whose HEAD is a merged PR's head reads as landed");
     eq(withMergedPrLabel(ancestryLabel(unshippedHead), unshippedHead, heads), "UNMERGED (not in origin/main)", "a truly unmerged branch still reads UNMERGED");
     eq(withMergedPrLabel(ancestryLabel(unshippedHead), unshippedHead, null), "UNMERGED (not in origin/main; landed? unknown — merged-PR list not cached yet)", "no merged-PR list → UNMERGED is hedged, never upgraded");
     eq(withMergedPrLabel("MERGED into origin/main", squashedHead, null), "MERGED into origin/main", "an ancestry-proven merge is untouched");

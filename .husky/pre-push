@@ -19,6 +19,16 @@ if ! npm run typecheck 2>&1; then
 fi
 
 echo ""
+echo "Running code-health check..."
+# CI fails on unused exports; catching them here saves a re-review (2026-11-03 retro).
+if ! npm run check:code-health 2>&1; then
+  echo ""
+  echo "❌ CODE-HEALTH CHECK FAILED — push blocked."
+  echo "Fix the reported unused code before pushing to GitHub."
+  exit 1
+fi
+
+echo ""
 echo "Running build check..."
 if ! npm run build 2>&1; then
   echo ""
@@ -31,4 +41,4 @@ fi
 # rarely changed the map (2026-11-02 retro). Run npm run graph:refresh on demand.
 
 echo ""
-echo "✅ Phase 3C containment, type check, and build passed — pushing to GitHub."
+echo "✅ Phase 3C containment, type check, code health, and build passed — pushing to GitHub."

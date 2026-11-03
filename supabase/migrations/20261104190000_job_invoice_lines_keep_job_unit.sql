@@ -8,14 +8,13 @@
 -- chemical loops (the multi-owner split and the single invoice) now read:
 --   unit_size: the job line's unit (job_chemicals.unit), else the product's Unit;
 --   rate_unit: the job line's rate unit, else its unit, else the product's Unit.
--- A blank job unit counts as missing. Nothing else in the body changes; amounts, cost,
+-- A blank unit or rate unit counts as missing. Nothing else in the body changes; amounts, cost,
 -- quantity and commissions are untouched. Invoices already created keep their labels.
 --
 -- Rollback: re-create the private body from
 -- 20260914100500_commission_dates_follow_chicago_business_day.sql (its transfer_job_to_invoice
 -- body, md5 85cd07a0a6b978cb066edab7df369fea) under this function's name, then re-run the
 -- REVOKE/GRANT below.
--- idempotency-body-check: exempt (the public wrapper transfer_job_to_invoice binds replays; this private body keeps its own check_idempotency and receipt write unchanged)
 -- caller-analysis: _transfer_job_to_invoice_intent_impl_20260908 :: REVOKE/GRANT keep its ACL exactly as live (postgres only); its one caller is the postgres-owned SECURITY DEFINER wrapper transfer_job_to_invoice, which the owner EXECUTE grant still covers
 
 SET LOCAL lock_timeout = '5s';
@@ -299,7 +298,7 @@ BEGIN
              jc.quantity,
              jc.customer_supplied,
              p.product_name, COALESCE(NULLIF(jc.unit, ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
-             COALESCE(jc.rate_unit, NULLIF(jc.unit, ''), p.unit_size) AS rate_unit
+             COALESCE(NULLIF(jc.rate_unit, ''), NULLIF(jc.unit, ''), p.unit_size) AS rate_unit
       FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
       WHERE jc.job_id = p_job_id ORDER BY p.product_name
     LOOP
@@ -533,7 +532,7 @@ BEGIN
            safe_cents_qty(jc.price_per_unit_cents, jc.quantity) AS chem_price,
            jc.customer_supplied,
            p.product_name, COALESCE(NULLIF(jc.unit, ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
-           COALESCE(jc.rate_unit, NULLIF(jc.unit, ''), p.unit_size) AS rate_unit
+           COALESCE(NULLIF(jc.rate_unit, ''), NULLIF(jc.unit, ''), p.unit_size) AS rate_unit
     FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
     WHERE jc.job_id = p_job_id ORDER BY p.product_name
   LOOP
@@ -777,7 +776,7 @@ BEGIN
        AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
        AND pg_get_userbyid(p.proowner) = 'postgres'
        AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]
-       AND md5(p.prosrc) = '13a38e891a3199ae270a852ae70a9a95'
+       AND md5(p.prosrc) = '0071afec350de8f807b58a046900278d'
   ) THEN
     RAISE EXCEPTION 'JOB_INVOICE_UNIT_POSTFLIGHT: the new private transfer body, owner, settings or ACL did not land as reviewed';
   END IF;

@@ -210,13 +210,13 @@ function buildContainer() {
 const ADMIN = '7c6b0000-0000-4000-8000-0000000000a1';
 const CUST = '7c6b0000-0000-4000-8000-0000000000c1';
 const CUST2 = '7c6b0000-0000-4000-8000-0000000000c2';
-const [P_PT, P_NULL, P_BLANK, P_QT] = ['d1', 'd2', 'd3', 'd4'].map((s) => `7c6b0000-0000-4000-8000-0000000000${s}`);
+const [P_PT, P_NULL, P_BLANK, P_QT, P_BLANK_RATE] = ['d1', 'd2', 'd3', 'd4', 'd5'].map((s) => `7c6b0000-0000-4000-8000-0000000000${s}`);
 const [F_SINGLE, F_SPLIT] = ['f1', 'f2'].map((s) => `7c6b0000-0000-4000-8000-0000000000${s}`);
 const [JOB_SINGLE, JOB_SPLIT] = ['e1', 'e2'].map((s) => `7c6b0000-0000-4000-8000-0000000000${s}`);
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const LIVE_IMPL_MD5 = '85cd07a0a6b978cb066edab7df369fea';
-const NEW_IMPL_MD5 = '13a38e891a3199ae270a852ae70a9a95';
+const NEW_IMPL_MD5 = '0071afec350de8f807b58a046900278d';
 // Every product's Unit is Gal; the job lines are entered in other units (or none).
 // [product, job unit, job rate unit, quantity, price cents, cost cents, rate per acre]
 const LINES = [
@@ -224,6 +224,7 @@ const LINES = [
   [P_NULL, 'NULL', 'NULL', 20, 2500, 1800, 2],
   [P_BLANK, "''", 'NULL', 5, 3100, 2000, 0.5],
   [P_QT, "'Qt'", 'NULL', 40, 900, 610, 4],
+  [P_BLANK_RATE, "'Pt'", "''", 16, 700, 450, 1.6],
 ];
 
 function seed() {
@@ -233,11 +234,12 @@ function seed() {
     UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     INSERT INTO public.customers (id, farm_name, is_active) VALUES
       ('${CUST}', '[PROVER] Owner Farm', true), ('${CUST2}', '[PROVER] Landlord Farm', true);
-    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form, container_unit, is_active) VALUES
-      ('${P_PT}', '[PROVER] A Pint line', 'Gal', 'Gal', 'liquid', 'Gal', true),
-      ('${P_NULL}', '[PROVER] B No unit', 'Gal', 'Gal', 'liquid', 'Gal', true),
-      ('${P_BLANK}', '[PROVER] C Blank unit', 'Gal', 'Gal', 'liquid', 'Gal', true),
-      ('${P_QT}', '[PROVER] D Quart line', 'Gal', 'Gal', 'liquid', 'Gal', true);
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form, container_unit, current_cost, is_active) VALUES
+      ('${P_PT}', '[PROVER] A Pint line', 'Gal', 'Gal', 'liquid', 'Gal', 1.00, true),
+      ('${P_NULL}', '[PROVER] B No unit', 'Gal', 'Gal', 'liquid', 'Gal', 1.00, true),
+      ('${P_BLANK}', '[PROVER] C Blank unit', 'Gal', 'Gal', 'liquid', 'Gal', 1.00, true),
+      ('${P_QT}', '[PROVER] D Quart line', 'Gal', 'Gal', 'liquid', 'Gal', 1.00, true),
+      ('${P_BLANK_RATE}', '[PROVER] E Blank rate unit', 'Gal', 'Gal', 'liquid', 'Gal', 1.00, true);
     INSERT INTO public.fields (id, customer_id, field_name, crop_type) VALUES
       ('${F_SINGLE}', '${CUST}', '[PROVER] North', 'corn'), ('${F_SPLIT}', '${CUST}', '[PROVER] South', 'soy');
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary) VALUES
@@ -250,8 +252,8 @@ function seed() {
     INSERT INTO public.job_chemicals (job_id, product_id, unit, rate_unit, quantity, price_per_unit_cents, cost_per_unit_cents, rate_per_acre) VALUES
       ${[JOB_SINGLE, JOB_SPLIT].flatMap((job) => LINES.map(([p, u, r, qty, price, cost, rate]) => `('${job}', '${p}', ${u}, ${r}, ${qty}, ${price}, ${cost}, ${rate})`)).join(',\n      ')};
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
-  assert.equal(scalar(`SELECT count(*) FROM public.job_chemicals WHERE job_id IN ('${JOB_SINGLE}', '${JOB_SPLIT}');`), '8');
-  console.log('[prover] seeded two completed jobs (single owner; 60/40 split) with Pt, missing, blank and Qt job units on Gal products');
+  assert.equal(scalar(`SELECT count(*) FROM public.job_chemicals WHERE job_id IN ('${JOB_SINGLE}', '${JOB_SPLIT}');`), '10');
+  console.log('[prover] seeded two completed jobs (single owner; 60/40 split) with Pt, missing, blank, Qt and blank-rate job units on Gal products');
 }
 
 // Transfers `job` as the admin in a rolled-back transaction; returns each invoice line (sorted by
@@ -267,7 +269,7 @@ SELECT 'SNAP|' || jsonb_agg(jsonb_build_object(
     'owner', i.customer_id, 'line', ii.description,
     'item', to_jsonb(ii) - 'id' - 'invoice_id' - 'created_at' - 'updated_at',
     'invoice', to_jsonb(i) - 'id' - 'invoice_number' - 'created_at' - 'updated_at' - 'invoice_group_id')
-  ORDER BY i.customer_id, ii.sort_order, ii.description)
+  ORDER BY i.customer_id, ii.sort_order, ii.description)::text
   FROM public.invoices i JOIN public.invoice_items ii ON ii.invoice_id = i.id WHERE i.job_id = '${job}';
 ROLLBACK;
 `, allowFailure: true });
@@ -294,15 +296,15 @@ const wrapperState = () => scalar(`SELECT md5(prosrc) || '|' || proacl::text FRO
 
 try {
   buildContainer();
-  assert.equal(implState(), `${LIVE_IMPL_MD5}|t|search_path=public, pg_temp|postgres|{postgres=X/postgres}`, 'replayed private body is not the live one');
+  assert.equal(implState(), `${LIVE_IMPL_MD5}|true|search_path=public, pg_temp|postgres|{postgres=X/postgres}`, 'replayed private body is not the live one');
   const wrapperBefore = wrapperState();
   seed();
 
   // 1. Before: the defect.
   const single0 = transfer(JOB_SINGLE);
   const split0 = transfer(JOB_SPLIT);
-  assert.deepEqual(labels(single0), ['A Pint line=Gal/pt/ac/pt/ac', 'B No unit=Gal/Gal/Gal', 'C Blank unit=Gal/Gal/Gal', 'D Quart line=Gal/Gal/Gal']);
-  assert.equal(split0.length, 8, 'the split job did not make one line per chemical per owner');
+  assert.deepEqual(labels(single0), ['A Pint line=Gal/pt/ac/pt/ac', 'B No unit=Gal/Gal/Gal', 'C Blank unit=Gal/Gal/Gal', 'D Quart line=Gal/Gal/Gal', 'E Blank rate unit=Gal//']);
+  assert.equal(split0.length, 10, 'the split job did not make one line per chemical per owner');
   assert.equal(new Set(split0.map((r) => r.owner)).size, 2, 'the split job did not bill two owners');
   console.log(`[prover] BEFORE: single ${labels(single0).join(', ')}`);
 
@@ -311,7 +313,7 @@ try {
   stageText('candidate.sql', candidate);
   const applied = apply('candidate.sql');
   assert.equal(applied.status, 0, `candidate failed to apply:\n${applied.output}`);
-  assert.equal(implState(), `${NEW_IMPL_MD5}|t|search_path=public, pg_temp|postgres|{postgres=X/postgres}`, 'private body, settings, owner or ACL is not as reviewed');
+  assert.equal(implState(), `${NEW_IMPL_MD5}|true|search_path=public, pg_temp|postgres|{postgres=X/postgres}`, 'private body, settings, owner or ACL is not as reviewed');
   assert.equal(wrapperState(), wrapperBefore, 'the public wrapper changed');
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(scalar(`SELECT has_function_privilege('${role}', '${IMPL}', 'EXECUTE');`), 'f', `${role} can call the private body`);
@@ -321,17 +323,19 @@ try {
   // 3. After: the job line's units; nothing else moves.
   const single1 = transfer(JOB_SINGLE);
   const split1 = transfer(JOB_SPLIT);
-  const expected = ['A Pint line=Pt/pt/ac/pt/ac', 'B No unit=Gal/Gal/Gal', 'C Blank unit=Gal/Gal/Gal', 'D Quart line=Qt/Qt/Qt'];
+  const expected = ['A Pint line=Pt/pt/ac/pt/ac', 'B No unit=Gal/Gal/Gal', 'C Blank unit=Gal/Gal/Gal', 'D Quart line=Qt/Qt/Qt', 'E Blank rate unit=Pt/Pt/Pt'];
   assert.deepEqual(labels(single1), expected);
   for (const owner of new Set(split1.map((r) => r.owner))) {
     assert.deepEqual(labels(split1.filter((r) => r.owner === owner)), expected, `split owner ${owner} lines are mislabelled`);
   }
   onlyLabelsMoved(single0, single1, 'single');
   onlyLabelsMoved(split0, split1, 'split');
-  // Only line D's applied-amount conversion moves (40 Qt is 10 Gal); line A's rate unit was already stored.
+  // Only lines D and E gain a new conversion (40 Qt is 10 Gal; 16 Pt is 2 Gal, where a blank rate unit had none).
   const glLb = (snap) => snap.map((r) => `${r.item.total_applied_gl_lb ?? '-'} ${r.item.gl_lb_unit ?? '-'}`);
   assert.deepEqual(glLb(single1).slice(0, 3), glLb(single0).slice(0, 3), 'lines A-C changed their gl/lb amount');
   assert.equal(Number(single1[3].item.total_applied_gl_lb) * 4, Number(single0[3].item.total_applied_gl_lb), 'the Qt line is not converted as quarts');
+  assert.equal(single0[4].item.total_applied_gl_lb, null, 'the blank-rate line had a conversion before');
+  assert.equal(Number(single1[4].item.total_applied_gl_lb), 2, 'the blank-rate line is not converted from its pints');
   console.log(`[prover] AFTER: single ${labels(single1).join(', ')}; both split owners match; every amount, quantity, acre and header column unchanged`);
 
   // 4. Re-apply refuses on the source pin.

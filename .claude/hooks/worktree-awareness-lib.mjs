@@ -720,7 +720,7 @@ export function validateParkedMigrationCrossReferences(paths, historyText, loadT
           return { state: "unknown", paths: new Set(), reason: "LOCAL CANDIDATE SQL sha256 pin cannot be verified" };
         }
         if (sha256Text(sqlText) !== expectedSha256) {
-          return { state: "unknown", paths: new Set(), reason: "LOCAL CANDIDATE SQL sha256 does not match migration history" };
+          return { state: "unknown", paths: new Set(), reason: `LOCAL CANDIDATE SQL sha256 does not match migration history: ${p}` };
         }
         verifiedCandidates.add(normalized);
       } else if (hasExplicitParkedMigrationHeader(sqlText)) {

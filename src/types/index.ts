@@ -55,12 +55,23 @@ export interface ProductCategory {
   sort_order: number;
 }
 
+export interface UseTimingOption {
+  code: string;
+  label: string;
+  timing_code: string;
+  crop: string | null;
+  category: 'Herbicide' | 'Foliar Fertilizer';
+  sort_order: number;
+  is_active: boolean;
+}
+
 export interface Product {
   id: string;
   product_name: string;
   sku: string | null;
   category: string | null;
   use_timing?: string | null;
+  use_timings: string[];
   vendor: string | null;
   manufacturer: string | null;
   container_size: number | null;

@@ -175,6 +175,12 @@ describe('BulkProductImport', () => {
     });
   });
 
+  it('passes several use timing labels to the database as semicolon-separated text', () => {
+    expect(buildProductInsert({
+      product_name: 'Chem', category: 'Herbicide', use_timing: '  Pre-Emerge; Post-Emergence  ',
+    }).use_timing).toBe('Pre-Emerge; Post-Emergence');
+  });
+
   it('shows a plain database refusal for an imported row', async () => {
     vi.mocked(supabase.from).mockImplementation(() => chainable({
       data: null,

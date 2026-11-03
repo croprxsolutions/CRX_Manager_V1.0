@@ -132,6 +132,9 @@ vi.mock('../components/ui/EditableDataTable', () => ({
       <button disabled={data.length === 0} onClick={() => void onSave(new Map([[
         data[0].id, { product_name: '   ' },
       ]])).catch(() => {})}>Test blank detail name</button>
+      <button disabled={data.length === 0} onClick={() => void onSave(new Map([[
+        data[0].id, { category: 'Foliar Fertilizer' },
+      ]])).catch(() => {})}>Test timing category change</button>
       <button
         disabled={data.length === 0}
         onClick={() => void onSave(new Map([[
@@ -282,6 +285,16 @@ describe('Products governed inline pricing flow', () => {
     render(<Products />);
     fireEvent.click(await screen.findByRole('button', { name: 'Test blank detail name' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Enter a product name before saving.'));
+    expect(mockProductUpdate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a list category change when the product has saved timings', async () => {
+    mockProducts.splice(0, 1, { ...product, use_timings: ['pre_emerge_corn'] });
+    render(<Products />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Test timing category change' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error', 'This product has use timings. Change its category on the product page.',
+    ));
     expect(mockProductUpdate).not.toHaveBeenCalled();
   });
 

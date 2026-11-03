@@ -14,7 +14,7 @@ import { runCriticalAction } from '../../lib/criticalAction';
 import { exportToCSV } from '../../lib/csvExport';
 import { downloadReportPdf } from '../../lib/reportPdf';
 import { buildInvoicePdfDataFromRow, buildBatchInvoicePdfData, batchInvoicePrintToast, generateBatchInvoicePdf, downloadInvoicePdf, generateInvoicePdf } from '../../lib/invoicePdf';
-import { sendEmail, pdfToBase64, buildInvoiceEmailPayload, isInvoiceEmailSuppressed } from '../../lib/emailService';
+import { sendEmail, pdfToBase64, buildInvoiceEmailPayload, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../../lib/emailService';
 import { logActivity } from '../../lib/activityLogger';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -311,6 +311,7 @@ export default function FieldInvoicesListPanel() {
           invoiceDate: row.invoice_date,
           balanceCents: row.balance_cents,
           attachmentBase64: base64,
+          snapshot: invoiceEmailSnapshot(pdfData),
         });
         await assertInvoiceSendable(row.id);
         const result = await sendEmail(payload);

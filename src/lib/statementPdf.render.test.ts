@@ -175,6 +175,56 @@ describe('statement PDF real renderer', () => {
     expect(finalPageCommands).toContain('Page 2');
   });
 
+  it('keeps Finance Charges and Net Due above the footer when a product table ends near the page bottom', async () => {
+    const statement: DetailedStatementData = {
+      ...renderedStatement,
+      mode: 'detailed',
+      transactions: [{
+        ...renderedStatement.transactions[0],
+        // 29 lines end the product table about 42pt above the page bottom.
+        items: Array.from({ length: 29 }, (_, index) => ({
+          product_name: `Chemical ${index + 1}`,
+          epa_registration: null,
+          rate_per_acre: null,
+          rate_unit: null,
+          total_applied: null,
+          total_applied_unit: null,
+          total_applied_gl_lb: null,
+          gl_lb_unit: null,
+          unit_price_cents: 1_000,
+          total_cost_cents: 1_000,
+          is_application_fee: false,
+          quantity: 1,
+          unit_size: 'gal',
+          product_form: 'liquid',
+        })),
+        finance_charge_cents: 500,
+        net_due_cents: 10_500,
+      }],
+    };
+
+    const doc = await generateStatementPdf(statement);
+    const pages = doc.internal.pages as unknown as string[][];
+    // jsPDF text position is "x y Td" with y measured up from the page bottom (pt).
+    const baselineAboveBottom = (label: string) => {
+      for (let page = 1; page < pages.length; page++) {
+        const match = pages[page].join('\n').match(new RegExp(`(-?[\\d.]+) Td\\n\\(${label}`));
+        if (match) return { page, y: Number(match[1]) };
+      }
+      throw new Error(`${label} not drawn`);
+    };
+    const finance = baselineAboveBottom('Finance Charges');
+    const netDue = baselineAboveBottom('Net Due');
+
+    // The footer rule sits 26pt and its text 20pt above the bottom; 32pt is the safe edge.
+    expect(netDue.y).toBeGreaterThanOrEqual(32);
+    expect(finance.y).toBeGreaterThanOrEqual(32);
+    expect(netDue.page).toBe(finance.page);
+    expect(finance.page).toBe(2); // the scenario must force the page break
+    // The page that was left keeps its footer (drawn by the product table).
+    expect(pages[1].join('\n')).toMatch(/Statement generated .*? Page 1\)/);
+  });
+
   it('replaces remittance instructions when credits cover the gross invoices', async () => {
     const creditCoveredStatement = {
       ...renderedStatement,

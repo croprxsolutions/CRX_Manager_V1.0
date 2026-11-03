@@ -46,7 +46,7 @@ vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/fieldsGeojsonCache', () => ({ getCachedFieldsGeojson: vi.fn().mockResolvedValue([]) }));
 vi.mock('../lib/plssLookup', () => ({ lookupPlss: vi.fn() }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn(), getKeyFor: () => 'key', resetKeyFor: vi.fn() }),
 }));
 vi.mock('../components/customers/CustomerSearchPicker', () => ({
   default: ({ onSelect }: { onSelect: (customer: { id: string; farm_name: string }) => void }) => (

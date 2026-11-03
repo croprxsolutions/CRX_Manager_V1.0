@@ -872,14 +872,14 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-77'));
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('already created this order'));
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
-    expect(mockResetKey).toHaveBeenCalled();
+    expect(mockResetKeyFor).toHaveBeenCalled();
   });
 
   it('opens nothing on an actor refusal, which carries no receipt', async () => {
     await createOrderWith({ message: 'IDEMPOTENCY_ACTOR_MISMATCH' });
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'IDEMPOTENCY_ACTOR_MISMATCH'));
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(mockResetKey).toHaveBeenCalled();
+    expect(mockResetKeyFor).toHaveBeenCalled();
   });
 
   it('keeps the retry key on a receipt refusal, since an earlier attempt may have committed', async () => {
@@ -887,6 +887,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'IDEMPOTENCY_RECEIPT_MISSING'));
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(mockResetKey).not.toHaveBeenCalled();
+    expect(mockResetKeyFor).not.toHaveBeenCalled();
   });
 
   it('blocks unlink for an unbilled linked ticket with an active invoice', async () => {

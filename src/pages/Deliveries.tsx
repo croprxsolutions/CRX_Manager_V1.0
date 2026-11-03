@@ -39,7 +39,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { isValidDeliveredOn, isValidNoProofReason, MAX_PAPER_TICKET_PHOTOS, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength, PAPER_TICKET_PHOTO_CAPTION } from '../lib/paperTicket';
 import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, mergePhotosById, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadEvidencePhoto, uploadSignatureImage } from '../lib/deliveryEvidence';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
@@ -901,23 +901,24 @@ export default function Deliveries() {
     }
     await runCriticalAction({
       action: async () => {
-        const cancelKey = batchCancelIdem.getKey();
+        // One key per exact request: a retry reuses it, a different selection or reason gets its own.
+        const cancelScope = fingerprintIntentPayload([ids, reason]);
         const { data, error } = await supabase.rpc('batch_cancel_deliveries', {
           p_delivery_ids: ids,
           p_cancel_reason: reason,
           p_performed_by: profile.id,
-          p_idempotency_key: cancelKey,
+          p_idempotency_key: batchCancelIdem.getKeyFor(cancelScope),
         });
         if (error) {
           // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
           // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
           const bindingRejection = getIdempotencyBindingRejection(error);
-          if (bindingRejection === 'intent' || bindingRejection === 'actor') batchCancelIdem.resetKey();
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') batchCancelIdem.resetKeyFor(cancelScope);
           throw error;
         }
-        batchCancelIdem.resetKey();
         // The server skips any delivery that completed or was cancelled since this list loaded.
         const cancelled = assertRpcResult<number>(data, 'batch_cancel_deliveries');
+        batchCancelIdem.resetKeyFor(cancelScope);
         if (cancelled > 0) logActivity({ event: 'batch_cancel_deliveries', description: `Batch cancelled ${cancelled} of ${ids.length} selected delivery(ies). Reason: ${reason}`, performedBy: profile.id });
         return cancelled;
       },

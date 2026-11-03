@@ -70,7 +70,7 @@ vi.mock('../lib/plssLookup', () => ({
 }));
 
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-key', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'test-key', resetKey: vi.fn(), getKeyFor: () => 'test-key', resetKeyFor: vi.fn() }),
 }));
 
 vi.mock('../hooks/useUnsavedChanges', () => ({

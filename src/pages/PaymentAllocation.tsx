@@ -34,6 +34,7 @@ import {
 import { ilikeOrPattern } from '../lib/recordSearch';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { fingerprintIntentPayload } from '../lib/idempotency';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import { formatCents as fmt } from '../lib/money';
@@ -392,21 +393,25 @@ export default function PaymentAllocation() {
     }
     setSubmitting(true);
     try {
-      const idemKey = allocatePaymentIdem.getKey();
-      const { data, error } = await supabase.rpc('allocate_payment', {
+      const args = {
         p_customer_id: payment.customerId,
         p_total_cents: payment.cents,
         p_allocations: payment.allocations,
         p_payment_method: payment.method,
         p_reference_number: payment.reference || undefined,
         p_notes: payment.notes || undefined,
+      };
+      // One key per exact check: a retry reuses it, a different customer, amount or split gets its own.
+      const scope = fingerprintIntentPayload(args);
+      const { data, error } = await supabase.rpc('allocate_payment', {
+        ...args,
         p_performed_by: profile.id,
-        p_idempotency_key: idemKey,
+        p_idempotency_key: allocatePaymentIdem.getKeyFor(scope),
       });
 
       if (error) throw error;
-      allocatePaymentIdem.resetKey();
       const result = assertRpcResult<PaymentAllocationResult>(data, 'allocate_payment');
+      allocatePaymentIdem.resetKeyFor(scope);
       setLastResult(result);
 
       const parts = [`Applied ${fmt(result.total_allocated_cents)} to ${result.invoices_paid} invoice(s)`];

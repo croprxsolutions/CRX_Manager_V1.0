@@ -189,13 +189,18 @@ PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invo
 it"). Remaining: notification RPCs and about 45 MED/LOW functions (batches 4c and 4d).
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
-**HIGH on money paths · PARTIAL · money · unassigned**
-On a lost reply the app should retry with the same key. Many screens discard the key too early or keep it across
-different records, so a retry could double-apply or replay another record's result. About 14 spots were fixed
-(PR #584); a dozen-plus remain (`KNOWN_UNFIXED_SITES` in `src/__tests__/idempotency-reset-order.test.ts:246`:
-JobDetail, QuoteBuilder, BlendTicketDetail, PrepayWorkspacePanel, FinanceChargePreviewModal and others). The
-`PrepaymentManagerPanel` item may now be covered server-side by KI-10 batch 1 (not confirmed). The automatic
-scanner for this is acknowledged as a weak tripwire.
+**HIGH on money paths · FIXED IN CODE 2026-11-02 (branch `claude/crx-idempotency-keys-4a3741`; live once merged) · money**
+On a lost reply the app should retry with the same key. Many screens discarded the key too early or kept it across
+different records, so a retry could double-apply or replay another record's result. About 14 spots were fixed in
+PR #584. The rest are now fixed: Invoices (batch void/delete), PaymentAllocation, PrepayWorkspacePanel,
+FinanceChargePreviewModal, QuoteBuilder, JobDetail, BlendTicketDetail, QuickDeliveryModal, Deliveries,
+DeliveryRemainders, NewOrder, Quotes and FieldSetup. Each keeps its key until the save is confirmed, and takes a
+new key when the record or payload changes (`getKeyFor(fingerprintIntentPayload(...))`). `KNOWN_UNFIXED_SITES` in
+`src/__tests__/idempotency-reset-order.test.ts` now lists only three documented scanner false positives
+(CustomerDetail, BulkTicketUpload, ManualTicketCreate). Proof on the local test copy, with the first reply
+dropped on purpose: Payment Allocation, Quick Delivery and Invoices delete each retried with the same key, and
+the server replayed the first result (one payment, one delivery/invoice, one delete). The scanner is still only a
+weak tripwire: it checks the order of the reset, not whether the key is scoped correctly.
 
 ### KI-12 — Quote "Convert to Order" can leave an accepted quote with no order
 **MED (latent) · CAUSE FIXED, LIVE 2026-10-27 (To-Do 1.3; PR #1105 merged as `f1503ba91`) · money/inventory/UI · Mason to decide about one real accepted quote with no order (Q-2026-2059)**
@@ -704,9 +709,13 @@ the `invoices_postable` view (every column but `total_cost_cents`), the seven sc
 ### KI-75 — Retry-key detail (extends KI-10, KI-11)
 **HIGH on money paths · OPEN · money**
 `transfer_invoice_to_job` and `update_field_app_invoice_billing` are now bound (batch 4a, `20261102180000`). Still
-open: the after-lock race in `apply_credit_memo_to_invoice`. Screen-side: the `PrepaymentManagerPanel` split-check modal, JobDetail
-reset-before-call defects the scanner cannot see, and payload-sensitive actions in FieldStop, DeliveryDetail and
-OrderDetail.
+open: the after-lock race in `apply_credit_memo_to_invoice`. Screen-side items, closed 2026-11-02 with KI-11 (same
+branch): JobDetail's reset-before-call defects are fixed. DeliveryDetail (edit, reassign, confirm, create invoice)
+and FieldStop (confirm) now keep a key per record or payload. Accepted with no change: the `PrepaymentManagerPanel`
+split-check modal, because batch 1 (`20261016060000`) binds `create_prepay_check_splits` on the server and the
+screen already resets only after a confirmed save. Also accepted: OrderDetail. `update_order_items` keeps one key
+per order, and a payload change is refused with a conflict dialog that reloads the order (by design).
+`price_order` already rotates its key when the payload hash changes. Cancel and split are per-order.
 
 ### KI-76 — Quote, season, invoice and return details (extends KI-12, KI-14, KI-18, KI-20, KI-69)
 **MED/LOW · OPEN · money**

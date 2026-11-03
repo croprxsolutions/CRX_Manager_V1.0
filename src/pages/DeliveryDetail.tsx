@@ -19,7 +19,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
-import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { downloadDeliveryPdf } from '../lib/deliveryPdf';
 import { logActivity } from '../lib/activityLogger';
@@ -783,8 +783,7 @@ export default function DeliveryDetail() {
         }))
       : null;
 
-    const idemKey = editIdem.getKey();
-    const { data, error } = await supabase.rpc('edit_delivery', {
+    const editArgs = {
       p_delivery_id: id!,
       p_assigned_driver: editDriver || undefined,
       p_scheduled_date: editDate,
@@ -795,15 +794,20 @@ export default function DeliveryDetail() {
       p_delivery_notes: editNotes || undefined,
       p_priority: editPriority,
       p_items: itemsPayload,
+    };
+    // One key per delivery and exact edit: an exact retry reuses it, a different edit gets its own.
+    const editScope = fingerprintIntentPayload(editArgs);
+    const { data, error } = await supabase.rpc('edit_delivery', {
+      ...editArgs,
       p_performed_by: profile.id,
-      p_idempotency_key: idemKey,
+      p_idempotency_key: editIdem.getKeyFor(editScope),
     });
 
     if (error) {
       toast('error', sanitizeError(error));
     } else {
       assertRpcResult(data, 'edit_delivery');
-      editIdem.resetKey();
+      editIdem.resetKeyFor(editScope);
       toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
       setEditing(false);
       fetchDelivery();
@@ -913,19 +917,19 @@ export default function DeliveryDetail() {
     setReassigning(true);
     setReassignConfirmOpen(false);
     try {
-      const idemKey = reassignIdem.getKey();
+      // Keyed per delivery: following a link to another delivery never reuses this one's key.
       const { data, error } = await supabase.rpc('reassign_delivery', {
         p_delivery_id: id!,
         p_new_driver: profile.id,
         p_performed_by: profile.id,
-        p_idempotency_key: idemKey,
+        p_idempotency_key: reassignIdem.getKeyFor(id!),
       });
 
       if (error) {
         toast('error', sanitizeError(error));
       } else {
         assertRpcResult(data, 'reassign_delivery');
-        reassignIdem.resetKey();
+        reassignIdem.resetKeyFor(id!);
         toast('success', 'Delivery assigned to you');
         fetchDelivery();
       }
@@ -1059,14 +1063,13 @@ export default function DeliveryDetail() {
     if (!delivery || !profile) return;
     setConfirming(true);
     try {
-      const idemKey = confirmIdem.getKey();
       const { data, error } = await supabase.rpc('confirm_delivery', {
         p_delivery_id: id!,
-        p_idempotency_key: idemKey,
+        p_idempotency_key: confirmIdem.getKeyFor(id!),
       });
       if (error) throw error;
       assertRpcResult(data, 'confirm_delivery');
-      confirmIdem.resetKey();
+      confirmIdem.resetKeyFor(id!);
       toast('success', `Delivery ${delivery.delivery_number} started`);
       setStartModalOpen(false);
       fetchDelivery();
@@ -1492,7 +1495,7 @@ export default function DeliveryDetail() {
       const { data, error } = await supabase.rpc('create_invoice_for_unbilled_delivery', {
         p_delivery_id: delivery.id,
         p_performed_by: profile.id,
-        p_idempotency_key: createInvoiceIdem.getKey(),
+        p_idempotency_key: createInvoiceIdem.getKeyFor(delivery.id),
       });
       if (error) throw error;
 
@@ -1500,7 +1503,7 @@ export default function DeliveryDetail() {
         data,
         'create_invoice_for_unbilled_delivery'
       );
-      createInvoiceIdem.resetKey();
+      createInvoiceIdem.resetKeyFor(delivery.id);
       setCreateInvoiceConfirmOpen(false);
       toast('success', `Invoice ${result.invoice_number} created`);
       await fetchDelivery();

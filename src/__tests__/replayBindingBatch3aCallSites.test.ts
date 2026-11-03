@@ -41,7 +41,7 @@ const RELOADS: Record<string, RegExp> = {
   'src/pages/DeliveryDetail.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*\}[\s\S]*?await reconcileFailedCompletion\(\{ deliveryId, keyHeld, resend: sendCompletion[\s\S]{0,2000}?if \(outcome\.kind === 'completed_not_replayed' \|\| outcome\.kind === 'closed'\) \{\n\s*await fetchDelivery\(\);/,
   'src/pages/FieldStop.tsx': /completeIdem\.resetKeyFor\(completeScope\);\n\s*\}[\s\S]*?await reconcileFailedCompletion\(\{ deliveryId: id, keyHeld, resend: sendCompletion[\s\S]{0,2000}?if \(outcome\.kind === 'completed_not_replayed' \|\| outcome\.kind === 'closed'\) await fetchStop\(\);/,
   'src/pages/FieldView.tsx': /completeIdem\.resetKey\(\);\n\s*\/\/[^\n]*\n\s*setCompleteFormOpenFor\(\(open\) => \(open === card\.job_id \? null : open\)\);\n\s*fetchCards\(\);/,
-  'src/pages/JobDetail.tsx': /completeJobIdem\.resetKey\(\);\n\s*if \(stillOnThisJob\(\)\) \{\n\s*setShowCompleteModal\(false\);\n\s*fetchJob\(\);/,
+  'src/pages/JobDetail.tsx': /completeJobIdem\.resetKeyFor\(completeScope\);\n\s*if \(stillOnThisJob\(\)\) \{\n\s*setShowCompleteModal\(false\);\n\s*fetchJob\(\);/,
 };
 // The narrower batch-1/2 form, which would leave a completion stuck on a 'receipt' refusal.
 const INTENT_OR_ACTOR_ONLY = /bindingRejection === 'intent' \|\| bindingRejection === 'actor'\) complete(?:Job)?Idem\.resetKey/;

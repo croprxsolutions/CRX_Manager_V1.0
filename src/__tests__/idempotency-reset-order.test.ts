@@ -205,34 +205,22 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   // for the wrong reason, which is the laundering this per-site scheme exists to stop.
   'src/pages/VendorBillDetail.tsx': ['throw-on-error', 'recovery'],
   'src/pages/SupplierPricing.tsx': ['intent-rotation'],
-  // JobDetail is pinned as known-unfixed AND declares intent-rotation: two of its
-  // scanner hits are modal-opening buttons (Save as Recipe, Complete Job) that
-  // deliberately rotate intent, and were being counted as defects (Codex round-5).
+  // JobDetail's Save as Recipe button deliberately rotates intent when it opens its modal
+  // (Codex round-5). Its save/complete/assign keys are payload-scoped since KI-11 (2026-11-02).
   'src/pages/JobDetail.tsx': ['intent-rotation'],
 };
 
 /**
- * Files that STILL CARRY the F1 defect and are deliberately not fixed here.
+ * Files the scanner still flags, each with its reason written at its entry below.
  *
- * This list is an admission, not an excuse. It exists so the guard reports the true
- * state instead of pretending these files are clean, and so a future session can find
- * the work. Most entries are live reset-before-assert sites; two (BulkTicketUpload,
- * ManualTicketCreate) are labelled scanner false positives at their entries below.
+ * KI-11 (2026-11-02) closed every remaining live reset-before-assert site: each now
+ * keys its request by the record and exact payload it sends (getKeyFor with a
+ * fingerprintIntentPayload scope, or the record id) and retires that key only after
+ * assertRpcResult accepts the reply. The three entries left are code the scanner
+ * cannot read correctly, not defects.
  *
- *  - JobDetail.tsx — 3 pinned sites, plus 2 real defects this scanner cannot see; a
- *    concurrent session owned the file during this change. See its entry below.
- *  - Everything else — reverted to main after the round-2 Codex review. Reordering the
- *    reset makes the client RETAIN the key, and on these pages the key is not bound to
- *    what the RPC actually targets (an in-page selection, a staged payload, component
- *    state, or a `/new` route with no id), so retaining it trades duplicate-on-retry
- *    for cross-record replay — demonstrably worse on PrepayWorkspacePanel, where
- *    batch B would receive batch A's receipt and clear B's allocations unapplied.
- *    Fixing them needs the key bound to the REQUEST PAYLOAD (the
- *    fingerprintIntentPayload approach), not to the URL. Tracked in
- *    docs/manual/KNOWN_ISSUES.md.
- *
- * Do NOT add a file here to make the suite pass. An entry means "known broken,
- * deliberately deferred, written down" — if that is not true, fix the site instead.
+ * Do NOT add a file here to make the suite pass. An entry means "the scanner flags it
+ * and the reason is written down" — if that is not true, fix the site instead.
  */
 /**
  * IDENTITY-PINNED, not count-pinned and not file-exempted.
@@ -250,55 +238,6 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
  * them would still pass. Narrowing that further needs an AST, not a line scan.
  */
 const KNOWN_UNFIXED_SITES: Record<string, string[]> = {
-  // JobDetail went 5 -> 6 -> 3 across rounds 3, 4 and 5. Round 4 corrected the filter
-  // and surfaced a sixth; round 5 showed that TWO of the six were never defects
-  // (Save as Recipe and Complete Job are modal openers that deliberately rotate
-  // intent), and that a third hit existed only because a COMMENT mentioning `.update(`
-  // fooled the scanner into thinking a call preceded it.
-  //
-  // Precisely (Codex round-6 LOW): only Complete Job's classification CHANGED, because
-  // its onClick opens eight lines above its reset and the window was four. Save as
-  // Recipe already classified as intent-rotation — its handler and reset share one
-  // line — and dropped out only when JobDetail was added to ALLOWED_REASONS.
-  //
-  // THE SCANNER UNDERCOUNTS THIS FILE. Two real defects are invisible to it because
-  // they are a DIFFERENT SHAPE — a reset placed BEFORE the call that uses the key,
-  // rather than before the assert: `runJobSave` (`saveJobIdem.resetKey()` on its first
-  // line) and `assignWithOverride` (`assignIdem.resetKey()` on its first line). Both
-  // hand an exact retry a brand-new key. This guard only reports reset-before-assert,
-  // so neither appears below. Do not read this list as the file's defect count
-  // (Codex round-5 MEDIUM).
-  'src/pages/JobDetail.tsx': [
-    'completeJobIdem.resetKey',
-    'saveJobIdem.resetKey',
-  ],
-  'src/pages/QuoteBuilder.tsx': [
-    'closeAppliedIdem.resetKey',
-    'closeShortIdem.resetKey',
-    'drawDownIdem.resetKey',
-    'fromTemplateIdem.resetKey',
-    'rolloverIdem.resetKey',
-  ],
-  'src/pages/BlendTicketDetail.tsx': [
-    'approveIdem.resetKey',
-    'createOrderIdem.resetKey',
-    'linkIdem.resetKey',
-    'linkIdem.resetKey',
-    'rejectIdem.resetKey',
-    'unlinkIdem.resetKey',
-  ],
-  'src/components/prepay/PrepayWorkspacePanel.tsx': ['batchApplyIdem.resetKey'],
-  'src/components/invoices/FinanceChargePreviewModal.tsx': ['financeChargeIdem.resetKey'],
-  // QuickDeliveryModal is ALSO allowlisted for 'recovery': its correct recovery reset
-  // is excused per-site and only the defective one is pinned here.
-  'src/components/deliveries/QuickDeliveryModal.tsx': ['quickDeliveryIdem.resetKey'],
-  'src/pages/Deliveries.tsx': ['batchCancelIdem.resetKey'],
-  'src/pages/DeliveryRemainders.tsx': ['followupIdem.resetKey'],
-  'src/pages/Invoices.tsx': ['batchDeleteIdem.resetKey', 'batchVoidIdem.resetKey'],
-  'src/pages/NewOrder.tsx': ['createOrderIdem.resetKey'],
-  'src/pages/PaymentAllocation.tsx': ['allocatePaymentIdem.resetKey'],
-  'src/pages/Quotes.tsx': ['duplicateQuoteIdem.resetKey'],
-  'src/pages/FieldSetup.tsx': ['saveFieldIdem.resetKey'],
   // OrderDetail and DeliveryDetail left this list in replay-binding batch 3b (20261019235000):
   // void_order, cancel_delivery and void_delivery are now bound to the exact request on the
   // server and keyed per (record, reason) on the screen, so each reset follows its verified reply.

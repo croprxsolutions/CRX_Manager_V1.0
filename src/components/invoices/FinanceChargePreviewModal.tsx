@@ -19,6 +19,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { sanitizeError, supabase, assertRpcResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import { fingerprintIntentPayload } from '../../lib/idempotency';
 import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { LoadFailedState } from '../ui/EmptyState';
 import type { FinanceChargePreview } from '../../types';
@@ -126,17 +127,18 @@ export default function FinanceChargePreviewModal({
     }
     setGenerating(true);
     try {
-      const idemKey = financeChargeIdem.getKey();
+      // One key per exact run: a retry reuses it, a different date or customer set gets its own.
+      const scope = fingerprintIntentPayload([asOfDate, customerIds ?? null]);
       const params = {
         p_as_of_date: asOfDate,
         p_performed_by: profile.id,
-        p_idempotency_key: idemKey,
+        p_idempotency_key: financeChargeIdem.getKeyFor(scope),
         ...(customerIds ? { p_customer_ids: customerIds } : {}),
       };
       const { data, error } = await supabase.rpc('generate_finance_charges', params);
       if (error) throw error;
-      financeChargeIdem.resetKey();
       const result = assertRpcResult<{ charges_generated: number; details: unknown[] }>(data, 'generate_finance_charges');
+      financeChargeIdem.resetKeyFor(scope);
       if (result.charges_generated === 0) {
         toast('info', 'No finance charges were generated');
       } else {

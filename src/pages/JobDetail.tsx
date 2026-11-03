@@ -17,7 +17,7 @@ import { supabase, checkMutationResult, assertRpcResult, assertTransferDataPrese
 import { warnIfOverCreditLimit } from '../lib/creditLimit';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
-import { getIdempotencyBindingRejection } from '../lib/idempotency';
+import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { getLicenseStatus, licenseStatusLabel } from '../lib/licenseStatus';
 import { generateWpsNoticePdf } from '../lib/wpsNoticePdf';
 import { generateApplicatorSheetPdf } from '../lib/applicatorSheetPdf';
@@ -2602,7 +2602,6 @@ export default function JobDetail() {
   };
 
   const runJobSave = async (overrideReasonForAudit?: string) => {
-    saveJobIdem.resetKey();
     // Second layer of the billing-hazard guard. handleSave already blocks this and is the
     // only path a user can reach today, but runJobSave is the chokepoint EVERY save funnels
     // through (including the admin over-label-rate override), so the arithmetic guarantee
@@ -2682,17 +2681,18 @@ export default function JobDetail() {
 
   /** Assign the applicator via the override RPC (admin-only path, B5). */
   const assignWithOverride = async (jobId: string) => {
-    assignIdem.resetKey();
+    // One key per job and applicator: an exact retry reuses it, a different pick gets its own.
+    const assignScope = fingerprintIntentPayload([jobId, applicatorId]);
     const { data, error } = await supabase.rpc('assign_job_applicator', {
       p_job_id: jobId,
       p_applicator_id: applicatorId,
       p_license_override: true,
       p_performed_by: profile!.id,
-      p_idempotency_key: assignIdem.getKey(),
+      p_idempotency_key: assignIdem.getKeyFor(assignScope),
     });
     if (error) throw error;
     assertRpcResult(data, 'assign_job_applicator');
-    assignIdem.resetKey();
+    assignIdem.resetKeyFor(assignScope);
   };
 
   // U13 (#15-21/#111): open the Dispatch Board wizard SCOPED to just this job's
@@ -2899,14 +2899,15 @@ export default function JobDetail() {
         }
       };
 
-      const idemKey = saveJobIdem.getKey();
+      // One key per job and exact payload: an exact retry reuses it, an edited form gets its own.
+      const saveScope = fingerprintIntentPayload([isNew ? null : id, payload, fieldsPayload, chemsPayload]);
       const { data, error } = await supabase.rpc('save_job', {
         p_job_id: (isNew ? null : id) as string,
         p_job_payload: payload,
         p_fields: fieldsPayload,
         p_chemicals: chemsPayload,
         p_performed_by: profile!.id,
-        p_idempotency_key: idemKey,
+        p_idempotency_key: saveJobIdem.getKeyFor(saveScope),
       });
 
       if (error) throw error;
@@ -2914,8 +2915,8 @@ export default function JobDetail() {
         displacementCommitted = true;
         notifyDisplacedApplicators(id as string);
       }
-      saveJobIdem.resetKey();
       const result = assertRpcResult<SaveJobResult>(data, 'save_job');
+      saveJobIdem.resetKeyFor(saveScope);
       const savedJobIdForNotify = isNew ? result.job_id : (id as string);
 
       // Fires HERE — at the commit point — not on the success path further down, because two
@@ -3215,6 +3216,8 @@ export default function JobDetail() {
 
   const handleComplete = async () => {
     const stillOnThisJob = captureRouteEpoch();
+    // One key per job and exact completion details: a retry reuses it, edited details get their own.
+    const completeScope = fingerprintIntentPayload([id, appliedInfo]);
     setCompleting(true);
     try {
       // #68: after-the-fact completion — the office is recording a job that was
@@ -3233,16 +3236,15 @@ export default function JobDetail() {
         assertRpcResult(startData, 'start_job');
         startJobIdem.resetKey();
       }
-      const idemKey = completeJobIdem.getKey();
       const { data, error } = await supabase.rpc('complete_job', {
         p_job_id: id!,
         p_applied_info: appliedInfo,
         p_performed_by: profile!.id,
-        p_idempotency_key: idemKey,
+        p_idempotency_key: completeJobIdem.getKeyFor(completeScope),
       });
       if (error) throw error;
-      completeJobIdem.resetKey();
       const result = assertRpcResult<CompleteJobResult>(data, 'complete_job');
+      completeJobIdem.resetKeyFor(completeScope);
       if (profile) logActivity({ event: 'job_completed', description: `Job ${jobNumber} completed → App Record ${result.record_number}`, performedBy: profile.id });
       // Completion committed; the activity log above records it either way. Everything
       // below writes to whatever job is on screen NOW, so it is gated on that still
@@ -3259,7 +3261,7 @@ export default function JobDetail() {
       // attempt committed: the next try runs fresh and the body refuses a record no longer in_progress.
       // Close the modal and reload so a completion an earlier attempt already committed shows.
       if (getIdempotencyBindingRejection(err)) {
-        completeJobIdem.resetKey();
+        completeJobIdem.resetKeyFor(completeScope);
         if (stillOnThisJob()) {
           setShowCompleteModal(false);
           fetchJob();
@@ -3984,7 +3986,6 @@ export default function JobDetail() {
                   toast('warning', 'You have unsaved changes — click Save Changes first, then complete the job.');
                   return;
                 }
-                completeJobIdem.resetKey();
                 setShowCompleteModal(true);
               }}
             >

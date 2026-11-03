@@ -25,6 +25,7 @@ import { CsbLookupError, findCsbFeatureAt, type CsbFeature } from '../lib/csbLoo
 import { CsbAdoptError, csbFeatureToDrawnParts } from '../lib/csbAdopt';
 import { canRemoveSingleBoundary } from '../lib/fieldBoundaryState';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { fingerprintIntentPayload } from '../lib/idempotency';
 import { Sentry } from '../lib/sentry';
 import { computeBounds } from '../hooks/useFitBounds';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
@@ -601,20 +602,21 @@ function FieldSetupPage() {
         pricing_note: s.pricing_note || null,
       }));
 
-      const idemKey = saveFieldIdem.getKey();
+      // One key per field and exact payload: an exact retry reuses it, an edited form gets its own.
+      const saveScope = fingerprintIntentPayload([isNew ? null : id, fieldPayload, billingPayload]);
       const { data, error } = await supabase.rpc('save_field', {
         p_field_id: (isNew ? null : id) as string,
         p_field_payload: fieldPayload,
         p_billing_defaults: billingPayload,
         p_performed_by: profile!.id,
-        p_idempotency_key: idemKey,
+        p_idempotency_key: saveFieldIdem.getKeyFor(saveScope),
       });
 
       if (error) {
         toast('error', rpcAuthErrorMessage(error) ?? error.message);
       } else {
-        saveFieldIdem.resetKey();
         assertRpcResult(data, 'save_field');
+        saveFieldIdem.resetKeyFor(saveScope);
         const savedFieldId = isNew ? data : id;
 
         // The field record is saved; now persist its acreage. Track whether any acreage RPC

@@ -170,11 +170,14 @@ try {
       const gp = gitTry(["rev-parse", "--git-path", rel], wtPath);
       if (gp.ok) newest = Math.max(newest, mtime(path.resolve(wtPath, gp.out.trim())));
     }
-    const stateDir = path.join(wtPath, ".claude", "session-state");
-    try {
-      newest = Math.max(newest, mtime(stateDir));
-      for (const name of readdirSync(stateDir)) newest = Math.max(newest, mtime(path.join(stateDir, name)));
-    } catch { /* no session-state → contributes nothing */ }
+    // Codex and agent sessions keep their own state folders.
+    for (const owner of [".claude", ".codex", ".agents"]) {
+      const stateDir = path.join(wtPath, owner, "session-state");
+      try {
+        newest = Math.max(newest, mtime(stateDir));
+        for (const name of readdirSync(stateDir)) newest = Math.max(newest, mtime(path.join(stateDir, name)));
+      } catch { /* no session-state → contributes nothing */ }
+    }
     return newest;
   }
 

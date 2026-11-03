@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied.** `20261105090000_vendor_only_product_links.sql` (LF SQL sha256: `c2d18939f5691fb13e560c6cd51130ed3552836456743039855183b70472a6c8`). WP-PM-15b step 1, Mason's DATA-11 decision 1 (2026-11-03): a link may name only the vendor, with item details not yet known.
+**APPLIED LIVE 2026-11-03 (PR #1381).** `20261105090000_vendor_only_product_links.sql` (LF SQL sha256: `c2d18939f5691fb13e560c6cd51130ed3552836456743039855183b70472a6c8`). WP-PM-15b step 1, Mason's DATA-11 decision 1 (2026-11-03): a link may name only the vendor, with item details not yet known.
 
 What it does:
 - `product_supplier_links.supplier_product_name` may be NULL. A new check, `product_supplier_links_vendor_only_shape`, requires SKU, unit, pack, conversion to be NULL and comparison `pending` whenever it is. Every existing row has a name, so the check validates against today's data.

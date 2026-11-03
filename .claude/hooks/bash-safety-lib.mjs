@@ -384,7 +384,9 @@ export function checkDestructiveSql(cmd) {
   const clientOutsideReader = splitShellSegments(text).some((segment) => {
     const unquoted = segment.replace(/["'`^\\]/g, "");
     return (SQL_CLIENT_RE.test(segment) || SQL_CLIENT_RE.test(unquoted)) &&
-      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || !plainReaderSegment(segment) || /(?:^|\s)--pre\b/.test(unquoted));
+      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || !plainReaderSegment(segment) || /(?:^|\s)--pre\b/.test(unquoted) ||
+        // rg options that run a program, as read-only-search-lib's rgOptionRunsProgram lists them.
+        (sqlSegmentProgram(segment) === "rg" && /(?:^|\s)(?:--(?:hostname-bin|search-zip)\b|-[^-\s]*z)/i.test(unquoted)));
   });
   if (clientOutsideReader || flagOutsideReader) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";

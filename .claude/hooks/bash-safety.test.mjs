@@ -91,6 +91,10 @@ ok(checkDangerousCommand(`grep() { psql -c 'DROP TABLE customers'; }; grep x f`)
 ok(checkDangerousCommand(`rg 'DROP TABLE' psql.log *`), "an unquoted glob can expand into rg --pre, so rg loses the exemption (Codex App, PR #1337)");
 ok(!checkDangerousCommand(`rg 'DROP TABLE|psql' '*.sql'`), "a quoted glob is passed to rg as text and stays allowed");
 ok(checkDangerousCommand(`grep "DROP TABLE ”; psql < wipe.sql; echo “" f`), "a PowerShell smart quote cannot hide a client (Codex App, PR #1337)");
+ok(checkDangerousCommand(`rg --hostname-bin psql 'DROP TABLE' notes.md`), "rg --hostname-bin runs a program, so it stays refused (Codex App, PR #1337)");
+ok(checkDangerousCommand(`rg --search-zip 'DROP TABLE|psql' notes.md`), "rg --search-zip runs a decompressor, so it is not exempt");
+ok(checkDangerousCommand(`rg -nz 'DROP TABLE|psql' notes.md`), "rg's short -z bundle is --search-zip");
+ok(!checkDangerousCommand(`rg -n 'DROP TABLE|psql' notes.md`), "an ordinary rg flag stays allowed");
 ok(!checkDangerousCommand(`grep -n 'psql $(x) DROP TABLE' notes.md`), "a single-quoted $( in a reader pattern runs nothing and stays allowed");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");

@@ -381,6 +381,21 @@ function sqlSegmentProgram(segment) {
   const word = (String(segment).trim().split(/\s+/)[0] || "").replace(/["'`^\\]/g, "");
   return word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").toLowerCase();
 }
+// The program a segment really runs, past `VAR=x` assignments and wrappers that
+// run their argument (`env node …`, `nohup python …`; Luna, 2026-11-03).
+const SQL_WRAPPERS = new Set(["env", "command", "exec", "nohup", "time", "timeout", "sudo", "doas", "xargs", "nice", "ionice", "stdbuf", "setsid", "builtin", "start", "call", "&"]);
+function sqlRunnerProgram(segment) {
+  const words = String(segment).trim().split(/\s+/);
+  let k = 0;
+  while (k < words.length) {
+    const word = words[k].replace(/["'`^\\]/g, "");
+    const name = word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").toLowerCase();
+    if (/^[A-Za-z_]\w*=/.test(word) || /^-/.test(word) || /^\d+[smhd]?$/.test(word)) { k += 1; continue; }
+    if (SQL_WRAPPERS.has(name)) { k += 1; continue; }
+    return name;
+  }
+  return "";
+}
 const sqlReaderHead = (segment) => SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || sqlSegmentInert(segment);
 // Allowlist, not a blocklist: every escape, expansion, comment or quoting quirk
 // bash and PowerShell read differently (`$'…'`, `\"`, `\;`, `<#…#>`, backtick,
@@ -421,11 +436,13 @@ export function checkDestructiveSql(cmd) {
         // rg options that run a program, as read-only-search-lib's rgOptionRunsProgram lists them.
         (sqlSegmentProgram(segment) === "rg" && /(?:^|\s)(?:--(?:hostname-bin|search-zip)\b|-[^-\s]*z)/i.test(unquoted)));
   });
+  // Split WITHOUT honouring quotes on purpose: PowerShell and cmd.exe quote
+  // differently from bash, and an extra split can only over-refuse.
   let at = 0;
   const scriptRunner = text.split(/(\|\||&&|[;\r\n|&]+)/).some((segment) => {
     const start = at;
     at += segment.length;
-    return SQL_SCRIPT_RUNNERS.has(sqlSegmentProgram(segment)) && DESTRUCTIVE_SQL_RE.test(text.slice(start));
+    return SQL_SCRIPT_RUNNERS.has(sqlRunnerProgram(segment)) && DESTRUCTIVE_SQL_RE.test(text.slice(start));
   });
   if (clientOutsideReader || flagOutsideReader || scriptRunner) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";

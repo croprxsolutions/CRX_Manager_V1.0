@@ -110,6 +110,11 @@ for (const [command, label] of [
   ["bash -c 'psql -c \"DROP TABLE x\"'", "bash -c psql"],
   ["sh <<'EOF'\npsql -c 'TRUNCATE x'\nEOF", "heredoc fed to sh"],
   ["cat wipe.sql | psql \"$DB\" # DROP TABLE", "file piped into psql"],
+  // Luna, 2026-11-03: wrappers in front of the runner.
+  ["env node -e \"new (require('pg').Client)().query('DROP TABLE x')\"", "env node"],
+  ["PGHOST=x nohup python3 run.py 'TRUNCATE customers'", "assignment + nohup python"],
+  ["timeout 30 node run.mjs 'DROP SCHEMA public'", "timeout node"],
+  ["env -i PATH=/usr/bin /usr/bin/node -e 'DROP TABLE x'", "env -i with a path-qualified node"],
 ]) ok(checkDangerousCommand(command), `SQL route stays refused: ${label}`);
 // Text that runs nothing stays allowed, including a script run BEFORE the words.
 for (const command of [

@@ -123,7 +123,8 @@ assert.equal(leadingCdFolder("cd C:/x; git status"), "C:/x");
 assert.equal(leadingCdFolder("cd C:/x;; git status"), null);
 // P1 (2026-11-03): Git Bash `/c/...` paths name the real drive on Windows.
 assert.equal(nativeFolder("/c/CRX_Manager/x", "win32"), "C:/CRX_Manager/x");
-assert.equal(nativeFolder("/d", "win32"), "D:");
+assert.equal(nativeFolder("/d", "win32"), "D:/");
+assert.equal(nativeFolder("/d/", "win32"), "D:/");
 assert.equal(nativeFolder("/cx/y", "win32"), "/cx/y");
 assert.equal(nativeFolder("/c/x", "linux"), "/c/x");
 // A data-only here-document never runs the push it mentions.
@@ -138,6 +139,10 @@ for (const command of [
   `cat > a.md <<'EOF'\ngit ${pushVerb} origin main\n`,
   `cat <<'EOF' \\\n| bash\ngit ${pushVerb} origin main\nEOF`,
   `bash \\\ncat <<'EOF'\ngit ${pushVerb} origin main\nEOF`,
+  // Luna BLOCKER: an opener inside quotes, or after an earlier non-data heredoc.
+  `echo "; cat <<'EOF'"\ngit ${pushVerb} origin HEAD:main\nEOF`,
+  `echo '\n; cat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
+  `bash <<'X'\ncat <<'EOF'\nX\ngit ${pushVerb} origin HEAD:main\nEOF`,
 ]) assert.equal(isGitPush(withoutDataHeredocs(command)), true, command);
 assert.equal(pushContextIsAmbiguous("$env:GIT_DIR='C:/other/.git'; git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("GIT_WORK_TREE=/tmp/other git push origin main"), true);

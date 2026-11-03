@@ -1046,6 +1046,13 @@ for (const command of [
   "rm -rf .claude/worktrees/wt-a/src/$X",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf ../wt-b",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .claude",
+  // Luna, 2026-11-03: the worktree root itself, or a glob that reaches its `.claude`.
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf ./",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf *",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .*",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .[!.]*",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && mv . /tmp/x",
   "cd C:/CRX_Manager/.claude/worktrees && rm -rf wt-a",
   "git -C C:/CRX_Manager/.claude/worktrees/wt-a clean -fdx",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && find . -delete",

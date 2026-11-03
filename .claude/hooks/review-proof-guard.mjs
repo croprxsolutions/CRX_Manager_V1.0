@@ -612,7 +612,10 @@ if (shellTool) {
   // repo's own `.claude` (pinned exploit rounds 2 and 4).
   const cdEntersWorktree = cdTargetsSeen.some((t) => /(?:^|[/\\])\.claude[/\\]+worktrees(?:[/\\]|$)/i.test(t)) ||
     (cdTargetsSeen.some((t) => /[$%`*?[\]{}]/.test(t)) && destructiveViews.some((v) => /\.claude[/\\]+worktrees(?![\w-])/i.test(v)));
-  const climbsOut = (v) => /(?:^|[\s"'=:/\\({,])\.\.(?=[/\\]|$|[\s"';&|)<>,}])/.test(v);
+  // …and a target that is the worktree root itself or can glob onto its `.claude`
+  // (`.`, `./`, `*`, `.*`, `.[!.]*`, `.?*`) erases its state (Luna, 2026-11-03).
+  const climbsOut = (v) => /(?:^|[\s"'=:/\\({,])\.\.(?=[/\\]|$|[\s"';&|)<>,}])/.test(v) ||
+    /(?:^|[\s"'=({,])(?:\.[/\\]*|\.?\*|\.[[?][^\s"';&|)<>,}]*)(?=$|[\s"';&|)<>,}])/.test(v);
   if ((cdEntersRepoClaude && destructiveViews.some(hitsDestructiveVerb)) ||
       (cdEntersWorktree && destructiveViews.some((v) => hitsDestructiveVerb(v) && climbsOut(v)))) {
     deny("REVIEW PROOF GUARD: a delete or move after cd into the repo's .claude folder is blocked — that folder holds the guard hooks, workflow sources and wrapper-owned review state. Run the command from the repo root with the full path so the guard can see what it touches.");

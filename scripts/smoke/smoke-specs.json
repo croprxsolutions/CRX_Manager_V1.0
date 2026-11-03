@@ -1734,6 +1734,17 @@
       "area": [
         "security"
       ]
+    },
+    "link_product_vendor": {
+      "chain": "smoke-link_product_vendor_vendor_only.sql",
+      "container_prover": "prove-vendor-only-links-real-schema.mjs",
+      "description": "REQUIRES 20261105090000. Vendor-only product links (WP-PM-15b step 1): the body is pinned and anon cannot execute it; on a real unlinked product an admin's first link is recorded with no item facts and not reusable, is preferred even when not asked, replays under the same key, and switching to a second vendor leaves exactly one preferred, with the product's vendor text untouched; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED and a signed-out visitor is refused EXECUTE.",
+      "covers": [
+        "link_product_vendor"
+      ],
+      "area": [
+        "security"
+      ]
     }
   }
 }

@@ -5,12 +5,12 @@
 // Run: node scripts/backup-claude-memory.test.mjs
 
 import assert from "node:assert/strict";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 import {
   INDEX_FILE,
@@ -46,7 +46,7 @@ let pass = 0;
 const ok = (condition, message) => { assert.ok(condition, message); pass += 1; };
 const eq = (actual, expected, message) => { assert.equal(actual, expected, message); pass += 1; };
 
-const root = mkdtempSync(path.join(os.tmpdir(), "backup-memory-test-"));
+const root = tempDir("backup-memory-test-");
 const fresh = (name) => { const dir = path.join(root, name); mkdirSync(dir, { recursive: true }); return dir; };
 
 // The suite must test the SCRIPT, not the git configuration of whatever machine

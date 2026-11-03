@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from './lib/test-temp-dir.mjs';
 import {
   applyDraftWindowsHold,
   applyPriorFullProof,
@@ -72,7 +72,7 @@ function commitAll(root, message) {
 }
 
 function createRepo() {
-  const root = mkdtempSync(path.join(tmpdir(), 'crx-ci-scope-'));
+  const root = tempDir('crx-ci-scope-');
   git(root, ['init', '--initial-branch=main', '--template=']);
   const isolatedHooks = path.join(root, '.git', 'test-hooks');
   mkdirSync(isolatedHooks, { recursive: true });
@@ -521,7 +521,7 @@ equal(
   for (const run of ['npm run lint', 'npm run typecheck', 'npm run build', 'npm audit --audit-level=high', 'npm run test:ci-scope', 'npm run check:docs']) {
     equal(jobSlice('lint-typecheck-build').includes(`run: ${run}`), true, `lint/build part runs ${run}`);
   }
-  for (const run of ['npm run test:supplier-pricing-phase3c-packet', 'npm run check:pricing-phase2-live-smoke', 'npm run check:smoke-product-inserts', 'npm run test:agent-workflows', 'npm run test:contracts']) {
+  for (const run of ['npm run test:supplier-pricing-phase3c-packet', 'npm run check:pricing-phase2-live-smoke', 'npm run check:smoke-product-inserts', 'node scripts/run-correction-guards.mjs test:agent-workflows', 'npm run test:contracts']) {
     equal(jobSlice('regression-tests').includes(`run: ${run}`), true, `regression part runs ${run}`);
   }
 }

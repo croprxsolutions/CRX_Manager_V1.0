@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { scratchHookEnvironment } from "./git-test-env.mjs";
 import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded, nativeFolder } from "./codex-push-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const now = Date.parse("2026-07-13T18:00:00.000Z");
 const sha = "a".repeat(40);
@@ -1211,7 +1211,7 @@ assert.equal(pushDestinationToken("git push"), null);
 // through. Exercising the HOOK is the only thing that proves the gate closed.
 {
   const HOOK = path.join(path.dirname(fileURLToPath(import.meta.url)), "codex-push-guard.mjs");
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "codex-push-guard-env-"));
+  const tmp = tempDir("codex-push-guard-env-");
   const work = path.join(tmp, "work");
   const dest = path.join(tmp, "dest.git");
   const git = (args, cwd) => spawnSync("git", args, { cwd, encoding: "utf8", env: scratchHookEnvironment(cwd, process.env) });
@@ -2440,7 +2440,7 @@ assert.equal(pushDestinationToken("git push"), null);
 // `pwsh -enc <base64 of a force-push to main>` passed this guard untouched.
 {
   const HOOK = path.join(path.dirname(fileURLToPath(import.meta.url)), "codex-push-guard.mjs");
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "codex-push-guard-nested-"));
+  const tmp = tempDir("codex-push-guard-nested-");
   const encode = (text) => Buffer.from(text, "utf16le").toString("base64");
   const runHook = (command) => {
     const res = spawnSync(process.execPath, [HOOK], {
@@ -2542,7 +2542,7 @@ assert.equal(pushDestinationToken("git push"), null);
 
   // The real hooks, end to end.
   const hooksDir = path.dirname(fileURLToPath(import.meta.url));
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "push-parse-time-"));
+  const tmp = tempDir("push-parse-time-");
   const hooks = [
     ["Claude push guard", path.join(hooksDir, "codex-push-guard.mjs"), (command) => ({ tool_name: "Bash", cwd: tmp, tool_input: { command } })],
     ["Codex production guard", path.join(hooksDir, "..", "..", ".codex", "hooks", "production-action-guard.mjs"),

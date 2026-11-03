@@ -2,10 +2,10 @@
 // routine lock-down on objects the migration creates applies by itself;
 // anything that widens access or changes existing access is his.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { accessChangeCheck, dataRewriteCheck, readMigrationHistory } from "./migration-access-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 let pass = 0;
 // Default: an empty history, i.e. nothing in these snippets existed before.
@@ -276,7 +276,7 @@ pass += rewrites;
 
 // readMigrationHistory: only files that sort before the current one, oldest first.
 {
-  const dir = mkdtempSync(path.join(tmpdir(), "access-history-"));
+  const dir = tempDir("access-history-");
   try {
     for (const name of ["20260103000000_c.sql", "20260101000000_a.sql", "20260102000000_now.sql", "notes.md"]) writeFileSync(path.join(dir, name), `-- ${name}`);
     const history = readMigrationHistory(dir, "20260102000000_now");

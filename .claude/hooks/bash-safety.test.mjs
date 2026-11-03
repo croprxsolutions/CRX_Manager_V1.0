@@ -86,6 +86,7 @@ ok(checkDangerousCommand('rg "DROP TABLE" x\\| psql < wipe.sql'), "an unquoted b
 ok(checkDangerousCommand(`grep "DROP TABLE" f <# ' #>; psql < wipe.sql; echo '`), "a PowerShell block comment cannot hide a client (Codex App, PR #1337)");
 ok(checkDangerousCommand('grep "DROP TABLE" f --% "; psql < wipe.sql'), "PowerShell's stop-parsing token cannot hide a client");
 ok(checkDangerousCommand(`rg 'DROP TABLE' psql.log @opts`), "PowerShell splatting can hide --pre, so it is not a plain reader (Luna, PR #1337)");
+ok(checkDangerousCommand('./grep "DROP TABLE" psql -c "DROP TABLE customers"'), "a path-qualified reader name may be any program (Luna, PR #1337)");
 ok(!checkDangerousCommand(`grep -n 'psql $(x) DROP TABLE' notes.md`), "a single-quoted $( in a reader pattern runs nothing and stays allowed");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");

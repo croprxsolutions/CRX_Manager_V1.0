@@ -362,7 +362,8 @@ function sqlSegmentProgram(segment) {
 // Outside quotes only plain word characters remain; a quoted span may not hold
 // `$` or a backtick (both shells expand them in double quotes) or end in `\`.
 function plainReaderSegment(segment) {
-  if (/[\r\n]|\\["']/.test(segment)) return false;
+  // A path-qualified head (`./grep`) may be any program, not the real reader (Luna).
+  if (/[\r\n]|\\["']/.test(segment) || /^\s*\S*[/\\]/.test(segment)) return false;
   return /^[\w\s./\\:*=,+#?-]*$/.test(segment.replace(/'[^']*'|"[^"$`]*"/g, ""));
 }
 export function checkDestructiveSql(cmd) {

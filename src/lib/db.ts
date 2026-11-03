@@ -280,6 +280,8 @@ export const RpcErrorCodes = {
   QUOTE_NOT_FOUND: 'QUOTE_NOT_FOUND',
   // save_quote / save_customer whole-record optimistic concurrency.
   QUOTE_STALE_WRITE: 'QUOTE_STALE_WRITE',
+  // save_quote (20261104130000): on another rep's sent booking, a rep may change prices only.
+  QUOTE_PRICE_ONLY_FOR_OTHER_REPS: 'QUOTE_PRICE_ONLY_FOR_OTHER_REPS',
   ORDER_STALE_WRITE: 'ORDER_STALE_WRITE',
   ORDER_EXPECTED_VERSION_REQUIRED: 'ORDER_EXPECTED_VERSION_REQUIRED',
   // restore_quote_version trust boundary (20260826220000). Legacy snapshots

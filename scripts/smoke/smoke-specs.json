@@ -897,6 +897,19 @@
         "security"
       ]
     },
+    "any_rep_changes_booked_prices": {
+      "chain": "smoke-any-rep-booked-prices.sql",
+      "description": "Migration 20261104130000 (Mason, 2026-10-30): another active sales rep revises a sent booking and lowers a price; it saves, the booking keeps its rep, the trail row names the rep who saved, and that rep's draw bills the new price with no re-send. A raise by that rep needs the Grower agreed tick like the owner's. A quantity, quantity and price, note, commission split or decline from that rep is refused QUOTE_PRICE_ONLY_FOR_OTHER_REPS and changes nothing; another rep's draft stays NOT_QUOTE_OWNER even with the price-only setting already set in the session; the booking's own rep still changes the quantity. Terminal rollback.",
+      "covers": [
+        "save_quote",
+        "create_quote_version",
+        "draw_down_quote"
+      ],
+      "area": [
+        "lifecycle",
+        "security"
+      ]
+    },
     "quote_commission_split_validation": {
       "chain": "smoke-quote-commission-split-validation.sql",
       "description": "Quote commission money-routing guard: blank or duplicate recipients and missing/JSON-null percentages fail closed on direct INSERT/UPDATE, while an explicit empty no-commission split and a complete named 100% split remain valid. Self-contained fixture and terminal rollback.",

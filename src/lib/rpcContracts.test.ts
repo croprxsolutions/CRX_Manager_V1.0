@@ -2806,6 +2806,9 @@ function registryMigrationHighWater(): string {
 // 20261103100000, 20261103120000 and 20261103130000 were added on 2026-11-02: they applied live
 // that evening and the wave-4 registry refresh moved the authored boundary to 20261103130000
 // while src/types/supabase.ts still predates them. Clear them on the same type-regeneration rule.
+// 20261104130000, 20261104140000 and 20261104150000 were added on 2026-11-03 for the same reason:
+// all three applied live that day and the registry refresh after WP-PM-9 moved the boundary to
+// 20261104150000.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2830,6 +2833,9 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261103100000',
   '20261103120000',
   '20261103130000',
+  '20261104130000',
+  '20261104140000',
+  '20261104150000',
 ]);
 
 /**

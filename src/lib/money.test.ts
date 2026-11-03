@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatCents, formatExactUSD, formatUSD, centsToDollarInput, centsTimesQuantity, isExactDecimalText, quantitySurvivesSave, sameExactDecimal } from './money';
+import { formatCents, formatExactCents, formatExactUSD, formatUSD, centsToDollarInput, centsTimesQuantity, isExactDecimalText, quantitySurvivesSave, sameExactDecimal } from './money';
 
 /**
  * money.ts is the canonical formatter for a codebase where money is stored as
@@ -11,6 +11,10 @@ import { formatCents, formatExactUSD, formatUSD, centsToDollarInput, centsTimesQ
  * Swapping them renders an amount off by 100x, silently.
  */
 describe('money', () => {
+  it('formats warning cents exactly above the safe number range', () => {
+    expect(formatExactCents(9007199254740993n)).toBe('$90,071,992,547,409.93');
+    expect(formatExactCents(-123n)).toBe('-$1.23');
+  });
   describe('formatCents — input is CENTS, divides by 100', () => {
     it('renders the documented example', () => {
       expect(formatCents(123456)).toBe('$1,234.56');

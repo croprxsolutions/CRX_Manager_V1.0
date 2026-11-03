@@ -2,6 +2,8 @@ import { useState } from 'react';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Modal from '../ui/Modal';
+import Select from '../ui/Select';
+import { PRICING_SOURCE_CHOICES, pricingSourceValue, type PricingSourceChoice } from './pricingSource';
 
 export interface PricingSourceReason {
   source: string;
@@ -13,8 +15,6 @@ interface PricingSourceReasonModalProps {
   busy: boolean;
   /** How many products the change covers, for the heading. */
   productCount: number;
-  /** A reason already typed elsewhere (the cost note), to start from. */
-  initialReason?: string;
   onCancel: () => void;
   onSubmit: (value: PricingSourceReason) => void;
 }
@@ -27,13 +27,17 @@ export default function PricingSourceReasonModal({
   open,
   busy,
   productCount,
-  initialReason = '',
   onCancel,
   onSubmit,
 }: PricingSourceReasonModalProps) {
-  const [source, setSource] = useState('');
-  const [reason, setReason] = useState(initialReason);
-  const ready = source.trim().length > 0 && reason.trim().length > 0;
+  const [choice, setChoice] = useState<PricingSourceChoice | ''>('');
+  const [detail, setDetail] = useState('');
+  const [reason, setReason] = useState('');
+  const source = pricingSourceValue(choice, detail);
+  const ready = source.length > 0 && source.length <= 200 && reason.trim().length > 0;
+  const detailHint = choice === 'Other' && !detail.trim()
+    ? 'Add a detail for Other.'
+    : !choice && detail.trim() ? 'Choose a source.' : null;
 
   return (
     <Modal
@@ -45,7 +49,7 @@ export default function PricingSourceReasonModal({
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onCancel} disabled={busy}>Cancel</Button>
           <Button
-            onClick={() => onSubmit({ source: source.trim(), reason: reason.trim() })}
+            onClick={() => onSubmit({ source, reason: reason.trim() })}
             disabled={!ready}
             loading={busy}
           >
@@ -59,15 +63,19 @@ export default function PricingSourceReasonModal({
           {productCount === 1 ? 'This change' : `These changes to ${productCount} products`} will be saved in the
           price history with the source and reason below.
         </p>
-        <Input
-          id="pricing-change-source"
-          label="Source (supplier, document, date)"
-          placeholder="e.g. Helena price list, Oct 2026"
-          value={source}
-          maxLength={200}
-          disabled={busy}
-          onChange={(event) => setSource(event.target.value)}
-        />
+        <Select id="pricing-change-source" label="Source" placeholder="Choose a source"
+          options={PRICING_SOURCE_CHOICES.map((value) => ({ value, label: value }))}
+          value={choice} disabled={busy}
+          onChange={(event) => setChoice(event.target.value as PricingSourceChoice | '')} />
+        <Input id="pricing-change-source-detail" label="Source detail"
+          placeholder="e.g. Helena, Oct 2026" value={detail} maxLength={200} disabled={busy}
+          required={choice === 'Other'}
+          aria-describedby={detailHint ? 'pricing-change-source-detail-hint' : undefined}
+          error={source.length > 200 ? 'Source and detail must be 200 characters or less.' : undefined}
+          onChange={(event) => setDetail(event.target.value)} />
+        {detailHint && (
+          <p id="pricing-change-source-detail-hint" className="text-sm text-secondary">{detailHint}</p>
+        )}
         <Input
           id="pricing-change-reason"
           label="Reason for the change"

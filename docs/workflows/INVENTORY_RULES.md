@@ -290,6 +290,26 @@ the ledger, receiving records and PO rows only. Product cost and tier prices cha
 pricing edit paths, and each change writes a `cost_history` row whose `change_source` is one of
 `pricing_worksheet`, `product_page`, `products_inline` (or `legacy_frontend` for old rows).
 
+### Cost-writer map (WP-PM-7 local candidate)
+
+The Product page's **Update cost** action, its cost-basis panel (supplier candidate,
+received purchase candidate, or manual replacement cost), Products-list inline edit,
+phone quick price change, and price workbook all use
+`preview_product_cost_basis_changes` → `approve_pricing_change_set` →
+`apply_product_cost_basis_change_set`. The database trigger refuses direct writes to
+`products.current_cost` and the other governed pricing fields. The Product page displays
+saved Current Cost as read-only; Update cost asks for a new cost and pricing mode, then
+the shared Source + Reason step asks for the reason once. Warning acknowledgements are
+separate approval reasons for warned products.
+
+Receiving and PO cost corrections change PO and inventory records, not
+`products.current_cost`. Bulk product import cannot set cost. The source picker offers
+Vendor price list, Rebate program, Market adjustment, PO cost, and Other. Optional detail
+is appended to a named choice; Other stores its required detail alone. Existing text
+sources remain untouched. The local candidate `20261104140000` adds `TIER_ORDER`, which compares
+the actual final cent price of each adjacent tier, including a stated $0, and requires
+acknowledgement when Tier 2 falls below Tier 1 or Tier 3 falls below Tier 2.
+
 ### Table: `cost_history`
 - `product_id`, `old_cost` / `new_cost`, `old_tierN_price` / `new_tierN_price` and `old_tierN_margin` / `new_tierN_margin` (N = 1–3), `change_source`, `change_reason`, `change_note`, `change_set_id`, `old_pricing_version` / `new_pricing_version`, `changed_by`, `changed_at`
 - Full column list: `.claude/schema-registry.json` → `columns.cost_history`

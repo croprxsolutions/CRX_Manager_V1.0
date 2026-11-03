@@ -1,6 +1,6 @@
 # Product Master: Wave 2 report (2026-11-02, attempt 2)
 
-## Current status (2026-11-03 1:15 PM Central)
+## Current status (2026-11-03 7:15 AM Central)
 
 **Status:** **1 landed** (Use Timing), **3 PRs open** (Corrections, One cost path, Seed/each forms), **4 waiting** on those PRs or not started. Wave 2 is **not finished**. Wave 3 has not started.
 
@@ -18,7 +18,7 @@
 | WP-PM-8b Incomplete badge, near-match warnings, rate help | Not started. | |
 | DM-0 Data clean-up | Your data step (vault list). | |
 
-**Stamp alert (found 1:15 PM Central).** Every database change is named with a stamp (a date and number), and a new one must sort above everything already live. Live is now at `20261104120000_balance_reports_flag_unrebuildable_customers`, applied 6:53 AM Central 11-03 by another PR. That is above both WP-PM-7's `20261103230000` and WP-PM-9's `20261104090000`. Both owner sessions were told to re-stamp with `npm run next-migration-stamp` (now on main): WP-PM-7 takes the lower new stamp and WP-PM-9 one above it. Each then re-runs its proof and Sol on the new head.
+**Stamp alert (found 7:15 AM Central).** Every database change is named with a stamp (a date and number), and a new one must sort above everything already live. Live is now at `20261104120000_balance_reports_flag_unrebuildable_customers`, applied 6:53 AM Central 11-03 by another PR. That is above both WP-PM-7's `20261103230000` and WP-PM-9's `20261104090000`. Both owner sessions were told to re-stamp with `npm run next-migration-stamp` (now on main): They agreed WP-PM-7 takes `20261104140000` and WP-PM-9 `20261104150000` (#1347 holds `20261104130000`). Each then re-runs its proof and Sol on the new head.
 
 **Landing order:** WP-PM-12b (no migration) any time after your click-through, then WP-PM-7, then WP-PM-9, then 6a, then 6b and 15a. Each applies its migration before its merge, and the next one merges main and re-checks.
 

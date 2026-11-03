@@ -136,6 +136,13 @@ export type MobileProduct = Pick<
   | 'tier2_price'
   | 'tier3_price'
   | 'is_active'
+  | 'product_form'
+  | 'inventory_unit'
+  | 'container_size'
+  | 'container_unit'
+  | 'signal_word'
+  | 'rei_hours'
+  | 'phi_days'
 >;
 
 // ─── EPA PPLS Lookup ────────────────────────────────────────────────────────

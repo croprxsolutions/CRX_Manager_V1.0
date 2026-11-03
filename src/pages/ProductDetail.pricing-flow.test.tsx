@@ -980,10 +980,10 @@ describe('ProductDetail governed pricing flow', () => {
     const timing = await screen.findByRole('checkbox', { name: 'Pre-Emerge Corn' });
     fireEvent.click(timing);
     fireEvent.click(timing);
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
-    expect(await screen.findByLabelText('Source (supplier, document, date)')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Source')).toBeInTheDocument();
     expect(mockToast).not.toHaveBeenCalledWith('error', 'Save or discard the unsaved Product details before reviewing a pricing change.');
   });
 });

@@ -21,7 +21,7 @@ If the user already described the change before invoking this skill, skip the qu
 1. Get the version stamp for the filename from the stamp helper. It reads `origin/main`, every
    local worktree and every open PR, and prints a stamp at least an hour above all of them, so it
    cannot collide with work in flight. When the migration will be applied live, first read the live
-   high-water read-only (`select max(greatest(version, coalesce(substring(name from '[0-9]{14}'), version))) from supabase_migrations.schema_migrations;`, which counts the stamp in each ledger row's name as well as its version, since a bare `max(version)` can sit below an applied name stamp) and pass it:
+   high-water read-only (`select greatest(max(version), (select max(m[1]) from supabase_migrations.schema_migrations s2, regexp_matches(s2.name, '([0-9]{14})', 'g') m)) from supabase_migrations.schema_migrations;`, which counts every stamp in each ledger row's name as well as its version, since a bare `max(version)` can sit below an applied name stamp) and pass it:
 
 ```bash
 npm run next-migration-stamp -- --live <live high-water>

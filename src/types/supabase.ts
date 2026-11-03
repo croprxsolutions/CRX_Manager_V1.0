@@ -13636,16 +13636,17 @@ export type Database = {
       get_ar_aging: {
         Args: { p_as_of_date?: string }
         Returns: {
-          current_amount: number
+          current_amount: number | null
           customer_id: string
-          days_30: number
-          days_60: number
-          days_90: number
+          days_30: number | null
+          days_60: number | null
+          days_90: number | null
           farm_name: string
-          open_credit_cents: number
-          over_90: number
-          prepay_balance_cents: number
-          total_outstanding: number
+          open_credit_cents: number | null
+          over_90: number | null
+          prepay_balance_cents: number | null
+          total_outstanding: number | null
+          unavailable_reason: string | null
         }[]
       }
       get_ar_reminder_candidates: { Args: never; Returns: Json }

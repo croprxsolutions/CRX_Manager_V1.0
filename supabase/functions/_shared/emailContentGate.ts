@@ -1,0 +1,140 @@
+// =============================================================================
+// Email content gate (audit finding 7, 2026-11-02)
+//
+// The browser still writes each email's subject and HTML, so send-email refuses
+// anything beyond plain formatting: no scripts, styles, forms or frames, and
+// links/images only to hosts our own templates use. It refuses rather than
+// rewrites, so what is logged in email_log is exactly what was sent.
+//
+// Pure, with no Deno or Supabase imports, so the app's Vitest suite tests it
+// directly (src/lib/emailContentGate.test.ts) against the real email builders.
+// =============================================================================
+
+const ALLOWED_TAGS = new Set([
+  "html", "head", "meta", "body",
+  "table", "thead", "tbody", "tr", "td", "th",
+  "h1", "h2", "h3", "h4", "p", "br", "hr", "div", "span",
+  "strong", "b", "em", "i", "u", "small", "ul", "ol", "li",
+  "a", "img",
+]);
+
+const ALLOWED_ATTRIBUTES = new Set([
+  "style", "width", "height", "align", "valign", "cellpadding", "cellspacing",
+  "border", "colspan", "rowspan", "bgcolor", "alt", "href", "src",
+  "charset", "name", "content",
+]);
+
+// The field-map snapshot and its live-map link (src/lib/proofNotification.ts),
+// plus our own site.
+const ALLOWED_URL_HOSTS = new Set([
+  "croprxsolutions.app",
+  "www.croprxsolutions.app",
+  "staticmap.openstreetmap.de",
+  "www.openstreetmap.org",
+]);
+
+// Map hosts get exactly the coordinate-only URLs proofNotification.ts builds, so no
+// caller data rides along to a third party when the email is opened.
+const COORD = String.raw`-?\d{1,3}\.\d{5}`;
+const MAP_URL_PATTERNS: Record<string, RegExp> = {
+  "staticmap.openstreetmap.de": new RegExp(
+    String.raw`^https://staticmap\.openstreetmap\.de/staticmap\.php\?center=` + `${COORD},${COORD}` +
+      String.raw`&zoom=\d{1,2}&size=\d{1,4}x\d{1,4}&markers=` + `${COORD},${COORD},red-pushpin$`,
+  ),
+  "www.openstreetmap.org": new RegExp(
+    String.raw`^https://www\.openstreetmap\.org/\?mlat=` + `${COORD}&mlon=${COORD}` +
+      String.raw`#map=\d{1,2}/` + `${COORD}/${COORD}$`,
+  ),
+};
+
+const MAX_SUBJECT_LENGTH = 200;
+const MAX_HTML_LENGTH = 200_000;
+
+// Sticky (y) regexes are matched at one position, so the scan stays linear.
+const DOCTYPE = /<!DOCTYPE html>/iy;
+const COMMENT = /<!--[^<>[\]]*-->/y;
+// Every attribute value must be quoted and free of < and >. Only HTML's own
+// whitespace (never JS \s, which also matches Unicode spaces) separates
+// attributes, so this parse and a mail client's parse always agree.
+const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:[\t\n\f\r ]+[a-zA-Z-]+(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"[^"<>]*"|'[^'<>]*'))?)*)[\t\n\f\r ]*\/?>/y;
+const ATTRIBUTE = /([a-zA-Z-]+)(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"([^"]*)"|'([^']*)'))?/g;
+// Entities, quotes and comments are refused outright: a mail client decodes or
+// strips them before reading the CSS.
+const UNSAFE_STYLE = /url|image|expression|@import|javascript|\\|&|"|'|\/\*/i;
+
+function urlProblem(value: string): string | null {
+  // escapeHtml turns & into &amp;; any other entity could hide a scheme.
+  if (/&(?!amp;)/.test(value)) return "Email link contains an encoded character";
+  let url: URL;
+  try {
+    url = new URL(value.replace(/&amp;/g, "&"));
+  } catch {
+    return "Email link is not a full web address";
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.port || !ALLOWED_URL_HOSTS.has(url.hostname)) {
+    return `Email links and images may only point to ${[...ALLOWED_URL_HOSTS].join(", ")}`;
+  }
+  const mapPattern = MAP_URL_PATTERNS[url.hostname];
+  if (mapPattern && !mapPattern.test(value.replace(/&amp;/g, "&"))) {
+    return "Map links and images must be the field-map address the app builds";
+  }
+  return null;
+}
+
+function hasControlCharacter(text: string): boolean {
+  return [...text].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127);
+}
+
+/** Why this subject + HTML body may not be sent, or null when it may. */
+export function emailContentProblem(subject: string, html: string): string | null {
+  if (!subject.trim() || subject.length > MAX_SUBJECT_LENGTH || hasControlCharacter(subject)) {
+    return `Email subject must be one line of plain text, at most ${MAX_SUBJECT_LENGTH} characters`;
+  }
+  if (html.length > MAX_HTML_LENGTH) return "Email body is too large";
+
+  let at = html.indexOf("<");
+  while (at !== -1) {
+    let end = -1;
+    for (const literal of [DOCTYPE, COMMENT]) {
+      literal.lastIndex = at;
+      if (literal.test(html)) end = literal.lastIndex;
+    }
+    if (end === -1) {
+      TAG.lastIndex = at;
+      const tag = TAG.exec(html);
+      if (!tag) return "Email body contains markup the server cannot verify";
+      const name = tag[2].toLowerCase();
+      if (!ALLOWED_TAGS.has(name)) return `Email body may not contain <${name}>`;
+      for (const attribute of tag[3].matchAll(ATTRIBUTE)) {
+        const attributeName = attribute[1].toLowerCase();
+        const value = attribute[2] ?? attribute[3] ?? "";
+        if (!ALLOWED_ATTRIBUTES.has(attributeName)) {
+          return `Email body may not use the ${attributeName} attribute`;
+        }
+        if (attributeName === "href" || attributeName === "src") {
+          const problem = urlProblem(value);
+          if (problem) return problem;
+        }
+        if (attributeName === "style" && UNSAFE_STYLE.test(value)) {
+          return "Email body style may not load or run anything";
+        }
+      }
+      end = TAG.lastIndex;
+    }
+    at = html.indexOf("<", end);
+  }
+  return null;
+}
+
+/** Why this attachment may not be sent, or null when it is a plainly named PDF. */
+export function attachmentProblem(filename: unknown, content: unknown): string | null {
+  if (typeof filename !== "string" || hasControlCharacter(filename) || !/^[^\\/:*?"<>|]{1,150}\.pdf$/i.test(filename)) {
+    return "Each attachment must be a PDF with a plain file name";
+  }
+  // "%PDF-" encodes to "JVBERi0" in base64. Only the file type is checked: a valid
+  // PDF can say anything, so parsing it deeper would add no safety.
+  if (typeof content !== "string" || !content.startsWith("JVBERi0") || !/^[A-Za-z0-9+/]*={0,2}$/.test(content)) {
+    return "Each attachment must be a base64 PDF";
+  }
+  return null;
+}

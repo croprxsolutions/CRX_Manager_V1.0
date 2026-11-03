@@ -75,15 +75,12 @@ INSERT INTO public.products(
 -- Dedicated complete-workbook follow-up fixtures. One Product deliberately has
 -- no cost; the other has an existing cost and will receive a governed change.
 INSERT INTO public.products(
-  id, product_name, sku, category, container_size, unit_size, inventory_unit,
-  current_cost, tier1_margin, tier2_margin, tier3_margin
+  id, product_name, sku, category, container_size, unit_size, inventory_unit
 ) VALUES
   ('ffffffff-ffff-4fff-8fff-fffffffffff1',
-   'Phase 2 Null Cost Workbook Product', 'P2-NULL', 'Herbicide', 1, 'gal', 'gal',
-   NULL, NULL, NULL, NULL),
+   'Phase 2 Null Cost Workbook Product', 'P2-NULL', 'Herbicide', 1, 'gal', 'gal'),
   ('ffffffff-ffff-4fff-8fff-fffffffffff2',
-   'Phase 2 Changed Workbook Product', 'P2-CHANGE', 'Herbicide', 1, 'gal', 'gal',
-   NULL, NULL, NULL, NULL);
+   'Phase 2 Changed Workbook Product', 'P2-CHANGE', 'Herbicide', 1, 'gal', 'gal');
 DO $proof$
 BEGIN
   IF (SELECT current_cost FROM public.products

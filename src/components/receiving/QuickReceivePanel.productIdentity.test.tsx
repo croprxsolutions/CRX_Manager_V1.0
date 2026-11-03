@@ -41,11 +41,11 @@ const siblings = [
   },
 ];
 
-function productQuery() {
+function productQuery(rows: unknown[] = siblings) {
   const builder: Record<string, unknown> = {};
   for (const method of ['select', 'eq', 'order', 'range']) builder[method] = vi.fn(() => builder);
   builder.then = (resolve: (value: unknown) => void) =>
-    Promise.resolve({ data: siblings, error: null }).then(resolve);
+    Promise.resolve({ data: rows, error: null }).then(resolve);
   return builder;
 }
 
@@ -88,7 +88,11 @@ vi.mock('../ui/Toast', () => ({
 
 vi.mock('../../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../../lib/db')>('../../lib/db');
-  return { ...actual, supabase: { from: vi.fn(() => productQuery()), rpc: mocks.rpc } };
+  return { ...actual, supabase: {
+    // Only Main Warehouse is an active warehouse (KI-85).
+    from: vi.fn((table: string) => productQuery(table === 'warehouses' ? [{ name: 'Main Warehouse' }] : siblings)),
+    rpc: mocks.rpc,
+  } };
 });
 
 vi.mock('../../lib/notificationTriggers', () => ({
@@ -279,7 +283,7 @@ describe('QuickReceivePanel Product identity', () => {
       condition: 'damaged',
       lot_number: null,
       notes: null,
-      storage_location: 'Cold Storage',
+      storage_location: 'Main Warehouse',
     }];
     const storageKey = `crx:uncertain-mutation:v4:${JSON.stringify([
       'receive_po_items',
@@ -304,7 +308,7 @@ describe('QuickReceivePanel Product identity', () => {
           notes: null,
           po_item_id: 'po-item-frozen',
           quantity: 3,
-          storage_location: 'Cold Storage',
+          storage_location: 'Main Warehouse',
         }],
         p_performed_by: 'user-1',
       }),
@@ -315,7 +319,7 @@ describe('QuickReceivePanel Product identity', () => {
         performedBy: 'user-1',
         receivedByName: 'Receiver',
         vendor: 'Vendor B',
-        storageLocation: 'Cold Storage',
+        storageLocation: 'Main Warehouse',
         matchResults: [frozenMatch],
         sourceItems: [sourceItem],
       },
@@ -403,12 +407,12 @@ describe('QuickReceivePanel Product identity', () => {
           condition: 'good',
           lot_number: null,
           notes: null,
-          storage_location: 'Cold Storage',
+          storage_location: 'Main Warehouse',
         }],
         performedBy: 'user-1',
         receivedByName: 'Receiver',
         vendor: 'Vendor B',
-        storageLocation: 'Cold Storage',
+        storageLocation: 'Main Warehouse',
         matchResults: [{
           product_id: 'product-b',
           product_name: 'Same Name',
@@ -452,5 +456,91 @@ describe('QuickReceivePanel Product identity', () => {
     await Promise.resolve();
     expect(mocks.rpc).not.toHaveBeenCalledWith('receive_po_items', expect.anything());
     expect(window.localStorage.getItem(storageKey)).toContain('expired-key');
+  });
+
+  it('caps a price-variance PO choice at what that line has left instead of over-receiving (KI-85)', async () => {
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'match_quick_receive_items') {
+        return { data: [{
+          product_id: 'product-b', product_name: 'Same Name', quantity_requested: 3, quantity_unmatched: 0, has_multiple_costs: true,
+          allocations: [
+            { po_item_id: 'po-item-low', purchase_order_id: 'po-low', po_number: 'PO-LOW', quantity_allocated: 2, unit_cost: 20, po_remaining_before: 2, po_remaining_after: 0 },
+            { po_item_id: 'po-item-high', purchase_order_id: 'po-high', po_number: 'PO-HIGH', quantity_allocated: 1, unit_cost: 25, po_remaining_before: 5, po_remaining_after: 4 },
+          ],
+        }], error: null };
+      }
+      if (name === 'receive_po_items') return { data: { receiving_record_ids: ['r-low'] }, error: null };
+      return { data: null, error: new Error(`Unexpected RPC ${name}`) };
+    });
+    render(<MemoryRouter><QuickReceivePanel /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Product' }));
+    fireEvent.click(await screen.findByRole('button', { name: /select product/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /SKU-B.*Family B/i }));
+    fireEvent.change(screen.getByRole('spinbutton', { name: /quantity received/i }), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: /review & match \(1 item\)/i }));
+    fireEvent.click(await screen.findByRole('radio', { name: /PO-LOW/ }));
+    expect(screen.getByText(/receives 2; skips 1/)).toBeInTheDocument();
+    expect(screen.getByText(/1 units exceed what the picked PO line has left/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirm & receive/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: /skip the extra units/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm & receive/i }));
+
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('receive_po_items', expect.objectContaining({
+      p_items: [expect.objectContaining({ po_item_id: 'po-item-low', quantity: 2 })],
+      p_allow_over_receive: false,
+    })));
+    // Wait out the post-receipt cleanup: left running, it writes this receipt's
+    // resolved record over the next test's saved request and hides its Retry.
+    expect(await screen.findByText(/successfully received 1 item allocation/i)).toBeInTheDocument();
+  });
+
+  it('offers only active warehouses as the storage location (KI-85)', async () => {
+    render(<MemoryRouter><QuickReceivePanel /></MemoryRouter>);
+    const picker = await screen.findByRole('combobox', { name: /storage location/i });
+    await waitFor(() => expect(
+      Array.from((picker as HTMLSelectElement).options).map((option) => option.value),
+    ).toEqual(['Main Warehouse']));
+  });
+
+  it('shows the refusal and claims no receipt when the server refuses an unknown location (KI-85)', async () => {
+    const frozenPayload = [{
+      po_item_id: 'po-item-old', quantity: 3, condition: 'good', lot_number: null, notes: null,
+      storage_location: 'Cold Storage',
+    }];
+    const storageKey = `crx:uncertain-mutation:v4:${JSON.stringify(['receive_po_items', 'user-1'])}`;
+    const record = {
+      version: 4, status: 'pending', requestVersion: 'old-version', claimTabIds: ['old-tab'], resolvedAtMs: null,
+      operation: 'receive_po_items', userId: 'user-1', surface: 'quick-receive', scope: '',
+      idempotencyKey: 'receive_po_items:user-1:old-key',
+      intentIdentity: JSON.stringify({
+        p_allow_over_receive: false,
+        p_items: [{ condition: 'good', lot_number: null, notes: null, po_item_id: 'po-item-old', quantity: 3, storage_location: 'Cold Storage' }],
+        p_performed_by: 'user-1',
+      }),
+      createdAtMs: Date.now(), retryNotAfterMs: Date.now() + (23 * 60 * 60 * 1000),
+      intent: {
+        itemsPayload: frozenPayload, performedBy: 'user-1', receivedByName: 'Receiver', vendor: 'Vendor B',
+        storageLocation: 'Cold Storage',
+        matchResults: [{
+          product_id: 'product-b', product_name: 'Same Name', quantity_requested: 3, quantity_unmatched: 0, has_multiple_costs: false,
+          allocations: [{ po_item_id: 'po-item-old', purchase_order_id: 'po-old', po_number: 'PO-OLD', quantity_allocated: 3, unit_cost: 25 }],
+        }],
+        sourceItems: [{ key: 'old-line', product_id: 'product-b', product_name: 'Same Name', sku: 'SKU-B', quantity: 3, condition: 'good', lot_number: '', notes: '' }],
+      },
+    };
+    window.localStorage.setItem(storageKey, JSON.stringify(record));
+    await seedPendingIntent(storageKey, record);
+    mocks.rpc.mockImplementation(async (name: string) => (name === 'receive_po_items'
+      ? { data: null, error: { code: 'P0001', message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' } }
+      : { data: null, error: new Error(`Unexpected RPC ${name}`) }));
+
+    render(<MemoryRouter><QuickReceivePanel /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /retry exact receiving/i }));
+
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringContaining('only into Main Warehouse')));
+    expect(mocks.rpc).toHaveBeenCalledWith('receive_po_items', expect.objectContaining({ p_items: frozenPayload }));
+    expect(screen.queryByText(/successfully received/i)).toBeNull();
+    expect(mocks.toast.mock.calls.filter(([kind]) => kind === 'success')).toEqual([]);
+    expect(downloadReceivingPdf).not.toHaveBeenCalled();
   });
 });

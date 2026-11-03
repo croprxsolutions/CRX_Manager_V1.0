@@ -62,7 +62,7 @@ import type { ProductCategory } from '../types';
 const PRODUCT_NONPRICING_FIELDS = [
   'product_name', 'sku', 'category', 'vendor', 'manufacturer',
   'container_size', 'unit_size', 'suggested_rate', 'rate_per_acre', 'rate_unit',
-  'notes', 'is_active', 'epa_registration', 'product_form', 'inventory_unit',
+  'notes', 'epa_registration', 'product_form', 'inventory_unit',
   'container_unit', 'container_type', 'is_rup', 'signal_word', 'internal_notes',
   'quoting_notes',
   'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit', 'use_timing',

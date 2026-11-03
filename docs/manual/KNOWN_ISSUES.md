@@ -2,6 +2,8 @@
 
 **Last verified:** 2026-11-02 for the live ledger only (see the WP-PM-8a changelog note); other evidence retains its stated dates.
 
+**WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
+
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
 **KI-18 verified: 2026-10-29 (America/Chicago)** for KI-18 only: read-only live function definitions confirm `generate_quote_number`, `generate_order_number`, `create_rebate_claim`, and `generate_ticket_number` still take the year from `current_date`. The live ledger includes `20261028185500_order_edit_and_number_concurrency` (version `20261029143642`); its blend-ticket generator retains the same year rule. PR #1181 is still an unapplied candidate and is not part of this check. KI-18 stands. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
@@ -34,9 +36,10 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
+| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
+| WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
@@ -161,6 +164,15 @@ No snapshot/guard migration was found, but the live row count could not be check
 
 ---
 
+### KI-97 — Invoice email content is built by the app screen, not by the email service
+**MED · OPEN (planned follow-up from PR #1302, 2026-11-02) · money · unassigned**
+The `send-email` service checks who may send an invoice email, to whom, and when, and limits the links and map
+images it may carry (PR #1302). The email's wording, amount and attached PDF still come from the app screen.
+Planned: the service builds the invoice email's amount, wording and PDF from the saved invoice itself. #1302 does
+not change this behaviour either way.
+
+---
+
 ## Money
 
 ### KI-10 — About 69 live functions replay a saved result matched on the retry key alone
@@ -172,12 +184,9 @@ PR #942), batch 2 (`20261016140000`, PR #951), batch 3a (`20261019200000`, PR #9
 PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invoice`, `unpost_invoice_group`,
 `close_accounting_period`, `reopen_accounting_period`, `transfer_invoice_to_job`, `save_field_app_invoice`,
 `update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
-`create_rebate_claim`, `transition_rebate_claim`). Remaining: `price_order`, `update_order_items`, notification
-RPCs and about 45 MED/LOW functions (batches 4b to 4d). No open PR.
-Batch 4 includes `mark_inventory_row_verified` (MED, added 2026-10-23, PR #1042 follow-up 3; Mason: "batch it"):
-it matches its saved result on key and operation only, so a reused key with a different `p_inventory_id`, or from
-another admin, returns the first call's result. `IntegrityCleanupPanel.tsx` mints a fresh key per click, so no
-screen reaches it today. Fix with the batch wrapper as in `20261016140000`, with a real-schema prover.
+`create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, not yet applied) binds
+`price_order`, `update_order_items` and `mark_inventory_row_verified` (MED, PR #1042 follow-up 3; Mason: "batch
+it"). Remaining: notification RPCs and about 45 MED/LOW functions (batches 4c and 4d).
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
 **HIGH on money paths · PARTIAL · money · unassigned**
@@ -248,8 +257,10 @@ tiers is not built; the linkage field is not used for money today.
 - Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
   `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
   (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
-- `invoices.season` defaults to `current_season()` = UTC date, and the blend-ticket path uses it
-  (`20261020210000:1050,1227`): about five hours each 30 Sept evening can stamp the next season. LOW.
+- `invoices.season` defaults to `current_season()`, and the blend-ticket path uses it
+  (`20261020210000:1050,1227`). Fixed by `20261103120000` (once applied), which makes `current_season()` read the
+  Chicago date; the same migration moves the `invoices.invoice_date` default to the Chicago date, so the two
+  defaults agree. LOW.
 - Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
   interval warning in `src/pages/JobDetail.tsx:1449`: a wrong season at the 1 October boundary can silently
   suppress the warning. MED (safety).
@@ -300,13 +311,18 @@ local replay's screen (a new line added after its product's cost rose shows the 
 ---
 
 ### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
-**MED · OPEN (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · unassigned**
-`get_ar_aging` (`supabase/migrations/20260805151605_fix_historical_ar_report_cutoffs.sql` ~L147) checks every
-customer before returning rows; one customer whose balance cannot be rebuilt as of the chosen past date raises an
-error and the whole report returns nothing. `allocate_payment` also accepts a future `p_payment_date` outside closed
-periods, which can trip the same later-activity test and block even a current report. The refusal itself is
-deliberate (it stops invented historical balances), so the fix is not to suppress it: report that customer as
-"cannot be shown as of this date" while returning the rest, and refuse future-dated payments.
+**MED · PARTLY FIXED (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (PR #1313, applied live 2026-11-02); payment half: open, KI-19 lane**
+**Report half — fixed by `20261103150000_ar_aging_flags_unrebuildable_customers`** (live status: its
+`docs/reference/migrations.d/` record). `get_ar_aging` still refuses to rebuild a customer whose later activity makes
+the chosen date unknowable, but now returns everyone else and lists that customer with no amounts and an
+`unavailable_reason`; the AR Aging tab shows them in a warning ("cannot be shown as of this date") and its totals say
+they are excluded. Proof: `scripts/smoke/prove-ar-aging-flags-unrebuildable-real-schema.mjs`. Still not covered: a
+rare `HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE` (two posting events with the same audit timestamp) is raised
+outside the per-customer check and still fails the whole report; `get_customer_balance_listing` keeps the
+fail-for-everyone behaviour.
+**Payment half — OPEN, left for the KI-19 month-lock lane (KI-10 retry keys also redefine it):** `allocate_payment`
+accepts a future `p_payment_date` outside closed periods, which trips the same later-activity test (that customer
+now shows as "cannot be shown" even on a current-date report). Fix there: refuse future-dated payments.
 
 ---
 
@@ -372,7 +388,11 @@ matching customers (alphabetical) without saying so. Past a cap, a record cannot
 ---
 
 ### KI-85 — Receiving offers warehouses that cannot ship
-**MED · OPEN · UI/database/inventory · unassigned (fix 1 Part A from the 2026-11-02 audit)**
+**MED · FIXED (Part A, `20261102220000` live 2026-11-02) · UI/database/inventory · Claude (2026-11-02)**
+Fix: the receiving pickers and Add Inventory list only active `warehouses` rows; `receive_po_items` and
+`manual_inventory_add` refuse any location but Main Warehouse with `UNKNOWN_STORAGE_LOCATION` until transfers exist; Quick Receive no longer offers
+its over-receive option, which always failed (no admin reason was sent). Part B (add-warehouse admin, transfer RPC,
+per-location alerts) stays deferred until a second warehouse opens. Original report:
 `src/pages/PurchaseOrderDetail.tsx` (~L1855) and `src/components/receiving/QuickReceivePanel.tsx` (~L69) offer
 four hard-coded locations; only Main Warehouse is in `warehouses`. `receive_po_items` stores whatever location is
 sent, but every outbound path uses Main Warehouse only and no transfer exists, so stock received elsewhere can never
@@ -380,6 +400,33 @@ ship. A live check on 2026-11-02 found all 117 inventory rows at Main Warehouse,
 Fix: list active `warehouses` rows only, refuse unknown locations on the server, and print the real location.
 Multi-warehouse support stays (`docs/manual/DECISION_LOG.md`, 2026-11-02; checklist in `docs/workflows/INVENTORY_RULES.md`).
 
+### KI-86 — Direct admin turn-off skips warnings
+**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
+Direct admin updates of `products.is_active` bypass the preview warning step; database blockers still refuse unsafe turn-off.
+
+### KI-87 — Refused turn-off uses the stale-review message
+**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
+A blocked turn-off is reported as “Product details changed,” hiding the actual blocker in that dialog.
+
+### KI-88 — Inventory loads the full catalog on mount
+**LOW · UNVERIFIED · inventory UI · LOCAL CANDIDATE — NOT APPLIED**
+Inventory pages through all products on mount to label inactive rows; product status could instead come from the position RPC.
+
+### KI-89 — Inventory position uses UTC dates
+**LOW · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
+The re-emitted position body still uses `CURRENT_DATE` for season start and hold expiry, unchanged from its prior body.
+
+### KI-90 — Reopen race needs proof
+**MED · UNVERIFIED · product database · LOCAL CANDIDATE — NOT APPLIED**
+The reopen race through `set_product_active` has no automated real-schema proof.
+
+### KI-91 — Retired negative stock needs proof
+**MED · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
+A retired product with a negative balance in the position report was checked by hand only.
+
+### KI-92 — Accepted quote with live order needs proof
+**LOW · UNVERIFIED · product database · LOCAL CANDIDATE — NOT APPLIED**
+The accepted-quote and live-order warning case was checked by hand only.
 
 ### KI-93 — One blend ticket can deduct its stock twice
 **MED · OPEN (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · unassigned (after the cycle-count freeze lands)**
@@ -534,7 +581,7 @@ not written; Gauntlet V2 Phase 2 unfinished (no staging database, E2E switched o
 counts not re-measured); `docs/reference/gotchas.md` has no "gross margin means markup" note.
 Further small LOW notes from the 2026-10-13 branch salvage, carried from the archive and not re-checked: invoices
 created through the order functions would be numbered INV- instead of CS-/MC- (latent; 0 of 12 live order
-invoices affected); the smoke chain `smoke-split_invoices_jsonb_fix.sql` is stale; on the bulk order import,
+invoices affected); on the bulk order import,
 Escape on the below-cost prompt also closes the Import Orders dialog while the upload continues out of sight
 (`src/components/orders/BulkOrderImport.tsx`; a fix sits on closed PR #350's branch); the return-credit prover
 is pre-apply and two test hardenings were not carried; GraphQL ref updates are not inspected locally (the
@@ -604,9 +651,9 @@ pipeline: fix merged (PR #885, `20261006200000`, applied live per the old record
 live-sweep predicate (`quote-versions-rpc-owned`) was declined at its prompt, and the live smoke chains need
 Mason's REAL-DATA-OK.
 
-Purchase order copy (To-Do 0.15, PR #1114 merged 2026-10-27): the PDF download is built. Migration `20261027070000` is absent from the live ledger read 2026-10-27; PR #1147's email snapshot/retry fixes merged 2026-10-27; the service still needs deployment. The
-**Email PO Copy (to mason@croprxsolutions.com) stays off until Mason approves deploying the `send-email`
-edge function** (the live function answers "Unknown email_type: purchase_order").
+Purchase order copy (To-Do 0.15, PRs #1114 and #1147): DONE. The `send-email` service has handled
+`purchase_order` since v20 (2026-10-27) and still does on v21 (2026-11-03 02:16 UTC); Email PO Copy on
+PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production deployments.
 
 ### KI-73 — More field-access holes (extends KI-01; To-Do row 11.4, plus row 11.7)
 **HIGH · PARTIAL · security · Mason approval to narrow permissions**
@@ -665,7 +712,7 @@ OrderDetail.
 **MED/LOW · OPEN · money**
 - Quote re-save can still be refused when a save both deletes or switches a saved line and adds several new lines
   for the same product (LOW).
-- `issue_return_credit` and the delivery-split functions can fall back to `current_season()` (UTC) (LOW).
+- `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (once applied) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
 - Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing

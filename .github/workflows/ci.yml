@@ -641,6 +641,10 @@ jobs:
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}
         run: npm run check:pricing-phase2-live-smoke
 
+      - name: Smoke chains create pricing-free products
+        if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}
+        run: npm run check:smoke-product-inserts
+
       - name: Agent workflow truth-state and sync tests
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}
         run: npm run test:agent-workflows

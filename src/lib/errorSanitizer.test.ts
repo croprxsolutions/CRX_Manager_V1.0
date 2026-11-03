@@ -2,6 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeError } from './errorSanitizer';
 
 describe('sanitizeError', () => {
+  it('keeps the product and order details from active-status refusals', () => {
+    expect(sanitizeError('PRODUCT_INACTIVE: Atrazine 4L is turned off; an admin must reactivate it before reopening order ORD-42'))
+      .toBe('Atrazine 4L is turned off; an admin must reactivate it before reopening order ORD-42');
+    expect(sanitizeError('PRODUCT_DEACTIVATION_BLOCKED: Atrazine 4L: order ORD-42; purchase order PO-9'))
+      .toBe('Atrazine 4L: order ORD-42; purchase order PO-9');
+  });
+
+  it('uses a safe fallback when an active-status refusal has no detail', () => {
+    expect(sanitizeError('PRODUCT_INACTIVE:   '))
+      .toBe('This product is turned off. Ask an admin to reactivate it.');
+    expect(sanitizeError('PRODUCT_DEACTIVATION_BLOCKED'))
+      .toBe('This product cannot be turned off while required work is open. Review its blockers.');
+  });
+
   it('explains product setup refusals without leaking constraint names', () => {
     expect(sanitizeError({ message: 'PRODUCT_CATEGORY_RETIRED: choose an active category' }))
       .toBe('This category is retired. Choose an active category');
@@ -9,6 +23,11 @@ describe('sanitizeError', () => {
       .toContain('This checks format only');
     expect(sanitizeError({ message: 'insert or update violates foreign key constraint "product_setup_category_fk"' }))
       .toBe('Choose a category from the product category list');
+  });
+  it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
+    const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' });
+    expect(message).toContain('only into Main Warehouse');
+    expect(message).not.toContain('UNKNOWN_STORAGE_LOCATION');
   });
   // The RAISE text of 20261022087000_job_chemicals_refuse_unpriced_zero_price_line.sql with the product filled in.
   it('explains a CHEM_PRICE_REQUIRED save refusal without the raw token', () => {

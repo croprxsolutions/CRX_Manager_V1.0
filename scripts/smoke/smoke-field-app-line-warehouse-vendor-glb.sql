@@ -4,9 +4,9 @@
 --   — migration 20260624212000 (field-app parity #25).
 -- ----------------------------------------------------------------------------
 -- Run AFTER applying 20260624212000. Proves:
---   M1  per-acre PRICING is unchanged & cents-correct: a tier-1 product at
---       $2.50/unit, rate 8 oz/ac over 10 applied acres -> quantity 80,
---       extended_cents = ROUND($2.50 -> 250c * 80) = 20000c. (safe_cents_qty)
+--   M1  per-acre PRICING is cents-correct in the SOLD unit: a tier-1 dry product at
+--       $2.50/lb, rate 8 oz/ac over 10 applied acres = 80 oz -> quantity 5 lb
+--       (field_app_priced_quantity, 20260630180000), extended_cents = 250c * 5 = 1250c.
 --   M2  Warehouse + Vendor round-trip from the client payload onto the line.
 --   M3  vendor FALLS BACK to products.vendor when the client omits it.
 --   M4  Total Applied gallon/lb-equivalent is populated for a DRY product
@@ -22,6 +22,7 @@
 DO $smoke$
 DECLARE
   v_admin   uuid;
+  v_pricing jsonb;
   v_sfx     text := substr(gen_random_uuid()::text,1,8);
   v_cust    uuid;
   v_prod    uuid;
@@ -48,9 +49,24 @@ BEGIN
   -- DRY product, $2.50 tier-1, vendor on the product (for the M3 fallback case).
   -- inventory_unit must satisfy validate_product_units (dry catalog); the per-line
   -- rate_unit in the payload below is the free-form 'oz' that drives the conversion.
-  INSERT INTO products (product_name, unit_size, inventory_unit, product_form, current_cost, tier1_price, vendor)
-    VALUES ('[SMOKE] FA25P '||v_sfx, 'Lb', 'Lb', 'dry', 1.00, 2.50, 'ACME Ag Supply')
+  -- Pricing-free shell, then cost/price through the governed preview/apply
+  -- path (a priced products INSERT is refused since the Phase 1a cutover).
+  INSERT INTO products (product_name, unit_size, inventory_unit, product_form, vendor)
+    VALUES ('[SMOKE] FA25P '||v_sfx, 'Lb', 'Lb', 'dry', 'ACME Ag Supply')
     RETURNING id INTO v_prod;
+  v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object('product_id', v_prod, 'row_version', 1,
+      'pricing_mode', 'price_driven', 'new_cost', '1.00',
+      'tier1_price', '2.50', 'tier2_price', '2.50', 'tier3_price', '2.50')),
+    v_admin, gen_random_uuid()::text);
+  IF NOT COALESCE((v_pricing->>'apply_allowed')::boolean, false) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing preview failed: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,
+    v_pricing->>'request_fingerprint', v_admin, gen_random_uuid()::text);
+  IF (SELECT tier1_price FROM products WHERE id = v_prod) IS DISTINCT FROM 2.50 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing apply did not set tier1_price';
+  END IF;
 
   INSERT INTO fields (customer_id, field_name, total_acres, is_active)
     VALUES (v_cust, '[SMOKE] FA25F '||v_sfx, 40, true) RETURNING id INTO v_field;
@@ -82,9 +98,9 @@ BEGIN
     INTO v_qty, v_ext, v_wh, v_vendor, v_ta, v_ta_glb, v_glb_u
     FROM invoice_items WHERE invoice_id = v_inv AND is_application_fee = false;
 
-  -- M1: cents-correct pricing (quantity 8*10=80; 250c * 80 = 20000c).
-  IF v_qty <> 80 THEN RAISE EXCEPTION 'SMOKE_FAIL M1 qty: % (exp 80 = 8/ac x 10 ac)', v_qty; END IF;
-  IF v_ext <> 20000 THEN RAISE EXCEPTION 'SMOKE_FAIL M1 extended_cents: % (exp 20000 = 250c x 80)', v_ext; END IF;
+  -- M1: cents-correct pricing in the sold unit (8*10 = 80 oz = 5 lb; 250c * 5 = 1250c).
+  IF v_qty <> 5 THEN RAISE EXCEPTION 'SMOKE_FAIL M1 qty: % (exp 5 lb = 8 oz/ac x 10 ac / 16)', v_qty; END IF;
+  IF v_ext <> 1250 THEN RAISE EXCEPTION 'SMOKE_FAIL M1 extended_cents: % (exp 1250 = 250c x 5 lb)', v_ext; END IF;
 
   -- M2: warehouse + vendor round-trip.
   IF v_wh IS DISTINCT FROM 'North Shed' THEN RAISE EXCEPTION 'SMOKE_FAIL M2 warehouse: %', v_wh; END IF;
@@ -97,7 +113,7 @@ BEGIN
 
   -- M5: header reconciles to the single priced line.
   SELECT total_amount_cents INTO v_total FROM invoices WHERE id = v_inv;
-  IF v_total <> 20000 THEN RAISE EXCEPTION 'SMOKE_FAIL M5 header total: % (exp 20000)', v_total; END IF;
+  IF v_total <> 1250 THEN RAISE EXCEPTION 'SMOKE_FAIL M5 header total: % (exp 1250)', v_total; END IF;
 
   -- ── CASE B: client omits vendor -> falls back to products.vendor ───────────
   v_res := save_field_app_invoice(
@@ -119,9 +135,9 @@ BEGIN
   SELECT vendor INTO v_vendor2 FROM invoice_items WHERE invoice_id = v_inv2 AND is_application_fee = false;
   IF v_vendor2 IS DISTINCT FROM 'ACME Ag Supply' THEN
     RAISE EXCEPTION 'SMOKE_FAIL M3 vendor fallback: % (exp products.vendor ACME Ag Supply)', v_vendor2; END IF;
-  -- and the tier price still drove the cents (no manual override): 250c x (8*5=40) = 10000c
+  -- and the tier price still drove the cents (no manual override): 250c x (8*5 = 40 oz = 2.5 lb) = 625c
   SELECT extended_cents INTO v_ext FROM invoice_items WHERE invoice_id = v_inv2 AND is_application_fee = false;
-  IF v_ext <> 10000 THEN RAISE EXCEPTION 'SMOKE_FAIL M3 tier pricing: % (exp 10000 = tier 250c x 40)', v_ext; END IF;
+  IF v_ext <> 625 THEN RAISE EXCEPTION 'SMOKE_FAIL M3 tier pricing: % (exp 625 = tier 250c x 2.5 lb)', v_ext; END IF;
 
   -- ── M6: client gal/lb preview AGREES with the server (convert_to_gl_lb) ─────
   -- These are the exact (quantity, rate_unit, product_form) tuples the on-screen

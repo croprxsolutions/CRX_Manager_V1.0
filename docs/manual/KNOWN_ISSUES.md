@@ -267,11 +267,15 @@ tiers is not built; the linkage field is not used for money today.
 - Two AR-aging views bucket a 30-day-old invoice differently; invoice dates have no future-date limit; three
   filters cut the day at UTC midnight. UNVERIFIED (PR #991 fixed the AR strip; the rest not re-checked). MED.
 
-### KI-19 — Accounting-month close: 26 other callers lack the month lock
-**HIGH-risk lane, dormant · PARTIAL · money · unassigned**
-Vendor-bill and vendor-payment edits are safe against a close (`20260730114102`, `20260730124308`,
-`20260731001654`). About 26 other `check_period_open` callers do not take the same lock, so a simultaneous edit
-could slip past a close. No month is closed live (older record's claim), so it is dormant.
+### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103170000`)
+**HIGH-risk lane, dormant · FIXED IN CODE (2026-11-02) · money · live status: its `docs/reference/migrations.d/` record**
+`20261103170000_period_check_takes_month_lock` makes `check_period_open` itself take the shared month lock that
+vendor-bill edits already took (`20260730114102`), so all 32 callers (26 had no lock) and a close of the same month now
+wait for each other: an edit racing a close waits and is then refused; a close waits for an in-flight edit. Proof:
+`scripts/smoke/prove-period-check-month-lock-real-schema.mjs` (real psql sessions racing a real close, fail-first).
+Known limit: callers take that lock before or after their invoice row locks, so two edits on one invoice while a close
+of that past month is queued can deadlock; PostgreSQL cancels one (40P01) and nothing is written. No month was closed
+live when this was written.
 
 ### KI-20 — Shelved or disabled money features
 **MED · OPEN · money · unassigned / Mason**
@@ -311,7 +315,7 @@ local replay's screen (a new line added after its product's cost rose shows the 
 ---
 
 ### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
-**MED · PARTLY FIXED (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (PR #1313, applied live 2026-11-02); payment half: open, KI-19 lane**
+**MED · FIXED IN CODE (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (PR #1313, applied live 2026-11-02); payment half: migration `20261103170000` (live status: its `docs/reference/migrations.d/` record)**
 **Report half — fixed by `20261103150000_ar_aging_flags_unrebuildable_customers`** (live status: its
 `docs/reference/migrations.d/` record). `get_ar_aging` still refuses to rebuild a customer whose later activity makes
 the chosen date unknowable, but now returns everyone else and lists that customer with no amounts and an
@@ -320,9 +324,9 @@ they are excluded. Proof: `scripts/smoke/prove-ar-aging-flags-unrebuildable-real
 rare `HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE` (two posting events with the same audit timestamp) is raised
 outside the per-customer check and still fails the whole report; `get_customer_balance_listing` keeps the
 fail-for-everyone behaviour.
-**Payment half — OPEN, left for the KI-19 month-lock lane (KI-10 retry keys also redefine it):** `allocate_payment`
-accepts a future `p_payment_date` outside closed periods, which trips the same later-activity test (that customer
-now shows as "cannot be shown" even on a current-date report). Fix there: refuse future-dated payments.
+**Payment half — fixed by `20261103170000_period_check_takes_month_lock`:** `allocate_payment` refuses a
+`p_payment_date` after today in Central time (`PAYMENT_DATE_IN_FUTURE`), so a payment can no longer make a customer
+unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
 ---
 

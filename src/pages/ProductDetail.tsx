@@ -22,7 +22,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, assertRpcResult, checkMutationResult, supabase, supabaseUntyped } from '../lib/db';
 import { localToday } from '../lib/dateUtils';
-import { formatUSD } from '../lib/money';
+import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
 import { unitOptionsForForm, isKnownUnit } from '../lib/units';
@@ -73,7 +73,7 @@ const PRODUCT_PRICING_FIELDS = [
   'tier1_price', 'tier2_price', 'tier3_price',
 ] as const satisfies ReadonlyArray<keyof Product>;
 
-type ProductPricingMoneyField = 'current_cost' | 'tier1_price' | 'tier2_price' | 'tier3_price';
+type ProductPricingMoneyField = 'tier1_price' | 'tier2_price' | 'tier3_price';
 type ProductPricingMoneyDrafts = Partial<Record<ProductPricingMoneyField, string>>;
 type ProductPricingMarginField = 'tier1_margin' | 'tier2_margin' | 'tier3_margin';
 type ProductPricingMarginDrafts = Partial<Record<ProductPricingMarginField, string>>;
@@ -120,7 +120,7 @@ function pricingPreviewRow(
   if (!Number.isInteger(persisted.pricing_version) || (persisted.pricing_version ?? 0) < 1) {
     throw new Error('This Product does not have a pricing version yet. Refresh after the Phase 1a database migration is available.');
   }
-  const cost = costOverride ?? pricingMoneyInput(product, moneyDrafts, 'current_cost');
+  const cost = costOverride ?? (product.current_cost == null ? '' : String(product.current_cost));
   if (cost === null || cost === '') throw new Error('Enter the Product cost before reviewing pricing.');
   const row: PricingPreviewInputRow = {
     product_id: persisted.id,
@@ -627,7 +627,6 @@ export default function ProductDetail() {
       return;
     }
     for (const [field, label] of [
-      ['current_cost', 'Cost'],
       ['tier1_price', 'Tier 1 price'],
       ['tier2_price', 'Tier 2 price'],
       ['tier3_price', 'Tier 3 price'],
@@ -641,7 +640,7 @@ export default function ProductDetail() {
     }
 
     // Warn (but allow) if price < cost. The server preview remains authoritative.
-    const costCents = pricingDollarInputToCents(pricingMoneyInput(product, pricingMoneyDrafts, 'current_cost')) ?? 0n;
+    const costCents = pricingDollarInputToCents(String(product.current_cost ?? 0)) ?? 0n;
     const priceCents = (['tier1_price', 'tier2_price', 'tier3_price'] as const)
       .map((field) => pricingDollarInputToCents(pricingMoneyInput(product, pricingMoneyDrafts, field)))
       .filter((value): value is bigint => value !== null && value > 0n);
@@ -1035,7 +1034,7 @@ export default function ProductDetail() {
         }));
       }
     } else if (mode === 'margin_driven') {
-      setPricingMoneyDrafts(({ current_cost }) => current_cost === undefined ? {} : { current_cost });
+      setPricingMoneyDrafts({});
     }
     setPricingMode(mode);
   };
@@ -1597,13 +1596,13 @@ export default function ProductDetail() {
                   <h4 className="text-sm font-medium text-secondary">Cost</h4>
                   <div className="flex items-center gap-2">
                     <div className="w-full">
-                      <span className="block text-sm font-medium text-secondary mb-1">Current Cost</span>
-                      <p aria-label="Current Cost" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-nav-dark">
-                        {product.current_cost == null ? 'N/A' : formatUSD(product.current_cost)}
-                      </p>
+                      <label htmlFor="product-current-cost" className="block text-sm font-medium text-secondary mb-1">Current Cost</label>
+                      <output id="product-current-cost" aria-live="off" className="block rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-nav-dark">
+                        {product.current_cost == null ? 'N/A' : formatExactUSD(product.current_cost)}
+                      </output>
                     </div>
                     {!isNew && (
-                      <Button variant="secondary" size="sm" icon={<DollarSign className="w-3 h-3" />} showChevron={false} onClick={() => setCostModal(true)} className="mt-5">
+                      <Button variant="secondary" size="sm" icon={<DollarSign className="w-3 h-3" />} showChevron={false} onClick={() => setCostModal(true)} aria-label="Update cost" className="mt-5">
                         Update
                       </Button>
                     )}
@@ -1878,7 +1877,7 @@ export default function ProductDetail() {
       <Modal open={costModal} onClose={() => setCostModal(false)} title="Update" accent="Cost">
         <div className="space-y-4">
           <p className="text-sm text-secondary">
-            Current cost: <strong>${product.current_cost?.toFixed(2) ?? 'N/A'}</strong>
+            Current cost: <strong>{product.current_cost == null ? 'N/A' : formatExactUSD(product.current_cost)}</strong>
           </p>
           <Input label="New Cost" type="number" value={newCost} onChange={(e) => setNewCost(e.target.value)} placeholder="0.00" disabled={pricingReloadRequired} />
           <div>

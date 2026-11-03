@@ -1,29 +1,14 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261027050000 candidate: the price sheet is safe to use (To-Do 0.1,
- * pricing plan slice 0). Builds the checked-in production schema baseline in a network-disabled
- * Supabase PostgreSQL 17 container, replays every ordered post-baseline migration up to the candidate
- * (the margin floors, 20261025210000, included), checks every md5 pin in the candidate's preflight,
- * seeds two admins, a rep, two products (one with a 30% floor and a blank tier 3) and a sent quote,
- * then runs one matrix BEFORE and AFTER the candidate. Each scenario is one transaction that always
- * rolls back; each step runs as a PostgREST session, a signed-out visitor, or the owner.
- *   1. A price change without a reason or source is invalid; with both it applies only after an
- *      approval, and its cost_history row keeps the reason and source.
- *   2. A tenfold typo ($150 for $15) is flagged (more than 10%, and the sent quote) and refused until
- *      every warning is acknowledged with a reason, by the admin who previewed it; rep and signed-out
- *      refused; the approval replays and binds its key; the receipt records who and why.
- *   3. Below cost, under the margin floor, a cost move over 10%, and tier fallback in the details.
- *   4. A floor set after the approval makes apply (and re-approval) refuse: the warnings changed.
- *   5. A per-acre rate change on the product page writes a history row.
- *   6. A floor raised after the approval with the same warning code (30% -> 40%) still refuses.
- *   7. A floor change that lands while apply runs (a test trigger, after the engine has locked the
- *      product) rolls the apply back.
- *   8. A per-acre rate row with no source (a preview made before the migration) is refused at approval.
- *   Grants; preflight drift refusals; a second apply refused; MUTATIONS: the apply approval check
- *   removed lets an unacknowledged typo through; the second read removed lets scenario 7 apply.
+ * Real-schema proof for the local tier-order warning candidate. Builds the checked-in schema
+ * baseline in a network-disabled PostgreSQL container, replays migrations up to the candidate,
+ * and checks the five pinned live function bodies before replacement. Rollback-only scenarios
+ * compare all existing warning codes and details, then prove the new TIER_ORDER code and exact
+ * adjacent-tier cents for price-driven, margin-driven, stated $0, and workbook changes. They also
+ * prove approval acknowledgement, apply, history, and the old body's missing warning.
  *
- * Run: node scripts/smoke/prove-price-sheet-warnings-real-schema.mjs   (needs Docker)
- * Prints PRICE_SHEET_WARNINGS_PROOF_PASS on success. CRX_PROVER_VERBOSE=1 prints every step.
+ * Run: node scripts/smoke/prove-pricing-tier-order-real-schema.mjs   (needs local Docker image)
+ * Prints PRICING_TIER_ORDER_PROOF_PASS on success.
  */
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -39,7 +24,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261103150000_pricing_tier_order_warning.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261103230000_pricing_tier_order_warning.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -160,6 +145,11 @@ function buildContainer() {
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     // Batch 2's preflight pins live's auth.uid() body, which live had when batch 2 was applied.
     if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
+    if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') {
+      psql(`UPDATE public.warehouses SET is_active = true WHERE name = 'Main Warehouse';
+        INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
+        WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse');`);
+    }
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
     ledger(path.basename(file, '.sql'));
@@ -169,15 +159,18 @@ function buildContainer() {
   console.log(`[prover] replayed ${replayed} post-baseline migrations before the candidate (skipped: ${[...PARKED].join(', ')}; ledger only: ${[...LEDGER_ONLY].join(', ')})`);
 }
 
-// The candidate is pinned to the exact two live bodies captured on 2026-11-02.
+// The candidate is pinned to these five live bodies captured on 2026-11-02.
 function fidelity() {
   for (const [signature, expected] of [
     ['public._pricing_change_set_warnings(uuid)', '2197e2c7410aeda9fed177c4046c3b32'],
     ['public._pricing_change_set_warning_set(uuid)', '52f7938fe4019436d861cd257fe2b217'],
+    ['public.preview_product_cost_basis_changes(text,uuid,jsonb,uuid,text)', '15dd6f1bce81c8c26022acf190e8e5a6'],
+    ['public.approve_pricing_change_set(uuid,text,jsonb,jsonb,uuid,text)', 'eccd562fd43c8f6ebe1946b26929dcba'],
+    ['public.apply_product_cost_basis_change_set(uuid,text,uuid,text)', 'ac5b75bd83c3c98c2420c93849804ada'],
   ]) {
-    assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = '${signature}'::regprocedure;`), expected, signature);
+    assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${signature}'::regprocedure;`), expected, signature);
   }
-  console.log('[prover] both live-body md5 pins hold before the candidate');
+  console.log('[prover] five live-body md5 pins hold before the candidate');
 }
 
 const id = (n) => `7c320000-0000-4000-8000-${n.padStart(12, '0')}`;
@@ -286,18 +279,8 @@ const FP = (tag) => `current_setting('crx.p.${tag}_fp')`;
 const approve = (tag, acks, key, file = null) => `(SELECT r->>'status' || ':' || (r->>'acknowledged_count') FROM (SELECT public.approve_pricing_change_set(${CS(tag)}, ${FP(tag)}, ${jb(acks)}, ${file === null ? 'NULL' : jb(file)}, current_setting('request.jwt.claim.sub')::uuid, '${key}') AS r) s)`;
 const applyCs = (tag, key) => `(SELECT r->>'status' FROM (SELECT public.apply_product_cost_basis_change_set(${CS(tag)}, ${FP(tag)}, current_setting('request.jwt.claim.sub')::uuid, '${key}') AS r) s)`;
 const ack = (product, codes, reason = 'checked against the supplier letter') => ({ product_id: product, warning_codes: codes, reason });
-const PRICES = (product) => `(SELECT round(current_cost, 2) || '/' || round(tier1_price, 2) || '/' || round(tier2_price, 2) || '/' || COALESCE(round(tier3_price, 2)::text, '-') FROM public.products WHERE id = '${product}')`;
 const LAST_HIST = (product) => `(SELECT COALESCE(change_reason, '-') || '|' || COALESCE(to_jsonb(h)->>'price_source', '-') || '|' || change_source || '|' || COALESCE(to_jsonb(h)->>'new_rate_per_acre', '-')
   FROM public.cost_history h WHERE product_id = '${product}' ORDER BY changed_at DESC, id DESC LIMIT 1)`;
-const FLOOR = (product) => `(SELECT COALESCE((SELECT margin_floor::text FROM public.product_margin_floors WHERE product_id = '${product}'), '-'))`;
-const HIST_COUNT = (product) =>`(SELECT count(*) FROM public.cost_history WHERE product_id = '${product}')`;
-
-// A floor change for B that lands inside apply, after the engine has updated (so locked) B: what a
-// concurrent set_product_margin_floors does once that lock is released to it.
-const ARM_MID_APPLY_FLOOR = { stmt: `CREATE FUNCTION public.prover_floor_mid_apply() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$ BEGIN UPDATE public.product_margin_floors SET margin_floor = 0.1 WHERE product_id = NEW.id; RETURN NULL; END $fn$;
-  CREATE TRIGGER prover_floor_mid_apply AFTER UPDATE ON public.products FOR EACH ROW WHEN (NEW.id = '${PROD_B}') EXECUTE FUNCTION public.prover_floor_mid_apply();
-  v := 'armed';` };
-const NO_APPROVE_FN =/^42883\|function public\.approve_pricing_change_set\(.*\) does not exist$/;
 const A = PROD;
 const B = PROD_B;
 
@@ -308,7 +291,7 @@ function warningSnapshot(rows, tag, raw = false) {
         'product_id', product_id, 'warning_codes', warning_codes, 'details', details)
         ORDER BY product_id)::text, '[]') FROM public._pricing_change_set_warnings(${CS(tag)}))` },
   ]);
-  assert.match(result.preview, /^ok\|previewed\|/);
+  assert.match(result.preview, /^ok\|previewed\|.*\|-$/, `${tag} preview must have no row errors`);
   assert.match(result.snapshot, /^ok\|\[/);
   const snapshot = result.snapshot.slice(3);
   return raw ? snapshot : JSON.parse(snapshot);
@@ -332,13 +315,22 @@ function testParity() {
 
 function checkNewWarning() {
   const tier2 = row(B, '20.00', '30.00', '29.00', '30.00', SOURCED);
-  const tier3 = row(B, '20.00', '30.00', '30.00', '29.00', SOURCED);
+  const tier3 = row(B, '20.00', '30.00', '32.00', '31.00', SOURCED);
   const second = warningSnapshot([tier2], 'tier2');
   assert.deepEqual(codes(second), ['TIER_ORDER']);
   assert.deepEqual(second[0].details.tier_order, [{
     lower_tier: 1, higher_tier: 2, lower_cents: '3000', higher_cents: '2900',
   }]);
-  assert.deepEqual(codes(warningSnapshot([tier3], 'tier3')), ['TIER_ORDER']);
+  const third = warningSnapshot([tier3], 'tier3');
+  assert.ok(codes(third).includes('TIER_ORDER'));
+  assert.deepEqual(third[0].details.tier_order, [{
+    lower_tier: 2, higher_tier: 3, lower_cents: '3200', higher_cents: '3100',
+  }]);
+  const both = warningSnapshot([row(B, '20.00', '30.00', '29.00', '28.00', SOURCED)], 'both');
+  assert.deepEqual(both[0].details.tier_order, [
+    { lower_tier: 1, higher_tier: 2, lower_cents: '3000', higher_cents: '2900' },
+    { lower_tier: 2, higher_tier: 3, lower_cents: '2900', higher_cents: '2800' },
+  ]);
   for (const [tag, rowValue] of [
     ['equal', row(B, '20.00', '30.00', '30.00', '30.00', SOURCED)],
     ['ascending', row(B, '20.00', '30.00', '31.00', '32.00', SOURCED)],
@@ -347,24 +339,47 @@ function checkNewWarning() {
   // Existing blank prices are covered by the equal/ascending previews above. The public
   // price parser refuses blank proposed cells and the change-set output columns are NOT NULL.
   assert.equal(scalar(`SELECT tier3_price IS NULL FROM public.products WHERE id = '${B}';`), 't');
-  assert.equal(scalar(`SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public'
-    AND table_name = 'pricing_change_set_rows' AND column_name = 'output_tier3_price_cents';`), 'NO');
+  assert.equal(scalar(`SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public'
+    AND table_name = 'pricing_change_set_rows' AND is_nullable = 'NO'
+    AND column_name IN ('output_tier1_price_cents', 'output_tier2_price_cents', 'output_tier3_price_cents',
+      'output_tier1_margin', 'output_tier2_margin', 'output_tier3_margin');`), '6');
   const zero = scenario([
     { key: 'preview', as: U.ADMIN, call: preview('zero',
-      [row(B, '20.00', '30.00', '30.00', '30.00', SOURCED)], 'zero-preview') },
-    { key: 'zero final tier', as: 'owner', stmt: `UPDATE public.pricing_change_set_rows
-        SET output_tier2_price_cents = 0
-        WHERE change_set_id = ${CS('zero')}; v := 'set';` },
-    { key: 'codes', as: 'owner', call: `(SELECT COALESCE(array_to_string(warning_codes, ','), '-')
+      [row(B, '0.00', '30.00', '0.00', '0.00', SOURCED)], 'zero-preview') },
+    { key: 'codes', as: 'owner', call: `(SELECT to_jsonb(warning_codes)::text
       FROM public._pricing_change_set_warnings(${CS('zero')}))` },
+    { key: 'details', as: 'owner', call: `(SELECT (details->'tier_order')::text
+      FROM public._pricing_change_set_warnings(${CS('zero')}))` },
+    { key: 'acks', as: 'owner', call: `(SELECT set_config('crx.p.zero_acks',
+      jsonb_agg(jsonb_build_object('product_id', product_id,
+        'warning_codes', warning_codes, 'reason', 'checked stated zero against source'))::text, true)
+      FROM public._pricing_change_set_warnings(${CS('zero')}))` },
+    { key: 'approve', as: U.ADMIN, call: `(SELECT r->>'status' || ':' || (r->>'acknowledged_count')
+      FROM (SELECT public.approve_pricing_change_set(${CS('zero')}, ${FP('zero')},
+        current_setting('crx.p.zero_acks')::jsonb,
+        NULL, current_setting('request.jwt.claim.sub')::uuid, 'zero-ack') AS r) s)` },
+    { key: 'apply', as: U.ADMIN, call: applyCs('zero', 'zero-apply') },
+    { key: 'saved tier 2', as: 'owner', call: `(SELECT tier2_price = 0.00
+      FROM public.products WHERE id = '${B}')` },
   ]);
-  assert.equal(zero['zero final tier'], 'ok|set');
-  assert.ok(!zero.codes.includes('TIER_ORDER'), '$0 Tier 2 falls back for the order check');
+  assert.match(zero.preview, /^ok\|previewed\|.*\|-$/, 'stated $0 preview must have no row errors');
+  assert.ok(JSON.parse(zero.codes.slice(3)).includes('TIER_ORDER'), 'stated $0 Tier 2 must fire TIER_ORDER');
+  assert.deepEqual(JSON.parse(zero.acks.slice(3))[0].warning_codes, JSON.parse(zero.codes.slice(3)));
+  assert.deepEqual(JSON.parse(zero.details.slice(3)), [
+    { lower_tier: 1, higher_tier: 2, lower_cents: '3000', higher_cents: '0' },
+  ]);
+  assert.equal(zero.approve, 'ok|approved:1');
+  assert.equal(zero.apply, 'ok|applied');
+  assert.equal(zero['saved tier 2'], 'ok|true');
 
   const margin = { ...row(B, '20.00', undefined, undefined, undefined, SOURCED),
     pricing_mode: 'margin_driven', tier1_margin_percent: '30',
     tier2_margin_percent: '28', tier3_margin_percent: '30' };
-  assert.ok(codes(warningSnapshot([margin], 'margin')).includes('TIER_ORDER'), 'margin output must be checked');
+  const marginWarnings = warningSnapshot([margin], 'margin');
+  assert.ok(codes(marginWarnings).includes('TIER_ORDER'), 'margin output must be checked');
+  assert.deepEqual(marginWarnings[0].details.tier_order, [
+    { lower_tier: 1, higher_tier: 2, lower_cents: '2857', higher_cents: '2778' },
+  ]);
 
   const applied = scenario([
     { key: 'preview', as: U.ADMIN, call: preview('apply', [tier2], 'apply-preview') },
@@ -417,6 +432,8 @@ function checkWorkbook() {
     { key: 'preview', as: U.ADMIN, call: previewCall },
     { key: 'warnings', as: 'owner', call: `(SELECT array_to_string(warning_codes, ',')
       FROM public._pricing_change_set_warnings(${CS('wb')}))` },
+    { key: 'details', as: 'owner', call: `(SELECT (details->'tier_order')::text
+      FROM public._pricing_change_set_warnings(${CS('wb')}))` },
     { key: 'approve', as: U.ADMIN, call: approve('wb', [ack(B, ['TIER_ORDER'])],
       'wb-approve', { name: 'sheet.xlsx', sha256: 'a'.repeat(64) }) },
     { key: 'apply', as: U.ADMIN, call: applyCs('wb', 'wb-apply') },
@@ -424,6 +441,9 @@ function checkWorkbook() {
   assert.match(result.export, /^ok\|[0-9a-f-]{36}$/);
   assert.match(result.preview, /^ok\|previewed\|TIER_ORDER$/);
   assert.equal(result.warnings, 'ok|TIER_ORDER');
+  assert.deepEqual(JSON.parse(result.details.slice(3)), [
+    { lower_tier: 1, higher_tier: 2, lower_cents: '3000', higher_cents: '2900' },
+  ]);
   assert.equal(result.approve, 'ok|approved:1');
   assert.equal(result.apply, 'ok|applied');
   console.log('[prover] workbook export, preview, warning, approval and apply passed');
@@ -440,6 +460,9 @@ function main() {
   fidelity();
   if (!REUSE) seed();
   const before = testParity();
+  const beforeMixed = warningSnapshot([row(B, '23.00', '30.00', '29.00', '30.00', SOURCED)], 'mixed_before');
+  assert.ok(beforeMixed.length === 1 && beforeMixed[0].warning_codes.length > 0);
+  assert.ok(!beforeMixed[0].warning_codes.includes('TIER_ORDER'));
   const expected = ['COST_MOVE_OVER_10_PERCENT', 'PRICE_MOVE_OVER_10_PERCENT',
     'PRICE_BELOW_COST', 'MARGIN_UNDER_FLOOR', 'OPEN_SENT_QUOTE'];
   const observed = new Set(Object.values(before).flatMap((raw) => codes(JSON.parse(raw))));
@@ -449,6 +472,13 @@ function main() {
   const applied = apply('candidate.sql');
   assert.equal(applied.status, 0, `candidate failed: ${applied.output}`);
   assert.deepEqual(testParity(), before, 'all existing code/details must be identical');
+  const afterMixed = warningSnapshot([row(B, '23.00', '30.00', '29.00', '30.00', SOURCED)], 'mixed_after');
+  assert.deepEqual(afterMixed[0].warning_codes, [...beforeMixed[0].warning_codes, 'TIER_ORDER']);
+  const { tier_order: mixedTierOrder, ...oldDetails } = afterMixed[0].details;
+  assert.deepEqual(oldDetails, beforeMixed[0].details, 'existing detail keys must be unchanged');
+  assert.deepEqual(mixedTierOrder, [
+    { lower_tier: 1, higher_tier: 2, lower_cents: '3000', higher_cents: '2900' },
+  ]);
   console.log('[prover] five existing codes and details match byte-for-byte before/after');
   checkNewWarning();
   checkWorkbook();
@@ -456,5 +486,5 @@ function main() {
 }
 
 try { main(); }
-finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
 

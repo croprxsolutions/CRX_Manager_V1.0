@@ -1,3 +1,0 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20261103150000_pricing_tier_order_warning.sql` (LF SQL sha256: `08c0ce3c7e20ffb1db89ef94a1704eb3988659b85aa776c3ebe6a0e9e2c96473`). This routine migration replaces the private pricing-warning function to add the final-price `TIER_ORDER` warning. It changes no data, grants, or policies.
-
-The preflight pins the live warning function and its warning-set helper as read on 2026-11-02. Rollback re-creates `_pricing_change_set_warnings` from `20261027050000_price_sheet_warnings_and_approval.sql`, lines 228–334. The existing five warning codes and their details must remain unchanged on the same previews.

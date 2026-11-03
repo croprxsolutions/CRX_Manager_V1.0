@@ -306,8 +306,9 @@ Receiving and PO cost corrections change PO and inventory records, not
 `products.current_cost`. Bulk product import cannot set cost. The source picker offers
 Vendor price list, Rebate program, Market adjustment, PO cost, and Other. Optional detail
 is appended to a named choice; Other stores its required detail alone. Existing text
-sources remain untouched. The candidate `TIER_ORDER` warning compares final cent prices
-and requires acknowledgement when Tier 2 falls below Tier 1 or Tier 3 falls below Tier 2.
+sources remain untouched. The local candidate `20261103230000` adds `TIER_ORDER`, which compares
+the actual final cent price of each adjacent tier, including a stated $0, and requires
+acknowledgement when Tier 2 falls below Tier 1 or Tier 3 falls below Tier 2.
 
 ### Table: `cost_history`
 - `product_id`, `old_cost` / `new_cost`, `old_tierN_price` / `new_tierN_price` and `old_tierN_margin` / `new_tierN_margin` (N = 1–3), `change_source`, `change_reason`, `change_note`, `change_set_id`, `old_pricing_version` / `new_pricing_version`, `changed_by`, `changed_at`

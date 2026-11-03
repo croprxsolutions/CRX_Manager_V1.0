@@ -26,9 +26,24 @@ describe('pricing source and reason', () => {
     fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'Other' } });
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Market correction' } });
     expect(screen.getByRole('button', { name: 'Preview changes' })).toBeDisabled();
+    expect(screen.getByText('Add a detail for Other.')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Source detail/)).toHaveAttribute(
+      'aria-describedby', 'pricing-change-source-detail-hint',
+    );
     fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: 'Local bid' } });
+    expect(screen.queryByText('Add a detail for Other.')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
     expect(onSubmit).toHaveBeenCalledWith({ source: 'Local bid', reason: 'Market correction' });
+  });
+
+  it('points a typed detail without a choice back to the source picker', () => {
+    show();
+    fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: 'Local bid' } });
+    expect(screen.getByText('Choose a source.')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Source detail/)).toHaveAttribute(
+      'aria-describedby', 'pricing-change-source-detail-hint',
+    );
+    expect(screen.getByRole('button', { name: 'Preview changes' })).toBeDisabled();
   });
 
   it('validates the combined stored source length, including choice and separator', () => {

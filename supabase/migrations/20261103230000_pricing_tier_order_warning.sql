@@ -1,19 +1,27 @@
 -- Written 2026-11-02. STATUS: NOT APPLIED.
 -- ROUTINE: adds a tier-order warning to the private pricing preview function.
 -- No data, grants, policies, or other functions change.
--- ROLLBACK: re-create _pricing_change_set_warnings from
--- 20261027050000_price_sheet_warnings_and_approval.sql, lines 228-334.
+-- ROLLBACK: re-create it from 20261027050000 (~228-334) as CREATE OR REPLACE.
 
 SET LOCAL lock_timeout = '5s';
 
 DO $preflight$
 BEGIN
-  IF (SELECT md5(prosrc) FROM pg_proc WHERE oid =
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid =
       to_regprocedure('public._pricing_change_set_warnings(uuid)'))
       IS DISTINCT FROM '2197e2c7410aeda9fed177c4046c3b32'
-     OR (SELECT md5(prosrc) FROM pg_proc WHERE oid =
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid =
       to_regprocedure('public._pricing_change_set_warning_set(uuid)'))
-      IS DISTINCT FROM '52f7938fe4019436d861cd257fe2b217' THEN
+      IS DISTINCT FROM '52f7938fe4019436d861cd257fe2b217'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid =
+      to_regprocedure('public.preview_product_cost_basis_changes(text,uuid,jsonb,uuid,text)'))
+      IS DISTINCT FROM '15dd6f1bce81c8c26022acf190e8e5a6'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid =
+      to_regprocedure('public.approve_pricing_change_set(uuid,text,jsonb,jsonb,uuid,text)'))
+      IS DISTINCT FROM 'eccd562fd43c8f6ebe1946b26929dcba'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid =
+      to_regprocedure('public.apply_product_cost_basis_change_set(uuid,text,uuid,text)'))
+      IS DISTINCT FROM 'ac5b75bd83c3c98c2420c93849804ada' THEN
     RAISE EXCEPTION 'PRICING_TIER_ORDER_PREFLIGHT: pricing warning bodies differ from the pinned live versions';
   END IF;
 END;
@@ -38,16 +46,16 @@ AS $function$
            ] AS price_before,
            ARRAY[
              r.output_tier1_price_cents,
-             COALESCE(r.output_tier2_price_cents, r.output_tier1_price_cents),
-             COALESCE(r.output_tier3_price_cents, r.output_tier1_price_cents)
+             r.output_tier2_price_cents,
+             r.output_tier3_price_cents
            ] AS price_after,
            -- The stored net margin the floor is defined against (20261025210000: under when
            -- tierN_margin < floor), not one recomputed from cent-rounded prices, which would flag a
-           -- tier set exactly at its floor. Only a blank tier, which falls back to tier 1, takes tier 1's margin.
+           -- tier set exactly at its floor. Final prices are NOT NULL, so each tier keeps its own margin.
            ARRAY[
              r.output_tier1_margin,
-             CASE WHEN r.output_tier2_price_cents IS NULL THEN r.output_tier1_margin ELSE r.output_tier2_margin END,
-             CASE WHEN r.output_tier3_price_cents IS NULL THEN r.output_tier1_margin ELSE r.output_tier3_margin END
+             r.output_tier2_margin,
+             r.output_tier3_margin
            ] AS margin_after,
            f.margin_floor
     FROM public.pricing_change_set_rows r
@@ -80,20 +88,18 @@ AS $function$
     FROM tiers t
     GROUP BY t.product_id
   ), tier_order AS (
-    -- Check final cent prices only. An omitted or $0 tier falls back to tier 1 for this
-    -- order check; an omitted tier cannot itself be the offending higher numbered tier.
+    -- Check final cent prices only. Every final tier is stated, including $0.
     SELECT c.product_id,
            jsonb_agg(jsonb_build_object(
              'lower_tier', v.lower_tier, 'higher_tier', v.higher_tier,
              'lower_cents', v.lower_cents::text, 'higher_cents', v.higher_cents::text
            ) ORDER BY v.higher_tier)
-             FILTER (WHERE v.higher_cents IS NOT NULL AND v.higher_cents <> 0
-                       AND v.lower_cents IS NOT NULL AND v.higher_cents < v.lower_cents)
+             FILTER (WHERE v.higher_cents < v.lower_cents)
              AS violations
     FROM changed c
     CROSS JOIN LATERAL (VALUES
       (1, 2, c.price_after[1], c.price_after[2]),
-      (2, 3, COALESCE(NULLIF(c.price_after[2], 0), c.price_after[1]), c.price_after[3])
+      (2, 3, c.price_after[2], c.price_after[3])
     ) AS v(lower_tier, higher_tier, lower_cents, higher_cents)
     GROUP BY c.product_id
   ), open_quotes AS (

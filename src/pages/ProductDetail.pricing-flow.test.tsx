@@ -103,7 +103,7 @@ function chainable(resolveWith: unknown) {
 }
 
 vi.mock('../lib/db', async () => {
-  // Use the REAL sanitizeError. Stubbing it as `e instanceof Error ? e.message : â€¦`
+  // Use the REAL sanitizeError. Stubbing it as `e instanceof Error ? e.message : …`
   // would re-implement the very defect these screens were just fixed for: a
   // non-throwing postgrest call resolves its error as a PLAIN OBJECT, so an
   // `instanceof Error` stub silently reproduces the swallowed-message bug and the
@@ -129,7 +129,7 @@ vi.mock('../lib/db', async () => {
     // Faithful to the real helper: it RE-THROWS result.error, and that error is
     // a plain PostgREST object. A `vi.fn()` no-op here silently deletes the
     // error path, so any test aiming at a catch block would assert against a
-    // save that quietly "succeeded" â€” the same class of problem as stubbing
+    // save that quietly "succeeded" — the same class of problem as stubbing
     // sanitizeError.
     checkMutationResult: vi.fn((result: { error: unknown; data: unknown }) => {
       if (result.error) throw result.error;
@@ -382,7 +382,7 @@ describe('ProductDetail governed pricing flow', () => {
     render(<ProductDetail />);
 
     expect(await screen.findByText('Legacy cost update')).toBeInTheDocument();
-    expect(screen.queryByText('Loading cost historyâ€¦')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading cost history…')).not.toBeInTheDocument();
   });
 
   it('rejects a direct detail save when the loaded pricing version is stale', async () => {
@@ -403,7 +403,7 @@ describe('ProductDetail governed pricing flow', () => {
   // The catches on this page were converted to sanitizeError() in the 2026-09-02
   // sweep. The error they receive is a PLAIN OBJECT (postgrest-js only builds a
   // real PostgrestError under .throwOnError()), so this exercises the actual
-  // shape rather than an Error the product never sees â€” and asserts BOTH halves
+  // shape rather than an Error the product never sees — and asserts BOTH halves
   // of the contract: a user-facing refusal survives intact, a raw Postgres
   // identifier does not.
   it('shows a plain-object server refusal verbatim but redacts raw identifiers', async () => {
@@ -424,7 +424,7 @@ describe('ProductDetail governed pricing flow', () => {
   it('redacts an unquoted Postgres permission error from a plain-object save failure', async () => {
     productMutationResult = {
       data: [],
-      // The UNQUOTED form Postgres actually emits â€” the form that used to pass
+      // The UNQUOTED form Postgres actually emits — the form that used to pass
       // through sanitizeError unredacted.
       error: { message: 'permission denied for table products', details: null, hint: null, code: '42501' },
     };
@@ -685,7 +685,7 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByText(/Profit as a % of price/)).toBeInTheDocument();
     expect(screen.getByText(/Profit as a % of cost/)).toBeInTheDocument();
     expect(screen.getByText(/A product with all three prices saved opens price-driven/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
     await giveSourceAndReason('Supplier quote', 'Cost change');
@@ -763,14 +763,15 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
     fireEvent.change(screen.getByLabelText('Tier 1 net margin percent'), { target: { value: '37' } });
-    expect(screen.getByLabelText('Current Cost').tagName).toBe('P');
+    expect(screen.getByLabelText('Current Cost').tagName).toBe('OUTPUT');
+    expect(screen.getByLabelText('Current Cost')).toHaveAttribute('aria-live', 'off');
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'price_driven' } });
     expect(screen.getByLabelText('Tier 1 net margin percent')).toHaveValue(20);
     expect(screen.getByLabelText('Tier 1 net margin percent')).toBeDisabled();
     expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
 
     fireEvent.change(screen.getByLabelText('Tier 1 price'), { target: { value: '75' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getAllByLabelText('Pricing mode')[1], { target: { value: 'margin_driven' } });
     expect(screen.getByLabelText('Tier 1 price')).toHaveValue(62.5);
     expect(screen.getByLabelText('Tier 1 price')).toBeDisabled();
@@ -793,7 +794,7 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
 
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
     expect(screen.queryByLabelText('Change Note (optional)')).not.toBeInTheDocument();
@@ -844,7 +845,7 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
 
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '0.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
 
@@ -861,7 +862,7 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
 
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
     await giveSourceAndReason('Helena list', 'Cost up');
@@ -869,7 +870,7 @@ describe('ProductDetail governed pricing flow', () => {
 
     // Keep the quick-cost modal mounted while apply finishes so its own lock is
     // verified in addition to the main Product fieldset.
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     productLoadResults.push({ data: null, error: new Error('reload failed') });
     fireEvent.click(screen.getByRole('button', { name: 'Apply approved changes' }));
 
@@ -903,7 +904,7 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
 
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'price_driven' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), {
       target: { value: '90071992547409.93' },
     });
@@ -955,7 +956,7 @@ describe('ProductDetail governed pricing flow', () => {
     fireEvent.change(screen.getByLabelText('Grower Description'), {
       target: { value: 'Unsaved grower-facing description' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
 

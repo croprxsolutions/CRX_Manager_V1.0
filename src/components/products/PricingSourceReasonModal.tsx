@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Modal from '../ui/Modal';
+import Select from '../ui/Select';
 import { PRICING_SOURCE_CHOICES, pricingSourceValue, type PricingSourceChoice } from './pricingSource';
 
 export interface PricingSourceReason {
@@ -34,6 +35,9 @@ export default function PricingSourceReasonModal({
   const [reason, setReason] = useState('');
   const source = pricingSourceValue(choice, detail);
   const ready = source.length > 0 && source.length <= 200 && reason.trim().length > 0;
+  const detailHint = choice === 'Other' && !detail.trim()
+    ? 'Add a detail for Other.'
+    : !choice && detail.trim() ? 'Choose a source.' : null;
 
   return (
     <Modal
@@ -59,20 +63,19 @@ export default function PricingSourceReasonModal({
           {productCount === 1 ? 'This change' : `These changes to ${productCount} products`} will be saved in the
           price history with the source and reason below.
         </p>
-        <div>
-          <label htmlFor="pricing-change-source" className="block text-sm font-medium text-secondary mb-1">Source</label>
-          <select id="pricing-change-source" value={choice} disabled={busy}
-            onChange={(event) => setChoice(event.target.value as PricingSourceChoice | '')}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-nav-dark focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20">
-            <option value="">Choose a source</option>
-            {PRICING_SOURCE_CHOICES.map((value) => <option key={value} value={value}>{value}</option>)}
-          </select>
-        </div>
+        <Select id="pricing-change-source" label="Source" placeholder="Choose a source"
+          options={PRICING_SOURCE_CHOICES.map((value) => ({ value, label: value }))}
+          value={choice} disabled={busy}
+          onChange={(event) => setChoice(event.target.value as PricingSourceChoice | '')} />
         <Input id="pricing-change-source-detail" label="Source detail"
           placeholder="e.g. Helena, Oct 2026" value={detail} maxLength={200} disabled={busy}
           required={choice === 'Other'}
+          aria-describedby={detailHint ? 'pricing-change-source-detail-hint' : undefined}
           error={source.length > 200 ? 'Source and detail must be 200 characters or less.' : undefined}
           onChange={(event) => setDetail(event.target.value)} />
+        {detailHint && (
+          <p id="pricing-change-source-detail-hint" className="text-sm text-secondary">{detailHint}</p>
+        )}
         <Input
           id="pricing-change-reason"
           label="Reason for the change"

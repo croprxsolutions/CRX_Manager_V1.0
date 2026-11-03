@@ -3,9 +3,10 @@
  *
  * Money is stored as bigint CENTS throughout the app.
  *   - formatCents(cents)   → divides by 100   (123456  -> "$1,234.56")
+ *   - formatExactCents(cents) → formats bigint cents without floating point
  *   - formatUSD(dollars)   → no division      (1234.56 -> "$1,234.56")
  *
- * Both render en-US USD. These replace ~35 byte-identical local copies that
+ * All three formatters render en-US USD; formatExactCents takes bigint cents. These replace ~35 byte-identical local copies that
  * had drifted into TWO different semantics under the same name `fmt` — see
  * docs/audits/2026-06-03-cleanup-money-touch-log.md.
  *
@@ -23,6 +24,7 @@
  */
 
 const usdFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const wholeDollarFormatter = new Intl.NumberFormat('en-US');
 
 /** Format an integer number of CENTS as USD. Divides by 100. */
 export function formatCents(cents: number): string {
@@ -33,7 +35,7 @@ export function formatCents(cents: number): string {
 export function formatExactCents(cents: bigint): string {
   const negative = cents < 0n;
   const absolute = negative ? -cents : cents;
-  const dollars = new Intl.NumberFormat('en-US').format(absolute / 100n);
+  const dollars = wholeDollarFormatter.format(absolute / 100n);
   return `${negative ? '-' : ''}$${dollars}.${(absolute % 100n).toString().padStart(2, '0')}`;
 }
 

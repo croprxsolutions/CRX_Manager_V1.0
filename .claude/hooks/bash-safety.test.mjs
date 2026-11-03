@@ -7,9 +7,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
-import os from "node:os";
+import { writeFileSync, rmSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   checkDangerousCommand,
   checkCommandDeep,
@@ -558,7 +558,7 @@ ok(!checkDangerousCommand("cat .env.example"), "reading .env.example is not a wr
 
 // ── migration-modify check (unchanged) ─────────────────────────────────────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bash-safety-migtest-"));
+  const tmp = tempDir("bash-safety-migtest-");
   try {
     const migDir = path.join(tmp, "supabase", "migrations");
     mkdirSync(migDir, { recursive: true });
@@ -580,7 +580,7 @@ ok(!checkDangerousCommand("cat .env.example"), "reading .env.example is not a wr
 
 // ── FIX 2: npm-script indirection ──────────────────────────────────────────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bash-safety-npmtest-"));
+  const tmp = tempDir("bash-safety-npmtest-");
   try {
     const pkg = {
       scripts: {
@@ -725,7 +725,7 @@ eq(extractNpmRunNames("npm --loglevel=silent run dangerous")[0], "dangerous", "n
   ok(chain.includes("git push --force origin main"), "prebuild lifecycle script is resolved with npm run build");
 }
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bashsafety-lifecycle-"));
+  const tmp = tempDir("bashsafety-lifecycle-");
   try {
     writeFileSync(path.join(tmp, "package.json"), JSON.stringify({
       scripts: { build: "echo building", postbuild: "git reset --hard HEAD~1" },
@@ -751,7 +751,7 @@ eq(checkDangerousCommand("dotenv -e .env.test -- npm run test"), null, "mentioni
 // ── Codex P1 2026-07-13: npm-resolved script bodies must also hit the
 //    migration-immutability check, not just the dangerous-command table ──────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bashsafety-npm-mig-"));
+  const tmp = tempDir("bashsafety-npm-mig-");
   try {
     mkdirSync(path.join(tmp, "supabase", "migrations"), { recursive: true });
     writeFileSync(path.join(tmp, "supabase", "migrations", "20260101000000_existing.sql"), "select 1;\n");

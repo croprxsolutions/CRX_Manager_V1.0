@@ -57,6 +57,39 @@ export function meaningfulDirt(porcelainText) {
     .filter((l) => !isIgnorableDirtLine(l));
 }
 
+// `git worktree remove` (no --force) silently deletes git-IGNORED files, which
+// the dirty check never sees (.env, backups/, *.dump, output/, local-app state,
+// supplier-pricing artifacts). Only these rebuildable ignored paths may go with
+// a worktree; any other ignored path keeps it (2026-11-03 Opus review).
+// INV-2026-0002.pdf (repo root only) is src/lib/invoicePdf.test.ts's fixture
+// output; any other invoice PDF or log may be real and keeps the worktree.
+// .claude/settings.local.json is already ignorable dirt (IGNORABLE_DIRT_PATH).
+const REBUILDABLE_IGNORED_DIRS = new Set([
+  "node_modules", "dist", "dist-ssr", "graphify-out", "coverage", "playwright-report", "test-results",
+  ".claude/session-state", ".claude/tmp", ".codex/session-state", ".codex/agents", ".agents/session-state",
+  "supabase/.temp", ".husky/_", ".playwright-mcp", ".playwright-cli",
+]);
+const REBUILDABLE_IGNORED_FILE = /^(INV-2026-0002\.pdf|\.claude\/settings\.local\.json|\.claude\/scheduled_tasks\.lock|\.impeccable\/hook\.cache\.json)$|(^|\/)[^/]*\.tsbuildinfo$/;
+
+export function isRebuildableIgnored(p) {
+  const rel = String(p || "").replace(/\\/g, "/").replace(/^"|"$/g, "").replace(/\/+$/, "");
+  if (!rel) return false;
+  if (rel.split("/").includes("node_modules")) return true;
+  if (REBUILDABLE_IGNORED_DIRS.has(rel)) return true;
+  return REBUILDABLE_IGNORED_FILE.test(rel);
+}
+
+// `git status --porcelain --ignored` text → the ignored paths that are NOT
+// rebuildable (an empty list = safe to remove with the worktree).
+export function preciousIgnored(porcelainText) {
+  return String(porcelainText || "")
+    .split("\n")
+    .map((l) => l.replace(/\r$/, ""))
+    .filter((l) => l.startsWith("!! "))
+    .map((l) => l.slice(3))
+    .filter((p) => !isRebuildableIgnored(p));
+}
+
 // Does raw applied-source-ledger JSON text contain at least one REAL entry
 // (an object with a non-empty string name — the only shape the recorder
 // writes)? Pure so the parse/shape rules are unit-testable; the runner wraps
@@ -100,9 +133,11 @@ export function normPath(p) {
 // Decide the fate of ONE worktree.
 //   fact: { path, branch, detached, locked, dirty, merged, lastActivityMs?,
 //           hasAppliedLedgerEntries? }
-//     - merged: true iff the branch has ZERO commits whose patch is not already
-//       in origin/main (computed by the runner via `git cherry`, so squash/rebase
-//       merges count as merged — a plain ancestor check would miss those).
+//     - merged: true iff the head is exactly a merged GitHub PR's head (squash
+//       merges), or `git cherry` finds no commit missing from origin/main.
+//       A detached worktree is merged iff its head is a merged PR head or an
+//       ancestor of origin/main.
+//     - preciousIgnored: count of ignored, non-rebuildable paths (see above).
 //     - lastActivityMs: newest mtime (ms) of the worktree's git index/HEAD/reflog
 //       or .claude/session-state; omit/0 if unknown.
 //   ctx:  { currentPath, nowMs?, activeWindowMs?, protectedBranches, harnessMarker }
@@ -123,8 +158,8 @@ export function classifyWorktree(fact, ctx = {}) {
       nowMs - fact.lastActivityMs < activeWindowMs) {
     return { action: "keep", reason: "recently-active" };
   }
-  // 2. Detached HEAD or no branch — nothing to safely reason about; leave it.
-  if (fact.detached || !fact.branch) return { action: "keep", reason: "detached" };
+  // 2. No branch: only a detached head that provably landed may go on.
+  if (fact.detached ? !fact.merged : !fact.branch) return { action: "keep", reason: "detached" };
   // 3. Protected branches are never removed.
   if (protectedBranches.includes(fact.branch)) return { action: "keep", reason: "protected-branch" };
   // 4. A locked worktree = an active/held session; respect the lock.
@@ -138,6 +173,9 @@ export function classifyWorktree(fact, ctx = {}) {
   //     the un-contained apply (Opus review 2026-08-19). stop-wrap prunes the
   //     ledger once the source is committed, which releases this keep.
   if (fact.hasAppliedLedgerEntries) return { action: "keep", reason: "applied-ledger" };
+  // 5c. Ignored files that can't be rebuilt would be deleted silently by the
+  //     remove; keep them. Anything but a counted 0 (unreadable) keeps too.
+  if (fact.preciousIgnored !== 0) return { action: "keep", reason: "ignored-files" };
   // 6. Unmerged commits = real un-shipped work; leave for human triage.
   if (!fact.merged) return { action: "keep", reason: "unmerged" };
   // 7. Only auto-remove harness-managed worktrees, never manual long-lived ones.
@@ -158,6 +196,23 @@ export function classifyBranch(fact, ctx = {}) {
   if (fact.checkedOut) return { action: "keep", reason: "checked-out" };
   if (!fact.merged) return { action: "keep", reason: "unmerged" };
   return { action: "remove", reason: "merged" };
+}
+
+// Decide the fate of ONE folder under .claude/worktrees/ that git no longer
+// lists as a worktree (a "husk": an interrupted delete left empty folders,
+// dangling node_modules links, or part of a checkout behind).
+//   fact: { registered, hasGit, realFiles, newestMtimeMs }
+//     - realFiles: count of regular files found WITHOUT following links
+//       (the walk stops at the first one, so 0 or 1); null = unreadable.
+// Only a husk with zero real files, idle past the active window, is removed.
+// One holding files may be someone's unsaved work: report only.
+export function classifyHusk(fact, ctx = {}) {
+  const nowMs = typeof ctx.nowMs === "number" ? ctx.nowMs : Date.now();
+  const activeWindowMs = typeof ctx.activeWindowMs === "number" ? ctx.activeWindowMs : ACTIVE_WINDOW_MS;
+  if (fact.registered || fact.hasGit) return { action: "keep", reason: "not-husk" };
+  if (fact.realFiles !== 0) return { action: "keep", reason: "husk-has-files" };
+  if (!(fact.newestMtimeMs > 0) || nowMs - fact.newestMtimeMs < activeWindowMs) return { action: "keep", reason: "recently-active" };
+  return { action: "remove", reason: "empty-husk" };
 }
 
 // Build a full cleanup plan from gathered facts.

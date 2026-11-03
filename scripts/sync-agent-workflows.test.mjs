@@ -16,10 +16,10 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs, { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import os from "node:os";
 import path from "node:path";
 
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 import {
   archiveImportedSkills,
@@ -32,7 +32,7 @@ import {
   writeExpected,
 } from "./sync-agent-workflows.mjs";
 
-const targetRoot = mkdtempSync(path.join(os.tmpdir(), "crx-sync-write-"));
+const targetRoot = tempDir("crx-sync-write-");
 
 // Release instructions must use the executable parameter/contract matcher,
 // not bless actor-forgery exemptions by their violation keys alone.
@@ -577,7 +577,7 @@ try {
   //     containment because a delete does not get to assume its caller validated.
   //     Asserted end to end on a real file outside the target root.
   {
-    const escapeRoot = mkdtempSync(path.join(os.tmpdir(), "crx-sync-escape-"));
+    const escapeRoot = tempDir("crx-sync-escape-");
     const targetInside = path.join(escapeRoot, "agents");
     mkdirSync(targetInside, { recursive: true });
     const outsider = path.join(escapeRoot, "package.json");

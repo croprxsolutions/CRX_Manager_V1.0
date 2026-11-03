@@ -7,10 +7,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, chmodSync } from "node:fs";
-import os from "node:os";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, chmodSync } from "node:fs";
 import path from "node:path";
 import { gitLocalEnvironmentNames, scratchHookEnvironment } from "./git-test-env.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -26,7 +26,7 @@ function runHook(file, payload, projectDir, inheritedEnv = process.env) {
   });
 }
 
-const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "registry-freshness-test-"));
+const tmpRoot = tempDir("registry-freshness-test-");
 const flagPathIn = (dir) => path.join(dir, ".claude", "session-state", "REGISTRY-STALE.flag");
 function git(args, cwd) {
   return spawnSync("git", args, {

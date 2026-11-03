@@ -2,13 +2,13 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { linkSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { PROTECTED_HARNESS_FILES, canonicalizeGuardPath, evaluateProductionAction as evaluateProductionActionRaw, isClearlyReadOnlySql, nativePatchEnvelope, parseNativePatch, realPathThroughLinks, repositoryWorktreeRoots, pullRequestChecksGreen } from "./production-action-guard.mjs";
 import { renderSweepQuery } from "../../.claude/hooks/live-testdata-lib.mjs";
 import { buildSweepQuery } from "../../scripts/db-invariant-sweeps/allowlist-match.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 // Since 2026-10-19 (Luna round 3) the merge gate FAILS CLOSED when it cannot
 // read the PR's review threads, because unresolved CodeRabbit threads block a
@@ -113,7 +113,7 @@ function git(cwd, args) {
 }
 
 function makeRepo(changePath, changeContent) {
-  const repo = mkdtempSync(path.join(tmpdir(), "crx-push-guard-"));
+  const repo = tempDir("crx-push-guard-");
   tempRoots.push(repo);
   git(repo, ["init", "-b", "main"]);
   git(repo, ["config", "user.email", "guard-test@example.com"]);
@@ -3303,7 +3303,7 @@ try {
   }
   // A destination that is a link (symlink or junction) to a protected file, or lives inside a
   // linked directory, lands on the protected file, not on the spelled path.
-  const linkRoot = mkdtempSync(path.join(tmpdir(), "crx-native-patch-links-"));
+  const linkRoot = tempDir("crx-native-patch-links-");
   try {
     mkdirSync(path.join(linkRoot, ".codex", "hooks"), { recursive: true });
     mkdirSync(path.join(linkRoot, ".claude", "session-state"), { recursive: true });
@@ -3319,7 +3319,7 @@ try {
     symlinkSync(path.join(linkRoot, ".codex", "hooks", "not-created-yet"), path.join(linkRoot, "src", "dangling-dir"), "junction");
     linkSync(path.join(linkRoot, ".codex", "hooks", "production-action-guard.mjs"), path.join(linkRoot, "src", "guard-hardlink.mjs"));
     // A patch edits THIS repository: a destination (or a link) that leads outside it is refused.
-    const outsideRoot = mkdtempSync(path.join(tmpdir(), "crx-native-patch-outside-"));
+    const outsideRoot = tempDir("crx-native-patch-outside-");
     try {
       symlinkSync(outsideRoot, path.join(linkRoot, "src", "escape"), "junction");
       const outsideCases = [
@@ -3444,7 +3444,7 @@ try {
     const sibling = `${repo}-sibling-worktree`;
     tempRoots.push(sibling);
     git(repo, ["worktree", "add", "-b", "feature/sibling", sibling]);
-    const unrelated = mkdtempSync(path.join(tmpdir(), "crx-unrelated-"));
+    const unrelated = tempDir("crx-unrelated-");
     tempRoots.push(unrelated);
     const roots = repositoryWorktreeRoots(repo);
     assert.equal(roots.length, 2, "both worktrees of the repository are listed");

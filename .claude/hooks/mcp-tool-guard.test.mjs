@@ -7,9 +7,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import os from "node:os";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -68,7 +68,7 @@ eq(r.stdout.trim(), "", "DC write_file to an ordinary source file is silent (all
 // the native Write/Edit matchers only — an MCP write CREATING a migration
 // would skip every one of them, so the guard denies the whole directory.
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mcp-tool-guard-migtest-"));
+  const tmp = tempDir("mcp-tool-guard-migtest-");
   try {
     const migDir = path.join(tmp, "supabase", "migrations");
     mkdirSync(migDir, { recursive: true });
@@ -103,7 +103,7 @@ eq(r.stdout.trim(), "", "malformed stdin produces no block");
 // ── Codex P1 2026-07-13: move_file must check the SOURCE path, not just the
 //    destination — moving a protected migration AWAY must be denied ──────────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mcpguard-move-"));
+  const tmp = tempDir("mcpguard-move-");
   try {
     mkdirSync(path.join(tmp, "supabase", "migrations"), { recursive: true });
     writeFileSync(path.join(tmp, "supabase", "migrations", "20260101000000_applied.sql"), "select 1;\n");

@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --from-introspection <queries.json> (queries documented in the script header)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261103052726",
+    "migrations_high_water": "20261103172003",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -482,6 +482,11 @@
       "20261103130000_bind_order_replay_receipts_batch4b",
       "20261103150000_ar_aging_flags_unrebuildable_customers",
       "20261103210000_product_use_timings",
+      "20261103220000_period_check_takes_month_lock",
+      "20261104120000_balance_reports_flag_unrebuildable_customers",
+      "20261104130000_any_rep_changes_booked_prices",
+      "20261104140000_pricing_tier_order_warning",
+      "20261104150000_product_forms_seed_each",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1462,6 +1467,7 @@
     "product_cost_basis",
     "product_cost_basis_change_rows",
     "product_cost_basis_rollout",
+    "product_form_units",
     "product_info_change_set_rows",
     "product_margin_floor_changes",
     "product_use_timing_options",
@@ -2502,6 +2508,15 @@
         "product_cost_basis_change_rows_selection_source_check"
       ]
     },
+    "product_form_units.product_form": {
+      "values": [
+        "seed",
+        "each"
+      ],
+      "constraints": [
+        "product_form_units_product_form_check"
+      ]
+    },
     "product_label_drafts.confidence": {
       "values": [
         "high",
@@ -2572,7 +2587,9 @@
     "products.product_form": {
       "values": [
         "liquid",
-        "dry"
+        "dry",
+        "seed",
+        "each"
       ],
       "constraints": [
         "products_product_form_check"
@@ -6059,6 +6076,15 @@
         "updated_at"
       ]
     },
+    "product_form_units": {
+      "no_default": [
+        "product_form",
+        "unit"
+      ],
+      "with_default": [
+        "created_at"
+      ]
+    },
     "product_info_change_set_rows": {
       "no_default": [
         "change_set_id",
@@ -8530,6 +8556,11 @@
       "is_active",
       "created_at",
       "updated_at"
+    ],
+    "product_form_units": [
+      "product_form",
+      "unit",
+      "created_at"
     ],
     "product_info_change_set_rows": [
       "change_set_id",

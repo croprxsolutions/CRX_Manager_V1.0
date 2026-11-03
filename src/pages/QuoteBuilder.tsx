@@ -2700,28 +2700,32 @@ export default function QuoteBuilder() {
   const handleSelectTemplate = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const templateId = e.target.value;
     if (!templateId || !customerId || !profile) return;
-    const ftIdemKey = fromTemplateIdem.getKey();
+    // One key per customer until a quote is confirmed: this RPC checks only the key, so an edited retry after a
+    // lost reply must replay the quote it already created rather than create a second one.
+    const ftScope = customerId;
     const { data, error } = await supabase.rpc('create_quote_from_template', {
       p_template_id: templateId,
       p_customer_id: customerId,
       p_performed_by: profile.id,
-      p_idempotency_key: ftIdemKey,
+      p_idempotency_key: fromTemplateIdem.getKeyFor(ftScope),
     });
     if (error) { toast('error', 'Failed to create from template'); return; }
-    fromTemplateIdem.resetKey();
     const result = assertRpcResult<{ quote_id: string; quote_number: string }>(data, 'create_quote_from_template');
+    fromTemplateIdem.resetKeyFor(ftScope);
     navigate(`/quotes/${result.quote_id}`);
   };
 
   // Seasonal rollover handler
   const handleRollover = async () => {
     if (!quoteId || !profile) return;
-    const rollIdemKey = rolloverIdem.getKey();
+    // One key per source quote until confirmed: this RPC checks only the key, so a changed season after a lost
+    // reply must replay the rollover it already made rather than create a second quote.
+    const rollScope = quoteId;
     const { data, error } = await supabase.rpc('rollover_quote_to_season', {
       p_quote_id: quoteId,
       p_new_season: rolloverSeason,
       p_performed_by: profile.id,
-      p_idempotency_key: rollIdemKey,
+      p_idempotency_key: rolloverIdem.getKeyFor(rollScope),
     });
     if (error) {
       if (hasRpcCode(error, RpcErrorCodes.BOOKING_FULLY_DRAWN)) {
@@ -2731,8 +2735,8 @@ export default function QuoteBuilder() {
       }
       return;
     }
-    rolloverIdem.resetKey();
     const result = assertRpcResult<{ quote_id: string; quote_number: string; season: number; remainder_rollover: boolean }>(data, 'rollover_quote_to_season');
+    rolloverIdem.resetKeyFor(rollScope);
     toast('success', `Rolled over to season ${result.season} — ${result.quote_number}`);
     navigate(`/quotes/${result.quote_id}`);
   };
@@ -2876,23 +2880,23 @@ export default function QuoteBuilder() {
     setClosingApplied(true);
     try {
       const previousRowVersion = quoteRowVersionRef.current;
-      const idemKey = closeAppliedIdem.getKey();
       // supabaseUntyped: close_quote_as_applied is a Layer 2 RPC not yet in the
       // generated types (matches get_dispatch_stock_status / job_product_draws usage).
       const { data, error } = await supabaseUntyped.rpc('close_quote_as_applied', {
         p_quote_id: id,
         p_performed_by: profile!.id,
-        p_idempotency_key: idemKey,
+        // Keyed per quote, so a retry here can never redeem another quote's close.
+        p_idempotency_key: closeAppliedIdem.getKeyFor(id),
       });
       if (error) {
         // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
         // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
         const bindingRejection = getIdempotencyBindingRejection(error);
-        if (bindingRejection === 'intent' || bindingRejection === 'actor') closeAppliedIdem.resetKey();
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') closeAppliedIdem.resetKeyFor(id);
         throw error;
       }
-      closeAppliedIdem.resetKey();
       const result = assertRpcResult<{ status: string; released_units?: number; active_jobs_remaining?: number; warnings?: string[] }>(data, 'close_quote_as_applied');
+      closeAppliedIdem.resetKeyFor(id);
       setStatus((result.status as QuoteStatus) || 'closed_by_application');
       const rowVersionConfirmed = await refreshQuoteRowVersionAfterMutation(id, previousRowVersion, previousRowVersion === null ? null : previousRowVersion + 1, 'closed as fulfilled by application');
       setIsDirty(false);
@@ -2928,23 +2932,23 @@ export default function QuoteBuilder() {
     setClosingShort(true);
     try {
       const previousRowVersion = quoteRowVersionRef.current;
-      const idemKey = closeShortIdem.getKey();
       // supabaseUntyped: close_quote_as_short is a new RPC not yet in the
       // generated types (matches close_quote_as_applied usage).
       const { data, error } = await supabaseUntyped.rpc('close_quote_as_short', {
         p_quote_id: id,
         p_performed_by: profile!.id,
-        p_idempotency_key: idemKey,
+        // Keyed per quote, so a retry here can never redeem another quote's close.
+        p_idempotency_key: closeShortIdem.getKeyFor(id),
       });
       if (error) {
         // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
         // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
         const bindingRejection = getIdempotencyBindingRejection(error);
-        if (bindingRejection === 'intent' || bindingRejection === 'actor') closeShortIdem.resetKey();
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') closeShortIdem.resetKeyFor(id);
         throw error;
       }
-      closeShortIdem.resetKey();
       const result = assertRpcResult<{ status: string; released_units?: number; warnings?: string[] }>(data, 'close_quote_as_short');
+      closeShortIdem.resetKeyFor(id);
       setStatus((result.status as QuoteStatus) || 'closed_short');
       const rowVersionConfirmed = await refreshQuoteRowVersionAfterMutation(id, previousRowVersion, previousRowVersion === null ? null : previousRowVersion + 1, 'closed short');
       setIsDirty(false);
@@ -3553,22 +3557,25 @@ export default function QuoteBuilder() {
       return;
     }
     setDrawing(true);
+    // The price choice is sent only for a quantity over what is left, so every other draw
+    // is the same request as before.
+    const drawPayload = draws.map((d) => ({
+      product_id: d.product_id,
+      quantity: d.quantity,
+      ...(d.quantity > d.remaining ? { extra_price: d.extraPrice } : {}),
+    }));
+    // One key per quote: the server binds this key to its request, so edited details after a lost reply are refused with the committed result (a re-entered quantity can newly exceed what is left).
+    const drawScope = id ?? '';
     try {
       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('draw_down_quote', withBelowCostReason('draw_down_quote', {
         p_quote_id: id,
-        // The price choice is sent only for a quantity over what is left, so every other draw
-        // is the same request as before.
-        p_draws: draws.map((d) => ({
-          product_id: d.product_id,
-          quantity: d.quantity,
-          ...(d.quantity > d.remaining ? { extra_price: d.extraPrice } : {}),
-        })),
+        p_draws: drawPayload,
         p_performed_by: profile!.id,
-        p_idempotency_key: drawDownIdem.getKey(),
+        p_idempotency_key: drawDownIdem.getKeyFor(drawScope),
       }, reason)));
       if (error) throw error;
-      drawDownIdem.resetKey();
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
+      drawDownIdem.resetKeyFor(drawScope);
       toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? ' — booking fully drawn' : ' — booking stays open'}`
         + (result.extra_order_number ? `. The amount over the booking is order ${result.extra_order_number}.` : ''));
       if (result.warnings && result.warnings.length > 0) {
@@ -3597,7 +3604,7 @@ export default function QuoteBuilder() {
       // open that order rather than suggesting a second draw.
       const bindingRejection = getIdempotencyBindingRejection(error);
       if (bindingRejection) {
-        drawDownIdem.resetKey();
+        drawDownIdem.resetKeyFor(drawScope);
         const committedResult = bindingRejection === 'intent'
           ? getIdempotencyMismatchResult(error, 'draw_down_quote')
           : null;

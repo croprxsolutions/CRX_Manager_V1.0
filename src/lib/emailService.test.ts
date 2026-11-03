@@ -171,7 +171,7 @@ describe('sendEmail', () => {
     await expect(sendEmail(validParams)).rejects.toThrow('Email service returned invalid response (HTTP 200)');
   });
 
-  it('includes attachments in the request body', async () => {
+  it('includes attachments in the request body (statements still attach the app PDF)', async () => {
     mockGetSession.mockResolvedValue(mockSession);
     mockFetch.mockResolvedValue({
       ok: true,
@@ -179,14 +179,18 @@ describe('sendEmail', () => {
     });
 
     const paramsWithAttachment: SendEmailParams = {
-      ...validParams,
-      attachments: [{ filename: 'invoice.pdf', content: 'base64data' }],
+      to: 'test@example.com',
+      subject: 'Statement',
+      html: '<p>Statement attached</p>',
+      email_type: 'statement',
+      customer_id: 'cust-123',
+      attachments: [{ filename: 'statement.pdf', content: 'base64data' }],
     };
 
     await sendEmail(paramsWithAttachment);
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.attachments).toEqual([{ filename: 'invoice.pdf', content: 'base64data' }]);
+    expect(body.attachments).toEqual([{ filename: 'statement.pdf', content: 'base64data' }]);
   });
 });
 
@@ -202,7 +206,6 @@ describe('buildInvoiceEmailPayload', () => {
     invoiceNumber: 'FA-1001',
     invoiceDate: '2026-06-25',
     balanceCents: 125000, // $1,250.00
-    attachmentBase64: 'QkFTRTY0UERG', // dummy base64
     snapshot: { invoice_number: 'FA-1001', total_amount_cents: 125000, paid_amount_cents: 0, prepay_applied_cents: 0, balance_cents: 125000, lines_total_cents: 125000 },
     nowMs: 1_700_000_000_000,
   };
@@ -230,11 +233,10 @@ describe('buildInvoiceEmailPayload', () => {
     expect(p.to).toBe('farmer@example.com');
   });
 
-  it('attaches the supplied PDF under an invoice-numbered filename', () => {
+  it('sends no PDF: the server draws it from the saved invoice (KI-98)', () => {
     const p = buildInvoiceEmailPayload(base);
-    expect(p.attachments).toHaveLength(1);
-    expect(p.attachments![0].filename).toBe('Invoice-FA-1001.pdf');
-    expect(p.attachments![0].content).toBe('QkFTRTY0UERG');
+    expect(p.attachments).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(p))).not.toHaveProperty('attachments');
   });
 
   it('builds a deterministic, per-invoice idempotency key', () => {

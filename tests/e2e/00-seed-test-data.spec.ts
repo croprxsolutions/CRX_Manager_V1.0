@@ -40,7 +40,7 @@ import { supabaseRest, supabaseRpc, asArray } from './golive/utils/supabase-help
 /* ─── Constants ────────────────────────────────────────────────────────────── */
 
 const TAG   = 'SEED-2026';
-const TODAY = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+const TODAY = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }); // YYYY-MM-DD, Central business day
 
 /* ─── Shared state — filled in by each serial step ────────────────────────── */
 

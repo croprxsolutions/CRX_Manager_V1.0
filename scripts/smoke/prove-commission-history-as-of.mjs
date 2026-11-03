@@ -418,7 +418,7 @@ function restoreBaseline() {
 
   psql('CREATE SCHEMA IF NOT EXISTS auth; CREATE TABLE IF NOT EXISTS auth.users(id uuid PRIMARY KEY);', { user: 'supabase_admin' });
   psql('\\i /tmp/commission-extensions.sql');
-  const decoded = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], {
+  const decoded = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], {
     cwd: ROOT,
     maxBuffer: 80 * 1024 * 1024,
   });

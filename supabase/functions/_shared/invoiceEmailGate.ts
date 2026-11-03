@@ -3,16 +3,13 @@
 //
 // send-email builds an invoice email's subject, wording, amount and attachment
 // name from the saved invoice; whatever the browser sends for those is ignored.
-// The PDF is still drawn by the app (jsPDF). The app also sends a summary of the
-// money it put in that PDF, and the send is refused unless the summary is the saved
-// invoice today. That catches a stale or buggy screen; it does NOT prove what the
-// PDF bytes show, because the same app supplies both (purchaseOrderEmailGate.ts
-// works the same way). Accepted for now by Mason, 2026-11-02:
-// the PDF bytes (forwarded unverified, as before this change; only signed-in staff
-// can send, only to the customer's address on file), and the moment between send-email's
+// It also draws the PDF itself from the saved invoice (_shared/pdf/invoicePdf.ts,
+// KNOWN_ISSUES KI-98) and refuses a PDF the app attaches. The app still sends the
+// money its screen showed, and the send is refused unless that is the saved invoice
+// today, so staff never send an invoice that changed under them; the server's own
+// PDF passes the same check. Not covered, by design: the moment between send-email's
 // final re-read of the invoice and the provider call (a payment saved in it still
 // goes out with the earlier Amount Due; the purchase-order copy has the same window).
-// Both are accepted for now and tracked as KNOWN_ISSUES KI-98 (follow-up: server-built PDFs).
 //
 // Pure, with no Deno or Supabase imports, so the app's Vitest suite tests it
 // directly (src/lib/invoiceEmailGate.test.ts).
@@ -29,7 +26,7 @@ export interface InvoiceEmailRow {
   balance_cents: number | string | null;
 }
 
-/** The app's account of the money it printed in the attached PDF (not verified against the bytes). All whole cents. */
+/** The money an invoice PDF prints: what the app's screen showed, or the server's own PDF. All whole cents. */
 export interface InvoiceEmailSnapshot {
   invoice_number: string;
   total_amount_cents: number;
@@ -141,9 +138,29 @@ export function wrapEmailHtml(bodyContent: string): string {
 </html>`;
 }
 
+/** The money an invoice PDF prints, from the data it is drawn from (src/lib/emailService.ts re-exports this). */
+export function invoiceEmailSnapshot(pdf: {
+  invoice_number: string;
+  total_amount_cents: number;
+  paid_amount_cents: number;
+  prepay_applied_cents: number;
+  balance_cents: number;
+  items: ReadonlyArray<{ extended_cents: number }>;
+}): InvoiceEmailSnapshot {
+  return {
+    invoice_number: pdf.invoice_number,
+    total_amount_cents: pdf.total_amount_cents,
+    paid_amount_cents: pdf.paid_amount_cents,
+    prepay_applied_cents: pdf.prepay_applied_cents,
+    balance_cents: pdf.balance_cents,
+    lines_total_cents: pdf.items.reduce((sum, item) => sum + item.extended_cents, 0),
+  };
+}
+
 /**
  * Builds the invoice email from the saved invoice and its lines' amounts, or refuses
- * when the app's PDF summary (`snapshot`) is not the invoice today (a stale screen).
+ * when the money in `snapshot` (the app's screen, or the server-drawn PDF) is not the
+ * invoice today.
  */
 export function buildInvoiceEmail(
   invoice: InvoiceEmailRow | null,

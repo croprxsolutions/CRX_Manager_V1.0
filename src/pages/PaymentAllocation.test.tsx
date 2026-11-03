@@ -46,7 +46,7 @@ vi.mock('../components/ui/Toast', () => ({
 }));
 
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn(), getKeyFor: () => 'test-idem-key', resetKeyFor: vi.fn() }),
 }));
 
 // parseCents is deliberately NOT mocked: the real parser refuses more than two

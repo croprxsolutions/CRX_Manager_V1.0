@@ -50,7 +50,7 @@ BEGIN
   WHERE id = v_inv_paid;
 
   v_pay_result := public.allocate_payment(
-    v_customer, 50000, 'check', 'E2E-H3-' || v_suffix, NULL, CURRENT_DATE,
+    v_customer, 50000, 'check', 'E2E-H3-' || v_suffix, NULL, (now() AT TIME ZONE 'America/Chicago')::date,
     'H3 reversible allocation smoke',
     jsonb_build_array(jsonb_build_object('invoice_id', v_inv_paid, 'amount_cents', 50000)),
     v_admin, 'e2e-h3-pay-' || v_suffix);

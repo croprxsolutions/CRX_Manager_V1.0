@@ -13,7 +13,7 @@ import { RouterProvider, createMemoryRouter } from 'react-router';
 // Same module copy for the page's useNavigate and the hook's useBlocker.
 vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
-const { mockDrawnPolygon, mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
+const { mockDrawnPolygon, mockFrom, mockHasKey, mockRpc, mockToast } = vi.hoisted(() => ({
   mockDrawnPolygon: {
     drawId: 'draw-1',
     acres: 40,
@@ -28,6 +28,7 @@ const { mockDrawnPolygon, mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
     },
   },
   mockFrom: vi.fn(),
+  mockHasKey: vi.fn(() => false),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
 }));
@@ -46,7 +47,7 @@ vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/fieldsGeojsonCache', () => ({ getCachedFieldsGeojson: vi.fn().mockResolvedValue([]) }));
 vi.mock('../lib/plssLookup', () => ({ lookupPlss: vi.fn() }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn(), getKeyFor: () => 'key', resetKeyFor: vi.fn(), hasKeyFor: mockHasKey }),
 }));
 vi.mock('../components/customers/CustomerSearchPicker', () => ({
   default: ({ onSelect }: { onSelect: (customer: { id: string; farm_name: string }) => void }) => (
@@ -92,6 +93,7 @@ async function renderNewField() {
 describe('FieldSetup — a new field whose acreage step fails', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockHasKey.mockReturnValue(false);
     mockFrom.mockImplementation((table: string) => chain(
       table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1' } : null,
     ));
@@ -128,5 +130,80 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/fields/field-1'));
     expect(mockToast).toHaveBeenCalledWith('error', 'Field saved but the boundary could not be measured. Please re-draw and save.');
     expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+  });
+
+  it('a changed retry after a lost create opens the created field and applies none of the edit', async () => {
+    mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
+    const router = await renderNewField();
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
+
+    mockHasKey.mockReturnValue(true); // the lost attempt's key is kept
+    fireEvent.change(screen.getByLabelText(/Field Name/), { target: { value: 'South 40' } });
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '35' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/fields/field-1'));
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('An earlier save may already have created this field'));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'set_field_override_acres')).toBe(false);
+  });
+
+  it('a changed retry whose first attempt never reached the server keeps its acreage', async () => {
+    mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
+    await renderNewField();
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
+
+    mockHasKey.mockReturnValue(true);
+    // The saved row holds this retry's details, so this retry created it.
+    mockFrom.mockImplementation((table: string) => chain(
+      table === 'fields' ? { field_name: 'South 40', customer_id: 'customer-1', state: 'IL', irrigation: false, is_active: true } : null,
+    ));
+    fireEvent.change(screen.getByLabelText(/Field Name/), { target: { value: 'South 40' } });
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '35' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_field_override_acres', expect.objectContaining({ p_field_id: 'field-1', p_override_acres: 35 })));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.anything());
+  });
+
+  it('a changed retry is not trusted when the saved billing splits differ from what it sent', async () => {
+    mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
+    await renderNewField();
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
+
+    mockHasKey.mockReturnValue(true);
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'field_billing_defaults') {
+        return chain(table === 'fields' ? { field_name: 'South 40', customer_id: 'customer-1', state: 'IL', irrigation: false, is_active: true } : null);
+      }
+      const self = chain(null);
+      const splits = Promise.resolve({ data: [{ customer_id: 'customer-9', split_pct: 100, is_primary: true, notes: null, price_override_cents: null, pricing_note: null }], error: null });
+      self.then = splits.then.bind(splits);
+      return self;
+    });
+    fireEvent.change(screen.getByLabelText(/Field Name/), { target: { value: 'South 40' } });
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '35' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('An earlier save may already have created this field')));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'set_field_override_acres')).toBe(false);
+  });
+
+  it('a retry that changes only the acreage saves it on the field', async () => {
+    mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
+    await renderNewField();
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
+
+    mockHasKey.mockReturnValue(true);
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '35' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_field_override_acres', expect.objectContaining({ p_field_id: 'field-1', p_override_acres: 35 })));
   });
 });

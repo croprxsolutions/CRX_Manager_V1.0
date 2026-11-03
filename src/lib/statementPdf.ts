@@ -348,6 +348,13 @@ function drawDetailedTransactions(
   autoTable: typeof autoTableFn,
 ): number {
   let y = startY;
+  // Lines drawn after a product table can otherwise land on the page footer.
+  const ensureRoomAboveFooter = (height: number) => {
+    if (height > 0 && y + height > pageH - FOOTER_SAFE_BOTTOM_OFFSET) {
+      doc.addPage();
+      y = margin;
+    }
+  };
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
@@ -410,6 +417,7 @@ function drawDetailedTransactions(
 
     // ── Price per acre ────────────────────────────────────────────
     if (tx.price_per_acre && tx.price_per_acre > 0 && tx.invoice_type === 'field_application') {
+      ensureRoomAboveFooter(12);
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(...GRAY);
@@ -472,6 +480,9 @@ function drawDetailedTransactions(
     }
 
     // ── Finance charges ───────────────────────────────────────────
+    const showNetDue = tx.net_due_cents > 0 && (tx.finance_charge_cents > 0 || (tx.shares && tx.shares.length > 1));
+    // Keep Finance Charges and Net Due together on one page.
+    ensureRoomAboveFooter((tx.finance_charge_cents > 0 ? 12 : 0) + (showNetDue ? 14 : 0));
     if (tx.finance_charge_cents > 0) {
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
@@ -483,7 +494,7 @@ function drawDetailedTransactions(
     }
 
     // ── Net Due line ──────────────────────────────────────────────
-    if (tx.net_due_cents > 0 && (tx.finance_charge_cents > 0 || (tx.shares && tx.shares.length > 1))) {
+    if (showNetDue) {
       doc.setFontSize(8.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(...CHARCOAL);

@@ -13,12 +13,12 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { normalizedSqlHash } from "./ledger-lock-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const hooksDir = path.dirname(fileURLToPath(import.meta.url));
 const recorderPath = path.join(hooksDir, "applied-snapshot-invalidate.mjs");
@@ -50,7 +50,7 @@ function git(args, cwd) {
   return r.stdout;
 }
 
-const tmp = mkdtempSync(path.join(os.tmpdir(), "crx-c3-test-"));
+const tmp = tempDir("crx-c3-test-");
 try {
   // ── Fresh git repo standing in for a session's worktree ──
   git(["init", "-q"], tmp);
@@ -304,7 +304,7 @@ try {
   // nothing committed is exactly the uncontained case. Guards against a
   // "skip when HEAD doesn't resolve" regression (CodeRabbit PR #423 round 3):
   // only a transient git failure may skip, never a genuinely empty history.
-  const tmp2 = mkdtempSync(path.join(os.tmpdir(), "crx-c3-unborn-"));
+  const tmp2 = tempDir("crx-c3-unborn-");
   try {
     git(["init", "-q"], tmp2);
     const top2 = git(["rev-parse", "--show-toplevel"], tmp2).trim();
@@ -323,7 +323,7 @@ try {
   // Simulated by deleting the commit's root tree object from the loose object
   // store: rev-parse --verify HEAD still succeeds (the commit object exists),
   // but ls-tree cannot read the tree and exits non-zero.
-  const tmp3 = mkdtempSync(path.join(os.tmpdir(), "crx-c3-lstree-"));
+  const tmp3 = tempDir("crx-c3-lstree-");
   try {
     git(["init", "-q"], tmp3);
     const top3 = git(["rev-parse", "--show-toplevel"], tmp3).trim();
@@ -445,7 +445,7 @@ try {
   // payload's cwd wins over CLAUDE_PROJECT_DIR for BOTH checker and recorder —
   // a harness that pins the env var to the primary checkout while the session
   // runs in a worktree must not aim the guard at the wrong tree.
-  const envDecoy = mkdtempSync(path.join(os.tmpdir(), "crx-c3-envdecoy-"));
+  const envDecoy = tempDir("crx-c3-envdecoy-");
   try {
     writeFileSync(ledgerPath, JSON.stringify([{ name: "cwd_precedence_probe", ts: "2026-08-18T00:00:00Z", session: "s" }]) + "\n");
     const viaCwd = spawnSync(process.execPath, [stopWrapPath], {
@@ -510,7 +510,7 @@ try {
   // is genuinely CLEAN (.claude/ is gitignored), the signature reduces to just
   // the APPLIED-NO-SOURCE component, and an EXACTLY matching ack is planted —
   // the session must still refuse to end.
-  const tmp4 = mkdtempSync(path.join(os.tmpdir(), "crx-c3-ackgate-"));
+  const tmp4 = tempDir("crx-c3-ackgate-");
   try {
     git(["init", "-q"], tmp4);
     const top4 = git(["rev-parse", "--show-toplevel"], tmp4).trim();

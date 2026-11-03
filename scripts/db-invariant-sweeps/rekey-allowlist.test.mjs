@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { tempDir } from '../lib/test-temp-dir.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const script = path.join(here, 'rekey-allowlist.mjs');
@@ -24,7 +24,7 @@ function sweepOutput(keys) {
 }
 
 function run(keys, ...extra) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'crx-rekey-'));
+  const dir = tempDir('crx-rekey-');
   try {
     const allowlist = path.join(dir, 'allowlist.json');
     const output = path.join(dir, 'out.txt');
@@ -74,7 +74,7 @@ test('a stale output whose new key is already allowlisted refuses', () => {
   data.entries.push({ ...costEntries[0], violation_key: rehash(costEntries[0].violation_key) });
   const eol = original.includes('\r\n') ? '\r\n' : '\n';
   const withBoth = JSON.stringify(data, null, 2).replace(/\n/g, eol) + eol;
-  const dir = mkdtempSync(path.join(tmpdir(), 'crx-rekey-'));
+  const dir = tempDir('crx-rekey-');
   try {
     const allowlist = path.join(dir, 'allowlist.json');
     const output = path.join(dir, 'out.txt');
@@ -94,7 +94,7 @@ test('a signature shared by two entries refuses', () => {
   data.entries.push(dupe);
   const eol = original.includes('\r\n') ? '\r\n' : '\n';
   const withDupe = JSON.stringify(data, null, 2).replace(/\n/g, eol) + eol;
-  const dir = mkdtempSync(path.join(tmpdir(), 'crx-rekey-'));
+  const dir = tempDir('crx-rekey-');
   try {
     const allowlist = path.join(dir, 'allowlist.json');
     const output = path.join(dir, 'out.txt');

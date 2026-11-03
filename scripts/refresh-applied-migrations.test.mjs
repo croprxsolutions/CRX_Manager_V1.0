@@ -12,10 +12,10 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts", "refresh-applied-migrations.mjs");
@@ -25,7 +25,7 @@ let passed = 0;
 // Each run gets its own CLAUDE_PROJECT_DIR so a test can never touch the real
 // session-state snapshot.
 function run(input, { asFileArg = false } = {}) {
-  const dir = mkdtempSync(path.join(tmpdir(), "refresh-applied-"));
+  const dir = tempDir("refresh-applied-");
   try {
     const text = typeof input === "string" ? input : JSON.stringify(input);
     const inFile = path.join(dir, "input.json");

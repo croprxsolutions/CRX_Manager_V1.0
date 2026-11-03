@@ -10,10 +10,10 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from './lib/test-temp-dir.mjs';
 
 import {
   analyzeMigrationSql,
@@ -250,7 +250,7 @@ function sh(cwd, args) {
 }
 
 function makeRepo() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'crx-mig-rules-'));
+  const dir = tempDir('crx-mig-rules-');
   sh(dir, ['init', '-q', '-b', 'main']);
   sh(dir, ['config', 'user.email', 'test@example.com']);
   sh(dir, ['config', 'user.name', 'test']);

@@ -5,11 +5,12 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { autopilotDecision, flagActive, isArmedLandingCommand } from "./autopilot-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 let pass = 0;
 function ok(cond, msg) { assert.ok(cond, msg); pass++; }
@@ -437,7 +438,7 @@ function runHook(projectDir) {
 }
 
 // (1) flag ABSENT → hook is inert (emits nothing, defers to normal flow).
-const noFlagDir = mkdtempSync(path.join(tmpdir(), "autopilot-noflag-"));
+const noFlagDir = tempDir("autopilot-noflag-");
 const resolvedNoFlagDir = safeTempDir(noFlagDir);
 try {
   const r = runHook(noFlagDir);
@@ -449,7 +450,7 @@ try {
 
 // (2) flag PRESENT + active → hook DENIES a deny-set command (rm -rf /). This is
 // the counterpart proof: the same isolation lets us assert the armed behavior too.
-const armedDir = mkdtempSync(path.join(tmpdir(), "autopilot-armed-"));
+const armedDir = tempDir("autopilot-armed-");
 const resolvedArmedDir = safeTempDir(armedDir);
 try {
   const armedStateDir = path.join(armedDir, ".claude", "session-state");

@@ -12,10 +12,10 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
 import path from "node:path";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const hookPath = path.join(__dirname, "grant-change-guard.mjs");
@@ -24,7 +24,7 @@ function ok(c, m) { assert.ok(c, m); pass++; }
 
 // Isolated fake project: its own caller-graph.json (fresh, so the stale-graph
 // warning stays out of the way) and its own supabase/migrations dir.
-const tmp = mkdtempSync(path.join(os.tmpdir(), "crx-grant-guard-"));
+const tmp = tempDir("crx-grant-guard-");
 mkdirSync(path.join(tmp, ".claude"), { recursive: true });
 mkdirSync(path.join(tmp, "supabase", "migrations"), { recursive: true });
 writeFileSync(path.join(tmp, ".claude", "caller-graph.json"), JSON.stringify({

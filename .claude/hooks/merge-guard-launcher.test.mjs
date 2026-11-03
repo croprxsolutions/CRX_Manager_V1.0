@@ -5,10 +5,11 @@
 // normally must have its verdict forwarded unchanged.
 
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   GUARD_BUDGET_MS,
   HARNESS_TIMEOUT_S,
@@ -192,7 +193,7 @@ ok(decisionOf(failureVerdict('{"tool_name":"Bash","tool_input":{"command":"npm r
   "a failed guard denies a call it could not read, even one that names no merge");
 
 // ── the supervisor, against guards that misbehave on purpose ─────────────────
-const tmp = mkdtempSync(path.join(os.tmpdir(), "merge-guard-launcher-"));
+const tmp = tempDir("merge-guard-launcher-");
 const fake = (name, source) => {
   const file = path.join(tmp, name);
   writeFileSync(file, source);

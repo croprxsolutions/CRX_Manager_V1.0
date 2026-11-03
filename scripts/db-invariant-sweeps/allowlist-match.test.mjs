@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdirSync, copyFileSync, writeFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { assertRequestedContracts, buildSweepQuery, functionContractSql, subtractAllowlist, hasStatementBreak, stripLeadingComments } from './allowlist-match.mjs';
 import { classifySql } from '../../.claude/hooks/live-testdata-lib.mjs';
+import { tempDir } from '../lib/test-temp-dir.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const allowlist = JSON.parse(readFileSync(new URL('./allowlist.json', import.meta.url), 'utf8'));
 const actorEntries = allowlist.entries.filter((entry) => entry.predicate.startsWith('actor-forgery'));
-const scratch = mkdtempSync(path.join(tmpdir(), 'crx-actor-allowlist-'));
+const scratch = tempDir('crx-actor-allowlist-');
 let assertions = 0;
 function equal(actual, expected, message) { assert.deepEqual(actual, expected, message); assertions += 1; }
 function check(condition, message) { assert.ok(condition, message); assertions += 1; }

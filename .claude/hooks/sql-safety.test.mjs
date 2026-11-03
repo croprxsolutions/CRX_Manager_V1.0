@@ -16,11 +16,11 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
 import path from "node:path";
 import { scratchHookEnvironment } from "./git-test-env.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -28,7 +28,7 @@ function ok(c, m) { assert.ok(c, m); pass++; }
 
 // Isolated scratch project: copied hook + its two lib deps, crafted v2
 // registry, and its own supabase/migrations dir.
-const tmp = mkdtempSync(path.join(os.tmpdir(), "crx-sql-safety-"));
+const tmp = tempDir("crx-sql-safety-");
 const hooksDir = path.join(tmp, ".claude", "hooks");
 mkdirSync(hooksDir, { recursive: true });
 mkdirSync(path.join(tmp, "supabase", "migrations"), { recursive: true });

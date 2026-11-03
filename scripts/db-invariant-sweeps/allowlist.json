@@ -878,8 +878,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "complete_delivery(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone, p_evidence text, p_evidence_ref text)#cdc5f8bf5d2f",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "complete_delivery(p_delivery_id uuid, p_signed_by text, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_completed_at timestamp with time zone, p_evidence text, p_evidence_ref text)#2b0809850dc0",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -926,8 +926,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "create_invoice_from_order(p_order_id uuid, p_salesman_id uuid, p_invoice_type text, p_idempotency_key text)#cdc5f8bf5d2f",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "create_invoice_from_order(p_order_id uuid, p_salesman_id uuid, p_invoice_type text, p_idempotency_key text)#2b0809850dc0",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -974,8 +974,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "create_split_invoices_from_order(p_order_id uuid, p_salesman_id uuid, p_invoice_type text, p_idempotency_key text)#cdc5f8bf5d2f",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "create_split_invoices_from_order(p_order_id uuid, p_salesman_id uuid, p_invoice_type text, p_idempotency_key text)#2b0809850dc0",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1010,8 +1010,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "enforce_invoice_draft_on_insert()#0d0206126c58",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE today. Callable by: not callable / trigger; see note on the service-fee grant. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "enforce_invoice_draft_on_insert()#058a8a5567c8",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE today. Callable by: not callable / trigger; see note on the service-fee grant. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1112,8 +1112,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_inventory_cost_report()#ced9748b018e",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "get_inventory_cost_report()#95c7e2b58039",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103100000_product_active_guard (#1315, ledger 20261103002521): the cost impl it reaches only widens its row filter to keep inactive products with a nonzero balance; columns are unchanged and the wrapper gate (admin only for the cost report, current_cost removed for non-admins in the position) is unchanged on live.",
       "dated": "2026-11-02"
     },
     {
@@ -1124,8 +1124,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_inventory_position()#c95f13a315a4",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "get_inventory_position()#35f6b2035489",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103100000_product_active_guard (#1315, ledger 20261103002521): the cost impl it reaches only widens its row filter to keep inactive products with a nonzero balance; columns are unchanged and the wrapper gate (admin only for the cost report, current_cost removed for non-admins in the position) is unchanged on live.",
       "dated": "2026-11-02"
     },
     {
@@ -1160,8 +1160,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_program_completion(p_season integer)#0a1b57ccaf79",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "get_program_completion(p_season integer)#0ed74ec49c18",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1232,8 +1232,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "issue_return_credit(p_return_id uuid, p_actor_id uuid, p_idempotency_key text)#ef9420dd1bf6",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only; admin gate first; generic messages. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "issue_return_credit(p_return_id uuid, p_actor_id uuid, p_idempotency_key text)#2fa06a550c9d",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only; admin gate first; generic messages. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1310,14 +1310,14 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "save_field_app_split_invoice(p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text)#c37469c2442f",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "save_field_app_split_invoice(p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text)#5fff65f70360",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "save_invoice(p_invoice jsonb, p_items jsonb, p_idempotency_key text)#02769900f2c6",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost set server-side or stripped; version hash excludes cost columns. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "save_invoice(p_invoice jsonb, p_items jsonb, p_idempotency_key text)#136cfd3ea343",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost set server-side or stripped; version hash excludes cost columns. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1370,8 +1370,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "start_and_complete_delivery(p_delivery_id uuid, p_signed_by text, p_delivered_on date, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_evidence text, p_evidence_ref text)#761172995a6c",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "start_and_complete_delivery(p_delivery_id uuid, p_signed_by text, p_delivered_on date, p_performed_by uuid, p_quantities jsonb, p_issue_type text, p_issue_notes text, p_idempotency_key text, p_evidence text, p_evidence_ref text)#2d0027f3eed8",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function (cancel_order admin only); ids, quantities and revenue only; cost goes to admin-only or unreadable places. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1382,8 +1382,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "transfer_job_to_invoice(p_job_id uuid, p_performed_by uuid, p_idempotency_key text)#ae179305f5fe",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "transfer_job_to_invoice(p_job_id uuid, p_performed_by uuid, p_idempotency_key text)#712d42bae1fa",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; ids, revenue totals, quantities, fixed texts. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1454,8 +1454,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "process_offline_action(p_client_action_id uuid, p_idempotency_key text)#ab2afbf41040",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102200000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes.",
+      "violation_key": "process_offline_action(p_client_action_id uuid, p_idempotency_key text)#9507391ee173",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102200000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1472,8 +1472,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "complete_job(p_job_id uuid, p_applied_info jsonb, p_performed_by uuid, p_idempotency_key text)#ccbfe1cea7a0",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102200000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes.",
+      "violation_key": "complete_job(p_job_id uuid, p_applied_info jsonb, p_performed_by uuid, p_idempotency_key text)#ffd1fdb4b820",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102200000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes. Re-read live 2026-11-02 after 20261103120000_chicago_season_and_statement_dates (#1298, ledger 20261103003731): the only changed functions this chain reaches are current_season and/or _issue_return_credit_header_only_impl_20260825, which now date in America/Chicago; neither reads or returns cost, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     }
   ]

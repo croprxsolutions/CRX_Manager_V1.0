@@ -464,7 +464,8 @@ export interface ProductSupplierLink {
   product_id: string;
   vendor_id: string;
   supplier_sku: string | null;
-  supplier_product_name: string;
+  /** NULL on a vendor-only link: item details not yet known. */
+  supplier_product_name: string | null;
   supplier_uom: string | null;
   supplier_pack_description: string | null;
   inventory_units_per_supplier_unit: number | null;

@@ -1,0 +1,3 @@
+## 2026-11-03 — Vendor-only product links (WP-PM-15b step 1, local candidate)
+
+Local candidate migration `20261105090000_vendor_only_product_links.sql` lets a product's vendor link name just the vendor, with the vendor's item name, number, unit and pack marked "not yet known" (Mason's DATA-11 decision 1). Nothing is invented for them, and the strict link writer still requires all four when they are filled in. New admin-only `link_product_vendor()` reuses or records the link and keeps exactly one preferred vendor per linked product. A vendor-only link is never used for price imports or comparisons. Product vendor text and every screen that edits it are unchanged; the copy rule waits for the enforcement step. Proof: `scripts/smoke/prove-vendor-only-links-real-schema.mjs`.

@@ -1,0 +1,41 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20261104200000_product_unit_backfill.sql` (LF SQL sha256: `5bbfac84249fe219304cfda6f164b755e36e8ce887d80ea22306e7d42dfc3203`). DATA migration for WP-PM-6a: sets `products.unit_size` to the row's `inventory_unit` on the nine products the owner approved one by one on 2026-11-03 (the review list is private; the file names rows by id only). One row changes `LB` to `Lb`; eight change `''` (empty text) to `Gal` (seven) or `MG` (one). It also stamps their `updated_at`, and adds one guard trigger (below). No other row, column, grant or policy changes.
+
+It **overwrites existing rows**, so its live apply needs Mason's own `I approve` reply for this exact file (`scripts/owner-approve-migration.mjs`; ship.md, Migrations bullet), on top of the normal proofs.
+
+**Safety rules in the file.**
+- The back-fill is one statement. On a database with none of the nine ids (a fresh rebuild) it changes no rows; the guard function and trigger below are still created.
+- Otherwise all nine must exist and still hold exactly the approved old Unit and inventory unit, or it raises `PRODUCT_UNIT_BACKFILL_DRIFT` and changes nothing.
+- It raises `PRODUCT_UNIT_BACKFILL_OTHER_COLUMN_MOVED` if any column of the nine rows other than `unit_size` and `updated_at` moves (it compares `to_jsonb(row)` before and after), so per-acre prices, `pricing_version`, prices and use timings are all checked at apply time. `recalc_product_price_per_acre` reads `inventory_unit` first, which is set on all nine, so none should move.
+- `validate_product_units` re-checks `inventory_unit` and `container_unit` against `unit_conversions` on every product update, so the apply needs live's exact spellings `Lb` (dry), `MG` (dry) and `Gal` (liquid). Live has all three (read 2026-11-03), and the rehearsal below passed through that trigger.
+- Old billed lines keep their own stored unit (`order_items`, `quote_items`, `invoice_items`, `delivery_items`, `purchase_order_items`, `delivery_remainders`, `job_chemicals.unit`); no trigger on `products` writes to them.
+- `write_product_change_history` records one `unit_size` row per product, with no actor (no signed-in user).
+
+**Readers that see the new Unit afterwards** (none changes a stored amount):
+- `_transfer_job_to_invoice_intent_impl_20260908` and `create_job_from_quote_section` copy the product's Unit as the new line's label; amounts come from the stored line cents.
+  The transfer labels the new invoice line with the product's Unit, not the job line's own unit, for every product (Luna round 6). That is existing behaviour, not caused here: the only job with any of the nine products is already invoiced (live, 2026-11-03), so no existing line is relabelled. Follow-up: the transfer should carry the job line's own unit.
+- `_cost_step2_job_chemicals` fills a missing job-line cost by converting from the product's Unit; with a blank Unit it skipped the conversion, so the corrected Unit makes that fill correct.
+- `preview_product_pricing_changes`, `apply_product_pricing_change_set` and `create_pricing_workbook_export` fingerprint `unit_size`. A pricing preview or price workbook made before the apply is refused for these nine rows afterwards and must be redone. Live, 2026-11-03: one unapplied single-product preview (product page) includes one of the nine.
+
+**Guard against a stale product page.** `ProductDetail.tsx` re-sends every setup field, `unit_size` included, and checks only `pricing_version`, which this file deliberately leaves alone. Without a guard, a product page opened before the apply and saved after it would write the old Unit back (Luna HIGH, round 1). So the file adds `guard_product_unit_matches_inventory_unit()` (plpgsql, invoker, `search_path = public, pg_temp`, owner `postgres`, EXECUTE revoked from every API role) and `trg_keep_product_unit` (`BEFORE UPDATE OF unit_size, inventory_unit`). Once a product's Unit equals its inventory unit exactly, any update that leaves the two different raises `PRODUCT_UNIT_STALE` ("reload the page and save again"); a future reviewed unit change must move both together (Luna round 3). This applies to all products that already match, which on 2026-11-03 was 595 of 604, and all 604 after the back-fill.
+- Nothing legitimate is refused. No screen edits the Unit: the product page re-sends the stored value, and the bulk import only creates products. No database function updates `products.unit_size` (live catalog search, 2026-11-03). Inventory-unit changes stay refused by `guard_product_setup_fields`.
+- A pair counts as matched only when the inventory unit is real (not NULL or blank) and the Unit equals it (Luna rounds 4 and 5). A product with both units empty is not matched, so the product page's first save giving it an inventory unit, while still sending a blank Unit, goes through. Live has no product with a NULL or blank inventory unit (0 of 604, 2026-11-03).
+- Products whose Unit does not yet match (new products made by the form with a blank Unit) are not affected.
+
+**Proof.** `node scripts/smoke/prove-product-unit-backfill-real-schema.mjs` (Docker, no network): a fresh database changes no rows and gets the guard; a hand-fixed row, a moved inventory unit or a missing row each refuse with nothing changed; mutated copies that also move a per-acre price, or only the notes, are refused; the real apply sets the nine Units while every other product column, every other product (one unapproved blank included) and every other public table stay byte-identical, with nine history rows; a stale save of the old blank, the old `LB` or NULL is refused, while a save keeping the Unit, and first fixing an unmatched Unit, still work; a second apply is refused.
+
+**Live rehearsal, 2026-11-03 (rolled back).** The exact DO block ran against live inside a transaction that ended in `SMOKE_PASS_ROLLBACK`: no drift or price error. Back-fill only: `unit_now_matches=9 other_columns_changed=0 new_history_rows=9 mismatches_left_all_products=0`. The whole file, with the guard: `unit_now_matches=9 other_columns_changed=0 mismatches_left_all_products=0 stale_save=PRODUCT_UNIT_STALE same_unit_save=ok api_can_execute=f`. So on the live rows the per-acre recompute and the use-timing re-sync leave every other column byte-identical (`to_jsonb(row) - 'unit_size' - 'updated_at'`). The final file, with its every-column check: no `OTHER_COLUMN_MOVED`, `mismatches_left_all_products=0 guard_enabled=O`. Reads straight afterwards still showed the nine mismatches, no new history rows and no guard function.
+
+**Live read, 2026-11-03 (read-only).** 604 products, 595 agree; the nine that differ are exactly the approved ids, with the approved old values. Live migration high-water, re-read later on 2026-11-03: `20261104150000_product_forms_seed_each` (WP-PM-9, which rewrites `validate_product_units`; the final file was rehearsed again on live after it, and the prover replays it). An open PR holds `20261104160000`. Re-read both at apply time.
+
+**Rollback.** A reviewed migration that drops `trg_keep_product_unit` and its function, then sets each id's `unit_size` back to its old value (the ids and old values are in the file).
+
+Renamed from `20261104170000_product_unit_backfill` on 2026-11-03: its first live apply was refused (nothing changed) because `20261104180000_vendor_link_proposals` (WP-PM-15a) went live first; that migration only reads products. Open PR #1377 holds `20261104190000`.
+
+Live ledger preflight, read 2026-11-03 at 1:22 PM Central from `supabase_migrations.schema_migrations`, worked out row by row: each row's effective stamp is the 14-digit timestamp in its `name`, or its `version` when the name has none (627 of the 1,107 rows fall back to `version`):
+- **Effective high-water:** `20261104180000`.
+- **Top row:** `20261104180000_vendor_link_proposals`, ledger version `20261103191530`.
+- **`max(version)`:** `20261103191530`.
+- **Total:** 1,107 rows.
+- **At or above this file:** no row's effective stamp is `>= 20261104200000`, and no row starts with `20261104200000` by name or by version.
+
+So `20261104200000` sorts above everything applied. Read the ledger again at apply time, and after the apply reconcile the new row's `name` and `version` with the disk basename (the B7 rule in ship.md).

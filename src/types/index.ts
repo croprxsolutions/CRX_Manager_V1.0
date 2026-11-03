@@ -447,6 +447,24 @@ export interface ProductBrand {
   updated_at: string;
 }
 
+/** One row of get_product_vendors (20261105110000): a vendor linked to a product. */
+export interface ProductVendor {
+  link_id: string;
+  vendor_id: string;
+  vendor_name: string;
+  is_preferred: boolean;
+  /** false = a vendor-only link: the vendor is known, its item name, number, unit and pack are not yet. */
+  item_details_known: boolean;
+  supplier_sku: string | null;
+  supplier_product_name: string | null;
+  supplier_uom: string | null;
+  supplier_pack_description: string | null;
+  /** Admins only (null for everyone else): newest current price per inventory unit, in cents. */
+  last_cost_cents: number | null;
+  last_quoted_package_cost_cents: number | null;
+  last_cost_as_of: string | null;
+}
+
 export interface ProductChangeHistoryEntry {
   id: number;
   product_id: string;

@@ -233,20 +233,9 @@ describe('ProductDetail brands section', () => {
     expect(within(reloaded).getByRole('checkbox', { name: 'Post-Emerge Soybeans' })).toBeChecked();
   });
 
-  it('still saves a vendor that was changed on the page', async () => {
+  it('locks the vendor of an existing product; it follows the preferred vendor', async () => {
     render(<ProductDetail />);
-    const vendor = await screen.findByRole('combobox', { name: 'Vendor' });
-    fireEvent.change(vendor, { target: { value: 'Other Vendor' } });
-    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
-    await waitFor(() => expect(H.savedPayload?.vendor).toBe('Other Vendor'));
-  });
-
-  it('saves a cleared vendor as blank', async () => {
-    render(<ProductDetail />);
-    const vendor = await screen.findByRole('combobox', { name: 'Vendor' });
-    fireEvent.change(vendor, { target: { value: '' } });
-    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
-    await waitFor(() => expect(H.savedPayload).toHaveProperty('vendor', null));
+    expect(await screen.findByRole('combobox', { name: 'Vendor' })).toBeDisabled();
   });
 
   it('sends the vendor when creating a product', async () => {

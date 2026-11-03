@@ -189,6 +189,36 @@ describe('NewPurchaseOrder save and submit workflow', () => {
     expect(args.p_items).toEqual([expect.objectContaining({ unit_cost_cents: 1250, unit_cost: 12.5 })]);
   });
 
+  it('suggests the preferred vendor and, for an admin, its last cost per unit (WP-PM-15b)', async () => {
+    mockAuth.role = 'admin';
+    mockRpc.mockImplementation(async (name: string, args?: Record<string, unknown>) => {
+      if (name === 'get_product_vendors') {
+        expect(args).toEqual({ p_product_id: 'product-1' });
+        return { data: [{ vendor_name: 'Test Vendor', is_preferred: true, last_cost_cents: 980 }], error: null };
+      }
+      if (name === 'save_purchase_order') return { data: { po_id: 'po-5', po_number: 'PO-TEST-5' }, error: null };
+      throw new Error(`Unexpected RPC ${name}`);
+    });
+    render(<NewPurchaseOrder />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select Product' }));
+    fireEvent.click(screen.getByRole('button', { name: /Test Herbicide/ }));
+    expect(screen.getByPlaceholderText('Enter or select vendor...')).toHaveValue('Test Vendor');
+    await waitFor(() => expect(screen.getByDisplayValue('9.8')).toBeInTheDocument());
+    fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_purchase_order', expect.anything()));
+    const [, args] = mockRpc.mock.calls.find(([name]) => name === 'save_purchase_order')!;
+    expect(args.p_items).toEqual([expect.objectContaining({ unit_cost_cents: 980 })]);
+  });
+
+  it('a rep gets the preferred vendor name but no cost lookup', async () => {
+    render(<NewPurchaseOrder />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select Product' }));
+    fireEvent.click(screen.getByRole('button', { name: /Test Herbicide/ }));
+    expect(screen.getByPlaceholderText('Enter or select vendor...')).toHaveValue('Test Vendor');
+    expect(mockRpc).not.toHaveBeenCalledWith('get_product_vendors', expect.anything());
+  });
+
   it('a failed product load blocks save and submit and Retry loads the catalog (CodeRabbit)', async () => {
     mockCatalog.failuresLeft = 1;
     render(<NewPurchaseOrder />);

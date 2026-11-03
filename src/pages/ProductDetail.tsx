@@ -14,6 +14,7 @@ import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductSellPriceHistory from '../components/products/ProductSellPriceHistory';
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
+import ProductVendorsSection from '../components/products/ProductVendorsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
 import ProductStockCard from '../components/products/ProductStockCard';
@@ -1179,7 +1180,7 @@ export default function ProductDetail() {
                   </div>
                 </fieldset>
               )}
-              <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin} placeholder="Type or select..." />
+              <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin || !isNew} placeholder="Type or select..." />
               <Combobox label="Manufacturer" value={product.manufacturer || ''} onChange={(v) => update('manufacturer', v)} options={manufacturerOptions} disabled={!isAdmin} placeholder="Type or select..." />
               <div>
                 <div className="flex items-end gap-2">
@@ -1604,6 +1605,23 @@ export default function ProductDetail() {
             </div>
           </Card>
           </PhoneSection>
+
+          {!isNew && id && persistedProduct?.id === id && (
+            <PhoneSection title="Vendors" {...sectionProps('vendors', pricingReloadRequired)}>
+              <ProductVendorsSection
+                key={id}
+                productId={id}
+                productName={persistedProduct.product_name}
+                isAdmin={isAdmin}
+                userId={profile?.id ?? null}
+                // The database copied the name onto the product; mirror it so a later save does not resend the old one.
+                onPreferredChanged={(vendorName) => {
+                  setProduct((p) => ({ ...p, vendor: vendorName }));
+                  setPersistedProduct((p) => (p ? { ...p, vendor: vendorName } : p));
+                }}
+              />
+            </PhoneSection>
+          )}
 
           {!isNew && id && persistedProduct?.id === id && (
             <PhoneSection title="Brands" {...sectionProps('brands', pricingReloadRequired)}>

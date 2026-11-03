@@ -25,6 +25,7 @@ import { Sentry } from '../lib/sentry';
 import { ProductOptionDetails, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
+import { listProductVendors } from '../lib/productVendors';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
@@ -203,8 +204,29 @@ export default function NewPurchaseOrder() {
           : i
       )
     );
+    // The product's vendor is its preferred vendor (WP-PM-15b): suggest it when none is entered yet.
+    if (product.vendor) setVendor((v) => v || product.vendor || '');
     setProductSearchOpen(null);
     setProductQuery('');
+    if (isAdmin) void suggestPreferredVendorCost(itemKey, product);
+  };
+
+  // An admin's line starts at the preferred vendor's newest price per inventory unit, when one is
+  // known, instead of the catalog cost. Skipped once the line changed product or cost meanwhile.
+  const suggestPreferredVendorCost = async (itemKey: string, product: Product) => {
+    let cents: number | null = null;
+    try {
+      cents = (await listProductVendors(product.id)).find((v) => v.is_preferred)?.last_cost_cents ?? null;
+    } catch (err) {
+      Sentry.captureException(err);
+      return;
+    }
+    if (cents === null) return;
+    setItems((prev) => prev.map((i) => (
+      i.key === itemKey && i.product_id === product.id && i.unit_cost === (product.current_cost || 0)
+        ? { ...i, unit_cost: cents / 100, costFromAdmin: true }
+        : i
+    )));
   };
 
   const totalCostCents = items.reduce(

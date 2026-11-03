@@ -29,6 +29,10 @@ await fails(() => reply(401, '{"message":"Unauthorized"}'), /HTTP 401/);
 await fails(() => reply(200, 'not json'), /not JSON/);
 await fails(() => reply(200, '{"rows":[]}'), /HTTP 200/);
 await fails((key) => reply(200, key === 'columns' ? '[]' : '[{"x":1}]'), /columns: returned no rows/);
+await fails((key) => reply(200, key === 'applied_names' ? '[]' : '[{"x":1}]'), /applied_names: returned no rows/);
+// A schema with no generated columns is valid, not a failed read.
+const noGenerated = await liveIntrospection({ token: 't', fetchImpl: fakeFetch((key) => reply(200, key === 'generated_columns' ? '[]' : '[{"x":1}]')) });
+assert.deepEqual(noGenerated.generated_columns, []);
 
 // Importing the module must not run a mode (the old top-level code stamped the registry on import).
 assert.equal(statSync(registryPath).mtimeMs, registryMtime, 'importing the module wrote the registry');

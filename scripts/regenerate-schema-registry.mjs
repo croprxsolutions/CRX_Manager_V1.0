@@ -87,6 +87,10 @@ export const INTROSPECTION_QUERIES = {
   applied_names: "SELECT name FROM supabase_migrations.schema_migrations ORDER BY name",
 };
 
+// A live database always has these; empty means a broken read, not an empty schema. The other
+// three (sequences, generated columns, CHECKs) can legitimately be empty.
+const MUST_HAVE_ROWS = new Set(["migrations_high_water", "columns", "applied_names"]);
+
 /** Runs Q1-Q6 against live, read-only, and returns the introspection input object. Fails closed. */
 export async function liveIntrospection({ fetchImpl = fetch, token = readCredentialToken() } = {}) {
   const data = {};
@@ -101,7 +105,7 @@ export async function liveIntrospection({ fetchImpl = fetch, token = readCredent
     let rows;
     try { rows = JSON.parse(text); } catch { throw new Error(`${key}: HTTP ${res.status}, response is not JSON`); }
     if (!res.ok || !Array.isArray(rows)) throw new Error(`${key}: HTTP ${res.status}: ${text.slice(0, 300)}`);
-    if (rows.length === 0) throw new Error(`${key}: returned no rows; refusing to write a registry from an empty result`);
+    if (rows.length === 0 && MUST_HAVE_ROWS.has(key)) throw new Error(`${key}: returned no rows; refusing to write a registry from an empty result`);
     data[key] = rows;
   }
   return data;

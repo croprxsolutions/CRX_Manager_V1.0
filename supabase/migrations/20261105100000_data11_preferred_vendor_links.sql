@@ -7,7 +7,9 @@
 --   * a vendor-only preferred link for the two products with no vendor text that Mason assigned by
 --     hand (product and vendor ids below; names stay in his private review list);
 --   * "preferred" on each product's single confirmed link where none is preferred yet.
--- It changes no products.vendor text, no other link, no vendor and no price.
+--   * the vendor text of those two hand-assigned products, which is blank, becomes the vendor's
+--     name, so every active product's vendor text matches its preferred vendor.
+-- It changes no other products.vendor text, no other link, no vendor and no price.
 --
 -- Bound to the approved list: the plan below is fingerprinted over every active product, and the
 -- migration refuses (changing nothing) unless it equals the plan Mason approved, read live on
@@ -26,6 +28,7 @@ DECLARE
   v_prefers bigint;
   v_inserted bigint;
   v_updated bigint;
+  v_named bigint;
   v_bad bigint;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = c_approver AND role = 'admin' AND is_active) THEN
@@ -116,8 +119,19 @@ BEGIN
     AND NOT l.is_preferred;
   GET DIAGNOSTICS v_updated = ROW_COUNT;
 
-  IF v_inserted <> 586 OR v_updated <> 10 THEN
-    RAISE EXCEPTION 'DATA11_COUNT_MISMATCH: inserted %, preferred %', v_inserted, v_updated;
+  -- Only the hand-assigned products, and only while their vendor text is still blank.
+  UPDATE public.products p
+  SET vendor = v.name
+  FROM data11_plan d
+  JOIN public.vendors v ON v.id = d.vendor_id
+  WHERE d.product_id = p.id
+    AND d.action = 'link'
+    AND d.product_id IN ('1a3c082a-1603-4eff-a4db-316af555ff87', '4983d7c2-45cc-4acd-b915-45e92184c563')
+    AND NULLIF(btrim(p.vendor), '') IS NULL;
+  GET DIAGNOSTICS v_named = ROW_COUNT;
+
+  IF v_inserted <> 586 OR v_updated <> 10 OR v_named <> 2 THEN
+    RAISE EXCEPTION 'DATA11_COUNT_MISMATCH: inserted %, preferred %, named %', v_inserted, v_updated, v_named;
   END IF;
 
   -- Every active product now has exactly one active, confirmed, preferred link to a live vendor.

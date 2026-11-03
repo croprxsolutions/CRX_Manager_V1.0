@@ -331,10 +331,14 @@ function main() {
   for (const r of rows.filter((x) => x.name === null)) {
     assert.deepEqual([r.status, r.cmp, r.by, r.created_by, r.reusable], ['confirmed', 'pending', APPROVER, APPROVER, false]);
   }
-  assert.equal(vendorText(), textBefore, 'no product vendor text changed');
+  const texts = JSON.parse(scalar("SELECT json_object_agg(id, vendor) FROM public.products;"));
+  assert.deepEqual([texts[P.EXP1], texts[P.EXP2]], ['[PROVER] Spinner', '[PROVER] Crop Rx'], 'the two hand-assigned blanks get their vendor name');
+  asOwner(`UPDATE public.products SET vendor = NULL WHERE id = '${P.EXP1}'; UPDATE public.products SET vendor = '' WHERE id = '${P.EXP2}';`);
+  assert.equal(vendorText(), textBefore, 'no other product vendor text changed');
+  asOwner(`UPDATE public.products SET vendor = '[PROVER] Spinner' WHERE id = '${P.EXP1}'; UPDATE public.products SET vendor = '[PROVER] Crop Rx' WHERE id = '${P.EXP2}';`);
   assert.equal(scalar(`SELECT count(*) FROM public.products p WHERE p.is_active AND (SELECT count(*) FROM public.product_supplier_links l
       WHERE l.product_id = p.id AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred) <> 1;`), '0');
-  console.log('[prover] bound to its plan: five vendor-only preferred links, one existing link made preferred, nothing else changed');
+  console.log('[prover] bound to its plan: five vendor-only preferred links, one existing link made preferred, the two blank vendor names filled, nothing else changed');
 
   // Run again: the plan is now "nothing to do", so it refuses rather than doubling anything.
   const after = linkState();

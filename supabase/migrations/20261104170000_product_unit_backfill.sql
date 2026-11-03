@@ -2,8 +2,7 @@
 -- DATA (WP-PM-6a): sets products.unit_size to the product's inventory_unit on the nine rows the
 -- owner approved one by one on 2026-11-03 (private review list): one 'LB' spelled 'Lb' to match,
 -- and eight stored as '' (empty text), and stamps their updated_at. Rows are named by id only.
--- It also adds one trigger (below) so a Unit that matches its inventory unit cannot be changed
--- on its own (its function's EXECUTE is revoked from every API role). No other row, column,
+-- It also adds one trigger (below) so a Unit that matches its inventory unit must keep matching (its function's EXECUTE is revoked from every API role). No other row, column,
 -- grant or function changes.
 -- Order, quote, job, invoice, delivery and PO lines keep their own stored unit and amounts; no
 -- trigger copies a product's unit into them. The per-acre prices read inventory_unit first, so
@@ -70,13 +69,12 @@ $unit_backfill$;
 -- Keep a matching Unit matching. The product page re-sends the stored Unit on every save and
 -- checks only pricing_version, so a page opened before this file would write the old blank back.
 -- No screen edits the Unit and no database function writes it, so once it equals the inventory
--- unit it may change only in the same update that changes the inventory unit.
+-- unit, every later update must leave the two equal (today the inventory unit itself is locked).
 CREATE FUNCTION public.guard_product_unit_matches_inventory_unit() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $function$
 BEGIN
   IF OLD.unit_size = OLD.inventory_unit
-     AND NEW.unit_size IS DISTINCT FROM OLD.unit_size
-     AND NEW.inventory_unit IS NOT DISTINCT FROM OLD.inventory_unit THEN
+     AND NEW.unit_size IS DISTINCT FROM NEW.inventory_unit THEN
     RAISE EXCEPTION 'PRODUCT_UNIT_STALE: this product''s Unit was updated; reload the page and save again'
       USING ERRCODE = '22023';
   END IF;

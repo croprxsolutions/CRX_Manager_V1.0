@@ -191,9 +191,10 @@ function seedProducts() {
       ${rateUnit ? 1.5 + i : 'NULL'}, ${10 + i}.00, ${12 + i}.00, ${11 + i}.50, NULL, true)`);
   rows.push(`('${BYSTANDER}', '[PROVER] Unapproved blank', '', 'Gal', 'liquid', 'Gal', 'Other', 'oz', '{}', 2, 5.00, 6.00, 5.50, 5.25, true)`);
   psql(`BEGIN;
-    -- Live has these exact spellings (read 2026-11-03); the replayed baseline lacks some.
+    -- Live's exact spellings for the nine (read 2026-11-03; the replayed baseline lacks some), plus Qt
+    -- for the both-units case.
     INSERT INTO public.unit_conversions (unit, unit_type, factor_oz)
-      SELECT v.unit, v.unit_type, v.factor_oz FROM (VALUES ('Lb', 'dry', 16::numeric), ('LB', 'dry', 16), ('MG', 'dry', 0.00003527396), ('Gal', 'liquid', 128))
+      SELECT v.unit, v.unit_type, v.factor_oz FROM (VALUES ('Lb', 'dry', 16::numeric), ('LB', 'dry', 16), ('MG', 'dry', 0.00003527396), ('Gal', 'liquid', 128), ('Qt', 'liquid', 32))
         AS v(unit, unit_type, factor_oz)
        WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions u WHERE u.unit = v.unit);
     ALTER TABLE public.products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
@@ -314,6 +315,15 @@ ${r.stderr}`, /PRODUCT_UNIT_STALE/);
   assert.equal(save(BYSTANDER, '').status, 0, 'an unmatched product could not be saved');
   assert.equal(save(BYSTANDER, 'Gal').status, 0, 'an unmatched Unit could not be fixed');
   assert.notEqual(save(BYSTANDER, '').status, 0, 'a fixed Unit could be blanked');
+  // Both units changed in one update (the setup guard that locks inventory_unit set aside, rolled back):
+  // to a matching pair is allowed, to a mismatched pair is refused.
+  const both = (unit, inv) => psql(`BEGIN; ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;
+    UPDATE public.products SET unit_size = '${unit}', inventory_unit = '${inv}' WHERE id = '${BLANK1}'; ROLLBACK;`, { allowFailure: true });
+  assert.equal(both('Qt', 'Qt').status, 0, 'a matching pair change was refused');
+  const split = both('Qt', 'Gal');
+  assert.notEqual(split.status, 0, 'a mismatched pair change went through');
+  assert.match(`${split.stdout}
+${split.stderr}`, /PRODUCT_UNIT_STALE/);
   assert.equal(scalar("SELECT has_function_privilege('authenticated', 'public.guard_product_unit_matches_inventory_unit()', 'EXECUTE');"), 'f');
   console.log('[prover] GUARD: stale saves refused; same-Unit saves and first fixes allowed; no API role can call it');
 

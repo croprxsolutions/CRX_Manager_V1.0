@@ -163,10 +163,10 @@ describe('product active review flow', () => {
       id: `11111111-1111-4111-8111-${String(i).padStart(12, '0')}`, product_name: `Chem ${i}`, sku: `C-${i}` }));
     mocks.products.splice(0, mocks.products.length, ...many);
     render(<Products />);
-    await screen.findByText('Chem 0');
+    await screen.findByText('Chem 0', {}, { timeout: 30000 });
     fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
     fireEvent.click(screen.getAllByRole('button', { name: 'Deactivate' })[0]);
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringContaining('at most 500 Products')));
     expect(mocks.rpc).not.toHaveBeenCalled();
-  });
+  }, 60000); // 501 rendered rows take ~15s on CI runners
 });

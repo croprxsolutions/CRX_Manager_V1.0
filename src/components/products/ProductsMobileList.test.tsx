@@ -207,4 +207,27 @@ describe('ProductsMobileList vendor filter', () => {
     fireEvent.change(screen.getByLabelText('Filter by vendor'), { target: { value: '' } });
     expect(onVendorFilterChange).toHaveBeenCalledWith('');
   });
+
+  it('counts incomplete products and lists only them under the setup filter', () => {
+    const complete = createProduct('1', {
+      product_form: 'liquid', inventory_unit: 'Gal', container_size: 2.5, container_unit: 'Gal',
+      epa_registration: '524-475', signal_word: 'Caution', rei_hours: 12, phi_days: 0,
+    });
+    const incomplete = createProduct('2');
+    const onSetupFilterChange = vi.fn();
+    const props = {
+      products: [complete, incomplete], categories: [], vendors: [], categoryFilter: '', vendorFilter: '', statusFilter: 'all' as const,
+      onCategoryFilterChange: vi.fn(), onVendorFilterChange: vi.fn(), onStatusFilterChange: vi.fn(), onOpenProduct: vi.fn(), onSetupFilterChange,
+    };
+    const view = render(<ProductsMobileList {...props} />);
+
+    expect(screen.getByRole('option', { name: 'Incomplete setup (1)' })).toBeInTheDocument();
+    expect(screen.getAllByText('Incomplete setup', { selector: 'span' })).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText('Filter by setup'), { target: { value: 'incomplete' } });
+    expect(onSetupFilterChange).toHaveBeenCalledWith('incomplete');
+
+    view.rerender(<ProductsMobileList {...props} setupFilter="incomplete" />);
+    expect(screen.queryByText('Product 1')).not.toBeInTheDocument();
+    expect(screen.getByText('Product 2')).toBeInTheDocument();
+  });
 });

@@ -3,7 +3,8 @@
 -- and two new trigger functions with triggers on existing tables (quote_items, job_chemicals).
 -- No grants or policies change on existing tables; no data is deleted.
 -- Rollback: restore the liquid/dry CHECK only after confirming no seed/each product exists;
--- re-create validate_product_units from 20260211000000_unit_tracking_pricing_overhaul.sql,
+-- re-create validate_product_units from 20260211000000_unit_tracking_pricing_overhaul.sql
+-- (keeping live's SET search_path TO 'public', which that file lacks),
 -- field_app_priced_quantity from 20260630180000_field_app_pricing_unit_fix.sql,
 -- convert_to_gl_lb from 20260702133000_a14_convert_to_gl_lb_pint_quart_aliases.sql;
 -- drop trg_guard_seed_each_quote_item_units on public.quote_items and
@@ -74,8 +75,7 @@ BEGIN
     IF TG_OP = 'UPDATE' AND OLD.product_form IS NULL AND EXISTS (
       SELECT 1 FROM public.job_chemicals jc WHERE jc.product_id = NEW.id
         AND (normalize_rate_unit(jc.unit) IS DISTINCT FROM normalize_rate_unit(NEW.inventory_unit)
-          OR (normalize_rate_unit(jc.rate_unit) IS NOT NULL
-              AND normalize_rate_unit(jc.rate_unit) <> normalize_rate_unit(NEW.inventory_unit)))
+          OR normalize_rate_unit(jc.rate_unit) IS DISTINCT FROM normalize_rate_unit(NEW.inventory_unit))
     ) THEN
       RAISE EXCEPTION 'Existing job lines use another unit; fix them before setting this form.'
         USING ERRCODE = '22023';
@@ -131,27 +131,30 @@ SET search_path = public, pg_temp AS $$
 DECLARE
   v_product_form text;
   v_inventory_unit text;
+  v_product_name text;
 BEGIN
   IF NEW.product_id IS NULL THEN RETURN NEW; END IF;
 
-  SELECT p.product_form, p.inventory_unit
-    INTO v_product_form, v_inventory_unit
-    FROM public.products p WHERE p.id = NEW.product_id;
+  SELECT p.product_form, p.inventory_unit, p.product_name
+    INTO v_product_form, v_inventory_unit, v_product_name
+    FROM public.products p WHERE p.id = NEW.product_id
+     FOR SHARE;  -- waits out a concurrent form change, then sees its result
 
   IF v_product_form IN ('seed','each') THEN
     IF NULLIF(btrim(NEW.rate_unit), '') IS NULL OR NULLIF(btrim(NEW.price_unit), '') IS NULL THEN
-      RAISE EXCEPTION 'Seed and each quote lines need their unit set (%).', v_inventory_unit
+      RAISE EXCEPTION 'Seed and each quote lines need their unit set (%). Product: %.', v_inventory_unit, v_product_name
         USING ERRCODE = '22023';
     END IF;
     IF (NULLIF(btrim(NEW.rate_unit), '') IS NOT NULL
         AND lower(btrim(NEW.rate_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit)))
        OR (NULLIF(btrim(NEW.price_unit), '') IS NOT NULL
         AND lower(btrim(NEW.price_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit))) THEN
-      RAISE EXCEPTION 'Seed and each products are quoted only in their own unit (%); "%" can''t be converted.',
+      RAISE EXCEPTION 'Seed and each products are quoted only in their own unit (%); "%" can''t be converted. Product: %.',
         v_inventory_unit,
         CASE WHEN NULLIF(btrim(NEW.rate_unit), '') IS NOT NULL
                   AND lower(btrim(NEW.rate_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit))
-             THEN NEW.rate_unit ELSE NEW.price_unit END
+             THEN NEW.rate_unit ELSE NEW.price_unit END,
+        v_product_name
         USING ERRCODE = '22023';
     END IF;
   END IF;
@@ -176,10 +179,12 @@ SET search_path = public, pg_temp AS $$
 DECLARE
   v_product_form text;
   v_inventory_unit text;
+  v_product_name text;
 BEGIN
-  SELECT p.product_form, p.inventory_unit
-    INTO v_product_form, v_inventory_unit
-    FROM public.products p WHERE p.id = NEW.product_id;
+  SELECT p.product_form, p.inventory_unit, p.product_name
+    INTO v_product_form, v_inventory_unit, v_product_name
+    FROM public.products p WHERE p.id = NEW.product_id
+     FOR SHARE;  -- waits out a concurrent form change, then sees its result
 
   IF v_product_form IN ('seed','each') THEN
     -- A blank unit is filled from the stock unit, so completion deducts it exactly.
@@ -187,10 +192,11 @@ BEGIN
     IF normalize_rate_unit(NEW.rate_unit) IS NULL THEN NEW.rate_unit := v_inventory_unit; END IF;
     IF normalize_rate_unit(NEW.unit) IS DISTINCT FROM normalize_rate_unit(v_inventory_unit)
        OR normalize_rate_unit(NEW.rate_unit) IS DISTINCT FROM normalize_rate_unit(v_inventory_unit) THEN
-      RAISE EXCEPTION 'Seed and each job lines use only the product''s own unit (%); "%" can''t be converted.',
+      RAISE EXCEPTION 'Seed and each job lines use only the product''s own unit (%); "%" can''t be converted. Product: %.',
         v_inventory_unit,
         CASE WHEN normalize_rate_unit(NEW.unit) IS DISTINCT FROM normalize_rate_unit(v_inventory_unit)
-             THEN NEW.unit ELSE NEW.rate_unit END
+             THEN NEW.unit ELSE NEW.rate_unit END,
+        v_product_name
         USING ERRCODE = '22023';
     END IF;
   END IF;

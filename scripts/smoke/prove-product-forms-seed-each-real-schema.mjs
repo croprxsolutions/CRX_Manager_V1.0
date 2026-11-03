@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,7 +34,7 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
-const TOUCHED = /product_form_units|validate_product_units|field_app_priced_quantity|convert_to_gl_lb|products_product_form_check|guard_seed_each_quote_item_units/;
+const TOUCHED = /product_form_units|validate_product_units|field_app_priced_quantity|convert_to_gl_lb|products_product_form_check|guard_seed_each_quote_item_units|guard_seed_each_job_chemical_units|normalize_rate_unit/;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -126,7 +126,8 @@ function bodyFrom(file, expression) {
 function restoreLiveBodies() {
   // Historical replay uses LF staging; validate_product_units had CRLF in live prosrc.
   const validate = bodyFrom('20260211000000_unit_tracking_pricing_overhaul.sql',
-    /CREATE OR REPLACE FUNCTION validate_product_units\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/);
+    /CREATE OR REPLACE FUNCTION validate_product_units\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/)
+    .replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');  // same bytes on an LF or CRLF checkout
   const field = bodyFrom('20260630180000_field_app_pricing_unit_fix.sql',
     /CREATE OR REPLACE FUNCTION public.field_app_priced_quantity\([\s\S]*?AS \$fapq\$([\s\S]*?)\$fapq\$;/);
   const seededConvert = bodyFrom(path.basename(CANDIDATE),
@@ -453,6 +454,8 @@ try {
     ['Seed Lb', 'Unit', 'Lb'], ['Seed Lb', 'Lb', 'oz/ac'], ['Seed Lb', 'oz', null],
     ['Each Ea', 'Unit', 'Ea'], ['Each Ea', 'Ea', 'Lb'],
   ]) refused(jobLine(name, unit, rateUnit, 9), jobUnitError);
+  refused(jobLine('Seed Lb', 'oz', 'Lb', 9), /can't be converted\. Product: Seed Lb\./);
+  refused(quoteLine('Seed Lb', 'Unit', 'Lb'), /can't be converted\. Product: Seed Lb\./);
   refused("UPDATE public.job_chemicals SET unit = 'Unit' WHERE sort_order = 1;", jobUnitError);
   refused("UPDATE public.job_chemicals SET rate_unit = 'oz' WHERE sort_order = 1;", jobUnitError);
   psql(jobLine('Liquid Gal', 'oz', 'oz/ac', 4));
@@ -466,14 +469,34 @@ try {
   psql("INSERT INTO public.products(product_name, category, product_form, inventory_unit, container_unit) VALUES ('Legacy job form', 'Herbicide', NULL, 'Ea', 'Ea');");
   psql(`BEGIN; SET LOCAL session_replication_role = replica;
     UPDATE public.products SET current_cost = 5.00, tier1_price = 12.50 WHERE product_name = 'Legacy job form'; COMMIT;`);
-  for (const unit of ['Unit', null]) {
-    psql(`DELETE FROM public.job_chemicals WHERE sort_order = 5; ${jobLine('Legacy job form', unit, null, 5)}`);
+  for (const [unit, rateUnit] of [['Unit', 'Ea'], [null, 'Ea'], ['Ea', null], ['ea', 'Unit/ac']]) {
+    psql(`DELETE FROM public.job_chemicals WHERE sort_order = 5; ${jobLine('Legacy job form', unit, rateUnit, 5)}`);
     refused("UPDATE public.products SET product_form = 'each' WHERE product_name = 'Legacy job form';",
       /Existing job lines use another unit; fix them before setting this form\./);
   }
   psql("UPDATE public.job_chemicals SET unit = 'ea', rate_unit = 'Ea/ac' WHERE sort_order = 5;");
   psql("UPDATE public.products SET product_form = 'each' WHERE product_name = 'Legacy job form';");
   assert.equal(scalar("SELECT product_form FROM public.products WHERE product_name = 'Legacy job form';"), 'each');
+  // A saved seed/each product's stock unit cannot change under its existing lines (setup-checks lock).
+  refused("UPDATE public.products SET inventory_unit = 'Unit', rate_unit = 'Unit' WHERE product_name = 'Seed Lb';",
+    /This can't change on a saved product yet/);
+  // Both line guards lock the product row, so a line write waits for a concurrent form change.
+  for (const fn of ['guard_seed_each_quote_item_units', 'guard_seed_each_job_chemical_units']) {
+    assert.match(functionDef(`public.${fn}()`), /WHERE p\.id = NEW\.product_id\n\s+FOR SHARE;/);
+  }
+  // Race: a form change holds its row while a mismatched quote line is written; the line must wait, then be refused.
+  psql("INSERT INTO public.products(product_name, category, product_form, inventory_unit, container_unit) VALUES ('Race legacy', 'Herbicide', NULL, 'Lb', 'Lb');");
+  psql(`BEGIN; SET LOCAL session_replication_role = replica;
+    UPDATE public.products SET current_cost = 5.00 WHERE product_name = 'Race legacy'; COMMIT;`);
+  const holder = spawn('docker', psqlArgs(), { cwd: ROOT, stdio: ['pipe', 'ignore', 'ignore'] });
+  holder.stdin.end("BEGIN; UPDATE public.products SET product_form = 'seed' WHERE product_name = 'Race legacy'; SELECT pg_sleep(4); COMMIT;");
+  await new Promise((resolve) => { setTimeout(resolve, 1500); });  // async, so the holder's input is flushed
+  const raced = psql(quoteLine('Race legacy', 'Unit', 'Lb'), { allowFailure: true });
+  await new Promise((resolve) => (holder.exitCode === null ? holder.on('exit', resolve) : resolve()));
+  assert.notEqual(raced.status, 0, 'a mismatched quote line raced past a concurrent form change');
+  assert.match(`${raced.stdout}
+${raced.stderr}`, /quoted only in their own unit \(Lb\); "Unit"/);
+  assert.equal(scalar("SELECT product_form FROM public.products WHERE product_name = 'Race legacy';"), 'seed');
 
   for (const [qty, rate, stock, form, expected] of [
     [16, 'Lb', 'Lb', 'seed', 16], [16, 'lb', 'Lb', 'seed', 16],

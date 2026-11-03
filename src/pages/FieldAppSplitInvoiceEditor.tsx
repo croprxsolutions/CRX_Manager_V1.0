@@ -25,7 +25,7 @@ import FieldSearchPicker, { type FieldSearchResult } from '../components/fields/
 import JobSearchPicker, { type JobSearchResult } from '../components/jobs/JobSearchPicker';
 import { jobSearchLabel } from '../lib/recordLabels';
 import UnitSelect from '../components/blendtickets/UnitSelect';
-import { blockedUnitSaveMessage, isKnownUnit, type UnitLoadState } from '../lib/units';
+import { blockedUnitSaveMessage, rateUnitOptionsForProduct, type UnitLoadState } from '../lib/units';
 import type { ProductSearchResult, UnitConversion } from '../types';
 import { requireGroupVersions } from '../lib/invoicePostVersion';
 import { groupVersionsFromRows } from '../lib/invoiceBatchPosting';
@@ -1153,11 +1153,14 @@ export default function FieldAppSplitInvoiceEditor() {
                               const nextId = product?.id ?? '';
                               // Switching to a product of the other form would leave the old rate
                               // unit selected as a grandfathered option (a liquid unit on a dry
-                              // product). Clear it so the operator must pick one that fits.
-                              // Only when the list really loaded: during an outage isKnownUnit is
-                              // false for everything, and clearing would wipe a stored unit.
+                              // product, or a unit other than a seed/each product's stock unit).
+                              // Clear it so the operator must pick one that fits.
+                              // Only when the list really loaded: during an outage the option list
+                              // is empty, and clearing would wipe a stored unit.
                               const dropUnit = unitLoad === 'loaded' && unitConversions.length > 0
-                                && !isKnownUnit(unitConversions, nextForm, l.rateUnit);
+                                && !!l.rateUnit
+                                && !rateUnitOptionsForProduct(unitConversions, nextForm, product?.inventory_unit)
+                                  .some((uc) => uc.unit === l.rateUnit);
                               patchLine(l.uid, dropUnit
                                 ? { product_id: nextId, product, rateUnit: '' }
                                 : { product_id: nextId, product });

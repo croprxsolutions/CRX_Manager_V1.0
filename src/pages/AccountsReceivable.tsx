@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase, assertRpcResult } from '../lib/db';
+import { isPricedAgingRow } from '../lib/arAging';
+import type { ARAgingRow } from '../types';
 import { formatUSD } from '../lib/money';
 import { todayInBusinessTz } from '../lib/dateUtils';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
@@ -58,16 +60,17 @@ export default function AccountsReceivable() {
         // which would drop customers, credits or memos from these totals silently.
         // Any failed read throws, so the whole strip is hidden (catch sets
         // owed=null) rather than showing a wrong number (Codex P2).
-        const { data: arData, error: arErr } = await fetchAllRows<{ customer_id: string; total_outstanding?: number; unavailable_reason?: string | null }>((from, to) => pageWithList(supabase
+        const { data: arData, error: arErr } = await fetchAllRows((from, to) => pageWithList(supabase
           .rpc('get_ar_aging', { p_as_of_date: today }, { count: 'exact' })
           // The function's own order (largest balance first), then the unique customer id.
           .order('total_outstanding', { ascending: false })
           .order('customer_id')
           .range(from, to)));
         if (arErr) throw arErr;
-        const arRows = assertRpcResult<Array<{ total_outstanding?: number; unavailable_reason?: string | null }>>(arData, 'get_ar_aging');
-        const owedSum = (arRows || []).reduce((s, r) => s + Number(r.total_outstanding || 0), 0);
-        const excluded = (arRows || []).filter((r) => r.unavailable_reason).length;
+        const arRows = assertRpcResult<ARAgingRow[]>(arData, 'get_ar_aging') || [];
+        const pricedRows = arRows.filter(isPricedAgingRow);
+        const owedSum = pricedRows.reduce((s, r) => s + Number(r.total_outstanding), 0);
+        const excluded = arRows.length - pricedRows.length;
         const { data: prepayRows, error: prepayErr } = await fetchAllRows<{ id: string; balance_cents: number | null }>((from, to) => pageWithList(supabase
           .from('prepay_credits')
           .select('id, balance_cents', { count: 'exact' })

@@ -26,6 +26,7 @@ import { fetchCustomerStatement } from '../lib/customerStatement';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV, fmtCSV, formatProductMoneyCSV } from '../lib/csvExport';
+import { isPricedAgingRow } from '../lib/arAging';
 import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
 import { downloadStatementPdf, downloadBatchStatements, generateStatementPdf } from '../lib/statementPdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
@@ -39,10 +40,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { computeSeason } from '../utils/season';
 import { localToday, parseLocalDate, localDatePlusDays, todayInBusinessTz } from '../lib/dateUtils';
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
-import type { ARAgingRow as BaseARagingRow, CustomerStatementRow, SeasonComparisonRow, DetailedStatementData, StatementOptions } from '../types';
+import type { ARAgingRow, ARAgingPricedRow, CustomerStatementRow, SeasonComparisonRow, DetailedStatementData, StatementOptions } from '../types';
 
 type TabKey = 'aging' | 'statement' | 'season';
-type ARAgingRow = BaseARagingRow & { prepay_balance_cents: number | null; open_credit_cents: number | null };
 
 // Why get_ar_aging could not rebuild a customer's balance as of the chosen date (KI-95).
 const UNAVAILABLE_REASONS: Record<string, string> = {
@@ -84,7 +84,7 @@ export default function ARaging() {
   const [showEmailStatementsConfirm, setShowEmailStatementsConfirm] = useState(false);
 
   // Aging
-  const [agingData, setAgingData] = useState<ARAgingRow[]>([]);
+  const [agingData, setAgingData] = useState<ARAgingPricedRow[]>([]);
   // Customers whose balance cannot be shown as of this date (no amounts): listed, never in the totals.
   const [agingUnavailable, setAgingUnavailable] = useState<ARAgingRow[]>([]);
   // The last aging load failed: the tab shows an error instead of zero totals.
@@ -127,7 +127,7 @@ export default function ARaging() {
     setLoading(true);
     // Read every page: the server cuts a function's rows off at 1,000, which
     // dropped the smallest balances from the list and the totals.
-    const { data, error } = await fetchAllRows<ARAgingRow>((from, to) => pageWithList(supabase
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .rpc('get_ar_aging', { p_as_of_date: asOfDate }, { count: 'exact' })
       // The function's own order (largest balance first), then the unique customer id.
       .order('total_outstanding', { ascending: false })
@@ -147,9 +147,9 @@ export default function ARaging() {
       return;
     }
     const allRows = assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging');
-    const rows = allRows.filter((r) => !r.unavailable_reason);
+    const rows = allRows.filter(isPricedAgingRow);
     setAgingData(rows);
-    setAgingUnavailable(allRows.filter((r) => r.unavailable_reason));
+    setAgingUnavailable(allRows.filter((r) => !isPricedAgingRow(r)));
     // Batch statements act on the selection: keep only customers on this date's list.
     const onList = new Set(rows.map((r) => r.customer_id));
     setSelectedCustomers((prev) => new Set([...prev].filter((id) => onList.has(id))));
@@ -234,9 +234,9 @@ export default function ARaging() {
     </li>
   );
 
-  const agingColumns: Column<ARAgingRow>[] = [
+  const agingColumns: Column<ARAgingPricedRow>[] = [
     {
-      key: 'customer_id' as keyof ARAgingRow,
+      key: 'customer_id' as keyof ARAgingPricedRow,
       header: '',
       className: 'w-10',
       render: (r) => (
@@ -343,7 +343,7 @@ export default function ARaging() {
       },
     },
     {
-      key: 'invoice_count' as keyof ARAgingRow,
+      key: 'invoice_count' as keyof ARAgingPricedRow,
       header: '',
       render: (r) => (
         <button
@@ -1031,7 +1031,7 @@ export default function ARaging() {
           {/* Aging Table */}
           <Card padding={false}>
             <div className="p-5">
-              <DataTable<ARAgingRow>
+              <DataTable<ARAgingPricedRow>
                 columns={agingColumns}
                 data={agingData}
                 loading={loading}

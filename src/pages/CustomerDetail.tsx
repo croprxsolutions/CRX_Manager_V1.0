@@ -16,12 +16,13 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, sanitizeError } from '../lib/db';
+import { isPricedAgingRow } from '../lib/arAging';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { parseLocalDate, localToday, localDatePlusDays, todayInBusinessTz } from '../lib/dateUtils';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import RelatedNotes from '../components/team/RelatedNotes';
-import type { Customer, CustomerAddress, CommissionSplit, Quote, Order, Delivery, DeliveryRemainder, Field, LinkedEntityType, ActivityFeedItem } from '../types';
+import type { Customer, CustomerAddress, CommissionSplit, Quote, Order, Delivery, DeliveryRemainder, Field, LinkedEntityType, ActivityFeedItem, ARAgingRow, ARAgingPricedRow } from '../types';
 import type { Json } from '../types/supabase';
 import { Sentry } from '../lib/sentry';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
@@ -190,10 +191,9 @@ export default function CustomerDetail() {
   const [cropSaving, setCropSaving] = useState<CropValue | null>(null);
 
   // Financials tab state
-  interface AgingRow { customer_id: string; farm_name: string; current_amount: number; days_30: number; days_60: number; days_90: number; over_90: number; total_outstanding: number; open_credit_cents?: number | null; unavailable_reason?: string | null }
   interface TxnRow { transaction_date: string; transaction_type: string; reference_number: string; amount_cents: number; running_balance: number }
   interface PrepayRow { id: string; bucket_label: string; original_amount_cents: number; balance_cents: number }
-  const [aging, setAging] = useState<AgingRow | null>(null);
+  const [aging, setAging] = useState<ARAgingPricedRow | null>(null);
   // KI-95: today's balance can't be rebuilt for this customer, so there is no Outstanding figure.
   const [agingUnavailable, setAgingUnavailable] = useState(false);
   // The balance read failed: the tab says so instead of showing $0 figures.
@@ -665,11 +665,12 @@ export default function CustomerDetail() {
           .rpc('get_ar_aging', { p_as_of_date: todayInBusinessTz() })
           .eq('customer_id', id!);
         if (agingError) throw agingError;
-        const myAging = assertRpcResult<AgingRow[]>(agingData, 'get_ar_aging').find((a) => a.customer_id === id) || null;
+        const myAging = assertRpcResult<ARAgingRow[]>(agingData, 'get_ar_aging').find((a) => a.customer_id === id) || null;
         if (isStale()) return;
-        // KI-95: a flagged row has no amounts; show "not available", never $0.
-        setAgingUnavailable(Boolean(myAging?.unavailable_reason));
-        setAging(myAging?.unavailable_reason ? null : myAging);
+        // KI-95: a flagged row has no amounts; show "not available", never $0. No row at all means nothing owed.
+        const priced = myAging && isPricedAgingRow(myAging) ? myAging : null;
+        setAgingUnavailable(myAging !== null && priced === null);
+        setAging(priced);
         agingRead = true;
 
         // Every statement row, page by page (src/lib/customerStatement.ts); the

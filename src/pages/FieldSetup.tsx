@@ -631,8 +631,19 @@ function FieldSetupPage() {
         saveFieldIdem.resetKeyFor(saveScope);
         const savedFieldId = isNew ? data : id;
 
+        // A changed retry's reply may be a field an earlier attempt created with other details. Read it back:
+        // if it holds what this save sent, this save created it and its acreage belongs on it.
+        let createdBySave = !changedNewRetry;
         if (changedNewRetry) {
-          // The reply may be a field an earlier attempt created with other details; never put this edit's acreage on it.
+          const { data: saved } = await supabase
+            .from('fields')
+            .select('customer_id, field_name, legal_description, county, state, fsa_farm_number, fsa_tract_number, fsa_field_number, crop_type, soil_type, irrigation, notes, is_active')
+            .eq('id', savedFieldId as string)
+            .maybeSingle();
+          const sent: Record<string, unknown> = { ...fieldPayload };
+          createdBySave = !!saved && Object.entries(saved).every(([k, v]) => (v ?? null) === (sent[k] ?? null));
+        }
+        if (!createdBySave) {
           toast('warning', 'An earlier save may already have created this field. Opening it now; check its details and re-enter any acreage or boundary.');
           skipUnsavedPromptRef.current = true;
           navigate(`/fields/${savedFieldId}`, { replace: true });

@@ -149,6 +149,26 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
     expect(mockRpc.mock.calls.some(([name]) => name === 'set_field_override_acres')).toBe(false);
   });
 
+  it('a changed retry whose first attempt never reached the server keeps its acreage', async () => {
+    mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
+    await renderNewField();
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
+
+    mockHasKey.mockReturnValue(true);
+    // The saved row holds this retry's details, so this retry created it.
+    mockFrom.mockImplementation((table: string) => chain(
+      table === 'fields' ? { field_name: 'South 40', customer_id: 'customer-1', state: 'IL', irrigation: false, is_active: true } : null,
+    ));
+    fireEvent.change(screen.getByLabelText(/Field Name/), { target: { value: 'South 40' } });
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '35' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_field_override_acres', expect.objectContaining({ p_field_id: 'field-1', p_override_acres: 35 })));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.anything());
+  });
+
   it('a retry that changes only the acreage saves it on the field', async () => {
     mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
     await renderNewField();

@@ -3,6 +3,7 @@
 // Machine-checkable reference-doc claims vs repository reality.
 // Always-loaded AGENTS.md and CLAUDE.md intentionally contain no volatile counts.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,7 @@ import {
   chicagoCalendarStamp,
   frozenHistoryProblems,
   manualFreshnessBoundary,
+  manualFreshnessStatus,
   manualStampProblems,
   migrationIndexProblems,
   recordFileProblems,
@@ -158,6 +160,20 @@ for (const doc of manualDocs) {
 // forcing function the manual layer lacked: within 48h of shipping, KNOWN_ISSUES
 // listed an applied-live fix as "parked" while claiming same-day re-verification.
 // Bump the stamp ONLY after actually re-reading the doc against live state.
+// Narrowed 2026-11-03: on a pull request it FAILS only a PR that adds a migration
+// or edits one of these docs (other PRs get a WARN); pushes to main and local
+// runs stay fully enforced. Any error reading the PR's files enforces in full.
+function pullRequestChanges() {
+  if (process.env.GITHUB_EVENT_NAME !== "pull_request") return null;
+  try {
+    const base = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")).pull_request.base.sha;
+    const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
+    return git("diff", "--name-status", git("merge-base", base, "HEAD"), "HEAD").split("\n").filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+const prChanges = pullRequestChanges();
 const newestMigDate = migrations
   .map((name) => name.match(/^(\d{8})/)?.[1])
   .filter(Boolean)
@@ -171,10 +187,10 @@ for (const doc of ["CURRENT_STATE.md", "KNOWN_ISSUES.md"]) {
   const m = read(rel).match(/Last verified:?\*{0,2}\s*(\d{4})-(\d{2})-(\d{2})/);
   if (!m) continue; // no parseable stamp — already a FAIL above
   const stampDate = `${m[1]}${m[2]}${m[3]}`; // YYYYMMDD
-  const fresh = !freshnessDate || stampDate >= freshnessDate;
+  const status = manualFreshnessStatus({ stampDate, freshnessDate, changes: prChanges });
   row(`manual freshness ${doc}`, `stamp >= freshness boundary (${freshnessDate ?? "none"})`, `stamp ${stampDate}`,
-    fresh ? "PASS" : "FAIL",
-    fresh ? "" : `migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.`);
+    status,
+    status === "PASS" ? "" : `${status === "WARN" ? "not failing this PR (it adds no migration and leaves this doc alone): " : ""}migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.`);
 }
 
 console.log("check-doc-drift");

@@ -12,7 +12,7 @@
 -- Bound to the approved list: the plan below is fingerprinted over every active product, and the
 -- migration refuses (changing nothing) unless it equals the plan Mason approved, read live on
 -- 2026-11-03: 596 active products, 586 new links, 10 preferred flags. Any product, vendor, alias
--- or link change since then makes it stop for a fresh review. Afterwards every active product
+-- or link change that alters what it would write makes it stop for a fresh review. Afterwards every active product
 -- must have exactly one active, confirmed, preferred link to a live vendor.
 -- The links are recorded as confirmed by Mason, whose approval this is.
 

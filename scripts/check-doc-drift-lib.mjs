@@ -83,17 +83,14 @@ export function manualFreshnessBoundary(newestMigrationDate, todayChicago) {
   return newestMigrationDate > todayChicago ? todayChicago : newestMigrationDate;
 }
 
-// A stale stamp fails only a PR that adds a migration or edits a live-state doc;
+// A stale stamp fails only a PR that changes a migration or edits a live-state doc;
 // any other PR gets a WARN, so it is not failed by a migration another PR landed.
 // `changes` is `git diff --name-status` lines, or null (main push, local run) to enforce.
 export function manualFreshnessStatus({ stampDate, freshnessDate, changes }) {
   if (!freshnessDate || stampDate >= freshnessDate) return 'PASS';
   if (changes === null) return 'FAIL';
-  const owns = changes.some((line) => {
-    const [status, ...paths] = line.split('\t');
-    const file = paths.at(-1) ?? '';
-    return (/^[AR]/.test(status) && /^supabase\/migrations\/[^/]+\.sql$/.test(file))
-      || ['docs/manual/CURRENT_STATE.md', 'docs/manual/KNOWN_ISSUES.md'].includes(file);
-  });
+  const owns = changes.some((line) => line.split('\t').slice(1).some((file) =>
+    /^supabase\/migrations\/[^/]+\.sql$/.test(file)
+      || ['docs/manual/CURRENT_STATE.md', 'docs/manual/KNOWN_ISSUES.md'].includes(file)));
   return owns ? 'FAIL' : 'WARN';
 }

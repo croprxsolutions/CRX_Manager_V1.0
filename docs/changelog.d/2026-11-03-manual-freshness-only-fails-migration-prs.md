@@ -5,8 +5,8 @@
 migration's date, capped at Chicago today) failed PRs #1266, #1335, #1338 and #1345. #1335 and #1338
 changed only scripts and docs. They went red because another PR had landed a migration stamped that day.
 
-On a pull request the check now FAILS only when the PR adds or renames a `supabase/migrations/*.sql`
-file or edits either doc. Every other PR gets a `WARN` row and passes. The PR's files come from
+On a pull request the check now FAILS only when the PR adds, edits, renames or deletes a
+`supabase/migrations/*.sql` file, or touches either doc. Every other PR gets a `WARN` row and passes. The PR's files come from
 `git diff --name-status <merge-base with the event's base SHA> HEAD`, read through the event file
 GitHub Actions provides. If that read fails, the check enforces in full.
 

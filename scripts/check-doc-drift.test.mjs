@@ -69,7 +69,9 @@ assert.equal(
   assert.equal(manualFreshnessStatus({ ...stale, changes: ['M\tscripts/check-doc-drift.mjs', 'A\tdocs/changelog.d/x.md'] }), 'WARN', 'a scripts-only PR with stale dates is not failed by another PR\'s migration');
   assert.equal(manualFreshnessStatus({ ...stale, changes: ['A\tsupabase/migrations/20261103090000_x.sql'] }), 'FAIL', 'a PR adding a migration with stale dates still fails');
   assert.equal(manualFreshnessStatus({ ...stale, changes: ['M\tdocs/manual/KNOWN_ISSUES.md'] }), 'FAIL', 'a PR editing a live-state doc must leave it fresh');
-  assert.equal(manualFreshnessStatus({ ...stale, changes: ['M\tsupabase/migrations/20261001000000_old.sql'] }), 'WARN', 'editing an existing migration (not adding one) does not trigger it');
+  assert.equal(manualFreshnessStatus({ ...stale, changes: ['M\tsupabase/migrations/20261001000000_old.sql'] }), 'FAIL', 'editing an existing migration triggers it too');
+  assert.equal(manualFreshnessStatus({ ...stale, changes: ['D\tsupabase/migrations/20261103090000_x.sql'] }), 'FAIL', 'deleting a migration (moving the boundary back) triggers it');
+  assert.equal(manualFreshnessStatus({ ...stale, changes: ['R100\tdocs/manual/KNOWN_ISSUES.md\tdocs/manual/OLD.md'] }), 'FAIL', 'renaming a live-state doc away triggers it');
   assert.equal(manualFreshnessStatus({ ...stale, changes: null }), 'FAIL', 'main and local runs (no PR file list) stay fully enforced');
   assert.equal(manualFreshnessStatus({ stampDate: '20261103', freshnessDate: '20261103', changes: null }), 'PASS', 'a fresh stamp passes');
 }

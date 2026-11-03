@@ -160,7 +160,7 @@ for (const doc of manualDocs) {
 // forcing function the manual layer lacked: within 48h of shipping, KNOWN_ISSUES
 // listed an applied-live fix as "parked" while claiming same-day re-verification.
 // Bump the stamp ONLY after actually re-reading the doc against live state.
-// Narrowed 2026-11-03: on a pull request it FAILS only a PR that adds a migration
+// Narrowed 2026-11-03: on a pull request it FAILS only a PR that changes a migration
 // or edits one of these docs (other PRs get a WARN); pushes to main and local
 // runs stay fully enforced. Any error reading the PR's files enforces in full.
 function pullRequestChanges() {
@@ -190,7 +190,7 @@ for (const doc of ["CURRENT_STATE.md", "KNOWN_ISSUES.md"]) {
   const status = manualFreshnessStatus({ stampDate, freshnessDate, changes: prChanges });
   row(`manual freshness ${doc}`, `stamp >= freshness boundary (${freshnessDate ?? "none"})`, `stamp ${stampDate}`,
     status,
-    status === "PASS" ? "" : `${status === "WARN" ? "not failing this PR (it adds no migration and leaves this doc alone): " : ""}migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.`);
+    status === "PASS" ? "" : `${status === "WARN" ? "not failing this PR (it changes no migration and leaves this doc alone): " : ""}migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.`);
 }
 
 console.log("check-doc-drift");

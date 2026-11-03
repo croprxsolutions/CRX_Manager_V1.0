@@ -266,14 +266,16 @@ const linkState = () => scalar(`SELECT md5(coalesce(string_agg(id::text || produ
 const vendorText = () => scalar("SELECT md5(string_agg(id::text || coalesce(vendor, '~'), ',' ORDER BY id)) FROM public.products;");
 // Runs the candidate with its approved constants swapped; returns the psql result.
 function run(text, name) { stageText(name, text); return apply(name); }
-function bound(fingerprint, links, prefers) {
+function bound(fingerprint, links, prefers, named = 5) {
   const source = lf(CANDIDATE);
-  for (const pin of [`c_fingerprint constant text := '${APPROVED.fingerprint}'`, `v_inserted <> ${APPROVED.links} OR v_updated <> ${APPROVED.prefers}`]) {
+  for (const pin of [`c_fingerprint constant text := '${APPROVED.fingerprint}'`, `v_inserted <> ${APPROVED.links} OR v_updated <> ${APPROVED.prefers}`,
+    'OR v_named <> 2 THEN']) {
     assert.equal(source.split(pin).length - 1, 1, `the candidate no longer pins: ${pin}`);
   }
   return source
     .replace(`c_fingerprint constant text := '${APPROVED.fingerprint}'`, `c_fingerprint constant text := '${fingerprint}'`)
-    .replace(`v_inserted <> ${APPROVED.links} OR v_updated <> ${APPROVED.prefers}`, `v_inserted <> ${links} OR v_updated <> ${prefers}`);
+    .replace(`v_inserted <> ${APPROVED.links} OR v_updated <> ${APPROVED.prefers}`, `v_inserted <> ${links} OR v_updated <> ${prefers}`)
+    .replace('OR v_named <> 2 THEN', `OR v_named <> ${named} THEN`);
 }
 function planOf(output) {
   const m = /DATA11_PLAN_CHANGED: (\d+) products, (\d+) links, (\d+) preferred flags, fingerprint ([0-9a-f]{32})/.exec(output);
@@ -353,13 +355,15 @@ function main() {
     assert.deepEqual([r.status, r.cmp, r.by, r.created_by, r.reusable], ['confirmed', 'pending', APPROVER, APPROVER, false]);
   }
   const texts = JSON.parse(scalar("SELECT json_object_agg(id, vendor) FROM public.products;"));
-  assert.deepEqual([texts[P.EXP1], texts[P.EXP2]], ['[PROVER] Spinner', '[PROVER] Crop Rx'], 'the two hand-assigned blanks get their vendor name');
-  asOwner(`UPDATE public.products SET vendor = NULL WHERE id = '${P.EXP1}'; UPDATE public.products SET vendor = '' WHERE id = '${P.EXP2}';`);
+  const named = [[P.TEXT, '[PROVER] Acme Ag', "'  [prover]  acme ag '"], [P.ALIAS, '[PROVER] Beta Supply', "'[PROVER] Beta Co.'"],
+    [P.LEGACY, '[PROVER] Legacy Co', "'[PROVER] LGCY'"], [P.EXP1, '[PROVER] Spinner', 'NULL'], [P.EXP2, '[PROVER] Crop Rx', "''"]];
+  assert.deepEqual(named.map(([p]) => texts[p]), named.map(([, name]) => name), 'planned vendor text becomes the exact vendor name');
+  asOwner(named.map(([p, , was]) => `UPDATE public.products SET vendor = ${was} WHERE id = '${p}';`).join(' '));
   assert.equal(vendorText(), textBefore, 'no other product vendor text changed');
-  asOwner(`UPDATE public.products SET vendor = '[PROVER] Spinner' WHERE id = '${P.EXP1}'; UPDATE public.products SET vendor = '[PROVER] Crop Rx' WHERE id = '${P.EXP2}';`);
+  asOwner(named.map(([p, name]) => `UPDATE public.products SET vendor = '${name}' WHERE id = '${p}';`).join(' '));
   assert.equal(scalar(`SELECT count(*) FROM public.products p WHERE p.is_active AND (SELECT count(*) FROM public.product_supplier_links l
       WHERE l.product_id = p.id AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred) <> 1;`), '0');
-  console.log('[prover] bound to its plan: five vendor-only preferred links, one existing link made preferred, the two blank vendor names filled, nothing else changed');
+  console.log('[prover] bound to its plan: five vendor-only preferred links, one existing link made preferred, every planned vendor text set to its exact vendor name, nothing else changed');
 
   // Run again: the plan is now "nothing to do", so it refuses rather than doubling anything.
   const after = linkState();

@@ -365,7 +365,10 @@ function plainReaderSegment(segment) {
   // A path-qualified head (`./grep`) may be any program, not the real reader (Luna).
   // PowerShell also treats smart quotes (U+2018-U+201F) as quotes (Codex App).
   if (/[\r\n‘-‟]|\\["']/.test(segment) || /^\s*\S*[/\\]/.test(segment)) return false;
-  const outside = segment.replace(/'[^']*'|"[^"$`]*"/g, "");
+  // cmd.exe (Desktop Commander) does not quote with `'` and expands `%`/`!`
+  // inside `"`, so those spans must hold no cmd.exe metacharacter (Codex App),
+  // as read-only-search-lib requires.
+  const outside = segment.replace(/'[^'|&<>^%"!]*'|"[^"$`%!]*"/g, "");
   // A glob can expand to a file named `--pre=…`, and only rg has an option that
   // runs a program, so an unquoted `*`/`?` costs rg its exemption (Codex App).
   if (/[*?]/.test(outside) && sqlSegmentProgram(segment) === "rg") return false;

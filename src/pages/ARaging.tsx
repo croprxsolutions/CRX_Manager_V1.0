@@ -29,6 +29,7 @@ import { exportToCSV, fmtCSV } from '../lib/csvExport';
 import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
 import { downloadStatementPdf, downloadBatchStatements, generateStatementPdf } from '../lib/statementPdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
+import { escapeHtml } from '../lib/proofNotification';
 import { buildStatementEmailContent } from '../lib/statementEmail';
 import { logActivity } from '../lib/activityLogger';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -616,7 +617,7 @@ export default function ARaging() {
           const html = buildEmailHtml(`
             <h2 style="color:#1e293b;margin:0 0 12px;">Account ${urgencyLabel}</h2>
             <p style="color:#475569;font-size:14px;line-height:1.6;">
-              Dear ${cust.farm_name},
+              Dear ${escapeHtml(cust.farm_name)},
             </p>
             <p style="color:#475569;font-size:14px;line-height:1.6;">
               Our records show an outstanding balance of

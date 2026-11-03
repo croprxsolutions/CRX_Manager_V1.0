@@ -87,6 +87,7 @@ vi.mock('./sentry', () => ({
 
 // Import AFTER mocks are registered
 import { sendOrderConfirmedEmail } from './orderConfirmedEmail';
+import { emailContentProblem } from '../../supabase/functions/_shared/emailContentGate';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -118,6 +119,15 @@ describe('sendOrderConfirmedEmail', () => {
     await sendOrderConfirmedEmail('order-1');
     const args = sendEmailMock.mock.calls[0][0] as Record<string, unknown>;
     expect(String(args.html)).toContain('Hi Pat');
+  });
+
+  it('escapes typed names so the server content gate accepts the email', async () => {
+    customerResp = { data: { ...mockCustomer, contact_name: 'Pat <Jr>' }, error: null };
+    itemsResp = { data: [{ product_name: 'Fertilizer < 1% chloride', total_units_needed: 1, price_per_unit: 5 }], error: null };
+    await sendOrderConfirmedEmail('order-1');
+    const args = sendEmailMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(String(args.html)).toContain('Fertilizer &lt; 1% chloride');
+    expect(emailContentProblem(String(args.subject), String(args.html))).toBeNull();
   });
 
   it('omits the contact name in the greeting when null', async () => {

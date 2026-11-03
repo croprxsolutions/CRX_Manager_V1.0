@@ -216,15 +216,15 @@ const [JOB_SINGLE, JOB_SPLIT] = ['e1', 'e2'].map((s) => `7c6b0000-0000-4000-8000
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const LIVE_IMPL_MD5 = '85cd07a0a6b978cb066edab7df369fea';
-const NEW_IMPL_MD5 = '0071afec350de8f807b58a046900278d';
+const NEW_IMPL_MD5 = 'a72cf3a5cff53d4024ad52b832985724';
 // Every product's Unit is Gal; the job lines are entered in other units (or none).
 // [product, job unit, job rate unit, quantity, price cents, cost cents, rate per acre]
 const LINES = [
   [P_PT, "'Pt'", "'pt/ac'", 80, 450, 300, 8],
   [P_NULL, 'NULL', 'NULL', 20, 2500, 1800, 2],
-  [P_BLANK, "''", 'NULL', 5, 3100, 2000, 0.5],
+  [P_BLANK, "'  '", 'NULL', 5, 3100, 2000, 0.5],
   [P_QT, "'Qt'", 'NULL', 40, 900, 610, 4],
-  [P_BLANK_RATE, "'Pt'", "''", 16, 700, 450, 1.6],
+  [P_BLANK_RATE, "'Pt'", "' '", 16, 700, 450, 1.6],
 ];
 
 function seed() {
@@ -253,7 +253,7 @@ function seed() {
       ${[JOB_SINGLE, JOB_SPLIT].flatMap((job) => LINES.map(([p, u, r, qty, price, cost, rate]) => `('${job}', '${p}', ${u}, ${r}, ${qty}, ${price}, ${cost}, ${rate})`)).join(',\n      ')};
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
   assert.equal(scalar(`SELECT count(*) FROM public.job_chemicals WHERE job_id IN ('${JOB_SINGLE}', '${JOB_SPLIT}');`), '10');
-  console.log('[prover] seeded two completed jobs (single owner; 60/40 split) with Pt, missing, blank, Qt and blank-rate job units on Gal products');
+  console.log('[prover] seeded two completed jobs (single owner; 60/40 split) with Pt, missing, all-space, Qt and all-space-rate job units on Gal products');
 }
 
 // Transfers `job` as the admin in a rolled-back transaction; returns each invoice line (sorted by
@@ -303,7 +303,7 @@ try {
   // 1. Before: the defect.
   const single0 = transfer(JOB_SINGLE);
   const split0 = transfer(JOB_SPLIT);
-  assert.deepEqual(labels(single0), ['A Pint line=Gal/pt/ac/pt/ac', 'B No unit=Gal/Gal/Gal', 'C Blank unit=Gal/Gal/Gal', 'D Quart line=Gal/Gal/Gal', 'E Blank rate unit=Gal//']);
+  assert.deepEqual(labels(single0), ['A Pint line=Gal/pt/ac/pt/ac', 'B No unit=Gal/Gal/Gal', 'C Blank unit=Gal/Gal/Gal', 'D Quart line=Gal/Gal/Gal', 'E Blank rate unit=Gal/ / ']);
   assert.equal(split0.length, 10, 'the split job did not make one line per chemical per owner');
   assert.equal(new Set(split0.map((r) => r.owner)).size, 2, 'the split job did not bill two owners');
   console.log(`[prover] BEFORE: single ${labels(single0).join(', ')}`);

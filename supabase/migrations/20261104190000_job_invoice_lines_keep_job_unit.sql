@@ -8,7 +8,7 @@
 -- chemical loops (the multi-owner split and the single invoice) now read:
 --   unit_size: the job line's unit (job_chemicals.unit), else the product's Unit;
 --   rate_unit: the job line's rate unit, else its unit, else the product's Unit.
--- A blank unit or rate unit counts as missing. Nothing else in the body changes; amounts, cost,
+-- A blank or all-space unit or rate unit counts as missing. Nothing else in the body changes; amounts, cost,
 -- quantity and commissions are untouched. Invoices already created keep their labels.
 --
 -- Rollback: re-create the private body from
@@ -297,8 +297,8 @@ BEGIN
              safe_cents_qty(jc.price_per_unit_cents, jc.quantity) AS chem_price,
              jc.quantity,
              jc.customer_supplied,
-             p.product_name, COALESCE(NULLIF(jc.unit, ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
-             COALESCE(NULLIF(jc.rate_unit, ''), NULLIF(jc.unit, ''), p.unit_size) AS rate_unit
+             p.product_name, COALESCE(NULLIF(btrim(jc.unit), ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
+             COALESCE(NULLIF(btrim(jc.rate_unit), ''), NULLIF(btrim(jc.unit), ''), p.unit_size) AS rate_unit
       FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
       WHERE jc.job_id = p_job_id ORDER BY p.product_name
     LOOP
@@ -531,8 +531,8 @@ BEGIN
            safe_cents_qty(jc.cost_per_unit_cents, jc.quantity) AS chem_cost,
            safe_cents_qty(jc.price_per_unit_cents, jc.quantity) AS chem_price,
            jc.customer_supplied,
-           p.product_name, COALESCE(NULLIF(jc.unit, ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
-           COALESCE(NULLIF(jc.rate_unit, ''), NULLIF(jc.unit, ''), p.unit_size) AS rate_unit
+           p.product_name, COALESCE(NULLIF(btrim(jc.unit), ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
+           COALESCE(NULLIF(btrim(jc.rate_unit), ''), NULLIF(btrim(jc.unit), ''), p.unit_size) AS rate_unit
     FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
     WHERE jc.job_id = p_job_id ORDER BY p.product_name
   LOOP
@@ -776,7 +776,7 @@ BEGIN
        AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
        AND pg_get_userbyid(p.proowner) = 'postgres'
        AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]
-       AND md5(p.prosrc) = '0071afec350de8f807b58a046900278d'
+       AND md5(p.prosrc) = 'a72cf3a5cff53d4024ad52b832985724'
   ) THEN
     RAISE EXCEPTION 'JOB_INVOICE_UNIT_POSTFLIGHT: the new private transfer body, owner, settings or ACL did not land as reviewed';
   END IF;

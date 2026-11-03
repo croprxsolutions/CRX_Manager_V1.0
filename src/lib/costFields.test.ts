@@ -182,14 +182,7 @@ describe('column lists match the schema registry', () => {
       for (const column of cost) expect(live).toContain(column);
       const safe = SAFE_COLUMNS[table].split(',').map((c) => c.trim());
       expect(new Set(safe).size).toBe(safe.length);
-      // The live registry predates this local, unapplied candidate. Verify its column
-      // against the candidate SQL until a post-apply registry refresh includes it.
-      const candidateColumns = table === 'products' ? ['use_timings'] : [];
-      if (table === 'products') {
-        const candidate = readFileSync(join(HERE, '..', '..', 'supabase', 'migrations', '20261103210000_product_use_timings.sql'), 'utf8');
-        expect(candidate).toMatch(/ALTER TABLE public\.products ADD COLUMN use_timings text\[\]/);
-      }
-      expect([...safe].sort()).toEqual([...new Set([...live, ...candidateColumns])].filter((c) => !cost.includes(c)).sort());
+      expect([...safe].sort()).toEqual(live.filter((c) => !cost.includes(c)).sort());
     });
   }
 });

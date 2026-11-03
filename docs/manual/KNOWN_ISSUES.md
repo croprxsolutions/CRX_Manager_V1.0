@@ -195,20 +195,21 @@ different records, so a retry could double-apply or replay another record's resu
 PR #584; the rest are fixed on this branch, and every one now keeps its key until the save is confirmed. How each
 key is scoped depends on whether the server binds the key to its request (KI-10):
 - **Server binds the request** (`create_quick_delivery`, `batch_apply_prepayments`, `create_order_from_blend_ticket`,
-  `batch_cancel_deliveries`, `batch_void_invoices`, `delete_invoices`, `complete_job`, `draw_down_quote`, and by
+  `batch_cancel_deliveries`, `batch_void_invoices`, `delete_invoices`, `complete_job`, `draw_down_quote`, `save_job`, and by
   their own argument check `allocate_payment` and `generate_finance_charges`): one key
   per form, record, or sorted set of records. An edited retry after a lost reply is refused with the committed
   result (the screen opens it, or says the earlier save went through and reloads), instead of creating a second
   one. Scoping these by payload would let an edit
   mint a fresh key and duplicate the work.
-- **Server does not bind the request** (`save_job`,
-  `assign_job_applicator`, `save_field`, `edit_delivery`, `link_blend_ticket_to_order`, `create_quote_from_template`,
-  `rollover_quote_to_season`, `reassign_delivery`): a save that creates a record (new field, new job, quote from
+- **Server does not bind the request** (`assign_job_applicator`, `save_field`, `edit_delivery`, `link_blend_ticket_to_order`, `create_quote_from_template`,
+  `rollover_quote_to_season`, `reassign_delivery`): a save that creates a record (new field, quote from
   template, season rollover) keeps one key per form or source until confirmed, so an edited retry after a lost
   reply replays the record already created instead of making a second one; an edit to an existing record uses
   one key per record and exact request, so a retry never replays another record's result.
 - NewOrder (`create_direct_order`, `create_rush_order`, both bound) keeps one key per exact request on purpose:
   its below-cost approval is remembered per key, and a shared key could carry an approval to a different order.
+- Saving an existing job keeps one key per exact edit: re-applying an edit to the same job is harmless, while a
+  new job keeps one key and opens the committed job when an edited retry is refused.
 **Remaining risk:** for the unbound functions, a create retried with different details after a lost reply opens
 the record already created without the later edits, and an edited retry of an existing record applies the new edit
 after the old one. Neither makes a second record or moves money twice; a clear refusal needs server-side binding

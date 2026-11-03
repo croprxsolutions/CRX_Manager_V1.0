@@ -17,7 +17,7 @@ import { supabase, checkMutationResult, assertRpcResult, assertTransferDataPrese
 import { warnIfOverCreditLimit } from '../lib/creditLimit';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
-import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { fingerprintIntentPayload, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
 import { getLicenseStatus, licenseStatusLabel } from '../lib/licenseStatus';
 import { generateWpsNoticePdf } from '../lib/wpsNoticePdf';
 import { generateApplicatorSheetPdf } from '../lib/applicatorSheetPdf';
@@ -3170,6 +3170,15 @@ export default function JobDetail() {
       // fired. hasRpcCode() reads object-shaped errors, so it now does.
       } else if (hasRpcCode(err, RpcErrorCodes.SHARE_NOT_100)) {
         toast('error', "Each field's customer shares must total 100%.");
+      } else if (isNew && typeof getIdempotencyMismatchResult(err, 'save_job')?.job_id === 'string') {
+        // An edited retry after a lost reply: the first save already created this job, so open it
+        // instead of leaving the form where a reload would mint a new key and create a second job.
+        saveJobIdem.resetKeyFor('new');
+        if (stillOnThisJob()) {
+          toast('warning', 'An earlier save already created this job. Opening it now; re-apply any later edits there.');
+          skipUnsavedPromptRef.current = true;
+          navigate(`/jobs/${getIdempotencyMismatchResult(err, 'save_job')!.job_id as string}`);
+        }
       } else {
         Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_job' } });
         toast('error', sanitizeError(err));

@@ -22,6 +22,7 @@
 DO $smoke$
 DECLARE
   v_admin   uuid;
+  v_pricing jsonb;
   v_sfx     text := substr(gen_random_uuid()::text,1,8);
   v_cust    uuid;
   v_prod    uuid;
@@ -48,9 +49,24 @@ BEGIN
   -- DRY product, $2.50 tier-1, vendor on the product (for the M3 fallback case).
   -- inventory_unit must satisfy validate_product_units (dry catalog); the per-line
   -- rate_unit in the payload below is the free-form 'oz' that drives the conversion.
-  INSERT INTO products (product_name, unit_size, inventory_unit, product_form, current_cost, tier1_price, vendor)
-    VALUES ('[SMOKE] FA25P '||v_sfx, 'Lb', 'Lb', 'dry', 1.00, 2.50, 'ACME Ag Supply')
+  -- Pricing-free shell, then cost/price through the governed preview/apply
+  -- path (a priced products INSERT is refused since the Phase 1a cutover).
+  INSERT INTO products (product_name, unit_size, inventory_unit, product_form, vendor)
+    VALUES ('[SMOKE] FA25P '||v_sfx, 'Lb', 'Lb', 'dry', 'ACME Ag Supply')
     RETURNING id INTO v_prod;
+  v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object('product_id', v_prod, 'row_version', 1,
+      'pricing_mode', 'price_driven', 'new_cost', '1.00',
+      'tier1_price', '2.50', 'tier2_price', '2.50', 'tier3_price', '2.50')),
+    v_admin, gen_random_uuid()::text);
+  IF NOT COALESCE((v_pricing->>'apply_allowed')::boolean, false) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing preview failed: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,
+    v_pricing->>'request_fingerprint', v_admin, gen_random_uuid()::text);
+  IF (SELECT tier1_price FROM products WHERE id = v_prod) IS DISTINCT FROM 2.50 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing apply did not set tier1_price';
+  END IF;
 
   INSERT INTO fields (customer_id, field_name, total_acres, is_active)
     VALUES (v_cust, '[SMOKE] FA25F '||v_sfx, 40, true) RETURNING id INTO v_field;

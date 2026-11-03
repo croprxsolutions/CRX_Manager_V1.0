@@ -581,7 +581,7 @@ not written; Gauntlet V2 Phase 2 unfinished (no staging database, E2E switched o
 counts not re-measured); `docs/reference/gotchas.md` has no "gross margin means markup" note.
 Further small LOW notes from the 2026-10-13 branch salvage, carried from the archive and not re-checked: invoices
 created through the order functions would be numbered INV- instead of CS-/MC- (latent; 0 of 12 live order
-invoices affected); the smoke chain `smoke-split_invoices_jsonb_fix.sql` is stale; on the bulk order import,
+invoices affected); on the bulk order import,
 Escape on the below-cost prompt also closes the Import Orders dialog while the upload continues out of sight
 (`src/components/orders/BulkOrderImport.tsx`; a fix sits on closed PR #350's branch); the return-credit prover
 is pre-apply and two test hardenings were not carried; GraphQL ref updates are not inspected locally (the

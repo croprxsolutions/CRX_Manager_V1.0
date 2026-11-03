@@ -1,3 +1,4 @@
+-- smoke-allow-priced-product-insert: disposable proof database cloned from a 2026-07-14 snapshot, before the 20260718190000 pricing cutover.
 -- Disposable-database fixtures for the multi-session offline receipt proof.
 -- This file intentionally persists fixtures and a test-only delay trigger in
 -- the newly created disposable database. It must never run against production.

@@ -54,8 +54,7 @@ const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
 const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
 const OWN_NAME_CHAIN = path.join(SMOKE, 'smoke-order-invoice-rep-own-name.sql');
-// Every other registered chain whose `covers` names either wrapper. (smoke-split_invoices_jsonb_fix.sql
-// is unregistered and stale, KNOWN_ISSUES.md: it builds the retired quote_sections split path.)
+// Every other registered chain whose `covers` names either wrapper.
 const COVERING_CHAINS = [
   'smoke-order-invoice-type-gate.sql',
   'smoke-backfill-refuse-split-billing.sql',

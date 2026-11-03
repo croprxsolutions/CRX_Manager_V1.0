@@ -32,7 +32,9 @@ DECLARE
   v_named bigint;
   v_bad bigint;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = c_approver AND role = 'admin' AND is_active) THEN
+  -- Held until commit, so the approver stays an active admin while the links name them.
+  PERFORM 1 FROM public.profiles WHERE id = c_approver AND role = 'admin' AND is_active FOR SHARE;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'DATA11_APPROVER_NOT_ACTIVE_ADMIN';
   END IF;
   -- Serialize with every link and product writer for the length of the step.

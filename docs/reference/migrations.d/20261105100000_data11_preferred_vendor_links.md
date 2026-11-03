@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied. Needs Mason's `I approve` (it overwrites existing rows).** `20261105100000_data11_preferred_vendor_links.sql` (LF SQL sha256: `495d2a6c04ead052feaa44a135505e3a8109960c9cce1852b99369986b7cdc44`). WP-PM-15b data step, Mason's DATA-11 decisions 2, 3 and 4 (2026-11-03). REQUIRES `20261105090000`.
+**LOCAL CANDIDATE, not applied. Needs Mason's `I approve` (it overwrites existing rows).** `20261105100000_data11_preferred_vendor_links.sql` (LF SQL sha256: `6b8e765de6586990444d8dcc43a9e3adb6902579a55bf5969b3a02f7e2590b23`). WP-PM-15b data step, Mason's DATA-11 decisions 2, 3 and 4 (2026-11-03). REQUIRES `20261105090000`.
 
 What it does:
 - Gives every active product with no vendor link a vendor-only link (item details not yet known), marked preferred. The link goes to the one vendor its vendor text already names, directly, by an approved alias, or by an approved legacy resolution.

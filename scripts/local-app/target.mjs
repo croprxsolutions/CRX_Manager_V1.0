@@ -172,6 +172,18 @@ export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetch
   if (!ours) throw new Refused(`An unknown frontend is running on port ${APP_PORT}. Stop it first.`);
 }
 
+/**
+ * Refuses a port for a second frontend that is not a plain user port of its own: never the shared
+ * copy's port and never one the test stack publishes. Returns it as a number.
+ */
+export function assertExtraAppPort(port) {
+  const number = /^\d{4,5}$/.test(String(port ?? '')) ? Number(port) : NaN;
+  if (!(number >= 1024 && number <= 65535) || [APP_PORT, API_PORT, DB_PORT].includes(number)) {
+    throw new Refused(`--port needs a port from 1024 to 65535 other than ${APP_PORT}, ${API_PORT} and ${DB_PORT}.`);
+  }
+  return number;
+}
+
 /** Refuses a running gateway that publishes anywhere but loopback. */
 export function assertLoopbackBindings(bindings) {
   for (const binding of bindings) {

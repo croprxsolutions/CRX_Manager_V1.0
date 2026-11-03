@@ -61,13 +61,15 @@ export function meaningfulDirt(porcelainText) {
 // the dirty check never sees (.env, backups/, *.dump, output/, local-app state,
 // supplier-pricing artifacts). Only these rebuildable ignored paths may go with
 // a worktree; any other ignored path keeps it (2026-11-03 Opus review).
-// INV-*.pdf is the invoice PDF test's output.
+// INV-2026-0002.pdf (repo root only) is src/lib/invoicePdf.test.ts's fixture
+// output; any other invoice PDF or log may be real and keeps the worktree.
+// .claude/settings.local.json is already ignorable dirt (IGNORABLE_DIRT_PATH).
 const REBUILDABLE_IGNORED_DIRS = new Set([
   "node_modules", "dist", "dist-ssr", "graphify-out", "coverage", "playwright-report", "test-results",
   ".claude/session-state", ".claude/tmp", ".codex/session-state", ".codex/agents", ".agents/session-state",
   "supabase/.temp", ".husky/_", ".playwright-mcp", ".playwright-cli",
 ]);
-const REBUILDABLE_IGNORED_FILE = /(^|\/)(INV-[^/]*\.pdf|[^/]*\.generated\.pdf|[^/]*\.tsbuildinfo|[^/]*\.log|\.claude\/settings\.local\.json|\.claude\/scheduled_tasks\.lock|\.impeccable\/hook\.cache\.json)$/;
+const REBUILDABLE_IGNORED_FILE = /^(INV-2026-0002\.pdf|\.claude\/settings\.local\.json|\.claude\/scheduled_tasks\.lock|\.impeccable\/hook\.cache\.json)$|(^|\/)[^/]*\.tsbuildinfo$/;
 
 export function isRebuildableIgnored(p) {
   const rel = String(p || "").replace(/\\/g, "/").replace(/^"|"$/g, "").replace(/\/+$/, "");

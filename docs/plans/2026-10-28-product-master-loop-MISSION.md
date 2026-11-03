@@ -144,7 +144,7 @@ Use Codex for building ("I have a lot of codex usage left").
    - Confirm that the build sheet `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` and this mission file are present on `origin/main`. If either is missing, PARK the whole run and report.
    - **Staleness check.** List every commit on `origin/main` since 2026-10-29 that touched `src/pages/Products.tsx`, `src/pages/ProductDetail.tsx`, `src/components/ui/Combobox.tsx`, `src/components/products/` or a `products` migration. Note in the ledger any package those commits already did or changed. A package already done on `main` becomes `REFUTED`.
 2. **Build worktree.**
-   - `git worktree add C:\CRX_Manager\.claude\worktrees\pm-build origin/main --detach`, then `npm install` inside it.
+   - `git worktree add --lock --reason "product-master build" C:\CRX_Manager\.claude\worktrees\pm-build origin/main --detach`, then `npm install` inside it. The lock stops the session-start cleanup from removing it between runs; when the loop is finished for good, run `git worktree unlock` on it so the cleanup can.
    - Run the baseline once: `npm run typecheck && npm run build && npm run lint && npm run test`. Record the result. A red baseline is not yours: note it and keep going.
 3. **Docker.** `docker info` must answer, and `docker pull postgres:17` must succeed. If Docker is down, database packages PARK, and screen-only packages continue.
 4. **Wrapper self-test.**

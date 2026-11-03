@@ -109,7 +109,8 @@ try {
   // Merged-PR heads cached by worktree-awareness.mjs (it refreshes the file at
   // session start). A squash merge lands a new commit, so `git cherry` calls a
   // multi-commit squash-merged branch unmerged; a head that IS a merged PR's
-  // head is landed. Missing cache → cherry only (more conservative, never less).
+  // head is landed. The cache holds only PRs merged into main (`gh pr list
+  // --base main`). Missing cache → cherry only (more conservative, never less).
   let mergedHeads = null;
   try { mergedHeads = mergedPrHeadsFromCache(readFileSync(path.join(commonDir, "crx-merged-pr-heads.json"), "utf8")); } catch { /* not cached yet */ }
   const prOfSha = (sha) => (mergedHeads && sha ? mergedHeads.get(String(sha).toLowerCase()) : undefined);
@@ -321,6 +322,10 @@ try {
     // A husk holds no real files, so nothing to recover. A locked file makes
     // rmSync throw; it stays for next time and is not reported each session.
     for (const h of removeHusks) {
+      // Re-check right before deleting: another session may have reused the
+      // path since the scan.
+      const again = { registered: false, hasGit: existsSync(path.join(h.path, ".git")), ...scanHusk(h.path) };
+      if (classifyHusk(again).action !== "remove") continue;
       try { rmSync(h.path, { recursive: true, force: true }); removed.push({ kind: "husk", path: h.path }); } catch { /* retried next session */ }
     }
   }

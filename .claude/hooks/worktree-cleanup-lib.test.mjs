@@ -190,7 +190,8 @@ eq(preciousIgnored([
   "!! .env", "!! .env.local", "!! backups/", "!! crx.dump", "!! output/", "!! scripts/local-app/.state/",
   "!! 2026-07-26-supplier-pricing-phase3-owner-decision-sheet.csv", "!! harness-pr-body.local", "!! docs/.obsidian/",
   "!! .vercel/", "!! dist-old/", "!! src/dist/x.sql",
-].join("\n")).length, 12, "secrets, backups, dumps, local state, artifacts and lookalikes all count as precious");
+  "!! INV-2026-0107.pdf", "!! exports/INV-2026-0002.pdf", "!! build.generated.pdf", "!! notes.log",
+].join("\n")).length, 16, "secrets, backups, dumps, local state, real invoices, logs and lookalikes all count as precious");
 ok(isRebuildableIgnored("node_modules"), "bare node_modules is rebuildable");
 ok(!isRebuildableIgnored(""), "empty path is not rebuildable");
 ok(!isRebuildableIgnored(".claude/session-state-backup/"), "lookalike of a rebuildable dir is precious");

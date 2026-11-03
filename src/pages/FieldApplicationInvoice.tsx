@@ -60,7 +60,7 @@ import {
   WEATHER_DISCLAIMER,
   type WeatherSetForm,
 } from '../lib/fieldAppWeather';
-import { sendEmail, pdfToBase64, buildInvoiceEmailPayload, isInvoiceEmailSuppressed } from '../lib/emailService';
+import { sendEmail, pdfToBase64, buildInvoiceEmailPayload, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../lib/emailService';
 import {
   countSentPostNotifications,
   describePostNotificationSend,
@@ -2677,6 +2677,7 @@ export default function FieldApplicationInvoice() {
           invoiceDate: transactionDate,
           balanceCents: pdfSnapshot.balance_cents,
           attachmentBase64: base64,
+          snapshot: invoiceEmailSnapshot(pdfData),
         });
         await assertInvoiceSendable(id);
         const result = await sendEmail(payload);

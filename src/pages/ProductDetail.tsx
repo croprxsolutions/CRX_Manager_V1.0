@@ -8,6 +8,7 @@ import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import PhoneSection from '../components/ui/PhoneSection';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 import PricingChangePreviewModal from '../components/products/PricingChangePreviewModal';
 import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductSellPriceHistory from '../components/products/ProductSellPriceHistory';
@@ -56,7 +57,8 @@ import {
 } from '../lib/productCostBasis';
 import { PRODUCT_COLUMNS, withAdminCost } from '../lib/costFields';
 import { listProductCategories, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories } from '../lib/productSetup';
-import type { ProductCategory } from '../types';
+import { listProductUseTimingOptions, visibleProductUseTimingOptions } from '../lib/productUseTimings';
+import type { ProductCategory, UseTimingOption } from '../types';
 
 const PRODUCT_NONPRICING_FIELDS = [
   'product_name', 'sku', 'category', 'vendor', 'manufacturer',
@@ -64,7 +66,7 @@ const PRODUCT_NONPRICING_FIELDS = [
   'notes', 'epa_registration', 'product_form', 'inventory_unit',
   'container_unit', 'container_type', 'is_rup', 'signal_word', 'internal_notes',
   'quoting_notes',
-  'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit', 'use_timing',
+  'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit', 'use_timings',
 ] as const satisfies ReadonlyArray<keyof Product>;
 
 const PRODUCT_PRICING_FIELDS = [
@@ -104,7 +106,9 @@ function pricingChanged(
 
 function productDetailsChanged(product: Partial<Product>, persisted: Product | null): boolean {
   if (!persisted) return false;
-  return PRODUCT_NONPRICING_FIELDS.some((field) => product[field] !== persisted[field]);
+  return PRODUCT_NONPRICING_FIELDS.some((field) => field === 'use_timings'
+    ? [...(product.use_timings ?? [])].sort().join('\u0000') !== [...(persisted.use_timings ?? [])].sort().join('\u0000')
+    : product[field] !== persisted[field]);
 }
 
 function pricingPreviewRow(
@@ -198,6 +202,7 @@ export default function ProductDetail() {
     product_name: '',
     sku: '',
     category: '',
+    use_timings: [],
     vendor: '',
     manufacturer: '',
     container_size: undefined,
@@ -225,6 +230,9 @@ export default function ProductDetail() {
   const [costHistory, setCostHistory] = useState<CostHistory[]>([]);
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>([]);
+  const [timingOptions, setTimingOptions] = useState<UseTimingOption[]>([]);
+  const [timingLoadFailed, setTimingLoadFailed] = useState(false);
+  const [pendingCategory, setPendingCategory] = useState<string | null | undefined>(undefined);
   const [categoryLoadFailed, setCategoryLoadFailed] = useState(false);
   const [nameRequired, setNameRequired] = useState(false);
   const [reiDraft, setReiDraft] = useState('');
@@ -420,6 +428,10 @@ export default function ProductDetail() {
       Sentry.captureException(error);
       setCategoryLoadFailed(true);
       toast('error', 'Could not load product categories. Refresh before saving a category.');
+    });
+    listProductUseTimingOptions().then(setTimingOptions).catch(() => {
+      setTimingLoadFailed(true);
+      toast('error', 'Could not load use timings. Refresh before changing them.');
     });
     // Vendor and manufacturer remain free-text choices.
     supabase.from('products').select('vendor, manufacturer').then(({ data, error }) => {
@@ -1005,6 +1017,21 @@ export default function ProductDetail() {
     }
   };
 
+  const changeCategory = (next: string | null) => {
+    if (next !== product.category && (product.use_timings?.length ?? 0) > 0
+      && (next !== 'Herbicide' && next !== 'Foliar Fertilizer'
+        || (product.use_timings ?? []).some((code) => timingOptions.find((option) => option.code === code)?.category !== next))) {
+      setPendingCategory(next);
+      return;
+    }
+    update('category', next);
+  };
+
+  const toggleUseTiming = (code: string, checked: boolean) => {
+    const selected = product.use_timings ?? [];
+    update('use_timings', checked ? [...selected, code] : selected.filter((item) => item !== code));
+  };
+
   const updatePricingMargin = (field: ProductPricingMarginField, text: string) => {
     if (pricingReloadRequired) return;
     setPricingMarginDrafts((drafts) => ({ ...drafts, [field]: text }));
@@ -1115,7 +1142,7 @@ export default function ProductDetail() {
               <div>
                 <label htmlFor="product-category" className="block text-sm font-medium text-secondary mb-1">Category</label>
                 <select id="product-category" value={product.category || ''}
-                  onChange={(e) => update('category', e.target.value || null)}
+                  onChange={(e) => changeCategory(e.target.value || null)}
                   disabled={!isAdmin || categoryLoadFailed}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-nav-dark focus-visible:ring-2 focus-visible:ring-crx-green disabled:opacity-50">
                   <option value="">-- Select --</option>
@@ -1124,17 +1151,31 @@ export default function ProductDetail() {
                   ))}
                 </select>
               </div>
-              {(product.category === 'Herbicide' || product.category === 'Foliar Fertilizer') && (
-                <Combobox
-                  label="Use Timing"
-                  value={product.use_timing || ''}
-                  onChange={(v) => update('use_timing', v || null)}
-                  options={product.category === 'Foliar Fertilizer'
-                    ? ['Foliar']
-                    : ['Post-Emergence', 'Pre-Emerge Corn', 'Pre-Emerge Soybean', 'Volunteer Corn', 'Range/Pasture/Turf']}
-                  disabled={!isAdmin}
-                  placeholder="Type or select..."
-                />
+              {(product.category === 'Herbicide' || product.category === 'Foliar Fertilizer'
+                || (timingLoadFailed && ((product.use_timings?.length ?? 0) > 0 || Boolean(product.use_timing)))) && (
+                <fieldset>
+                  <legend className="mb-1 text-sm font-medium text-secondary">Use Timing</legend>
+                  <div className="rounded-lg border border-gray-200 bg-white p-2 space-y-1">
+                    {timingLoadFailed ? (
+                      <>
+                        <p className="px-2 text-sm text-secondary">Use timings could not be loaded. Refresh before changing them.</p>
+                        <p className="px-2 text-sm text-nav-dark">{product.use_timing || 'No saved use timings'}</p>
+                      </>
+                    ) : visibleProductUseTimingOptions(timingOptions, product.category, product.use_timings ?? []).map((option) => (
+                      <label key={option.code} className={`flex min-h-9 items-center gap-2 rounded px-2 text-sm text-nav-dark ${isAdmin && !pricingReloadRequired && !(isNew && saving) ? 'hover:bg-gray-50' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={(product.use_timings ?? []).includes(option.code)}
+                          onChange={(event) => toggleUseTiming(option.code, event.target.checked)}
+                          disabled={!isAdmin || timingLoadFailed}
+                          className="h-4 w-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+                        />
+                        {option.label}{option.is_active ? '' : ' (retired)'}
+                      </label>
+                    ))}
+                    {!timingLoadFailed && timingOptions.length === 0 && <p className="px-2 text-sm text-secondary">Loading use timings...</p>}
+                  </div>
+                </fieldset>
               )}
               <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin} placeholder="Type or select..." />
               <Combobox label="Manufacturer" value={product.manufacturer || ''} onChange={(v) => update('manufacturer', v)} options={manufacturerOptions} disabled={!isAdmin} placeholder="Type or select..." />
@@ -1941,6 +1982,19 @@ export default function ProductDetail() {
         open={blocker.state === 'blocked'}
         onStay={() => blocker.reset?.()}
         onLeave={() => blocker.proceed?.()}
+      />
+      <ConfirmModal
+        open={pendingCategory !== undefined}
+        title="Clear use timings?"
+        message="This product has use timings. Changing the category clears them."
+        confirmLabel="Change Category"
+        variant="warning"
+        onClose={() => setPendingCategory(undefined)}
+        onConfirm={() => {
+          update('use_timings', []);
+          update('category', pendingCategory ?? null);
+          setPendingCategory(undefined);
+        }}
       />
     </div>
   );

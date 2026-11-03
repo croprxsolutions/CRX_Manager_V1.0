@@ -138,3 +138,17 @@ export function attachmentProblem(filename: unknown, content: unknown): string |
   }
   return null;
 }
+
+/** Email types whose PDF send-email draws itself from the saved record (KNOWN_ISSUES KI-98). */
+export const SERVER_BUILT_PDF_EMAIL_TYPES: ReadonlySet<string> = new Set(["invoice", "purchase_order"]);
+
+/**
+ * Why this request may not be sent as it is, or null. An invoice or purchase-order
+ * email carries only the PDF send-email draws, so any file the app sends with one is
+ * refused rather than dropped: an older app that still attaches its own PDF hears it.
+ */
+export function appSuppliedPdfProblem(emailType: unknown, attachments: unknown): string | null {
+  if (typeof emailType !== "string" || !SERVER_BUILT_PDF_EMAIL_TYPES.has(emailType)) return null;
+  if (attachments == null || (Array.isArray(attachments) && attachments.length === 0)) return null;
+  return "This email's PDF is now made by the server from the saved record, so the app must not attach one. Reload the app and send again";
+}

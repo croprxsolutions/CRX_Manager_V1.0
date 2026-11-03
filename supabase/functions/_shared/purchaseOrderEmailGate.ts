@@ -39,7 +39,7 @@ export interface PoGateLine {
   product: { product_name: string | null; epa_registration: string | null } | null;
 }
 
-/** One line as the attached PDF printed it. */
+/** One line as the admin's screen showed it. */
 export interface PoGateSnapshotLine {
   id: string;
   product_id: string;
@@ -51,7 +51,7 @@ export interface PoGateSnapshotLine {
   unit_cost: number;
 }
 
-/** What the attached PDF printed, sent by the app alongside the PDF. */
+/** What the admin's screen showed, sent by the app with the send. */
 export interface PoGateSnapshot {
   po_number: string;
   vendor: string | null;
@@ -115,15 +115,14 @@ function snapshotMatches(order: PoGateOrder, lines: readonly PoGateLine[], snaps
 
 /**
  * Decides whether this PO copy may be sent to `requestedTo`. The recipient is never
- * trusted: it must be the company ordering address. The attached PDF is built by
- * the app, so the app also sends what it printed (PO number, vendor name, order date, requested date, notes
+ * trusted: it must be the company ordering address. send-email draws the PDF from
+ * the PO and lines read here (_shared/pdf/purchaseOrderPdf.ts, KI-98); the app sends
+ * what its screen showed (PO number, vendor name, order date, requested date, notes
  * and each line's product, name, EPA number, unit size, note, quantity and cost),
  * and the send is refused unless that is the PO today: an order is never placed
- * from a copy with yesterday's details. Not covered, by design: the attachment bytes
- * themselves (the server trusts the admin's app to render the snapshot, as for every
- * emailed PDF here; only an admin can send, and only to the ordering inbox), the
- * vendor record's contact block (orders go through the portal, not that address),
- * and a change in the milliseconds between the final read and the send.
+ * from a copy with yesterday's details. Not covered, by design: the vendor record's
+ * contact block (orders go through the portal, not that address), and a change in
+ * the milliseconds between the final read and the send.
  */
 export function decidePurchaseOrderEmail(
   order: PoGateOrder | null,

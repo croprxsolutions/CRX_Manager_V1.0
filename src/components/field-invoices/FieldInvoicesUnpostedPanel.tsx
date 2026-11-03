@@ -19,11 +19,10 @@ import {
   buildBatchInvoicePdfData,
   batchInvoicePrintToast,
   generateBatchInvoicePdf,
-  generateInvoicePdf,
   downloadInvoicePdf,
 } from '../../lib/invoicePdf';
 import { downloadReportPdf } from '../../lib/reportPdf';
-import { sendEmail, pdfToBase64, buildEmailHtml, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../../lib/emailService';
+import { sendEmail, buildEmailHtml, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../../lib/emailService';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCents as fmt } from '../../lib/money';
 import SeasonTag from '../invoices/SeasonTag';
@@ -306,9 +305,8 @@ export default function FieldInvoicesUnpostedPanel() {
         const email = (cust as { email?: string | null } | null)?.email;
         if (!email) throw new Error('Customer does not have an email address on file');
 
+        // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
         const pdfData = await buildInvoicePdfDataFromRow(toPdfRow(row));
-        const doc = await generateInvoicePdf(pdfData);
-        const base64 = pdfToBase64(doc);
 
         const amountStr = (row.balance_cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
         const html = buildEmailHtml(`
@@ -328,7 +326,6 @@ export default function FieldInvoicesUnpostedPanel() {
           resource_type: 'invoice',
           resource_id: row.id,
           idempotency_key: `invoice-email-${row.id}-${Date.now()}`,
-          attachments: [{ filename: `Invoice-${row.invoice_number}.pdf`, content: base64 }],
           invoice_snapshot: invoiceEmailSnapshot(pdfData),
         });
         if (!result.success) throw new Error(result.error || 'Email failed to send');

@@ -33,8 +33,6 @@ describe('buildPurchaseOrderEmailPayload', () => {
     purchaseOrderId: 'po-1',
     poNumber: 'PO-2026-0040',
     expectedDeliveryDate: '11/3/2026',
-    attachmentBase64: 'QUJD',
-    attachmentFilename: 'Purchase-Order-PO-2026-0040.pdf',
     idempotencyKey: 'key-1',
     snapshot,
   };
@@ -48,10 +46,11 @@ describe('buildPurchaseOrderEmailPayload', () => {
       resource_type: 'purchase_order',
       resource_id: 'po-1',
       idempotency_key: 'key-1',
-      attachments: [{ filename: 'Purchase-Order-PO-2026-0040.pdf', content: 'QUJD' }],
-      purchase_order_snapshot: snapshot,
+      purchase_order_screen: snapshot,
     });
     expect(payload.customer_id).toBeUndefined();
+    // The server draws the PO PDF from the saved order (KI-98).
+    expect(payload.attachments).toBeUndefined();
     expect(payload.html).toContain('Vendor: Spinner &lt;Ag&gt;');
     expect(payload.html).toContain('Requested delivery: 11/3/2026');
   });

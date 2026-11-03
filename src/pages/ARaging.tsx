@@ -26,6 +26,7 @@ import { fetchCustomerStatement } from '../lib/customerStatement';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV, fmtCSV, formatProductMoneyCSV } from '../lib/csvExport';
+import { agingCents, isPricedAgingRow } from '../lib/arAging';
 import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
 import { downloadStatementPdf, downloadBatchStatements, generateStatementPdf } from '../lib/statementPdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
@@ -40,10 +41,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { computeSeason } from '../utils/season';
 import { localToday, parseLocalDate, localDatePlusDays, todayInBusinessTz } from '../lib/dateUtils';
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
-import type { ARAgingRow as BaseARagingRow, CustomerStatementRow, SeasonComparisonRow, DetailedStatementData, StatementOptions } from '../types';
+import type { ARAgingRow, ARAgingPricedRow, CustomerStatementRow, SeasonComparisonRow, DetailedStatementData, StatementOptions } from '../types';
 
 type TabKey = 'aging' | 'statement' | 'season';
-type ARAgingRow = BaseARagingRow & { prepay_balance_cents: number | null; open_credit_cents: number | null };
 
 
 function statementKey(customerId: string, start: string, end: string): string {
@@ -79,7 +79,7 @@ export default function ARaging() {
   const [showEmailStatementsConfirm, setShowEmailStatementsConfirm] = useState(false);
 
   // Aging
-  const [agingData, setAgingData] = useState<ARAgingRow[]>([]);
+  const [agingData, setAgingData] = useState<ARAgingPricedRow[]>([]);
   // Customers whose balance cannot be shown as of this date (no amounts): listed, never in the totals.
   const [agingUnavailable, setAgingUnavailable] = useState<ARAgingRow[]>([]);
   // The last aging load failed: the tab shows an error instead of zero totals.
@@ -122,7 +122,7 @@ export default function ARaging() {
     setLoading(true);
     // Read every page: the server cuts a function's rows off at 1,000, which
     // dropped the smallest balances from the list and the totals.
-    const { data, error } = await fetchAllRows<ARAgingRow>((from, to) => pageWithList(supabase
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .rpc('get_ar_aging', { p_as_of_date: asOfDate }, { count: 'exact' })
       // The function's own order (largest balance first), then the unique customer id.
       .order('total_outstanding', { ascending: false })
@@ -142,9 +142,9 @@ export default function ARaging() {
       return;
     }
     const allRows = assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging');
-    const rows = allRows.filter((r) => !r.unavailable_reason);
+    const rows = allRows.filter(isPricedAgingRow);
     setAgingData(rows);
-    setAgingUnavailable(allRows.filter((r) => r.unavailable_reason));
+    setAgingUnavailable(allRows.filter((r) => !isPricedAgingRow(r)));
     // Batch statements act on the selection: keep only customers on this date's list.
     const onList = new Set(rows.map((r) => r.customer_id));
     setSelectedCustomers((prev) => new Set([...prev].filter((id) => onList.has(id))));
@@ -208,15 +208,15 @@ export default function ARaging() {
     setLoading(false);
   };
 
-  // Totals for aging
+  // Totals for aging, in cents
   const agingTotals = agingData.reduce(
     (acc, r) => ({
-      current: acc.current + r.current_amount,
-      d30: acc.d30 + r.days_30,
-      d60: acc.d60 + r.days_60,
-      d90: acc.d90 + r.days_90,
-      over90: acc.over90 + r.over_90,
-      total: acc.total + r.total_outstanding,
+      current: acc.current + agingCents(r.current_amount),
+      d30: acc.d30 + agingCents(r.days_30),
+      d60: acc.d60 + agingCents(r.days_60),
+      d90: acc.d90 + agingCents(r.days_90),
+      over90: acc.over90 + agingCents(r.over_90),
+      total: acc.total + agingCents(r.total_outstanding),
     }),
     { current: 0, d30: 0, d60: 0, d90: 0, over90: 0, total: 0 }
   );
@@ -229,9 +229,9 @@ export default function ARaging() {
     </li>
   );
 
-  const agingColumns: Column<ARAgingRow>[] = [
+  const agingColumns: Column<ARAgingPricedRow>[] = [
     {
-      key: 'customer_id' as keyof ARAgingRow,
+      key: 'customer_id' as keyof ARAgingPricedRow,
       header: '',
       className: 'w-10',
       render: (r) => (
@@ -338,7 +338,7 @@ export default function ARaging() {
       },
     },
     {
-      key: 'invoice_count' as keyof ARAgingRow,
+      key: 'invoice_count' as keyof ARAgingPricedRow,
       header: '',
       render: (r) => (
         <button
@@ -1000,25 +1000,25 @@ export default function ARaging() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <Card>
               <p className="text-xs text-secondary mb-1">Total Outstanding</p>
-              <p className="text-xl font-semibold font-heading text-red-600">{fmt(agingTotals.total)}</p>
+              <p className="text-xl font-semibold font-heading text-red-600">{fmtCents(agingTotals.total)}</p>
               {agingUnavailable.length > 0 && (
                 <p className="text-xs text-amber-700 mt-1">Excludes {agingUnavailable.length} customer{agingUnavailable.length === 1 ? '' : 's'} not shown</p>
               )}
             </Card>
             <Card>
               <p className="text-xs text-secondary mb-1">Current (&lt;30 days)</p>
-              <p className="text-xl font-semibold font-heading text-nav-dark">{fmt(agingTotals.current)}</p>
+              <p className="text-xl font-semibold font-heading text-nav-dark">{fmtCents(agingTotals.current)}</p>
             </Card>
             <Card>
               <p className="text-xs text-secondary mb-1">30-89 Days</p>
               <p className="text-xl font-semibold font-heading text-orange-600">
-                {fmt(agingTotals.d30 + agingTotals.d60)}
+                {fmtCents(agingTotals.d30 + agingTotals.d60)}
               </p>
             </Card>
             <Card>
               <p className="text-xs text-secondary mb-1">90+ Days</p>
               <p className="text-xl font-semibold font-heading text-red-700">
-                {fmt(agingTotals.d90 + agingTotals.over90)}
+                {fmtCents(agingTotals.d90 + agingTotals.over90)}
               </p>
             </Card>
           </div>
@@ -1026,7 +1026,7 @@ export default function ARaging() {
           {/* Aging Table */}
           <Card padding={false}>
             <div className="p-5">
-              <DataTable<ARAgingRow>
+              <DataTable<ARAgingPricedRow>
                 columns={agingColumns}
                 data={agingData}
                 loading={loading}
@@ -1051,12 +1051,12 @@ export default function ARaging() {
                     <span className="block text-xs font-normal text-amber-700">excl. {agingUnavailable.length} not shown</span>
                   )}
                 </span>
-                <span className="font-mono font-semibold">{fmt(agingTotals.current)}</span>
-                <span className="font-mono font-semibold text-yellow-600">{fmt(agingTotals.d30)}</span>
-                <span className="font-mono font-semibold text-orange-600">{fmt(agingTotals.d60)}</span>
-                <span className="font-mono font-semibold text-red-500">{fmt(agingTotals.d90)}</span>
-                <span className="font-mono font-semibold text-red-700">{fmt(agingTotals.over90)}</span>
-                <span className="font-mono font-semibold">{fmt(agingTotals.total)}</span>
+                <span className="font-mono font-semibold">{fmtCents(agingTotals.current)}</span>
+                <span className="font-mono font-semibold text-yellow-600">{fmtCents(agingTotals.d30)}</span>
+                <span className="font-mono font-semibold text-orange-600">{fmtCents(agingTotals.d60)}</span>
+                <span className="font-mono font-semibold text-red-500">{fmtCents(agingTotals.d90)}</span>
+                <span className="font-mono font-semibold text-red-700">{fmtCents(agingTotals.over90)}</span>
+                <span className="font-mono font-semibold">{fmtCents(agingTotals.total)}</span>
               </div>
             </Card>
           )}

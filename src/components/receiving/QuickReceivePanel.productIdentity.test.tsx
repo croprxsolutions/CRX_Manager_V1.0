@@ -489,6 +489,9 @@ describe('QuickReceivePanel Product identity', () => {
       p_items: [expect.objectContaining({ po_item_id: 'po-item-low', quantity: 2 })],
       p_allow_over_receive: false,
     })));
+    // Wait out the post-receipt cleanup: left running, it writes this receipt's
+    // resolved record over the next test's saved request and hides its Retry.
+    expect(await screen.findByText(/successfully received 1 item allocation/i)).toBeInTheDocument();
   });
 
   it('offers only active warehouses as the storage location (KI-85)', async () => {

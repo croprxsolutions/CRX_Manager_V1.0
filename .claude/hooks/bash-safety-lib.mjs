@@ -357,12 +357,13 @@ function sqlSegmentProgram(segment) {
 }
 // Allowlist, not a blocklist: every escape, expansion, comment or quoting quirk
 // bash and PowerShell read differently (`$'…'`, `\"`, `\;`, `<#…#>`, backtick,
-// `$(`, a line break) was a way to hide a client in a reader (Codex App, PR #1337).
+// `$(`, a line break, PowerShell `@args` splatting) was a way to hide a client
+// or `--pre` in a reader (Codex App and Luna, PR #1337).
 // Outside quotes only plain word characters remain; a quoted span may not hold
 // `$` or a backtick (both shells expand them in double quotes) or end in `\`.
 function plainReaderSegment(segment) {
   if (/[\r\n]|\\["']/.test(segment)) return false;
-  return /^[\w\s./\\:*=,@+#?-]*$/.test(segment.replace(/'[^']*'|"[^"$`]*"/g, ""));
+  return /^[\w\s./\\:*=,+#?-]*$/.test(segment.replace(/'[^']*'|"[^"$`]*"/g, ""));
 }
 export function checkDestructiveSql(cmd) {
   const text = String(cmd || "");

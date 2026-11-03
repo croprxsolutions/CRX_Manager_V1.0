@@ -1,0 +1,5 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20261104140000_pricing_tier_order_warning.sql` (LF SQL sha256: `662149f4abb30f296711c3ef0582ad6fd48109e23170093f0de94c6d2a88d07e`). This routine migration replaces the private pricing-warning function to add the final-price `TIER_ORDER` warning. It changes no data, grants, or policies.
+
+The preflight pins the live warning function, warning-set helper, and three consumer bodies as read on 2026-11-02. Rollback: re-create it from 20261027050000 (~228-334) as CREATE OR REPLACE. The existing five warning codes and their details must remain unchanged on the same previews. A stated $0 is a real final tier price.
+
+Live migration high-water read 2026-11-03 (after the restamp from `20261103230000`): `20261104130000_any_rep_changes_booked_prices`; the five preflight md5 pins re-checked against live the same day and match. Re-check before apply.

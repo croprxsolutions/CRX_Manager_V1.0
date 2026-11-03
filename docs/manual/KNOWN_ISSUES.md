@@ -182,7 +182,7 @@ The invoice was posted only for this test and voided right after.
 ---
 
 ### KI-98 — Emailed invoice and purchase-order PDFs are drawn by the sender's app, not the server
-**LOW · FIX BUILT, AWAITING DEPLOY · money · Claude**
+**LOW · FIXED, LIVE 2026-11-03 (PR #1346; `send-email` v23) · money · Claude**
 Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_LOG.md`, same date).
 - **The fix.** `send-email` now draws the invoice and purchase-order PDFs itself, from the saved records
   (`supabase/functions/_shared/pdf/`, the same drawing code the app prints with). It refuses a PDF the app
@@ -195,11 +195,12 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
 - **Still accepted.** `send-email`'s last check is a read just before the provider call, not an atomic step. A
   change saved in that split second still goes out as it was a moment earlier.
 - **Behaviour change.** An invoice emailed from the editor shows the saved invoice, not unsaved edits on screen.
-- **Becomes FIXED** when the new `send-email` is deployed (Mason's yes) and one real invoice email and one PO
-  copy are checked in `email_log`. Plan: `send-email` first, then merge the app
-  change. Either order is safe: a mismatched app and server refuse invoice and PO emails (the PO screen copy
-  is sent under a new name, `purchase_order_screen`, that the old server does not read) instead of mailing
-  one with no PDF, so in between staff see a "reload and send again" message for a few minutes.
+- **Live proof (2026-11-03, about 7:00 AM Central).** `send-email` v23 was deployed on Mason's in-chat yes, and
+  the app merged about 20 seconds later. Each step was run on croprxsolutions.app:
+  - The PO-2026-0030 copy email was sent, and its `email_log` row is `sent` with `Purchase-Order-PO-2026-0030.pdf`.
+  - Test invoice INV-2026-1522 ([E2E] Farm Alpha, one $312.72 service line) was posted and emailed. Its row is
+    `sent` with `Invoice-INV-2026-1522.pdf`, and the invoice was then voided.
+  - Both calls returned 200 with no function errors logged.
 
 ---
 

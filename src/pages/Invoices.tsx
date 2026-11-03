@@ -395,7 +395,7 @@ export default function Invoices() {
           // A changed reason after a lost reply: the earlier void already committed, so show the current list.
           if (bindingRejection === 'intent') {
             setSelected(new Set());
-            fetchInvoices();
+            await fetchInvoices();
             throw new Error('An earlier void of these invoices already went through. The list has been refreshed.');
           }
           throw error;

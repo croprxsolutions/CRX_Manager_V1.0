@@ -260,7 +260,7 @@ export default function PrepayWorkspacePanel() {
           // A changed batch after a lost reply: the earlier batch already applied, so show current balances and
           // keep this batch pending for review.
           if (bindingRejection === 'intent') {
-            fetchData();
+            await fetchData();
             throw new Error('An earlier batch already went through. Balances have been refreshed; review the pending allocations before saving again.');
           }
           throw error;

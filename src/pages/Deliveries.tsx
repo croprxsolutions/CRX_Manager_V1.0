@@ -917,7 +917,7 @@ export default function Deliveries() {
           // A changed reason after a lost reply: the earlier cancel already committed, so show the current list.
           if (bindingRejection === 'intent') {
             setSelected(new Set());
-            fetchDeliveries();
+            await fetchDeliveries();
             throw new Error('An earlier cancel of these deliveries already went through. The list has been refreshed.');
           }
           throw error;

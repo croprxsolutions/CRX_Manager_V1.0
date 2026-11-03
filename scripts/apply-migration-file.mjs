@@ -30,8 +30,11 @@
 //   Dry run (evaluates the gate, transmits nothing) — always do this first:
 //     node scripts/apply-migration-file.mjs supabase/migrations/<file>.sql
 //
-//   Real apply (requires an explicit flag AND a token in the environment):
-//     SUPABASE_ACCESS_TOKEN=... node scripts/apply-migration-file.mjs <file>.sql --confirm
+//   Real apply (requires an explicit flag AND a Management API token):
+//     node scripts/apply-migration-file.mjs <file>.sql --confirm
+//   The token comes from SUPABASE_ACCESS_TOKEN when set, otherwise (on Windows, with the
+//   variable absent, not merely empty) from Credential Manager target
+//   `Supabase CLI:supabase`, read in memory and never printed.
 //
 //   Flags:
 //     --confirm            actually transmit. Without it this is a dry run.
@@ -69,6 +72,7 @@ import {
 import { assertWrappable } from "../.claude/hooks/migration-wrappability-lib.mjs";
 import { checkLiveMigrationOrdering } from "../.claude/hooks/migration-ordering-lib.mjs";
 import { assertApprovalStillValid, ownerOnceGuardSql, recordUsedApproval } from "../.claude/hooks/owner-approval-lib.mjs";
+import { CREDENTIAL_TARGET, readCredentialToken } from "./lib/supabase-credential.mjs";
 
 // Every existing ledger row carries this; apply_migration fills it from the
 // authenticated Supabase account, and the personal access token this script uses
@@ -370,13 +374,25 @@ console.log("");
 // ordering, pending-set and already-applied checks judge what is live rather than
 // a copy that may be weeks old (2026-11-02). Without one, the gate judges the
 // snapshot on disk.
-const token = process.env.SUPABASE_ACCESS_TOKEN;
+// Only the token's source is printed, never its value. Credential Manager is read
+// only when the variable is absent: an explicit empty value (the tests) means none.
+let token = process.env.SUPABASE_ACCESS_TOKEN;
+if (token) {
+  console.log("Token: from SUPABASE_ACCESS_TOKEN.");
+} else if (token === undefined && process.platform === "win32") {
+  try {
+    token = readCredentialToken();
+    console.log(`Token: from Windows Credential Manager (${CREDENTIAL_TARGET}).`);
+  } catch (err) {
+    console.log(`Token: none (${err.message}).`);
+  }
+}
 if (token) {
   const failed = await refreshSnapshotFromLive(token);
   if (failed) die(2, `LEDGER REFRESH FAILED: ${failed}. Refusing rather than judging an old snapshot.`);
   console.log("Refreshed the applied-migration snapshot from the live ledger.");
 } else {
-  console.log("No SUPABASE_ACCESS_TOKEN: the gate judges the snapshot on disk. Set it to refresh that from the live ledger first.");
+  console.log("No token: the gate judges the snapshot on disk. Set SUPABASE_ACCESS_TOKEN, or run on Mason's PC, to refresh that from the live ledger first.");
 }
 
 // ── THE GATE ───────────────────────────────────────────────────────────────
@@ -439,8 +455,8 @@ if (!confirm) {
 
 if (!token) {
   die(1,
-    "apply-migration-file: SUPABASE_ACCESS_TOKEN is not set, so there is no way to reach the\n" +
-    "management API. Supply it for this one run; do not write it to a file.");
+    "apply-migration-file: no token (SUPABASE_ACCESS_TOKEN is unset and Credential Manager gave\n" +
+    "none), so there is no way to reach the management API. Do not write it to a file.");
 }
 
 // ── LIVE ORDERING RE-CHECK ─────────────────────────────────────────────────

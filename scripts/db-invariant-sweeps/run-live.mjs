@@ -7,7 +7,7 @@
  * `isKnownSweepQuery` byte-for-byte, and each returned `sweep_result` is saved untouched.
  *
  * The Management API token is read in memory from Windows Credential Manager (target
- * `Supabase CLI:supabase`). It is never printed, logged or written to disk. Mason approved this
+ * `Supabase CLI:supabase`, via scripts/lib/supabase-credential.mjs). It is never printed, logged or written to disk. Mason approved this
  * read-only use on 2026-11-02 (docs/manual/SERVICES_AND_ACCOUNTS.md).
  *
  * Usage: node scripts/db-invariant-sweeps/run-live.mjs
@@ -20,14 +20,13 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isKnownSweepQuery } from '../../.claude/hooks/live-testdata-lib.mjs';
+import { readCredentialToken } from '../lib/supabase-credential.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '../..');
 const RUNNER = join(HERE, 'run-sweeps.mjs');
 const PROJECT_ID = 'rhyzpcqhnizqbxphqdkr';
 const QUERY_URL = `https://api.supabase.com/v1/projects/${PROJECT_ID}/database/query`;
-const CREDENTIAL_TARGET = 'Supabase CLI:supabase';
-const TOKEN_RE = /^sbp_[A-Za-z0-9_]{20,}$/;
 const HEAD = "SELECT json_build_object(\n  'predicate', '";
 const TAIL = '\n) AS sweep_result;';
 
@@ -63,50 +62,6 @@ export function packetFrom(name, status, bodyText) {
   return packet;
 }
 
-/** Credential Manager blob (base64) → token. Errors never include the value. */
-export function decodeTokenBlob(base64) {
-  const bytes = Buffer.from(base64.trim(), 'base64');
-  for (const encoding of ['utf8', 'utf16le']) {
-    let value = bytes.toString(encoding).replace(/\0+$/, '').trim();
-    if (value.startsWith('go-keyring-base64:')) {
-      value = Buffer.from(value.slice('go-keyring-base64:'.length), 'base64').toString('utf8').trim();
-    }
-    if (TOKEN_RE.test(value)) return value;
-  }
-  throw new Error(`The ${CREDENTIAL_TARGET} credential is not a Supabase access token.`);
-}
-
-function readToken() {
-  if (process.platform !== 'win32') throw new Error('The token lives in Windows Credential Manager; run this on Mason\'s PC.');
-  const ps = [
-    "$ErrorActionPreference = 'Stop'",
-    "Add-Type -TypeDefinition @'",
-    'using System; using System.Runtime.InteropServices;',
-    'public static class CrxCred {',
-    '  [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]',
-    '  public static extern bool CredReadW(string target, int type, int flags, out IntPtr cred);',
-    '  [DllImport("advapi32.dll")] public static extern void CredFree(IntPtr cred);',
-    '}',
-    "'@",
-    '$p = [IntPtr]::Zero',
-    `if (-not [CrxCred]::CredReadW('${CREDENTIAL_TARGET}', 1, 0, [ref]$p)) { exit 3 }`,
-    'try {',
-    // 64-bit CREDENTIALW: CredentialBlobSize at offset 32, CredentialBlob pointer at 40.
-    '  $n = [Runtime.InteropServices.Marshal]::ReadInt32($p, 32)',
-    '  $b = [Runtime.InteropServices.Marshal]::ReadIntPtr($p, 40)',
-    '  $bytes = New-Object byte[] $n',
-    '  [Runtime.InteropServices.Marshal]::Copy($b, $bytes, 0, $n)',
-    '  [Console]::Out.Write([Convert]::ToBase64String($bytes))',
-    '} finally { [CrxCred]::CredFree($p) }',
-  ].join('\n');
-  const exe = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  // -EncodedCommand: piping a script to `-Command -` returned zero bytes (2026-11-01).
-  const res = spawnSync(exe, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')],
-    { encoding: 'utf8', windowsHide: true });
-  if (res.status !== 0 || !res.stdout) throw new Error(`Could not read the ${CREDENTIAL_TARGET} credential (exit ${res.status}).`);
-  return decodeTokenBlob(res.stdout);
-}
-
 async function main() {
   const out = join(ROOT, '.claude', 'session-state', 'db-sweeps-live-capture.json');
   // This script is the live execution, so the helpers run in print/adjudicate mode: an empty
@@ -116,7 +71,7 @@ async function main() {
   const printed = spawnSync(process.execPath, [RUNNER], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
   if (printed.status !== 0) throw new Error(`run-sweeps failed (exit ${printed.status}): ${printed.stderr}`);
   const queries = extractQueries(printed.stdout);
-  const token = readToken();
+  const token = readCredentialToken();
   const capture = [];
   for (const { name, query } of queries) {
     const res = await fetch(QUERY_URL, {

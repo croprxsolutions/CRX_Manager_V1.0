@@ -78,7 +78,10 @@ template is `.env.example`.
   Agents read it in memory to apply reviewed migrations, and (Mason's yes, 2026-11-02) to run
   the db-invariant sweeps read-only with `npm run db-sweeps:live`
   (`scripts/db-invariant-sweeps/run-live.mjs`). That script sends only queries the live-data
-  guard recognises, always with `read_only: true`, and never prints or saves the token. The developer should get their own
+  guard recognises, always with `read_only: true`, and never prints or saves the token. Both
+  `scripts/apply-migration-file.mjs` and the sweep runner read it themselves through
+  `scripts/lib/supabase-credential.mjs` (2026-11-02), so no session sets `SUPABASE_ACCESS_TOKEN`
+  or builds a launcher; the env var, when set, still wins. The developer should get their own
   Supabase login, not this token.
 - **Staging project:** none yet (`.env.staging.example` is a template). Goal 6 builds it.
 

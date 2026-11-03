@@ -426,8 +426,12 @@ export function checkDestructiveSql(cmd) {
   // reach it through a variable set earlier (Luna round 2, 2026-11-03). Split
   // WITHOUT honouring quotes on purpose: PowerShell and cmd.exe quote
   // differently from bash, and an extra split can only over-refuse.
-  const scriptRunner = text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() &&
-    !((SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || sqlSegmentInert(segment)) && plainReaderSegment(segment)) &&
+  // The words count only outside plain text (a commit message or grep pattern
+  // naming TRUNCATE is not SQL; Luna round 4 LOW); `export SQL='DROP …'` does.
+  const plainText = (segment) =>
+    (SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || sqlSegmentInert(segment)) && plainReaderSegment(segment);
+  const segments = text.split(/(?:\|\||&&|[;\r\n|&])+/).filter((segment) => segment.trim() && !plainText(segment));
+  const scriptRunner = segments.some((segment) => DESTRUCTIVE_SQL_RE.test(segment)) && segments.some((segment) =>
     segment.replace(/["'`^\\]/g, " ").split(/[\s()=,]+/).some((word) =>
       // A version suffix (`python3.11`, `node22`, `pwsh-7`) is the same runner (Luna round 3).
       SQL_SCRIPT_RUNNERS.has(word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").replace(/[-.\d]+$/, "").toLowerCase())));

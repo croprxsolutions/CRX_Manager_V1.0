@@ -150,6 +150,11 @@ for (const command of [
   `cat > a.sh <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nbash *.sh`,
   `cat <<'EOF' > push.sh\ngit ${pushVerb} origin HEAD:main\nEOF\nbash push.sh`,
   `cat > x <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\ncp x y; bash y`,
+  // Luna round 4: a function, alias or PATH change can make `cat` run a shell.
+  `cat(){ bash; }; cat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
+  `function cat { bash; }\ncat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
+  `alias cat=bash; cat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
+  `PATH=/tmp/evil:$PATH cat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
 ]) assert.equal(isGitPush(withoutDataHeredocs(command)), true, command);
 assert.equal(pushContextIsAmbiguous("$env:GIT_DIR='C:/other/.git'; git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("GIT_WORK_TREE=/tmp/other git push origin main"), true);

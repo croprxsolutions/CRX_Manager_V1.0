@@ -484,11 +484,12 @@ refused commands from those sessions before and after the change.
    `psql`/`pgcli`/`supabase sql`/`supabase db` call (direct, through `npx`, or fed a here-document)
    still count. Tightened at the same time (Sol on the proposal, Luna rounds 1–2): a script runner
    (`node`, `deno`, `bun`, `tsx`, `npx`, `python`, `ruby`, `perl`, `bash`, `sh`, `pwsh`, `cmd`,
-   `eval`, `iex` …) named in any segment that is not plain text, with the destructive words anywhere
-   in the command, now counts as a client call, since it can run SQL through `pg` or the Supabase
-   client (including SQL set in a variable first, `env -u X node …`, `eval "node …"`). Before,
-   `node -e "…DROP TABLE…"` passed unless a `-c` sat beside it. Over-refusal kept on purpose:
-   `node check.mjs && echo 'DROP TABLE'`.
+   `eval`, `iex` …, with or without a version suffix) named in any segment that is not plain text,
+   with the destructive words in any segment that is not plain text, now counts as a client call,
+   since it can run SQL through `pg` or the Supabase client (including SQL exported first,
+   `env -u X node …`, `eval "node …"`). Before, `node -e "…DROP TABLE…"` passed unless a `-c` sat
+   beside it. A here-document is never treated as data when the command defines a function or
+   alias, changes `PATH`, or writes a file and then runs anything after it.
 
 ### Guard narrowing (2026-10-18 decision)
 

@@ -451,6 +451,11 @@ export function everyPushHasAbsoluteFolder(fullCmd) {
 // provable data here-document stops the pass: its body is not shell text, so
 // nothing after it is judged.
 export function withoutDataHeredocs(cmd) {
+  // A function, alias or PATH change can make `cat`/`tee`/`git` run a shell
+  // (`cat(){ bash; }`; Luna round 4): then no body is provably data.
+  if (/(?:^|[\s;&|(])(?:function\s+[\w-]+|[\w-]+\s*\(\s*\)|alias\s|unalias\s|enable\s|hash\s|source\s|\.\s+\S|(?:PATH|BASH_ENV|ENV|GIT_EDITOR|GIT_EXEC_PATH)\s*=)/i.test(String(cmd || ""))) {
+    return String(cmd || "");
+  }
   const lines = String(cmd || "").split("\n");
   let state = "";
   for (let i = 0; i < lines.length; i += 1) {

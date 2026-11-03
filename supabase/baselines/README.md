@@ -38,6 +38,12 @@ node scripts/decompress-schema-baseline.mjs | psql "$DATABASE_URL" -v ON_ERROR_S
 The decoder refuses to emit SQL unless both the compressed and decompressed
 manifest hashes match.
 
+Disposable test databases (the `scripts/smoke/prove-*` provers) add
+`--with-live-rows`, which appends the few live rows that later migrations'
+postconditions require, today only the active Main Warehouse that
+`20261102220000` checks. Never pass it on a real restore: the data restore
+brings those rows back, and the extra row would collide with it.
+
 The first artifact creates the production-specific `metabase_ro` NOLOGIN role
 when it is absent, before the decoded schema restores grants to that role. Run
 the restore as the project owner so role creation is permitted. Every artifact

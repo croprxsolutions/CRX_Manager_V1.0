@@ -209,7 +209,7 @@ function restoreFullSchemaAndRunSmoke() {
   copyIntoContainer(migrationHistory, 'draw-baseline-history.sql');
 
   psql('\\i /tmp/draw-baseline-extensions.sql');
-  const decompressed = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], {
+  const decompressed = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], {
     cwd: ROOT,
     maxBuffer: 60 * 1024 * 1024,
   });

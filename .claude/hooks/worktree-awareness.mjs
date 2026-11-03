@@ -12,7 +12,7 @@
 // Fail-open: any error → emit nothing.
 
 import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -25,7 +25,7 @@ import {
   ORIGIN_MAIN_CAT_FILE_MAX_BUFFER, originMainSqlBlobMap as parseOriginMainSqlBlobMap,
   originMainForwardBlobPaths,
   classifyDirt, formatSiblingReport, groupUnknownReasons,
-  mergedPrHeadsFromCache, withMergedPrLabel,
+  mergedPrHeadsFromCache, withMergedPrLabel, MERGED_PR_CACHE_FILE, MERGED_PR_CACHE_MAX_AGE_MS,
 } from "./worktree-awareness-lib.mjs";
 import { combinedMigrationHistoryAtRev, readCombinedMigrationHistory } from "./migration-records-lib.mjs";
 
@@ -40,7 +40,18 @@ function emit(extra) {
 
 const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
+// Results of the per-worktree git calls, run concurrently by prefetchWorktreeGit()
+// below. With ~55 worktrees the same calls run one at a time took ~10s, the hook's
+// whole timeout. Every call site still falls back to a sync spawn on a miss.
+const prefetched = new Map(); // gitKey → { status, stdout }
+const gitKey = (args, cwd) => `${cwd}\0${args.join("\0")}`;
+
 function git(args, cwd) {
+  const hit = prefetched.get(gitKey(args, cwd || projectDir));
+  if (hit) {
+    if (hit.status !== 0) throw new Error(`git ${args[0]} failed`);
+    return hit.stdout;
+  }
   return execFileSync("git", args, {
     encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"], cwd: cwd || projectDir,
   });
@@ -50,11 +61,10 @@ function git(args, cwd) {
 // copy. The banner never waits on GitHub: a stale or missing cache is refreshed
 // by a detached copy of this script, and this run uses whatever is on disk.
 const REFRESH_FLAG = "--refresh-merged-pr-heads";
-const MERGED_PR_CACHE_MAX_AGE_MS = 10 * 60_000;
 const REFRESH_LOCK_MAX_AGE_MS = 3 * 60_000;
 function mergedPrCachePath() {
   try {
-    return path.resolve(projectDir, git(["rev-parse", "--git-common-dir"]).trim(), "crx-merged-pr-heads.json");
+    return path.resolve(projectDir, git(["rev-parse", "--git-common-dir"]).trim(), MERGED_PR_CACHE_FILE);
   } catch { return null; }
 }
 
@@ -147,9 +157,54 @@ try {
 } catch { hasOriginMain = false; }
 
 const mergedPrHeads = readMergedPrHeads();
+
+// Run the same per-worktree git calls the sync code below makes, a few at a time,
+// so the sync code finds them in `prefetched`. The args must match the call sites
+// exactly; a mismatch only costs speed, never correctness.
+function gitAsync(args, cwd) {
+  return new Promise((resolve) => {
+    execFile("git", args, { cwd, encoding: "utf8", timeout: 5000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+      prefetched.set(gitKey(args, cwd), { status: err ? (typeof err.code === "number" ? err.code : null) : 0, stdout: String(stdout || "") });
+      resolve();
+    });
+  });
+}
+async function inPool(tasks, width = 8) {
+  let next = 0;
+  await Promise.all(Array.from({ length: width }, async () => {
+    while (next < tasks.length) await tasks[next++]();
+  }));
+}
+async function prefetchWorktreeGit() {
+  const live = entries.filter((e) => e.path && existsSync(e.path));
+  const spec = draftPathspec();
+  // Wave 1: status, ancestry and branch point need nothing but the worktree.
+  await inPool(live.flatMap((e) => [
+    () => gitAsync(["status", "--porcelain", "-uall"], e.path),
+    ...(hasOriginMain && e.head ? [
+      () => gitAsync(["merge-base", "--is-ancestor", e.head, originMainRev], projectDir),
+      () => gitAsync(["merge-base", originMainRev, e.head], projectDir),
+    ] : []),
+  ]));
+  // Wave 2: the draft diff, which needs the branch point and whether it is clean
+  // (mirrors createOwnDraftPathsReader in the lib).
+  await inPool(live.flatMap((e) => {
+    const base = String(prefetched.get(gitKey(["merge-base", originMainRev, e.head], projectDir))?.stdout || "").trim();
+    const status = prefetched.get(gitKey(["status", "--porcelain", "-uall"], e.path));
+    if (!base || !status || status.status !== 0) return [];
+    if (classifyDirt(status.stdout).total === 0) return [() => gitAsync(["diff", "--name-only", base, e.head, "--", ...spec], projectDir)];
+    return [
+      () => gitAsync(["diff", "--name-only", base, "--", ...spec], e.path),
+      () => gitAsync(["ls-files", "--others", "--exclude-standard", "--", ...spec], e.path),
+    ];
+  }));
+}
+try { await prefetchWorktreeGit(); } catch { /* fail-open: the sync calls below still run */ }
+
 function mergedLabel(sha) {
   if (!hasOriginMain || !sha) return mergedLabelFromStatus(null, false);
-  const r = spawnSync("git", ["merge-base", "--is-ancestor", sha, originMainRev], {
+  const args = ["merge-base", "--is-ancestor", sha, originMainRev];
+  const r = prefetched.get(gitKey(args, projectDir)) || spawnSync("git", args, {
     encoding: "utf8", timeout: 5000, cwd: projectDir,
   });
   return withMergedPrLabel(mergedLabelFromStatus(r.status, true), sha, mergedPrHeads);
@@ -263,7 +318,7 @@ const ownDraftPaths = createOwnDraftPathsReader({
   // immutable origin/main verification path.
   sha256Text: (text) => createHash("sha256").update(text.replace(/\r\n/g, "\n"), "utf8").digest("hex"),
   run: (args, cwd) => {
-    const r = spawnSync("git", args, { encoding: "utf8", timeout: 5000, cwd });
+    const r = prefetched.get(gitKey(args, cwd)) || spawnSync("git", args, { encoding: "utf8", timeout: 5000, cwd });
     return r.status === 0 ? String(r.stdout || "").split("\n") : null;
   },
 });

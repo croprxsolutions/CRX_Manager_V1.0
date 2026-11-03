@@ -86,6 +86,12 @@ BEGIN
   PERFORM 1 FROM public.products WHERE id = NEW.product_id FOR UPDATE;
 
   IF NEW.is_active AND NEW.link_status = 'confirmed' THEN
+    -- Waits out a vendor delete in progress, then refuses a link to the deleted vendor.
+    PERFORM 1 FROM public.vendors WHERE id = NEW.vendor_id AND deleted_at IS NULL FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'VENDOR_DELETED: this vendor was deleted; choose another vendor' USING ERRCODE = 'check_violation';
+    END IF;
+
     IF NEW.supplier_product_name IS NOT NULL THEN
       SELECT id, is_preferred INTO v_vendor_only_id, v_vendor_only_preferred
       FROM public.product_supplier_links

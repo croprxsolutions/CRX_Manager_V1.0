@@ -53,6 +53,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       return list;
     } catch (error) {
       Sentry.captureException(error);
+      setVendors(null);
       setLoadError(productVendorErrorMessage(error));
       return null;
     }

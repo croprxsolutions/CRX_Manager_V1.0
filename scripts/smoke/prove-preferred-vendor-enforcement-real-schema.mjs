@@ -386,6 +386,12 @@ function main() {
   assert.notEqual(scalar(`SELECT updated_at FROM public.products WHERE id = '${P.ONE}';`), stampBefore, 'the copy stamps updated_at');
   refused(ADMIN, `SELECT public.delete_vendor('${V.B}', 'k-del-b');`, /VENDOR_IS_PREFERRED: 1 products/);
   ok(ADMIN, `SELECT public.delete_vendor('${V.C}', 'k-del-c');`);
+  // The link trigger itself refuses a deleted vendor, so a delete racing a new link cannot leave one behind.
+  const deletedLink = psql(`INSERT INTO public.product_supplier_links (product_id, vendor_id, comparison_status, link_status, is_preferred, created_by)
+    VALUES ('${P.ONE}', '${V.C}', 'pending', 'confirmed', false, '${ADMIN}');`, { user: 'supabase_admin', allowFailure: true });
+  assert.notEqual(deletedLink.status, 0);
+  assert.match(`${deletedLink.stdout}
+${deletedLink.stderr}`, /VENDOR_DELETED/);
   console.log('[prover] a vendor rename reaches its products; a preferred vendor cannot be deleted, a spare one can');
 
   // A rename that waits on a preferred-vendor switch away from it re-reads afterwards: the product

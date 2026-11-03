@@ -249,6 +249,38 @@ describe('ProductDetail brands section', () => {
     await waitFor(() => expect(H.savedPayload).toHaveProperty('vendor', null));
   });
 
+  it('does not re-send untouched label fields, so an open page never overwrites a Label Review commit', async () => {
+    H.product = baseProduct({
+      epa_registration: '100-1', signal_word: 'Caution', rei_hours: 12, phi_days: 30,
+      max_label_rate: 32, max_label_rate_unit: 'fl oz/acre',
+    });
+    render(<ProductDetail />);
+    const group = await screen.findByRole('group', { name: 'Use Timing' });
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'Pre-Emerge Corn' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload?.use_timings).toEqual(['pre_emerge_corn']));
+    for (const field of ['epa_registration', 'signal_word', 'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit']) {
+      expect(H.savedPayload).not.toHaveProperty(field);
+    }
+  });
+
+  it('still saves a label field that was changed on the page', async () => {
+    H.product = baseProduct({ epa_registration: '100-1', signal_word: 'Caution' });
+    render(<ProductDetail />);
+    fireEvent.change(await screen.findByDisplayValue('Caution'), { target: { value: 'Warning' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload?.signal_word).toBe('Warning'));
+    expect(H.savedPayload).not.toHaveProperty('epa_registration');
+  });
+
+  it('still saves a label field that was cleared on the page', async () => {
+    H.product = baseProduct({ signal_word: 'Caution' });
+    render(<ProductDetail />);
+    fireEvent.change(await screen.findByDisplayValue('Caution'), { target: { value: '' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload).toHaveProperty('signal_word', null));
+  });
+
   it('sends the vendor when creating a product', async () => {
     H.routeId = 'new';
     render(<ProductDetail />);

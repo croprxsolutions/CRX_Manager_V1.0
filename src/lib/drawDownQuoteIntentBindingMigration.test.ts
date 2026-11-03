@@ -250,7 +250,7 @@ describe('draw_down_quote actor and intent binding migration', () => {
   });
 
   it('retires rejected draw keys and gives the operator a safe recovery path', () => {
-    const drawStart = quoteBuilder.indexOf('const handleDrawDown = async () => {');
+    const drawStart = quoteBuilder.indexOf('const handleDrawDown = async (resume?: PendingRetry<DrawRequestLine[]>) => {');
     const drawEnd = quoteBuilder.indexOf('const handleConvertToOrder = async () => {', drawStart);
     const drawHandler = quoteBuilder.slice(drawStart, drawEnd);
 

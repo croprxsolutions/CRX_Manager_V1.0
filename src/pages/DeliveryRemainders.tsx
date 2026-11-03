@@ -114,25 +114,17 @@ export default function DeliveryRemainders() {
   const customerCount = new Set(remainders.filter((r) => r.status === 'pending').map((r) => r.customer_id)).size;
 
   const handleCreateFollowup = async (deliveryId: string) => {
-    // Codex P2 fix (PR #59, 2026-05-16): reset followup key per remainder.
-    // Page-scoped key would otherwise carry across row clicks — followup A
-    // succeeds, response lost, user clicks Create Followup on row B → server
-    // replays A's cached delivery_id/number without creating B's followup.
-    // Reset-on-click scopes each row click to its own idempotency intent
-    // (each new click = new intent; the in-flight retry would happen
-    // automatically if the same row click handler re-fires before reset).
-    followupIdem.resetKey();
     setCreating(deliveryId);
     try {
-      const key = followupIdem.getKey();
+      // Keyed per remainder row: a retry on row A reuses A's key, row B never redeems A's receipt.
       const { data, error } = await supabase.rpc('create_followup_delivery', {
         p_original_delivery_id: deliveryId,
         p_performed_by: profile?.id,
-        p_idempotency_key: key,
+        p_idempotency_key: followupIdem.getKeyFor(deliveryId),
       });
       if (error) throw error;
-      followupIdem.resetKey();
       const followupResult = assertRpcResult<{ delivery_id: string; delivery_number: string; item_count: number }>(data, 'create_followup_delivery');
+      followupIdem.resetKeyFor(deliveryId);
       toast('success', `Follow-up delivery ${followupResult.delivery_number} created with ${followupResult.item_count} item(s)`);
       navigate(`/deliveries/${followupResult.delivery_id}`);
     } catch (err: unknown) {

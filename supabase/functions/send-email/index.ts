@@ -11,6 +11,12 @@ import {
   type PoGateSnapshot,
 } from "../_shared/purchaseOrderEmailGate.ts";
 import { attachmentProblem, emailContentProblem } from "../_shared/emailContentGate.ts";
+import {
+  buildInvoiceEmail,
+  parseInvoiceEmailSnapshot,
+  type InvoiceEmailResult,
+  type InvoiceEmailSnapshot,
+} from "../_shared/invoiceEmailGate.ts";
 
 // =============================================================================
 // CRX send-email — Sprint F #1 lockdown
@@ -39,6 +45,9 @@ import { attachmentProblem, emailContentProblem } from "../_shared/emailContentG
 //   7. The idempotency key is scoped to email_type + record, so a reused key
 //      can never replay or block a different email; a key already used for a
 //      different email is refused (audit finding 8, 2026-11-02).
+//   8. An invoice email's subject, wording, amount and attachment name are built
+//      here from the saved invoice; the caller's are ignored. Its PDF must print
+//      the invoice's money as saved now (_shared/invoiceEmailGate.ts, KI-97).
 // =============================================================================
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -117,6 +126,29 @@ function decodedBase64Length(b64: string): number {
   return Math.floor((b64.length * 3) / 4) - padding;
 }
 
+// Reads the saved invoice and its lines and builds the email from them. Any read
+// error refuses the send (503): never state an amount on a guess.
+async function loadInvoiceEmail(
+  adminClient: SupabaseClient,
+  invoiceId: string,
+  snapshot: InvoiceEmailSnapshot,
+): Promise<InvoiceEmailResult> {
+  const { data: invoice, error: invoiceErr } = await adminClient
+    .from("invoices")
+    .select("invoice_number, invoice_type, invoice_date, due_date, total_amount_cents, paid_amount_cents, prepay_applied_cents, balance_cents")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (invoiceErr) return { ok: false, status: 503, error: `Invoice lookup failed: ${invoiceErr.message}` };
+  const { data: lines, error: linesErr } = await adminClient
+    .from("invoice_items")
+    .select("extended_cents")
+    .eq("invoice_id", invoiceId);
+  if (linesErr || !Array.isArray(lines)) {
+    return { ok: false, status: 503, error: `Invoice lines lookup failed: ${linesErr?.message ?? "no list"}` };
+  }
+  return buildInvoiceEmail(invoice, lines.map((line) => line.extended_cents), snapshot);
+}
+
 // Reads what the purchase-order gate needs and lets it decide. Any read error
 // refuses the send (503): never send a PO copy on a guess.
 async function checkPurchaseOrderEmail(
@@ -188,19 +220,28 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const {
       to,
-      subject,
-      html,
       email_type,
       customer_id,
       resource_type,
       resource_id,
       idempotency_key,
-      attachments,
       purchase_order_snapshot,
+      invoice_snapshot,
     } = body;
+    // An invoice email's subject, body and attachment name are replaced below (step 6c).
+    let { subject, html, attachments } = body;
+    const isInvoiceEmail = email_type === "invoice";
 
-    if (!to || !subject || !html || !email_type) {
+    if (!to || !email_type || (!isInvoiceEmail && (!subject || !html))) {
       return jsonResponse({ error: "to, subject, html, and email_type are required" }, 400);
+    }
+    // What the attached PDF prints; the invoice must still say the same (KI-97).
+    const invoiceSnapshot = isInvoiceEmail ? parseInvoiceEmailSnapshot(invoice_snapshot) : null;
+    if (isInvoiceEmail && !invoiceSnapshot) {
+      return jsonResponse(
+        { error: "Invoice emails require invoice_snapshot (what the PDF shows). Reload the app and send again" },
+        400,
+      );
     }
     const isPurchaseOrderEmail = email_type === PURCHASE_ORDER_EMAIL_TYPE;
     // What the attached PDF printed; the gate refuses unless it is the PO today.
@@ -222,13 +263,13 @@ Deno.serve(async (req: Request) => {
     } else if (!customer_id) {
       return jsonResponse({ error: "customer_id is required" }, 400);
     }
-    if (typeof to !== "string" || typeof subject !== "string" || typeof html !== "string") {
+    if (typeof to !== "string" || (!isInvoiceEmail && (typeof subject !== "string" || typeof html !== "string"))) {
       return jsonResponse({ error: "to, subject, html must be strings" }, 400);
     }
     if (idempotency_key != null && (typeof idempotency_key !== "string" || !idempotency_key || idempotency_key.length > 256)) {
       return jsonResponse({ error: "idempotency_key must be a non-empty string of at most 256 characters" }, 400);
     }
-    const contentProblem = emailContentProblem(subject, html);
+    const contentProblem = isInvoiceEmail ? null : emailContentProblem(subject, html);
     if (contentProblem) {
       return jsonResponse({ error: contentProblem }, 400);
     }
@@ -338,8 +379,6 @@ Deno.serve(async (req: Request) => {
         400,
       );
     }
-    // shortcut: the invoice email's wording, amount and PDF still come from the caller; building them
-    // from the saved invoice here is the planned follow-up (KNOWN_ISSUES KI-97).
     let invoiceGateId = resource_type === "invoice" ? resource_id : null;
     let invoiceGateCustomerId: string | null = null;
 
@@ -550,6 +589,26 @@ Deno.serve(async (req: Request) => {
           );
         }
       }
+    }
+
+    // 6c. The invoice email itself (KI-97): subject, wording, amount and file name
+    // come from the saved invoice, and the one PDF must print its money as saved.
+    if (isInvoiceEmail && invoiceSnapshot) {
+      if (!Array.isArray(attachments) || attachments.length !== 1) {
+        return jsonResponse({ error: "An invoice email carries exactly one PDF: the invoice" }, 400);
+      }
+      const built = await loadInvoiceEmail(adminClient, resource_id, invoiceSnapshot);
+      if (!built.ok) {
+        return jsonResponse({ error: built.error }, built.status);
+      }
+      // An unusual stored invoice number (very long, odd characters) must not slip past the content gate.
+      const builtProblem = emailContentProblem(built.subject, built.html);
+      if (builtProblem) {
+        return jsonResponse({ error: builtProblem }, 409);
+      }
+      subject = built.subject;
+      html = built.html;
+      attachments = [{ filename: built.filename, content: attachments[0]?.content }];
     }
 
     // 7. Attachment limits
@@ -805,6 +864,7 @@ Deno.serve(async (req: Request) => {
       }
 
       let finalGateRefusal: string | null = null;
+      let finalGateStatus = finalGateError ? 503 : 409;
       if (finalGateError) {
         finalGateRefusal = `Final invoice eligibility lookup failed: ${finalGateError.message}`;
       } else if (!finalInvoiceRow) {
@@ -824,6 +884,15 @@ Deno.serve(async (req: Request) => {
         finalInvoiceRow.send_disposition !== "sendable"
       ) {
         finalGateRefusal = "Invoice became suppressed or unavailable before send";
+      } else if (isInvoiceEmail && invoiceSnapshot) {
+        // A payment or edit since step 6c would make the stated amount or the PDF wrong.
+        const rebuilt = await loadInvoiceEmail(adminClient, invoiceGateId, invoiceSnapshot);
+        if (!rebuilt.ok) {
+          finalGateRefusal = rebuilt.error;
+          finalGateStatus = rebuilt.status;
+        } else if (rebuilt.subject !== subject || rebuilt.html !== html) {
+          finalGateRefusal = "Invoice changed before send";
+        }
       }
 
       if (finalGateRefusal) {
@@ -851,7 +920,7 @@ Deno.serve(async (req: Request) => {
         }
         return jsonResponse(
           { error: `${finalGateRefusal}; email send refused`, email_log_id: emailLogId },
-          finalGateError ? 503 : 409,
+          finalGateStatus,
         );
       }
     }

@@ -165,11 +165,15 @@ No snapshot/guard migration was found, but the live row count could not be check
 ---
 
 ### KI-97 — Invoice email content is built by the app screen, not by the email service
-**MED · OPEN (planned follow-up from PR #1302, 2026-11-02) · money · unassigned**
+**MED · FIX IN REVIEW (not live until `send-email` is redeployed) · money · Claude**
 The `send-email` service checks who may send an invoice email, to whom, and when, and limits the links and map
 images it may carry (PR #1302). The email's wording, amount and attached PDF still come from the app screen.
-Planned: the service builds the invoice email's amount, wording and PDF from the saved invoice itself. #1302 does
-not change this behaviour either way.
+Fix (branch `claude/goofy-gauss-3449d8`): the service writes the invoice email's subject, wording, Amount Due
+(stored balance, whole cents) and attachment name from the saved invoice and ignores the screen's. The PDF is
+still drawn by the app, so the app also sends the money the PDF prints; the service refuses the send unless that
+matches the saved invoice, and checks again just before sending (same method as the purchase-order copy). Left
+open: the PDF file itself is drawn by the signed-in user's app, not the server. Becomes FIXED when the new
+`send-email` version is deployed and one real invoice email is checked.
 
 ---
 

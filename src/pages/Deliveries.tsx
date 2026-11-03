@@ -914,6 +914,12 @@ export default function Deliveries() {
           // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
           const bindingRejection = getIdempotencyBindingRejection(error);
           if (bindingRejection === 'intent' || bindingRejection === 'actor') batchCancelIdem.resetKeyFor(cancelScope);
+          // A changed reason after a lost reply: the earlier cancel already committed, so show the current list.
+          if (bindingRejection === 'intent') {
+            setSelected(new Set());
+            fetchDeliveries();
+            throw new Error('An earlier cancel of these deliveries already went through. The list has been refreshed.');
+          }
           throw error;
         }
         // The server skips any delivery that completed or was cancelled since this list loaded.

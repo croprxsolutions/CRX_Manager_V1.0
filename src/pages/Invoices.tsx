@@ -392,6 +392,12 @@ export default function Invoices() {
           // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
           const bindingRejection = getIdempotencyBindingRejection(error);
           if (bindingRejection === 'intent' || bindingRejection === 'actor') batchVoidIdem.resetKeyFor(voidScope);
+          // A changed reason after a lost reply: the earlier void already committed, so show the current list.
+          if (bindingRejection === 'intent') {
+            setSelected(new Set());
+            fetchInvoices();
+            throw new Error('An earlier void of these invoices already went through. The list has been refreshed.');
+          }
           throw error;
         }
         const voided = assertRpcResult(data, 'batch_void_invoices');

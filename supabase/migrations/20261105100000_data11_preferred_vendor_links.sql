@@ -11,7 +11,8 @@
 --     name, so every active product's vendor text matches its preferred vendor.
 -- It changes no other products.vendor text, no other link, no vendor and no price.
 --
--- Bound to the approved list: the plan below, with each product's current vendor text, is
+-- Bound to the approved list: the plan below, with each product's current vendor text and the id
+-- of the single confirmed link it would mark preferred, is
 -- fingerprinted over every active product, and the
 -- migration refuses (changing nothing) unless it equals the plan Mason approved, read live on
 -- 2026-11-03: 596 active products, 586 new links, 10 preferred flags. Any product, vendor, alias
@@ -22,7 +23,7 @@
 DO $data11$
 DECLARE
   c_approver constant uuid := '22c1fc50-4d2a-4baa-8ff8-341c0c7edd4f';
-  c_fingerprint constant text := '2442f136e9746035768229974b1f973d';
+  c_fingerprint constant text := '6c8955cb8d658f89d45546d22e225dde';
   v_fingerprint text;
   v_total bigint;
   v_links bigint;
@@ -65,7 +66,8 @@ BEGIN
            count(*) AS any_links,
            count(*) FILTER (WHERE l.is_active AND l.link_status = 'confirmed') AS confirmed_links,
            count(*) FILTER (WHERE l.is_active AND l.link_status = 'confirmed' AND l.is_preferred) AS preferred_links,
-           min(l.vendor_id::text) FILTER (WHERE l.is_active AND l.link_status = 'confirmed')::uuid AS confirmed_vendor_id
+           min(l.vendor_id::text) FILTER (WHERE l.is_active AND l.link_status = 'confirmed')::uuid AS confirmed_vendor_id,
+           min(l.id::text) FILTER (WHERE l.is_active AND l.link_status = 'confirmed')::uuid AS confirmed_link_id
     FROM public.product_supplier_links l
     JOIN public.vendors v ON v.id = l.vendor_id AND v.deleted_at IS NULL
     GROUP BY l.product_id
@@ -86,7 +88,8 @@ BEGIN
            WHEN e.vendor_id IS NOT NULL THEN e.vendor_id
            WHEN ls.confirmed_links = 1 THEN ls.confirmed_vendor_id
            ELSE r.vendor_id
-         END AS vendor_id
+         END AS vendor_id,
+         CASE WHEN ls.confirmed_links = 1 THEN ls.confirmed_link_id END AS link_id
   FROM public.products p
   LEFT JOIN resolved r ON r.normalized = public.normalize_vendor_alias(NULLIF(btrim(p.vendor), ''))
   LEFT JOIN link_summary ls ON ls.product_id = p.id
@@ -97,7 +100,7 @@ BEGIN
          count(*) FILTER (WHERE action = 'link'),
          count(*) FILTER (WHERE action = 'prefer'),
          md5(string_agg(product_id::text || ':' || coalesce(vendor_id::text, '-') || ':' || coalesce(action, '-')
-                        || ':' || coalesce(vendor_text, '~'), ',' ORDER BY product_id))
+                        || ':' || coalesce(vendor_text, '~') || ':' || coalesce(link_id::text, '-'), ',' ORDER BY product_id))
     INTO v_total, v_links, v_prefers, v_fingerprint
   FROM data11_plan;
   IF v_fingerprint IS DISTINCT FROM c_fingerprint THEN
@@ -123,6 +126,7 @@ BEGIN
   SET is_preferred = true
   FROM data11_plan d
   WHERE d.action = 'prefer'
+    AND l.id = d.link_id
     AND l.product_id = d.product_id
     AND l.vendor_id = d.vendor_id
     AND l.is_active

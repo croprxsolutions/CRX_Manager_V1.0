@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied. Needs Mason's `I approve` (it overwrites existing rows).** `20261105100000_data11_preferred_vendor_links.sql` (LF SQL sha256: `6b8e765de6586990444d8dcc43a9e3adb6902579a55bf5969b3a02f7e2590b23`). WP-PM-15b data step, Mason's DATA-11 decisions 2, 3 and 4 (2026-11-03). REQUIRES `20261105090000`.
+**LOCAL CANDIDATE, not applied. Needs Mason's `I approve` (it overwrites existing rows).** `20261105100000_data11_preferred_vendor_links.sql` (LF SQL sha256: `83ebb476eec745bb8d3d3c172881fdf535fab77b07278faa579ff0bd311133a7`). WP-PM-15b data step, Mason's DATA-11 decisions 2, 3 and 4 (2026-11-03). REQUIRES `20261105090000`.
 
 What it does:
 - Gives every active product with no vendor link a vendor-only link (item details not yet known), marked preferred. The link goes to the one vendor its vendor text already names, directly, by an approved alias, or by an approved legacy resolution.
@@ -6,9 +6,9 @@ What it does:
 - Marks preferred the single confirmed link of each product that has links but none preferred (decision 3).
 - Records the links as confirmed by Mason. It changes no other product vendor text, no other link, no vendor and no price.
 
-Bound to the approved list: the plan is fingerprinted over every active product, and the migration refuses (changing nothing) unless it equals the plan read live on 2026-11-03 and reviewed by Mason: 596 active products, 586 new links, 10 preferred flags, 0 left over. Any product, vendor, alias or link change that alters what it would write (which product gets which vendor, which link becomes preferred, or the vendor text of any planned product) stops it for a fresh review. A lone existing link is made preferred only when the product's vendor text names that same vendor. It also refuses unless the approver is an active admin, the written counts match (586 links, 10 preferred flags, 2 vendor names), and afterwards every active product has exactly one active, confirmed, preferred link to a live vendor.
+Bound to the approved list: the plan is fingerprinted over every active product, and the migration refuses (changing nothing) unless it equals the plan read live on 2026-11-03 and reviewed by Mason: 596 active products, 586 new links, 10 preferred flags, 0 left over. Any product, vendor, alias or link change that alters what it would write (which product gets which vendor, which link, by id, becomes preferred, or the vendor text of any planned product) stops it for a fresh review. A lone existing link is made preferred only when the product's vendor text names that same vendor. It also refuses unless the approver is an active admin, the written counts match (586 links, 10 preferred flags, 2 vendor names), and afterwards every active product has exactly one active, confirmed, preferred link to a live vendor.
 
-Rollback: delete the vendor-only links it created (`supplier_product_name IS NULL AND confirmed_by = <approver> AND created_at = <apply time>`), and set `is_preferred = false` on the 10 links it marked. Both steps are exactly identifiable from the apply transaction's timestamp.
+Rollback: delete the vendor-only links it created (`supplier_product_name IS NULL AND confirmed_by = <approver> AND created_at = <apply time>`), set `is_preferred = false` on the 10 links it marked, and set `vendor = ''` (empty text, its value before, read live 2026-11-03) on the two hand-assigned products named by id in the migration (`updated_at` = the apply time). All three steps are exactly identifiable from the apply transaction's timestamp. Run it before the enforcement migration (20261105110000) is installed, or remove that first, since it refuses blank vendor text on a linked product.
 
 Proof: `node scripts/smoke/prove-data11-preferred-links-real-schema.mjs` prints `DATA11_PREFERRED_LINKS_PROOF_PASS`. It runs in Docker with invented rows and covers:
 - refusal on a different plan, with nothing written;
@@ -16,4 +16,4 @@ Proof: `node scripts/smoke/prove-data11-preferred-links-real-schema.mjs` prints 
 - the exact writes;
 - a second run refusing.
 
-Live preflight (2026-11-03): the plan fingerprint (including vendor text) matches, and all 10 lone-link products' vendor text names their link's vendor; the ledger high-water is `20261105090000` once step 1 is applied.
+Live preflight (2026-11-03): the plan fingerprint (including vendor text and the id of each link it marks preferred) matches, and all 10 lone-link products' vendor text names their link's vendor; the ledger high-water is `20261105090000` once step 1 is applied.

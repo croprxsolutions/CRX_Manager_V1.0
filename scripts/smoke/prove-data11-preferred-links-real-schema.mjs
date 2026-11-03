@@ -29,7 +29,7 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261105100000_data11_preferred_vendor_links.sql');
 // The live plan Mason approved on 2026-11-03 (see the migration header).
-const APPROVED = { fingerprint: '2442f136e9746035768229974b1f973d', links: 586, prefers: 10 };
+const APPROVED = { fingerprint: '6c8955cb8d658f89d45546d22e225dde', links: 586, prefers: 10 };
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -315,6 +315,16 @@ function main() {
   assert.equal(linkState(), linksBefore);
   asOwner(`UPDATE public.products SET vendor = '[PROVER] Beta Supply' WHERE id = '${P.ONE}';`);
   console.log('[prover] vendor text changed after approval is refused, and so is preferring a vendor the text does not name');
+
+  // The confirmed link was replaced by another link to the same vendor after approval: the plan
+  // names the link it marks preferred, so the approved plan no longer matches.
+  asOwner(`UPDATE public.product_supplier_links SET id = '${id('d9')}' WHERE id = '${id('d1')}';`);
+  const replaced = linkState();
+  assert.match(run(bound(seeded.fingerprint, seeded.links, seeded.prefers), 'replaced.sql').output, /DATA11_PLAN_CHANGED/);
+  assert.equal(linkState(), replaced);
+  asOwner(`UPDATE public.product_supplier_links SET id = '${id('d1')}' WHERE id = '${id('d9')}';`);
+  assert.equal(linkState(), linksBefore);
+  console.log('[prover] a preferred-to-be link replaced after approval, even to the same vendor, is refused');
 
   // A product whose vendor text names two vendors gets no link, so the step refuses as a whole.
   asOwner(`INSERT INTO public.products (id, product_name, sku, vendor, inventory_unit, is_active)

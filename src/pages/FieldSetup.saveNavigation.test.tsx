@@ -13,7 +13,7 @@ import { RouterProvider, createMemoryRouter } from 'react-router';
 // Same module copy for the page's useNavigate and the hook's useBlocker.
 vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
-const { mockDrawnPolygon, mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
+const { mockDrawnPolygon, mockFrom, mockHasKey, mockRpc, mockToast } = vi.hoisted(() => ({
   mockDrawnPolygon: {
     drawId: 'draw-1',
     acres: 40,
@@ -28,6 +28,7 @@ const { mockDrawnPolygon, mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
     },
   },
   mockFrom: vi.fn(),
+  mockHasKey: vi.fn(() => false),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
 }));
@@ -46,7 +47,7 @@ vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/fieldsGeojsonCache', () => ({ getCachedFieldsGeojson: vi.fn().mockResolvedValue([]) }));
 vi.mock('../lib/plssLookup', () => ({ lookupPlss: vi.fn() }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn(), getKeyFor: () => 'key', resetKeyFor: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn(), getKeyFor: () => 'key', resetKeyFor: vi.fn(), hasKeyFor: mockHasKey }),
 }));
 vi.mock('../components/customers/CustomerSearchPicker', () => ({
   default: ({ onSelect }: { onSelect: (customer: { id: string; farm_name: string }) => void }) => (
@@ -92,6 +93,7 @@ async function renderNewField() {
 describe('FieldSetup — a new field whose acreage step fails', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockHasKey.mockReturnValue(false);
     mockFrom.mockImplementation((table: string) => chain(
       table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1' } : null,
     ));
@@ -128,5 +130,21 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/fields/field-1'));
     expect(mockToast).toHaveBeenCalledWith('error', 'Field saved but the boundary could not be measured. Please re-draw and save.');
     expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+  });
+
+  it('a changed retry after a lost create opens the created field and applies none of the edit', async () => {
+    mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
+    const router = await renderNewField();
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
+
+    mockHasKey.mockReturnValue(true); // the lost attempt's key is kept
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '35' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/fields/field-1'));
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('An earlier save already created this field'));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'set_field_override_acres')).toBe(false);
   });
 });

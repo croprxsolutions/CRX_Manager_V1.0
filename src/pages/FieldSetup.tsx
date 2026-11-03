@@ -114,6 +114,8 @@ function FieldSetupPage() {
   // Counts confirmed saves: a later confirmed edit settles any older lost attempt, so returning to that
   // older edit must get a fresh key and apply, not replay its stale result.
   const confirmedFieldSavesRef = useRef(0);
+  // What the first attempt of a new field sent: a changed retry under the same key replays that field.
+  const firstNewAttemptRef = useRef<string | null>(null);
   const saveFieldBoundaryIdem = useIdempotencyKey('set_field_boundary', profile?.id || '');
   const saveFieldOverrideIdem = useIdempotencyKey('set_field_override_acres', profile?.id || '');
   const isNew = id === 'new';
@@ -608,6 +610,9 @@ function FieldSetupPage() {
       // save_field checks only the key. A new field keeps one key until confirmed, so an edited retry after a lost
       // reply replays the field it already created; an edit to an existing field gets a key per exact payload.
       const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, confirmedFieldSavesRef.current, fieldPayload, billingPayload]);
+      const attempt = fingerprintIntentPayload([fieldPayload, billingPayload, field.override_acres ?? null, geometryDirty ? drawnPolygons : null]);
+      if (isNew && !saveFieldIdem.hasKeyFor('new')) firstNewAttemptRef.current = attempt;
+      const changedNewRetry = isNew && firstNewAttemptRef.current !== attempt;
       const { data, error } = await supabase.rpc('save_field', {
         p_field_id: (isNew ? null : id) as string,
         p_field_payload: fieldPayload,
@@ -623,6 +628,15 @@ function FieldSetupPage() {
         saveFieldIdem.resetKeyFor(saveScope);
         confirmedFieldSavesRef.current += 1;
         const savedFieldId = isNew ? data : id;
+
+        if (changedNewRetry) {
+          // The reply may be the field an earlier attempt created; never put this edit's acreage on it.
+          toast('warning', 'An earlier save already created this field. Opening it now; re-apply any later edits there.');
+          skipUnsavedPromptRef.current = true;
+          navigate(`/fields/${savedFieldId}`, { replace: true });
+          setSaving(false);
+          return;
+        }
 
         // The field record is saved; now persist its acreage. Track whether any acreage RPC
         // fails so we don't report a misleading success or clear the dirty flag.

@@ -12,7 +12,7 @@ import { hasPageAccess } from '../lib/pagePermissions';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
 import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
-import { exportToCSV, fmtCSV, fmtDateCSV, fmtDateOnlyCSV, formatProductMoneyCSV } from '../lib/csvExport';
+import { exportToCSV, fmtCSV, fmtDateCSV, formatProductMoneyCSV } from '../lib/csvExport';
 import { formatExactUSD, formatUSD } from '../lib/money';
 import { parseDollarsToCentsSigned } from '../lib/parseCents';
 import LogbookReport from '../components/reports/LogbookReport';
@@ -1142,13 +1142,13 @@ export default function Reports() {
       ], 'product_profitability');
     } else if (profitTab === 'commission') {
       exportToCSV(visibleCommissions, [
-        { key: 'order_date', header: 'Date', format: fmtDateOnlyCSV },
+        { key: 'order_date', header: 'Date', format: fmtDateCSV },
         { key: 'recipient', header: 'Recipient' },
         { key: 'commission_amount', header: 'Commission', format: fmtCSV },
         { key: 'split_percentage', header: 'Split %', format: (v) => `${v}%` },
         ...(isAdmin ? [{ key: 'order_profit', header: 'Order Profit', format: fmtCSV }] : []),
         { key: 'status', header: 'Status' },
-        { key: 'paid_date', header: 'Paid Date', format: fmtDateOnlyCSV },
+        { key: 'paid_date', header: 'Paid Date', format: fmtDateCSV },
       ], 'commissions');
     } else if (profitTab === 'revenue') {
       exportToCSV(revenueData, [
@@ -1271,12 +1271,12 @@ export default function Reports() {
     }
     exportToCSV(commPaymentDetailData as unknown as Record<string, unknown>[], [
       { key: 'payment_number', header: 'Payment Number' },
-      { key: 'payment_date', header: 'Payment Date', format: fmtDateOnlyCSV },
+      { key: 'payment_date', header: 'Payment Date', format: fmtDateCSV },
       { key: 'recipient_name', header: 'Recipient' },
       { key: 'source_type', header: 'Source Type' },
       { key: 'source_number', header: 'Source Number' },
       { key: 'customer_name', header: 'Customer' },
-      { key: 'commission_order_date', header: 'Commission Date', format: fmtDateOnlyCSV },
+      { key: 'commission_order_date', header: 'Commission Date', format: fmtDateCSV },
       { key: 'settled_amount', header: 'Settled Amount', format: formatExactUSD },
     ], `commission_payment_detail_as_of_${commissionAsOfDate}`);
     toast('success', 'Payment detail exported');

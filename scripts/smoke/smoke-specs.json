@@ -7,6 +7,23 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "order_replay_binding_batch4b": {
+      "chain": "smoke-order-replay-binding-batch4b.sql",
+      "container_only": true,
+      "container_prover": "prove-order-replay-binding-batch4b-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-order-replay-binding-batch4b-real-schema.mjs, never through run-smoke.mjs against the live database: the fixtures create rush orders, which draw customer-visible order numbers from a non-transactional sequence that a rollback does not return (the prover reports which document-number sequences the chain moved), and plant [SMOKE] customers, products, orders and inventory rows, which the LIVE-DATA GUARD refuses. Proves price_order, update_order_items and mark_inventory_row_verified replay a stored receipt only for the same person and the exact same request, and that a retry carrying an approved below-cost reason still replays (KNOWN_ISSUES KI-10 batch 4b).",
+      "covers": [
+        "price_order",
+        "update_order_items",
+        "mark_inventory_row_verified"
+      ],
+      "area": [
+        "billing",
+        "inventory",
+        "idempotency",
+        "security"
+      ]
+    },
     "money_replay_binding_batch4a": {
       "chain": "smoke-money-replay-binding-batch4a.sql",
       "container_only": true,

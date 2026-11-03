@@ -172,12 +172,9 @@ PR #942), batch 2 (`20261016140000`, PR #951), batch 3a (`20261019200000`, PR #9
 PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invoice`, `unpost_invoice_group`,
 `close_accounting_period`, `reopen_accounting_period`, `transfer_invoice_to_job`, `save_field_app_invoice`,
 `update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
-`create_rebate_claim`, `transition_rebate_claim`). Remaining: `price_order`, `update_order_items`, notification
-RPCs and about 45 MED/LOW functions (batches 4b to 4d). No open PR.
-Batch 4 includes `mark_inventory_row_verified` (MED, added 2026-10-23, PR #1042 follow-up 3; Mason: "batch it"):
-it matches its saved result on key and operation only, so a reused key with a different `p_inventory_id`, or from
-another admin, returns the first call's result. `IntegrityCleanupPanel.tsx` mints a fresh key per click, so no
-screen reaches it today. Fix with the batch wrapper as in `20261016140000`, with a real-schema prover.
+`create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, not yet applied) binds
+`price_order`, `update_order_items` and `mark_inventory_row_verified` (MED, PR #1042 follow-up 3; Mason: "batch
+it"). Remaining: notification RPCs and about 45 MED/LOW functions (batches 4c and 4d).
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
 **HIGH on money paths · PARTIAL · money · unassigned**
@@ -248,8 +245,10 @@ tiers is not built; the linkage field is not used for money today.
 - Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
   `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
   (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
-- `invoices.season` defaults to `current_season()` = UTC date, and the blend-ticket path uses it
-  (`20261020210000:1050,1227`): about five hours each 30 Sept evening can stamp the next season. LOW.
+- `invoices.season` defaults to `current_season()`, and the blend-ticket path uses it
+  (`20261020210000:1050,1227`). Fixed by `20261103120000` (once applied), which makes `current_season()` read the
+  Chicago date; the same migration moves the `invoices.invoice_date` default to the Chicago date, so the two
+  defaults agree. LOW.
 - Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
   interval warning in `src/pages/JobDetail.tsx:1449`: a wrong season at the 1 October boundary can silently
   suppress the warning. MED (safety).
@@ -669,7 +668,7 @@ OrderDetail.
 **MED/LOW · OPEN · money**
 - Quote re-save can still be refused when a save both deletes or switches a saved line and adds several new lines
   for the same product (LOW).
-- `issue_return_credit` and the delivery-split functions can fall back to `current_season()` (UTC) (LOW).
+- `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (once applied) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
 - Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing

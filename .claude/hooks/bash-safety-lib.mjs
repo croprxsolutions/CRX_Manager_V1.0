@@ -362,10 +362,13 @@ export function checkDestructiveSql(cmd) {
     text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() && !SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)));
   // A client name counts only outside a known reader, so a `grep "…\|psql"`
   // pattern is a search, not a call (retro on PR #1333). The split respects
-  // quotes; a reader holding a command substitution can still run a client.
-  const clientOutsideReader = splitShellSegments(text).some((segment) =>
-    (SQL_CLIENT_RE.test(segment) || SQL_CLIENT_RE.test(segment.replace(/["'`^\\]/g, ""))) &&
-    (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || /\$\(|`|[<>]\(/.test(segment)));
+  // quotes; a reader holding a command substitution, or `rg --pre` (which runs
+  // a program on each file, Codex App on PR #1337), can still run a client.
+  const clientOutsideReader = splitShellSegments(text).some((segment) => {
+    const unquoted = segment.replace(/["'`^\\]/g, "");
+    return (SQL_CLIENT_RE.test(segment) || SQL_CLIENT_RE.test(unquoted)) &&
+      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || /\$\(|`|[<>]\(/.test(segment) || /(?:^|\s)--pre\b/.test(unquoted));
+  });
   if (clientOutsideReader || flagOutsideReader) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";
   }

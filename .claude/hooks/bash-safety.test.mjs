@@ -69,6 +69,8 @@ ok(checkDangerousCommand("cat <<'SQL' | psql\nDROP TABLE customers;\nSQL"), "cat
 ok(checkDangerousCommand('grep -l "DROP TABLE" f | xargs cat | psql'), "readers feeding psql still blocked");
 ok(checkDangerousCommand(`grep "$(psql -c 'DROP SCHEMA x')" f`), "a client run from a reader's command substitution still blocked");
 ok(checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git stays a non-reader");
+ok(checkDangerousCommand('rg --pre psql "DROP SCHEMA" db.sql'), "rg --pre running a client stays refused (Codex App, PR #1337)");
+ok(checkDangerousCommand(`rg --p''re=psql "DROP SCHEMA" db.sql`), "a quote-split --pre= spelling stays refused");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
 ok(!checkDangerousCommand("git push origin feature/x"), "ordinary feature push allowed");

@@ -27,13 +27,8 @@ if ! npm run build 2>&1; then
   exit 1
 fi
 
-echo ""
-echo "🗺️ Refreshing local Graphify architecture map when code or database structure changed..."
-if ! node scripts/graphify-refresh.mjs --if-relevant; then
-  echo ""
-  echo "⚠️ Graphify refresh skipped or failed — continuing because Graphify is an optional local navigation aid."
-  echo "   Run npm run graph:refresh after installing Graphify to restore the local architecture map."
-fi
+# Graphify is not refreshed here: it re-extracted every file on each push and
+# rarely changed the map (2026-11-02 retro). Run npm run graph:refresh on demand.
 
 echo ""
 echo "✅ Phase 3C containment, type check, and build passed — pushing to GitHub."

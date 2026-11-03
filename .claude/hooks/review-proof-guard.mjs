@@ -618,8 +618,9 @@ if (shellTool) {
   // (`.`, `./`, `*`, `.*`, `.[!.]*`, `.?*`) erases its state (Luna, 2026-11-03).
   const climbsOut = (v) => /(?:^|[\s"'=:/\\({,])\.\.(?=[/\\]|$|[\s"';&|)<>,}])/.test(v) ||
     /(?:^|[\s"'=({,])(?:\.[/\\]*|\.?\*|\.[[?][^\s"';&|)<>,}]*)(?=$|[\s"';&|)<>,}])/.test(v) ||
-    // …or a target the guard cannot read (`"$TARGET"`, `%X%`, a backtick) could be its `.claude`.
-    /[$%`]/.test(v);
+    // …or a delete/move whose own target the guard cannot read (`rm -rf "$TARGET"`,
+    // `%X%`, a backtick) could be its `.claude`.
+    v.split(/&&|\|\||[;|\r\n]/).some((part) => hitsDestructiveVerb(part) && /[$%`]/.test(part));
   if ((cdEntersRepoClaude && destructiveViews.some(hitsDestructiveVerb)) ||
       (cdEntersWorktree && destructiveViews.some((v) => hitsDestructiveVerb(v) && climbsOut(v)))) {
     deny("REVIEW PROOF GUARD: a delete or move after cd into the repo's .claude folder is blocked — that folder holds the guard hooks, workflow sources and wrapper-owned review state. Run the command from the repo root with the full path so the guard can see what it touches.");

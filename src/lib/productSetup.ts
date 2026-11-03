@@ -89,7 +89,7 @@ export function normalizedProductSetup(
  * every label and chemistry value (EPA number, RUP, signal word, intervals, rates, timings), which
  * must be entered for the new product rather than inherited unchecked.
  */
-export const DUPLICATE_COPIED_FIELDS = [
+const DUPLICATE_COPIED_FIELDS = [
   'category', 'vendor', 'manufacturer', 'product_form', 'inventory_unit',
 ] as const satisfies ReadonlyArray<keyof Product>;
 

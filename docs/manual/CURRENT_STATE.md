@@ -284,6 +284,17 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **2026-11-03 02:16 UTC (9:16 PM Central, 2026-11-02; email record and content checks live, PR #1302):** the
+  `send-email` Edge Function was deployed live as v21 (was v20) on Mason's in-chat approval ("yes deploy it"),
+  with `supabase functions deploy send-email --use-api` from main `aeeff4880`. ACTIVE with JWT checking on;
+  the six deployed files (`index.ts` and `_shared/` cors, auth, sentry, purchaseOrderEmailGate,
+  emailContentGate) match main byte for byte (read back through the Supabase connector). Each email must now
+  name a record that belongs to its customer, carry only the app's own links and map images, and use a
+  retry key scoped to that record. Caller path exercised on croprxsolutions.app: a signed-out call got 401,
+  a two-line subject was refused with 400, and Email PO Copy on PO-2026-0030 sent one email whose
+  `email_log` row is `sent` under a record-scoped key; Mason confirmed it arrived. Quote, invoice,
+  delivery and job-notice sends had not run on v21 at the time of writing. Invoice email wording, amount
+  and PDF still come from the app screen (KI-97). The rollback is redeploying v20.
 - **2026-10-27 (purchase order copy email live, To-Do 0.15):** the `send-email` Edge Function was
   deployed live as v20 (was v19) on Mason's in-chat approval ("yes, deploy send-email"), from main
   `14761c400`, after migration row 995 (`purchase_order` email type) was applied and PRs #1114 and #1147

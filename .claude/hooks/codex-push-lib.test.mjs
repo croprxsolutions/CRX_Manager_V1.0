@@ -117,6 +117,9 @@ for (const command of [
   "git -C rel push origin x; cd C:/c",
   // Luna final review, 2026-11-03.
   "cd && git push origin main",
+  "cd - && git push origin feature",
+  "CDPATH=C:/p; cd crx && git push origin feature",
+  "cd crx && git push origin feature",
   "cd; git push origin main",
   "git push origin main; popd",
   ...(process.platform === "win32" ? ["pushd D:\\other && git -C \\repo push origin x"] : []),

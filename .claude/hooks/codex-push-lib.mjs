@@ -423,7 +423,12 @@ export function leadingCdFolder(fullCmd) {
   if (!head) return null;
   if (DIRECTORY_CHANGE_RE.test(text.slice(assign.length + head[0].length))) return null;
   const folder = head[4] ? folderVariableValue(text, head[4]) : head[1] ?? head[2] ?? head[3];
-  return folder ? folder : null;
+  // Absolute only: bash looks a relative folder up through CDPATH, and `cd -`
+  // goes to $OLDPWD (Luna, 2026-11-03).
+  if (!folder || folder.startsWith("-")) return null;
+  const native = nativeFolder(folder);
+  const absolute = process.platform === "win32" ? /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(native) : path.isAbsolute(native);
+  return absolute ? folder : null;
 }
 
 // True when every push in the command names its folder with an absolute `-C`

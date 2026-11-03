@@ -7,6 +7,6 @@ schema; every `scripts/smoke/prove-*` that decodes the baseline passes it, and t
 in-loop stop-gaps are gone. Without the flag the output is byte-identical (manifest hash unchanged), so a
 real restore is unaffected. Never pass it on a real restore.
 
-**Live ledger read (for the CURRENT_STATE and KNOWN_ISSUES stamps):** read-only `schema_migrations` read
+**Live ledger read:** read-only `schema_migrations` read
 2026-11-03 06:06 UTC. All 12 migration files stamped 20261102–20261103 on `main` are applied, the last being
 `20261103210000_product_use_timings` (version `20261103052726`). No file from those two days is unapplied.

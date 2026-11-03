@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NAME = `crx-unit-backfill-${process.pid}-${Date.now().toString(36)}`;
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
+let started = false;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
@@ -123,6 +124,7 @@ function installLiveAuthUid() {
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
 }
 function buildContainer() {
+  started = true; // set first: a failed run still may have created the container
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   ready();
   wait(1500);
@@ -219,7 +221,7 @@ function seedProducts() {
 }
 
 // One hash of every public table except products and its change history, plus every product
-// column except unit_size, so "nothing else changed" is checked byte for byte.
+// column except unit_size and updated_at, so "nothing else changed" is checked byte for byte.
 function fingerprint() {
   return scalar(`DO $fp$ DECLARE t text; h text := ''; x text; BEGIN
     FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
@@ -227,7 +229,7 @@ function fingerprint() {
       EXECUTE format('SELECT COALESCE(md5(string_agg(md5(r::text), '''' ORDER BY md5(r::text))), ''-'') FROM public.%I r', t) INTO x;
       h := md5(h || t || x);
     END LOOP;
-    SELECT md5(string_agg(md5((to_jsonb(p) - 'unit_size')::text), '' ORDER BY p.id)) INTO x FROM public.products p;
+    SELECT md5(string_agg(md5((to_jsonb(p) - 'unit_size' - 'updated_at')::text), '' ORDER BY p.id)) INTO x FROM public.products p;
     PERFORM set_config('crx.fp', md5(h || x), false);
   END $fp$; SELECT current_setting('crx.fp');`);
 }
@@ -254,7 +256,10 @@ try {
   assert.equal(fresh.status, 0, `fresh apply failed:\n${fresh.output}`);
   assert.match(fresh.output, /none of the approved products exist here/);
   assert.equal(historyRows(), '0');
-  console.log('[prover] FRESH: no approved products, nothing changed');
+  assert.equal(scalar("SELECT tgenabled::text FROM pg_trigger WHERE tgname = 'trg_keep_product_unit' AND tgrelid = 'public.products'::regclass;"), 'O');
+  console.log('[prover] FRESH: no approved products, nothing changed; the guard installs');
+  // Back to the pre-candidate schema so the real apply below runs on the same base as live.
+  psql('DROP TRIGGER trg_keep_product_unit ON public.products; DROP FUNCTION public.guard_product_unit_matches_inventory_unit();');
 
   seedProducts();
   const before = { units: units(), fp: fingerprint() };
@@ -291,13 +296,30 @@ try {
   assert.equal(scalar(`SELECT string_agg(COALESCE(old_value, '<blank>') || '>' || new_value, ',' ORDER BY new_value, old_value)
     FROM public.product_change_history WHERE field_name = 'unit_size' AND product_id IN (${IDS});`),
   '<blank>>Gal,<blank>>Gal,<blank>>Gal,<blank>>Gal,<blank>>Gal,<blank>>Gal,<blank>>Gal,LB>Lb,<blank>>MG');
+  assert.equal(scalar(`SELECT count(*) FROM public.products WHERE id IN (${IDS}) AND updated_at > now() - interval '5 minutes';`), '9');
   console.log('[prover] APPLY: nine Units set; prices, versions, lines and other tables byte-identical; nine history rows');
+
+  // 5. Stale product page: re-sending the old blank (or old spelling) with another edit is refused;
+  //    a save that keeps the Unit, and the first fix of an unmatched Unit, still go through.
+  const save = (id, unit) => psql(`UPDATE public.products SET unit_size = ${q(unit)}, notes = 'stale page save' WHERE id = '${id}';`, { allowFailure: true });
+  for (const [id, old] of [[BLANK1, ''], [LB, 'LB'], [BLANK1, null]]) {
+    const r = save(id, old);
+    assert.notEqual(r.status, 0, `a stale save wrote ${old} back`);
+    assert.match(`${r.stdout}
+${r.stderr}`, /PRODUCT_UNIT_STALE/);
+  }
+  assert.equal(save(BLANK1, 'Gal').status, 0, 'a save keeping the Unit was refused');
+  assert.equal(save(BYSTANDER, '').status, 0, 'an unmatched product could not be saved');
+  assert.equal(save(BYSTANDER, 'Gal').status, 0, 'an unmatched Unit could not be fixed');
+  assert.notEqual(save(BYSTANDER, '').status, 0, 'a fixed Unit could be blanked');
+  assert.equal(scalar("SELECT has_function_privilege('authenticated', 'public.guard_product_unit_matches_inventory_unit()', 'EXECUTE');"), 'f');
+  console.log('[prover] GUARD: stale saves refused; same-Unit saves and first fixes allowed; no API role can call it');
 
   const after = { units: units(), fp: fingerprint() };
   refused('reapply', candidate, /PRODUCT_UNIT_BACKFILL_DRIFT: 9 of 9 approved products present, 0 still held/, after);
   console.log('[prover] RE-APPLY: refused, nothing changed');
   console.log('PRODUCT_UNIT_BACKFILL_PROOF_PASS');
 } finally {
-  if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true });
+  if (!KEEP && started) docker(['rm', '-f', NAME], { allowFailure: true });
   else console.log(`[prover] kept container ${NAME}`);
 }

@@ -1,8 +1,9 @@
 -- Written 2026-11-03. STATUS: NOT APPLIED.
 -- DATA (WP-PM-6a): sets products.unit_size to the product's inventory_unit on the nine rows the
 -- owner approved one by one on 2026-11-03 (private review list): one 'LB' spelled 'Lb' to match,
--- and eight stored as '' (empty text). Rows are named by id only; no other row, column, grant or
--- function changes.
+-- and eight stored as '' (empty text), and stamps their updated_at. Rows are named by id only.
+-- It also adds one trigger (below) so a Unit that matches its inventory unit cannot be changed
+-- on its own. No other row, column, grant or function changes.
 -- Order, quote, job, invoice, delivery and PO lines keep their own stored unit and amounts; no
 -- trigger copies a product's unit into them. The per-acre prices read inventory_unit first, so
 -- they and pricing_version must stay unchanged; the statement below refuses if they move.
@@ -38,7 +39,7 @@ BEGIN
   ),
   changed AS (
     UPDATE public.products p
-       SET unit_size = a.new_unit
+       SET unit_size = a.new_unit, updated_at = now()
       FROM approved a
      WHERE p.id = a.id
        AND p.unit_size = a.old_unit
@@ -66,3 +67,25 @@ BEGIN
   END IF;
 END;
 $unit_backfill$;
+
+-- Keep a matching Unit matching. The product page re-sends the stored Unit on every save and
+-- checks only pricing_version, so a page opened before this file would write the old blank back.
+-- No screen edits the Unit and no database function writes it, so once it equals the inventory
+-- unit it may change only in the same update that changes the inventory unit.
+CREATE FUNCTION public.guard_product_unit_matches_inventory_unit() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $function$
+BEGIN
+  IF OLD.unit_size = OLD.inventory_unit
+     AND NEW.unit_size IS DISTINCT FROM OLD.unit_size
+     AND NEW.inventory_unit IS NOT DISTINCT FROM OLD.inventory_unit THEN
+    RAISE EXCEPTION 'PRODUCT_UNIT_STALE: this product''s Unit was updated; reload the page and save again'
+      USING ERRCODE = '22023';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public.guard_product_unit_matches_inventory_unit() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_product_unit_matches_inventory_unit()
+  FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+CREATE TRIGGER trg_keep_product_unit BEFORE UPDATE OF unit_size, inventory_unit ON public.products
+  FOR EACH ROW EXECUTE FUNCTION public.guard_product_unit_matches_inventory_unit();

@@ -297,7 +297,10 @@ try {
         writeFileSync(path.join(foreign, ".husky", name), "#!/usr/bin/env sh\n# CRX_OWN_HOOK hand-off\n");
       }
       assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "a marker without the hand-off code is not a hand-off");
-      for (const name of HAND_OFF_HOOKS) writeFileSync(path.join(foreign, ".husky", name), `${hookHandOff(name)}exit 1\n`);
+      for (const name of HAND_OFF_HOOKS) {
+        writeFileSync(path.join(foreign, ".husky", name), `${hookHandOff(name)}exit 1\n`);
+        chmodSync(path.join(foreign, ".husky", name), 0o755);
+      }
       const handsOff = checkGitHooksInstalled(hooksRepo);
       assert.equal(handsOff.status, "PASS", "hooks that hand off to this worktree's copy are safe");
       assert.match(handsOff.note, /hands off/);
@@ -310,6 +313,7 @@ try {
       rmSync(path.join(foreign, ".husky/commit-msg"));
       assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "every hook, commit-msg included, must hand off");
       writeFileSync(path.join(foreign, ".husky/commit-msg"), hookHandOff("commit-msg"));
+      chmodSync(path.join(foreign, ".husky/commit-msg"), 0o755);
       rmSync(path.join(hooksRepo, ".husky/pre-push"));
       assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "hand-off needs this worktree's own hooks");
       writeHook(path.join(hooksRepo, ".husky"), "pre-push");

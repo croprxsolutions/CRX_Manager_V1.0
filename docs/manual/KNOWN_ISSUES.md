@@ -311,13 +311,18 @@ local replay's screen (a new line added after its product's cost rose shows the 
 ---
 
 ### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
-**MED · OPEN (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · unassigned**
-`get_ar_aging` (`supabase/migrations/20260805151605_fix_historical_ar_report_cutoffs.sql` ~L147) checks every
-customer before returning rows; one customer whose balance cannot be rebuilt as of the chosen past date raises an
-error and the whole report returns nothing. `allocate_payment` also accepts a future `p_payment_date` outside closed
-periods, which can trip the same later-activity test and block even a current report. The refusal itself is
-deliberate (it stops invented historical balances), so the fix is not to suppress it: report that customer as
-"cannot be shown as of this date" while returning the rest, and refuse future-dated payments.
+**MED · PARTLY FIXED (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (KI-95 PR); payment half: open, KI-19 lane**
+**Report half — fixed by `20261103150000_ar_aging_flags_unrebuildable_customers`** (live status: its
+`docs/reference/migrations.d/` record). `get_ar_aging` still refuses to rebuild a customer whose later activity makes
+the chosen date unknowable, but now returns everyone else and lists that customer with no amounts and an
+`unavailable_reason`; the AR Aging tab shows them in a warning ("cannot be shown as of this date") and its totals say
+they are excluded. Proof: `scripts/smoke/prove-ar-aging-flags-unrebuildable-real-schema.mjs`. Still not covered: a
+rare `HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE` (two posting events with the same audit timestamp) is raised
+outside the per-customer check and still fails the whole report; `get_customer_balance_listing` keeps the
+fail-for-everyone behaviour.
+**Payment half — OPEN, left for the KI-19 month-lock lane (KI-10 retry keys also redefine it):** `allocate_payment`
+accepts a future `p_payment_date` outside closed periods, which trips the same later-activity test (that customer
+now shows as "cannot be shown" even on a current-date report). Fix there: refuse future-dated payments.
 
 ---
 

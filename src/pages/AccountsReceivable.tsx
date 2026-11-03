@@ -40,6 +40,8 @@ export default function AccountsReceivable() {
   const [owed, setOwed] = useState<number | null>(null);
   const [prepay, setPrepay] = useState<number>(0);
   const [openCredit, setOpenCredit] = useState<number>(0);
+  // Customers get_ar_aging could not rebuild for today (KI-95): left out of Total Owed, and said so.
+  const [owedExcluded, setOwedExcluded] = useState(0);
   // The strip's last read failed: it says so instead of silently disappearing.
   const [summaryFailed, setSummaryFailed] = useState(false);
   // Bumped by Try again to read the strip once more.
@@ -56,15 +58,16 @@ export default function AccountsReceivable() {
         // which would drop customers, credits or memos from these totals silently.
         // Any failed read throws, so the whole strip is hidden (catch sets
         // owed=null) rather than showing a wrong number (Codex P2).
-        const { data: arData, error: arErr } = await fetchAllRows<{ customer_id: string; total_outstanding?: number }>((from, to) => pageWithList(supabase
+        const { data: arData, error: arErr } = await fetchAllRows<{ customer_id: string; total_outstanding?: number; unavailable_reason?: string | null }>((from, to) => pageWithList(supabase
           .rpc('get_ar_aging', { p_as_of_date: today }, { count: 'exact' })
           // The function's own order (largest balance first), then the unique customer id.
           .order('total_outstanding', { ascending: false })
           .order('customer_id')
           .range(from, to)));
         if (arErr) throw arErr;
-        const arRows = assertRpcResult<Array<{ total_outstanding?: number }>>(arData, 'get_ar_aging');
+        const arRows = assertRpcResult<Array<{ total_outstanding?: number; unavailable_reason?: string | null }>>(arData, 'get_ar_aging');
         const owedSum = (arRows || []).reduce((s, r) => s + Number(r.total_outstanding || 0), 0);
+        const excluded = (arRows || []).filter((r) => r.unavailable_reason).length;
         const { data: prepayRows, error: prepayErr } = await fetchAllRows<{ id: string; balance_cents: number | null }>((from, to) => pageWithList(supabase
           .from('prepay_credits')
           .select('id, balance_cents', { count: 'exact' })
@@ -87,6 +90,7 @@ export default function AccountsReceivable() {
         const creditSum = (creditRows || []).reduce((s, r) => s + -Number(r.balance_cents ?? 0), 0) / 100;
         if (!cancelled) {
           setOwed(owedSum);
+          setOwedExcluded(excluded);
           setPrepay(prepaySum);
           setOpenCredit(creditSum);
         }
@@ -102,7 +106,8 @@ export default function AccountsReceivable() {
     };
   }, [summaryAttempt]);
 
-  const net = owed !== null ? owed - prepay - openCredit : null;
+  // A Total Owed that leaves customers out cannot give a true net position (KI-95).
+  const net = owed !== null && owedExcluded === 0 ? owed - prepay - openCredit : null;
 
   return (
     <div className="space-y-4">
@@ -130,6 +135,11 @@ export default function AccountsReceivable() {
               {formatUSD(owed)}
             </p>
             <p className="text-xs text-secondary mt-1">outstanding on open invoices</p>
+            {owedExcluded > 0 && (
+              <p className="text-xs text-amber-700 mt-1">
+                Excludes {owedExcluded} customer{owedExcluded === 1 ? '' : 's'} that can't be shown for today — see the Aging tab
+              </p>
+            )}
           </Card>
           <Card>
             <p className="text-[11px] font-medium text-secondary uppercase tracking-wide">Unused Prepay</p>
@@ -143,10 +153,19 @@ export default function AccountsReceivable() {
           </Card>
           <Card>
             <p className="text-[11px] font-medium text-secondary uppercase tracking-wide">Net Position</p>
-            <p className={`text-2xl font-semibold font-heading mt-1 ${(net ?? 0) > 0 ? 'text-red-600' : 'text-crx-green'}`}>
-              {formatUSD(net ?? 0)}
-            </p>
-            <p className="text-xs text-secondary mt-1">true exposure = owed minus unused prepay & credit</p>
+            {net === null ? (
+              <>
+                <p className="text-2xl font-semibold font-heading mt-1 text-secondary">Not available</p>
+                <p className="text-xs text-amber-700 mt-1">Total Owed leaves out {owedExcluded} customer{owedExcluded === 1 ? '' : 's'}, so the net can't be worked out</p>
+              </>
+            ) : (
+              <>
+                <p className={`text-2xl font-semibold font-heading mt-1 ${net > 0 ? 'text-red-600' : 'text-crx-green'}`}>
+                  {formatUSD(net)}
+                </p>
+                <p className="text-xs text-secondary mt-1">true exposure = owed minus unused prepay & credit</p>
+              </>
+            )}
           </Card>
         </div>
       )}

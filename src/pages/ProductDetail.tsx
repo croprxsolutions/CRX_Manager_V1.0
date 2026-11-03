@@ -1159,10 +1159,7 @@ export default function ProductDetail() {
                     {timingLoadFailed ? (
                       <>
                         <p className="px-2 text-sm text-secondary">Use timings could not be loaded. Refresh before changing them.</p>
-                        <p className="px-2 text-sm text-nav-dark">{(product.use_timings ?? []).length > 0
-                          && (product.use_timings ?? []).every((code) => timingOptions.some((option) => option.code === code))
-                          ? (product.use_timings ?? []).map((code) => timingOptions.find((option) => option.code === code)!.label).join('; ')
-                          : product.use_timing || 'No saved use timings'}</p>
+                        <p className="px-2 text-sm text-nav-dark">{product.use_timing || 'No saved use timings'}</p>
                       </>
                     ) : visibleProductUseTimingOptions(timingOptions, product.category, product.use_timings ?? []).map((option) => (
                       <label key={option.code} className={`flex min-h-9 items-center gap-2 rounded px-2 text-sm text-nav-dark ${isAdmin && !pricingReloadRequired && !(isNew && saving) ? 'hover:bg-gray-50' : ''}`}>

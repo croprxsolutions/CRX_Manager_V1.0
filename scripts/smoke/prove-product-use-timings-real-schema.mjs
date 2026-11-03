@@ -197,6 +197,11 @@ try {
   const historyBefore = scalar("SELECT count(*) FROM public.product_change_history WHERE product_id IN (SELECT id FROM public.products WHERE product_name LIKE 'PM5 %');");
   const versionBefore = scalar("SELECT sum(pricing_version) FROM public.products WHERE product_name LIKE 'PM5 %';");
   stageText('candidate.sql', lf(CANDIDATE));
+  stageText('null-category.sql', "INSERT INTO public.products(product_name, category, use_timing) VALUES ('PM5 Null Category', NULL, 'Foliar');\n\\i /tmp/candidate.sql\n");
+  const nullCategoryCandidate = apply('null-category.sql');
+  assert.notEqual(nullCategoryCandidate.status, 0, 'candidate accepted a timed product with NULL category');
+  assert.match(nullCategoryCandidate.output, /PREFLIGHT_PRODUCT_USE_TIMING_UNKNOWN_OR_CATEGORY/);
+  assert.equal(scalar("SELECT count(*) FROM public.products WHERE product_name = 'PM5 Null Category';"), '0');
   const candidate = apply('candidate.sql');
   assert.equal(candidate.status, 0, candidate.output);
   console.log(`[prover] BEFORE row triggers: ${scalar("SELECT string_agg(tgname::text, ', ' ORDER BY tgname) FROM pg_trigger WHERE tgrelid = 'public.products'::regclass AND NOT tgisinternal AND tgenabled = 'O' AND (tgtype & 3) = 3;")}`);

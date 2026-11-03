@@ -19,10 +19,10 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_USE_TIMINGS_ALREADY_EXISTS';
   END IF;
   SELECT id, use_timing, category INTO v_bad FROM public.products
-  WHERE use_timing IS NOT NULL AND NOT (
+  WHERE use_timing IS NOT NULL AND NOT COALESCE((
     (category = 'Herbicide' AND use_timing IN
       ('Post-Emergence','Pre-Emerge Soybean','Pre-Emerge Corn','Range/Pasture/Turf','Volunteer Corn'))
-    OR (category = 'Foliar Fertilizer' AND use_timing = 'Foliar')) LIMIT 1;
+    OR (category = 'Foliar Fertilizer' AND use_timing = 'Foliar')), false) LIMIT 1;
   IF FOUND THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_USE_TIMING_UNKNOWN_OR_CATEGORY: product %', v_bad.id;
   END IF;

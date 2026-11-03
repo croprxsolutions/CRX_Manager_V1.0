@@ -57,7 +57,8 @@ const statement = {
 describe('emailContentProblem accepts every email the app builds', () => {
   const payloads = [
     buildInvoiceEmailPayload({ customerEmail: 'a@b.test', customerId: 'c1', invoiceId: 'i1', invoiceNumber: 'INV-1',
-      invoiceDate: '2026-11-02', balanceCents: 12_345, attachmentBase64: 'JVBERi0x' }),
+      invoiceDate: '2026-11-02', balanceCents: 12_345, attachmentBase64: 'JVBERi0x',
+      snapshot: { invoice_number: 'INV-1', total_amount_cents: 12_345, paid_amount_cents: 0, prepay_applied_cents: 0, balance_cents: 12_345, lines_total_cents: 12_345 } }),
     buildPurchaseOrderEmailPayload({ vendorName: 'Spinner <Ag>', purchaseOrderId: 'po-1', poNumber: 'PO-1',
       expectedDeliveryDate: '11/3/2026', attachmentBase64: 'JVBERi0x', attachmentFilename: 'Purchase-Order-PO-1.pdf',
       idempotencyKey: 'k', snapshot: { po_number: 'PO-1', vendor: null, submitted_date: null, expected_delivery_date: null, notes: null, lines: [] } }),

@@ -7,8 +7,9 @@
 --   * a vendor-only preferred link for the two products with no vendor text that Mason assigned by
 --     hand (product and vendor ids below; names stay in his private review list);
 --   * "preferred" on each product's single confirmed link where none is preferred yet.
---   * the vendor text of those two hand-assigned products, which is blank, becomes the vendor's
---     name, so every active product's vendor text matches its preferred vendor.
+--   * the vendor text of every planned product that is not already exactly its vendor's name
+--     becomes that name (live: only the two blank hand-assigned products), so every active
+--     product's vendor text equals its preferred vendor's name, as 20261105110000 requires.
 -- It changes no other products.vendor text, no other link, no vendor and no price.
 --
 -- Bound to the approved list: the plan below, with each product's current vendor text and the id
@@ -38,9 +39,10 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'DATA11_APPROVER_NOT_ACTIVE_ADMIN';
   END IF;
-  -- Serialize with every link and product writer for the length of the step.
-  LOCK TABLE public.product_supplier_links IN SHARE ROW EXCLUSIVE MODE;
+  -- Serialize with every link and product writer for the length of the step, products first as
+  -- link writers lock the product before the link, so the two cannot deadlock.
   LOCK TABLE public.products IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE public.product_supplier_links IN SHARE ROW EXCLUSIVE MODE;
   -- The names the plan resolves through stay put until it is written.
   LOCK TABLE public.vendors, public.vendor_aliases, public.legacy_vendor_resolution IN SHARE MODE;
 
@@ -134,15 +136,14 @@ BEGIN
     AND NOT l.is_preferred;
   GET DIAGNOSTICS v_updated = ROW_COUNT;
 
-  -- Only the hand-assigned products, and only while their vendor text is still blank.
+  -- The vendor text becomes the vendor's exact name; the fingerprint bound which texts these are.
   UPDATE public.products p
   SET vendor = v.name, updated_at = now()
   FROM data11_plan d
   JOIN public.vendors v ON v.id = d.vendor_id
   WHERE d.product_id = p.id
-    AND d.action = 'link'
-    AND d.product_id IN ('1a3c082a-1603-4eff-a4db-316af555ff87', '4983d7c2-45cc-4acd-b915-45e92184c563')
-    AND NULLIF(btrim(p.vendor), '') IS NULL;
+    AND d.action IN ('link', 'prefer')
+    AND p.vendor IS DISTINCT FROM v.name;
   GET DIAGNOSTICS v_named = ROW_COUNT;
 
   IF v_inserted <> 586 OR v_updated <> 10 OR v_named <> 2 THEN
@@ -158,6 +159,16 @@ BEGIN
          WHERE l.product_id = p.id AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred) <> 1;
   IF v_bad <> 0 THEN
     RAISE EXCEPTION 'DATA11_PREFERRED_INVARIANT: % active products without exactly one preferred link', v_bad;
+  END IF;
+  -- ...and shows that vendor's exact name.
+  SELECT count(*) INTO v_bad
+  FROM public.products p
+  JOIN public.product_supplier_links l
+    ON l.product_id = p.id AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred
+  JOIN public.vendors v ON v.id = l.vendor_id
+  WHERE p.is_active AND p.vendor IS DISTINCT FROM v.name;
+  IF v_bad <> 0 THEN
+    RAISE EXCEPTION 'DATA11_VENDOR_TEXT_INVARIANT: % active products show a name other than their preferred vendor', v_bad;
   END IF;
 END
 $data11$;

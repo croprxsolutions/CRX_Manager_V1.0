@@ -115,6 +115,11 @@ for (const command of [
   "echo; cd C:/a && git push origin main",
   "cd C:/a && pushd C:/b && git push origin main",
   "git -C rel push origin x; cd C:/c",
+  // Luna final review, 2026-11-03.
+  "cd && git push origin main",
+  "cd; git push origin main",
+  "git push origin main; popd",
+  ...(process.platform === "win32" ? ["pushd D:\\other && git -C \\repo push origin x"] : []),
   "cd C:/a && GIT_DIR=C:/b/.git git push origin main",
 ]) assert.equal(pushContextIsAmbiguous(command), true, command);
 assert.equal(pushContextIsAmbiguous("Set-Location C:/other; git.exe push origin main"), true);

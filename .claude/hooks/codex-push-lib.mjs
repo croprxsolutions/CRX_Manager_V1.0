@@ -401,7 +401,8 @@ export function nativeFolder(folder, platform = process.platform) {
   return text.replace(/^\/([A-Za-z])(\/|$)/, (_, drive) => `${drive.toUpperCase()}:/`);
 }
 
-const DIRECTORY_CHANGE_RE = /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|pushd|popd|set-location|pop-location)\s+/i;
+// A bare `cd`/`popd` (no folder; `cd && git push` goes home) counts too (Luna, 2026-11-03).
+const DIRECTORY_CHANGE_RE = /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|pushd|popd|set-location|pop-location)(?:\s+|(?=[;&|)]|$))/i;
 // `cd <literal> && …` (or `;` / a newline) as the command's FIRST statement, with
 // no other directory change anywhere after it: every later git runs in that one
 // folder, so a push there can be bound to it (2026-11-03: about half of 43
@@ -436,7 +437,11 @@ export function everyPushHasAbsoluteFolder(fullCmd) {
     if (!first) return false;
     const name = first.match(/^(?:"\$(\w+)"|"\$\{(\w+)\}"|\$(\w+)|\$\{(\w+)\})$/)?.slice(1).find(Boolean);
     const folder = name ? folderVariableValue(fullCmd, name) : (/[$`]/.test(first) ? null : unquoteShellArg(first));
-    return folder !== null && path.isAbsolute(nativeFolder(folder));
+    if (folder === null) return false;
+    // On Windows `\repo` is absolute only on the CURRENT drive, which a `cd` can
+    // change (Luna, 2026-11-03): require a drive letter or a network path.
+    const native = nativeFolder(folder);
+    return process.platform === "win32" ? /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(native) : path.isAbsolute(native);
   });
 }
 

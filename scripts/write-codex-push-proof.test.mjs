@@ -23,6 +23,7 @@ import {
   evaluateSolPreflight,
   cleanMainMergeParent,
   readSolPreflightFacts,
+  solReviewBase,
   openPullsAtHead,
   headPushedAt,
   parseGithubSlug,
@@ -1093,6 +1094,8 @@ assert.equal(
       "run() takes the mint decision from reviewProofBase",
     );
     assert.ok(runBody.includes("headSha: headAfter, baseSha: proofBase, verdict"), "run() mints with the base reviewProofBase chose");
+    assert.ok(runBody.includes("const baseBefore = solReviewBase(root, headBefore, "), "run() reviews against solReviewBase, not the raw shared origin/main");
+    assert.ok(runBody.includes("baseRef: baseBefore,"), "run() builds the review packet from that same base");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1430,6 +1433,29 @@ function collisionPromptSkipsWork(prompt) {
       assert.equal(readSolPreflightFacts(repo, branchHead, movedMain).headContainsBase, false, "preflight: real git sees the head lacks the moved main");
       assert.equal(readSolPreflightFacts(repo, movedMain, branchHead).headContainsBase, true, "preflight: real git sees a head that contains its base");
       assert.equal(readSolPreflightFacts(repo, branchHead, "").headContainsBase, null, "preflight: no base sha is unreadable");
+      // A peer worktree's fetch moves origin/main past a branch that was current
+      // (2026-11-02): Sol reviews against the fork point instead of refusing.
+      {
+        git("checkout", "-q", "-b", "peer-fetch", branchHead);
+        writeFileSync(path.join(repo, "feature.txt"), "feature\n");
+        git("add", ".");
+        git("commit", "-qm", "feature");
+        const featureHead = git("rev-parse", "HEAD");
+        assert.equal(solReviewBase(repo, featureHead, movedMain), branchHead, "review base: a head behind origin/main is reviewed from where it left main");
+        assert.equal(readSolPreflightFacts(repo, featureHead, solReviewBase(repo, featureHead, movedMain)).headContainsBase, true, "review base: so the pre-flight no longer refuses it");
+        assert.equal(solReviewBase(repo, movedMain, movedMain), movedMain, "review base: a head containing origin/main keeps it");
+        assert.equal(solReviewBase(repo, featureHead, ""), "", "review base: an unusable main sha is passed through to refuse");
+        mkdirSync(path.join(repo, "supabase", "migrations"), { recursive: true });
+        writeFileSync(path.join(repo, "supabase", "migrations", "20990101000000_x.sql"), "select 1;\n");
+        git("add", ".");
+        git("commit", "-qm", "migration");
+        assert.equal(solReviewBase(repo, git("rev-parse", "HEAD"), movedMain), movedMain, "review base: a migration branch keeps origin/main, so it still must merge main first");
+        // The proof the fork-point review mints passes the merge gate's base check.
+        const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
+        const forkProof = { codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: branchHead, timestamp: new Date().toISOString() };
+        assert.ok(proofValidForMerge({ data: forkProof, headSha: featureHead, nowMs: Date.now(), baseSha: movedMain, isAncestor }), "review base: the merge gate accepts a proof bound to the fork point");
+        git("checkout", "-q", "main");
+      }
       // The clean-merge exception refuses a criss-cross too (Luna MED). Branch commit B0 is
       // dated later than main's Mc, so plain merge-base picks B0 and the branch's deletion of
       // Mc's file would look like no shared change.
@@ -1459,6 +1485,7 @@ function collisionPromptSkipsWork(prompt) {
         assert.equal(git("merge-base", branchTip, mainTip), b0, "criss-cross fixture: plain merge-base picks the later-dated B0");
         at("2026-01-08T00:00:00Z", "merge", "-q", "--no-edit", mainTip);
         assert.equal(cleanMainMergeParent(repo, git("rev-parse", "HEAD"), mainTip), null, "clean merge: a criss-cross merge is not treated as clean");
+        assert.equal(solReviewBase(repo, branchTip, mainTip), mainTip, "review base: several split points keep origin/main, so the pre-flight refuses");
         git("checkout", "-q", "main");
         git("update-ref", "refs/remotes/origin/main", movedMain);
         git("checkout", "-q", "main");

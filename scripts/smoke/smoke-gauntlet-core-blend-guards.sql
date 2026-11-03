@@ -46,7 +46,8 @@ DECLARE
   v_ocr_queue_id uuid;
   v_ocr_lease uuid := gen_random_uuid();
   v_key_prefix text := 'gauntlet-' || gen_random_uuid()::text;
-  v_location text := '[E2E] gauntlet ' || gen_random_uuid()::text;
+  -- Receiving accepts only Main Warehouse until stock transfers exist (KI-85, 20261102220000).
+  v_location text := 'Main Warehouse';
   v_result jsonb;
   v_replay jsonb;
   v_order_id uuid;

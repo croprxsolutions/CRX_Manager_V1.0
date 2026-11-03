@@ -81,11 +81,10 @@ ok(checkDangerousCommand('docker exec c psql -c "TRUNCATE t"'), "docker exec psq
 ok(checkDangerousCommand("cat <<'SQL' | psql\nDROP TABLE customers;\nSQL"), "cat piped into psql with DROP TABLE still blocked");
 ok(checkDangerousCommand('grep -l "DROP TABLE" f | xargs cat | psql'), "readers feeding psql still blocked");
 ok(checkDangerousCommand(`grep "$(psql -c 'DROP SCHEMA x')" f`), "a client run from a reader's command substitution still blocked");
-// P4 (2026-11-03): only a plain `git grep` / `git log` search counts as a reader;
-// a real refusal from 11/3 was `git grep -ln "TRUNCATE"` beside `git grep "pgcli\|psql"`.
-ok(!checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git grep is a reader when grep follows git directly");
-ok(!checkDangerousCommand(`git grep -ln "TRUNCATE" -- '.claude/hooks/*.test.mjs'; git grep -n "pgcli\\|psql\\|git log -c" -- '*.test.mjs' | head`), "git grep for TRUNCATE and psql allowed");
-ok(!checkDangerousCommand('git log -c --grep "psql TRUNCATE" -- supabase'), "git log -c naming psql and TRUNCATE allowed");
+ok(checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git stays a non-reader");
+// 2026-11-03: a git grep/log exemption (P4) was tried and dropped — a pager set
+// in git's config can run a program the command text never names. These pin
+// that every real SQL route stays refused.
 ok(checkDangerousCommand('git commit -q -m "stop refusing psql -c TRUNCATE in a search"'), "a commit message stays as main treats it (no text skipping)");
 ok(checkDangerousCommand('git -c alias.x="!psql" x "DROP SCHEMA"'), "git with a global option before the subcommand stays a non-reader");
 ok(checkDangerousCommand('git -C . grep "psql" "DROP SCHEMA"'), "git with -C before grep stays a non-reader");
@@ -97,7 +96,7 @@ ok(checkDangerousCommand("psql <<'EOF'\nDROP TABLE customers;\nEOF"), "a here-do
 ok(checkDangerousCommand("python - <<'EOF'\nimport os; os.system('psql -c \"DROP TABLE x\"')\nEOF"), "an interpreter here-document naming psql stays refused");
 ok(checkDangerousCommand('echo "DROP TABLE x;" | psql'), "echo piped into psql stays refused");
 ok(checkDangerousCommand('supabase sql "DROP SCHEMA public"'), "supabase sql DROP SCHEMA stays refused");
-// Real SQL routes stay refused beside the git exemption (Sol on the P4 proposal, 2026-11-03).
+// Real SQL routes stay refused (Sol on the P4 proposal, 2026-11-03).
 for (const [command, label] of [
   ['git grep x; npx psql "$DB" -c "DROP TABLE x"', "npx psql after a git grep"],
   ["git log -1 && bash -c 'psql -c \"DROP TABLE x\"'", "bash -c psql after a git log"],

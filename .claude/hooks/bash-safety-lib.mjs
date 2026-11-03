@@ -356,20 +356,10 @@ export function checkAskCommand(cmd) {
 const DESTRUCTIVE_SQL_RE = /\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i;
 const SQL_CLIENT_RE = /\b(?:psql|pgcli)\b|supabase\s+sql/i;
 const SQL_SAFE_READ_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "ls"]);
-// `git grep` / `git log` search text and never run it (2026-11-03: `git grep
-// TRUNCATE` was refused). Only with the subcommand RIGHT after `git`, so `git -c
-// alias.x=!…` stays a non-reader (Sol, PR #1193); any `-O`/`-o` cluster or
-// `--open-files-in-pager` (runs a pager program) loses the exemption.
-function sqlSegmentInert(segment) {
-  const words = String(segment).trim().split(/\s+/).map((w) => w.replace(/["'`^\\]/g, "").toLowerCase());
-  if (sqlSegmentProgram(segment) !== "git" || (words[1] !== "grep" && words[1] !== "log")) return false;
-  return !words.some((w) => /^-[^-]*o|^--open-files-in-pager|^--ext-diff|^--textconv/i.test(w));
-}
 function sqlSegmentProgram(segment) {
   const word = (String(segment).trim().split(/\s+/)[0] || "").replace(/["'`^\\]/g, "");
   return word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").toLowerCase();
 }
-const sqlReaderHead = (segment) => SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || sqlSegmentInert(segment);
 // Allowlist, not a blocklist: every escape, expansion, comment or quoting quirk
 // bash and PowerShell read differently (`$'…'`, `\"`, `\;`, `<#…#>`, backtick,
 // `$(`, a line break, PowerShell `@args` splatting) was a way to hide a client
@@ -393,8 +383,7 @@ export function checkDestructiveSql(cmd) {
   const text = String(cmd || "");
   if (!DESTRUCTIVE_SQL_RE.test(text)) return null;
   const flagOutsideReader = /(?:^|\s)--?[cf]\s/.test(text) &&
-    text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() && !SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) &&
-      !(sqlSegmentInert(segment) && plainReaderSegment(segment)));
+    text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() && !SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)));
   // A client name counts only outside a known reader, so a `grep "…\|psql"`
   // pattern is a search, not a call (retro on PR #1333). The split follows bash
   // quoting, so the exemption holds only for a plain reader segment that bash
@@ -403,7 +392,7 @@ export function checkDestructiveSql(cmd) {
   const clientOutsideReader = splitShellSegments(text).some((segment) => {
     const unquoted = segment.replace(/["'`^\\]/g, "");
     return (SQL_CLIENT_RE.test(segment) || SQL_CLIENT_RE.test(unquoted)) &&
-      (!sqlReaderHead(segment) || !plainReaderSegment(segment) || /(?:^|\s)--pre\b/.test(unquoted) ||
+      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || !plainReaderSegment(segment) || /(?:^|\s)--pre\b/.test(unquoted) ||
         // rg options that run a program, as read-only-search-lib's rgOptionRunsProgram lists them.
         (sqlSegmentProgram(segment) === "rg" && /(?:^|\s)(?:--(?:hostname-bin|search-zip)\b|-[^-\s]*z)/i.test(unquoted)));
   });

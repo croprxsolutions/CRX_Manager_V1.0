@@ -4,7 +4,8 @@
 // origin/main, every local worktree and every open PR, plus the live high-water when
 // passed. A run on 2026-11-02 re-stamped five times because picked stamps collided with
 // these; each re-stamp after Sol cost a new Sol review. Live access stays with the caller:
-//   SELECT max(version) FROM supabase_migrations.schema_migrations;
+//   select greatest(max(version), (select max(m[1]) from supabase_migrations.schema_migrations s2, regexp_matches(s2.name, '([0-9]{14})', 'g') m)) from supabase_migrations.schema_migrations;
+// (a row's name stamp can sit above every version; see migration-ordering-lib.mjs)
 // Two sessions picking in the same minute get the same stamp; the pre-commit check
 // (check-migration-stamp-collision.mjs) refuses the second once the first file exists, before any Sol.
 import { spawnSync } from "node:child_process";

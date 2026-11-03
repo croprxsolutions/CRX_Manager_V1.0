@@ -24,7 +24,7 @@
 > current HEAD at the start of a run. See `docs/manual/DECISION_LOG.md`, 2026-09-20.
 >
 > **Guard-change round cap (Mason, 2026-11-03).** When the reviewed diff touches `.claude/hooks/` or `.codex/hooks/`,
-> `scripts/luna-review.mjs` allows two completed Luna rounds per branch; the third prints `STOP: third review round
+> `scripts/luna-review.mjs` allows two completed Luna rounds per branch (an advisory `--sol` run is neither stopped nor counted); the third prints `STOP: third review round
 > on a guard change` and exits 1 without calling Codex (count: `crx-luna-guard-rounds.json` in the git common dir,
 > not a proof). Drop the carve-out or hand the decision to Mason.
 >

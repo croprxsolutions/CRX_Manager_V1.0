@@ -379,7 +379,8 @@ export function main(argv = process.argv.slice(2), codexDeps = {}) {
       );
     }
 
-    const rounds = GUARD_DIFF_RE.test(frozen.diff) ? guardRounds(git, rootDir) : null;
+    // Luna rounds only: the advisory Sol escalation is the documented way past the cap.
+    const rounds = !opts.sol && GUARD_DIFF_RE.test(frozen.diff) ? guardRounds(git, rootDir) : null;
     if (rounds && rounds.count >= GUARD_ROUND_LIMIT) {
       console.log("STOP: third review round on a guard change — drop the carve-out or hand the decision to Mason (AGENTS.md stop rule).");
       console.log(`LUNA RESULT: STOPPED after ${rounds.count} guard-change rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);

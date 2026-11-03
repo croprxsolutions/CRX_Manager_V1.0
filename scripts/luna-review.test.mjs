@@ -127,7 +127,7 @@ assert.match(printed.join("\n"), /max_output_tokens/);
 
 // Guard-change round cap: the third Luna round on a branch whose diff touches a hook is a STOP,
 // exits as findings and never reaches Codex. Other branches run as often as asked.
-function lunaRoundsOn(file, counter) {
+function lunaRoundsOn(file, counter, runs = ["luna", "luna", "luna"]) {
   const dir = mkdtempSync(path.join(tmpdir(), "crx-luna-cap-"));
   const git = (...gitArgs) => execFileSync(fixedGitExecutable(), ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.autocrlf=false", ...gitArgs], { cwd: dir, encoding: "utf8" });
   git("init", "-q");
@@ -150,14 +150,14 @@ function lunaRoundsOn(file, counter) {
   process.chdir(dir);
   const exits = [];
   try {
-    for (let round = 0; round < 3; round += 1) {
-      exits.push(main(["--base", base], {
+    for (const run of runs) {
+      exits.push(main(run === "sol" ? ["--base", base, "--sol", "--reason", "test"] : ["--base", base], {
         resolveCodex: () => "codex-stub",
         spawn: (bin, spawnArgs, options) => {
           spawned += 1;
           const tailCanary = /tail canary: (CRXDIFF-[^)\s]+)\) =====\s*$/.exec(options.input)[1];
           writeFileSync(spawnArgs[spawnArgs.indexOf("-o") + 1], `MED x\n${tailCanary}\nLUNA_REVIEW: FINDINGS 1\n`);
-          return { status: 0, stdout: "", stderr: `${banner(LUNA_MODEL)}tokens used\n1\n` };
+          return { status: 0, stdout: "", stderr: `${banner(spawnArgs[spawnArgs.indexOf("-m") + 1])}tokens used\n1\n` };
         },
       }));
     }
@@ -178,6 +178,12 @@ for (const hook of [".claude/hooks/x.mjs", ".codex/hooks/y.mjs"]) {
 const uncapped = lunaRoundsOn("src/a.ts");
 assert.equal(uncapped.spawned, 3);
 assert.doesNotMatch(uncapped.printed, /STOP:/);
+// The cap is for Luna only: an advisory Sol escalation is never stopped and uses up no Luna round.
+for (const runs of [["luna", "luna", "sol"], ["sol", "luna", "luna"]]) {
+  const mixed = lunaRoundsOn(".claude/hooks/x.mjs", undefined, runs);
+  assert.equal(mixed.spawned, 3, runs.join(","));
+  assert.doesNotMatch(mixed.printed, /STOP:/, runs.join(","));
+}
 // A damaged counter fails closed instead of starting the count over.
 for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   const damaged = lunaRoundsOn(".claude/hooks/x.mjs", counter);

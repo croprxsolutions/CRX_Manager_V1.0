@@ -3089,7 +3089,7 @@ try {
   assert.equal(psqlValue("SELECT count(*) FROM public.invoices WHERE invoice_number LIKE 'SMK-RCC-%';"), '0', 'invoice fixture residue remained');
   assert.equal(psqlValue("SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key LIKE 'smk-rcc-%';"), '0', 'receipt residue remained');
   assert.deepEqual([...completedProofs].sort(), [...expectedProofs].sort(), 'proof marker set does not match the mutant and direct-branch proofs that actually completed');
-  const passMarker = wasAlreadyInstalled ? 'RETURN_CREDIT_POSTAPPLY_LIVE_PASS' : 'RETURN_CREDIT_REAL_SCHEMA_PASS';
+  const passMarker = wasAlreadyInstalled ? 'RETURN_CREDIT_POSTAPPLY_BASELINE_REPLAY_PASS' : 'RETURN_CREDIT_REAL_SCHEMA_PASS';
   console.log(`${passMarker} source=baseline-replay-before-report-candidate candidate_migrations=${migrations.length} proofs=${[...completedProofs].join(',')} smoke=SMOKE_PASS_ROLLBACK residue=0`);
 } catch (error) {
   console.error(`RETURN_CREDIT_REAL_SCHEMA_FAIL ${error.stack ?? error.message}`);

@@ -119,7 +119,7 @@ function assertExecutableProofGuards(smokeText: string, proverText: string) {
   expect(proverText).toContain('const at = all.indexOf(REPORT_CANDIDATE);');
   expect(proverText).toContain('const preApplyViolations = psqlValue');
   expect(proverText).toContain("if (preApplyViolations !== '0')");
-  expect(proverText).toContain('RETURN_CREDIT_POSTAPPLY_LIVE_PASS');
+  expect(proverText).toContain('RETURN_CREDIT_POSTAPPLY_BASELINE_REPLAY_PASS');
   expect(proverText).toContain('const FORWARD_COMPATIBILITY_REPLAY = [');
   expect(proverText).toContain("'20260813060000_require_completed_delivery_before_invoice_post.sql'");
   expect(proverText).toContain('for (const migration of FORWARD_COMPATIBILITY_REPLAY)');
@@ -342,7 +342,7 @@ describe('return/credit remediation durable guards', () => {
       'const at = all.indexOf(REPORT_CANDIDATE);',
       'const preApplyViolations = psqlValue',
       "if (preApplyViolations !== '0')",
-      'RETURN_CREDIT_POSTAPPLY_LIVE_PASS',
+      'RETURN_CREDIT_POSTAPPLY_BASELINE_REPLAY_PASS',
       'function forwardReplayState(migration)',
       "assert.notEqual(forwardState, 'drifted'",
       'if (pendingForwardMigrations.length > 0)',

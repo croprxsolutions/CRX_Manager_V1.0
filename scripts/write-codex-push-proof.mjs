@@ -1238,7 +1238,9 @@ export function evaluateSolPreflight({
   // Sol reviews against the local origin/main, a ref every worktree shares, so a
   // peer's fetch can move it past this branch. A clean review of a head that
   // lacks its base can neither merge (GitHub: BEHIND) nor be carried forward, so
-  // it would be paid for again (#1075 paid five times, 2026-10-23).
+  // it would be paid for again (#1075 paid five times, 2026-10-23). The caller
+  // passes solReviewBase(), so this only fires for a migration branch or a
+  // branch with several split points from main.
   if (headContainsBase === false) {
     problems.push(
       "this branch does not contain the latest main this checkout knows about (origin/main). Run " +
@@ -1838,6 +1840,22 @@ export function cleanMainMergeParent(root, headSha, baseSha) {
   return branchHead;
 }
 
+// The commit Sol reviews against: origin/main when HEAD contains it, else the one
+// commit where HEAD left main. origin/main is shared by every worktree, so a peer's
+// fetch moves it past a branch that was current a minute ago (re-merges with no
+// conflict, 2026-11-02). The fork point gives the same origin/main...HEAD diff and a
+// base the head contains, which is all proofValidForMerge needs. A branch adding a
+// migration keeps origin/main: the apply gate wants Sol bound to the PR's exact base.
+// Returns mainSha (so the pre-flight refuses as before) when it cannot tell.
+export function solReviewBase(root, headSha, mainSha) {
+  if (!CARRY_SHA_RE.test(String(headSha || "")) || !CARRY_SHA_RE.test(String(mainSha || ""))) return mainSha;
+  if (gitOk(["merge-base", "--is-ancestor", mainSha, headSha], root)) return mainSha;
+  const forks = runGit(["merge-base", "--all", headSha, mainSha], { cwd: root }).split(/\s+/).filter(Boolean);
+  if (forks.length !== 1 || !CARRY_SHA_RE.test(forks[0])) return mainSha;
+  const migrations = runGit(["diff", "--name-only", forks[0], headSha, "--", "supabase/migrations/"], { cwd: root, fallback: null });
+  return migrations === "" ? forks[0] : mainSha;
+}
+
 // Everything the carry needs from Git, checked. Returns { problem } or the facts.
 function resolveCarry(root, nowMs) {
   const headSha = runGit(["rev-parse", "HEAD"], { cwd: root });
@@ -2147,7 +2165,9 @@ export function run(argv = process.argv.slice(2)) {
     process.stdout.write(`[dry-run] Review base (pinned): ${GUARDED_BASE}\n`);
     process.stdout.write(`[dry-run] Would mint proof at: ${codexPushProofPath(root, "<HEAD>")}\n`);
     const head = runGit(["rev-parse", "HEAD"], { cwd: root });
-    const preflight = solPreflight(root, head, runGit(["rev-parse", GUARDED_BASE], { cwd: root }));
+    const reviewBase = solReviewBase(root, head, runGit(["rev-parse", GUARDED_BASE], { cwd: root }));
+    process.stdout.write(`[dry-run] Review base commit: ${reviewBase}\n`);
+    const preflight = solPreflight(root, head, reviewBase);
     process.stdout.write(
       `[dry-run] Sol pre-flight for ${head.slice(0, 12)}: ${preflight.ok ? "would run" : "would REFUSE"}\n` +
       `${preflightReport(preflight)}\n`,
@@ -2160,7 +2180,7 @@ export function run(argv = process.argv.slice(2)) {
   // session committed / checked out, or edits appeared), the review no longer
   // describes HEAD — revoke, never mint.
   const headBefore = runGit(["rev-parse", "HEAD"], { cwd: root });
-  const baseBefore = runGit(["rev-parse", GUARDED_BASE], { cwd: root });
+  const baseBefore = solReviewBase(root, headBefore, runGit(["rev-parse", GUARDED_BASE], { cwd: root }));
   const cleanBefore = worktreeIsClean(root);
   if (!cleanBefore) {
     process.stderr.write("The push-proof reviewer requires a clean worktree before building its sanitized snapshot.\n");
@@ -2188,7 +2208,7 @@ export function run(argv = process.argv.slice(2)) {
   try {
     reviewWorkspace = createSanitizedReviewWorkspace({
       sourceRoot: root,
-      baseRef: GUARDED_BASE,
+      baseRef: baseBefore,
       candidateRef: headBefore,
     });
     if (reviewWorkspace.baseSha !== baseBefore || reviewWorkspace.headSha !== headBefore) {
@@ -2257,8 +2277,8 @@ export function run(argv = process.argv.slice(2)) {
     );
     if (baseAfter !== proofBase) {
       process.stdout.write(
-        `origin/main moved forward during the review (now ${baseAfter}). The clean review is kept, bound to the base it ` +
-        "started from, so the merge gates accept it. If this head still needs a push, the push gate wants the exact base: " +
+        `origin/main (now ${baseAfter}) is ahead of the base this review was bound to. The clean review is kept, bound to ` +
+        "the base it covered, so the merge gates accept it. If this head still needs a push, the push gate wants the exact base: " +
         "merge origin/main into the branch and run this script with --carry-forward.\n",
       );
     }

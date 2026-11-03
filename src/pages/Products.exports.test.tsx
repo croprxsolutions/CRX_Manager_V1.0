@@ -304,7 +304,7 @@ describe('Products list and exports', () => {
     expect(allColumns.find((column) => column.key === 'is_rup')?.format?.(null, inactiveProduct)).toBe('');
     expect(allColumns.find((column) => column.key === 'is_rup')?.format?.(false, inactiveProduct)).toBe('No');
 
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     const [selectedRows, selectedColumns] = vi.mocked(exportToCSV).mock.calls[1];
     expect(selectedRows.map((row) => row.id)).toEqual([activeProduct.id]);
@@ -321,7 +321,7 @@ describe('Products list and exports', () => {
     expect(price?.format?.(rows[0].price, rows[0])).toBe('$0.00');
     expect(price?.format?.(null, rows[0])).toBe('');
 
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     const [selected, selectedColumns] = vi.mocked(exportToCSV).mock.calls[1];
     expect(selectedColumns.find((column) => column.key === 'tier1_price')?.format?.(selected[0].tier1_price, selected[0])).toBe('');
@@ -359,21 +359,21 @@ describe('Products list and exports', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     expect(vi.mocked(exportToCSV).mock.calls[0][0].map((row) => row.id)).toEqual([inactiveProduct.id]);
-    expect(mocks.toast).toHaveBeenCalledWith('success', 'Exported 1 product(s) to CSV');
+    expect(mocks.toast).toHaveBeenCalledWith('success', 'Exported 1 product(s) to CSV (1 turned-off product(s) left out)');
 
     fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
     await waitFor(() => expect(downloadReportPdf).toHaveBeenCalledTimes(1));
     const [pdf] = vi.mocked(downloadReportPdf).mock.calls[0];
     expect(pdf.data.map((row) => row.id)).toEqual([inactiveProduct.id]);
     expect(pdf.subtitle).toBe('1 product(s) selected');
-    expect(mocks.toast).toHaveBeenCalledWith('success', 'Downloaded PDF with 1 product(s)');
+    expect(mocks.toast).toHaveBeenCalledWith('success', 'Downloaded PDF with 1 product(s) (1 turned-off product(s) left out)');
   });
 
   it('warns and skips both selected exports when the only selected product became inactive', async () => {
     const view = render(<Products />);
     await screen.findByText('Active Product');
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'all' } });
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
 
     mocks.products.splice(0, 1, { ...activeProduct, is_active: false });
     mocks.role = 'sales_rep';
@@ -385,8 +385,8 @@ describe('Products list and exports', () => {
     expect(exportToCSV).not.toHaveBeenCalled();
     expect(downloadReportPdf).not.toHaveBeenCalled();
     expect(mocks.toast).toHaveBeenCalledTimes(2);
-    expect(mocks.toast).toHaveBeenNthCalledWith(1, 'warning', 'No active products selected.');
-    expect(mocks.toast).toHaveBeenNthCalledWith(2, 'warning', 'No active products selected.');
+    expect(mocks.toast).toHaveBeenNthCalledWith(1, 'warning', 'No active products selected (1 turned-off product(s) left out).');
+    expect(mocks.toast).toHaveBeenNthCalledWith(2, 'warning', 'No active products selected (1 turned-off product(s) left out).');
   });
 
   it('labels selected exports internal with or without Margins', async () => {
@@ -461,11 +461,13 @@ describe('Products list and exports', () => {
     expect(screen.queryByText('No products yet')).not.toBeInTheDocument();
   });
 
-  it('hides Select All when the Inactive filter has no selectable products', async () => {
+  it('lets an admin select inactive products for reactivation', async () => {
     await loadProducts();
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'inactive' } });
     expect(screen.getByText('Inactive Product')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Select All' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select All' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    expect(screen.getByRole('checkbox')).toBeChecked();
   });
 
   it('finds a product by EPA registration number and manufacturer', async () => {

@@ -20,6 +20,7 @@ describe('InventoryPositionMobileCards', () => {
     render(
       <InventoryPositionMobileCards
         rows={[row]}
+        inactiveProductIds={new Set([row.product_id])}
         isAdmin={false}
         selectedIds={new Set()}
         onToggleSelect={vi.fn()}
@@ -32,6 +33,7 @@ describe('InventoryPositionMobileCards', () => {
 
     expect(screen.getByTestId('inventory-mobile-cards')).toHaveClass('md:hidden');
     expect(screen.getByText('Atrazine 4L')).toBeInTheDocument();
+    expect(screen.getByText('Inactive')).toBeInTheDocument();
     expect(screen.getByText('On hand')).toBeInTheDocument();
     expect(screen.getByText('Reserved')).toBeInTheDocument();
     expect(screen.getByText('Shortfall 25')).toBeInTheDocument();

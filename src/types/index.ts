@@ -2813,6 +2813,9 @@ export interface ARAgingRow {
   days_90: number;
   over_90: number;
   total_outstanding: number;
+  /** Set when this customer's balance cannot be rebuilt as of the date (KI-95): every amount above is then
+   *  null at runtime, so filter these rows out before summing; never read them as $0. */
+  unavailable_reason?: string | null;
 }
 
 export interface CustomerStatementRow {

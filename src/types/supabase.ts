@@ -13682,6 +13682,7 @@ export type Database = {
           over_90: number
           prepay_balance_cents: number
           total_outstanding: number
+          unavailable_reason: string
         }[]
       }
       get_ar_reminder_candidates: { Args: never; Returns: Json }

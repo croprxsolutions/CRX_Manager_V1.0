@@ -12,7 +12,7 @@
  * position; credits are reflected against AR when applied via payment allocation.
  */
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { DollarSign, FileText, Printer, TrendingDown, TrendingUp, ArrowLeft, Zap, FileStack, Mail, Send } from 'lucide-react';
+import { DollarSign, FileText, Printer, TrendingDown, TrendingUp, ArrowLeft, Zap, FileStack, Mail, Send, AlertTriangle } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
@@ -25,10 +25,11 @@ import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { fetchCustomerStatement } from '../lib/customerStatement';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import { Sentry } from '../lib/sentry';
-import { exportToCSV, fmtCSV } from '../lib/csvExport';
+import { exportToCSV, fmtCSV, formatProductMoneyCSV } from '../lib/csvExport';
 import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
 import { downloadStatementPdf, downloadBatchStatements, generateStatementPdf } from '../lib/statementPdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
+import { escapeHtml } from '../lib/proofNotification';
 import { buildStatementEmailContent } from '../lib/statementEmail';
 import { logActivity } from '../lib/activityLogger';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -42,6 +43,13 @@ import type { ARAgingRow as BaseARagingRow, CustomerStatementRow, SeasonComparis
 
 type TabKey = 'aging' | 'statement' | 'season';
 type ARAgingRow = BaseARagingRow & { prepay_balance_cents: number | null; open_credit_cents: number | null };
+
+// Why get_ar_aging could not rebuild a customer's balance as of the chosen date (KI-95).
+const UNAVAILABLE_REASONS: Record<string, string> = {
+  HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE: 'a payment, prepay or write-off was entered after this date',
+  HISTORICAL_VOID_RECONSTRUCTION_UNAVAILABLE: 'an invoice was voided after this date',
+  HISTORICAL_UNPOST_RECONSTRUCTION_UNAVAILABLE: 'an invoice was unposted after this date',
+};
 
 function statementKey(customerId: string, start: string, end: string): string {
   return `${customerId}|${start}|${end}`;
@@ -77,6 +85,8 @@ export default function ARaging() {
 
   // Aging
   const [agingData, setAgingData] = useState<ARAgingRow[]>([]);
+  // Customers whose balance cannot be shown as of this date (no amounts): listed, never in the totals.
+  const [agingUnavailable, setAgingUnavailable] = useState<ARAgingRow[]>([]);
   // The last aging load failed: the tab shows an error instead of zero totals.
   const [agingFailed, setAgingFailed] = useState(false);
   // Only the newest aging load may set state; an older date's load finishing late is ignored.
@@ -130,13 +140,16 @@ export default function ARaging() {
       toast('error', 'Failed to load AR aging data');
       // No rows and no totals: the previous date's or a partial list would look current.
       setAgingData([]);
+      setAgingUnavailable([]);
       setSelectedCustomers(new Set());
       setAgingFailed(true);
       setLoading(false);
       return;
     }
-    const rows = assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging');
+    const allRows = assertRpcResult<ARAgingRow[]>(data, 'get_ar_aging');
+    const rows = allRows.filter((r) => !r.unavailable_reason);
     setAgingData(rows);
+    setAgingUnavailable(allRows.filter((r) => r.unavailable_reason));
     // Batch statements act on the selection: keep only customers on this date's list.
     const onList = new Set(rows.map((r) => r.customer_id));
     setSelectedCustomers((prev) => new Set([...prev].filter((id) => onList.has(id))));
@@ -211,6 +224,14 @@ export default function ARaging() {
       total: acc.total + r.total_outstanding,
     }),
     { current: 0, d30: 0, d60: 0, d90: 0, over90: 0, total: 0 }
+  );
+
+  const unavailableItem = (r: ARAgingRow) => (
+    <li key={r.customer_id}>
+      <span className="font-medium">{r.farm_name}</span>
+      {' — '}
+      {UNAVAILABLE_REASONS[r.unavailable_reason ?? ''] ?? 'later activity changed this balance'}
+    </li>
   );
 
   const agingColumns: Column<ARAgingRow>[] = [
@@ -616,7 +637,7 @@ export default function ARaging() {
           const html = buildEmailHtml(`
             <h2 style="color:#1e293b;margin:0 0 12px;">Account ${urgencyLabel}</h2>
             <p style="color:#475569;font-size:14px;line-height:1.6;">
-              Dear ${cust.farm_name},
+              Dear ${escapeHtml(cust.farm_name)},
             </p>
             <p style="color:#475569;font-size:14px;line-height:1.6;">
               Our records show an outstanding balance of
@@ -925,15 +946,21 @@ export default function ARaging() {
                   disabled={agingFailed || loading}
                   onClick={() =>
                     exportToCSV(
-                      agingData as unknown as Record<string, unknown>[],
+                      // Customers that cannot be shown as of this date stay in the file, with blank amounts.
+                      [...agingData, ...agingUnavailable] as unknown as Record<string, unknown>[],
                       [
                         { key: 'farm_name', header: 'Customer' },
-                        { key: 'current_amount', header: 'Current', format: fmtCSV },
-                        { key: 'days_30', header: '30 Days', format: fmtCSV },
-                        { key: 'days_60', header: '60 Days', format: fmtCSV },
-                        { key: 'days_90', header: '90–119 Days', format: fmtCSV },
-                        { key: 'over_90', header: '120+ Days', format: fmtCSV },
-                        { key: 'total_outstanding', header: 'Total', format: fmtCSV },
+                        { key: 'current_amount', header: 'Current', format: formatProductMoneyCSV },
+                        { key: 'days_30', header: '30 Days', format: formatProductMoneyCSV },
+                        { key: 'days_60', header: '60 Days', format: formatProductMoneyCSV },
+                        { key: 'days_90', header: '90–119 Days', format: formatProductMoneyCSV },
+                        { key: 'over_90', header: '120+ Days', format: formatProductMoneyCSV },
+                        { key: 'total_outstanding', header: 'Total', format: formatProductMoneyCSV },
+                        {
+                          key: 'unavailable_reason',
+                          header: 'Note',
+                          format: (v) => (v ? `Cannot be shown as of this date: ${UNAVAILABLE_REASONS[String(v)] ?? 'later activity changed this balance'}` : ''),
+                        },
                       ],
                       'ar_aging_report'
                     )
@@ -952,11 +979,36 @@ export default function ARaging() {
             </Card>
           ) : (
           <>
+          {agingUnavailable.length > 0 && (
+            <div role="alert" className="flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" aria-hidden="true" />
+              <div>
+                <p className="font-semibold">
+                  {agingUnavailable.length === 1 ? '1 customer cannot' : `${agingUnavailable.length} customers cannot`} be shown as of this date
+                </p>
+                <p className="mt-0.5">Their balance on this date can't be rebuilt exactly, so it is not guessed. They are left out of every total below.</p>
+                <ul className="mt-2 list-disc pl-5 space-y-0.5">
+                  {agingUnavailable.slice(0, 10).map(unavailableItem)}
+                </ul>
+                {/* A date far back can flag most customers: the first ten, then the rest on request. */}
+                {agingUnavailable.length > 10 && (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer font-medium">Show all {agingUnavailable.length}</summary>
+                    <ul className="mt-1 list-disc pl-5 space-y-0.5">{agingUnavailable.slice(10).map(unavailableItem)}</ul>
+                  </details>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <Card>
               <p className="text-xs text-secondary mb-1">Total Outstanding</p>
               <p className="text-xl font-semibold font-heading text-red-600">{fmt(agingTotals.total)}</p>
+              {agingUnavailable.length > 0 && (
+                <p className="text-xs text-amber-700 mt-1">Excludes {agingUnavailable.length} customer{agingUnavailable.length === 1 ? '' : 's'} not shown</p>
+              )}
             </Card>
             <Card>
               <p className="text-xs text-secondary mb-1">Current (&lt;30 days)</p>
@@ -986,8 +1038,10 @@ export default function ARaging() {
                 searchable
                 searchPlaceholder="Search customers..."
                 searchKeys={['farm_name']}
-                emptyTitle="No outstanding receivables"
-                emptyDescription="All customer balances are current."
+                emptyTitle={agingUnavailable.length > 0 ? 'No balances can be shown for this date' : 'No outstanding receivables'}
+                emptyDescription={agingUnavailable.length > 0
+                  ? 'Every customer with a balance on this date is listed above as one that cannot be shown.'
+                  : 'All customer balances are current.'}
               />
             </div>
           </Card>
@@ -996,7 +1050,12 @@ export default function ARaging() {
           {agingData.length > 0 && (
             <Card>
               <div className="grid grid-cols-7 gap-2 text-sm">
-                <span className="font-semibold">Totals</span>
+                <span className="font-semibold">
+                  Totals
+                  {agingUnavailable.length > 0 && (
+                    <span className="block text-xs font-normal text-amber-700">excl. {agingUnavailable.length} not shown</span>
+                  )}
+                </span>
                 <span className="font-mono font-semibold">{fmt(agingTotals.current)}</span>
                 <span className="font-mono font-semibold text-yellow-600">{fmt(agingTotals.d30)}</span>
                 <span className="font-mono font-semibold text-orange-600">{fmt(agingTotals.d60)}</span>

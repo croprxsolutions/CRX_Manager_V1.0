@@ -1,4 +1,5 @@
 \set ON_ERROR_STOP on
+-- smoke-allow-priced-product-insert: proves the PRODUCT_PRICING_GOVERNED_PATH_REQUIRED refusal of a priced Product insert.
 
 SELECT set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
 SET ROLE authenticated;

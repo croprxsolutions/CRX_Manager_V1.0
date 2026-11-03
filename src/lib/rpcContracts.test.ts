@@ -2803,6 +2803,9 @@ function registryMigrationHighWater(): string {
 // apply moved the authored boundary to 20260914101300, so they no longer sort
 // above it while src/types/supabase.ts still predates them. Clear them on the
 // same type-regeneration rule.
+// 20261103100000, 20261103120000 and 20261103130000 were added on 2026-11-02: they applied live
+// that evening and the wave-4 registry refresh moved the authored boundary to 20261103130000
+// while src/types/supabase.ts still predates them. Clear them on the same type-regeneration rule.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2824,6 +2827,9 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260914101100',
   '20260914101200',
   '20260914101300',
+  '20261103100000',
+  '20261103120000',
+  '20261103130000',
 ]);
 
 /**
@@ -2997,6 +3003,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // check_idempotency/save_idempotency calls behind the required-key public wrapper. Prune once the
   // registry high-water passes 20261020210000 (the body never reaches the generated types).
   '_create_order_from_blend_ticket_replay_impl_20261015',
+  'set_product_active', // WP-PM-3 local migration: admin-only mutator, receipt-bound through check_idempotency_intent.
   // 20261102180000 (replay-binding batch 4a) re-emits this renamed body so it unposts each member
   // through the private _unpost_invoice_replay_impl_20261015; it keeps p_idempotency_key behind the
   // required-key public wrapper and never reaches the generated types.

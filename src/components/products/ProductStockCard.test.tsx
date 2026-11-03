@@ -87,14 +87,13 @@ describe('ProductStockCard', () => {
     expect(screen.getByText('Total on hand: 0.3 GAL')).toBeInTheDocument();
   });
 
-  it('explains that stock is not shown when an inactive product has no rows', async () => {
+  it('explains an inactive product with no stock rows', async () => {
     mocks.rpc.mockResolvedValue({ data: [], error: null });
     renderCard('product-a', false);
 
     expect(await screen.findByText(
-      'Inventory does not list inactive products, so stock cannot be shown here.',
+      'No stock recorded for this product.',
     )).toBeInTheDocument();
-    expect(screen.queryByText('No stock recorded for this product.')).not.toBeInTheDocument();
   });
 
   it('shows no stock on hand and the on-order quantity for an on-order-only row', async () => {

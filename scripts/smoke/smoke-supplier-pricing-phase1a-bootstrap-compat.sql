@@ -1,4 +1,5 @@
 \set ON_ERROR_STOP on
+-- smoke-allow-priced-product-insert: runs before the 20260718190000 cutover in the disposable proof database, to prove the legacy compatibility window.
 
 -- Prove the additive bootstrap does not break the currently deployed Product
 -- form during the deliberate database-first compatibility window. Everything

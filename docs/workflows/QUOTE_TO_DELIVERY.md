@@ -355,3 +355,11 @@ A single customer can be in BOTH modes simultaneously if some of their fields ha
 - [ ] `invoice_shares` populated for every invoice (one 100% row per child) — PDF/statement compat
 - [ ] Posted-status check covers the whole group, not just the invoice being edited
 - [ ] All RPCs verified to have exactly one overload via `DO $$` block at end of migration
+
+### Product retirement (WP-PM-3 local candidate)
+
+An admin previews and confirms turning a product off. Open confirmed or partially fulfilled orders and open purchase orders block it. A fulfilled order blocks it when completed, internally billed delivery quantity for that product exceeds non-voided, non-credit invoice quantity for the same order and product; linked and unlinked invoice lines count together. A historical delivered line without a completed delivery item is treated as unknown and blocks. A Cancel Remaining line with no delivered quantity does not block.
+
+Draft, sent and revised quotes always warn, including partly drawn bookings. An accepted quote warns when it has no live order. Voided or cancelled orders are not live conversions. Quote templates, scheduled jobs, crop programs and stock also warn.
+
+New sales through direct orders, quote conversion, draw-down, rollover, duplicate_quote, create_quote_from_template and restore_quote_version refuse an inactive product. Existing order and PO lines can be edited in place if ordered quantity does not increase. An inactive order line cannot regain positive remaining quantity from zero or NULL, even if its order stays partially fulfilled. A delivery cancel or void that would do so fails as one transaction. Lines already carrying positive remaining quantity can still decrease. Purchase-order receipt reversal remains possible as a stock correction.

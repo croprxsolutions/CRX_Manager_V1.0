@@ -11,7 +11,8 @@
 --     name, so every active product's vendor text matches its preferred vendor.
 -- It changes no other products.vendor text, no other link, no vendor and no price.
 --
--- Bound to the approved list: the plan below is fingerprinted over every active product, and the
+-- Bound to the approved list: the plan below, with each product's current vendor text, is
+-- fingerprinted over every active product, and the
 -- migration refuses (changing nothing) unless it equals the plan Mason approved, read live on
 -- 2026-11-03: 596 active products, 586 new links, 10 preferred flags. Any product, vendor, alias
 -- or link change that alters what it would write makes it stop for a fresh review. Afterwards every active product
@@ -21,7 +22,7 @@
 DO $data11$
 DECLARE
   c_approver constant uuid := '22c1fc50-4d2a-4baa-8ff8-341c0c7edd4f';
-  c_fingerprint constant text := '2ea5e0659601e7c5858df86fd3602349';
+  c_fingerprint constant text := '2442f136e9746035768229974b1f973d';
   v_fingerprint text;
   v_total bigint;
   v_links bigint;
@@ -72,6 +73,8 @@ BEGIN
     ('4983d7c2-45cc-4acd-b915-45e92184c563'::uuid, '3c2f7804-72f3-4311-af61-2be4c4a7f0af'::uuid)
   )
   SELECT p.id AS product_id,
+         p.vendor AS vendor_text,
+         r.vendor_id AS text_vendor_id,
          CASE
            WHEN COALESCE(ls.any_links, 0) = 0 AND e.vendor_id IS NOT NULL AND NULLIF(btrim(p.vendor), '') IS NULL THEN 'link'
            WHEN e.vendor_id IS NULL AND ls.confirmed_links = 1 AND ls.preferred_links = 0 THEN 'prefer'
@@ -91,12 +94,18 @@ BEGIN
   SELECT count(*),
          count(*) FILTER (WHERE action = 'link'),
          count(*) FILTER (WHERE action = 'prefer'),
-         md5(string_agg(product_id::text || ':' || coalesce(vendor_id::text, '-') || ':' || coalesce(action, '-'), ',' ORDER BY product_id))
+         md5(string_agg(product_id::text || ':' || coalesce(vendor_id::text, '-') || ':' || coalesce(action, '-')
+                        || ':' || coalesce(vendor_text, '~'), ',' ORDER BY product_id))
     INTO v_total, v_links, v_prefers, v_fingerprint
   FROM data11_plan;
   IF v_fingerprint IS DISTINCT FROM c_fingerprint THEN
     RAISE EXCEPTION 'DATA11_PLAN_CHANGED: % products, % links, % preferred flags, fingerprint % (approved %); re-run the review',
       v_total, v_links, v_prefers, v_fingerprint, c_fingerprint;
+  END IF;
+  -- A lone existing link becomes preferred only where the vendor text already names that vendor.
+  SELECT count(*) INTO v_bad FROM data11_plan WHERE action = 'prefer' AND text_vendor_id IS DISTINCT FROM vendor_id;
+  IF v_bad <> 0 THEN
+    RAISE EXCEPTION 'DATA11_PREFER_TEXT_MISMATCH: % products would prefer a vendor their vendor text does not name', v_bad;
   END IF;
 
   INSERT INTO public.product_supplier_links(

@@ -4,7 +4,7 @@
  * preferred vendor link. Builds the checked-in schema baseline in a network-disabled PostgreSQL
  * container, replays migrations up to the candidate, seeds invented rows (sharing only the ids the
  * migration names), and checks: bound to the approved live plan it refuses on any other data and
- * writes nothing; a non-admin approver, a count mismatch, or a product left with no preferred link
+ * writes nothing; a non-admin approver, a count mismatch, vendor text that does not name the vendor to prefer, or a product left with no preferred link
  * refuse as a whole; bound to its own plan it writes vendor-only preferred links for products whose
  * vendor text names one vendor (directly, by approved alias, or by approved legacy resolution) and
  * for the two hand-assigned products, marks a lone existing link preferred, and changes nothing else
@@ -29,7 +29,7 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261105100000_data11_preferred_vendor_links.sql');
 // The live plan Mason approved on 2026-11-03 (see the migration header).
-const APPROVED = { fingerprint: '2ea5e0659601e7c5858df86fd3602349', links: 586, prefers: 10 };
+const APPROVED = { fingerprint: '2442f136e9746035768229974b1f973d', links: 586, prefers: 10 };
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -244,7 +244,7 @@ function seed() {
       ('${P.TEXT}', '[PROVER] Text', 'D11-1', '  [prover]  acme ag ', 'gal', true),
       ('${P.ALIAS}', '[PROVER] Alias', 'D11-2', '[PROVER] Beta Co.', 'gal', true),
       ('${P.LEGACY}', '[PROVER] Legacy', 'D11-3', '[PROVER] LGCY', 'gal', true),
-      ('${P.ONE}', '[PROVER] One link', 'D11-4', '[PROVER] Acme Ag', 'gal', true),
+      ('${P.ONE}', '[PROVER] One link', 'D11-4', '[PROVER] Beta Supply', 'gal', true),
       ('${P.DONE}', '[PROVER] Done', 'D11-5', '[PROVER] Acme Ag', 'gal', true),
       ('${P.EXP1}', '[PROVER] Hand one', 'D11-6', NULL, 'gal', true),
       ('${P.EXP2}', '[PROVER] Hand two', 'D11-7', '', 'gal', true),
@@ -304,6 +304,17 @@ function main() {
   assert.match(run(bound(seeded.fingerprint, seeded.links + 1, seeded.prefers), 'count.sql').output, /DATA11_COUNT_MISMATCH/);
   assert.equal(linkState(), linksBefore);
   console.log('[prover] a non-admin approver and a count mismatch are refused, with nothing written');
+
+  // Vendor text edited after approval: the approved plan no longer matches, and a plan that would
+  // prefer a vendor the text does not name refuses even when bound to it.
+  asOwner(`UPDATE public.products SET vendor = '[PROVER] Acme Ag' WHERE id = '${P.ONE}';`);
+  assert.match(run(bound(seeded.fingerprint, seeded.links, seeded.prefers), 'drift.sql').output, /DATA11_PLAN_CHANGED/);
+  const drifted = planOf(run(lf(CANDIDATE), 'drift-plan.sql').output);
+  assert.notEqual(drifted.fingerprint, seeded.fingerprint, 'the vendor text is part of the fingerprint');
+  assert.match(run(bound(drifted.fingerprint, drifted.links, drifted.prefers), 'mismatch.sql').output, /DATA11_PREFER_TEXT_MISMATCH: 1 products/);
+  assert.equal(linkState(), linksBefore);
+  asOwner(`UPDATE public.products SET vendor = '[PROVER] Beta Supply' WHERE id = '${P.ONE}';`);
+  console.log('[prover] vendor text changed after approval is refused, and so is preferring a vendor the text does not name');
 
   // A product whose vendor text names two vendors gets no link, so the step refuses as a whole.
   asOwner(`INSERT INTO public.products (id, product_name, sku, vendor, inventory_unit, is_active)

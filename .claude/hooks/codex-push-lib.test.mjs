@@ -148,6 +148,8 @@ for (const command of [
   `cat > "$TEMP/p.sh" <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nsh "$TEMP/p.sh"`,
   `tee -a run.sh <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nsource ./run.sh`,
   `cat > a.sh <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nbash *.sh`,
+  `cat <<'EOF' > push.sh\ngit ${pushVerb} origin HEAD:main\nEOF\nbash push.sh`,
+  `cat > x <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\ncp x y; bash y`,
 ]) assert.equal(isGitPush(withoutDataHeredocs(command)), true, command);
 assert.equal(pushContextIsAmbiguous("$env:GIT_DIR='C:/other/.git'; git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("GIT_WORK_TREE=/tmp/other git push origin main"), true);

@@ -471,15 +471,10 @@ export function withoutDataHeredocs(cmd) {
     while (end < lines.length && lines[end].replace(/\r$/, "").replace(open[1] ? /^\t+/ : /^$/, "") !== delimiter) end += 1;
     if (end >= lines.length) break;
     // A file it writes may be RUN later (`cat > push.sh <<'EOF'` … `bash push.sh`;
-    // Luna round 3): keep the body when a later line names that file or holds a
-    // glob or expansion that could reach it.
-    const head = open[0].slice(0, open[0].lastIndexOf("<<"));
-    const written = [...head.matchAll(/>>?\s*("[^"]*"|'[^']*'|[^\s<>]+)/g)].map((m) => m[1]);
-    const tee = head.match(/^(?:&&|;)?\s*tee(?![\w-])(.*)$/);
-    if (tee) written.push(...tee[1].split(/\s+/).filter((w) => w && !w.startsWith("-") && !w.startsWith(">")));
-    const later = lines.slice(end + 1).join("\n");
-    if (written.length && (/[*?[$`]/.test(later) ||
-        written.some((file) => later.includes(file.replace(/["']/g, "").split(/[/\\]/).pop())))) break;
+    // Luna round 3): a here-document that writes anywhere (`>` before or after
+    // `<<`, or `tee`) keeps its body whenever any command follows it.
+    const writesFile = />/.test(open[0].replace(/<<-?\s*\S+/, " ")) || /^(?:&&|;)?\s*tee(?![\w-])/.test(open[0]);
+    if (writesFile && lines.slice(end + 1).some((rest) => rest.trim())) break;
     for (let j = i + 1; j < end; j += 1) lines[j] = "";
     i = end;
   }

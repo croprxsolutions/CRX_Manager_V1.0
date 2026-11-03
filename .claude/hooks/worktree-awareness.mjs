@@ -11,8 +11,9 @@
 // It is silent when there are no sibling worktrees (a solo session), so it never nags.
 // Fail-open: any error → emit nothing.
 
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, renameSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import {
@@ -24,6 +25,7 @@ import {
   ORIGIN_MAIN_CAT_FILE_MAX_BUFFER, originMainSqlBlobMap as parseOriginMainSqlBlobMap,
   originMainForwardBlobPaths,
   classifyDirt, formatSiblingReport, groupUnknownReasons,
+  mergedPrHeadsFromCache, withMergedPrLabel,
 } from "./worktree-awareness-lib.mjs";
 import { combinedMigrationHistoryAtRev, readCombinedMigrationHistory } from "./migration-records-lib.mjs";
 
@@ -36,9 +38,6 @@ function emit(extra) {
   process.exit(0);
 }
 
-// Read (and ignore) the payload; SessionStart provides cwd/source but we don't need it.
-try { readFileSync(0, "utf8"); } catch { /* fine */ }
-
 const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
 function git(args, cwd) {
@@ -46,6 +45,58 @@ function git(args, cwd) {
     encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"], cwd: cwd || projectDir,
   });
 }
+
+// Merged-PR heads, cached in the shared .git folder so every worktree reads one
+// copy. The banner never waits on GitHub: a stale or missing cache is refreshed
+// by a detached copy of this script, and this run uses whatever is on disk.
+const REFRESH_FLAG = "--refresh-merged-pr-heads";
+const MERGED_PR_CACHE_MAX_AGE_MS = 10 * 60_000;
+const REFRESH_LOCK_MAX_AGE_MS = 3 * 60_000;
+function mergedPrCachePath() {
+  try {
+    return path.resolve(projectDir, git(["rev-parse", "--git-common-dir"]).trim(), "crx-merged-pr-heads.json");
+  } catch { return null; }
+}
+
+if (process.argv[2] === REFRESH_FLAG) {
+  const cachePath = mergedPrCachePath();
+  try {
+    const prs = JSON.parse(execFileSync("gh", ["pr", "list", "--state", "merged", "--base", "main", "--limit", "5000", "--json", "number,headRefOid"], {
+      cwd: projectDir, encoding: "utf8", timeout: 120_000, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 16 * 1024 * 1024,
+    }));
+    writeFileSync(`${cachePath}.tmp`, JSON.stringify({ fetchedAt: Date.now(), prs }));
+    renameSync(`${cachePath}.tmp`, cachePath);
+  } catch { /* offline or gh missing: the banner keeps saying "landed? unknown" */ }
+  process.exit(0);
+}
+
+function readMergedPrHeads() {
+  const cachePath = mergedPrCachePath();
+  if (!cachePath) return null;
+  let text = null;
+  try { text = readFileSync(cachePath, "utf8"); } catch { /* not cached yet */ }
+  const heads = mergedPrHeadsFromCache(text);
+  let fetchedAt = 0;
+  try { fetchedAt = Number(JSON.parse(text).fetchedAt) || 0; } catch { /* refresh below */ }
+  if (Date.now() - fetchedAt > MERGED_PR_CACHE_MAX_AGE_MS) {
+    // The lock stops a burst of session starts from each launching a refresh.
+    const lock = `${cachePath}.refreshing`;
+    let lockAge = Infinity;
+    try { lockAge = Date.now() - statSync(lock).mtimeMs; } catch { /* no lock */ }
+    if (lockAge > REFRESH_LOCK_MAX_AGE_MS) {
+      try {
+        writeFileSync(lock, "");
+        spawn(process.execPath, [fileURLToPath(import.meta.url), REFRESH_FLAG], {
+          cwd: projectDir, detached: true, stdio: "ignore", windowsHide: true,
+        }).unref();
+      } catch { /* fail-open */ }
+    }
+  }
+  return heads;
+}
+
+// Read (and ignore) the payload; SessionStart provides cwd/source but we don't need it.
+try { readFileSync(0, "utf8"); } catch { /* fine */ }
 
 // Read every prefiltered origin/main SQL blob in one bounded Git process. The
 // shared parser validates echoed paths, record delimiters, and complete framing.
@@ -92,12 +143,13 @@ try {
   hasOriginMain = true;
 } catch { hasOriginMain = false; }
 
+const mergedPrHeads = readMergedPrHeads();
 function mergedLabel(sha) {
   if (!hasOriginMain || !sha) return mergedLabelFromStatus(null, false);
   const r = spawnSync("git", ["merge-base", "--is-ancestor", sha, originMainRev], {
     encoding: "utf8", timeout: 5000, cwd: projectDir,
   });
-  return mergedLabelFromStatus(r.status, true);
+  return withMergedPrLabel(mergedLabelFromStatus(r.status, true), sha, mergedPrHeads);
 }
 
 // Memoized: the sibling list and the parked scan both ask, and this is one git spawn.

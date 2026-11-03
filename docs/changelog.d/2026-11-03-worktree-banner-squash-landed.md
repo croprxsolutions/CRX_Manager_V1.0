@@ -1,0 +1,5 @@
+## 2026-11-03 - Worktree banner: squash-merged branches read as landed
+
+- `.claude/hooks/worktree-awareness.mjs` called a worktree UNMERGED whenever its HEAD was not an ancestor of origin/main. A squash merge puts a new commit on main, so every squash-landed branch looked unshipped: on 2026-11-03 about 48 folders said UNMERGED while each HEAD was exactly a merged PR's final commit.
+- The banner now also checks a cached list of merged PR heads (`gh pr list --state merged --base main`, stored once in the shared `.git/crx-merged-pr-heads.json`). A HEAD that matches reads `LANDED via merged PR #N (squash)` and folds into the finished line when it has no real changes. The list refreshes in a detached background process when older than 10 minutes, so session start never waits on GitHub; until the first refresh, or when offline, UNMERGED says `landed? unknown`.
+- A branch with commits after its PR's head (for example main merged into it) still reads UNMERGED; only an exact head match counts as landed.

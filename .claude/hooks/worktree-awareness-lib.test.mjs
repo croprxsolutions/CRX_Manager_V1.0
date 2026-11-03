@@ -23,7 +23,7 @@ import {
   ORIGIN_MAIN_CAT_FILE_MAX_BUFFER, originMainSqlBlobMap, originMainForwardBlobPaths,
   createOwnDraftPathsReader,
   isCodexImportDirtLine, classifyDirt, shortWorktreeName, describeDirt,
-  formatSiblingReport, groupUnknownReasons,
+  formatSiblingReport, groupUnknownReasons, mergedPrHeadsFromCache, withMergedPrLabel,
 } from "./worktree-awareness-lib.mjs";
 import { MIGRATION_HISTORY_FILE, MIGRATION_RECORDS_DIR, combineMigrationHistory, combinedMigrationHistoryAtRev } from "./migration-records-lib.mjs";
 
@@ -121,7 +121,7 @@ ok(report[1].includes("merged-real-dirt") && report[1].includes("1 real"), "merg
 ok(report[2].includes("unknown-state"), "unknown merge state keeps its full entry");
 ok(report[3].includes("gone") && report[3].includes("unreadable/absent"), "unreadable checkout keeps its full entry");
 const folded = report[4];
-ok(folded.startsWith("  • 2 finished worktrees (in origin/main, no real changes; 1 carry only Codex-import skill dirs): "), `folded line counts and labels: ${folded}`);
+ok(folded.startsWith("  • 2 finished worktrees (in origin/main or a merged PR, no real changes; 1 carry only Codex-import skill dirs): "), `folded line counts and labels: ${folded}`);
 ok(folded.includes("merged-importer-only") && folded.includes("pr449"), "folded line still NAMES every folded worktree");
 ok(!folded.includes("unmerged-work"), "an unmerged worktree is never folded");
 // A detached HEAD folds only when origin/main provably contains it (exact-SHA
@@ -144,6 +144,57 @@ eq(allFinished.length, 1, "only finished siblings → exactly one folded line");
 eq(formatSiblingReport([{ ...reportInput[2], mergedLabel: "UNMERGED (not in origin/main)" }]).length, 1, "importer-only dirt does not fold an UNMERGED worktree");
 ok(formatSiblingReport([{ ...reportInput[2], mergedLabel: "UNMERGED (not in origin/main)" }])[0].includes("UNMERGED"), "…and it is reported as unmerged");
 ok(formatSiblingReport([{ ...reportInput[2], dirt: { total: 25, importer: 24, real: 1 } }])[0].includes("1 real"), "one real dirty file un-folds a merged worktree");
+
+// ── Squash-merged branches read as landed (2026-11-03) ──────────────────────
+// A squash merge puts a NEW commit on main, so the branch head is never an
+// ancestor of origin/main. On 2026-11-03 the banner called ~48 worktrees
+// UNMERGED whose HEAD was exactly a merged PR's final commit. A real git
+// fixture reproduces it: ancestry says UNMERGED, the merged-PR list says landed.
+{
+  const repo = mkdtempSync(path.join(tmpdir(), "crx-squash-landed-"));
+  try {
+    const g = (...args) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.test", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf8" }).trim();
+    g("init", "-q", "-b", "main");
+    writeFileSync(path.join(repo, "a.txt"), "base\n");
+    g("add", "a.txt"); g("commit", "-q", "-m", "base");
+    g("checkout", "-q", "-b", "squashed");
+    writeFileSync(path.join(repo, "b.txt"), "one\n"); g("add", "b.txt"); g("commit", "-q", "-m", "one");
+    writeFileSync(path.join(repo, "b.txt"), "two\n"); g("add", "b.txt"); g("commit", "-q", "-m", "two");
+    const squashedHead = g("rev-parse", "HEAD");
+    g("checkout", "-q", "main");
+    g("merge", "--squash", "-q", "squashed"); g("commit", "-q", "-m", "squashed (#42)");
+    g("checkout", "-q", "-b", "unshipped");
+    writeFileSync(path.join(repo, "c.txt"), "wip\n"); g("add", "c.txt"); g("commit", "-q", "-m", "wip");
+    const unshippedHead = g("rev-parse", "HEAD");
+    const mainRev = g("rev-parse", "main");
+    const ancestryLabel = (sha) => {
+      try { execFileSync("git", ["merge-base", "--is-ancestor", sha, mainRev], { cwd: repo, stdio: "ignore" }); return mergedLabelFromStatus(0); } catch (e) { return mergedLabelFromStatus(e.status); }
+    };
+    eq(ancestryLabel(squashedHead), "UNMERGED (not in origin/main)", "fixture reproduces the bug: ancestry alone calls a squash-merged branch UNMERGED");
+
+    const heads = mergedPrHeadsFromCache(JSON.stringify({ fetchedAt: Date.now(), prs: [{ number: 42, headRefOid: squashedHead.toUpperCase() }] }));
+    eq(withMergedPrLabel(ancestryLabel(squashedHead), squashedHead, heads), "LANDED via merged PR #42 (squash)", "a branch whose HEAD is a merged PR's head reads as landed");
+    eq(withMergedPrLabel(ancestryLabel(unshippedHead), unshippedHead, heads), "UNMERGED (not in origin/main)", "a truly unmerged branch still reads UNMERGED");
+    eq(withMergedPrLabel(ancestryLabel(unshippedHead), unshippedHead, null), "UNMERGED (not in origin/main; landed? unknown — merged-PR list not cached yet)", "no merged-PR list → UNMERGED is hedged, never upgraded");
+    eq(withMergedPrLabel("MERGED into origin/main", squashedHead, null), "MERGED into origin/main", "an ancestry-proven merge is untouched");
+    eq(withMergedPrLabel("merge-state unknown", squashedHead, heads), "merge-state unknown", "only an UNMERGED verdict is re-checked against the PR list");
+
+    const banner = formatSiblingReport([
+      { path: "C:/wt/squashed", branchLabel: "squashed", mergedLabel: withMergedPrLabel(ancestryLabel(squashedHead), squashedHead, heads), dirt: { total: 0, importer: 0, real: 0 } },
+      { path: "C:/wt/squashed-dirty", branchLabel: "squashed", mergedLabel: withMergedPrLabel(ancestryLabel(squashedHead), squashedHead, heads), dirt: { total: 1, importer: 0, real: 1 } },
+      { path: "C:/wt/unshipped", branchLabel: "unshipped", mergedLabel: withMergedPrLabel(ancestryLabel(unshippedHead), unshippedHead, heads), dirt: { total: 0, importer: 0, real: 0 } },
+    ]);
+    eq(banner.length, 3, "two detailed entries plus one folded line");
+    ok(banner[0].includes("squashed-dirty") && banner[0].includes("LANDED") && banner[0].includes("1 dirty file"), "a landed worktree with real changes keeps its detailed entry");
+    ok(banner[1].includes("unshipped") && banner[1].includes("UNMERGED"), "the truly unmerged worktree is still flagged UNMERGED");
+    ok(banner[2].includes("1 finished worktree") && banner[2].includes("squashed") && !banner[2].includes("unshipped"), `a clean squash-landed worktree folds as finished: ${banner[2]}`);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+eq(mergedPrHeadsFromCache("not json"), null, "an unreadable cache is no list at all");
+eq(mergedPrHeadsFromCache(JSON.stringify({ prs: "nope" })), null, "a malformed cache is no list at all");
+eq(mergedPrHeadsFromCache(JSON.stringify({ prs: [{ number: 7, headRefOid: "ABC" }, { number: 8 }] })).get("abc"), 7, "head ids are matched case-insensitively and bad rows skipped");
 
 const grouped = groupUnknownReasons([
   "origin/main parked-state metadata is unreadable",

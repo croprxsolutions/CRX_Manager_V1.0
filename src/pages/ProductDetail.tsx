@@ -80,11 +80,15 @@ type ProductPricingMoneyDrafts = Partial<Record<ProductPricingMoneyField, string
 type ProductPricingMarginField = 'tier1_margin' | 'tier2_margin' | 'tier3_margin';
 type ProductPricingMarginDrafts = Partial<Record<ProductPricingMarginField, string>>;
 
-function nonpricingProductPayload(product: Partial<Product>): Record<string, unknown> {
-  return Object.fromEntries([
+function nonpricingProductPayload(product: Partial<Product>, persisted?: Product): Record<string, unknown> {
+  const payload: Record<string, unknown> = Object.fromEntries([
     ...PRODUCT_NONPRICING_FIELDS.map((field) => [field, product[field]] as const),
     ['updated_at', new Date().toISOString()],
   ]);
+  // Send the vendor only when it was edited here, so a page left open never re-saves an old
+  // vendor over one changed elsewhere (WP-PM-15: the vendor becomes the preferred vendor's copy).
+  if (persisted && payload.vendor === (persisted.vendor ?? null)) delete payload.vendor;
+  return payload;
 }
 
 function pricingMoneyInput(
@@ -457,7 +461,7 @@ export default function ProductDetail() {
     }
     const result = await supabaseUntyped
       .from('products')
-      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct)))
+      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct))
       .eq('id', id!)
       .eq('pricing_version', persistedProduct.pricing_version)
       .select('id');

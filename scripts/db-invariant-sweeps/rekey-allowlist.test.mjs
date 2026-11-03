@@ -41,7 +41,7 @@ test('a same-signature re-key changes only those entries', () => {
   const targets = [costEntries[0], costEntries[5]];
   const r = run(targets.map((e) => rehash(e.violation_key)), '--note', NOTE);
   assert.equal(r.status, 0, r.stderr);
-  for (const e of targets) assert.match(r.stdout, new RegExp(`  ${e.violation_key.slice(0, 20).replace(/[()]/g, '\\$&')}`));
+  for (const e of targets) assert.ok(r.stdout.includes(`  ${e.violation_key.slice(0, e.violation_key.lastIndexOf('#'))}\n`), r.stdout);
   const eol = original.includes('\r\n') ? '\r\n' : '\n';
   const before = original.split(eol);
   const after = r.after.split(eol);

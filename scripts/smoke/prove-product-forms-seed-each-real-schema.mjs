@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261104090000_product_forms_seed_each.
+ * Real-schema proof for 20261104150000_product_forms_seed_each.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17
  * container and replays ordered post-baseline migrations up to this candidate. It exercises
@@ -22,7 +22,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261104090000_product_forms_seed_each.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261104150000_product_forms_seed_each.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

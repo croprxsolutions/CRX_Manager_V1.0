@@ -31,7 +31,7 @@ describe('unitOptionsForForm', () => {
     expect(asProductForm('grain')).toBeNull();
   });
   it('matches the SQL seed rows exactly', () => {
-    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261104090000_product_forms_seed_each.sql'), 'utf8');
+    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261104150000_product_forms_seed_each.sql'), 'utf8');
     const values = migration.match(/FROM \(VALUES ([^\n]+)\) v\(form, unit\)/)?.[1];
     expect(values).toBeDefined();
     const rows = [...(values ?? '').matchAll(/\('([^']+)','([^']+)'\)/g)];

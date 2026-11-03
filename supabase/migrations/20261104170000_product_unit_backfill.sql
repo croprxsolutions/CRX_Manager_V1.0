@@ -7,7 +7,8 @@
 -- grant or function changes.
 -- Order, quote, job, invoice, delivery and PO lines keep their own stored unit and amounts; no
 -- trigger copies a product's unit into them. The per-acre prices read inventory_unit first, so
--- they and pricing_version must stay unchanged; the statement below refuses if they move.
+-- every other column (prices, per-acre prices, pricing_version, use timings) must stay as it was;
+-- the statement below refuses if any column but unit_size and updated_at moves.
 -- A database without these products (a fresh rebuild) changes no rows. On a database that has
 -- any of them, all nine must still hold exactly the approved old values, or nothing changes.
 -- write_product_change_history records each row's unit_size change (actor NULL: no signed-in user).
@@ -20,7 +21,7 @@ DO $unit_backfill$
 DECLARE
   v_present integer;
   v_updated integer;
-  v_price_moved integer;
+  v_other_moved integer;
 BEGIN
   WITH approved(id, old_unit, new_unit) AS (VALUES
     ('0294faa8-ab0b-488e-9efe-868071738625'::uuid, 'LB', 'Lb'),
@@ -35,8 +36,7 @@ BEGIN
   ),
   -- Every sub-statement reads the same pre-update snapshot, so "before" is the old row.
   before AS (
-    SELECT p.id, p.tier1_price_per_acre, p.tier2_price_per_acre, p.tier3_price_per_acre,
-           p.pricing_version
+    SELECT p.id, to_jsonb(p) - 'unit_size' - 'updated_at' AS rest
       FROM public.products p JOIN approved a ON a.id = p.id
   ),
   changed AS (
@@ -46,16 +46,13 @@ BEGIN
      WHERE p.id = a.id
        AND p.unit_size = a.old_unit
        AND p.inventory_unit = a.new_unit
-    RETURNING p.id, p.tier1_price_per_acre, p.tier2_price_per_acre, p.tier3_price_per_acre,
-              p.pricing_version
+    RETURNING p.id, to_jsonb(p) - 'unit_size' - 'updated_at' AS rest
   )
   SELECT (SELECT count(*) FROM before),
          (SELECT count(*) FROM changed),
          (SELECT count(*) FROM changed c JOIN before b ON b.id = c.id
-           WHERE (c.tier1_price_per_acre, c.tier2_price_per_acre, c.tier3_price_per_acre, c.pricing_version)
-                 IS DISTINCT FROM
-                 (b.tier1_price_per_acre, b.tier2_price_per_acre, b.tier3_price_per_acre, b.pricing_version))
-    INTO v_present, v_updated, v_price_moved;
+           WHERE c.rest IS DISTINCT FROM b.rest)
+    INTO v_present, v_updated, v_other_moved;
 
   IF v_present = 0 THEN
     RAISE NOTICE 'PRODUCT_UNIT_BACKFILL: none of the approved products exist here; nothing changed';
@@ -64,8 +61,8 @@ BEGIN
   IF v_present <> 9 OR v_updated <> 9 THEN
     RAISE EXCEPTION 'PRODUCT_UNIT_BACKFILL_DRIFT: % of 9 approved products present, % still held the approved values; re-review the list', v_present, v_updated;
   END IF;
-  IF v_price_moved <> 0 THEN
-    RAISE EXCEPTION 'PRODUCT_UNIT_BACKFILL_PRICE_MOVED: % products changed a per-acre price or pricing version', v_price_moved;
+  IF v_other_moved <> 0 THEN
+    RAISE EXCEPTION 'PRODUCT_UNIT_BACKFILL_OTHER_COLUMN_MOVED: % products changed a column other than unit_size', v_other_moved;
   END IF;
 END;
 $unit_backfill$;

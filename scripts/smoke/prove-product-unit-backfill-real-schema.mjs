@@ -282,8 +282,10 @@ try {
   const set = 'SET unit_size = a.new_unit';
   assert.equal(candidate.split(set).length - 1, 1);
   refused('mutation-price', candidate.replace(set, `${set}, rate_per_acre = p.rate_per_acre + 1`),
-    /PRODUCT_UNIT_BACKFILL_PRICE_MOVED: 7 products/, before);
-  console.log('[prover] MUTATION: a per-acre price move is caught and rolled back');
+    /PRODUCT_UNIT_BACKFILL_OTHER_COLUMN_MOVED: 7 products/, before);
+  refused('mutation-other', candidate.replace(set, `${set}, notes = 'moved'`),
+    /PRODUCT_UNIT_BACKFILL_OTHER_COLUMN_MOVED: 9 products/, before);
+  console.log('[prover] MUTATION: a per-acre price move, or any other column moving, is caught and rolled back');
 
   // 4. The real apply.
   const applied = apply('candidate.sql');
@@ -320,6 +322,6 @@ ${r.stderr}`, /PRODUCT_UNIT_STALE/);
   console.log('[prover] RE-APPLY: refused, nothing changed');
   console.log('PRODUCT_UNIT_BACKFILL_PROOF_PASS');
 } finally {
-  if (!KEEP && started) docker(['rm', '-f', NAME], { allowFailure: true });
-  else console.log(`[prover] kept container ${NAME}`);
+  if (KEEP && started) console.log(`[prover] kept container ${NAME}`);
+  else if (started) docker(['rm', '-f', NAME], { allowFailure: true });
 }

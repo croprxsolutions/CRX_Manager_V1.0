@@ -319,7 +319,7 @@ they belong rather than duplicated here: `get_monthly_summary()` under Financial
 
 ## Season Helpers
 - `compute_season(p_date)` — returns season year for a given date (Oct 1 - Sep 30)
-- `current_season()` — returns current season year
+- `current_season()` — returns current season year for today's America/Chicago date
 - `season_start_date(p_season)` — returns Oct 1 of the season
 - `season_end_date(p_season)` — returns Sep 30 of the following year
 

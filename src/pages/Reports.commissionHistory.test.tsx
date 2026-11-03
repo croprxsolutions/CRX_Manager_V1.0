@@ -120,7 +120,6 @@ vi.mock('../lib/csvExport', () => ({
   exportToCSV: vi.fn(),
   fmtCSV: vi.fn(),
   fmtDateCSV: vi.fn(),
-  fmtDateOnlyCSV: vi.fn(),
 }));
 vi.mock('../lib/yearEndSummaryPdf', () => ({ downloadYearEndSummaryPdf: vi.fn(), downloadBatchYearEndSummaries: vi.fn() }));
 vi.mock('../components/reports/LogbookReport', () => ({ default: () => <div>Logbook</div> }));

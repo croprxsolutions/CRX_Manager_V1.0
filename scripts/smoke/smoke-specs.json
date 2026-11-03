@@ -1723,6 +1723,17 @@
         "pricing",
         "security"
       ]
+    },
+    "get_vendor_link_proposals": {
+      "chain": "smoke-vendor_link_proposals_admin_only.sql",
+      "container_prover": "prove-vendor-link-proposals-real-schema.mjs",
+      "description": "REQUIRES 20261104180000. The vendor link proposal report (WP-PM-15a, DATA-11) is admin-only and read-only: its body is pinned, anon cannot execute it, an active admin gets one row per active product with a known status, a summary that adds up and no cost key, while an active sales rep, driver, applicator, commission-recipient profile and an id with no active profile are refused ADMIN_REQUIRED, and a signed-out visitor is refused EXECUTE.",
+      "covers": [
+        "get_vendor_link_proposals"
+      ],
+      "area": [
+        "security"
+      ]
     }
   }
 }

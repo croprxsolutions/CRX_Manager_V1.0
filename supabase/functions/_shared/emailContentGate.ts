@@ -33,6 +33,20 @@ const ALLOWED_URL_HOSTS = new Set([
   "www.openstreetmap.org",
 ]);
 
+// Map hosts get exactly the coordinate-only URLs proofNotification.ts builds, so no
+// caller data rides along to a third party when the email is opened.
+const COORD = String.raw`-?\d{1,3}\.\d{5}`;
+const MAP_URL_PATTERNS: Record<string, RegExp> = {
+  "staticmap.openstreetmap.de": new RegExp(
+    String.raw`^https://staticmap\.openstreetmap\.de/staticmap\.php\?center=` + `${COORD},${COORD}` +
+      String.raw`&zoom=\d{1,2}&size=\d{1,4}x\d{1,4}&markers=` + `${COORD},${COORD},red-pushpin$`,
+  ),
+  "www.openstreetmap.org": new RegExp(
+    String.raw`^https://www\.openstreetmap\.org/\?mlat=` + `${COORD}&mlon=${COORD}` +
+      String.raw`#map=\d{1,2}/` + `${COORD}/${COORD}$`,
+  ),
+};
+
 const MAX_SUBJECT_LENGTH = 200;
 const MAX_HTML_LENGTH = 200_000;
 
@@ -59,6 +73,10 @@ function urlProblem(value: string): string | null {
   }
   if (url.protocol !== "https:" || url.username || url.password || url.port || !ALLOWED_URL_HOSTS.has(url.hostname)) {
     return `Email links and images may only point to ${[...ALLOWED_URL_HOSTS].join(", ")}`;
+  }
+  const mapPattern = MAP_URL_PATTERNS[url.hostname];
+  if (mapPattern && !mapPattern.test(value.replace(/&amp;/g, "&"))) {
+    return "Map links and images must be the field-map address the app builds";
   }
   return null;
 }

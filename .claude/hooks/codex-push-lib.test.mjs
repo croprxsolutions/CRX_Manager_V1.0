@@ -9,7 +9,7 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { scratchHookEnvironment } from "./git-test-env.mjs";
-import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded, leadingCdFolder, nativeFolder } from "./codex-push-lib.mjs";
+import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded, nativeFolder } from "./codex-push-lib.mjs";
 
 const now = Date.parse("2026-07-13T18:00:00.000Z");
 const sha = "a".repeat(40);
@@ -97,38 +97,25 @@ assert.equal(pushUsesBulkMode("git push origin --branches"), true);
 assert.equal(pushUsesBulkMode("git push origin --mirror"), true);
 assert.equal(pushUsesBulkMode("git push origin --prune"), true);
 assert.equal(pushUsesBulkMode("git push origin feature"), false);
-// P2 (2026-11-03): a leading literal `cd` binds; anything less certain does not.
-assert.equal(pushContextIsAmbiguous("cd C:/other && git push origin main"), false);
-assert.equal(pushContextIsAmbiguous("cd /c/other; git add a && git push origin main"), false);
-assert.equal(pushContextIsAmbiguous('W="C:/other"; cd "$W" && git push origin main'), false);
-assert.equal(pushContextIsAmbiguous("cd C:/a && git -C C:/b push origin x; cd C:/c"), false);
-assert.equal(pushContextIsAmbiguous("git -C C:/b push origin x; cd C:/c"), false);
+// A push beside any directory change stays refused, as on main (P2's cd binding
+// was dropped, Mason "ship safe parts" 2026-11-03); a bare `cd` now counts too.
+assert.equal(pushContextIsAmbiguous("cd C:/other && git commit -m x"), false);
 for (const command of [
-  "cd C:/a && cd C:/b && git push origin main",
-  "cd C:/a || git push origin main",
-  "cd C:/a & git push origin main",
+  "cd C:/other && git push origin main",
+  "cd /c/other; git add a && git push origin main",
+  'W="C:/other"; cd "$W" && git push origin main',
+  "cd C:/a && git -C C:/b push origin x; cd C:/c",
+  "git -C C:/b push origin x; cd C:/c",
   "(cd C:/a && git push origin main)",
-  "cd $X && git push origin main",
-  'W="C:/a"; W="C:/b"; cd "$W" && git push origin main',
-  "cd ~/a && git push origin main",
   "git push origin main; cd C:/c",
-  "echo; cd C:/a && git push origin main",
-  "cd C:/a && pushd C:/b && git push origin main",
-  "git -C rel push origin x; cd C:/c",
-  // Luna final review, 2026-11-03.
+  // Luna final review, 2026-11-03: a bare cd/popd.
   "cd && git push origin main",
   "cd - && git push origin feature",
-  "CDPATH=C:/p; cd crx && git push origin feature",
-  "cd crx && git push origin feature",
   "cd; git push origin main",
   "git push origin main; popd",
-  ...(process.platform === "win32" ? ["pushd D:\\other && git -C \\repo push origin x"] : []),
   "cd C:/a && GIT_DIR=C:/b/.git git push origin main",
 ]) assert.equal(pushContextIsAmbiguous(command), true, command);
 assert.equal(pushContextIsAmbiguous("Set-Location C:/other; git.exe push origin main"), true);
-assert.equal(leadingCdFolder("cd \"C:/x y\" && git push"), "C:/x y");
-assert.equal(leadingCdFolder("cd C:/x; git status"), "C:/x");
-assert.equal(leadingCdFolder("cd C:/x;; git status"), null);
 // P1 (2026-11-03): Git Bash `/c/...` paths name the real drive on Windows.
 assert.equal(nativeFolder("/c/CRX_Manager/x", "win32"), "C:/CRX_Manager/x");
 assert.equal(nativeFolder("/d", "win32"), "D:/");

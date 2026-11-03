@@ -377,8 +377,7 @@ export function shellArgvWord(word) {
 // `fullCmd` (optional) is the whole command the push sits in, so a `-C "$W"`
 // can be read as the literal W was given earlier in it (folderVariableValue).
 export function gitPushCwd(cmd, fallbackCwd, fullCmd = "") {
-  const lead = leadingCdFolder(fullCmd);
-  const base = path.resolve(fallbackCwd || process.cwd(), lead === null ? "" : nativeFolder(lead));
+  const base = path.resolve(fallbackCwd || process.cwd());
   const prefix = String(cmd || "").match(GIT_PUSH_PREFIX_RE)?.[1] || "";
   const optionRe = new RegExp(`(?:^|\\s)-C\\s+(${GIT_ARG})`, "g");
   let cwd = base;
@@ -403,52 +402,6 @@ export function nativeFolder(folder, platform = process.platform) {
 
 // A bare `cd`/`popd` (no folder; `cd && git push` goes home) counts too (Luna, 2026-11-03).
 const DIRECTORY_CHANGE_RE = /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|pushd|popd|set-location|pop-location)(?:\s+|(?=[;&|)]|$))/i;
-// `cd <literal> && …` (or `;` / a newline) as the command's FIRST statement, with
-// no other directory change anywhere after it: every later git runs in that one
-// folder, so a push there can be bound to it (2026-11-03: about half of 43
-// "cannot be bound safely" refusals were this shape). Returns the literal, or
-// null for anything else — a variable, `~`, a glob, `cd X || …`, `cd X &`, a
-// subshell, or a second `cd`/`pushd` — which keeps the fail-closed refusal.
-// shortcut: `cd X; git push` runs in the old folder if the cd fails; the guards
-// refuse a folder that does not exist, so only a permission error is left.
-// `W=<literal>; cd "$W" && …` counts too, when folderVariableValue proves W.
-export function leadingCdFolder(fullCmd) {
-  const text = String(fullCmd || "");
-  const assign = text.match(
-    /^\s*[A-Za-z_]\w*=(?:"[^"$`\\]*"|'[^']*'|[^\s"'$`\\;&|<>()~*?[\]{}#]+)[^\S\r\n]*(?:;(?!;)|&&|\r?\n)/,
-  )?.[0] || "";
-  const head = text.slice(assign.length).match(
-    /^\s*cd[^\S\r\n]+(?:"([^"$`\\]*)"|'([^']*)'|([^\s"'$`\\;&|<>()~*?[\]{}#]+)|"?\$\{?([A-Za-z_]\w*)\}?"?)[^\S\r\n]*(?:&&|;(?!;)|\r?\n)/,
-  );
-  if (!head) return null;
-  if (DIRECTORY_CHANGE_RE.test(text.slice(assign.length + head[0].length))) return null;
-  const folder = head[4] ? folderVariableValue(text, head[4]) : head[1] ?? head[2] ?? head[3];
-  // Absolute only: bash looks a relative folder up through CDPATH, and `cd -`
-  // goes to $OLDPWD (Luna, 2026-11-03).
-  if (!folder || folder.startsWith("-")) return null;
-  const native = nativeFolder(folder);
-  const absolute = process.platform === "win32" ? /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(native) : path.isAbsolute(native);
-  return absolute ? folder : null;
-}
-
-// True when every push in the command names its folder with an absolute `-C`
-// (a literal, or a variable folderVariableValue proves): a `cd` elsewhere in
-// the command then cannot change where that push goes.
-export function everyPushHasAbsoluteFolder(fullCmd) {
-  const pushes = shellSegments(fullCmd).filter((segment) => isGitPush(segment));
-  return pushes.length > 0 && pushes.every((segment) => {
-    const prefix = segment.match(GIT_PUSH_PREFIX_RE)?.[1] || "";
-    const first = prefix.match(new RegExp(`(?:^|\\s)-C\\s+(${GIT_ARG})`))?.[1];
-    if (!first) return false;
-    const name = first.match(/^(?:"\$(\w+)"|"\$\{(\w+)\}"|\$(\w+)|\$\{(\w+)\})$/)?.slice(1).find(Boolean);
-    const folder = name ? folderVariableValue(fullCmd, name) : (/[$`]/.test(first) ? null : unquoteShellArg(first));
-    if (folder === null) return false;
-    // On Windows `\repo` is absolute only on the CURRENT drive, which a `cd` can
-    // change (Luna, 2026-11-03): require a drive letter or a network path.
-    const native = nativeFolder(folder);
-    return process.platform === "win32" ? /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(native) : path.isAbsolute(native);
-  });
-}
 
 // `W="C:/x"; git -C "$W" push` (2026-11-02: five harmless pushes denied with
 // `spawnSync git ENOENT`). Returns W's literal only when the FIRST statement of
@@ -484,7 +437,7 @@ export function folderVariableValue(fullCmd, name) {
 export function pushContextIsAmbiguous(cmd) {
   const text = String(cmd || "");
   if (!isGitPush(text)) return false;
-  return (DIRECTORY_CHANGE_RE.test(text) && leadingCdFolder(text) === null && !everyPushHasAbsoluteFolder(text)) ||
+  return DIRECTORY_CHANGE_RE.test(text) ||
     // `[^\S\r\n]*`, not `\s*`: `\s*` re-read a whole run of newlines from every
     // newline in it (quadratic). A later newline in the run is itself a separator
     // start, so what matches is unchanged.

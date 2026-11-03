@@ -453,13 +453,9 @@ refused commands from those sessions before and after the change.
    a shell variable the guard cannot read) is refused with that reason before git runs. Refusing
    when git itself fails is unchanged.
 2. **Push gate, "directory-changing … pushes cannot be bound safely" (same lib, also used by
-   `.codex/hooks/production-action-guard.mjs`).** A leading `cd <literal>` (or `W=<literal>; cd "$W"`)
-   followed by `&&`, `;` or a new line, with no other directory change anywhere after it, now binds
-   every push to that folder (`leadingCdFolder`). A `cd` elsewhere no longer matters when every push
-   names an absolute `git -C` folder (`everyPushHasAbsoluteFolder`). Still refused: `cd X || …`, `cd X &`, a subshell, a second `cd`/`pushd`,
-   a `cd` into a variable the guard cannot prove, a `cd` after a push with no `-C`, `GIT_DIR`/
-   `GIT_WORK_TREE`, and a push inside a here-document fed to a shell. Force, bulk and main-bound
-   proof checks apply to the bound folder exactly as before.
+   `.codex/hooks/production-action-guard.mjs`).** Unchanged except that a bare `cd`/`popd` with no
+   folder (`cd && git push`, which goes home) now counts as a directory change too. Any push in a
+   command that changes directory stays refused; use `git -C <repo> push`.
 3. **Review proof guard, "destructive or overwriting shell commands touching the .claude review
    state directory" (`review-proof-guard.mjs`).** `.claude/worktrees` now counts as the worktrees
    folder or one whole worktree, not every file inside one. A worktree root used as the folder a
@@ -487,6 +483,8 @@ rounds each found a new way to make that text run (a quoted opener, a line conti
 know what a word will do at run time, so commit messages, notes and PR bodies that mention a push or
 SQL words keep being judged as on `main`. A broader SQL "script runner" rule (Sol's request) was
 dropped with it, so `node`/`python` scripts that run SQL through a driver are handled as on `main`.
+Binding a push to a leading `cd <folder>` (P2) was dropped too: each review round found another way
+the shell picks a different folder (`cd -`, `CDPATH`, a bare `cd`, a drive-relative `\repo`).
 
 ### Guard narrowing (2026-10-18 decision)
 

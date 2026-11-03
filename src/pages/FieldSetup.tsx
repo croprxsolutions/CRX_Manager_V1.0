@@ -111,6 +111,9 @@ function FieldSetupPage() {
   const { toast } = useToast();
   const { profile } = useAuth();
   const saveFieldIdem = useIdempotencyKey('save_field', profile?.id || '');
+  // Counts confirmed saves: a later confirmed edit settles any older lost attempt, so returning to that
+  // older edit must get a fresh key and apply, not replay its stale result.
+  const confirmedFieldSavesRef = useRef(0);
   const saveFieldBoundaryIdem = useIdempotencyKey('set_field_boundary', profile?.id || '');
   const saveFieldOverrideIdem = useIdempotencyKey('set_field_override_acres', profile?.id || '');
   const isNew = id === 'new';
@@ -604,7 +607,7 @@ function FieldSetupPage() {
 
       // save_field checks only the key. A new field keeps one key until confirmed, so an edited retry after a lost
       // reply replays the field it already created; an edit to an existing field gets a key per exact payload.
-      const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, fieldPayload, billingPayload]);
+      const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, confirmedFieldSavesRef.current, fieldPayload, billingPayload]);
       const { data, error } = await supabase.rpc('save_field', {
         p_field_id: (isNew ? null : id) as string,
         p_field_payload: fieldPayload,
@@ -618,6 +621,7 @@ function FieldSetupPage() {
       } else {
         assertRpcResult(data, 'save_field');
         saveFieldIdem.resetKeyFor(saveScope);
+        confirmedFieldSavesRef.current += 1;
         const savedFieldId = isNew ? data : id;
 
         // The field record is saved; now persist its acreage. Track whether any acreage RPC

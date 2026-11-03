@@ -97,6 +97,9 @@ export default function DeliveryDetail() {
   const { role, profile } = useAuth();
   const { toast } = useToast();
   const editIdem = useIdempotencyKey('edit_delivery', profile?.id || '');
+  // Counts confirmed saves: a later confirmed edit settles any older lost attempt, so returning to that
+  // older edit must get a fresh key and apply, not replay its stale result.
+  const confirmedEditsRef = useRef(0);
   const cancelIdem = useIdempotencyKey('cancel_delivery', profile?.id || '');
   // F1: create_followup_delivery is the ONLY retained key on this page, and it is
   // scoped by the route id. Its payload is exactly (p_original_delivery_id,
@@ -796,7 +799,7 @@ export default function DeliveryDetail() {
       p_items: itemsPayload,
     };
     // One key per delivery and exact edit: an exact retry reuses it, a different edit gets its own.
-    const editScope = fingerprintIntentPayload(editArgs);
+    const editScope = fingerprintIntentPayload([confirmedEditsRef.current, editArgs]);
     const { data, error } = await supabase.rpc('edit_delivery', {
       ...editArgs,
       p_performed_by: profile.id,
@@ -808,6 +811,7 @@ export default function DeliveryDetail() {
     } else {
       assertRpcResult(data, 'edit_delivery');
       editIdem.resetKeyFor(editScope);
+      confirmedEditsRef.current += 1;
       toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
       setEditing(false);
       fetchDelivery();

@@ -294,6 +294,9 @@ export default function JobDetail() {
   const { toast } = useToast();
   const { role, profile } = useAuth();
   const saveJobIdem = useIdempotencyKey('save_job', profile?.id || '');
+  // Counts confirmed saves: a later confirmed edit settles any older lost attempt, so returning to that
+  // older edit must get a fresh key and apply, not replay its stale result.
+  const confirmedJobSavesRef = useRef(0);
   const completeJobIdem = useIdempotencyKey('complete_job', profile?.id || '');
   const startJobIdem = useIdempotencyKey('start_job', profile?.id || '');
   const transferJobIdem = useIdempotencyKey('transfer_job_to_invoice', profile?.id || '');
@@ -494,6 +497,7 @@ export default function JobDetail() {
   const [hasActiveDispatch, setHasActiveDispatch] = useState(false);
   const [showLicenseOverrideConfirm, setShowLicenseOverrideConfirm] = useState(false);
   const assignIdem = useIdempotencyKey('assign_job_applicator', profile?.id || '');
+  const confirmedAssignsRef = useRef(0);
   // U13 (#15-21/#111): job-scoped Dispatch Locations wizard.
   const [dispatchWizardOpen, setDispatchWizardOpen] = useState(false);
   const [dispatchWizardLocations, setDispatchWizardLocations] = useState<DispatchLocation[]>([]);
@@ -2681,8 +2685,8 @@ export default function JobDetail() {
 
   /** Assign the applicator via the override RPC (admin-only path, B5). */
   const assignWithOverride = async (jobId: string) => {
-    // One key per job and applicator: an exact retry reuses it, a different pick gets its own.
-    const assignScope = fingerprintIntentPayload([jobId, applicatorId]);
+    // One key per job, applicator and confirmed-assign count: an exact retry reuses it, a different pick gets its own.
+    const assignScope = fingerprintIntentPayload([jobId, applicatorId, confirmedAssignsRef.current]);
     const { data, error } = await supabase.rpc('assign_job_applicator', {
       p_job_id: jobId,
       p_applicator_id: applicatorId,
@@ -2693,6 +2697,7 @@ export default function JobDetail() {
     if (error) throw error;
     assertRpcResult(data, 'assign_job_applicator');
     assignIdem.resetKeyFor(assignScope);
+    confirmedAssignsRef.current += 1;
   };
 
   // U13 (#15-21/#111): open the Dispatch Board wizard SCOPED to just this job's
@@ -2902,7 +2907,7 @@ export default function JobDetail() {
       // save_job binds the key to the request. A new job keeps one key until confirmed, so an edited retry after a
       // lost reply is refused with the committed job, which the catch below opens; an edit to an existing job gets a
       // key per exact payload, since re-applying an edit to the same job is harmless.
-      const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, payload, fieldsPayload, chemsPayload]);
+      const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, confirmedJobSavesRef.current, payload, fieldsPayload, chemsPayload]);
       const { data, error } = await supabase.rpc('save_job', {
         p_job_id: (isNew ? null : id) as string,
         p_job_payload: payload,
@@ -2919,6 +2924,7 @@ export default function JobDetail() {
       }
       const result = assertRpcResult<SaveJobResult>(data, 'save_job');
       saveJobIdem.resetKeyFor(saveScope);
+      confirmedJobSavesRef.current += 1;
       const savedJobIdForNotify = isNew ? result.job_id : (id as string);
 
       // Fires HERE — at the commit point — not on the success path further down, because two

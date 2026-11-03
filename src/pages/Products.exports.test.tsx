@@ -359,14 +359,14 @@ describe('Products list and exports', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     expect(vi.mocked(exportToCSV).mock.calls[0][0].map((row) => row.id)).toEqual([inactiveProduct.id]);
-    expect(mocks.toast).toHaveBeenCalledWith('success', 'Exported 1 product(s) to CSV');
+    expect(mocks.toast).toHaveBeenCalledWith('success', 'Exported 1 product(s) to CSV (1 turned-off product(s) left out)');
 
     fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
     await waitFor(() => expect(downloadReportPdf).toHaveBeenCalledTimes(1));
     const [pdf] = vi.mocked(downloadReportPdf).mock.calls[0];
     expect(pdf.data.map((row) => row.id)).toEqual([inactiveProduct.id]);
     expect(pdf.subtitle).toBe('1 product(s) selected');
-    expect(mocks.toast).toHaveBeenCalledWith('success', 'Downloaded PDF with 1 product(s)');
+    expect(mocks.toast).toHaveBeenCalledWith('success', 'Downloaded PDF with 1 product(s) (1 turned-off product(s) left out)');
   });
 
   it('warns and skips both selected exports when the only selected product became inactive', async () => {
@@ -385,8 +385,8 @@ describe('Products list and exports', () => {
     expect(exportToCSV).not.toHaveBeenCalled();
     expect(downloadReportPdf).not.toHaveBeenCalled();
     expect(mocks.toast).toHaveBeenCalledTimes(2);
-    expect(mocks.toast).toHaveBeenNthCalledWith(1, 'warning', 'No active products selected.');
-    expect(mocks.toast).toHaveBeenNthCalledWith(2, 'warning', 'No active products selected.');
+    expect(mocks.toast).toHaveBeenNthCalledWith(1, 'warning', 'No active products selected (1 turned-off product(s) left out).');
+    expect(mocks.toast).toHaveBeenNthCalledWith(2, 'warning', 'No active products selected (1 turned-off product(s) left out).');
   });
 
   it('labels selected exports internal with or without Margins', async () => {

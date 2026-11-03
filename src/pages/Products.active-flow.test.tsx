@@ -28,7 +28,7 @@ vi.mock('../lib/db', async (original) => ({
   supabase: { from: vi.fn(() => chainable({ data: mocks.products, error: null })) },
   supabaseUntyped: { rpc: (...args: unknown[]) => mocks.rpc(...args) },
   assertRpcResult: (data: unknown) => data,
-  sanitizeError: (error: unknown) => error instanceof Error ? error.message : String(error),
+  sanitizeError: (error: unknown) => (error as { message?: string } | null)?.message ?? String(error),
   checkMutationResult: vi.fn(),
 }));
 vi.mock('../lib/costFields', async (original) => ({
@@ -53,6 +53,9 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
   useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
 }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
+vi.mock('../lib/csvExport', async (original) => ({
+  ...(await original<typeof import('../lib/csvExport')>()), exportToCSV: vi.fn(),
+}));
 
 import Products from './Products';
 
@@ -130,6 +133,14 @@ describe('product active review flow', () => {
     expect(mocks.rpc).toHaveBeenCalledTimes(3);
   });
 
+  it('says how many turned-off products a selected export left out', async () => {
+    await loaded();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by status' }), { target: { value: 'all' } });
+    for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Export CSV' })[0]);
+    expect(mocks.toast).toHaveBeenCalledWith('success', 'Exported 1 product(s) to CSV (1 turned-off product(s) left out)');
+  });
+
   it('reopens the review when an order becomes a blocker after preview', async () => {
     mocks.rpc.mockResolvedValueOnce({ data: review(), error: null })
       .mockResolvedValueOnce({ data: null, error: { message: 'PRODUCT_DEACTIVATION_BLOCKED: order PM3-NEW' } })
@@ -140,6 +151,7 @@ describe('product active review flow', () => {
     expect(await screen.findByText('Test Chemical: order PM3-NEW')).toBeInTheDocument();
     expect(screen.getByRole('dialog')).not.toHaveTextContent('Deactivate these products:');
     expect(mocks.rpc).toHaveBeenCalledTimes(3);
+    expect(mocks.toast).toHaveBeenCalledWith('warning', expect.stringContaining('order PM3-NEW'));
   });
 
   it('bulk actions review only rows whose status will change', async () => {

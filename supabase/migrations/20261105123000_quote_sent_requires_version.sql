@@ -165,5 +165,12 @@ BEGIN
            OR (tgname = 'enforce_quote_insert_status' AND tgtype = 7))) <> 2 THEN
     RAISE EXCEPTION 'POSTFLIGHT: both quote status triggers must be enabled, on their events, and call _enforce_quote_status_transition';
   END IF;
+  -- Again under CREATE TRIGGER's table lock: a status change committed after the preflight read is
+  -- visible now, and any later one waits for this transaction and then meets the new rule.
+  IF EXISTS (SELECT 1 FROM public.quotes q
+              WHERE q.status IN ('sent', 'revised')
+                AND NOT EXISTS (SELECT 1 FROM public.quote_versions v WHERE v.quote_id = q.id)) THEN
+    RAISE EXCEPTION 'POSTFLIGHT: a sent or revised quote has no version; resolve it before applying';
+  END IF;
 END
 $postflight$;

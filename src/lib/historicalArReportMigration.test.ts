@@ -112,7 +112,7 @@ describe('historical AR report migration', () => {
     expect(smoke).toContain(
       "v_ar.unavailable_reason IS DISTINCT FROM 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE'",
     );
-    // KI-95: the Customer Balance Listing flags it the same way (20261103160000).
+    // KI-95: the Customer Balance Listing flags it the same way (20261104120000).
     expect(smoke).toContain(
       "v_listing.unavailable_reason IS DISTINCT FROM 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE'",
     );

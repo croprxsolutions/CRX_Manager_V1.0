@@ -80,7 +80,7 @@ describe('AR Aging with a customer that cannot be shown as of the date', () => {
     expect(screen.getByText('excl. 1 not shown')).toBeTruthy();
   });
 
-  it('explains a posting-history flag (20261103160000) in plain words', async () => {
+  it('explains a posting-history flag (20261104120000) in plain words', async () => {
     H.functions.get_ar_aging = [{ ...H.functions.get_ar_aging[2] as object, unavailable_reason: 'HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE' }];
     render(<MemoryRouter><ARaging /></MemoryRouter>);
     const alert = await screen.findByRole('alert');

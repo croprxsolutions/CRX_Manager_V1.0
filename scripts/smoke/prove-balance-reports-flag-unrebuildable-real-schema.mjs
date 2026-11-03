@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// KI-95 proof for 20261103160000_balance_reports_flag_unrebuildable_customers on a disposable,
+// KI-95 proof for 20261104120000_balance_reports_flag_unrebuildable_customers on a disposable,
 // network-disabled PostgreSQL 17 built from the checked-in production baseline plus every migration
 // before the candidate. No live URLs or writes. Proves, for BOTH get_ar_aging and
 // get_customer_balance_listing:
@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const name = `crx-balance-flags-${process.pid}`;
 let created = false;
-const candidate = '20261103160000_balance_reports_flag_unrebuildable_customers.sql';
+const candidate = '20261104120000_balance_reports_flag_unrebuildable_customers.sql';
 const baseline = path.join(root, 'supabase/baselines');
 const skippedStorage = new Set(['20260914100700_customer_document_bytes_server_only.sql', '20261015230000_staff_photo_storage_access.sql', '20261016030000_staff_photo_buckets_private.sql']);
 const ledgerOnly = new Set(['20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql', '20261007150200_release_reservations_of_deleted_spring_orders.sql']);

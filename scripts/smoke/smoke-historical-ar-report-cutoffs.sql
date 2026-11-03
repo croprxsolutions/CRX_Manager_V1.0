@@ -206,7 +206,7 @@ BEGIN
       v_ar.total_outstanding, v_ar.open_credit_cents, v_ar.unavailable_reason;
   END IF;
 
-  -- KI-95 (20261103160000): Customer Balance Listing flags the unrebuildable
+  -- KI-95 (20261104120000): Customer Balance Listing flags the unrebuildable
   -- customer the same way, with every amount blank, and keeps the safe row.
   SELECT *
     INTO v_listing

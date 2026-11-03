@@ -343,13 +343,13 @@ local replay's screen (a new line added after its product's cost rose shows the 
 ---
 
 ### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
-**MED · PARTLY FIXED (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migrations `20261103150000` (PR #1313, applied live 2026-11-02) and `20261103160000` (candidate); payment half: open, KI-19 lane**
+**MED · PARTLY FIXED (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migrations `20261103150000` (PR #1313, applied live 2026-11-02) and `20261104120000` (candidate); payment half: open, KI-19 lane**
 **Report half — fixed by `20261103150000_ar_aging_flags_unrebuildable_customers`** (live status: its
 `docs/reference/migrations.d/` record). `get_ar_aging` still refuses to rebuild a customer whose later activity makes
 the chosen date unknowable, but now returns everyone else and lists that customer with no amounts and an
 `unavailable_reason`; the AR Aging tab shows them in a warning ("cannot be shown as of this date") and its totals say
 they are excluded. Proof: `scripts/smoke/prove-ar-aging-flags-unrebuildable-real-schema.mjs`.
-**Remaining report gaps — fixed by `20261103160000_balance_reports_flag_unrebuildable_customers`** (live status: its
+**Remaining report gaps — fixed by `20261104120000_balance_reports_flag_unrebuildable_customers`** (live status: its
 `docs/reference/migrations.d/` record). The rare `HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE` (two posting events on
 one invoice with the same audit timestamp) is now caught per customer in `get_ar_aging`, so it flags only that customer;
 and `get_customer_balance_listing` gets the same flag-don't-fail behaviour (flagged rows: every amount, count and date

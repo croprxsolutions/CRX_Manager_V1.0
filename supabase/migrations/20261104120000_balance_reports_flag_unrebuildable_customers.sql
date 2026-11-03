@@ -1,5 +1,5 @@
 -- Written 2026-11-02. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261103160000_balance_reports_flag_unrebuildable_customers.md.
+-- docs/reference/migrations.d/20261104120000_balance_reports_flag_unrebuildable_customers.md.
 --
 -- WHAT (KI-95, the two report gaps left by 20261103150000):
 --   1. get_ar_aging(date): HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE (two posting events on one

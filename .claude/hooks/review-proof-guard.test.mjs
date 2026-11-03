@@ -1053,6 +1053,8 @@ for (const command of [
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .*",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .[!.]*",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && mv . /tmp/x",
+  "git -C C:/CRX_Manager/.claude/worktrees/wt-a rm -rf .",
+  "git -C C:/CRX_Manager/.claude/worktrees/wt-a rm -r ../wt-b",
   "cd C:/CRX_Manager/.claude/worktrees && rm -rf wt-a",
   "git -C C:/CRX_Manager/.claude/worktrees/wt-a clean -fdx",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && find . -delete",

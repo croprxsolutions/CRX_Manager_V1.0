@@ -482,10 +482,13 @@ refused commands from those sessions before and after the change.
    right after `git`), `echo`, `printf`, `gh pr` and `gh issue` count as readers under the same plain
    quoting rules. `git grep -O` (runs a pager), `git -c …`, other `gh` commands, `sed`, and any real
    `psql`/`pgcli`/`supabase sql`/`supabase db` call (direct, through `npx`, or fed a here-document)
-   still count. Tightened at the same time (Sol on the proposal): a script runner (`node`, `deno`,
-   `bun`, `tsx`, `npx`, `python`, `ruby`, `perl`, `bash`, `sh`, `pwsh`, `cmd` …) followed anywhere
-   later by the destructive words now counts as a client call, since it can run SQL through `pg` or
-   the Supabase client; before, `node -e "…DROP TABLE…"` passed unless a `-c` sat beside it.
+   still count. Tightened at the same time (Sol on the proposal, Luna rounds 1–2): a script runner
+   (`node`, `deno`, `bun`, `tsx`, `npx`, `python`, `ruby`, `perl`, `bash`, `sh`, `pwsh`, `cmd`,
+   `eval`, `iex` …) named in any segment that is not plain text, with the destructive words anywhere
+   in the command, now counts as a client call, since it can run SQL through `pg` or the Supabase
+   client (including SQL set in a variable first, `env -u X node …`, `eval "node …"`). Before,
+   `node -e "…DROP TABLE…"` passed unless a `-c` sat beside it. Over-refusal kept on purpose:
+   `node check.mjs && echo 'DROP TABLE'`.
 
 ### Guard narrowing (2026-10-18 decision)
 

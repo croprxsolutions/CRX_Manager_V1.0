@@ -610,7 +610,9 @@ if (shellTool) {
     (cdTargetsSeen.some((t) => /[$%`*?[\]{}]/.test(t)) && commandNamesRepoClaude());
   // From inside a worktree, `..` steps up toward `.claude/worktrees` and the
   // repo's own `.claude` (pinned exploit rounds 2 and 4).
+  // `git -C <worktree> rm -rf .` runs there too (Luna round 2).
   const cdEntersWorktree = cdTargetsSeen.some((t) => /(?:^|[/\\])\.claude[/\\]+worktrees(?:[/\\]|$)/i.test(t)) ||
+    destructiveViews.some((v) => /\bgit(?:\.exe)?\s+-C\s+["']?[^\s"';&|]*\.claude[/\\]+worktrees(?![\w-])/i.test(v)) ||
     (cdTargetsSeen.some((t) => /[$%`*?[\]{}]/.test(t)) && destructiveViews.some((v) => /\.claude[/\\]+worktrees(?![\w-])/i.test(v)));
   // …and a target that is the worktree root itself or can glob onto its `.claude`
   // (`.`, `./`, `*`, `.*`, `.[!.]*`, `.?*`) erases its state (Luna, 2026-11-03).

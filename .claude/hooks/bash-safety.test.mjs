@@ -115,10 +115,15 @@ for (const [command, label] of [
   ["PGHOST=x nohup python3 run.py 'TRUNCATE customers'", "assignment + nohup python"],
   ["timeout 30 node run.mjs 'DROP SCHEMA public'", "timeout node"],
   ["env -i PATH=/usr/bin /usr/bin/node -e 'DROP TABLE x'", "env -i with a path-qualified node"],
+  // Luna round 2, 2026-11-03.
+  ["export SQL='DROP TABLE customers'; node -e \"new (require('pg').Pool)().query(process.env.SQL)\"", "SQL set before the runner"],
+  ["env -u UNUSED node scripts/run-sql.mjs 'DROP TABLE customers'", "env option with an argument"],
+  ["eval \"node -e 'new (require(\\\"pg\\\").Pool)().query(\\\"DROP TABLE customers\\\")'\"", "eval"],
+  ["git commit -m \"docs: TRUNCATE is refused\" && node scripts/check.mjs", "a runner anywhere beside the words (over-refusal kept on purpose)"],
 ]) ok(checkDangerousCommand(command), `SQL route stays refused: ${label}`);
 // Text that runs nothing stays allowed, including a script run BEFORE the words.
 for (const command of [
-  'git commit -m "docs: TRUNCATE is refused" && node scripts/check.mjs',
+  'git commit -m "docs: TRUNCATE is refused by sh and node runs" && git log -1',
   'grep -rn "DROP TABLE" supabase/migrations/20261103_x.sql',
   'ls supabase/migrations/20260101_drop_table_legacy.sql',
 ]) ok(!checkDangerousCommand(command), `text that runs nothing allowed: ${command}`);

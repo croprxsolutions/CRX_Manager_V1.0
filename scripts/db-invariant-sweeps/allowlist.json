@@ -1126,8 +1126,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_monthly_summary(p_period_start date, p_period_end date)#4d5de755b0e0",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "get_monthly_summary(p_period_start date, p_period_end date)#9a7eba16983c",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-03 after 20261105130000 (PR #1392, ledger 20261103223741): only the deliveries.count line changed (now skips cancelled/voided); PERFORM require_admin() still gates every caller, anon has no EXECUTE, body sha 079f77c1.",
       "dated": "2026-11-02"
     },
     {

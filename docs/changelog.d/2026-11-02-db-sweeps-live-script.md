@@ -1,0 +1,5 @@
+## 2026-11-02 - One script runs the live db-invariant sweeps
+
+`npm run db-sweeps:live` (`scripts/db-invariant-sweeps/run-live.mjs`) runs all the db-invariant sweeps against live, read-only, and adjudicates them. It takes each wrapped query from `run-sweeps.mjs` output and refuses any the live-data guard does not recognise byte-for-byte. Each query goes to the Supabase Management API with `read_only: true`, and every `sweep_result` is saved untouched to a private, git-ignored capture before `--adjudicate` runs over it. The Management token is read in memory from Windows Credential Manager. Mason approved this read-only use on 2026-11-02 (`docs/manual/SERVICES_AND_ACCOUNTS.md`).
+
+The post-apply sweep gate (`.claude/commands/ship.md` Step 5 item 7) and `codex-review` Step 2 now point at it. Before this, six helper agents copied about 330KB of SQL and the results by hand, which cost about 840K tokens per run and could not prove an exact copy. The MCP path remains the fallback where the token is unavailable. `run-live.test.mjs` checks the parsing, refusal and capture logic without any network.

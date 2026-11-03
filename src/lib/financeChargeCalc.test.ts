@@ -27,6 +27,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     product_name: 'Test Product',
     sku: null,
     category: null,
+    use_timings: [],
     vendor: null,
     manufacturer: null,
     container_size: null,

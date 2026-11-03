@@ -83,6 +83,7 @@ describe('sendEmail', () => {
     email_type: 'invoice',
     customer_id: 'cust-123',
     idempotency_key: 'idem-abc',
+    invoice_snapshot: { invoice_number: 'INV-1', total_amount_cents: 100, paid_amount_cents: 0, prepay_applied_cents: 0, balance_cents: 100, lines_total_cents: 100 },
   };
 
   const mockSession = {
@@ -202,6 +203,7 @@ describe('buildInvoiceEmailPayload', () => {
     invoiceDate: '2026-06-25',
     balanceCents: 125000, // $1,250.00
     attachmentBase64: 'QkFTRTY0UERG', // dummy base64
+    snapshot: { invoice_number: 'FA-1001', total_amount_cents: 125000, paid_amount_cents: 0, prepay_applied_cents: 0, balance_cents: 125000, lines_total_cents: 125000 },
     nowMs: 1_700_000_000_000,
   };
 

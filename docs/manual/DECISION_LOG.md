@@ -17,6 +17,13 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Why.** Asked whether unposted invoices should also offer an EPA update after a product correction, Mason chose to leave invoice lines as copied.
 
 **What this forbids/implies:** no "update EPA" offer is built for draft or unposted invoices. Posted invoices never change (2026-10-28). Record map: `docs/reference/product-corrections-record-map.md`.
+## 2026-11-02 — Invoice emails ship with server-written text; server-built PDFs are a later project
+
+**Decision (Mason, in chat):** "option A but make sure and note this everywhere so we don't forget it and document well to follow up in separate session with bigger work". KI-97 ships with the email service writing the invoice email's text and Amount Due from the saved invoice and checking the app's summary of its PDF. It does not wait for the server to draw the PDF itself.
+
+**Why.** Codex (Luna) rated the remaining gap a BLOCKER: the PDF file still comes from the sender's app, so a staff member could attach a doctored PDF next to a correct summary. The complete fix means porting about 1,600 lines of PDF code to the server. Holding KI-97 for that would leave the larger, likelier problem live: wrong amounts from a bug or a stale screen. Only signed-in admin or sales staff can send, only to the address on file, and the purchase-order email already works this way.
+
+**What this forbids/implies:** the gap is tracked as `KNOWN_ISSUES.md` KI-98 with a scoped follow-up: build invoice and purchase-order PDFs on the server. A reviewer re-raising "the PDF bytes are caller-supplied" on KI-97 or the PO email should be pointed here and to KI-98, not treated as new. It still counts as a real finding against any change that claims to close KI-98.
 
 ## 2026-11-02 — A PR off the Sol list opens ready, not as a draft
 

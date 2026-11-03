@@ -69,6 +69,25 @@ test('a violation that is an existing key (not a re-key) refuses', () => {
   assert.equal(r.after, original);
 });
 
+test('a stale output whose new key is already allowlisted refuses', () => {
+  const data = JSON.parse(original);
+  data.entries.push({ ...costEntries[0], violation_key: rehash(costEntries[0].violation_key) });
+  const eol = original.includes('\r\n') ? '\r\n' : '\n';
+  const withBoth = JSON.stringify(data, null, 2).replace(/\n/g, eol) + eol;
+  const dir = mkdtempSync(path.join(tmpdir(), 'crx-rekey-'));
+  try {
+    const allowlist = path.join(dir, 'allowlist.json');
+    const output = path.join(dir, 'out.txt');
+    writeFileSync(allowlist, withBoth);
+    writeFileSync(output, sweepOutput([rehash(costEntries[0].violation_key)]));
+    const r = spawnSync(process.execPath, [script, output, '--allowlist', allowlist, '--note', NOTE], { encoding: 'utf8' });
+    assert.equal(r.status, 1);
+    assert.equal(readFileSync(allowlist, 'utf8'), withBoth);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a signature shared by two entries refuses', () => {
   const dupe = { ...costEntries[0], violation_key: rehash(costEntries[0].violation_key).replace(/0+$/, '111111111111') };
   const data = JSON.parse(original);
@@ -90,11 +109,11 @@ test('a signature shared by two entries refuses', () => {
   }
 });
 
-test('an empty or missing note refuses', () => {
-  for (const extra of [['--note', '   '], []]) {
+test('an empty, missing or undated note refuses', () => {
+  for (const extra of [['--note', '   '], [], ['--note', 're-read after the migration']]) {
     const r = run([rehash(costEntries[0].violation_key)], ...extra);
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /note is required/);
+    assert.match(r.stderr, /dated note .*is required/);
     assert.equal(r.after, original);
   }
 });

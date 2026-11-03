@@ -251,7 +251,7 @@ node scripts/db-invariant-sweeps/run-sweeps.mjs --explain <predicate>  # header 
   `npm run db-sweeps:live > sweep-output.txt`, then
   `node scripts/db-invariant-sweeps/rekey-allowlist.mjs sweep-output.txt --note "Re-read live <date> after <migration> (PR #<n>, ledger <version>): ..."`
   (`--predicate` defaults to `cost-exposure-review`). It swaps each key and appends the note, and
-  refuses, writing nothing, on an empty note or any violation that is not exactly one existing
+  refuses, writing nothing, on an undated note or any violation that is not exactly one existing
   same-signature entry; a new function still needs a review. Test: `rekey-allowlist.test.mjs`.
 - The allowlist is itself a Codex artifact: hand Codex the allowlist **diff** to attack (per §5 of the
   review) — adjudicating exemptions is exactly what a second model is good at.

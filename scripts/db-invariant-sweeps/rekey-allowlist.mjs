@@ -12,9 +12,10 @@
  *   node scripts/db-invariant-sweeps/rekey-allowlist.mjs sweep-output.txt --note "Re-read live <date> after ..."
  *     [--predicate cost-exposure-review] [--allowlist <path>]
  *
- * Refuses and writes nothing when the note is empty, when any violation of the predicate is not
- * exactly one existing same-signature entry (a new function must be reviewed, not auto-allowlisted),
- * or when the file would not round-trip to the same bytes. Exit 0 re-keyed, 1 refused.
+ * Refuses and writes nothing when the note has no YYYY-MM-DD date, when any violation of the
+ * predicate is not exactly one existing same-signature entry with a different key (a new function
+ * must be reviewed, not auto-allowlisted), or when the file would not round-trip to the same bytes.
+ * Exit 0 re-keyed, 1 refused. One writer at a time: it rewrites the whole file.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -37,8 +38,8 @@ export function violationKeys(outputText, predicate) {
 
 /** Pure: the new file text, or a thrown refusal. */
 export function rekey(allowlistText, keys, predicate, note) {
-  if (typeof note !== 'string' || note.trim() === '') {
-    throw new Error('A note is required: a key is never re-pasted without a human re-read of the changed chain.');
+  if (typeof note !== 'string' || !/\b\d{4}-\d{2}-\d{2}\b/.test(note)) {
+    throw new Error('A dated note (YYYY-MM-DD) is required: a key is never re-pasted without a human re-read of the changed chain.');
   }
   if (keys.length === 0) throw new Error(`No ${predicate} violations to re-key.`);
   const eol = allowlistText.includes('\r\n') ? '\r\n' : '\n';
@@ -53,9 +54,11 @@ export function rekey(allowlistText, keys, predicate, note) {
   for (const key of keys) {
     const signature = signatureOf(key);
     const matches = signature === null ? [] : data.entries.filter((e) => e.predicate === predicate &&
-      e.violation_key !== key && signatureOf(e.violation_key) === signature);
+      signatureOf(e.violation_key) === signature);
     if (matches.length !== 1) {
       problems.push(`${key}: ${matches.length === 0 ? 'no reviewed entry has this signature (a new function needs a review, not a re-key)' : `${matches.length} entries share this signature`}`);
+    } else if (matches[0].violation_key === key) {
+      problems.push(`${key}: already the allowlisted key, so this is not a fingerprint change`);
     } else if (claimed.has(matches[0])) {
       problems.push(`${key}: another violation already re-keys the same entry`);
     } else {

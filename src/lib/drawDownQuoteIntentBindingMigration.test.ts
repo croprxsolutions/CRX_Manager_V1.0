@@ -257,7 +257,7 @@ describe('draw_down_quote actor and intent binding migration', () => {
     expect(drawStart).toBeGreaterThan(-1);
     expect(drawEnd).toBeGreaterThan(drawStart);
     expect(quoteBuilder).toContain(
-      "import { fingerprintIntentPayload, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';",
+      "import { getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';",
     );
     expect(drawHandler).toContain('const bindingRejection = getIdempotencyBindingRejection(error);');
     const rejectionHandler = drawHandler.slice(drawHandler.indexOf('if (bindingRejection) {'));

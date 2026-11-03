@@ -52,7 +52,7 @@ import {
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { fingerprintIntentPayload, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
+import { getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
@@ -2700,7 +2700,9 @@ export default function QuoteBuilder() {
   const handleSelectTemplate = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const templateId = e.target.value;
     if (!templateId || !customerId || !profile) return;
-    const ftScope = fingerprintIntentPayload([templateId, customerId]);
+    // One key per customer until a quote is confirmed: this RPC checks only the key, so an edited retry after a
+    // lost reply must replay the quote it already created rather than create a second one.
+    const ftScope = customerId;
     const { data, error } = await supabase.rpc('create_quote_from_template', {
       p_template_id: templateId,
       p_customer_id: customerId,
@@ -2716,7 +2718,9 @@ export default function QuoteBuilder() {
   // Seasonal rollover handler
   const handleRollover = async () => {
     if (!quoteId || !profile) return;
-    const rollScope = fingerprintIntentPayload([quoteId, rolloverSeason]);
+    // One key per source quote until confirmed: this RPC checks only the key, so a changed season after a lost
+    // reply must replay the rollover it already made rather than create a second quote.
+    const rollScope = quoteId;
     const { data, error } = await supabase.rpc('rollover_quote_to_season', {
       p_quote_id: quoteId,
       p_new_season: rolloverSeason,

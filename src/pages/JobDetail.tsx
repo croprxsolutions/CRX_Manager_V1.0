@@ -2899,8 +2899,9 @@ export default function JobDetail() {
         }
       };
 
-      // One key per job and exact payload: an exact retry reuses it, an edited form gets its own.
-      const saveScope = fingerprintIntentPayload([isNew ? null : id, payload, fieldsPayload, chemsPayload]);
+      // save_job checks only the key. A new job keeps one key until confirmed, so an edited retry after a lost
+      // reply replays the job it already created; an edit to an existing job gets a key per exact payload.
+      const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, payload, fieldsPayload, chemsPayload]);
       const { data, error } = await supabase.rpc('save_job', {
         p_job_id: (isNew ? null : id) as string,
         p_job_payload: payload,

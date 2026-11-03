@@ -602,8 +602,9 @@ function FieldSetupPage() {
         pricing_note: s.pricing_note || null,
       }));
 
-      // One key per field and exact payload: an exact retry reuses it, an edited form gets its own.
-      const saveScope = fingerprintIntentPayload([isNew ? null : id, fieldPayload, billingPayload]);
+      // save_field checks only the key. A new field keeps one key until confirmed, so an edited retry after a lost
+      // reply replays the field it already created; an edit to an existing field gets a key per exact payload.
+      const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, fieldPayload, billingPayload]);
       const { data, error } = await supabase.rpc('save_field', {
         p_field_id: (isNew ? null : id) as string,
         p_field_payload: fieldPayload,

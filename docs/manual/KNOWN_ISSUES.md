@@ -203,12 +203,16 @@ key is scoped depends on whether the server binds the key to its request (KI-10)
   mint a fresh key and duplicate the work.
 - **Server does not bind the request** (`save_job`,
   `assign_job_applicator`, `save_field`, `edit_delivery`, `link_blend_ticket_to_order`, `create_quote_from_template`,
-  `rollover_quote_to_season`, `reassign_delivery`): one key per record and exact request, so a retry can never
-  replay another record's result.
+  `rollover_quote_to_season`, `reassign_delivery`): a save that creates a record (new field, new job, quote from
+  template, season rollover) keeps one key per form or source until confirmed, so an edited retry after a lost
+  reply replays the record already created instead of making a second one; an edit to an existing record uses
+  one key per record and exact request, so a retry never replays another record's result.
 - NewOrder (`create_direct_order`, `create_rush_order`, both bound) keeps one key per exact request on purpose:
   its below-cost approval is remembered per key, and a shared key could carry an approval to a different order.
-**Remaining risk:** for the unbound functions, editing the form after a lost reply and saving again can still do
-the work twice. These are edits and assignments on one record rather than new money. That needs server-side binding (KI-10 batches 4c/4d), not a screen change. Quotes' Convert to Order
+**Remaining risk:** for the unbound functions, a create retried with different details after a lost reply opens
+the record already created without the later edits, and an edited retry of an existing record applies the new edit
+after the old one. Neither makes a second record or moves money twice; a clear refusal needs server-side binding
+(KI-10 batches 4c/4d), not a screen change. Quotes' Convert to Order
 starts a new key each time its dialog opens, which is accepted: the server answers a repeat with
 `already_converted` and opens the existing order. `KNOWN_UNFIXED_SITES` in
 `src/__tests__/idempotency-reset-order.test.ts` lists only three documented scanner false positives (CustomerDetail,

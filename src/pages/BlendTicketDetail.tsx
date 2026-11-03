@@ -1663,6 +1663,7 @@ export function BlendTicketDetail() {
             const productForm = catalog
               ? (catalog.product_form ?? null)
               : (product.product?.product_form ?? null);
+            const inventoryUnit = catalog ? catalog.inventory_unit : product.product?.inventory_unit;
             return (
             <div key={product.id} className={`grid grid-cols-12 gap-3 items-start p-4 rounded-lg ${
               !product.manually_corrected && product.confidence_score > 0 && product.confidence_score < 70
@@ -1710,7 +1711,7 @@ export function BlendTicketDetail() {
                 <UnitSelect
                   unitConversions={unitConversions}
                   form={productForm}
-                  inventoryUnit={product.product?.inventory_unit}
+                  inventoryUnit={inventoryUnit}
                   value={product.unit || ''}
                   onChange={(value) => updateProduct(index, 'unit', value)}
                   disabled={contentLocked}
@@ -1737,7 +1738,7 @@ export function BlendTicketDetail() {
                 <UnitSelect
                   unitConversions={unitConversions}
                   form={productForm}
-                  inventoryUnit={product.product?.inventory_unit}
+                  inventoryUnit={inventoryUnit}
                   value={product.rate_per_acre_unit || ''}
                   onChange={(value) => updateProduct(index, 'rate_per_acre_unit', value)}
                   disabled={contentLocked}

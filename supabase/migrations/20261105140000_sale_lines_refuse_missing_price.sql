@@ -52,7 +52,9 @@
 --   booked quote is checked at the customer's tier, not the quote's. rollover_quote_to_season
 --   drops price overrides, so rolling a giveaway line for an unpriced product is refused. A quote's
 --   tier change is checked against its existing $0 lines (trigger on quotes.tier), because
---   save_quote writes the tier after the lines. Changing an order's quote or customer (no app
+--   save_quote writes the tier after the lines; for the same reason a quote line for a product
+--   priced only at another tier is checked at commit against the tier the quote was saved with
+--   (deferred trigger), and a non-admin then sees the below-cost refusal first. Changing an order's quote or customer (no app
 --   screen does) re-checks its $0 lines (trigger on orders), so the two legacy lines would refuse a
 --   customer change on their fulfilled orders until priced.
 --
@@ -80,6 +82,7 @@
 --   DROP TRIGGER trigger_b_invoice_item_price_required ON public.invoice_items;
 --   DROP TRIGGER trigger_b_quote_tier_price_required ON public.quotes;
 --   DROP TRIGGER trigger_b_order_source_price_required ON public.orders;
+--   DROP TRIGGER trigger_c_quote_item_price_required_at_commit ON public.quote_items;
 --   DROP FUNCTION public._sale_line_price_required(). No data to restore.
 
 SET LOCAL lock_timeout = '5s';
@@ -97,7 +100,8 @@ BEGIN
   IF to_regproc('public._sale_line_price_required') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname IN ('trigger_b_quote_item_price_required',
                   'trigger_b_order_item_price_required', 'trigger_b_invoice_item_price_required',
-                  'trigger_b_quote_tier_price_required', 'trigger_b_order_source_price_required')) THEN
+                  'trigger_b_quote_tier_price_required', 'trigger_b_order_source_price_required',
+                  'trigger_c_quote_item_price_required_at_commit')) THEN
     RAISE EXCEPTION 'SALE_LINE_PRICE_REQUIRED_EXISTS: this migration has already run';
   END IF;
   IF (SELECT count(*) FROM information_schema.columns
@@ -131,6 +135,7 @@ DECLARE
   v_tier integer;
   v_product_name text;
   v_stated numeric;
+  v_any_stated boolean;
 BEGIN
   -- save_quote writes a changed tier after it prices the lines, so the lines are checked again
   -- against the tier as it is written.
@@ -207,6 +212,22 @@ BEGIN
     IF NEW.price_override IS NOT NULL OR round(COALESCE(NEW.price_per_unit, 0), 2) <> 0 THEN
       RETURN NEW;
     END IF;
+    -- At commit (the deferred trigger): the line as it now stands, against the tier its quote was
+    -- saved with. save_quote writes a changed tier after the lines, so a line priced only at the
+    -- new tier waits for this check.
+    IF TG_WHEN = 'AFTER' THEN
+      SELECT p.product_name INTO v_product_name
+        FROM quote_items qi JOIN quotes q ON q.id = qi.quote_id JOIN products p ON p.id = qi.product_id
+       WHERE qi.id = NEW.id AND qi.price_override IS NULL AND round(COALESCE(qi.price_per_unit, 0), 2) = 0
+         AND COALESCE(CASE COALESCE(q.tier, 1) WHEN 3 THEN p.tier3_price WHEN 2 THEN p.tier2_price ELSE p.tier1_price END,
+                      p.tier1_price) IS NULL;
+      IF FOUND THEN
+        RAISE EXCEPTION
+          'QUOTE_PRICE_MISSING: % has no price for this quote''s tier, so its line would show $0. Type a price on the line, or set the product''s prices first (give it a $0 price if you give it away).',
+          v_product_name USING ERRCODE = 'P0001';
+      END IF;
+      RETURN NULL;
+    END IF;
     SELECT q.tier INTO v_tier FROM quotes q WHERE q.id = NEW.quote_id;
   ELSIF TG_TABLE_NAME = 'order_items' THEN
     IF COALESCE(NEW.pricing_pending, false) OR round(COALESCE(NEW.price_per_unit, 0), 2) <> 0 THEN
@@ -235,13 +256,18 @@ BEGIN
   END IF;
   SELECT p.product_name,
          COALESCE(CASE COALESCE(v_tier, 1) WHEN 3 THEN p.tier3_price WHEN 2 THEN p.tier2_price ELSE p.tier1_price END,
-                  p.tier1_price)
-    INTO v_product_name, v_stated
+                  p.tier1_price),
+         num_nonnulls(p.tier1_price, p.tier2_price, p.tier3_price) > 0
+    INTO v_product_name, v_stated, v_any_stated
     FROM products p WHERE p.id = NEW.product_id;
   IF NOT FOUND OR v_stated IS NOT NULL THEN
     RETURN NEW;
   END IF;
   IF TG_TABLE_NAME = 'quote_items' THEN
+    -- Priced at another tier: the quote may be switching to it in this save; checked at commit.
+    IF v_any_stated THEN
+      RETURN NEW;
+    END IF;
     RAISE EXCEPTION
       'QUOTE_PRICE_MISSING: % has no price for this quote''s tier, so its line would show $0. Type a price on the line, or set the product''s prices first (give it a $0 price if you give it away).',
       COALESCE(v_product_name, 'A product') USING ERRCODE = 'P0001';
@@ -263,6 +289,12 @@ REVOKE ALL ON FUNCTION public._sale_line_price_required() FROM PUBLIC, anon, aut
 CREATE TRIGGER trigger_b_quote_item_price_required
   BEFORE INSERT OR UPDATE OF quote_id, product_id, price_per_unit, price_override, total_units_needed
   ON public.quote_items
+  FOR EACH ROW EXECUTE FUNCTION public._sale_line_price_required();
+
+CREATE CONSTRAINT TRIGGER trigger_c_quote_item_price_required_at_commit
+  AFTER INSERT OR UPDATE OF quote_id, product_id, price_per_unit, price_override, total_units_needed
+  ON public.quote_items
+  DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION public._sale_line_price_required();
 
 CREATE TRIGGER trigger_b_order_item_price_required
@@ -304,15 +336,18 @@ BEGIN
   IF (SELECT count(*) FROM pg_trigger t
        WHERE t.tgname IN ('trigger_b_quote_item_price_required', 'trigger_b_order_item_price_required',
                           'trigger_b_invoice_item_price_required', 'trigger_b_quote_tier_price_required',
-                          'trigger_b_order_source_price_required')
+                          'trigger_b_order_source_price_required', 'trigger_c_quote_item_price_required_at_commit')
          AND t.tgenabled = 'O' AND t.tgfoid = to_regprocedure('public._sale_line_price_required()')
          AND NOT t.tgisinternal
-         AND t.tgtype = CASE WHEN t.tgname IN ('trigger_b_quote_tier_price_required', 'trigger_b_order_source_price_required') THEN 19 ELSE 23 END  -- ROW, BEFORE, (INSERT,) UPDATE
-         AND t.tgrelid = CASE t.tgname WHEN 'trigger_b_quote_item_price_required' THEN 'public.quote_items'::regclass
-                                       WHEN 'trigger_b_order_item_price_required' THEN 'public.order_items'::regclass
-                                       WHEN 'trigger_b_quote_tier_price_required' THEN 'public.quotes'::regclass
-                                       WHEN 'trigger_b_order_source_price_required' THEN 'public.orders'::regclass
-                                       ELSE 'public.invoice_items'::regclass END) <> 5 THEN
+         -- ROW, BEFORE, (INSERT,) UPDATE; the commit-time one is ROW, AFTER, INSERT, UPDATE and deferred
+         AND t.tgtype = CASE WHEN t.tgname IN ('trigger_b_quote_tier_price_required', 'trigger_b_order_source_price_required') THEN 19
+                             WHEN t.tgname = 'trigger_c_quote_item_price_required_at_commit' THEN 21 ELSE 23 END
+         AND (t.tgdeferrable AND t.tginitdeferred AND t.tgconstraint <> 0) = (t.tgname = 'trigger_c_quote_item_price_required_at_commit')
+         AND t.tgrelid = CASE WHEN t.tgname IN ('trigger_b_quote_item_price_required', 'trigger_c_quote_item_price_required_at_commit') THEN 'public.quote_items'::regclass
+                              WHEN t.tgname = 'trigger_b_order_item_price_required' THEN 'public.order_items'::regclass
+                              WHEN t.tgname = 'trigger_b_quote_tier_price_required' THEN 'public.quotes'::regclass
+                              WHEN t.tgname = 'trigger_b_order_source_price_required' THEN 'public.orders'::regclass
+                              ELSE 'public.invoice_items'::regclass END) <> 6 THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: a price-required trigger is missing or not enabled';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK: quote, order and tier-priced invoice lines refuse an unpriced product at $0';

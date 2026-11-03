@@ -206,7 +206,7 @@ function buildContainer() {
 const id = (n) => `6b000000-0000-4000-8000-${n.padStart(12, '0')}`;
 const U = { ADMIN: id('a1') };
 const C = { T1: id('c1'), T2: id('c2'), T3: id('c3') };
-const P = { UNPRICED: id('f1'), ZERO: id('f2'), T1ONLY: id('f3'), T2ONLY: id('f4') };
+const P = { UNPRICED: id('f1'), ZERO: id('f2'), T1ONLY: id('f3'), T2ONLY: id('f4'), T2ZERO: id('f5'), T3ONLY: id('f6') };
 const Q = { T1: id('e1'), T2: id('e2'), T3: id('e3') };
 const S = { T1: id('51'), T2: id('52'), T3: id('53') };
 const O = { T1: id('d1'), T2: id('d2'), T1_NO_QUOTE: id('d3'), OTHER_CUSTOMER: id('d4') };
@@ -228,7 +228,9 @@ function seed() {
       ('${P.UNPRICED}', '[PROVER] Unpriced', true, NULL, NULL, NULL, 4),
       ('${P.ZERO}', '[PROVER] Stated Zero', true, 0, NULL, NULL, 4),
       ('${P.T1ONLY}', '[PROVER] Tier One Only', true, 10, NULL, NULL, 4),
-      ('${P.T2ONLY}', '[PROVER] Tier Two Only', true, NULL, 5, NULL, 4);
+      ('${P.T2ONLY}', '[PROVER] Tier Two Only', true, NULL, 5, NULL, 4),
+      ('${P.T2ZERO}', '[PROVER] Tier Two Zero', true, NULL, 0, NULL, 4),
+      ('${P.T3ONLY}', '[PROVER] Tier Three Only', true, NULL, NULL, 5, 4);
     INSERT INTO public.quotes (id, quote_number, customer_id, created_by, tier) VALUES
       ('${Q.T1}', 'PV6B-Q1', '${C.T1}', '${U.ADMIN}', 1), ('${Q.T2}', 'PV6B-Q2', '${C.T2}', '${U.ADMIN}', 2),
       ('${Q.T3}', 'PV6B-Q3', '${C.T3}', '${U.ADMIN}', 3);
@@ -243,18 +245,21 @@ function seed() {
       ('${OI_LEGACY}', '${O.T1}', '${P.UNPRICED}', 0, 5, 5);
     INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, created_by) VALUES ('${I.T1}', 'PV6B-I1', '${C.T1}', 'field_application', '${U.ADMIN}');
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
-  console.log('[prover] seeded three customers (tiers 1-3), four products, quotes, orders, a field-app invoice and legacy $0 lines');
+  console.log('[prover] seeded three customers (tiers 1-3), six products, quotes, orders, a field-app invoice and legacy $0 lines');
 }
 
 const ONLY_GUARD = `ALTER TABLE public.quote_items DISABLE TRIGGER USER; ALTER TABLE public.quote_items ENABLE TRIGGER trigger_b_quote_item_price_required;
+  ALTER TABLE public.quote_items ENABLE TRIGGER trigger_c_quote_item_price_required_at_commit;
   ALTER TABLE public.order_items DISABLE TRIGGER USER; ALTER TABLE public.order_items ENABLE TRIGGER trigger_b_order_item_price_required;
   ALTER TABLE public.invoice_items DISABLE TRIGGER USER; ALTER TABLE public.invoice_items ENABLE TRIGGER trigger_b_invoice_item_price_required;`;
 
 // One rolled-back transaction; `isolate` leaves only this migration's triggers on (the other
-// triggers' own rules are not under test here). Returns null on success, else the error text.
+// triggers' own rules are not under test here). Deferred checks run before the rollback, as at
+// commit. Returns null on success, else the error text.
+const AT_COMMIT = 'SET CONSTRAINTS ALL IMMEDIATE;';
 function attempt(sql, { isolate = true } = {}) {
   const r = docker([...psqlArgs(), '-A', '-t'], {
-    input: `BEGIN;\n${isolate ? ONLY_GUARD : ''}\n${sql}\nROLLBACK;`, allowFailure: true,
+    input: `BEGIN;\n${isolate ? ONLY_GUARD : ''}\n${sql}\n${AT_COMMIT}\nROLLBACK;`, allowFailure: true,
   });
   return r.status === 0 ? null : r.stderr.trim();
 }
@@ -288,6 +293,22 @@ const asAdmin = (operation) => `SELECT set_config('request.jwt.claim.sub', '${U.
 const GAP_QUOTE = asAdmin('save_quote') + REFUSED_QUOTE;
 const GAP_ORDER = asAdmin('update_order_items') + oi(O.T1, P.UNPRICED, 0);
 const GAP_INVOICE = asAdmin('save_invoice') + ii(P.UNPRICED, 0, "'tier'");
+// The real save_quote: create a tier-1 quote, then save it again at `tier` with one line for
+// `product` (save_quote re-inserts the lines, then writes the new tier).
+const saveQuote = (tier, product) => asAdmin('save_quote') + `DO $sq$
+DECLARE r jsonb;
+  s jsonb := jsonb_build_array(jsonb_build_object('section_name', 'S1', 'sort_order', 0, 'items', jsonb_build_array(
+    jsonb_build_object('product_id', '${P.T1ONLY}', 'sort_order', 0, 'calc_mode', 'units_direct', 'total_units_needed', 2, 'unit_size', 'gal',
+      'below_cost_reason', 'prover giveaway'))));
+BEGIN
+  r := public.save_quote(NULL, jsonb_build_object('quote_number', 'PV6B-SQ', 'status', 'draft', 'tier', 1,
+    'commission_split', '{"splits": []}'::jsonb, 'customer_id', '${C.T1}'), s, '${U.ADMIN}', NULL);
+  s := jsonb_set(s, '{0,items,0,product_id}', to_jsonb('${product}'::text));
+  r := public.save_quote((r->>'quote_id')::uuid, jsonb_build_object('quote_number', 'PV6B-SQ', 'status', 'draft', 'tier', ${tier},
+    'commission_split', '{"splits": []}'::jsonb, 'customer_id', '${C.T1}', 'row_version_expected', (r->>'row_version')::bigint),
+    s, '${U.ADMIN}', NULL);
+END
+$sq$;`;
 
 function main() {
   buildContainer();
@@ -339,7 +360,21 @@ ${unnamed}`);
     UPDATE public.quotes SET tier = tier WHERE id = '${Q.T2}';`);
   allowed('quote: tier changed, lines still priced', `${qi(Q.T2, S.T2, P.ZERO, 0)}
     UPDATE public.quotes SET tier = 3 WHERE id = '${Q.T2}';`);
-  console.log('[prover] a quote tier change re-checks its $0 lines by name');
+  // A line priced only at the tier the quote is switching to waits for the tier (checked at commit).
+  // (Q.T3 and Q.T2 carry no legacy $0 line, which a tier change would re-check.)
+  allowed('quote: line for a stated $0 at tier 2, then the tier set to 2', `${qi(Q.T3, S.T3, P.T2ZERO, 0)}
+    UPDATE public.quotes SET tier = 2 WHERE id = '${Q.T3}';`);
+  refused('quote: line priced only at tier 3, tier set to 1', `${qi(Q.T2, S.T2, P.T3ONLY, 0)}
+    UPDATE public.quotes SET tier = 1 WHERE id = '${Q.T2}';`, 'QUOTE_PRICE_MISSING', 'Tier Three Only');
+  refused('quote: line priced only at tier 3, tier unchanged (at commit)', qi(Q.T1, S.T1, P.T3ONLY, 0), 'QUOTE_PRICE_MISSING', 'Tier Three Only');
+  refused('quote: switched to tier 2 and back to 3', `${qi(Q.T3, S.T3, P.T2ZERO, 0)}
+    UPDATE public.quotes SET tier = 2 WHERE id = '${Q.T3}'; UPDATE public.quotes SET tier = 3 WHERE id = '${Q.T3}';`, 'QUOTE_PRICE_MISSING', 'Tier Two Zero');
+  // Through save_quote itself, every trigger on.
+  allowed('save_quote: tier 1 -> 2 with a stated $0 at tier 2', saveQuote(2, P.T2ZERO), { isolate: false });
+  refused('save_quote: tier 1 -> 2, product priced only at tier 3', saveQuote(2, P.T3ONLY), 'QUOTE_PRICE_MISSING', 'Tier Three Only', { isolate: false });
+  refused('save_quote: tier 1 -> 2, product with no price', saveQuote(2, P.UNPRICED), 'QUOTE_PRICE_MISSING', 'Unpriced', { isolate: false });
+  refused('save_quote: tier 1 kept, product priced only at tier 2 (at commit)', saveQuote(1, P.T2ZERO), 'QUOTE_PRICE_MISSING', 'Tier Two Zero', { isolate: false });
+  console.log('[prover] a quote tier change re-checks its $0 lines by name; a line priced only at the new tier is checked against the tier saved (save_quote both ways)');
   console.log('[prover] quote lines: missing refused by name (tier 1, NULL price, tier 2/3 fallback, rewrite); stated $0, typed price, typed $0 and untouched legacy lines allowed');
 
   // Order lines: price_tier_at_sale, else the customer's tier.
@@ -407,12 +442,13 @@ ${unnamed}`);
   allowed('quote: full stack, stated $0 with admin approval', asAdmin('save_quote') + qi(Q.T1, S.T1, P.ZERO, 0), { isolate: false });
   console.log('[prover] with every trigger on, each table names the missing price first');
 
-  // MUTATION: without the trigger the refused case is accepted again.
+  // MUTATION: without the quote triggers the refused case is accepted again, at commit too.
   const mutated = docker([...psqlArgs(), '-A', '-t'], {
-    input: `BEGIN;\nDROP TRIGGER trigger_b_quote_item_price_required ON public.quote_items;\n${GAP_QUOTE}\nROLLBACK;`, allowFailure: true,
+    input: `BEGIN;\nDROP TRIGGER trigger_b_quote_item_price_required ON public.quote_items;
+DROP TRIGGER trigger_c_quote_item_price_required_at_commit ON public.quote_items;\n${GAP_QUOTE}\n${AT_COMMIT}\nROLLBACK;`, allowFailure: true,
   });
-  assert.equal(mutated.status, 0, `with the trigger dropped the line must save:\n${mutated.stderr}`);
-  console.log('[prover] MUTATION: dropping the quote trigger lets the no-price $0 line save again');
+  assert.equal(mutated.status, 0, `with the triggers dropped the line must save:\n${mutated.stderr}`);
+  console.log('[prover] MUTATION: dropping the quote triggers lets the no-price $0 line save again');
   console.log('SALE_LINES_PRICE_REQUIRED_PROOF_PASS');
 }
 

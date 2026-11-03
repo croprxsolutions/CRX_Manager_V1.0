@@ -1,4 +1,4 @@
--- Smoke chain: vendor-only product links through link_product_vendor (REQUIRES 20261105110000).
+-- Smoke chain: vendor-only product links through link_product_vendor (REQUIRES 20261105180000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so every link it records is rolled back.
 -- Proves, as a real signed-in browser session (role authenticated with each live profile's claims)
 -- and as a signed-out visitor (role anon), on an invented product with no links and two real
@@ -7,7 +7,7 @@
 --   * an admin's first link is recorded vendor-only (no item facts, not reusable) and is preferred
 --     even when not asked, a same-key replay returns the same answer, and making a second vendor
 --     preferred leaves exactly one preferred;
---   * the product's vendor name follows the preferred vendor (20261105110000);
+--   * the product's vendor name follows the preferred vendor (20261105180000);
 --   * an active sales rep, driver, applicator and commission-recipient profile are refused
 --     ADMIN_REQUIRED, and a signed-out visitor is refused EXECUTE.
 -- Every other rule is proven on invented rows by scripts/smoke/prove-vendor-only-links-real-schema.mjs.

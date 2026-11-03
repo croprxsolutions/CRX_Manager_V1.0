@@ -1,8 +1,8 @@
--- Smoke chain: preferred vendor enforcement (REQUIRES 20261105110000).
+-- Smoke chain: preferred vendor enforcement (REQUIRES 20261105180000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so the product and links it makes are rolled back.
 -- Proves, as a real signed-in browser session (role authenticated with each live profile's claims)
 -- and as a signed-out visitor (role anon), on an invented product and two real active vendors:
---   * the installed unlink_product_vendor and get_product_vendors bodies are 20261105110000's, and
+--   * the installed unlink_product_vendor and get_product_vendors bodies are 20261105180000's, and
 --     anon cannot execute either;
 --   * the product's vendor name follows the preferred vendor when an admin links and switches it;
 --   * get_product_vendors lists the preferred vendor first, with cost keys for an admin and null
@@ -30,10 +30,10 @@ DECLARE
   v_refused boolean;
 BEGIN
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_unlink), chr(13), '')) <> 'bb1d7141eb1a08806f42c0a30f8cdd12' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: unlink_product_vendor is not the body of 20261105110000';
+    RAISE EXCEPTION 'SMOKE_FAIL: unlink_product_vendor is not the body of 20261105180000';
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_list), chr(13), '')) <> '8511e8a2c94d3b5aa5ebb6ad217a1495' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: get_product_vendors is not the body of 20261105110000';
+    RAISE EXCEPTION 'SMOKE_FAIL: get_product_vendors is not the body of 20261105180000';
   END IF;
   IF has_function_privilege('anon', v_unlink, 'EXECUTE') OR has_function_privilege('anon', v_list, 'EXECUTE') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: anon can execute a product vendor RPC';

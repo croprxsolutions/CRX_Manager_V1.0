@@ -1,5 +1,5 @@
 -- WP-PM-15b enforcement: the product's vendor follows its preferred vendor link.
--- REQUIRES 20261105090000 (vendor-only links) and 20261105100000 (DATA-11), and refuses to finish
+-- REQUIRES 20261105090000 (vendor-only links) and 20261105170000 (DATA-11), and refuses to finish
 -- unless DATA-11's result still holds (checked at the end).
 --
 -- Rules, all in the database so every writer (current and older app builds) obeys them:

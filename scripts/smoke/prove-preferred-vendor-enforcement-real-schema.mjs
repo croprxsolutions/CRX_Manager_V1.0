@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for WP-PM-15b enforcement (20261105110000): a product with vendor links has
+ * Real-schema proof for WP-PM-15b enforcement (20261105180000): a product with vendor links has
  * exactly one preferred link, and products.vendor is a read-only copy of its name. Builds the
  * checked-in schema baseline in a network-disabled PostgreSQL container, replays migrations up to
  * the candidate, seeds invented rows, and checks: it refuses to install until every product with
@@ -25,7 +25,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261105110000_preferred_vendor_enforcement.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261105180000_preferred_vendor_enforcement.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -37,7 +37,7 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
   // DATA-11 rewrites live rows only (every product gets one preferred link); the proof seeds that state.
-  '20261105100000_data11_preferred_vendor_links.sql',
+  '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 const TOUCHED = /(product_supplier_links|vendor_aliases|legacy_vendor_resolution|normalize_vendor_alias|supplier_price_observations|FUNCTION\s+(public\.)?"?(is_admin|is_active_profile|save_vendor|delete_vendor)\b)/i;

@@ -1738,7 +1738,7 @@
     "link_product_vendor": {
       "chain": "smoke-link_product_vendor_vendor_only.sql",
       "container_prover": "prove-preferred-vendor-enforcement-real-schema.mjs",
-      "description": "REQUIRES 20261105110000. Vendor-only product links (WP-PM-15b): the body is pinned and anon cannot execute it; on an invented product an admin's first link is recorded with no item facts and not reusable, is preferred even when not asked, replays under the same key, and switching to a second vendor leaves exactly one preferred, whose name the product's vendor follows; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED and a signed-out visitor is refused EXECUTE.",
+      "description": "REQUIRES 20261105180000. Vendor-only product links (WP-PM-15b): the body is pinned and anon cannot execute it; on an invented product an admin's first link is recorded with no item facts and not reusable, is preferred even when not asked, replays under the same key, and switching to a second vendor leaves exactly one preferred, whose name the product's vendor follows; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED and a signed-out visitor is refused EXECUTE.",
       "covers": [
         "link_product_vendor"
       ],
@@ -1749,7 +1749,7 @@
     "unlink_product_vendor": {
       "chain": "smoke-preferred_vendor_enforcement.sql",
       "container_prover": "prove-preferred-vendor-enforcement-real-schema.mjs",
-      "description": "REQUIRES 20261105110000. Preferred vendor enforcement (WP-PM-15b): unlink_product_vendor and get_product_vendors bodies are pinned and anon cannot execute either; on an invented product the vendor name follows the preferred vendor as an admin links and switches it; the list shows the preferred vendor first, with cost keys for an admin and null cost for a sales rep; removing the preferred vendor is refused PREFERRED_VENDOR_REQUIRED, a direct vendor-name edit is refused PRODUCT_VENDOR_FOLLOWS_PREFERRED_VENDOR, removing the other vendor works and replays; a sales rep is refused ADMIN_REQUIRED and a signed-out visitor is refused EXECUTE.",
+      "description": "REQUIRES 20261105180000. Preferred vendor enforcement (WP-PM-15b): unlink_product_vendor and get_product_vendors bodies are pinned and anon cannot execute either; on an invented product the vendor name follows the preferred vendor as an admin links and switches it; the list shows the preferred vendor first, with cost keys for an admin and null cost for a sales rep; removing the preferred vendor is refused PREFERRED_VENDOR_REQUIRED, a direct vendor-name edit is refused PRODUCT_VENDOR_FOLLOWS_PREFERRED_VENDOR, removing the other vendor works and replays; a sales rep is refused ADMIN_REQUIRED and a signed-out visitor is refused EXECUTE.",
       "covers": [
         "unlink_product_vendor",
         "get_product_vendors"

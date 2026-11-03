@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied.** `20261105110000_preferred_vendor_enforcement.sql` (LF SQL sha256: `914c07b30ea34e069b75710404a042b51175bd21f8c8f9f76fbc16d21961c78d`). WP-PM-15b enforcement step. REQUIRES `20261105100000` (DATA-11) live first: its install refuses with `PREFERRED_VENDOR_ENFORCEMENT_NOT_READY`, changing nothing, while any product with links lacks exactly one preferred link, shows other vendor text, or prefers a deleted vendor.
+**LOCAL CANDIDATE, not applied.** `20261105180000_preferred_vendor_enforcement.sql` (LF SQL sha256: `fbc47677e5e3416af36d4e7772d6066f34488cc0789f7dd201909ee53376773b`). WP-PM-15b enforcement step. REQUIRES `20261105170000` (DATA-11) live first: its install refuses with `PREFERRED_VENDOR_ENFORCEMENT_NOT_READY`, changing nothing, while any product with links lacks exactly one preferred link, shows other vendor text, or prefers a deleted vendor.
 
 What it does:
 - A product with active confirmed vendor links has exactly one preferred link (a deferred constraint trigger; `PREFERRED_VENDOR_REQUIRED` at commit otherwise).

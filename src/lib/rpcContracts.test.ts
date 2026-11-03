@@ -3075,7 +3075,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   //     landed on main and applied live; it drops both helpers before finishing.
   // Pruned 2026-10-22 when 20261021140000 applied live (ledger 20261021224056) and the registry
   // high-water moved past it: _po_item_cost_change_log is trigger-returning, so it is no longer discovered.
-  // WP-PM-15b enforcement (20261105110000), pre-apply window: trigger-only helpers that keep
+  // WP-PM-15b enforcement (20261105180000), pre-apply window: trigger-only helpers that keep
   // products.vendor a copy of the preferred vendor. Every API-role EXECUTE is revoked; the
   // writing statement owns its transaction. Prune these once that migration is live.
   _sync_product_vendor_copy: 'trigger-only copy of the preferred vendor name onto products.vendor; every API-role EXECUTE is revoked',

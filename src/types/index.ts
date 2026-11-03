@@ -454,7 +454,7 @@ export interface ProductBrand {
   updated_at: string;
 }
 
-/** One row of get_product_vendors (20261105110000): a vendor linked to a product. */
+/** One row of get_product_vendors (20261105180000): a vendor linked to a product. */
 export interface ProductVendor {
   link_id: string;
   vendor_id: string;

@@ -80,6 +80,13 @@ describe('AR Aging with a customer that cannot be shown as of the date', () => {
     expect(screen.getByText('excl. 1 not shown')).toBeTruthy();
   });
 
+  it('explains a posting-history flag (20261104120000) in plain words', async () => {
+    H.functions.get_ar_aging = [{ ...H.functions.get_ar_aging[2] as object, unavailable_reason: 'HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE' }];
+    render(<MemoryRouter><ARaging /></MemoryRouter>);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain("Late Payer Farm — an invoice's posting history has two changes recorded at the same moment");
+  });
+
   it('shows no warning when every customer can be shown', async () => {
     H.functions.get_ar_aging = H.functions.get_ar_aging.slice(0, 2);
     render(<MemoryRouter><ARaging /></MemoryRouter>);

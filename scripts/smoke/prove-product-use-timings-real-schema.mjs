@@ -118,7 +118,7 @@ function buildContainer() {
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
-  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
   if (schema.status !== 0) throw new Error(schema.stderr.toString());
   psql('\\i /tmp/20260727174805_extensions.sql'); psql(schema.stdout.toString());
   // storage.objects carries metadata and a (bucket_id, name) key, and postgres may read it, as live
@@ -142,8 +142,6 @@ function buildContainer() {
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     // Batch 2's preflight pins live's auth.uid() body, which live had when batch 2 was applied.
     if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
-    // KI-85's postcondition needs live's active Main Warehouse row, which the empty baseline lacks.
-    if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') psql(`INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse' AND is_active);`);
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
     ledger(path.basename(file, '.sql'));

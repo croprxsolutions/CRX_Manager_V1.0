@@ -26,7 +26,7 @@
 
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -285,6 +285,27 @@ function freezeDiff(git, opts) {
   };
 }
 
+// ── guard-change round cap ───────────────────────────────────────────────────
+// A third round on a command-text carve-out means the design is wrong (PR #1375 ran ~8). The count
+// lives in the shared git dir, written only here and read by nothing else; it is not a proof.
+export const GUARD_ROUND_LIMIT = 2;
+const GUARD_DIFF_RE = /^diff --git (?:"?a\/\.(?:claude|codex)\/hooks\/|.* "?b\/\.(?:claude|codex)\/hooks\/)/m;
+
+function guardRounds(git, root) {
+  const file = path.join(path.resolve(root, gitOutput(git, ["rev-parse", "--git-common-dir"]).trim()), "crx-luna-guard-rounds.json");
+  const branch = gitOutput(git, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  let counts = {};
+  try {
+    counts = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    // No file yet, or a broken one: start over.
+  }
+  return {
+    count: Number(counts[branch]) || 0,
+    record: () => writeFileSync(file, JSON.stringify({ ...counts, [branch]: (Number(counts[branch]) || 0) + 1 }, null, 2)),
+  };
+}
+
 // ── reporting ────────────────────────────────────────────────────────────────
 function oversizedAdvice(git, frozen) {
   const commits = frozen.baseSha
@@ -330,7 +351,8 @@ export function main(argv = process.argv.slice(2), codexDeps = {}) {
 
     const root = spawnSync(fixedGitExecutable(), ["rev-parse", "--show-toplevel"], { encoding: "utf8", windowsHide: true });
     if (root.status !== 0) throw new Error("Not inside a git checkout.");
-    const git = gitRunner(root.stdout.trim());
+    const rootDir = root.stdout.trim();
+    const git = gitRunner(rootDir);
     const frozen = freezeDiff(git, opts);
 
     if (!frozen.diff.trim()) return reportDidNotRun(`Empty diff for ${frozen.label}: nothing was reviewed.`);
@@ -343,10 +365,19 @@ export function main(argv = process.argv.slice(2), codexDeps = {}) {
       );
     }
 
+    const rounds = GUARD_DIFF_RE.test(frozen.diff) ? guardRounds(git, rootDir) : null;
+    if (rounds && rounds.count >= GUARD_ROUND_LIMIT) {
+      console.log("STOP: third review round on a guard change — drop the carve-out or hand the decision to Mason (AGENTS.md stop rule).");
+      console.log(`LUNA RESULT: STOPPED after ${rounds.count} guard-change rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
+      return EXIT_FINDINGS;
+    }
+
     const diffLines = frozen.diff.split("\n").length;
     const files = frozen.diff.match(/^diff --git /gm)?.length ?? 0;
     console.error(`[luna-review] ${model} at ${effort} reviewing ${frozen.label}: ${files} file(s), ${diffLines} diff lines.`);
     const run = runLunaReview({ diff: frozen.diff, model, effort, ...codexDeps });
+    // Only a round that reached a verdict counts; a broken run is retried for free.
+    if (rounds && run.outcome !== "void") rounds.record();
     if (run.kind === "output-limit") run.advice = oversizedAdvice(git, frozen);
     return report(run, { label: frozen.label, diffLines, files, model, effort });
   } catch (error) {

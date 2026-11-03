@@ -145,6 +145,7 @@ is there.
 |---|---|---|
 | 0 | `LUNA RESULT: CLEAN` | Luna read the whole diff and found nothing |
 | 1 | `LUNA RESULT: FINDINGS <n>` | Luna's findings are printed above that line |
+| 1 | `LUNA RESULT: STOPPED` | Third round on a hook change (`.claude/hooks/`, `.codex/hooks/`): Codex was not called. Drop the carve-out or hand the decision to Mason; do not rerun |
 | 2 | `LUNA RESULT: DID NOT RUN` | **Not a review and not a clean result.** The `Why:` line says what broke |
 
 **Exit 2 is a broken run, never a verdict:** a refused or substituted model (the script names it and

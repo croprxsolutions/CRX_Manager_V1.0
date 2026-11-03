@@ -3,7 +3,7 @@
 // Run: node scripts/luna-review.test.mjs
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -124,6 +124,59 @@ rmSync(repo, { recursive: true, force: true });
 assert.equal(voidExit, EXIT_DID_NOT_RUN);
 assert.match(printed.join("\n"), /DID NOT RUN.*NOT A REVIEW AND NOT A CLEAN RESULT/);
 assert.match(printed.join("\n"), /max_output_tokens/);
+
+// Guard-change round cap: the third Luna round on a branch whose diff touches a hook is a STOP,
+// exits as findings and never reaches Codex. Other branches run as often as asked.
+function lunaRoundsOn(file) {
+  const dir = mkdtempSync(path.join(tmpdir(), "crx-luna-cap-"));
+  const git = (...gitArgs) => execFileSync(fixedGitExecutable(), ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.autocrlf=false", ...gitArgs], { cwd: dir, encoding: "utf8" });
+  git("init", "-q");
+  writeFileSync(path.join(dir, "base.txt"), "base\n");
+  git("add", "base.txt");
+  git("commit", "-q", "-m", "base");
+  const base = git("rev-parse", "HEAD").trim();
+  git("checkout", "-q", "-b", "feature");
+  mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+  writeFileSync(path.join(dir, file), "change\n");
+  git("add", file);
+  git("commit", "-q", "-m", "change");
+  const out = [];
+  let spawned = 0;
+  const savedLog = console.log;
+  const savedErr = console.error;
+  console.log = (line = "") => out.push(line);
+  console.error = () => {};
+  process.chdir(dir);
+  const exits = [];
+  try {
+    for (let round = 0; round < 3; round += 1) {
+      exits.push(main(["--base", base], {
+        resolveCodex: () => "codex-stub",
+        spawn: (bin, spawnArgs, options) => {
+          spawned += 1;
+          const tailCanary = /tail canary: (CRXDIFF-[^)\s]+)\) =====\s*$/.exec(options.input)[1];
+          writeFileSync(spawnArgs[spawnArgs.indexOf("-o") + 1], `MED x\n${tailCanary}\nLUNA_REVIEW: FINDINGS 1\n`);
+          return { status: 0, stdout: "", stderr: `${banner(LUNA_MODEL)}tokens used\n1\n` };
+        },
+      }));
+    }
+  } finally {
+    process.chdir(realCwd);
+    console.log = savedLog;
+    console.error = savedErr;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return { exits, spawned, printed: out.join("\n") };
+}
+for (const hook of [".claude/hooks/x.mjs", ".codex/hooks/y.mjs"]) {
+  const capped = lunaRoundsOn(hook);
+  assert.equal(capped.spawned, 2, hook);
+  assert.deepEqual(capped.exits, [EXIT_FINDINGS, EXIT_FINDINGS, EXIT_FINDINGS], hook);
+  assert.match(capped.printed, /STOP: third review round on a guard change/);
+}
+const uncapped = lunaRoundsOn("src/a.ts");
+assert.equal(uncapped.spawned, 3);
+assert.doesNotMatch(uncapped.printed, /STOP:/);
 
 // Other broken runs stay broken.
 for (const [finalText, kind] of [

@@ -17,7 +17,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { computeTotalDiluentGallons, formatGallons } from "./fieldAppDiluent.ts";
-import { COMPANY_LEGAL_NAME, companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo } from "./companyInfo.ts";
+import { COMPANY_LEGAL_NAME, companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo, fitCompanyNameFont } from "./companyInfo.ts";
 import {
   ALT_ROW_BG,
   CHARCOAL,
@@ -680,8 +680,8 @@ export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfDat
   doc.setFillColor(...CRX_GREEN);
   doc.rect(0, 0, pageW, 70, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 110, 22);
   doc.text(company.name.toUpperCase(), margin, 35);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');

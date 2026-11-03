@@ -100,3 +100,14 @@ export const COMPANY_FOOTER_INTERNAL = `${COMPANY_NAME}  â€¢  ${COMPANY_CITY}  â
  * are two distinct, correct locations.
  */
 export const COMPANY_REMIT_ADDRESS = `${COMPANY_LEGAL_NAME}\n9100 E 2000th Ave\nAnnapolis, IL 62413`;
+
+/** Shrinks the font until the Settings company name fits, so a long name never runs into the number on the right. */
+export function fitCompanyNameFont(
+  doc: { getTextWidth(text: string): number; setFontSize(size: number): unknown },
+  name: string,
+  maxWidth: number,
+  size: number,
+): void {
+  doc.setFontSize(size);
+  while (size > 8 && doc.getTextWidth(name) > maxWidth) doc.setFontSize(--size);
+}

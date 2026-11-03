@@ -12,7 +12,7 @@
 
 import { supabase } from './db';
 import { Sentry } from './sentry';
-import { COMPANY_LEGAL_NAME, companyTaglineHeader, DEFAULT_COMPANY_INFO } from './companyInfo';
+import { COMPANY_LEGAL_NAME, companyTaglineHeader, DEFAULT_COMPANY_INFO, fitCompanyNameFont } from './companyInfo';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatCents as fmt } from './money';
 import type jsPDF from 'jspdf';
@@ -180,8 +180,8 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
 
   // ── Plain text header (no color band) ──────────────────────────────
   doc.setFont('courier', 'bold');
-  doc.setFontSize(13);
   doc.setTextColor(...black);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 110, 13);
   doc.text(company.name.toUpperCase(), margin, y);
   doc.setFont('courier', 'normal');
   doc.setFontSize(8);

@@ -7,7 +7,7 @@
 // jsPDF and autoTable are dynamically imported inside each function
 // to keep them out of the main bundle (~500KB each)
 import { CRX_GREEN, CHARCOAL, GRAY, LIGHT_BG, type JsPDFWithAutoTable } from './pdfTheme';
-import { COMPANY_WEBSITE, companyTaglineHeader } from './companyInfo';
+import { COMPANY_WEBSITE, companyTaglineHeader, fitCompanyNameFont } from './companyInfo';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatUSD as fmt } from './money';
 
@@ -97,8 +97,8 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   doc.setFillColor(...CRX_GREEN);
   doc.rect(0, 0, pageW, 70, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 150, 22);
   doc.text(company.name.toUpperCase(), margin, 35);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');

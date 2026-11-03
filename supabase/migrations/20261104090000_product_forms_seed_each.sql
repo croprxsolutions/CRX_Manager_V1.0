@@ -141,18 +141,15 @@ BEGIN
      FOR SHARE;  -- waits out a concurrent form change, then sees its result
 
   IF v_product_form IN ('seed','each') THEN
-    IF NULLIF(btrim(NEW.rate_unit), '') IS NULL OR NULLIF(btrim(NEW.price_unit), '') IS NULL THEN
-      RAISE EXCEPTION 'Seed and each quote lines need their unit set (%). Product: %.', v_inventory_unit, v_product_name
-        USING ERRCODE = '22023';
-    END IF;
-    IF (NULLIF(btrim(NEW.rate_unit), '') IS NOT NULL
-        AND lower(btrim(NEW.rate_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit)))
-       OR (NULLIF(btrim(NEW.price_unit), '') IS NOT NULL
-        AND lower(btrim(NEW.price_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit))) THEN
+    -- A blank unit (pricing would read it as an ounce) is filled from the stock unit, the only
+    -- unit a seed/each line may use; create_quote_from_template leaves price_unit blank.
+    IF NULLIF(btrim(NEW.rate_unit), '') IS NULL THEN NEW.rate_unit := v_inventory_unit; END IF;
+    IF NULLIF(btrim(NEW.price_unit), '') IS NULL THEN NEW.price_unit := v_inventory_unit; END IF;
+    IF lower(btrim(NEW.rate_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit))
+       OR lower(btrim(NEW.price_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit)) THEN
       RAISE EXCEPTION 'Seed and each products are quoted only in their own unit (%); "%" can''t be converted. Product: %.',
         v_inventory_unit,
-        CASE WHEN NULLIF(btrim(NEW.rate_unit), '') IS NOT NULL
-                  AND lower(btrim(NEW.rate_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit))
+        CASE WHEN lower(btrim(NEW.rate_unit)) IS DISTINCT FROM lower(btrim(v_inventory_unit))
              THEN NEW.rate_unit ELSE NEW.price_unit END,
         v_product_name
         USING ERRCODE = '22023';

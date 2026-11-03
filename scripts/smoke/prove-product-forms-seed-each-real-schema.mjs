@@ -390,10 +390,20 @@ try {
       VALUES ('aa110000-0000-0000-0000-000000000004',
         'aa110000-0000-0000-0000-000000000003', 'Seed');`);
   psql(quoteLine('Seed Lb', 'Lb', 'Lb'));
-  refused(quoteLine('Seed Lb', '', 'Lb'), /Seed and each quote lines need their unit set \(Lb\)\./);
-  refused(quoteLine('Seed Lb', null, 'Lb'), /Seed and each quote lines need their unit set \(Lb\)\./);
-  refused(quoteLine('Seed Lb', 'Lb', ''), /Seed and each quote lines need their unit set \(Lb\)\./);
-  refused(quoteLine('Seed Lb', 'Lb', null), /Seed and each quote lines need their unit set \(Lb\)\./);
+  // A blank quote unit is filled from the stock unit, so pricing never reads it as an ounce.
+  for (const [rateUnit, priceUnit] of [['', 'Lb'], [null, 'Lb'], ['Lb', ''], ['Lb', null], [' ', null]]) {
+    assert.equal(scalar(quoteLine('Seed Lb', rateUnit, priceUnit).replace(/;$/, " RETURNING rate_unit || ':' || price_unit;")), 'Lb:Lb');
+  }
+  // Save-as-template, then create-from-template: the copy omits price_unit and must still save.
+  assert.equal(scalar(`BEGIN; SET LOCAL ROLE authenticated;
+    SET LOCAL request.jwt.claim.sub = 'aa110000-0000-0000-0000-000000000001';
+    SELECT (public.create_quote_from_template(
+      ((public.save_quote_template('aa110000-0000-0000-0000-000000000003', 'Prover seed template'))->>'template_id')::uuid,
+      'aa110000-0000-0000-0000-000000000002', NULL))->>'status';
+    COMMIT;`), 'created');
+  assert.equal(scalar(`SELECT count(*) FILTER (WHERE qi.rate_unit = 'Lb' AND qi.price_unit = 'Lb') || '/' || count(*)
+    FROM public.quote_items qi JOIN public.quotes q ON q.id = qi.quote_id
+    WHERE q.id <> 'aa110000-0000-0000-0000-000000000003';`), '6/6');
   assert.equal(mutation('DROP TRIGGER trg_guard_seed_each_quote_item_units ON public.quote_items;',
     `${quoteLine('Seed Lb', '', 'Lb')} SELECT count(*) FROM public.quote_items WHERE rate_unit = '' AND price_unit = 'Lb';`), '1');
   assert.equal(mutation('DROP TRIGGER trg_guard_seed_each_quote_item_units ON public.quote_items;',

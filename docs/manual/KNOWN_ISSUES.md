@@ -185,7 +185,8 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
 - **The fix.** `send-email` now draws the invoice and purchase-order PDFs itself, from the saved records
   (`supabase/functions/_shared/pdf/`, the same drawing code the app prints with). It refuses a PDF the app
   attaches to those two email types, and the app no longer sends one. The app still sends what its screen showed,
-  so a send is refused if the screen was out of date.
+  so a send is refused if the screen was out of date. Before drawing an invoice it checks that the sender can open
+  that invoice in the app (a rep only their own), because the server reads it with full access.
 - **Proof so far.** One real chemical-sale invoice, one field-application invoice and one purchase order drawn by
   the old app code and by the new server code came out byte-for-byte the same (apart from the file's creation
   time).

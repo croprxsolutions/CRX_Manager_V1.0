@@ -642,6 +642,19 @@ Deno.serve(async (req: Request) => {
       if (!built.ok) {
         return jsonResponse({ error: built.error }, built.status);
       }
+      // The PDF is read with the service client, so first confirm the sender may read this
+      // invoice under their own row security (a rep sees only invoices they own).
+      const { data: callerInvoice, error: callerInvoiceErr } = await callerClient
+        .from("invoices")
+        .select("id")
+        .eq("id", resource_id)
+        .maybeSingle<{ id: string }>();
+      if (callerInvoiceErr) {
+        return jsonResponse({ error: `Invoice access check failed: ${callerInvoiceErr.message}` }, 503);
+      }
+      if (!callerInvoice) {
+        return jsonResponse({ error: "You do not have access to this invoice" }, 403);
+      }
       let invoicePdfData;
       try {
         invoicePdfData = await loadInvoicePdfData(adminClient, resource_id);

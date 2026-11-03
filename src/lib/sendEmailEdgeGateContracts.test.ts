@@ -98,6 +98,14 @@ describe('send-email draws invoice and PO PDFs from the saved records (KI-98)', 
     expect(source).not.toContain('attachments[0]?.content');
   });
 
+  it('checks the sender may read the invoice under their own row security before drawing it', () => {
+    const access = source.indexOf('const { data: callerInvoice, error: callerInvoiceErr } = await callerClient\n        .from("invoices")');
+    const draw = source.indexOf('invoicePdfData = await loadInvoicePdfData(adminClient, resource_id);');
+    expect(access).toBeGreaterThan(-1);
+    expect(access).toBeLessThan(draw);
+    expect(source).toContain('if (!callerInvoice) {\n        return jsonResponse({ error: "You do not have access to this invoice" }, 403);');
+  });
+
   it('reads the PO screen copy under a name a pre-KI-98 send-email refuses', () => {
     expect(source).toContain('parsePurchaseOrderSnapshot(purchase_order_screen)');
     expect(source).not.toContain('purchase_order_snapshot,');

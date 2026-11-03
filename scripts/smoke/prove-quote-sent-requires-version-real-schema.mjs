@@ -264,6 +264,10 @@ const MUTATIONS = [
     '', '(C) the rep inserted a quote at sent'],
   ['a browser insert starts as a draft', "IF current_user IN ('anon', 'authenticated') AND NEW.status IS DISTINCT FROM 'draft' THEN",
     'IF false THEN', '(C) the rep inserted a quote at sent'],
+  ['a committed non-draft insert needs a version', "  IF TG_WHEN = 'AFTER' THEN\n    IF NOT EXISTS (SELECT 1 FROM quote_versions WHERE quote_id = NEW.id) THEN",
+    "  IF TG_WHEN = 'AFTER' THEN\n    IF false THEN", '(G) a privileged insert at sent with no version would commit'],
+  ['the deferred check covers every status past draft', "FOR EACH ROW WHEN (NEW.status IS DISTINCT FROM 'draft')",
+    "FOR EACH ROW WHEN (NEW.status = 'revised')", '(G) a privileged insert at sent with no version would commit'],
 ];
 const RULE = 'public._enforce_quote_status_transition()';
 const SWEEP_MUTATIONS = [
@@ -272,6 +276,13 @@ const SWEEP_MUTATIONS = [
   'DROP TRIGGER enforce_quote_status_transition ON public.quotes; CREATE TRIGGER enforce_quote_status_transition BEFORE UPDATE ON public.quotes FOR EACH ROW EXECUTE FUNCTION public._enforce_quote_status_transition();',
   'DROP TRIGGER enforce_quote_status_transition ON public.quotes; CREATE TRIGGER enforce_quote_status_transition BEFORE UPDATE OF quote_number ON public.quotes FOR EACH ROW EXECUTE FUNCTION public._enforce_quote_status_transition();',
   'ALTER TABLE public.quotes ENABLE REPLICA TRIGGER enforce_quote_insert_status;',
+  'DROP TRIGGER enforce_quote_insert_version ON public.quotes;',
+  'ALTER TABLE public.quotes DISABLE TRIGGER enforce_quote_insert_version;',
+  "DROP TRIGGER enforce_quote_insert_version ON public.quotes; CREATE CONSTRAINT TRIGGER enforce_quote_insert_version AFTER INSERT ON public.quotes DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.status = 'revised') EXECUTE FUNCTION public._enforce_quote_status_transition();",
+  "DROP TRIGGER enforce_quote_insert_version ON public.quotes; CREATE CONSTRAINT TRIGGER enforce_quote_insert_version AFTER INSERT ON public.quotes DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW WHEN (NEW.status IS DISTINCT FROM 'draft') EXECUTE FUNCTION public._enforce_quote_status_transition();",
+  `UPDATE pg_proc SET prosrc = replace(prosrc, 'IF TG_WHEN = ''AFTER'' THEN
+    IF NOT EXISTS', 'IF TG_WHEN = ''AFTER'' THEN
+    IF false AND NOT EXISTS') WHERE oid = '${RULE}'::regprocedure;`,
   `UPDATE pg_proc SET prosrc = replace(prosrc, 'AND NOT EXISTS (SELECT 1 FROM quote_versions WHERE quote_id = NEW.id)', 'AND false') WHERE oid = '${RULE}'::regprocedure;`,
   `UPDATE pg_proc SET prosrc = replace(prosrc, 'IF current_user IN (''anon'', ''authenticated'') AND NEW.status', 'IF false AND NEW.status') WHERE oid = '${RULE}'::regprocedure;`,
 ];
@@ -356,7 +367,7 @@ try {
 
   // 1. BEFORE.
   const before = runChain(CHAIN);
-  for (const want of ['(A) save_quote marked a draft sent', '(B) the owning rep marked a draft sent', '(C) the rep inserted a quote at sent', '(D) the admin override marked a draft sent', '(F) reopening a never-sent cancelled quote marked it sent']) {
+  for (const want of ['(A) save_quote marked a draft sent', '(B) the owning rep marked a draft sent', '(C) the rep inserted a quote at sent', '(D) the admin override marked a draft sent', '(F) reopening a never-sent cancelled quote marked it sent', '(G) sent: ']) {
     assert.ok(before.includes(want), `BEFORE: the chain should report "${want}", got: ${before}`);
   }
   console.log(`[prover] BEFORE ${CHAIN}: ${before.replace(/^.*ERROR:\s*/, '')}`);

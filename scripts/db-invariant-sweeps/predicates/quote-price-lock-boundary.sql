@@ -147,7 +147,7 @@ SELECT 'quotes.expires_at:browser-write-privilege' AS violation_key,
 UNION ALL
 
 SELECT 'quotes:sent-requires-version' AS violation_key,
-       'public.quotes must keep enforce_quote_status_transition (BEFORE UPDATE OF status) and enforce_quote_insert_status (BEFORE INSERT), both enabled for ordinary sessions, the first on the status column alone, calling _enforce_quote_status_transition(), which must still refuse a quote becoming sent or revised with no version and a browser insert at any status but draft' AS reason
+       'public.quotes must keep enforce_quote_status_transition (BEFORE UPDATE OF status) enforce_quote_insert_status (BEFORE INSERT) and the deferred constraint trigger enforce_quote_insert_version (AFTER INSERT of a non-draft quote), all enabled for ordinary sessions, the first on the status column alone, calling _enforce_quote_status_transition(), which must still refuse a quote becoming sent or revised with no version a browser insert at any status but draft, and a committed non-draft insert with no version' AS reason
  WHERE (SELECT count(*) FROM pg_trigger t
          WHERE t.tgrelid = 'public.quotes'::regclass
            AND t.tgfoid = to_regprocedure('public._enforce_quote_status_transition()')
@@ -155,10 +155,14 @@ SELECT 'quotes:sent-requires-version' AS violation_key,
            AND ((t.tgname = 'enforce_quote_status_transition' AND t.tgtype = 19
                  AND t.tgattr::text = (SELECT a.attnum::text FROM pg_attribute a
                                         WHERE a.attrelid = 'public.quotes'::regclass AND a.attname = 'status'))
-             OR (t.tgname = 'enforce_quote_insert_status' AND t.tgtype = 7))) <> 2
+             OR (t.tgname = 'enforce_quote_insert_status' AND t.tgtype = 7)
+             OR (t.tgname = 'enforce_quote_insert_version' AND t.tgtype = 5 AND t.tgconstraint <> 0
+                 AND t.tgdeferrable AND t.tginitdeferred
+                 AND pg_get_triggerdef(t.oid) LIKE '%WHEN ((new.status IS DISTINCT FROM ''draft''::text))%'))) <> 3
     OR NOT EXISTS (
       SELECT 1 FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._enforce_quote_status_transition()')
          AND p.prosrc LIKE '%IF NEW.status IN (''sent'', ''revised'')%NOT EXISTS (SELECT 1 FROM quote_versions WHERE quote_id = NEW.id)%IF _is_admin_override()%'
+         AND p.prosrc LIKE '%IF TG_WHEN = ''AFTER'' THEN%IF NOT EXISTS (SELECT 1 FROM quote_versions WHERE quote_id = NEW.id) THEN%RAISE EXCEPTION%RETURN NULL;%'
          AND p.prosrc LIKE '%IF current_user IN (''anon'', ''authenticated'') AND NEW.status IS DISTINCT FROM ''draft'' THEN%'
     )

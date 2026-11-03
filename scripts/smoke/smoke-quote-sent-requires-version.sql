@@ -8,13 +8,15 @@
 --      still insert a draft (so the refusal is the status rule, not row security or grants)
 --   D  the admin override does not mark a draft sent either
 --   F  a never-sent quote that was cancelled cannot be reopened to sent, even by the admin override
+--   G  a privileged (definer-rights) insert past draft with no version is refused at commit; the
+--      check is forced early with SET CONSTRAINTS, since this chain never commits
 --   E  the real send still works: it records V1 and marks the quote sent; revise, re-send,
 --      rewind, convert and reopen (accepted -> sent) all still work
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
 -- quote, order and ledger row is rolled back. Any other error text is a failure.
--- A, B, C, D and F report together, so one run before the migration shows each of them.
+-- A, B, C, D, F and G report together, so one run before the migration shows each of them.
 -- ============================================================================
 
 DO $smoke$
@@ -221,6 +223,28 @@ BEGIN
   END IF;
 
   -- --------------------------------------------------------------------
+  -- G: a privileged insert past draft with no version cannot commit.
+  -- --------------------------------------------------------------------
+  FOREACH v_new_status IN ARRAY ARRAY['sent', 'accepted']
+  LOOP
+    BEGIN
+      INSERT INTO quotes (quote_number, customer_id, created_by, tier, status)
+      VALUES ('[SMOKE] SENTVER-G-' || v_new_status || '-' || v_suffix, v_c1, v_admin, 1, v_new_status);
+      EXECUTE 'SET CONSTRAINTS public.enforce_quote_insert_version IMMEDIATE';
+      v_fails := v_fails || '(G) a privileged insert at ' || v_new_status || ' with no version would commit; ';
+    EXCEPTION WHEN OTHERS THEN
+      v_err := SQLERRM;
+      IF v_err NOT LIKE 'QUOTE_SEND_REQUIRED%' THEN
+        v_fails := v_fails || '(G) ' || v_new_status || ': ' || v_err || '; ';
+      END IF;
+    END;
+  END LOOP;
+  BEGIN
+    EXECUTE 'SET CONSTRAINTS public.enforce_quote_insert_version DEFERRED';
+  EXCEPTION WHEN OTHERS THEN NULL;  -- before the migration the trigger does not exist
+  END;
+
+  -- --------------------------------------------------------------------
   -- E: the real send and everything after it still work.
   -- --------------------------------------------------------------------
   v_id := (v_quotes->>'E')::uuid;
@@ -265,6 +289,6 @@ BEGIN
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: %', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: sent-requires-version chain (A-F) passed';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: sent-requires-version chain (A-G) passed';
 END
 $smoke$;

@@ -3,7 +3,7 @@
 -- ledger before applying.
 --
 -- WHAT: a quote leaves draft for sent or revised only with a sent version on record, so every
---   sent quote has the version the customer was sent. One function, two triggers:
+--   sent quote has the version the customer was sent. One function, three triggers:
 --   1. A quote moves to sent or revised (from draft, or reopened from cancelled, declined,
 --      expired or accepted) only when a quote_versions row exists for it, for every caller
 --      (save_quote and the admin override included). The send records its version before it
@@ -14,6 +14,9 @@
 --      2026-11-03: save_quote, duplicate_quote, create_quote_from_template,
 --      rollover_quote_to_season); those run as the definer, as do the rolled-back smoke fixtures
 --      that insert older quote shapes.
+--   3. New deferred constraint trigger enforce_quote_insert_version: a quote inserted in any
+--      status other than draft, by any caller, must have a quote_versions row by commit. Checked
+--      at commit, so a rolled-back fixture never reaches it and a committed insert always does.
 --   Every other line of _enforce_quote_status_transition is its current live body (pinned below).
 --
 -- NOT CHANGED: every other status transition, the admin override for them, grants, RLS, the send,
@@ -21,7 +24,8 @@
 --   sent or revised quotes without a version, and every accepted quote has one (the preflight
 --   re-checks sent and revised).
 --
--- ROLLBACK (its own reviewed migration): DROP TRIGGER enforce_quote_insert_status ON public.quotes;
+-- ROLLBACK (its own reviewed migration): DROP TRIGGER enforce_quote_insert_status and
+--   enforce_quote_insert_version ON public.quotes;
 --   re-emit _enforce_quote_status_transition from its pinned live body (md5 below); drop the
 --   quotes:sent-requires-version rows from quote-price-lock-boundary.sql.
 --
@@ -49,8 +53,9 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_QUOTE_FUNCTION_DRIFT: the re-emitted function differs from its pinned body, owner, mode or search_path';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_trigger
-              WHERE tgrelid = 'public.quotes'::regclass AND tgname = 'enforce_quote_insert_status') THEN
-    RAISE EXCEPTION 'PREFLIGHT: trigger enforce_quote_insert_status already exists; re-read live first';
+              WHERE tgrelid = 'public.quotes'::regclass
+                AND tgname IN ('enforce_quote_insert_status', 'enforce_quote_insert_version')) THEN
+    RAISE EXCEPTION 'PREFLIGHT: a quote insert trigger already exists; re-read live first';
   END IF;
   IF EXISTS (SELECT 1 FROM public.quotes q
               WHERE q.status IN ('sent', 'revised')
@@ -67,6 +72,15 @@ CREATE OR REPLACE FUNCTION public._enforce_quote_status_transition()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
+  -- At commit, for every caller: a quote inserted past draft has its sent version (20261105160000).
+  IF TG_WHEN = 'AFTER' THEN
+    IF NOT EXISTS (SELECT 1 FROM quote_versions WHERE quote_id = NEW.id) THEN
+      RAISE EXCEPTION 'QUOTE_SEND_REQUIRED: a quote created as % needs its sent version', NEW.status
+        USING ERRCODE = 'P0001';
+    END IF;
+    RETURN NULL;
+  END IF;
+
   -- A quote inserted by a browser session starts as a draft; it becomes sent only through the
   -- send (20261105160000). Definer-rights code runs as its owner and inserts draft.
   IF TG_OP = 'INSERT' THEN
@@ -132,6 +146,12 @@ CREATE TRIGGER enforce_quote_insert_status
   BEFORE INSERT ON public.quotes
   FOR EACH ROW EXECUTE FUNCTION public._enforce_quote_status_transition();
 
+CREATE CONSTRAINT TRIGGER enforce_quote_insert_version
+  AFTER INSERT ON public.quotes
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW WHEN (NEW.status IS DISTINCT FROM 'draft')
+  EXECUTE FUNCTION public._enforce_quote_status_transition();
+
 DO $postflight$
 BEGIN
   IF EXISTS (
@@ -162,8 +182,11 @@ BEGIN
          AND ((tgname = 'enforce_quote_status_transition' AND tgtype = 19
                AND tgattr::text = (SELECT attnum::text FROM pg_attribute
                                     WHERE attrelid = 'public.quotes'::regclass AND attname = 'status'))
-           OR (tgname = 'enforce_quote_insert_status' AND tgtype = 7))) <> 2 THEN
-    RAISE EXCEPTION 'POSTFLIGHT: both quote status triggers must be enabled, on their events, and call _enforce_quote_status_transition';
+           OR (tgname = 'enforce_quote_insert_status' AND tgtype = 7)
+           OR (tgname = 'enforce_quote_insert_version' AND tgtype = 5 AND tgconstraint <> 0
+               AND tgdeferrable AND tginitdeferred
+               AND pg_get_triggerdef(oid) LIKE '%WHEN ((new.status IS DISTINCT FROM ''draft''::text))%'))) <> 3 THEN
+    RAISE EXCEPTION 'POSTFLIGHT: all three quote status triggers must be enabled, on their events, and call _enforce_quote_status_transition';
   END IF;
   -- Again under CREATE TRIGGER's table lock: a status change committed after the preflight read is
   -- visible now, and any later one waits for this transaction and then meets the new rule.

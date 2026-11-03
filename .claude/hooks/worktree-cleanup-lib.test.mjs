@@ -7,7 +7,7 @@ import {
   classifyWorktree, classifyBranch, planCleanup, normPath,
   meaningfulDirt, isIgnorableDirtLine, IGNORABLE_DIRT_PATH,
   PROTECTED_BRANCHES, HARNESS_MARKER, ACTIVE_WINDOW_MS,
-  ledgerHasEntries, ledgerKeepsWorktree,
+  ledgerHasEntries, ledgerKeepsWorktree, preciousIgnored, isRebuildableIgnored, classifyHusk,
 } from "./worktree-cleanup-lib.mjs";
 
 let pass = 0;
@@ -20,7 +20,7 @@ const ctx = { currentPath: CUR };
 // A worktree that passes EVERY gate → removed.
 const finished = {
   path: "C:/CRX_Manager/.claude/worktrees/done-xyz789",
-  branch: "chore/done", detached: false, locked: false, dirty: false, merged: true,
+  branch: "chore/done", detached: false, locked: false, dirty: false, merged: true, preciousIgnored: 0,
 };
 eq(classifyWorktree(finished, ctx), { action: "remove", reason: "merged-clean" }, "finished harness worktree → remove");
 
@@ -34,7 +34,9 @@ eq(classifyWorktree({ ...finished, path: CUR.replace(/\//g, "\\").toUpperCase() 
   "active match is slash/case-insensitive");
 
 // 2. detached / no branch
-eq(classifyWorktree({ ...finished, detached: true }, ctx).reason, "detached", "detached → keep");
+eq(classifyWorktree({ ...finished, branch: null, detached: true, merged: false }, ctx).reason, "detached", "unlanded detached head → keep");
+eq(classifyWorktree({ ...finished, branch: null, detached: true }, ctx), { action: "remove", reason: "merged-clean" }, "detached head that landed + clean → remove");
+eq(classifyWorktree({ ...finished, branch: null, detached: true, dirty: true }, ctx).reason, "dirty", "landed detached head with uncommitted work → keep");
 eq(classifyWorktree({ ...finished, branch: null }, ctx).reason, "detached", "no branch → keep");
 
 // 3. protected branch
@@ -104,7 +106,7 @@ eq(classifyBranch({ branch: "feat/x", merged: true, checkedOut: true }, {}).reas
 const plan = planCleanup({
   worktrees: [
     { path: CUR, branch: "claude/active", merged: false, dirty: false, locked: false, detached: false }, // active
-    { path: "C:/CRX_Manager/.claude/worktrees/finished-1", branch: "chore/f1", merged: true, dirty: false, locked: false, detached: false }, // remove
+    { path: "C:/CRX_Manager/.claude/worktrees/finished-1", branch: "chore/f1", merged: true, dirty: false, locked: false, detached: false, preciousIgnored: 0 }, // remove
     { path: "C:/CRX_Manager/.claude/worktrees/locked-1", branch: "wt-sync", merged: true, dirty: false, locked: true, detached: false }, // keep (locked)
     { path: "C:/CRX_Layer2", branch: "main", merged: true, dirty: false, locked: false, detached: false }, // keep (protected+manual)
   ],
@@ -172,6 +174,37 @@ ok(!ledgerKeepsWorktree({ rawText: JSON.stringify([]) }),
   "readable EMPTY ledger → no entries → does NOT keep");
 ok(!ledgerKeepsWorktree({ rawText: JSON.stringify([{ bogus: true }]) }),
   "readable junk-only ledger → no real entry → does NOT keep");
+
+// ── Ignored files `git worktree remove` would delete silently (2026-11-03) ──
+eq(classifyWorktree({ ...finished, preciousIgnored: 2 }, ctx).reason, "ignored-files", "non-rebuildable ignored files → keep");
+eq(classifyWorktree({ ...finished, preciousIgnored: null }, ctx).reason, "ignored-files", "unreadable ignored list → keep");
+eq(classifyWorktree({ ...finished, preciousIgnored: undefined }, ctx).reason, "ignored-files", "unknown ignored list → keep");
+const ignoredText = [
+  "!! node_modules/", "!! dist/", "!! graphify-out/", "!! .claude/session-state/", "!! .claude/tmp/",
+  "!! .codex/agents/", "!! .impeccable/hook.cache.json", "!! INV-2026-0002.pdf", "!! supabase/.temp/",
+  "!! scripts/x/node_modules/", "!! tsconfig.app.tsbuildinfo", "!! .claude/settings.local.json", "!! .husky/_/",
+  "?? src/new.ts", " M src/app.ts",
+].join("\n");
+eq(preciousIgnored(ignoredText), [], "rebuildable ignored paths (and non-ignored lines) don't count");
+eq(preciousIgnored([
+  "!! .env", "!! .env.local", "!! backups/", "!! crx.dump", "!! output/", "!! scripts/local-app/.state/",
+  "!! 2026-07-26-supplier-pricing-phase3-owner-decision-sheet.csv", "!! harness-pr-body.local", "!! docs/.obsidian/",
+  "!! .vercel/", "!! dist-old/", "!! src/dist/x.sql",
+].join("\n")).length, 12, "secrets, backups, dumps, local state, artifacts and lookalikes all count as precious");
+ok(isRebuildableIgnored("node_modules"), "bare node_modules is rebuildable");
+ok(!isRebuildableIgnored(""), "empty path is not rebuildable");
+ok(!isRebuildableIgnored(".claude/session-state-backup/"), "lookalike of a rebuildable dir is precious");
+
+// ── Left-over folders git no longer lists (husks) ──
+const OLD = NOW - (ACTIVE_WINDOW_MS + 60_000);
+const husk = { registered: false, hasGit: false, realFiles: 0, newestMtimeMs: OLD };
+eq(classifyHusk(husk, { nowMs: NOW }), { action: "remove", reason: "empty-husk" }, "old husk with no real files → remove");
+eq(classifyHusk({ ...husk, realFiles: 1 }, { nowMs: NOW }).reason, "husk-has-files", "husk holding a file → report only");
+eq(classifyHusk({ ...husk, realFiles: null }, { nowMs: NOW }).reason, "husk-has-files", "unreadable husk → keep");
+eq(classifyHusk({ ...husk, newestMtimeMs: NOW - 60_000 }, { nowMs: NOW }).reason, "recently-active", "brand-new folder (maybe mid-creation) → keep");
+eq(classifyHusk({ ...husk, newestMtimeMs: 0 }, { nowMs: NOW }).reason, "recently-active", "unknown age → keep");
+eq(classifyHusk({ ...husk, registered: true }, { nowMs: NOW }).reason, "not-husk", "a registered worktree is never a husk");
+eq(classifyHusk({ ...husk, hasGit: true }, { nowMs: NOW }).reason, "not-husk", "a folder with .git is never a husk");
 
 // normPath sanity
 eq(normPath("C:\\A\\B\\"), "c:/a/b", "normPath lowercases + forward-slashes + strips trailing");

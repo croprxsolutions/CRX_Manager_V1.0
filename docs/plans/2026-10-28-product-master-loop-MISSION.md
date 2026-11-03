@@ -39,7 +39,7 @@ Use Codex for building ("I have a lot of codex usage left").
   - If a package proves too big to review in one pass, split it into labelled sub-packages (e.g. PM-8a / PM-8b) — never half-land one.
 - **Worktree:** this loop uses two worktrees, and never edits any other.
   - **Coordinator:** this session's own worktree, on a branch `loop/product-master-w<wave>-r<attempt>-<YYYY-MM-DD>` named for the run and cut from `origin/main` at Step 0. It holds the ledger `docs/loops/product-master-ledger.md` and the morning report. This mission file itself lives on `main` at `docs/plans/2026-10-28-product-master-loop-MISSION.md`.
-  - **Build:** `C:\CRX_PMBuild`, created at Step 0, where each package branch is cut and built.
+  - **Build:** `C:\CRX_Manager\.claude\worktrees\pm-build`, created at Step 0, where each package branch is cut and built.
   - `git worktree list` is the source of truth; check it at Step 0.
 - **Definition of done:** the loop ends at whichever comes first:
   - every queue package in this run's wave (§5) has one final status, with the ledger complete and the morning report written. The statuses are DRAFTED, PARKED, REFUTED and NOT ATTEMPTED, and they must add up to the wave's total. *REFUTED* means already done or wrong against current code, with the evidence. *NOT ATTEMPTED* means the run ended first, with the reason; optional PM-12a counts here. *DRAFTED* means Codex-built, Claude-reviewed, checks green, committed, branch pushed and draft PR open; each acceptance item is marked proven or owed. It is not complete or merge-ready while any required observed behavior is owed. *PARKED* means a plain-English reason and the next step are written down.
@@ -83,7 +83,7 @@ Use Codex for building ("I have a lot of codex usage left").
 
 - **Invoke Codex only through the wrapper:** `node scripts/codex-build.mjs <specFile> --timeout 1800 [--model gpt-6-sol] [--effort xhigh]`.
   - It strips Codex's live-database, deploy and GitHub plugins (`--ignore-user-config`). That is not a sealed sandbox: Codex's shell can still run local commands and reach the network, as the wrapper's own notes say. So every spec also says: no production access, no GitHub writes, no deploys, no reading secrets or `.env`, and work only in the build worktree.
-  - Run it **in the build worktree**: `C:\CRX_PMBuild` is the working directory for the call.
+  - Run it **in the build worktree**: `C:\CRX_Manager\.claude\worktrees\pm-build` is the working directory for the call.
   - Run it in the foreground.
 - **What a spec contains.** Every spec is fully self-contained, because Codex remembers nothing between calls:
   - the exact files, and the exact behaviour from the build sheet's Approach and Sol notes;
@@ -133,9 +133,9 @@ Use Codex for building ("I have a lot of codex usage left").
 0. **Published plan.** `git fetch origin` and confirm `origin/main`'s copy of this file contains section 4a and the wave table. If not, the reviewed plan has not landed: end with `NEEDS MASON - ACTION REQUIRED` and change nothing.
 0a. **Context size.** A wave run needs auto-summarize at 800K; Mason's normal setting is 300K. Read `autoCompactWindow` from `~/.claude/settings.json`. If it is below `800000`, or a `modelSettings` entry overrides it, switch it with the `deep-mode` skill. That reaches only new sessions, so do no package work: end with `NEEDS MASON - ACTION REQUIRED: open a new session and paste the same prompt`. On Mason's PC only; where the file is absent, note it and continue.
 **Reuse, never recreate.** Check the ledger first. If who owns a branch or worktree is unclear, stop and ask (`run-loop.md` Step 2).
-- **The same run continuing** (a marathon handoff): reuse its loop branch, `C:\CRX_PMBuild` and ledger. Keep its start time, attempt number and handoff count. Skip items 1, 2 and 6 below.
+- **The same run continuing** (a marathon handoff): reuse its loop branch, `C:\CRX_Manager\.claude\worktrees\pm-build` and ledger. Keep its start time, attempt number and handoff count. Skip items 1, 2 and 6 below.
 - **Packages, in every run.** Before building, reconcile the ledger against branches and PRs. DRAFTED packages stay as they are. A PARKED package resumes on its existing branch and PR, after checking they are clean and current. Create a branch only when none exists, and never open a second PR for a package.
-- **A new run** (the next wave, or the rest of an unfinished wave after Mason's new go): item 1 makes a new loop branch with the next attempt number. Copy the ledger forward and record the new start time; a new run has its own 8 hours. If `C:\CRX_PMBuild` exists, confirm it is clean and unowned, run `git switch --detach origin/main` there, and skip `git worktree add`.
+- **A new run** (the next wave, or the rest of an unfinished wave after Mason's new go): item 1 makes a new loop branch with the next attempt number. Copy the ledger forward and record the new start time; a new run has its own 8 hours. If `C:\CRX_Manager\.claude\worktrees\pm-build` exists, confirm it is clean and unowned, run `git switch --detach origin/main` there, and skip `git worktree add`.
 
 1. **Coordinator.**
    - `git fetch origin`.
@@ -144,12 +144,12 @@ Use Codex for building ("I have a lot of codex usage left").
    - Confirm that the build sheet `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` and this mission file are present on `origin/main`. If either is missing, PARK the whole run and report.
    - **Staleness check.** List every commit on `origin/main` since 2026-10-29 that touched `src/pages/Products.tsx`, `src/pages/ProductDetail.tsx`, `src/components/ui/Combobox.tsx`, `src/components/products/` or a `products` migration. Note in the ledger any package those commits already did or changed. A package already done on `main` becomes `REFUTED`.
 2. **Build worktree.**
-   - `git worktree add C:\CRX_PMBuild origin/main --detach`, then `npm install` inside it.
+   - `git worktree add C:\CRX_Manager\.claude\worktrees\pm-build origin/main --detach`, then `npm install` inside it.
    - Run the baseline once: `npm run typecheck && npm run build && npm run lint && npm run test`. Record the result. A red baseline is not yours: note it and keep going.
 3. **Docker.** `docker info` must answer, and `docker pull postgres:17` must succeed. If Docker is down, database packages PARK, and screen-only packages continue.
 4. **Wrapper self-test.**
    - `codex --version`.
-   - A throwaway spec asking Codex to write `scripts/.codex-build-selftest.txt` with a token: run `node scripts/codex-build.mjs <spec> --timeout 300` in `C:\CRX_PMBuild`.
+   - A throwaway spec asking Codex to write `scripts/.codex-build-selftest.txt` with a token: run `node scripts/codex-build.mjs <spec> --timeout 300` in `C:\CRX_Manager\.claude\worktrees\pm-build`.
    - Confirm the file appeared with the token, then delete it. If it fails, STOP the queue and write the report.
 5. **Keep awake.** Ask the app to keep the PC awake for the run (`request_keep_awake`), if available.
 6. **Ledger.** Create `docs/loops/product-master-ledger.md` with the start time in America/Chicago and a row per queue package in this wave (status ⬜). On a later wave, continue the existing ledger from the previous loop branch. Commit it on the loop branch and push.

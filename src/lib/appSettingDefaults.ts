@@ -7,16 +7,19 @@ import { Sentry } from './sentry';
  * A failed read returns null and is reported; callers keep their built-in default.
  */
 async function readAppSetting(key: string): Promise<string | null> {
-  const { data, error } = await supabase
-    .from('app_settings')
-    .select('setting_value')
-    .eq('setting_key', key)
-    .maybeSingle();
-  if (error) {
-    Sentry.captureException(error, { tags: { source: 'read', action: `app_setting_${key}` } });
+  try {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('setting_value')
+      .eq('setting_key', key)
+      .maybeSingle();
+    if (error) throw error;
+    return data?.setting_value ?? null;
+  } catch (err) {
+    // Also catches a thrown network failure, so the new-customer form still finishes loading.
+    Sentry.captureException(err, { tags: { source: 'read', action: `app_setting_${key}` } });
     return null;
   }
-  return data?.setting_value ?? null;
 }
 
 /** customers.assigned_tier accepts 1, 2 or 3 (customers_assigned_tier_check); anything else is 1. */

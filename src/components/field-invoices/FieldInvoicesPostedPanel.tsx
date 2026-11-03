@@ -22,7 +22,7 @@ import {
   downloadInvoicePdf,
 } from '../../lib/invoicePdf';
 import { downloadReportPdf } from '../../lib/reportPdf';
-import { sendEmail, pdfToBase64, buildEmailHtml, isInvoiceEmailSuppressed } from '../../lib/emailService';
+import { sendEmail, pdfToBase64, buildEmailHtml, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../../lib/emailService';
 import { useAuth } from '../../contexts/AuthContext';
 import { logActivity } from '../../lib/activityLogger';
 import { formatCents as fmt } from '../../lib/money';
@@ -333,6 +333,7 @@ export default function FieldInvoicesPostedPanel() {
           resource_id: row.id,
           idempotency_key: `invoice-email-${row.id}-${Date.now()}`,
           attachments: [{ filename: `Invoice-${row.invoice_number}.pdf`, content: base64 }],
+          invoice_snapshot: invoiceEmailSnapshot(pdfData),
         });
         if (!result.success) throw new Error(result.error || 'Email failed to send');
 

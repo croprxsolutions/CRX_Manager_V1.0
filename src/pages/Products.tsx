@@ -700,6 +700,13 @@ export default function Products() {
         hasNonpricing ||= Object.keys(fields).some((key) => INLINE_NONPRICING_FIELDS.has(key));
         hasFloor ||= MARGIN_FLOOR_FIELD in fields;
       }
+      for (const [productId, fields] of changes) {
+        const original = products.find((item) => item.id === productId);
+        if ('category' in fields && original && (original.use_timings?.length ?? 0) > 0
+          && (fields.category || null) !== original.category) {
+          throw new Error('This product has use timings. Change its category on the product page.');
+        }
+      }
 
       if (hasFloor && (hasPricing || hasNonpricing)) {
         throw new Error('Save margin floors on their own. Cancel, change only the floors, then save again.');

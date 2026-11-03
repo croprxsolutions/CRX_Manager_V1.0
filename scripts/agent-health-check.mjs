@@ -420,6 +420,21 @@ export function checkGitHooksInstalled(root, platform = process.platform) {
   // path.relative is case-insensitive on win32, which is what we want for a
   // same-directory test on this repository's primary platform.
   if (path.relative(expected, resolved) !== "") {
+    // The desktop app writes an absolute path to the main checkout's .husky. That is
+    // fine when those hooks hand off to this worktree's own copy (CRX_OWN_HOOK), and
+    // that copy really lives here (a linked .husky would hand off to itself).
+    const handsOff = ["pre-commit", "pre-push"].every((hook) => {
+      try {
+        const own = path.relative(expected, canonical(path.join(expected, hook)));
+        return readFileSync(path.join(resolved, hook), "utf8").includes("CRX_OWN_HOOK") &&
+          existsSync(path.join(expected, hook)) && own === hook;
+      } catch {
+        return false;
+      }
+    });
+    if (handsOff) {
+      return check("PASS", "Git hooks installed", `${hooksPath} hands off to this worktree's .husky (pre-commit, pre-push)`);
+    }
     return check("FAIL", "Git hooks installed", `core.hooksPath is ${hooksPath}, which resolves to ${resolved} rather than this worktree's tracked .husky (${expected}) — git would run another checkout's guards or none at all; set core.hooksPath to .husky`);
   }
   const required = ["pre-commit", "pre-push"];

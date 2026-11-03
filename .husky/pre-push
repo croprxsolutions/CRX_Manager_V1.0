@@ -1,4 +1,10 @@
 #!/usr/bin/env sh
+# The desktop app can point core.hooksPath at another checkout; run this
+# worktree's own hook instead. CRX_OWN_HOOK stops a second hand-off.
+if [ -z "${CRX_OWN_HOOK:-}" ] && [ -f .husky/pre-push ] && ! [ "$0" -ef .husky/pre-push ]; then
+  CRX_OWN_HOOK=1 exec sh .husky/pre-push "$@"
+fi
+
 echo "🛡️ Pre-push safety check..."
 echo ""
 echo "Checking Phase 3C private-artifact containment..."

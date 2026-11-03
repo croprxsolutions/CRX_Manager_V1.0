@@ -10,6 +10,21 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-03 — Each `.husky` hook hands off to the worktree's own copy
+
+**Source:** Mason's in-chat "ok do it" on 2026-11-03, after an investigation found 12 desktop-app
+worktrees running the main checkout's 132-commit-stale hooks.
+
+**Decision.** `.husky/pre-commit`, `pre-push` and `commit-msg` start by re-running the current
+worktree's own `.husky/<hook>` when git launched a different file (guarded by `CRX_OWN_HOOK`, so it
+hands off at most once). `checkGitHooksInstalled` passes a `core.hooksPath` pointing elsewhere only
+when those hooks carry the hand-off and this worktree's own hooks live in its own `.husky`.
+Amends the 2026-08-31 entry below; the shared value is still the relative `.husky`.
+
+**Why.** The Claude desktop app writes `core.hooksPath = C:\CRX_Manager\.husky` into a worktree's
+`config.worktree` each time it hands the worktree to a new session, so clearing it never stuck.
+Takes effect in an affected worktree once the main checkout's `.husky` has these lines.
+
 ## 2026-11-02 — Invoice emails ship with server-written text; server-built PDFs are a later project
 
 **Decision (Mason, in chat):** "option A but make sure and note this everywhere so we don't forget it and document well to follow up in separate session with bigger work". KI-97 ships with the email service writing the invoice email's text and Amount Due from the saved invoice and checking the app's summary of its PDF. It does not wait for the server to draw the PDF itself.

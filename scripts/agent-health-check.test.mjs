@@ -288,6 +288,18 @@ try {
       assert.equal(outside.status, "FAIL");
       assert.match(outside.note, /tracked \.husky/);
 
+      // The desktop app writes the main checkout's .husky; hooks that hand off to
+      // this worktree's own copy (CRX_OWN_HOOK) make that safe.
+      for (const name of ["pre-commit", "pre-push"]) {
+        writeFileSync(path.join(foreign, ".husky", name), "#!/usr/bin/env sh\n# CRX_OWN_HOOK hand-off\n");
+      }
+      const handsOff = checkGitHooksInstalled(hooksRepo);
+      assert.equal(handsOff.status, "PASS", "hooks that hand off to this worktree's copy are safe");
+      assert.match(handsOff.note, /hands off/);
+      rmSync(path.join(hooksRepo, ".husky/pre-push"));
+      assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "hand-off needs this worktree's own hooks");
+      writeHook(path.join(hooksRepo, ".husky"), "pre-push");
+
       // Any other in-worktree directory holding two executable hooks would pass a
       // containment test while git bypassed the tracked .husky entirely.
       mkdirSync(path.join(hooksRepo, ".other-hooks"), { recursive: true });

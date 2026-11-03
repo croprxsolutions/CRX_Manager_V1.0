@@ -1474,7 +1474,8 @@ git() { return 0; }
   );
   if (fixtureBash()) {
     const hookPath = path.join(REPO_ROOT, '.husky', 'pre-push');
-    const runPrePushHook = (functions, args = [], input = '') => spawnSync(fixtureBash(), ['-c', `${functions}\nHOOK=$1; shift; source "$HOOK"`, 'synthetic-pre-push', hookPath, ...args], { cwd: REPO_ROOT, encoding: 'utf8', input, env: sanitizedFixtureGitEnv() });
+    // CRX_OWN_HOOK: the hooks are sourced with stubs, so their hand-off to a fresh shell must not fire.
+    const runPrePushHook = (functions, args = [], input = '') => spawnSync(fixtureBash(), ['-c', `${functions}\nHOOK=$1; shift; source "$HOOK"`, 'synthetic-pre-push', hookPath, ...args], { cwd: REPO_ROOT, encoding: 'utf8', input, env: sanitizedFixtureGitEnv({ CRX_OWN_HOOK: '1' }) });
     for (const [name, functions] of [
       ['containment', 'node() { return 42; }; npm() { return 0; };'],
       ['typecheck', 'node() { return 0; }; npm() { if [ "$2" = "typecheck" ]; then return 42; fi; return 0; };'],
@@ -1488,7 +1489,7 @@ git() { return 0; }
     assert(!prePush.includes('graphify'), 'pre-push must not refresh Graphify; it is on demand (npm run graph:refresh)');
     const preCommitPath = '.husky/pre-commit'; // relative to cwd REPO_ROOT, so no absolute path reaches the shell
     // git(): `diff --cached` lists the staged paths; `diff --quiet` reports unstaged edits via $unstaged; `ls-files` lists $untracked.
-    const runPreCommitHook = (staged, npx, unstaged = 0, untracked = '') => spawnSync(fixtureBash(), ['-c', `git() { [ "$2" = "--quiet" ] && return ${unstaged}; [ "$1" = "ls-files" ] && { printf '%s' '${untracked}'; return 0; }; printf '%s\\n' ${staged}; }; node() { return 0; }; bash() { return 0; }; ${npx}\nHOOK=$1; shift; source "$HOOK"`, 'synthetic-pre-commit', preCommitPath], { cwd: REPO_ROOT, encoding: 'utf8', env: sanitizedFixtureGitEnv() });
+    const runPreCommitHook = (staged, npx, unstaged = 0, untracked = '') => spawnSync(fixtureBash(), ['-c', `git() { [ "$2" = "--quiet" ] && return ${unstaged}; [ "$1" = "ls-files" ] && { printf '%s' '${untracked}'; return 0; }; printf '%s\\n' ${staged}; }; node() { return 0; }; bash() { return 0; }; ${npx}\nHOOK=$1; shift; source "$HOOK"`, 'synthetic-pre-commit', preCommitPath], { cwd: REPO_ROOT, encoding: 'utf8', env: sanitizedFixtureGitEnv({ CRX_OWN_HOOK: '1' }) });
     const registryFails = 'npx() { [ "$2" = "run" ] && return 42; return 0; };';
     const registryPasses = 'npx() { [ "$*" = "vitest run src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts" ] && return 0; return 42; };';
     assert.equal(runPreCommitHook('supabase/migrations/20990101000000_x.sql', registryFails).status, 1, 'a staged migration must block the commit when the RPC registry tests fail');

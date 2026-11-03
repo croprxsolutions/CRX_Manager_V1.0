@@ -115,6 +115,16 @@ function background(user, statements) {
   return new Promise(resolve => child.on('close', status => resolve({ status, stdout, stderr })));
 }
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+// Wait until the background session has finished its write and is sleeping inside its open
+// transaction, so the race order is guaranteed (a fixed pause could lose the race under load).
+function waitForHolder() {
+  for (let i = 0; i < 300; i++) {
+    const sleeping = sql("SELECT count(*) FROM pg_stat_activity WHERE query LIKE 'SELECT pg_sleep(%' AND state = 'active';").stdout.trim();
+    if (sleeping !== '0') return;
+    pause(100);
+  }
+  throw new Error('background session never reached its hold');
+}
 const HOLD_SECONDS = 4;
 let keyNo = 0;
 const key = (tag) => `[PROVER]-ki19-${tag}-${process.pid}-${++keyNo}`;
@@ -126,7 +136,7 @@ const reopenAll = () => sql(`UPDATE public.accounting_periods SET status = 'open
 // A month close is held open for HOLD_SECONDS while a payment dated in that month is recorded.
 async function raceCloseFirst(periodEnd, payDate, tag) {
   const held = background(ADMIN, ['BEGIN', closeSql(periodEnd, tag), `SELECT pg_sleep(${HOLD_SECONDS})`, 'COMMIT']);
-  pause(1000);
+  waitForHolder();
   const t0 = Date.now();
   const writer = asUser(ADMIN, pay(payDate, tag), true);
   const waitedMs = Date.now() - t0;
@@ -137,7 +147,7 @@ async function raceCloseFirst(periodEnd, payDate, tag) {
 // A payment is held open for HOLD_SECONDS while the month is closed.
 async function raceWriterFirst(periodEnd, payDate, tag) {
   const held = background(ADMIN, ['BEGIN', pay(payDate, tag), `SELECT pg_sleep(${HOLD_SECONDS})`, 'COMMIT']);
-  pause(1000);
+  waitForHolder();
   const t0 = Date.now();
   const close = asUser(ADMIN, closeSql(periodEnd, tag), true);
   const waitedMs = Date.now() - t0;

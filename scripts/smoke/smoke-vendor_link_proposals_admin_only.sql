@@ -53,18 +53,37 @@ BEGIN
       IF v_refused OR v_result IS NULL THEN
         RAISE EXCEPTION 'SMOKE_FAIL: admin was refused the report';
       END IF;
-      IF jsonb_array_length(v_result->'rows') <> v_active THEN
-        RAISE EXCEPTION 'SMOKE_FAIL: % rows for % active products', jsonb_array_length(v_result->'rows'), v_active;
+      -- Exactly one row per active product: same set, no duplicates.
+      SELECT count(*) INTO v_bad FROM (
+        (SELECT (r->>'product_id')::uuid FROM jsonb_array_elements(v_result->'rows') r
+         EXCEPT ALL SELECT p.id FROM public.products p WHERE p.is_active)
+        UNION ALL
+        (SELECT p.id FROM public.products p WHERE p.is_active
+         EXCEPT ALL SELECT (r->>'product_id')::uuid FROM jsonb_array_elements(v_result->'rows') r)
+      ) d;
+      IF v_bad <> 0 OR jsonb_array_length(v_result->'rows') <> v_active THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: rows are not one per active product (% mismatches, % rows, % products)',
+          v_bad, jsonb_array_length(v_result->'rows'), v_active;
       END IF;
       SELECT count(*) INTO v_bad FROM jsonb_array_elements(v_result->'rows') r
-       WHERE r->>'status' NOT IN ('linked', 'linked_text_differs', 'linked_no_preferred', 'proposed', 'ambiguous', 'unresolved', 'no_vendor')
+       WHERE r->>'status' IS NULL
+          OR r->>'status' NOT IN ('linked', 'linked_text_differs', 'linked_no_preferred', 'proposed', 'ambiguous', 'unresolved', 'no_vendor')
           OR EXISTS (SELECT 1 FROM jsonb_object_keys(r) k WHERE k ~ '(cost|price_cents|tier)');
       IF v_bad <> 0 THEN
-        RAISE EXCEPTION 'SMOKE_FAIL: % rows have an unknown status or a cost key', v_bad;
+        RAISE EXCEPTION 'SMOKE_FAIL: % rows have a missing or unknown status or a cost key', v_bad;
       END IF;
-      SELECT coalesce(sum(value::bigint), 0) INTO v_bad FROM jsonb_each_text(v_result->'summary');
-      IF v_bad <> v_active THEN
-        RAISE EXCEPTION 'SMOKE_FAIL: summary counts % rows, expected %', v_bad, v_active;
+      IF EXISTS (SELECT 1 FROM jsonb_object_keys(v_result) k WHERE k ~ '(cost|price_cents|tier)') THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: the report carries a top-level cost key';
+      END IF;
+      -- Each summary count matches its rows, in both directions.
+      SELECT count(*) INTO v_bad FROM (
+        SELECT s.key, s.value::bigint AS n FROM jsonb_each_text(v_result->'summary') s
+        EXCEPT
+        SELECT r->>'status', count(*) FROM jsonb_array_elements(v_result->'rows') r GROUP BY 1
+      ) x;
+      IF v_bad <> 0 OR (SELECT count(DISTINCT r->>'status') FROM jsonb_array_elements(v_result->'rows') r)
+                        <> (SELECT count(*) FROM jsonb_object_keys(v_result->'summary')) THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: the summary does not match the rows';
       END IF;
     ELSIF NOT v_refused THEN
       RAISE EXCEPTION 'SMOKE_FAIL: % pulled the vendor proposal report', v_role;

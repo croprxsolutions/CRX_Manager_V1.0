@@ -1,0 +1,5 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20261103120000_chicago_season_and_statement_dates.sql` (SQL sha256: `0c0b9136753cc0376cb61afd082233e7ba710b19229ac9407abd04df9b591a5b`). `current_season()` reads the America/Chicago date instead of the UTC date, and the customer statement dates prepay applications and undated payment allocation sets by the Chicago date; `invoices.invoice_date` defaults to the Chicago date and the return-credit header dates credit memos by it, so an invoice's date and season agree. No grant or data change; every live body and the old default are pinned before the edit.
+
+Rollback: a reviewed migration restoring the two pinned bodies. Proof: `scripts/smoke/prove-chicago-season-and-statement.mjs`.
+
+**Live capture — 2026-11-02 (read-only ledger query, re-read after main moved):** effective high-water is `20261103090000` (`retire_admin_set_application_service_cost`, recorded as version `20261102205903`). Restamped from `20261102230000` to `20261103120000` so it follows that and PR #1276 (`20261103100000`) and the cycle-count fix (`20261103110000`), in that landing order. Re-read before applying.

@@ -5,6 +5,8 @@
 // passed. A run on 2026-11-02 re-stamped five times because picked stamps collided with
 // these; each re-stamp after Sol cost a new Sol review. Live access stays with the caller:
 //   SELECT max(version) FROM supabase_migrations.schema_migrations;
+// Two sessions picking in the same minute get the same stamp; the pre-commit check
+// (check-migration-stamp-collision.mjs) refuses the second once the first file exists, before any Sol.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -42,7 +44,7 @@ function collect() {
   const seen = [];
   const add = (path, source) => { const stamp = stampOf(path); if (stamp) seen.push({ stamp, source }); };
 
-  run("git", ["fetch", "--quiet", "origin", "main"]);
+  run("git", ["fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
   for (const p of run("git", ["ls-tree", "-r", "--name-only", "origin/main", `${DIR}/`]).split("\n")) add(p.trim(), "origin/main");
 
   for (const wt of parseWorktreePorcelain(run("git", ["worktree", "list", "--porcelain"]))) {

@@ -27,7 +27,7 @@ If the user already described the change before invoking this skill, skip the qu
 npm run next-migration-stamp -- --live <live max version>
 ```
 
-   Do not use `date` for the stamp. If the helper prints `NO STAMP` (for example `gh` is missing),
+   Create the file right away so the pre-commit stamp check sees it. Do not use `date` for the stamp. If the helper prints `NO STAMP` (for example `gh` is missing),
    say so and do not guess one.
 
 2. Create the file at `supabase/migrations/<timestamp>_<short_snake_case_description>.sql`

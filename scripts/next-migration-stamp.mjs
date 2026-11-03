@@ -43,22 +43,30 @@ function collect() {
   const add = (path, source) => { const stamp = stampOf(path); if (stamp) seen.push({ stamp, source }); };
 
   run("git", ["fetch", "--quiet", "origin", "main"]);
-  for (const p of run("git", ["ls-tree", "--name-only", "origin/main", `${DIR}/`]).split("\n")) add(p.trim(), "origin/main");
+  for (const p of run("git", ["ls-tree", "-r", "--name-only", "origin/main", `${DIR}/`]).split("\n")) add(p.trim(), "origin/main");
 
   for (const wt of parseWorktreePorcelain(run("git", ["worktree", "list", "--porcelain"]))) {
     const dir = join(wt.path, DIR);
     if (existsSync(dir)) for (const f of readdirSync(dir)) add(f, `worktree ${wt.path}`);
   }
 
-  // shortcut: gh lists at most 100 files per PR; a PR with more may hide a stamp. Upgrade to `gh pr diff --name-only` per PR if that ever bites.
-  const prs = JSON.parse(run("gh", ["pr", "list", "--state", "open", "--limit", "500", "--json", "number,files"]));
-  for (const pr of prs) for (const f of pr.files ?? []) if (f.path.startsWith(`${DIR}/`)) add(f.path, `open PR #${pr.number}`);
+  const LIMIT = 500;
+  const prs = JSON.parse(run("gh", ["pr", "list", "--state", "open", "--limit", String(LIMIT), "--json", "number,files"]));
+  if (prs.length >= LIMIT) throw new Error(`${prs.length} open PRs reached the ${LIMIT} listing cap; some may be unseen`);
+  for (const pr of prs) {
+    // gh lists at most 100 files per PR; read the full list for any PR at that cap.
+    const paths = (pr.files ?? []).length >= 100
+      ? run("gh", ["pr", "diff", String(pr.number), "--name-only"]).split("\n").map((p) => p.trim())
+      : (pr.files ?? []).map((f) => f.path);
+    for (const p of paths) if (p.startsWith(`${DIR}/`)) add(p, `open PR #${pr.number}`);
+  }
   return { seen, prCount: prs.length };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const args = process.argv.slice(2);
-  const opt = (name) => { const i = args.indexOf(name); return i === -1 ? undefined : args[i + 1]; };
+  // A flag given without a value comes back as "" and fails validation instead of being ignored.
+  const opt = (name) => { const i = args.indexOf(name); return i === -1 ? undefined : (args[i + 1] ?? ""); };
   const live = opt("--live");
   const gap = opt("--gap-minutes") ?? "60";
   if ((live !== undefined && !/^\d{14}$/.test(live)) || !/^\d+$/.test(gap)) {

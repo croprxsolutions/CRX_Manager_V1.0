@@ -3075,6 +3075,14 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   //     landed on main and applied live; it drops both helpers before finishing.
   // Pruned 2026-10-22 when 20261021140000 applied live (ledger 20261021224056) and the registry
   // high-water moved past it: _po_item_cost_change_log is trigger-returning, so it is no longer discovered.
+  // WP-PM-15b enforcement (20261105110000), pre-apply window: trigger-only helpers that keep
+  // products.vendor a copy of the preferred vendor. Every API-role EXECUTE is revoked; the
+  // writing statement owns its transaction. Prune these once that migration is live.
+  _sync_product_vendor_copy: 'trigger-only copy of the preferred vendor name onto products.vendor; every API-role EXECUTE is revoked',
+  link_new_product_vendor: 'trigger-only: a new product whose vendor text names one vendor gets it as a preferred vendor-only link; every API-role EXECUTE is revoked',
+  prepare_product_supplier_link: 'trigger-only: locks the product, auto-prefers, retires a superseded vendor-only link; every API-role EXECUTE is revoked',
+  sync_product_vendor_from_links: 'trigger-only products.vendor copy after a link change; every API-role EXECUTE is revoked',
+  sync_product_vendor_on_vendor_rename: 'trigger-only products.vendor copy after a vendor rename; every API-role EXECUTE is revoked',
   _insert_commissions_for_job: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   _insert_commissions_for_order: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   // _guard_delivery_completion_authorized is also parked with Wave A in

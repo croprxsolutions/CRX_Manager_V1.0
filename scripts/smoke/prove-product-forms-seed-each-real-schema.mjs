@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261102210000_product_forms_seed_each.
+ * Real-schema proof for 20261104090000_product_forms_seed_each.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17
  * container and replays ordered post-baseline migrations up to this candidate. It exercises
@@ -22,7 +22,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261102210000_product_forms_seed_each.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261104090000_product_forms_seed_each.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -178,6 +178,12 @@ function buildContainer() {
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     // Batch 2's preflight pins live's auth.uid() body, which live had when batch 2 was applied.
     if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
+    // KI-85's postcondition needs live's active Main Warehouse row, which the schema-only baseline lacks.
+    if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') {
+      psql(`UPDATE public.warehouses SET is_active = true WHERE name = 'Main Warehouse';
+        INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
+        WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse');`);
+    }
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
     ledger(path.basename(file, '.sql'));
@@ -212,6 +218,12 @@ function quoteLine(productName, rateUnit, priceUnit) {
     current_cost, rate_unit, price_unit, total_units_needed, unit_size, total_price)
     SELECT 'aa110000-0000-0000-0000-000000000003', 'aa110000-0000-0000-0000-000000000004',
       id, 12.50, 5.00, ${rateUnit === null ? 'NULL' : `'${rateUnit}'`}, ${priceUnit === null ? 'NULL' : `'${priceUnit}'`}, 2, inventory_unit, 25.00
+    FROM public.products WHERE product_name = '${productName}';`;
+}
+function sqlText(value) { return value === null ? 'NULL' : `'${value}'`; }
+function jobLine(productName, unit, rateUnit, sortOrder = 0) {
+  return `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, rate_unit, price_per_unit_cents, sort_order)
+    SELECT 'aa110000-0000-0000-0000-000000000005', id, 4, ${sqlText(unit)}, ${sqlText(rateUnit)}, 1250, ${sortOrder}
     FROM public.products WHERE product_name = '${productName}';`;
 }
 function priced(qty, rate, inventory, form) {
@@ -260,6 +272,15 @@ try {
   assert.equal(scalar("SELECT has_function_privilege('authenticated', 'public.guard_seed_each_quote_item_units()', 'EXECUTE');"), 'f');
   assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.quote_items'::regclass
     AND tgname = 'trg_guard_seed_each_quote_item_units' AND tgenabled IN ('O','A')
+    AND NOT tgisinternal;`), '1');
+  assert.equal(scalar(`SELECT prosecdef AND pg_get_userbyid(proowner) = 'postgres'
+    AND proconfig @> ARRAY['search_path=public, pg_temp']
+    FROM pg_proc WHERE oid = 'public.guard_seed_each_job_chemical_units()'::regprocedure;`), 't');
+  for (const role of ['anon', 'authenticated', 'service_role', 'metabase_ro']) {
+    assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public.guard_seed_each_job_chemical_units()', 'EXECUTE');`), 'f');
+  }
+  assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.job_chemicals'::regclass
+    AND tgname = 'trg_guard_seed_each_job_chemical_units' AND tgenabled IN ('O','A')
     AND NOT tgisinternal;`), '1');
 
   assert.equal(scalar('SELECT count(*) FROM public.product_form_units;'), '4');
@@ -397,6 +418,62 @@ try {
   assert.equal(mutation('DROP TRIGGER trg_guard_seed_each_quote_item_units ON public.quote_items;',
     `${quoteLine('Seed Lb', 'Unit', 'Lb')} SELECT count(*) FROM public.quote_items WHERE rate_unit = 'Unit' AND price_unit = 'Lb';`), '1');
   assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_guard_seed_each_quote_item_units';"), '1');
+
+  // A blank quote unit on a no-form product blocks it from becoming seed (pricing reads blank as ounce).
+  psql("INSERT INTO public.products(product_name, category, product_form, inventory_unit, container_unit) VALUES ('Legacy blank quote', 'Herbicide', NULL, 'Lb', 'Lb');");
+  psql(`BEGIN; SET LOCAL session_replication_role = replica;
+    UPDATE public.products SET current_cost = 5.00 WHERE product_name = 'Legacy blank quote'; COMMIT;`);
+  for (const [rateUnit, priceUnit] of [['Lb', ''], ['Lb', null], ['', 'Lb'], [null, 'Lb']]) {
+    psql(`DELETE FROM public.quote_items WHERE product_id = (SELECT id FROM public.products WHERE product_name = 'Legacy blank quote');
+      ${quoteLine('Legacy blank quote', rateUnit, priceUnit)}`);
+    refused("UPDATE public.products SET product_form = 'seed' WHERE product_name = 'Legacy blank quote';",
+      /Existing quote lines use another unit; fix them before setting this form\./);
+  }
+  psql("UPDATE public.quote_items SET rate_unit = 'lb', price_unit = 'Lb' WHERE product_id = (SELECT id FROM public.products WHERE product_name = 'Legacy blank quote');");
+  psql("UPDATE public.products SET product_form = 'seed' WHERE product_name = 'Legacy blank quote';");
+  assert.equal(scalar("SELECT product_form FROM public.products WHERE product_name = 'Legacy blank quote';"), 'seed');
+
+  // Job lines: job completion deducts stock by converting jc.unit and falls back to the raw
+  // number when it can't, so a seed/each line must be stored in the stock unit.
+  psql(`BEGIN; SET LOCAL session_replication_role = replica;
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, created_by) VALUES
+      ('aa110000-0000-0000-0000-000000000005', 'PROVER-FORMS-JOB-1', 'aa110000-0000-0000-0000-000000000002', current_date,
+        'aa110000-0000-0000-0000-000000000001');
+    COMMIT;`);
+  const deducted = (sortOrder, stock, form) => scalar(`SELECT coalesce(public.field_app_priced_quantity(quantity,
+    public.normalize_rate_unit(unit), '${stock}', '${form}')::text, 'NULL') FROM public.job_chemicals WHERE sort_order = ${sortOrder};`);
+  psql(jobLine('Seed Lb', 'Lb', 'Lb', 1));
+  psql(jobLine('Seed Lb', 'lbs', 'lb/ac', 2));
+  assert.equal(Number(deducted(2, 'Lb', 'seed')), 4);
+  psql(jobLine('Each Ea', null, '', 3));
+  assert.equal(scalar("SELECT unit || ':' || rate_unit FROM public.job_chemicals WHERE sort_order = 3;"), 'Ea:Ea');
+  assert.equal(Number(deducted(3, 'Ea', 'each')), 4);
+  const jobUnitError = /Seed and each job lines use only the product's own unit \((?:Lb|Ea)\); "(?:Unit|oz|oz\/ac|Lb)" can't be converted\./;
+  for (const [name, unit, rateUnit] of [
+    ['Seed Lb', 'Unit', 'Lb'], ['Seed Lb', 'Lb', 'oz/ac'], ['Seed Lb', 'oz', null],
+    ['Each Ea', 'Unit', 'Ea'], ['Each Ea', 'Ea', 'Lb'],
+  ]) refused(jobLine(name, unit, rateUnit, 9), jobUnitError);
+  refused("UPDATE public.job_chemicals SET unit = 'Unit' WHERE sort_order = 1;", jobUnitError);
+  refused("UPDATE public.job_chemicals SET rate_unit = 'oz' WHERE sort_order = 1;", jobUnitError);
+  psql(jobLine('Liquid Gal', 'oz', 'oz/ac', 4));
+  // Without the guard, a count line on a pounds-stocked seed product saves and cannot convert:
+  // job completion would then subtract 4 units as 4 lb.
+  assert.equal(mutation('DROP TRIGGER trg_guard_seed_each_job_chemical_units ON public.job_chemicals;',
+    `${jobLine('Seed Lb', 'Unit', 'Unit', 8)} SELECT coalesce(public.field_app_priced_quantity(quantity, public.normalize_rate_unit(unit), 'Lb', 'seed')::text, 'NULL') FROM public.job_chemicals WHERE sort_order = 8;`), 'NULL');
+  assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_guard_seed_each_job_chemical_units';"), '1');
+
+  // A no-form product with job lines in another (or blank) unit cannot become seed/each.
+  psql("INSERT INTO public.products(product_name, category, product_form, inventory_unit, container_unit) VALUES ('Legacy job form', 'Herbicide', NULL, 'Ea', 'Ea');");
+  psql(`BEGIN; SET LOCAL session_replication_role = replica;
+    UPDATE public.products SET current_cost = 5.00, tier1_price = 12.50 WHERE product_name = 'Legacy job form'; COMMIT;`);
+  for (const unit of ['Unit', null]) {
+    psql(`DELETE FROM public.job_chemicals WHERE sort_order = 5; ${jobLine('Legacy job form', unit, null, 5)}`);
+    refused("UPDATE public.products SET product_form = 'each' WHERE product_name = 'Legacy job form';",
+      /Existing job lines use another unit; fix them before setting this form\./);
+  }
+  psql("UPDATE public.job_chemicals SET unit = 'ea', rate_unit = 'Ea/ac' WHERE sort_order = 5;");
+  psql("UPDATE public.products SET product_form = 'each' WHERE product_name = 'Legacy job form';");
+  assert.equal(scalar("SELECT product_form FROM public.products WHERE product_name = 'Legacy job form';"), 'each');
 
   for (const [qty, rate, stock, form, expected] of [
     [16, 'Lb', 'Lb', 'seed', 16], [16, 'lb', 'Lb', 'seed', 16],

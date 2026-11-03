@@ -1,13 +1,14 @@
 -- Add Seed and Each / unit product forms with exact allowed inventory and container units.
 -- ROUTINE: a new table with its own grants, a superset CHECK, three function replacements,
--- and a new trigger function and trigger on an existing table.
+-- and two new trigger functions with triggers on existing tables (quote_items, job_chemicals).
 -- No grants or policies change on existing tables; no data is deleted.
 -- Rollback: restore the liquid/dry CHECK only after confirming no seed/each product exists;
 -- re-create validate_product_units from 20260211000000_unit_tracking_pricing_overhaul.sql,
 -- field_app_priced_quantity from 20260630180000_field_app_pricing_unit_fix.sql,
 -- convert_to_gl_lb from 20260702133000_a14_convert_to_gl_lb_pint_quart_aliases.sql;
 -- drop trg_guard_seed_each_quote_item_units on public.quote_items and
--- public.guard_seed_each_quote_item_units(); then drop public.product_form_units.
+-- public.guard_seed_each_quote_item_units(); drop trg_guard_seed_each_job_chemical_units on
+-- public.job_chemicals and public.guard_seed_each_job_chemical_units(); then drop public.product_form_units.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -61,14 +62,22 @@ BEGIN
     END IF;
     -- BEFORE triggers run in name order: trg_validate_product_units precedes
     -- trigger_recalc_product_price_per_acre, so pricing sees the filled rate.
+    -- A blank existing unit counts as different: pricing reads it as one ounce.
     IF TG_OP = 'UPDATE' AND OLD.product_form IS NULL AND EXISTS (
       SELECT 1 FROM public.quote_items qi WHERE qi.product_id = NEW.id
-        AND ((NULLIF(btrim(qi.rate_unit), '') IS NOT NULL
-              AND lower(btrim(qi.rate_unit)) <> lower(btrim(NEW.inventory_unit)))
-          OR (NULLIF(btrim(qi.price_unit), '') IS NOT NULL
-              AND lower(btrim(qi.price_unit)) <> lower(btrim(NEW.inventory_unit))))
+        AND (lower(btrim(coalesce(qi.rate_unit, ''))) <> lower(btrim(NEW.inventory_unit))
+          OR lower(btrim(coalesce(qi.price_unit, ''))) <> lower(btrim(NEW.inventory_unit)))
     ) THEN
       RAISE EXCEPTION 'Existing quote lines use another unit; fix them before setting this form.'
+        USING ERRCODE = '22023';
+    END IF;
+    IF TG_OP = 'UPDATE' AND OLD.product_form IS NULL AND EXISTS (
+      SELECT 1 FROM public.job_chemicals jc WHERE jc.product_id = NEW.id
+        AND (normalize_rate_unit(jc.unit) IS DISTINCT FROM normalize_rate_unit(NEW.inventory_unit)
+          OR (normalize_rate_unit(jc.rate_unit) IS NOT NULL
+              AND normalize_rate_unit(jc.rate_unit) <> normalize_rate_unit(NEW.inventory_unit)))
+    ) THEN
+      RAISE EXCEPTION 'Existing job lines use another unit; fix them before setting this form.'
         USING ERRCODE = '22023';
     END IF;
   END IF;
@@ -156,6 +165,45 @@ REVOKE ALL ON FUNCTION public.guard_seed_each_quote_item_units() FROM PUBLIC, an
 CREATE TRIGGER trg_guard_seed_each_quote_item_units
   BEFORE INSERT OR UPDATE OF product_id, rate_unit, price_unit ON public.quote_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_seed_each_quote_item_units();
+
+-- Job completion deducts stock by converting jc.unit to the stock unit and falls back
+-- to the raw number when it can't, so a seed/each line must already be in the stock unit.
+CREATE FUNCTION public.guard_seed_each_job_chemical_units()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+DECLARE
+  v_product_form text;
+  v_inventory_unit text;
+BEGIN
+  SELECT p.product_form, p.inventory_unit
+    INTO v_product_form, v_inventory_unit
+    FROM public.products p WHERE p.id = NEW.product_id;
+
+  IF v_product_form IN ('seed','each') THEN
+    -- A blank unit is filled from the stock unit, so completion deducts it exactly.
+    IF normalize_rate_unit(NEW.unit) IS NULL THEN NEW.unit := v_inventory_unit; END IF;
+    IF normalize_rate_unit(NEW.rate_unit) IS NULL THEN NEW.rate_unit := v_inventory_unit; END IF;
+    IF normalize_rate_unit(NEW.unit) IS DISTINCT FROM normalize_rate_unit(v_inventory_unit)
+       OR normalize_rate_unit(NEW.rate_unit) IS DISTINCT FROM normalize_rate_unit(v_inventory_unit) THEN
+      RAISE EXCEPTION 'Seed and each job lines use only the product''s own unit (%); "%" can''t be converted.',
+        v_inventory_unit,
+        CASE WHEN normalize_rate_unit(NEW.unit) IS DISTINCT FROM normalize_rate_unit(v_inventory_unit)
+             THEN NEW.unit ELSE NEW.rate_unit END
+        USING ERRCODE = '22023';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+ALTER FUNCTION public.guard_seed_each_job_chemical_units() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_seed_each_job_chemical_units() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+
+CREATE TRIGGER trg_guard_seed_each_job_chemical_units
+  BEFORE INSERT OR UPDATE OF product_id, unit, rate_unit ON public.job_chemicals
+  FOR EACH ROW EXECUTE FUNCTION public.guard_seed_each_job_chemical_units();
 
 CREATE OR REPLACE FUNCTION public.field_app_priced_quantity(
   p_applied_qty numeric, p_rate_unit text, p_inventory_unit text, p_product_form text
@@ -255,7 +303,8 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_FORM_UNITS_ANON_ACCESS';
   END IF;
   IF has_table_privilege('metabase_ro', 'public.product_form_units', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
-     OR has_function_privilege('metabase_ro', 'public.guard_seed_each_quote_item_units()', 'EXECUTE') THEN
+     OR has_function_privilege('metabase_ro', 'public.guard_seed_each_quote_item_units()', 'EXECUTE')
+     OR has_function_privilege('metabase_ro', 'public.guard_seed_each_job_chemical_units()', 'EXECUTE') THEN
     RAISE EXCEPTION 'PRODUCT_FORM_UNITS_METABASE_ACCESS';
   END IF;
   IF has_table_privilege('authenticated', 'public.product_form_units', 'INSERT, UPDATE, DELETE, TRUNCATE') THEN
@@ -268,6 +317,14 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.quote_items'::regclass
       AND tgname = 'trg_guard_seed_each_quote_item_units' AND tgenabled IN ('O','A') AND NOT tgisinternal) THEN
     RAISE EXCEPTION 'PRODUCT_FORM_QUOTE_GUARD_MISSING';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = 'public.guard_seed_each_job_chemical_units()'::regprocedure
+      AND prosecdef AND proconfig @> ARRAY['search_path=public, pg_temp']) THEN
+    RAISE EXCEPTION 'PRODUCT_FORM_JOB_GUARD_UNSAFE';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.job_chemicals'::regclass
+      AND tgname = 'trg_guard_seed_each_job_chemical_units' AND tgenabled IN ('O','A') AND NOT tgisinternal) THEN
+    RAISE EXCEPTION 'PRODUCT_FORM_JOB_GUARD_MISSING';
   END IF;
   IF (SELECT count(*) FROM public.unit_conversions WHERE unit IN ('Lb','Unit','Ea')) = 3 THEN
     IF (SELECT count(*) FROM public.product_form_units) <> 4

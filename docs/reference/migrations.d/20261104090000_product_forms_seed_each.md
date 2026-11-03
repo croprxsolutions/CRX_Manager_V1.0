@@ -1,0 +1,3 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20261104090000_product_forms_seed_each.sql` (LF SQL sha256: `49729f7c0d0ef123abbef346ef543685da1b9a1c027a0afbe2d8a806bd2a07d8`). Adds exact Seed and Each stock-unit rules, rejects quote lines with missing or mismatched units, and rejects job-chemical lines in another unit (filling a blank one from the stock unit). Fills a blank product rate unit from its stock unit before per-acre pricing.
+
+Rollback: remove the quote-unit and job-line unit triggers and the form-unit table, then restore the prior function bodies and liquid/dry product-form constraint after confirming no Seed or Each products remain.

@@ -103,6 +103,9 @@ type ActiveReview = {
   review_token: string;
 };
 
+// preview_product_active_change and set_product_active refuse more than 500 products per call.
+const MAX_ACTIVE_CHANGE_PRODUCTS = 500;
+
 // Floors live in product_margin_floors, not on the product: the list copies each one onto its row.
 const MARGIN_FLOOR_FIELD = 'margin_floor_percent';
 type ProductListRow = Product & { [MARGIN_FLOOR_FIELD]?: string };
@@ -473,6 +476,10 @@ export default function Products() {
 
   const startActiveReview = async (ids: string[], active: boolean) => {
     if (!isAdmin || loadError || isEditingProducts || ids.length === 0) return;
+    if (ids.length > MAX_ACTIVE_CHANGE_PRODUCTS) {
+      toast('error', `Turn on or off at most ${MAX_ACTIVE_CHANGE_PRODUCTS} Products at a time. Narrow the filters or select a smaller batch.`);
+      return;
+    }
     const seq = ++activeReviewSeq.current;
     try {
       const { data, error } = await supabaseUntyped.rpc('preview_product_active_change', {

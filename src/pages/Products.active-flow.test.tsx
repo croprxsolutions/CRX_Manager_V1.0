@@ -157,4 +157,16 @@ describe('product active review flow', () => {
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('preview_product_active_change',
       { p_product_ids: [inactive.id], p_active: true }));
   });
+
+  it('refuses a bulk change above the 500-product RPC limit without calling it', async () => {
+    const many = Array.from({ length: 501 }, (_, i) => ({ ...active,
+      id: `11111111-1111-4111-8111-${String(i).padStart(12, '0')}`, product_name: `Chem ${i}`, sku: `C-${i}` }));
+    mocks.products.splice(0, mocks.products.length, ...many);
+    render(<Products />);
+    await screen.findByText('Chem 0');
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Deactivate' })[0]);
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringContaining('at most 500 Products')));
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
 });

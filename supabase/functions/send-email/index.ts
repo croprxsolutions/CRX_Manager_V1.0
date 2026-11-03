@@ -295,6 +295,7 @@ Deno.serve(async (req: Request) => {
     // 5b. The record this email is about (audit finding 7). It must belong to
     // customer_id, and it scopes the idempotency key below (finding 8).
     let recordRef = `customer:${customer_id}`;
+    let legacyQuoteAttachment: string | null = null;
     const recordSpec = RECORD_BY_EMAIL_TYPE[email_type];
     if (isPurchaseOrderEmail || email_type === "invoice") {
       // Ownership is checked in their own steps; both require a resource_id.
@@ -308,9 +309,9 @@ Deno.serve(async (req: Request) => {
       }
       const { data: recordRow, error: recordErr } = await adminClient
         .from(recordSpec.table)
-        .select("customer_id")
+        .select(email_type === "quote" ? "customer_id, quote_number" : "customer_id")
         .eq("id", resource_id)
-        .maybeSingle();
+        .maybeSingle<{ customer_id: string | null; quote_number?: string | null }>();
       if (recordErr) {
         return jsonResponse({ error: `${recordSpec.resourceType} lookup failed: ${recordErr.message}` }, 503);
       }
@@ -321,6 +322,8 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: `${recordSpec.resourceType} does not belong to customer_id` }, 403);
       }
       recordRef = `${resource_type}:${resource_id}`;
+      // QuoteBuilder's keys never held the quote id; its old rows name the quote's PDF instead.
+      if (email_type === "quote" && recordRow.quote_number) legacyQuoteAttachment = `Quote-${recordRow.quote_number}.pdf`;
     } else if (!JOB_NOTICE_TYPE_BY_EMAIL_TYPE[email_type] && resource_type &&
       (resource_type !== "customer" || resource_id !== customer_id)) {
       return jsonResponse({ error: `${email_type} emails are about the customer's account only` }, 400);
@@ -597,7 +600,8 @@ Deno.serve(async (req: Request) => {
     //    same email. Rows written before this change hold the raw key and no
     //    record id, so one counts only when that raw key names this record
     //    (the app's keys embed the record id) or, for job notices, when the
-    //    key was already matched to this job through job_notifications above;
+    //    key was already matched to this job through job_notifications above,
+    //    or, for quotes, when the row's attachment is this quote's PDF;
     //    any other raw-key row is refused as ambiguous rather than reported
     //    as already sent.
     let emailLogId: string | null = null;
@@ -608,7 +612,7 @@ Deno.serve(async (req: Request) => {
     if (scopedIdempotencyKey) {
       const { data: keyRows, error: existingErr } = await adminClient
         .from("email_log")
-        .select("id, resend_message_id, status, email_type, customer_id, idempotency_key")
+        .select("id, resend_message_id, status, email_type, customer_id, idempotency_key, attachment_name")
         .in("idempotency_key", [scopedIdempotencyKey, idempotency_key]);
       if (existingErr) {
         return jsonResponse({ error: `Idempotency lookup failed: ${existingErr.message}` }, 503);
@@ -616,7 +620,10 @@ Deno.serve(async (req: Request) => {
       const scopedRow = keyRows?.find((row) => row.idempotency_key === scopedIdempotencyKey);
       const legacyRow = scopedRow ? undefined : keyRows?.find((row) => row.idempotency_key === idempotency_key);
       const recordId = recordRef.slice(recordRef.indexOf(":") + 1);
-      if (legacyRow && !notificationRow && (!recordId || !idempotency_key.includes(recordId))) {
+      const legacyMatchesRecord = notificationRow != null ||
+        (!!recordId && idempotency_key.includes(recordId)) ||
+        (legacyQuoteAttachment != null && legacyRow?.attachment_name === legacyQuoteAttachment);
+      if (legacyRow && !legacyMatchesRecord) {
         return jsonResponse({
           error: "This idempotency_key was used before keys were tied to a record and cannot be matched to this one. Send again with a new key.",
         }, 409);

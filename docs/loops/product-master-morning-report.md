@@ -1,88 +1,120 @@
-# Product Master: Wave 2 morning report (2026-11-02)
+# Product Master: Wave 2 report (2026-11-02, attempt 2)
 
-**Status:** 3 drafted (change history; turning products off, after your approved rounds 4-6; the first half of setup checks), 0 parked, 8 not attempted, of 11. Run: 2026-11-01 21:50 to 04:25 Central. No new package may start after 03:50, so the run ended there, inside the 05:50 wrap (Wave 2, attempt 1).
+**Status:** of the 9 Wave 2 packages left after attempt 1: **1 drafted** (Use Timing, [#1316](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1316)), **6 parked**, **2 not attempted**. Run: 2026-11-02 12:32 to 19:47 Central (Wave 2, attempt 2). It ended at the closeout deadline.
 
-**Recommended next step (current as of 2026-11-02 11:15 Central):** land **#1276 (turning products off)**. #1266 and #1272 are merged and their migrations are live. #1276 is open and up to date with main. Its migration was renamed to `20261102160000` so it applies after both live migrations. It owes an exact-head Sol, then the apply, then the merge. The original 04:25 recommendation, to land #1266 first, is done.
+**Recommended next step:** land **#1316 (Use Timing)** in a normal session. Its migration changes column grants on the products table, so the landing session will show you a summary and ask for your `I approve`. The migration must be applied **before** the merge. Otherwise every product list and picker fails to load, because the screens select the new column.
 
 ## Packages
 
 | Package | Status | PR / where |
 |---|---|---|
-| WP-PM-12a Change history | **DRAFTED** | [#1266](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1266) |
-| WP-PM-3 Turning products off safely | **DRAFTED** after rounds 4-6, which you approved; Sol clean on round 6 | [#1276](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1276), head `86d88007f`; its migration applies after #1266's |
-| WP-PM-8 Setup checks (split: 8a now, 8b later) | **DRAFTED** (8a); 8b not attempted | [#1272](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1272) |
-| WP-PM-9 Forms, units, containers | not attempted (time; needs PM-8) | |
-| DM-0 Data hygiene | not attempted (time; needs PM-8, PM-9) | |
-| WP-PM-5 Use Timing | not attempted (time; needs PM-8) | |
-| WP-PM-6a Unit audit | not attempted (time; needs PM-9) | |
-| WP-PM-6b New-product flow, Duplicate 💲 | not attempted (needs PM-6a) | |
-| WP-PM-7 One cost path, tier order 💲 | not attempted (time) | |
-| WP-PM-15a Vendor proposals 💲 | not attempted (needs PM-7) | |
-| WP-PM-12b Corrections | not attempted (time) | |
+| WP-PM-5 Use Timing | **DRAFTED** (see CI note below) | [#1316](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1316), head `0b90a1767`; **Mason-gated** migration `20261103140000` |
+| WP-PM-9 Seed and each forms | **PARKED**: failed review after 3 build rounds (Sol found 2 HIGH) | branch `pm/wp-pm-9-forms-seed-each` at `19551a7ba`, on this PC only |
+| DM-0 Data clean-up lists | **PARKED**: the lists are done; the data step is yours | your vault: `Products\Product Master review\2026-11-02 DM-0 data hygiene review list.md` |
+| WP-PM-6a Unit audit | **PARKED**: waits on WP-PM-9; audit half done | your vault: `Products\Product Master review\2026-11-02 PM-6a unit mismatch list.md` |
+| WP-PM-6b New-product flow, Duplicate 💲 | **PARKED**: waits on WP-PM-6a | |
+| WP-PM-7 One cost path, tier-order warning 💲 | **PARKED**: time; one build round done, review fixes owed | branch `pm/wp-pm-7-cost-path` at `31436cc01`, on this PC only |
+| WP-PM-15a Vendor proposals 💲 | **PARKED**: waits on WP-PM-7 | |
+| WP-PM-12b Corrections | not attempted (no new package after 18:32) | |
+| WP-PM-8b Incomplete badge, near-match warnings, rate help | not attempted (no new package after 18:32) | |
 
-Each package took about two and a half hours, including three independent review rounds, so the wave was always going to be longer than one night.
+### WP-PM-5 Use Timing: DRAFTED, [#1316](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1316)
 
-### WP-PM-12a Change history: DRAFTED, [#1266](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1266)
-- **What it does:** each product page shows who changed which setup field, when, and old → new. The database writes it in the same save, so no screen can skip it and nobody can edit it. Cost, margin and price stay out.
-- **Proof:** the real-schema database proof passed; 6,964 unit tests passed, none failed; all 20 browser tests on the test app passed, including a saved signal word showing the staff member's name after reload. All 20 CI checks are green.
-- **Owed:** a Mason-session click-through on the Vercel preview. After apply: run `list_migrations`, regenerate the schema registry and types, then switch the card off `supabaseUntyped`.
-- **Migration:** **Mason-gated** (see below). Sol clean on `2bb7bfdfb`.
-- **CodeRabbit:** labelled and reviewed. One comment, about two old test scripts, was refuted on the thread (they never replay this migration); CodeRabbit agreed. No fix commit.
-- **Not proven:** multi-row update, product-delete refusal, `use_timing` rewrite, trigger order.
+**What it does:** a product can have several use timings. Post-Emerge Corn, Post-Emerge Soybeans and Pre-Emerge are added; Post-Emergence stays. Only Herbicide and Foliar Fertilizer have timings. The product page uses checkboxes and asks before a category change clears the timings. The old single timing text is kept by the database as the timings joined with "; ", so the price workbook, bulk import and change history keep working, and no money function was touched.
 
-### WP-PM-3 Turning products off safely: PARKED
-- **Update 05:25:** round 4, which you approved, fixed the quantity-increase gap, pinned the inventory function bodies, and made a retired product never show as below reorder. The proof, 7,013 tests and all 24 browser tests passed. Sol then found one new HIGH: two lines of the same product on one order can hide a missing delivery record on one of them. **Next step:** a fifth round checks each line by its own delivery record, if you say yes.
-- **Update 07:05:** round 5, which you approved, fixed that gap. The proof, 7,015 tests and all 25 browser tests passed. Two new high-severity gaps were found. Sol: the database doesn't stop a new stock hold on a turned-off product, and only the screen does. Luna: on an order that is still part-delivered, voiding a delivery can put a turned-off product's line back as owed. **Next step:** a sixth round closes both, if you say yes.
-- **Update 08:15:** round 6, which you approved, closed both gaps. The proof, 7,016 tests and all 25 browser tests passed, and **Sol came back clean**. The three Claude reviewers found no blockers. It is now draft PR [#1276](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1276), with CodeRabbit requested. Its live database update applies after #1266's.
-- **Update 09:50:** #1266 has merged. #1276's 10 CodeRabbit comments are all answered: six fixed, two belonged to #1266, two recorded as known issues. Main was merged in and the tests pass. **Next step:** run Sol once more on #1276's latest version before it lands, because the fix touched its database change.
-- **Why:** after the three build rounds the mission allows, Sol found one HIGH. Raising the ordered quantity of a turned-off product on an existing order line is not blocked, and that is a new sale. The guard deliberately left held lines editable, so the one live open order that holds a turned-off product keeps working, and the quantity case slipped through.
-- **Everything else passed:** three independent reviews found 1 BLOCKER and 13 HIGH between them, all fixed and confirmed by a re-review. The database proof passed (including two real sessions racing a deactivation in both orders), 6,996 unit tests passed, and all 24 browser tests passed. In the browser, the row button refuses with the order named, a stock warning is confirmed, and an inactive product is reactivated.
-- **Exact next step (needs your OK for a fourth round):** refuse an *increase* in ordered quantity on order, quote and PO lines for a turned-off product (decreases and other edits stay allowed), add a proof case, rerun Sol, then open the draft PR. The branch stacks on #1266.
-- **Also owed when it resumes:** pin the live bodies of the three inventory functions it re-creates before replacing them (a review MED). After a fourth round, Claude also made small test-and-docs-only fixes.
-- **For you to confirm when it lands:**
-  1. Voiding a delivery that would put a turned-off product back on an open order is refused until reactivation. Voiding a delivery of other products on the same order still works.
-  2. Draw-down from a booking, season rollover and copying a quote refuse a turned-off product.
-  3. A PO receipt reversal can reopen a PO holding a turned-off product. This is allowed so stock corrections stay possible.
-- **Also in it:** retired stock with a balance stays visible in inventory and in the admin inventory value (💲 display only).
+**Proof:**
+- the database proof (`PRODUCT_USE_TIMINGS_PROOF_PASS`) shows all 317 existing timings copied exactly;
+- a real workbook export, preview and apply keeps both timings with prices unchanged;
+- the full test suite passed on the round-2 head (7,069 tests);
+- Sol is clean on `0b90a1767`.
 
-### WP-PM-8a Setup checks: DRAFTED, [#1272](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1272)
-- **What it does:** Category is a pick list from a new admin-maintained table: the 11 categories in use plus **Seed**. The database refuses a blank or space-padded name, an empty SKU or EPA string, a badly formatted EPA number, a negative or non-finite rate, and negative REI/PHI, but only when that field changes. The 16 old products that don't meet these rules keep working, so a price change, notes edit or deactivation on them succeeds. An existing product's form and units are locked until the reviewed unit change (WP-PM-6a); a first-time choice is allowed. Bulk import follows the same rules.
-- **Proof:** all 20 CI checks are green. The real-schema database proof passed; 7,043 unit tests passed, none failed; all 24 browser tests passed, including a blank name and a bad EPA number refused on the product page and Seed saved with a first form choice.
-- **Smaller safe variant (said plainly):** the sheet's "a Form change asks before clearing units" is a lock on saved products for now, as the sheet's dependency rule requires. The incomplete badge and filter, the near-match warnings for vendor and manufacturer, and the rate help text are **WP-PM-8b**, not started.
-- **Owed:** a Mason-session click-through on the Vercel preview; the three open CodeRabbit fixes (below), then exact-head Sol. At apply, keep the time between apply and deploy short, because until the new screen deploys the old screen can type an off-list category and would get a database error.
-- **Migration:** routine; applies after #1266's. Sol clean on `3feefee69`.
-- **Reviews:** three Codex rounds. Compliance found 2 HIGH, and drift and security found 2 HIGH. The worst would have blocked price changes on the 16 old products. All fixed, and a re-review confirmed each fix. Claude fixed a unit name in the proof's test data.
+**Owed:**
+- **CI:** at 19:10 Central, CI on `0b90a1767` was still running (10 passed, 6 pending); the earlier head `3c8b77f5f` passed all 20.
+- **Clicks:** a browser click-through on the Vercel preview after the live apply. The exact clicks are in the PR.
+
+**CodeRabbit:** 2 comments, both fixed by Codex and their threads resolved.
+
+### WP-PM-9 Seed and each forms: PARKED
+
+**What it does:** adds Seed (stocked in Lb or Unit) and Each / unit (Ea or Unit). Seed and each products never convert between units. Their rate unit, and every quote line's units, must be the stock unit.
+
+**Why this matters (found while grounding):** the per-acre price and the quote save read a blank unit as one ounce. Without these rules, a seed product stocked in pounds could price at 1/16.
+
+**Why it parked:** after 3 build rounds, Sol found 2 HIGH issues. A seed job line can still be saved in a different unit, which lets job completion take the wrong amount from stock. And a blank quote unit does not stop a product with no form from becoming seed. Both are small fixes. Neither can happen today, because no seed or each products exist.
+
+**Next step:** approve a 4th round. It adds a guard on job lines and blocks blank quote units, then reruns Sol. The migration's timestamp `20261102210000` is now below live and needs a new one in that round.
+
+### DM-0 Data clean-up: PARKED for your data step
+
+The list in your vault covers:
+- 11 products with no form, each with a proposed form (8 "each", 3 "liquid");
+- 13 products with no SKU (you type them);
+- the duplicate SKU `9768NR` (the row with the orders keeps it);
+- 3 groups of products sharing a name, including two "MicroNourish - Tote" rows that are exact duplicates with orders on both (a complicated merge), and a "Vixen D - 12#" set up once as liquid and once as dry;
+- 4 test rows (two hold old stock that needs an approved adjustment).
+
+Nothing was changed.
+
+### WP-PM-6a Unit audit: PARKED (audit done; the build waits on WP-PM-9)
+
+- **The audit:** 594 of 604 products have matching units. 8 have a blank Unit (products made on the product page, which has no Unit box), and one differs only in capital letters.
+- **One real pricing risk:** "Piksi Dust Plus - 1800G Jar" is stocked in milligrams but billed by dry ounces on jobs. **Check its price before it goes on a job.**
+- **Proposed design:** the stock unit becomes the one priced unit, and the database keeps Unit in step on new and changed products. Existing rows wait for your approval, row by row; there is no back-fill.
+
+### WP-PM-7 One cost path and tier-order warning: PARKED (time)
+
+**What round 1 built:**
+- Current Cost becomes read-only, and the reason is asked once;
+- a pick list for the price source;
+- a new warning when Tier 2 is priced below Tier 1, or Tier 3 below Tier 2. It sits in the database, so the workbook, the list and the product page all must acknowledge it.
+
+Its proof shows the five existing warnings are unchanged. Only 3 active products are already out of order.
+
+**Fixes owed (round 2 is written, not run):**
+- a test file whose special characters were garbled;
+- a timestamp that collides with PR #1313;
+- a stated $0 tier must count as a real price, per your 2026-10-27 decision;
+- more proof cases.
 
 ## Suggested merge order
-1. **#1266** change history (stacks on nothing).
-2. **#1272** setup checks, after #1266. Refresh it after #1266 lands and recheck.
-3. WP-PM-3, after its fourth round. It stacks on #1266, so refresh it after #1266 lands and recheck.
 
-Every PR targets `main`. After a prerequisite lands, refresh and recheck the dependent PR's diff before landing it.
+1. **#1276** (turning products off; another session is landing it).
+2. **#1316** (Use Timing): apply its migration first, with your `I approve`, then merge.
+3. Later, after their next rounds: WP-PM-9 (new timestamp), then WP-PM-6a, WP-PM-7, WP-PM-15a.
 
-## Mason-gated migrations (historical: #1266 and #1272 are applied)
-- **#1266, `20261102100000_product_change_history`.** Nothing in it deletes data. Its append-only history table refuses TRUNCATE, and the owner-approval classifier reads that word as a data-deleting migration. That is a false positive, but the protection stays as it is, so the apply waits for you.
+Every PR targets `main`, so after one lands, the next must merge `main` in and re-check before landing.
 
-- #1272 (`20261102102000_product_setup_checks`) is routine, with no access change and no classifier category. It still needs exact-head Sol at apply.
+## Mason-gated migrations
+
+- `20261103140000_product_use_timings.sql` (#1316): adds column grants on `products` matching `use_timing`'s grants. Needs your `I approve`.
 
 ## Tests, builds and events
-- Baseline at start: typecheck, build and lint passed; 6,917 tests passed. One failure came from my own tree switch, and that file passed 22 of 22 alone.
-- All three Wave 1 PRs still open at the start (#1250, #1252, #1255) merged during the night, and main also took #1264, #1265, #1267 and #1271. Each package merged the newest main before Sol.
-- **Codex events:** one, at 23:33. WP-PM-3's first round ended on `Selected model is at capacity`. §6 says a Codex API error ends the run early. I judged one capacity message a passing condition, kept the same model and continued. No further errors. This is recorded in the ledger.
-- `CURRENT_STATE.md` and `KNOWN_ISSUES.md` were re-stamped 2026-11-02 for a live ledger read only (high-water `20261101181836`, 1,089 rows). A 2026-11-02 migration requires that stamp.
+
+- **Baseline on `main` at start:** typecheck, build and lint passed; 7,047 tests passed, none failed.
+- **WP-PM-9** on `19551a7ba`: full suite 7,078 passed, none failed.
+- **WP-PM-5:** full suite 7,069 passed on `3c8b77f5f`. The local full suite on the fix head was stopped to free the build folder; CI runs it.
+- **Codex:**
+  - WP-PM-5 round 1 hit the 50-minute limit while re-running its own final check, with the work complete.
+  - WP-PM-7's Codex ran one read-only `git fetch` despite the no-network instruction; nothing changed.
+- **Schema registry:** refreshed read-only from live at the start, and left uncommitted in this session's worktree for you.
+- **Shared test app:** port 5199 is held by a test-app frontend nobody claims (node PID 45156, started 10:20 today). Neither this run nor the #1276 session stopped it, so **no browser proof ran this run**. If it isn't yours, it is safe to close.
 
 ## CodeRabbit
-- #1266: requested after Sol; one comment, refuted; no fixes kept.
-- #1272: requested after Sol at 04:03 and reviewed, with 5 comments. **Refuted and resolved (2):** the live-function list (trigger functions are not RPCs) and product hard-deletes (no app path deletes products). **Valid, left open for the landing session (3):** trim a category name after collapsing its whitespace (a raw error instead of a clear message for a tab-padded name); bound a browser test's keyboard loop by the vendor option count; a KNOWN_ISSUES note. These go in one reviewed Codex round, then exact-head Sol before apply, because tonight's three build rounds were used.
-- WP-PM-3: not requested (parked before a PR).
 
-## Sol proofs (historical: both PRs landed)
-- #1266: clean on `2bb7bfdfb`, about 23:15 on 2026-11-01. Valid until about **23:15 on 2026-11-02**. Main touched `ProductDetail.tsx` (#1271) after it, so the landing session must check whether the carry-forward still holds.
-- #1272: clean on `3feefee69`, about 03:59 on 2026-11-02. Valid until about **03:59 on 2026-11-03**.
+- #1316: requested once after Sol. It found 2 comments (a preflight hole for a timed product with no category, and an unreachable display branch); both were fixed by Codex.
+- No other PR was opened.
+
+## Sol proofs
+
+- #1316: clean on `0b90a1767` at 2026-11-03 00:06 UTC (7:06 PM Central, 11-02); **it passes 24 hours at 7:06 PM Central on 2026-11-03.**
+- The earlier clean proof on `3c8b77f5f` (5:04 PM Central) no longer matches the head.
 
 ## Decision for you
-- Nothing is open from the original list: #1266 and #1272 landed, and you approved rounds 4 to 6 for WP-PM-3.
-- Next: land #1276. Its migration adds guards and removes no data.
 
-## Private review lists
-`Products\Product Master review\2026-11-02 PM-8 setup check cleanup list.md` in your private vault: 16 products that don't meet the new setup checks. Only one needs a real decision: an EPA number missing its second part.
+1. Land #1316 (your `I approve` for its migration).
+2. Approve WP-PM-9's 4th round, so seed and each forms can draft and unblock WP-PM-6a and 6b.
+3. Your data steps from the two vault lists (DM-0 and the unit mismatches), starting with Piksi Dust Plus's price.
+
+## Attempt 1 (2026-11-01 night), for reference
+
+Drafted change history (#1266), turning products off (#1276, after your approved rounds 4-6) and the first half of setup checks (#1272). #1266 and #1272 are merged and their migrations are live; #1276 is being landed by another session.

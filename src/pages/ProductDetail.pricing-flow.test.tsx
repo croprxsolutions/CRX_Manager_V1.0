@@ -9,7 +9,9 @@ const {
   mockProductEq,
   mockToast,
   mockGetCostBasisWorkspace,
+  mockNavigate,
 } = vi.hoisted(() => ({
+  mockNavigate: vi.fn(),
   mockApplyPricing: vi.fn(),
   mockApprovePricing: vi.fn(),
   mockPreviewPricing: vi.fn(),
@@ -64,6 +66,7 @@ const product = {
 };
 
 let routeProductId = product.id;
+let routeState: unknown = null;
 
 let productLoadResults: Array<{ data: typeof product | null; error: unknown }> = [];
 let costHistoryLoadResult: { data: unknown[] | null; error: unknown } = { data: [], error: null };
@@ -197,8 +200,8 @@ vi.mock('../contexts/AuthContext', () => ({
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ id: routeProductId }),
-  useNavigate: () => vi.fn(),
-  useLocation: () => ({ pathname: `/products/${product.id}` }),
+  useNavigate: () => mockNavigate,
+  useLocation: () => ({ pathname: `/products/${product.id}`, state: routeState }),
 }));
 
 vi.mock('../hooks/useUnsavedChanges', () => ({
@@ -224,6 +227,7 @@ describe('ProductDetail governed pricing flow', () => {
     vi.clearAllMocks();
     mockApprovePricing.mockResolvedValue(undefined);
     routeProductId = product.id;
+    routeState = null;
     productLoadResults = [];
     costHistoryLoadResult = { data: [], error: null };
     productMutationResult = { data: [product], error: null };
@@ -300,6 +304,27 @@ describe('ProductDetail governed pricing flow', () => {
       }],
       purchase_candidates: [],
     });
+  });
+
+  it('Duplicate opens a new product carrying only the copied fields (WP-PM-6b)', async () => {
+    render(<ProductDetail />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Duplicate' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/products/new', { state: { duplicateFrom: {
+      id: product.id, product_name: product.product_name, category: product.category, vendor: product.vendor,
+      manufacturer: product.manufacturer, product_form: product.product_form, inventory_unit: product.inventory_unit,
+    } } });
+  });
+
+  it('prompts for prices on a just-created product that has none, and not once it has them', async () => {
+    routeState = { justCreated: true };
+    productLoadResults = [{ data: { ...product, tier1_price: null, tier2_price: null, tier3_price: null } as unknown as typeof product, error: null }];
+    const { unmount } = render(<ProductDetail />);
+    expect(await screen.findByText(/Product created\. Now set its prices/)).toBeInTheDocument();
+    unmount();
+
+    render(<ProductDetail />);
+    await screen.findByLabelText('Quoting Notes');
+    expect(screen.queryByText(/Product created\. Now set its prices/)).not.toBeInTheDocument();
   });
 
   it('loads and saves customer-facing Quoting Notes with pricing-version conflict protection', async () => {

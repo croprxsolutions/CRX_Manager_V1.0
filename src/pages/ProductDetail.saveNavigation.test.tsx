@@ -61,17 +61,18 @@ function chain(data: unknown) {
   return self;
 }
 
-function renderNewProduct() {
+function renderNewProduct(state?: unknown) {
   const router = createMemoryRouter(
     [{
       element: <><Link to="/elsewhere">Elsewhere</Link><Outlet /></>,
       children: [
         { path: '/products', element: <p>Products list page</p> },
+        { path: '/products/product-1', element: <p>New product page</p> },
         { path: '/products/:id', element: <ProductDetail /> },
         { path: '/elsewhere', element: <p>Elsewhere page</p> },
       ],
     }],
-    { initialEntries: ['/products/new'] },
+    { initialEntries: [{ pathname: '/products/new', state }] },
   );
   render(<RouterProvider router={router} />);
   return router;
@@ -83,7 +84,20 @@ describe('ProductDetail — leaving a new product', () => {
     mockFrom.mockImplementation(() => chain([{ id: 'product-1' }]));
   });
 
-  it('a successful create moves to the list with no Unsaved Changes prompt', async () => {
+  it('a successful create opens the new product for pricing with no Unsaved Changes prompt', async () => {
+    const router = renderNewProduct();
+    fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
+
+    await screen.findByText('New product page');
+    expect(router.state.location.pathname).toBe('/products/product-1');
+    expect(router.state.location.state).toEqual({ justCreated: true });
+    expect(mockToast).toHaveBeenCalledWith('success', 'Product created. Now set its prices.');
+    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the list when the new id does not come back', async () => {
+    mockFrom.mockImplementation(() => chain([]));
     const router = renderNewProduct();
     fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
@@ -91,7 +105,35 @@ describe('ProductDetail — leaving a new product', () => {
     await screen.findByText('Products list page');
     expect(router.state.location.pathname).toBe('/products');
     expect(mockToast).toHaveBeenCalledWith('success', 'Product created');
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+  });
+
+  it('Duplicate starts from the copied fields only and saves nothing else of the source', async () => {
+    renderNewProduct({ duplicateFrom: {
+      id: 'source-1', product_name: 'Atrazine 4L', category: 'Herbicide', vendor: 'Acme Ag',
+      manufacturer: 'Maker Co', product_form: 'liquid', inventory_unit: 'Gal',
+    } });
+    expect(await screen.findByText('Copy of Atrazine 4L. Nothing is saved until you create it.')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Product Name/)).toHaveValue('Atrazine 4L (copy)');
+    expect(screen.getByLabelText('SKU')).toHaveValue('');
+    expect(screen.getByLabelText('EPA Registration')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
+
+    await screen.findByText('New product page');
+    const [[[row]]] = mockInsert.mock.calls as [[[Record<string, unknown>]]];
+    expect(row).toEqual(expect.objectContaining({
+      product_name: 'Atrazine 4L (copy)', vendor: 'Acme Ag', manufacturer: 'Maker Co',
+      product_form: 'liquid', inventory_unit: 'Gal',
+      sku: null, epa_registration: null, is_rup: false, signal_word: null, rei_hours: null, phi_days: null,
+      container_size: undefined, container_unit: null, unit_size: '',
+    }));
+    for (const field of ['id', 'tier1_price', 'tier2_price', 'tier3_price', 'current_cost']) expect(row).not.toHaveProperty(field);
+  });
+
+  it('a Duplicate left unsaved still prompts', async () => {
+    renderNewProduct({ duplicateFrom: { id: 'source-1', product_name: 'Atrazine 4L', category: null, vendor: null, manufacturer: null, product_form: null, inventory_unit: null } });
+    await screen.findByText('Copy of Atrazine 4L. Nothing is saved until you create it.');
+    fireEvent.click(screen.getByRole('link', { name: 'Elsewhere' }));
+    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
   });
 
   it('locks the form while a new product saves', async () => {
@@ -111,7 +153,7 @@ describe('ProductDetail — leaving a new product', () => {
 
     await waitFor(() => expect(name).toBeDisabled());
     finish({ data: [{ id: 'product-1' }], error: null });
-    await screen.findByText('Products list page');
+    await screen.findByText('New product page');
   });
 
   it('leaving with an unsaved name still prompts', async () => {
@@ -160,7 +202,7 @@ describe('ProductDetail — leaving a new product', () => {
     const form = screen.getByText('Product Form').parentElement!.querySelector('select')!;
     fireEvent.change(form, { target: { value: 'dry' } });
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
-    await screen.findByText('Products list page');
+    await screen.findByText('New product page');
     expect(mockInsert).toHaveBeenCalledWith([expect.objectContaining({
       product_name: 'Seed Chem', sku: 'SKU-1', category: 'Seed', epa_registration: null,
       product_form: 'dry',

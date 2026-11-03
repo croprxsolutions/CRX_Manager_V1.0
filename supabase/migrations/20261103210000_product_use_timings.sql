@@ -189,7 +189,7 @@ BEGIN
          string_agg(o.label, '; ' ORDER BY o.sort_order, o.code)
     INTO NEW.use_timings, v_labels
     FROM public.product_use_timing_options o WHERE o.code = ANY(v_codes);
-  IF TG_OP = 'INSERT' AND cardinality(v_codes) > 0 AND NEW.use_timing IS NOT NULL
+  IF TG_OP = 'INSERT' AND NOT v_legacy AND cardinality(v_codes) > 0 AND NEW.use_timing IS NOT NULL
      AND NEW.use_timing IS DISTINCT FROM v_labels THEN
     RAISE EXCEPTION 'Use timing was changed two ways at once; refresh and try again.' USING ERRCODE = '22023';
   END IF;

@@ -242,6 +242,8 @@ try {
   assert.equal(scalar(`SELECT category || ':' || COALESCE(use_timing, 'NULL') FROM public.products WHERE id = ${product('PM5 Post')};`), 'Insecticide:NULL');
   psql("INSERT INTO public.products(product_name, category) VALUES ('PM5 Alias', 'Post Emergence');");
   assert.equal(scalar(`SELECT category || ':' || use_timings[1] FROM public.products WHERE id = ${product('PM5 Alias')};`), 'Herbicide:post_emergence');
+  psql("INSERT INTO public.products(product_name, category, use_timing) VALUES ('PM5 Legacy Insert', 'Herbicide', 'Post-Emergence;Pre-Emerge');");
+  assert.equal(scalar(`SELECT array_to_string(use_timings, ',') || '|' || use_timing FROM public.products WHERE id = ${product('PM5 Legacy Insert')};`), 'pre_emerge,post_emergence|Pre-Emerge; Post-Emergence');
   refused("INSERT INTO public.products(product_name, category, use_timings, use_timing) VALUES ('PM5 Conflicting Insert', 'Herbicide', ARRAY['pre_emerge'], 'Foliar');", /changed two ways at once/);
   refused(`UPDATE public.products SET use_timings = ARRAY['pre_emerge_corn'], use_timing = 'Foliar' WHERE id = ${product('PM5 Soy')};`, /changed two ways at once/);
   console.log('[prover] app, legacy, category, alias and conflict paths passed');

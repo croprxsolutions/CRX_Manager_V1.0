@@ -165,17 +165,19 @@ No snapshot/guard migration was found, but the live row count could not be check
 ---
 
 ### KI-97 — Invoice email content is built by the app screen, not by the email service
-**MED · FIX IN REVIEW (not live until `send-email` is redeployed) · money · Claude**
+**MED · FIXED, LIVE 2026-11-02 (PR #1340; `send-email` v22) · money · residual tracked as KI-98**
 The `send-email` service checks who may send an invoice email, to whom, and when, and limits the links and map
-images it may carry (PR #1302). The email's wording, amount and attached PDF still come from the app screen.
-Fix (branch `claude/goofy-gauss-3449d8`): the service writes the invoice email's subject, wording, Amount Due
+images it may carry (PR #1302). Before this fix, the email's wording, amount and attached PDF came from the app screen.
+Fix (PR #1340): the service writes the invoice email's subject, wording, Amount Due
 (stored balance, whole cents) and attachment name from the saved invoice and ignores the screen's. The PDF is
 still drawn by the app, so the app also sends the money the PDF prints; the service refuses the send unless that
 matches the saved invoice, and checks again just before sending (same method as the purchase-order copy). Left
 open: the PDF file itself is drawn by the signed-in user's app, not the server; and the last check is a read
 before the send, so a payment saved in that split second can still go out with the earlier Amount Due (the
 purchase-order copy has the same window). Both are accepted for now and tracked as KI-98 (Mason, 2026-11-02).
-Becomes FIXED when the new `send-email` version is deployed and one real invoice email is checked.
+Proved live 2026-11-02 at 11:45 PM Central: test invoice CS-2026-0058 (test customer) was emailed from the app.
+Its `email_log` row is `sent` with the server-written subject, Amount Due $3,000.00 and `Invoice-CS-2026-0058.pdf`.
+The invoice was posted only for this test and voided right after.
 
 ---
 

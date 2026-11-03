@@ -3,10 +3,9 @@
 // Run: node .claude/hooks/worktree-awareness-lib.test.mjs
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -26,6 +25,7 @@ import {
   formatSiblingReport, groupUnknownReasons,
 } from "./worktree-awareness-lib.mjs";
 import { MIGRATION_HISTORY_FILE, MIGRATION_RECORDS_DIR, combineMigrationHistory, combinedMigrationHistoryAtRev } from "./migration-records-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 let pass = 0;
 function ok(cond, msg) { assert.ok(cond, msg); pass++; }
@@ -479,7 +479,7 @@ eq(
   ["grep", "-l", "-i", "-E", "-e", "^(\uFEFF)?[[:blank:]]*--[[:blank:]]*(STATUS:[[:blank:]]*)?(PARKED|NOT[[:blank:]]+APPLIED|DO[[:blank:]]+NOT[[:blank:]]+APPLY)", "origin/main", "--", "supabase/migrations"],
   "shared origin/main prefilter anchors to portable SQL comment status lines",
 );
-const grepFixtureDir = mkdtempSync(path.join(tmpdir(), "crx-parked-prefilter-"));
+const grepFixtureDir = tempDir("crx-parked-prefilter-");
 try {
   const grepFixtures = [
     ["bom.sql", BOM_PARKED_FORWARD_HEADER],
@@ -734,7 +734,7 @@ ok(/check_period_open[\s\S]*?SET search_path = ''[\s\S]*?FROM public\.accounting
   assert.throws(() => combinedMigrationHistoryAtRev(git, "abc", () => new Map([frozenBlob])), /unreadable/, "a missing record blob fails closed");
 
   // The mock above trusts its listing, so prove the real git listing against real commits.
-  const recordsRepo = mkdtempSync(path.join(tmpdir(), "crx-records-at-rev-"));
+  const recordsRepo = tempDir("crx-records-at-rev-");
   try {
     const realGit = (args) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.test", ...args], { cwd: recordsRepo, encoding: "utf8" });
     const commitAll = () => {

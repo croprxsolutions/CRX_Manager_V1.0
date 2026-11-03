@@ -12,6 +12,7 @@ import { isHoldPhrase, isResumePhrase, isBuildActionUnderHold, holdDecision, hol
 import { classifySql } from "./live-testdata-lib.mjs";
 import { isGitPush, pushTargetsMain, mainPushSource, riskyFiles, contentIsRisky, proofValid } from "./codex-push-lib.mjs";
 import { DENY_TOOLNAME_RE } from "./autopilot-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -576,7 +577,7 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
 // REAL-DATA-OK (2026-10-23): a fresh marker relaxes ordinary writes only; a stale
 // one is ignored; destructive rules never relax, even later in the same batch.
 {
-  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "crx-realdata-"));
+  const proj = tempDir("crx-realdata-");
   const stateDir = path.join(proj, ".claude", "session-state");
   fs.mkdirSync(stateDir, { recursive: true });
   const marker = path.join(stateDir, "REAL-DATA-OK");
@@ -901,7 +902,7 @@ for (const command of [
 // dead for the exact hazard its own deny text describes. These assertions fail
 // against the old ordering.
 {
-  const mirrorRepo = fs.mkdtempSync(path.join(os.tmpdir(), "crx-mirror-guard-"));
+  const mirrorRepo = tempDir("crx-mirror-guard-");
   const git = (...args) => spawnSync("git", ["-C", mirrorRepo, ...args], { encoding: "utf8" });
   spawnSync("git", ["init", "-q", mirrorRepo], { encoding: "utf8" });
   git("config", "user.email", "test@example.com");
@@ -1069,7 +1070,7 @@ for (const command of [
 // directory, blocking an ordinary feature push that never touched it. `-C` is a
 // documented global form. The deny must survive in the direction that matters.
 {
-  const outer = fs.mkdtempSync(path.join(os.tmpdir(), "crx-outer-")); // deliberately NOT a repo
+  const outer = tempDir("crx-outer-"); // deliberately NOT a repo
   const repo = path.join(outer, "repo");
   fs.mkdirSync(repo);
   const git = (...args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
@@ -1110,7 +1111,7 @@ for (const command of [
 // with `spawnSync git ENOENT` because the guard read "$W" as a folder name. Any
 // variable the guard cannot prove is that one literal stays denied.
 {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "crx-folder-var-"));
+  const repo = tempDir("crx-folder-var-");
   const git = (...args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
   spawnSync("git", ["init", "-q", repo], { encoding: "utf8" });
   git("config", "user.email", "test@example.com");

@@ -2,8 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,6 +39,7 @@ import {
 } from "./agent-health-check.mjs";
 import { clearWorktreeOverride } from "./install-git-hooks.mjs";
 import { gitLocalEnvironmentNames } from "../.claude/hooks/git-test-env.mjs";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 // Git exports GIT_DIR (and friends) to hook child processes. This file builds
 // throwaway repositories and calls checkGitHooksInstalled() IN-PROCESS, so an
@@ -61,7 +61,7 @@ for (const name of Object.keys(process.env)) {
   if (/^GIT_CONFIG_(?:KEY|VALUE)_\d+$/.test(name)) delete process.env[name];
 }
 
-const root = mkdtempSync(path.join(os.tmpdir(), "crx-agent-health-"));
+const root = tempDir("crx-agent-health-");
 
 try {
   for (const dir of [
@@ -221,7 +221,7 @@ try {
   // resolves to a directory that is not there. Each FAIL branch is asserted, not
   // just the happy path: on 2026-08-31 fourteen live worktrees were in one of
   // these states, all reporting perfectly normal `git commit` output.
-  const hooksRepo = mkdtempSync(path.join(os.tmpdir(), "crx-hooks-"));
+  const hooksRepo = tempDir("crx-hooks-");
   try {
     const git = (...args) =>
       execFileSync("git", ["-C", hooksRepo, ...args], {
@@ -280,7 +280,7 @@ try {
     // different branch. Six live worktrees pointed at an abandoned Codex checkout.
     git("config", "core.hooksPath", path.join(hooksRepo, ".husky"));
     assert.equal(checkGitHooksInstalled(hooksRepo).status, "PASS", "own worktree by absolute path is still this worktree");
-    const foreign = mkdtempSync(path.join(os.tmpdir(), "crx-foreign-hooks-"));
+    const foreign = tempDir("crx-foreign-hooks-");
     try {
       mkdirSync(path.join(foreign, ".husky"), { recursive: true });
       writeHook(path.join(foreign, ".husky"), "pre-commit");
@@ -333,7 +333,7 @@ try {
       // the expected path keeps `.husky` literal, the configured one is resolved.
       // Junctions need no privilege on Windows; if the link cannot be made, skip
       // rather than assert a false pass.
-      const linkedRepo = mkdtempSync(path.join(os.tmpdir(), "crx-linked-husky-"));
+      const linkedRepo = tempDir("crx-linked-husky-");
       try {
         const linkedEnv = scratchHookEnvironment(linkedRepo);
         execFileSync("git", ["-C", linkedRepo, "init"], { stdio: "ignore", env: linkedEnv });
@@ -396,8 +396,8 @@ try {
   // alone leaves a stale foreign override effective and `npm install` reports
   // success while repairing nothing. Exercised against a real repository with a
   // real linked worktree, because that precedence is the whole point.
-  const installRepo = mkdtempSync(path.join(os.tmpdir(), "crx-install-hooks-"));
-  const installWorktree = mkdtempSync(path.join(os.tmpdir(), "crx-install-wt-"));
+  const installRepo = tempDir("crx-install-hooks-");
+  const installWorktree = tempDir("crx-install-wt-");
   try {
     // Scrubbed per-call, keyed to the directory being acted on: this block spans two
     // fixture repositories, and the `git config user.email/user.name` calls just below

@@ -10,8 +10,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './lib/test-temp-dir.mjs';
 import {
   REVIEW_TIMEOUT_MS,
   applyProofPaths,
@@ -70,7 +70,7 @@ assert.deepEqual(
     codexFile: path.join('state', 'codex-review-mig-safe-name.json'),
   },
 );
-const proofState = mkdtempSync(path.join(tmpdir(), 'crx-apply-proof-state-'));
+const proofState = tempDir('crx-apply-proof-state-');
 try {
   const staleProofs = applyProofPaths(proofState, 'stale');
   writeFileSync(staleProofs.reviewerFile, '{"stale":true}', 'utf8');
@@ -91,7 +91,7 @@ const driftPrompt = buildReviewerCharterPrompt(
 assert.match(driftPrompt, /TIME-BOUND CHECK 2 GUIDANCE/);
 assert.match(driftPrompt, /Do not print or read whole function bodies/);
 
-const sourceRoot = mkdtempSync(path.join(tmpdir(), 'crx-apply-proof-source-'));
+const sourceRoot = tempDir('crx-apply-proof-source-');
 let packetRoot;
 try {
   const migrationDir = path.join(sourceRoot, 'supabase', 'migrations');

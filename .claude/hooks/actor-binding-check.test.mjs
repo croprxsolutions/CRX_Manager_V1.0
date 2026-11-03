@@ -6,10 +6,10 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -117,7 +117,7 @@ ok(isDeny(r), "Edit-tool new_string payload is checked the same as Write content
 // A real Edit carries only the changed body fragment. Reconstruct the full
 // on-disk migration so the existing function header, parameters, and SECURITY
 // DEFINER attribute remain visible to the unchanged actor-binding analysis.
-const editFixtureRoot = mkdtempSync(path.join(tmpdir(), "crx-actor-binding-edit-"));
+const editFixtureRoot = tempDir("crx-actor-binding-edit-");
 try {
   const editFixtureDir = path.join(editFixtureRoot, "supabase", "migrations");
   mkdirSync(editFixtureDir, { recursive: true });

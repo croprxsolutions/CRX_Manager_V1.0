@@ -15,10 +15,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { scratchHookEnvironment } from "./git-test-env.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -48,7 +48,7 @@ function scaffoldIsolatedHook(tmpDir, scriptNames, registryContent) {
   return hooksDir;
 }
 
-const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "schema-registry-loud-test-"));
+const tmpRoot = tempDir("schema-registry-loud-test-");
 
 try {
   // ── status-enum-check.mjs: registry file missing entirely ───────────────

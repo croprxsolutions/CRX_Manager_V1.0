@@ -11,10 +11,11 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const hooksDir = path.dirname(fileURLToPath(import.meta.url));
 const stopWrapPath = path.join(hooksDir, "stop-wrap.mjs");
@@ -63,7 +64,7 @@ function startSession(sessionId) {
 const LEDGER_WARNING = /no ledger file was touched/;
 
 let pass = 0;
-const tmp = mkdtempSync(path.join(os.tmpdir(), "crx-stopwrap-ledger-"));
+const tmp = tempDir("crx-stopwrap-ledger-");
 const snapshots = [];
 try {
   git(["init", "-q", "-b", "main"], tmp);
@@ -163,7 +164,7 @@ try {
   snapshots.push(startSession(s1d));
   // Someone else's commit reaches main the real way: made in another clone,
   // then fetched — it never passes through this checkout's HEAD.
-  const other = mkdtempSync(path.join(os.tmpdir(), "crx-stopwrap-other-"));
+  const other = tempDir("crx-stopwrap-other-");
   try {
     git(["clone", "-q", "-b", "main", tmp, other], os.tmpdir());
     git(["config", "user.email", "other@test"], other);
@@ -257,7 +258,7 @@ try {
   // Line main up with feat first, so the rebase replays ONLY this session's
   // commit (replaying 1h's unrecorded commit would warn on its own).
   git(["branch", "-f", "main", "feat"], tmp);
-  const other2 = mkdtempSync(path.join(os.tmpdir(), "crx-stopwrap-other-"));
+  const other2 = tempDir("crx-stopwrap-other-");
   try {
     git(["clone", "-q", "-b", "main", tmp, other2], os.tmpdir());
     git(["config", "user.email", "other@test"], other2);
@@ -314,7 +315,7 @@ try {
   //    entry to an old author date. Session membership comes from the reflog
   //    position recorded at session start, not timestamps → still warns ──
   git(["branch", "-f", "main", "feat"], tmp);
-  const other3 = mkdtempSync(path.join(os.tmpdir(), "crx-stopwrap-other-"));
+  const other3 = tempDir("crx-stopwrap-other-");
   try {
     git(["clone", "-q", "-b", "main", tmp, other3], os.tmpdir());
     git(["config", "user.email", "other@test"], other3);
@@ -365,7 +366,7 @@ try {
   //    unrecorded session commit and logs it as `pull --rebase (pick)`; the
   //    original commit is then unreachable → still warns ──
   git(["branch", "-f", "main", "feat"], tmp);
-  const other4 = mkdtempSync(path.join(os.tmpdir(), "crx-stopwrap-other-"));
+  const other4 = tempDir("crx-stopwrap-other-");
   try {
     git(["clone", "-q", "-b", "main", tmp, other4], os.tmpdir());
     git(["config", "user.email", "other@test"], other4);
@@ -450,7 +451,7 @@ try {
   writeFileSync(path.join(tmp, "src", "q.txt"), "a\nb\nc\nd\ne\nf\ng\n");
   git(["add", "."], tmp);
   git(["commit", "-qm", "q base"], tmp, { past: true });
-  const otherWt = mkdtempSync(path.join(os.tmpdir(), "crx-stopwrap-other-"));
+  const otherWt = tempDir("crx-stopwrap-other-");
   rmSync(otherWt, { recursive: true, force: true });
   git(["worktree", "add", "-q", "-b", "q-octo", otherWt, "HEAD"], tmp);
   git(["checkout", "-qb", "q-one"], otherWt);
@@ -530,7 +531,7 @@ try {
   const staleBase = startSession(s1u);
   snapshots.push(staleBase);
   assert.ok(existsSync(`${staleBase}.reflog`), "setup: the first run records an anchor");
-  const noHead = mkdtempSync(path.join(os.tmpdir(), "crx-stopwrap-nohead-"));
+  const noHead = tempDir("crx-stopwrap-nohead-");
   try {
     git(["init", "-q"], noHead);
     const resumed = spawnSync(process.execPath, [sessionSnapshotPath], {
@@ -600,6 +601,8 @@ try {
     rmSync(`${p}.snapshot`, { force: true });
     rmSync(`${p}.reflog`, { force: true });
   }
+  // The real hooks share this folder; drop it only when no live session still uses it.
+  try { rmdirSync(snapDir); } catch { /* not empty, or already gone */ }
 }
 
 console.log(`stop-wrap-ledger: ${pass} assertions passed`);

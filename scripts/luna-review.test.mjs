@@ -3,8 +3,7 @@
 // Run: node scripts/luna-review.test.mjs
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -21,6 +20,7 @@ import {
   runLunaReview,
 } from "./luna-review.mjs";
 import { fixedGitExecutable } from "./write-codex-push-proof.mjs";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 const canary = "CRXDIFF-TEST";
 const banner = (model) => `OpenAI Codex v0.166\n--------\nmodel: ${model}\nreasoning effort: xhigh\n--------\nuser\n`;
@@ -103,7 +103,7 @@ assert.equal(clean.outcome, "clean");
 
 // End to end in a throwaway repo (CI's own HEAD is a merge commit with no diff): the real void
 // exits "did not run" and says so.
-const repo = mkdtempSync(path.join(tmpdir(), "crx-luna-test-"));
+const repo = tempDir("crx-luna-test-");
 const gitIn = (...gitArgs) => execFileSync(fixedGitExecutable(), ["-c", "user.name=t", "-c", "user.email=t@example.com", ...gitArgs], { cwd: repo });
 gitIn("init", "-q");
 writeFileSync(path.join(repo, "a.txt"), "one\n");

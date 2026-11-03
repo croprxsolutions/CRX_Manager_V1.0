@@ -7,13 +7,13 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, existsSync, readFileSync, rmSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, rmSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { isMachineGenerated, MACHINE_TAG_NAMES, PUSH_POLICY, authoredByMason, hasAuthoredText, withoutSubagentReports } from "./prompt-source-lib.mjs";
 import { isHoldPhrase } from "./hold-latch-lib.mjs";
 import { SHARED_PROMPT_MODULES } from "./prompt-router.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -249,7 +249,7 @@ const PHRASE_HOOKS = [
 ];
 // ship-intent-reminder was unwired (Mason, 2026-10-29); the router must not run it.
 ok(!SHARED_PROMPT_MODULES.includes("./ship-intent-reminder.mjs"), "ship-intent-reminder is no longer routed");
-const tmpProj = mkdtempSync(path.join(tmpdir(), "crx-prompt-hooks-"));
+const tmpProj = tempDir("crx-prompt-hooks-");
 for (const hook of PHRASE_HOOKS) {
   const r = spawnSync(process.execPath, [path.join(__dirname, hook)], {
     input: JSON.stringify({ prompt: MACHINE_PROMPT }),
@@ -275,7 +275,7 @@ const HEARTBEAT_PROMPT =
   "Monitor and orchestrate the CRX Manager session fleet. Stop on any error and report. " +
   "Force push is never allowed; run it overnight hands-free; is this safe to ship?\r\n" +
   "  </instructions>\r\n</heartbeat>";
-const hbProj = mkdtempSync(path.join(tmpdir(), "crx-heartbeat-"));
+const hbProj = tempDir("crx-heartbeat-");
 for (const hook of PHRASE_HOOKS) {
   const r = spawnSync(process.execPath, [path.join(__dirname, hook)], {
     input: JSON.stringify({ prompt: HEARTBEAT_PROMPT }),
@@ -328,7 +328,7 @@ ok(!isMachineGenerated("[Subagent hand-back] The text below is the final report 
   "the frame's opening sentence with stop on the same line is not machine content (Sol)");
 ok(!isMachineGenerated(`${HANDBACK_FRAME} stop\n  report`), "the whole frame line with stop appended is not machine content");
 ok(!isMachineGenerated(HANDBACK_FRAME), "the frame line alone, with no report under it, is not machine content");
-const handbackProj = mkdtempSync(path.join(tmpdir(), "crx-handback-"));
+const handbackProj = tempDir("crx-handback-");
 for (const hook of PHRASE_HOOKS) {
   const r = spawnSync(process.execPath, [path.join(__dirname, hook)], {
     input: JSON.stringify({ prompt: BARE_HANDBACK }),
@@ -382,7 +382,7 @@ rmSync(handbackProj, { recursive: true, force: true });
       "the `<cross-session-message>` tag is odd. stop now\n" + PEER_BLOCK, true],
   ];
   for (const [label, prompt, shouldLatch] of XS) {
-    const dir = mkdtempSync(path.join(tmpdir(), "crx-xsession-"));
+    const dir = tempDir("crx-xsession-");
     const r = runPrompt(dir, prompt);
     eq(r.status, 0, `hold-latch-prompt exits 0: ${label}`);
     eq(existsSync(holdOf(dir)), shouldLatch,
@@ -392,7 +392,7 @@ rmSync(handbackProj, { recursive: true, force: true });
 
   // A peer message must not CLEAR a hold Mason latched either — only he speaks
   // for the latch, in both directions.
-  const keepDir = mkdtempSync(path.join(tmpdir(), "crx-xsession-keep-"));
+  const keepDir = tempDir("crx-xsession-keep-");
   runPrompt(keepDir, "stop everything");
   ok(existsSync(holdOf(keepDir)), "setup: Mason's stop latched the hold");
   runPrompt(keepDir, PEER_BLOCK);
@@ -629,7 +629,7 @@ rmSync(handbackProj, { recursive: true, force: true });
   // hand-back as machine content (2026-10-23), trip every phrase hook.
   const REPORT_WORDS = REPORT_BODY.split("\n").slice(1).map((l) => l.trim()).join("\n");
   for (const hook of PHRASE_HOOKS) {
-    const dir = mkdtempSync(path.join(tmpdir(), "crx-agentmsg-ctl-"));
+    const dir = tempDir("crx-agentmsg-ctl-");
     const r = run(hook, dir, REPORT_WORDS);
     ok(r.stdout.includes("additionalContext"), `control: ${hook} fires on the report's words without the frame`);
     rmSync(dir, { recursive: true, force: true });
@@ -641,7 +641,7 @@ rmSync(handbackProj, { recursive: true, force: true });
   // latches, because that fail-safe is what froze a session on a subagent report.
   // A truncated report WITHOUT the preamble keeps the fail-safe.
   for (const [label, turn] of SPELLINGS) {
-    const dir = mkdtempSync(path.join(tmpdir(), "crx-agentmsg-"));
+    const dir = tempDir("crx-agentmsg-");
     const truncated = /truncated/.test(label) && !turn.trimStart().startsWith("Another Claude session sent a message:");
     for (const hook of PHRASE_HOOKS) {
       const r = run(hook, dir, turn);
@@ -656,7 +656,7 @@ rmSync(handbackProj, { recursive: true, force: true });
 
   // Mason's words alongside a report still drive the hooks...
   {
-    const dir = mkdtempSync(path.join(tmpdir(), "crx-agentmsg-mason-"));
+    const dir = tempDir("crx-agentmsg-mason-");
     run("hold-latch-prompt.mjs", dir, "stop, let me read this first\n" + AGENT_TURN);
     ok(existsSync(stateOf(dir, "hold.json")), "Mason's stop beside a report latches the hold");
     rmSync(dir, { recursive: true, force: true });
@@ -665,7 +665,7 @@ rmSync(handbackProj, { recursive: true, force: true });
   // A report must not CLEAR a hold Mason latched, and neither may a real-shape
   // peer message (preamble included).
   {
-    const dir = mkdtempSync(path.join(tmpdir(), "crx-agentmsg-keep-"));
+    const dir = tempDir("crx-agentmsg-keep-");
     run("hold-latch-prompt.mjs", dir, "pause");
     ok(existsSync(stateOf(dir, "hold.json")), "setup: Mason's pause latched the hold");
     run("hold-latch-prompt.mjs", dir, AGENT_TURN.replace(/\bstop\b/g, "halted"));
@@ -711,7 +711,7 @@ rmSync(tmpProj, { recursive: true, force: true });
 // latch — closed OR truncated — but a stop Mason typed after a closed report
 // does, and such a turn never clears a hold.
 {
-  const dir = mkdtempSync(path.join(tmpdir(), "crx-peer-turn-"));
+  const dir = tempDir("crx-peer-turn-");
   const holdFile = path.join(dir, ".claude", "session-state", "hold.json");
   // A crashed hook must fail here, not pass on hold state left by an earlier run.
   const runHold = (prompt) => {
@@ -736,7 +736,7 @@ rmSync(tmpProj, { recursive: true, force: true });
 // One latched the main checkout's hold on 2026-09-28 and left it stuck for days.
 // It must neither latch nor clear the hold (Mason, 2026-10-02).
 {
-  const dir = mkdtempSync(path.join(tmpdir(), "crx-automation-"));
+  const dir = tempDir("crx-automation-");
   const holdFile = path.join(dir, ".claude", "session-state", "hold.json");
   // A crashed hook must fail here, not pass on hold state left by an earlier run.
   const runHold = (prompt) => {
@@ -816,7 +816,7 @@ rmSync(tmpProj, { recursive: true, force: true });
     // The hook's own order: a machine prompt is dropped whole, then the rest is stripped.
     const latches = !isMachineGenerated(prompt) && isHoldPhrase(authoredByMason(prompt));
     ok(latches === shouldLatch, `phrase: ${label} → ${shouldLatch ? "latches" : "does not latch"}`);
-    const dir = mkdtempSync(path.join(tmpdir(), "crx-narrow-"));
+    const dir = tempDir("crx-narrow-");
     runHold(dir, prompt, "sess-1");
     eq(holdFiles(dir).length > 0, shouldLatch, `hook: ${label} → hold ${shouldLatch ? "LATCHED" : "not latched"}`);
     rmSync(dir, { recursive: true, force: true });
@@ -831,7 +831,7 @@ rmSync(tmpProj, { recursive: true, force: true });
   ok(!hasAuthoredText(BARE_TAG_HANDBACK), "a bare-tag hand-back is not Mason speaking (cannot clear a hold)");
 
   // One hold per session: session A's stop is invisible to session B's guard.
-  const dir = mkdtempSync(path.join(tmpdir(), "crx-two-sessions-"));
+  const dir = tempDir("crx-two-sessions-");
   runHold(dir, "stop", "session-a");
   eq(holdFiles(dir).join(","), "hold-session-a.json", "session A's stop writes only its own hold file");
   const guard = (sessionId) => spawnSync(process.execPath, [path.join(__dirname, "hold-latch-guard.mjs")], {
@@ -857,7 +857,7 @@ rmSync(tmpProj, { recursive: true, force: true });
   rmSync(dir, { recursive: true, force: true });
 
   // No session_id: the prompt hook writes hold.json and the guard reads it.
-  const shared = mkdtempSync(path.join(tmpdir(), "crx-no-session-"));
+  const shared = tempDir("crx-no-session-");
   runHold(shared, "stop");
   eq(holdFiles(shared).join(","), "hold.json", "with no session id the hold goes to hold.json");
   const noIdGuard = spawnSync(process.execPath, [path.join(__dirname, "hold-latch-guard.mjs")], {

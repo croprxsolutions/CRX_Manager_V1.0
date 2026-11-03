@@ -323,3 +323,53 @@ describe('Reports past the 1,000-row server cap', () => {
     expect(screen.queryByTestId('rows:No commissions')).not.toBeInTheDocument();
   });
 });
+
+// KI-95: a customer whose balance get_customer_balance_listing cannot rebuild as of the date comes
+// back flagged with no amounts. It is listed in a warning, kept out of the table, never shown as $0.
+describe('Customer Balance with a customer that cannot be shown as of the date', () => {
+  const flagged = (id: string, farm: string, reason: string): Row => ({
+    customer_id: id, farm_name: farm, total_invoiced: null, total_paid: null, prepay_applied: null,
+    outstanding_balance: null, open_credit: null, invoice_count: null, oldest_unpaid_date: null,
+    unavailable_reason: reason,
+  });
+
+  it('lists the flagged customer in a warning with its reason, keeps it out of the table, and exports it with blank amounts', async () => {
+    H.functions.get_customer_balance_listing = [
+      {
+        customer_id: 'c1', farm_name: 'Big Farm', total_invoiced: 100, total_paid: 0, prepay_applied: 0,
+        outstanding_balance: 100, open_credit: 0, invoice_count: 1, oldest_unpaid_date: '2026-09-01', unavailable_reason: null,
+      },
+      flagged('c2', 'Twin Stamp Farm', 'HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE'),
+    ];
+    await openTab('Financial', 'Customer Balance');
+
+    await waitFor(() => expect(screen.getByTestId('rows:No balances can be shown for this date')).toHaveTextContent('1'));
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('1 customer cannot be shown as of this date');
+    expect(alert).toHaveTextContent("Twin Stamp Farm — an invoice's posting history has two changes recorded at the same moment");
+    expect(screen.getByTestId('rows:No balances can be shown for this date').dataset.last).toContain('Big Farm');
+
+    fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
+    const [exported, columns] = H.exportToCSV.mock.calls[0] as [Row[], { key: string; format?: (v: unknown) => string }[]];
+    expect(exported.map((r) => r.customer_id)).toEqual(['c1', 'c2']);
+    const column = (key: string) => columns.find((c) => c.key === key)!;
+    // A flagged row's money cells are blank, not $0.00.
+    expect(column('outstanding_balance').format!(null)).toBe('');
+    expect(column('total_invoiced').format!(null)).toBe('');
+    expect(column('unavailable_reason').format!('HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE'))
+      .toBe('Cannot be shown as of this date: a payment, prepay or write-off was entered after this date');
+    expect(column('unavailable_reason').format!(null)).toBe('');
+  });
+
+  it('says no balances can be shown, rather than none are owed, when every customer is flagged', async () => {
+    H.functions.get_customer_balance_listing = [
+      flagged('c1', 'Late Payer Farm', 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE'),
+      flagged('c2', 'Voided Farm', 'HISTORICAL_VOID_RECONSTRUCTION_UNAVAILABLE'),
+    ];
+    await openTab('Financial', 'Customer Balance');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('2 customers cannot be shown as of this date');
+    expect(screen.getByTestId('rows:No balances can be shown for this date')).toHaveTextContent('0');
+    expect(screen.queryByTestId('rows:No outstanding balances')).not.toBeInTheDocument();
+  });
+});

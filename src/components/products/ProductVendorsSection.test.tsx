@@ -83,6 +83,14 @@ describe('ProductVendorsSection', () => {
     expect(mocks.logActivity).toHaveBeenCalledWith(expect.objectContaining({ event: 'product_preferred_vendor_changed' }));
   });
 
+  it('still reports the new preferred vendor when the re-read fails', async () => {
+    const onPreferredChanged = renderSection(true);
+    const button = await screen.findByRole('button', { name: 'Make preferred' });
+    mocks.listProductVendors.mockRejectedValue(new Error('network'));
+    fireEvent.click(button);
+    await waitFor(() => expect(onPreferredChanged).toHaveBeenCalledWith('Spinner Ag'));
+  });
+
   it('adds only a vendor that is not linked yet, as not preferred', async () => {
     const onPreferredChanged = renderSection(true);
     const picker = await screen.findByLabelText('Add a vendor');

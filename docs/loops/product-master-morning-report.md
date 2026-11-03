@@ -1,10 +1,45 @@
 # Product Master: Wave 2 report (2026-11-02, attempt 2)
 
-**Status:** of the 9 Wave 2 packages left after attempt 1: **1 drafted** (Use Timing, [#1316](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1316)), **6 parked**, **2 not attempted**. Run: 2026-11-02 12:32 to 19:47 Central (Wave 2, attempt 2). It ended at the closeout deadline.
+## Current status (2026-11-03 1:15 PM Central)
 
-**Recommended next step:** land **#1316 (Use Timing)** in a normal session. Its migration changes column grants on the products table, so the landing session will show you a summary and ask for your `I approve`. The migration must be applied **before** the merge. Otherwise every product list and picker fails to load, because the screens select the new column.
+**Status:** **1 landed** (Use Timing), **3 PRs open** (Corrections, One cost path, Seed/each forms), **4 waiting** on those PRs or not started. Wave 2 is **not finished**. Wave 3 has not started.
 
-## Packages
+**Recommended next step:** do the WP-PM-12b click-through on its Vercel preview (steps below). It is the only open Wave 2 step that needs you.
+
+| Package | Status | Where |
+|---|---|---|
+| WP-PM-5 Use Timing | **LANDED.** Migration `20261103210000` applied 11:27 PM Central 11-02 with your approval. Merged as `c69209353` at 11:31 PM. 317/317 timings back-filled with 0 mismatches. Live save test on "2, 4D Ester 6# - 2.5 Gal": two timings saved and survived a reload, then it was reverted. Read back from live: Pre-Emerge Corn only. Registry refresh merged ([#1343](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1343)). | [#1316](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1316) merged |
+| WP-PM-12b Corrections | **PR open, no migration.** Sol clean on `48cfcb0bc`, carried to `da04b0823`. `40a066a63` is docs only (your EPA decision). Main was merged in since then, now head `07330f84c`. The PR is marked ready and CI is re-running. **Owed:** your preview click-through. | [#1341](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1341) |
+| WP-PM-7 One cost path, tier-order warning 💲 | **Draft PR.** Luna: 1 LOW, deferred. Sol clean on exact head `f1a15f169` (about 12:35 AM Central 11-03). 18 checks pass. **Blocked:** its stamp `20261103230000` is now below live (see Stamp alert). It needs a new stamp, a re-proof and a new Sol. Also owed: a preview click-through. | [#1345](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1345) |
+| WP-PM-9 Seed and each forms | **PR open (marked ready).** Sol clean on `6f99da763`. Later fix commits and a main merge make the head `21bff9bea`, which needs exact-head Sol before the apply. 20 checks pass. **Blocked:** its stamp `20261104090000` is now below live. It lands after WP-PM-7. | [#1342](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1342) |
+| WP-PM-6a Unit audit | Waits on WP-PM-9 landing. Audit done (vault list). | |
+| WP-PM-6b New-product flow 💲 | Waits on WP-PM-6a. | |
+| WP-PM-15a Vendor proposals 💲 | Waits on WP-PM-7 landing. | |
+| WP-PM-8b Incomplete badge, near-match warnings, rate help | Not started. | |
+| DM-0 Data clean-up | Your data step (vault list). | |
+
+**Stamp alert (found 1:15 PM Central).** Every database change is named with a stamp (a date and number), and a new one must sort above everything already live. Live is now at `20261104120000_balance_reports_flag_unrebuildable_customers`, applied 6:53 AM Central 11-03 by another PR. That is above both WP-PM-7's `20261103230000` and WP-PM-9's `20261104090000`. Both owner sessions were told to re-stamp with `npm run next-migration-stamp` (now on main): WP-PM-7 takes the lower new stamp and WP-PM-9 one above it. Each then re-runs its proof and Sol on the new head.
+
+**Landing order:** WP-PM-12b (no migration) any time after your click-through, then WP-PM-7, then WP-PM-9, then 6a, then 6b and 15a. Each applies its migration before its merge, and the next one merges main and re-checks.
+
+**WP-PM-12b click-through.** Preview: <https://crx-manager-v1-0-git-pm-wp-pm-12b-c-0cf32e-mason-wells-projects.vercel.app>. It saves to the live database, so use a throwaway job.
+1. Open a scheduled job that has a chemical line.
+2. On the Chemicals tab, type an REI different from the product's label. Save, then reload.
+3. An amber notice, "Some lines differ from the product's current label", lists old → new.
+4. Click "Update to current label", Save, then reload. The notice is gone and the line shows the product's value.
+5. On another line with a different value, click "Keep job values". The notice hides.
+6. Open a completed job. No notice appears.
+
+**Follow-ups named this round (not Wave 2 scope):**
+- a product-page list of open jobs still on old label values;
+- a server-side status check in `save_job`, which does not itself refuse edits to completed jobs;
+- WP-PM-7 deferred LOWs: emoji character count, older `toFixed` displays, the raw select in the cost modal.
+
+**Still yours:** the DM-0 list and Piksi Dust Plus tidy-up (name, suggested rate, notes; cost basis still open) in your vault; delete the REAL-DATA-OK note in `C:\CRX_Manager` if it is still there.
+
+## Packages (as of the run's end, 2026-11-02 7:47 PM Central)
+
+**Status then:** of the 9 Wave 2 packages left after attempt 1: 1 drafted (Use Timing), 6 parked, 2 not attempted. The run ended at the closeout deadline. The sections below are that run's record.
 
 | Package | Status | PR / where |
 |---|---|---|

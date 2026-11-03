@@ -181,3 +181,16 @@ PROOF — Ran: on `3c8b77f5f`, typecheck, build, lint, check:code-health, check:
 **WP-PM-5 closeout (after the run, Mason's go at the wrap-session check).** CI on `fcf1260ce` was all green (read at 21:01 Central), so WP-PM-5 is **DRAFTED**. The live ledger then showed `20261103150000` (#1313) applied at 19:57 Central, which put `20261103140000` below the live high-water. The migration was re-stamped to `20261103210000` (`160000` and `170000` are held by other sessions; the pre-commit validator caught `170000`), and the latest main was merged in twice. The prover replay failed on main's KI-85 postcondition (`20261102220000` needs an active Main Warehouse, which the empty baseline lacks), so the prover now seeds that row before that one migration. PROOF — Ran: `prove-product-use-timings-real-schema.mjs` on the final stamp, `check:docs`, typecheck, lint on the prover, `costFields.test.ts`, Sol · Saw: `PRODUCT_USE_TIMINGS_PROOF_PASS` (including the BEFORE-trigger order with #1276's `trigger_a_guard_product_deactivation`), migration records PASS, Sol CLEAN on `604b763e5` carried to `9f5b63928` by the collision check, pushed at 21:40 Central · Not verified: CI on `9f5b63928` (it runs after this entry), the browser click-through.
 
 **Parked branches backed up:** `pm/wp-pm-9-forms-seed-each` (`19551a7ba`) and `pm/wp-pm-7-cost-path` (`31436cc01`) were pushed to GitHub with no PR. WP-PM-7's next round needs a stamp above `20261103210000`. **Schema registry:** refreshed again read-only at 21:08 Central (high-water `20261103015728`). Table shapes, the check-constraint hash and the counts were unchanged; only the applied-migration names changed. It is left uncommitted for Mason.
+
+## Wave 2 attempt 2 completion (2026-11-03)
+
+| Package | Status | Branch / PR | Migration | Sol |
+|---|---|---|---|---|
+| WP-PM-5 Use Timing | LANDED | #1316 merged `c69209353` (11-02 23:31 Central); registry refresh #1343 merged | `20261103210000` live (ledger `20261103052726`) | clean on `3951697b3` |
+| WP-PM-12b Corrections | PR open, CI re-running; Mason's preview click-through owed | #1341, head `07330f84c` | none | clean on `48cfcb0bc`, carried |
+| WP-PM-7 One cost path 💲 | draft PR; stamp below live, re-stamp owed | #1345, head `f1a15f169` | `20261103230000`, not applied, must move above `20261104120000` | clean on `f1a15f169`; new Sol needed after re-stamp |
+| WP-PM-9 Seed/each forms | PR open; stamp below live, re-stamp owed; lands after WP-PM-7 | #1342, head `21bff9bea` | `20261104090000`, not applied, must move | clean on `6f99da763`; exact-head Sol needed |
+| WP-PM-6a / 6b / 15a | waiting on prerequisites | none | none | n/a |
+| WP-PM-8b | not started | none | none | n/a |
+
+PROOF: Ran read-only checks: `gh pr view`/`gh pr checks` on #1316, #1341, #1342, #1343 and #1345; `supabase_migrations.schema_migrations` top 3; a products SELECT on "2, 4D Ester 6#"; the live bundle name on croprxsolutions.app. Saw: #1316 and #1343 merged; live high-water `20261104120000_balance_reports_flag_unrebuildable_customers` (applied 2026-11-03 12:53 UTC); the 2.5 Gal product back to `use_timings {pre_emerge_corn}`; live bundle `index-7OMbg-a6.js`. Not verified: the Sol proofs reported by the owner sessions (taken from their reports and PR bodies); the WP-PM-12b and WP-PM-7 click-throughs.

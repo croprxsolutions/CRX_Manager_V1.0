@@ -5,11 +5,12 @@ description: Regenerate `.claude/schema-registry.json` from the live Supabase da
 
 # Regenerate Schema Registry
 
-Wraps `scripts/regenerate-schema-registry.mjs` with the surrounding hygiene that the script alone doesn't do: verifying the regeneration succeeded, diffing against the previous version, clearing the REGISTRY-STALE flag, and reminding Mason to commit.
+Wraps `scripts/regenerate-schema-registry.mjs` with the surrounding hygiene that the script alone doesn't do: verifying the regeneration succeeded, diffing against the previous version, clearing the REGISTRY-STALE flag, and running the tests that read the registry.
 
-⚠️ **Honesty check — the script has TWO modes, and only one is a real refresh:**
+⚠️ **Honesty check — only `--live` and `--from-introspection` are real refreshes:**
 - `node scripts/regenerate-schema-registry.mjs` (no args) is **"stamp" mode**: it only bumps `_meta.generated_at`. It does NOT touch any schema data, so it leaves the hooks exactly as stale as before. A stamp run is NOT a refresh.
-- `node scripts/regenerate-schema-registry.mjs --from-introspection <file.json>` is the **REAL refresh**: it rebuilds the registry from live Supabase introspection results. This is the mode this skill runs.
+- `node scripts/regenerate-schema-registry.mjs --live` is the **REAL refresh** this skill runs: it sends the six read-only introspection queries to live itself and rebuilds the registry (about 6 seconds).
+- `node scripts/regenerate-schema-registry.mjs --from-introspection <file.json>` is the same rebuild from saved query results; the fallback when `--live` can't reach the token.
 
 ## Step 1: Do a REAL Refresh (live introspection — not the stamp)
 
@@ -19,18 +20,17 @@ Wraps `scripts/regenerate-schema-registry.mjs` with the surrounding hygiene that
 node -e "const fs=require('node:fs');fs.mkdirSync('.claude/session-state',{recursive:true});fs.writeFileSync('.claude/session-state/registry-refresh-start.txt',new Date().toISOString())"
 ```
 
-1. Run the 6 read-only queries documented in the header of `scripts/regenerate-schema-registry.mjs` (Q1 migrations_high_water, Q2 sequences, Q3 generated_columns, Q4 check_constraints, Q5 columns, Q6 applied_names) via Supabase MCP `execute_sql` on project rhyzpcqhnizqbxphqdkr — one statement per call (the MCP drops all but the last statement in a multi-statement call). Do NOT skip Q6 — it powers the name-based staleness comparison; without it the script only carries forward the previous (possibly behind) name list.
-2. Assemble the results into one JSON object (exact input format is in the script header) and save it to a temp file.
-3. Run:
+1. Run the live refresh. It sends Q1-Q6 (`INTROSPECTION_QUERIES` in the script) to project rhyzpcqhnizqbxphqdkr through the Supabase Management API with `read_only: true`, using Mason's token from Windows Credential Manager, and refuses to write the registry if any query fails or returns no rows:
 
 ```bash
-node scripts/regenerate-schema-registry.mjs --from-introspection <path-to-queries.json>
+node scripts/regenerate-schema-registry.mjs --live
 ```
 
+2. **Fallback, only if `--live` can't read the token** (cloud session, another machine): run each `INTROSPECTION_QUERIES` entry via Supabase MCP `execute_sql`, one statement per call (the MCP drops all but the last statement in a multi-statement call). Do NOT skip Q6 (`applied_names`); it powers the name-based staleness comparison. Save the rows under each key in one JSON file and run `node scripts/regenerate-schema-registry.mjs --from-introspection <path-to-queries.json>`. Q5 can be split by table-name range if the MCP response is too large.
+
 If this fails:
-- Read the script's error output — it validates the input shape loudly
-- If an MCP query failed, retry it (Q5 can be split by table-name range if the response is too large — see the script header)
-- Report the error to Mason and STOP — don't proceed with stale data
+- Read the script's error output: it names the query and the HTTP status, or the bad input shape
+- Report the error to Mason and STOP; don't proceed with stale data
 
 ## Step 2: Diff Against Previous Version
 
@@ -73,10 +73,10 @@ If the new enum was registered, this should now be checked.
 
 If `.claude/session-state/REGISTRY-STALE.flag` exists (written by the registry-freshness PostToolUse hook after a live apply), delete it **only after the refreshed registry is verified — content changed, not just timestamp**:
 
-1. The refresh was the real `--from-introspection` mode (Step 1), NOT a no-args stamp run.
+1. The refresh was a real `--live` or `--from-introspection` run (Step 1), NOT a no-args stamp run.
 2. `_meta.generated_at` in the new registry is newer than the flag's `created` timestamp.
 3. The file **content** actually changed vs before the refresh (Step 2's diff shows more than a `generated_at` bump). A timestamp-only diff means a stamp run happened — that does NOT clear the flag; go back to Step 1.
-   - Exception: if a genuine `--from-introspection` run produced an EMPTY diff, the registry was already accurate — that also verifies freshness. Say so explicitly, then delete the flag.
+   - Exception: if a genuine `--live` or `--from-introspection` run produced an EMPTY diff, the registry was already accurate — that also verifies freshness. Say so explicitly, then delete the flag.
 
 Then clear the flag from **EVERY** location — since 2026-07-13 the flag is written to the main checkout's `.claude/session-state/` AND the applying worktree's, and any sibling worktree may hold its own copy; leaving any one behind keeps migration writes blocked there. Use the shared helper, which sweeps the main checkout + all worktrees and prints exactly what it deleted. The cutoff is the refresh START stamp recorded in Step 1.0 — a flag created after that moment belongs to a live apply your introspection snapshot may not include and must be left in place (go refresh again instead):
 
@@ -109,22 +109,33 @@ Details:
   <bulleted list of specific additions/removals>
 
 Next step:
-  Commit `.claude/schema-registry.json` (Mason commits — Claude never auto-commits)
+  Commit `.claude/schema-registry.json` on a branch and land it per `.claude/commands/ship.md`
 
 ⚠️  If the hook behavior should change now (e.g., a new generated column means
     an existing UPDATE statement somewhere is about to fail), recommend running
     /audit before the next commit.
 ```
 
-## Step 7: Wait
+## Step 7: Run the Tests That Read the Registry
 
-Do NOT auto-commit. Mason commits when he's ready.
+A refresh after a live apply can break two checks that compare the repo with the registry. Run both before committing:
 
-If Mason asks "should this be committed?" — yes, always. The schema registry being out of sync with the live DB makes every hook + subagent less reliable.
+```bash
+npx vitest run src/lib/rpcContracts.test.ts
+```
+
+```bash
+npm run test:supplier-pricing-phase3c-packet
+```
+
+- `rpcContracts.test.ts` failing on a newly applied migration: flip its `docs/reference/migrations.d/` record's first paragraph to APPLIED LIVE (naming the `.sql`), and add its timestamp to `MIGRATIONS_AWAITING_TYPE_REGENERATION` until types are regenerated.
+- `test:supplier-pricing-phase3c-packet` failing on a CHECK value list: update the matching allowlist in `scripts/supplier-pricing-phase3-private-artifacts.mjs` (e.g. `PRODUCT_FORM_ALLOWLIST`).
+- Also prune any `MUTATOR_INVENTORY_EXEMPT` entry the refresh made unnecessary.
+
+Commit the registry with these fixes; the registry being out of sync with the live DB makes every hook and subagent less reliable.
 
 ## Hard Rules
 
 - NEVER modify `.claude/schema-registry.json` by hand — only via the script. Manual edits drift.
 - NEVER skip Step 2 (diff check) — Mason should see what changed before committing.
-- NEVER auto-commit the registry change.
 - If the script doesn't exist (`scripts/regenerate-schema-registry.mjs`), tell Mason and STOP. Don't attempt to fabricate the registry from scratch.

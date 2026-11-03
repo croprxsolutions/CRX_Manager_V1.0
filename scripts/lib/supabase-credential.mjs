@@ -1,7 +1,8 @@
 // Reads Mason's Supabase Management API token, in memory only, from Windows Credential Manager
 // (generic target `Supabase CLI:supabase`, where the Supabase CLI keeps it). The value is never
 // printed, logged or written to disk, and no error message includes it. Approved uses: applying
-// reviewed migrations and the read-only db-invariant sweeps (docs/manual/SERVICES_AND_ACCOUNTS.md).
+// reviewed migrations, the read-only db-invariant sweeps, and the read-only schema-registry refresh
+// (docs/manual/SERVICES_AND_ACCOUNTS.md).
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 

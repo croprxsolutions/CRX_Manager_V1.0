@@ -348,7 +348,7 @@ function drawDetailedTransactions(
   let y = startY;
   // Lines drawn after a product table can otherwise land on the page footer.
   const ensureRoomAboveFooter = (height: number) => {
-    if (y + height > pageH - FOOTER_SAFE_BOTTOM_OFFSET) {
+    if (height > 0 && y + height > pageH - FOOTER_SAFE_BOTTOM_OFFSET) {
       doc.addPage();
       y = margin;
     }

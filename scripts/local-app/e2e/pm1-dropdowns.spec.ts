@@ -6,7 +6,7 @@ const categories = ['Adjuvant', 'Biological', 'Foliar Fertilizer', 'Herbicide', 
 const vendors = Array.from({ length: 8 }, (_, i) => `Vendor ${i + 1} ${run}`);
 const makers = [`Maker A ${run}`, `Maker B ${run}`];
 let batch = 0;
-const timings = ['Post-Emergence', 'Pre-Emerge Corn', 'Pre-Emerge Soybean', 'Volunteer Corn', 'Range/Pasture/Turf'];
+const timings = ['Post-Emergence', 'Post-Emerge Corn', 'Post-Emerge Soybeans', 'Pre-Emerge', 'Pre-Emerge Corn', 'Pre-Emerge Soybean', 'Volunteer Corn', 'Range/Pasture/Turf'];
 
 async function signIn(page: Page) {
   await page.goto('/login');
@@ -63,20 +63,14 @@ test('product page dropdowns show the full list, mark the saved choice, and save
   await expectFullList(page, box(page, 'Manufacturer'), makers[1], makers);
   await page.keyboard.press('Tab');
 
-  // Every Use Timing option can be clicked, and a second click after a pick reopens the whole list.
-  const timing = box(page, 'Use Timing');
-  await expectFullList(page, timing, 'Pre-Emerge Corn', timings);
-  await page.keyboard.press('Tab');
+  // Every Herbicide timing is selectable without losing the other selected timings.
+  const timing = page.getByRole('group', { name: 'Use Timing' });
+  await expect(timing.getByRole('checkbox')).toHaveCount(timings.length);
+  await expect(timing.getByRole('checkbox', { name: 'Pre-Emerge Corn' })).toBeChecked();
   for (const option of timings) {
-    await timing.click();
-    await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(timings.length);
-    await page.getByRole('listbox').getByRole('option', { name: option }).click();
-    await expect(timing).toHaveValue(option);
-    await expect(page.getByRole('listbox')).toHaveCount(0);
-    await timing.click();
-    await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(timings.length);
-    await page.keyboard.press('Escape');
-    await expect(timing).toHaveValue(option);
+    const checkbox = timing.getByRole('checkbox', { name: option, exact: true });
+    await checkbox.check();
+    await expect(checkbox).toBeChecked();
   }
 
   // Typing narrows, Escape cancels the typing, and typed text stays free text.
@@ -146,13 +140,12 @@ test('a save after a pick survives a reload', async ({ page }) => {
   await signIn(page);
   const id = await addProducts(page);
   await page.goto(`/products/${id}`);
-  const timing = box(page, 'Use Timing');
-  await timing.click();
-  await page.getByRole('listbox').getByRole('option', { name: 'Volunteer Corn' }).click();
+  const timing = page.getByRole('group', { name: 'Use Timing' });
+  await timing.getByRole('checkbox', { name: 'Volunteer Corn' }).check();
   await page.getByRole('button', { name: /^Save/ }).first().click();
   await expect(page.getByText(/product (saved|updated)/i).first()).toBeVisible();
   await page.reload();
-  await expect(box(page, 'Use Timing')).toHaveValue('Volunteer Corn');
+  await expect(page.getByRole('group', { name: 'Use Timing' }).getByRole('checkbox', { name: 'Volunteer Corn' })).toBeChecked();
 });
 
 test('Escape in a dropdown inside a pop-up closes only the list', async ({ page }) => {

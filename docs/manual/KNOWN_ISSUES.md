@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-02 for the live ledger only (see the WP-PM-8a changelog note); other evidence retains its stated dates.
+**Last verified:** 2026-11-03 for the live ledger only (see the pm5-registry-refresh changelog note); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -165,11 +165,43 @@ No snapshot/guard migration was found, but the live row count could not be check
 ---
 
 ### KI-97 — Invoice email content is built by the app screen, not by the email service
-**MED · OPEN (planned follow-up from PR #1302, 2026-11-02) · money · unassigned**
+**MED · FIXED, LIVE 2026-11-02 (PR #1340; `send-email` v22) · money · residual tracked as KI-98**
 The `send-email` service checks who may send an invoice email, to whom, and when, and limits the links and map
-images it may carry (PR #1302). The email's wording, amount and attached PDF still come from the app screen.
-Planned: the service builds the invoice email's amount, wording and PDF from the saved invoice itself. #1302 does
-not change this behaviour either way.
+images it may carry (PR #1302). Before this fix, the email's wording, amount and attached PDF came from the app screen.
+Fix (PR #1340): the service writes the invoice email's subject, wording, Amount Due
+(stored balance, whole cents) and attachment name from the saved invoice and ignores the screen's. The PDF is
+still drawn by the app, so the app also sends the money the PDF prints; the service refuses the send unless that
+matches the saved invoice, and checks again just before sending (same method as the purchase-order copy). Left
+open: the PDF file itself is drawn by the signed-in user's app, not the server; and the last check is a read
+before the send, so a payment saved in that split second can still go out with the earlier Amount Due (the
+purchase-order copy has the same window). Both are accepted for now and tracked as KI-98 (Mason, 2026-11-02).
+Proved live 2026-11-02 at 11:45 PM Central: test invoice CS-2026-0058 (test customer) was emailed from the app.
+Its `email_log` row is `sent` with the server-written subject, Amount Due $3,000.00 and `Invoice-CS-2026-0058.pdf`.
+The invoice was posted only for this test and voided right after.
+
+---
+
+### KI-98 — Emailed invoice and purchase-order PDFs are drawn by the sender's app, not the server
+**LOW · OPEN · ACCEPTED FOR NOW, FOLLOW-UP PLANNED · money · unassigned**
+Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_LOG.md`, same date). It is a
+known limit, not an oversight.
+- **What is true today.** After KI-97, `send-email` writes the invoice email's text and Amount Due from the saved
+  invoice. It refuses the send unless the dollar figures the app says its PDF shows match the saved invoice.
+- **What is not covered.** The PDF file itself is still built in the signed-in staff member's app (jsPDF). The
+  server checks that summary, not the file's contents. The purchase-order email works the same way
+  (`purchaseOrderEmailGate.ts`).
+- **Why it was accepted.** Only signed-in admin or sales staff can send, and only to the customer's or supplier's
+  address on file. The email text always states the saved balance. The complete fix is a large port.
+- **Also accepted.** `send-email`'s last check is a read just before the provider call, not an atomic step. A
+  payment saved in that split second still goes out with the earlier Amount Due.
+- **Follow-up (its own session and PR).** Build invoice and purchase-order PDFs on the server from the saved
+  records, and drop the app-sent summary.
+  - The work: port the needed parts of `src/lib/invoicePdf.ts` (about 1,600 lines: jsPDF + autotable, and a data
+    loader that reads through the browser client) and the PO PDF builder to a Deno-safe shared module. Load data
+    with the service client; prove the output matches today's PDFs page for page.
+  - Done when: `send-email` attaches only a server-built PDF for `invoice` and `purchase_order` emails, the old
+    app-built path is refused, and one real email of each type is checked after deploy.
+  - Risk: the PDF must look identical to customers. It needs an Edge Function deploy (Mason's yes) and Sol.
 
 ---
 
@@ -184,7 +216,7 @@ PR #942), batch 2 (`20261016140000`, PR #951), batch 3a (`20261019200000`, PR #9
 PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invoice`, `unpost_invoice_group`,
 `close_accounting_period`, `reopen_accounting_period`, `transfer_invoice_to_job`, `save_field_app_invoice`,
 `update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
-`create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, not yet applied) binds
+`create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, applied 2026-11-03) binds
 `price_order`, `update_order_items` and `mark_inventory_row_verified` (MED, PR #1042 follow-up 3; Mason: "batch
 it"). Remaining: notification RPCs and about 45 MED/LOW functions (batches 4c and 4d).
 
@@ -258,7 +290,7 @@ tiers is not built; the linkage field is not used for money today.
   `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
   (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
 - `invoices.season` defaults to `current_season()`, and the blend-ticket path uses it
-  (`20261020210000:1050,1227`). Fixed by `20261103120000` (once applied), which makes `current_season()` read the
+  (`20261020210000:1050,1227`). Fixed by `20261103120000` (applied 2026-11-03), which makes `current_season()` read the
   Chicago date; the same migration moves the `invoices.invoice_date` default to the Chicago date, so the two
   defaults agree. LOW.
 - Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
@@ -712,7 +744,7 @@ OrderDetail.
 **MED/LOW · OPEN · money**
 - Quote re-save can still be refused when a save both deletes or switches a saved line and adds several new lines
   for the same product (LOW).
-- `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (once applied) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
+- `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; since `20261103120000` (applied 2026-11-03) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
 - Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing

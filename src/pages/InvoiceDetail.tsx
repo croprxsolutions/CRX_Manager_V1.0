@@ -33,7 +33,7 @@ import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
 import { withBelowCostReason } from '../lib/belowCostApproval';
-import { sendEmail, pdfToBase64, buildEmailHtml, isInvoiceEmailSuppressed } from '../lib/emailService';
+import { sendEmail, pdfToBase64, buildEmailHtml, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../lib/emailService';
 import { logActivity } from '../lib/activityLogger';
 import { runCriticalAction } from '../lib/criticalAction';
 import { retryGenericInvoiceCutover } from '../lib/genericInvoiceCutoverRetry';
@@ -1891,6 +1891,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             filename: `Invoice-${invoice.invoice_number || 'DRAFT'}.pdf`,
             content: base64,
           }],
+          invoice_snapshot: invoiceEmailSnapshot(pdfData),
         });
 
         if (result.success) {

@@ -2,6 +2,8 @@
 
 **Last verified:** 2026-11-02 for the live ledger only (see the WP-PM-8a changelog note); other evidence retains its stated dates.
 
+**WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
+
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
 **KI-18 verified: 2026-10-29 (America/Chicago)** for KI-18 only: read-only live function definitions confirm `generate_quote_number`, `generate_order_number`, `create_rebate_claim`, and `generate_ticket_number` still take the year from `current_date`. The live ledger includes `20261028185500_order_edit_and_number_concurrency` (version `20261029143642`); its blend-ticket generator retains the same year rule. PR #1181 is still an unapplied candidate and is not part of this check. KI-18 stands. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
@@ -37,6 +39,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
+| WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
@@ -383,6 +386,33 @@ ship. A live check on 2026-11-02 found all 117 inventory rows at Main Warehouse,
 Fix: list active `warehouses` rows only, refuse unknown locations on the server, and print the real location.
 Multi-warehouse support stays (`docs/manual/DECISION_LOG.md`, 2026-11-02; checklist in `docs/workflows/INVENTORY_RULES.md`).
 
+### KI-86 — Direct admin turn-off skips warnings
+**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
+Direct admin updates of `products.is_active` bypass the preview warning step; database blockers still refuse unsafe turn-off.
+
+### KI-87 — Refused turn-off uses the stale-review message
+**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
+A blocked turn-off is reported as “Product details changed,” hiding the actual blocker in that dialog.
+
+### KI-88 — Inventory loads the full catalog on mount
+**LOW · UNVERIFIED · inventory UI · LOCAL CANDIDATE — NOT APPLIED**
+Inventory pages through all products on mount to label inactive rows; product status could instead come from the position RPC.
+
+### KI-89 — Inventory position uses UTC dates
+**LOW · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
+The re-emitted position body still uses `CURRENT_DATE` for season start and hold expiry, unchanged from its prior body.
+
+### KI-90 — Reopen race needs proof
+**MED · UNVERIFIED · product database · LOCAL CANDIDATE — NOT APPLIED**
+The reopen race through `set_product_active` has no automated real-schema proof.
+
+### KI-91 — Retired negative stock needs proof
+**MED · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
+A retired product with a negative balance in the position report was checked by hand only.
+
+### KI-92 — Accepted quote with live order needs proof
+**LOW · UNVERIFIED · product database · LOCAL CANDIDATE — NOT APPLIED**
+The accepted-quote and live-order warning case was checked by hand only.
 
 ### KI-93 — One blend ticket can deduct its stock twice
 **MED · OPEN (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · unassigned (after the cycle-count freeze lands)**

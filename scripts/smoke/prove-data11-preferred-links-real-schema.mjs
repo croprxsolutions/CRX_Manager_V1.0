@@ -27,7 +27,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261105100000_data11_preferred_vendor_links.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261105170000_data11_preferred_vendor_links.sql');
 // The live plan Mason approved on 2026-11-03 (see the migration header).
 const APPROVED = { fingerprint: '6c8955cb8d658f89d45546d22e225dde', links: 586, prefers: 10 };
 const PARKED = new Set([

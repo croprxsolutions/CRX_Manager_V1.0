@@ -4,6 +4,7 @@ import {
   getQuoteTierPrice,
   getConversionFactor,
   recalcItem,
+  billedLine,
   catalogPricePerAcre,
   computeQuoteTotals,
   validateCommissionSplits,
@@ -739,5 +740,35 @@ describe('catalogPricePerAcre', () => {
   it('returns null when the product has no positive rate_per_acre', () => {
     expect(catalogPricePerAcre(makeProduct({ rate_per_acre: null }), 1, conversions)).toBeNull();
     expect(catalogPricePerAcre(makeProduct({ rate_per_acre: 0 }), 1, conversions)).toBeNull();
+  });
+});
+
+// S09: the screen must show the total the database stores and bills. save_quote settles the
+// quantity to 0.01 first, then rounds price × quantity and cost × quantity to the cent.
+describe('billedLine', () => {
+  it('bills 3 fl oz/acre on 157 acres of a $139.50 gallon at 3.68 gal = $513.36, as the database does', () => {
+    expect(billedLine(139.5, 100, 3.6796875)).toEqual({ units: 3.68, totalPrice: 513.36, profit: 145.36, netMargin: 28.32 });
+  });
+
+  it('rounds a half cent away from zero, as PostgreSQL ROUND does', () => {
+    expect(billedLine(0.5, 0, 0.01).totalPrice).toBe(0.01);
+    expect(billedLine(1.005, 0, 1).totalPrice).toBe(1.01);
+  });
+
+  it('multiplies a manual price with more than two decimals exactly', () => {
+    expect(billedLine(17.6625, 0, 3).totalPrice).toBe(52.99);
+  });
+
+  it('bills nothing for no quantity', () => {
+    expect(billedLine(139.5, 100, 0)).toEqual({ units: 0, totalPrice: 0, profit: 0, netMargin: 0 });
+  });
+});
+
+describe('recalcItem per-acre total (S09)', () => {
+  it('shows the billed total for a rate × acres line', () => {
+    const product = makeProduct({ tier1_price: 139.5, current_cost: 100, inventory_unit: 'Gallon', unit_size: 'Gallon' });
+    const line = recalcItem({ calc_mode: 'rate_acres', actual_rate: 3, rate_unit: 'fl oz', acres: 157 } as CalcItem, product, 1, conversions);
+    expect(line.total_units_needed).toBe(3.68);
+    expect(line.total_price).toBe(513.36);
   });
 });

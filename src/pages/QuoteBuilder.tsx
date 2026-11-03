@@ -57,7 +57,7 @@ import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
-import { catalogPricePerAcre, getQuoteTierPrice, validateCommissionSplits } from '../lib/quoteCalc';
+import { billedLine, catalogPricePerAcre, getQuoteTierPrice, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
 import {
   buildRowVersionPatch,
@@ -1654,10 +1654,9 @@ export default function QuoteBuilder() {
 
       if (item.calc_mode === 'units_direct') {
         // User entered total_units_needed directly — skip rate×acres computation
-        const totalInventoryUnits = item.total_units_needed || 0;
-        const totalPrice = pricePerUnit * totalInventoryUnits;
-        const profit = (pricePerUnit - cost) * totalInventoryUnits;
-        const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+        const billed = billedLine(pricePerUnit, cost, item.total_units_needed || 0);
+        const totalInventoryUnits = billed.units;
+        const totalPrice = billed.totalPrice;
 
         // Back-calculate oz/acre and $/acre if acres provided
         const acres = item.acres || 0;
@@ -1675,10 +1674,10 @@ export default function QuoteBuilder() {
           current_cost: cost,
           oz_per_acre: ozPerAcre,
           price_per_acre: pricePerAcre,
-          total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-          total_price: Math.round(totalPrice * 100) / 100,
-          profit: Math.round(profit * 100) / 100,
-          net_margin: Math.round(netMargin * 100 * 100) / 100,
+          total_units_needed: billed.units,
+          total_price: billed.totalPrice,
+          profit: billed.profit,
+          net_margin: billed.netMargin,
         };
       }
 
@@ -1697,9 +1696,8 @@ export default function QuoteBuilder() {
       const pricePerAcre = inventoryUnitFactorOz > 0
         ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
         : 0;
-      const totalPrice = pricePerUnit * totalInventoryUnits;
-      const profit = (pricePerUnit - cost) * totalInventoryUnits;
-      const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+      // S09: the quantity, total and profit the database stores and bills (see billedLine).
+      const billed = billedLine(pricePerUnit, cost, totalInventoryUnits);
 
       return {
         ...item,
@@ -1707,10 +1705,10 @@ export default function QuoteBuilder() {
         current_cost: cost,
         oz_per_acre: Math.round(ozPerAcre * 100) / 100,
         price_per_acre: Math.round(pricePerAcre * 100) / 100,
-        total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-        total_price: Math.round(totalPrice * 100) / 100,
-        profit: Math.round(profit * 100) / 100,
-        net_margin: Math.round(netMargin * 100 * 100) / 100,
+        total_units_needed: billed.units,
+        total_price: billed.totalPrice,
+        profit: billed.profit,
+        net_margin: billed.netMargin,
       };
     },
     [products, getTierPrice, getConversionFactor, lineBasisFor]

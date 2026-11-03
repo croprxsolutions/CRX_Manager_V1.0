@@ -77,6 +77,33 @@ export function getConversionFactor(
 }
 
 /** Core pricing recalculation — pure function (no React deps) */
+// Exact a × b rounded to the cent, half away from zero, like PostgreSQL's ROUND(numeric, 2).
+// Binary floats cannot do this: 1.005 × 1 rounds to 1.00 in floats and to 1.01 in the database.
+function exactDollars(a: number, b: number): number {
+  const parts = [a, b].map((n) => /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(n)));
+  if (parts.some((m) => !m)) return Math.round(a * b * 100) / 100; // exponent form: tiny or huge, float is the best we have
+  const [ma, mb] = parts as RegExpExecArray[];
+  const scale = (ma[3] ?? '').length + (mb[3] ?? '').length;
+  const product = BigInt(ma[2] + (ma[3] ?? '')) * BigInt(mb[2] + (mb[3] ?? '')) * 100n;
+  const denominator = 10n ** BigInt(scale);
+  const cents = product / denominator + (2n * (product % denominator) >= denominator ? 1n : 0n);
+  return ((ma[1] === '-') !== (mb[1] === '-') ? -1 : 1) * Number(cents) / 100;
+}
+
+/**
+ * A quote line's quantity and money, figured as save_quote figures them (S09): the quantity is
+ * settled to 0.01 first, then price × quantity and cost × quantity are each rounded to the cent.
+ * Figuring the total from the unsettled quantity showed $513.32 on screen and on the PDF for a
+ * line the database stores and bills at $513.36 (3.68 gal × $139.50).
+ */
+export function billedLine(pricePerUnit: number, cost: number, rawUnits: number) {
+  const units = Math.round(rawUnits * 100) / 100;
+  const totalPrice = exactDollars(pricePerUnit, units);
+  const profit = Math.round((totalPrice - exactDollars(cost, units)) * 100) / 100;
+  const netMargin = totalPrice > 0 ? Math.round((profit / totalPrice) * 100 * 100) / 100 : 0;
+  return { units, totalPrice, profit, netMargin };
+}
+
 export function recalcItem(
   item: CalcItem,
   product: Product,
@@ -93,10 +120,9 @@ export function recalcItem(
 
   if (mode === 'units_direct') {
     // User entered total_units_needed directly — skip rate×acres computation
-    const totalInventoryUnits = item.total_units_needed || 0;
-    const totalPrice = pricePerUnit * totalInventoryUnits;
-    const profit = (pricePerUnit - (product.current_cost || 0)) * totalInventoryUnits;
-    const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+    const billed = billedLine(pricePerUnit, product.current_cost || 0, item.total_units_needed || 0);
+    const totalInventoryUnits = billed.units;
+    const totalPrice = billed.totalPrice;
 
     // Back-calculate rate if acres is also set (informational)
     const acres = item.acres || 0;
@@ -114,10 +140,10 @@ export function recalcItem(
       current_cost: product.current_cost || 0,
       oz_per_acre: ozPerAcre,
       price_per_acre: pricePerAcre,
-      total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-      total_price: Math.round(totalPrice * 100) / 100,
-      profit: Math.round(profit * 100) / 100,
-      net_margin: Math.round(netMargin * 100 * 100) / 100,
+      total_units_needed: billed.units,
+      total_price: billed.totalPrice,
+      profit: billed.profit,
+      net_margin: billed.netMargin,
     };
   }
 
@@ -136,9 +162,7 @@ export function recalcItem(
     inventoryUnitFactorOz > 0
       ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
       : 0;
-  const totalPrice = pricePerUnit * totalInventoryUnits;
-  const profit = (pricePerUnit - (product.current_cost || 0)) * totalInventoryUnits;
-  const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+  const billed = billedLine(pricePerUnit, product.current_cost || 0, totalInventoryUnits);
 
   return {
     ...item,
@@ -146,10 +170,10 @@ export function recalcItem(
     current_cost: product.current_cost || 0,
     oz_per_acre: Math.round(ozPerAcre * 100) / 100,
     price_per_acre: Math.round(pricePerAcre * 100) / 100,
-    total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-    total_price: Math.round(totalPrice * 100) / 100,
-    profit: Math.round(profit * 100) / 100,
-    net_margin: Math.round(netMargin * 100 * 100) / 100, // stored as percentage
+    total_units_needed: billed.units,
+    total_price: billed.totalPrice,
+    profit: billed.profit,
+    net_margin: billed.netMargin, // stored as percentage
   };
 }
 

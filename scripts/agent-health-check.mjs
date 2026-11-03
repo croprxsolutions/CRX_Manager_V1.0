@@ -372,6 +372,19 @@ export function checkClaudeAuth(runner) {
 // 2026-08-31 every worktree created without `npm install` landed in exactly that
 // state, and hand-set absolute overrides pointed several at other checkouts.
 // The tracked .husky/ hooks are plain shell and need no husky runtime.
+// The exact opening every tracked .husky hook carries (the test pins the real files
+// to it). The -ef test is the loop stop; CRX_OWN_HOOK names the target path, so a
+// stray inherited value cannot switch the hand-off off.
+export const HAND_OFF_HOOKS = Object.freeze(["commit-msg", "pre-commit", "pre-push"]);
+export function hookHandOff(hook) {
+  return "#!/usr/bin/env sh\n" +
+    "# The desktop app can point core.hooksPath at another checkout; run this\n" +
+    "# worktree's own hook instead (scripts/agent-health-check.mjs pins these lines).\n" +
+    `if [ -f .husky/${hook} ] && ! [ "$0" -ef .husky/${hook} ] && [ "\${CRX_OWN_HOOK:-}" != "$PWD/.husky/${hook}" ]; then\n` +
+    `  CRX_OWN_HOOK="$PWD/.husky/${hook}" exec sh .husky/${hook} "$@"\n` +
+    "fi\n";
+}
+
 export function checkGitHooksInstalled(root, platform = process.platform) {
   let hooksPath = "";
   try {
@@ -421,12 +434,12 @@ export function checkGitHooksInstalled(root, platform = process.platform) {
   // same-directory test on this repository's primary platform.
   if (path.relative(expected, resolved) !== "") {
     // The desktop app writes an absolute path to the main checkout's .husky. That is
-    // fine when those hooks hand off to this worktree's own copy (CRX_OWN_HOOK), and
-    // that copy really lives here (a linked .husky would hand off to itself).
-    const handsOff = ["pre-commit", "pre-push"].every((hook) => {
+    // fine when those hooks START with the exact hand-off to this worktree's own copy,
+    // and that copy really lives here (a linked .husky would hand off to itself).
+    const handsOff = HAND_OFF_HOOKS.every((hook) => {
       try {
         const own = path.relative(expected, canonical(path.join(expected, hook)));
-        return readFileSync(path.join(resolved, hook), "utf8").includes("CRX_OWN_HOOK") &&
+        return normalizeEol(readFileSync(path.join(resolved, hook), "utf8")).startsWith(hookHandOff(hook)) &&
           existsSync(path.join(expected, hook)) && own === hook;
       } catch {
         return false;

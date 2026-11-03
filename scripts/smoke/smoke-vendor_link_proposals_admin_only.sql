@@ -67,13 +67,15 @@ BEGIN
       END IF;
       SELECT count(*) INTO v_bad FROM jsonb_array_elements(v_result->'rows') r
        WHERE r->>'status' IS NULL
-          OR r->>'status' NOT IN ('linked', 'linked_text_differs', 'linked_no_preferred', 'proposed', 'ambiguous', 'unresolved', 'no_vendor')
-          OR EXISTS (SELECT 1 FROM jsonb_object_keys(r) k WHERE k ~ '(cost|price_cents|tier)');
+          OR r->>'status' NOT IN ('linked', 'linked_text_differs', 'linked_no_preferred', 'proposed', 'ambiguous', 'unresolved', 'no_vendor');
       IF v_bad <> 0 THEN
-        RAISE EXCEPTION 'SMOKE_FAIL: % rows have a missing or unknown status or a cost key', v_bad;
+        RAISE EXCEPTION 'SMOKE_FAIL: % rows have a missing or unknown status', v_bad;
       END IF;
-      IF EXISTS (SELECT 1 FROM jsonb_object_keys(v_result) k WHERE k ~ '(cost|price_cents|tier)') THEN
-        RAISE EXCEPTION 'SMOKE_FAIL: the report carries a top-level cost key';
+      -- No cost or price key anywhere in the result, at any depth, in any case.
+      IF EXISTS (SELECT 1 FROM jsonb_path_query(v_result, 'strict $.**') v
+                  WHERE jsonb_typeof(v) = 'object'
+                    AND EXISTS (SELECT 1 FROM jsonb_object_keys(v) k WHERE k ~* '(cost|price|tier)')) THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: the report carries a cost or price key';
       END IF;
       -- Each summary count matches its rows, in both directions.
       SELECT count(*) INTO v_bad FROM (

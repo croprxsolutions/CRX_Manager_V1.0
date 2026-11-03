@@ -13777,6 +13777,7 @@ export type Database = {
           prepay_applied: number
           total_invoiced: number
           total_paid: number
+          unavailable_reason: string
         }[]
       }
       get_customer_delivery_remainders: {

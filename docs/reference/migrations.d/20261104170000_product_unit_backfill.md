@@ -28,3 +28,12 @@ It **overwrites existing rows**, so its live apply needs Mason's own `I approve`
 **Live read, 2026-11-03 (read-only).** 604 products, 595 agree; the nine that differ are exactly the approved ids, with the approved old values. Live migration high-water, re-read later on 2026-11-03: `20261104150000_product_forms_seed_each` (WP-PM-9, which rewrites `validate_product_units`; the final file was rehearsed again on live after it, and the prover replays it). An open PR holds `20261104160000`. Re-read both at apply time.
 
 **Rollback.** A reviewed migration that drops `trg_keep_product_unit` and its function, then sets each id's `unit_size` back to its old value (the ids and old values are in the file).
+
+Live ledger preflight, read 2026-11-03 at 12:41 PM Central from `supabase_migrations.schema_migrations`, worked out row by row: each row's effective stamp is the 14-digit timestamp in its `name`, or its `version` when the name has none (627 of the 1,106 rows fall back to `version`):
+- **Effective high-water:** `20261104150000`.
+- **Top row:** `20261104150000_product_forms_seed_each`, ledger version `20261103172003`.
+- **`max(version)`:** `20261103172003`.
+- **Total:** 1,106 rows.
+- **At or above this file:** no row's effective stamp is `>= 20261104170000`, and no row starts with `20261104170000` by name or by version.
+
+So `20261104170000` sorts above everything applied. Read the ledger again at apply time, and after the apply reconcile the new row's `name` and `version` with the disk basename (the B7 rule in ship.md).

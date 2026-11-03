@@ -91,6 +91,14 @@ function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U',
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
+// Covering chains as they stood when the candidate landed: later edits call functions that later migrations add.
+const CANDIDATE_COMMIT = spawnSync('git', ['log', '--diff-filter=A', '--format=%H', '-1', '--', path.relative(ROOT, CANDIDATE)], { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
+function chainAtCandidate(file) {
+  assert.match(CANDIDATE_COMMIT, /^[0-9a-f]{40}$/, 'cannot find the commit that added the candidate');
+  const r = spawnSync('git', ['show', `${CANDIDATE_COMMIT}:${path.relative(ROOT, file).replaceAll('\\', '/')}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  if (r.status !== 0) throw new Error(r.stderr);
+  return r.stdout.replaceAll('\r\n', '\n');
+}
 function stageText(name, text) {
   const staged = path.join(tmpdir(), `${NAME}-${name}`);
   writeFileSync(staged, text, 'utf8');
@@ -141,10 +149,7 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  // Only 20261021155000 (split-payer returns, which builds on this guard) may follow it.
-  assert.deepEqual(all.slice(at + 1).map((f) => path.basename(f)),
-    all.length - 1 === at ? [] : ['20261021155000_split_payer_return_credit.sql'],
-    'the candidate must be the last migration in the replay plan, or followed only by 20261021155000');
+  // Applied live; later migrations carry their own proofs, so replay only up to the candidate (as #1292).
   const before = all.slice(0, at);
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);
@@ -162,7 +167,7 @@ function buildContainer() {
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
-  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
   if (schema.status !== 0) throw new Error(schema.stderr.toString());
   psql('\\i /tmp/20260727174805_extensions.sql'); psql(schema.stdout.toString());
   psql(`CREATE SCHEMA IF NOT EXISTS storage;
@@ -232,7 +237,7 @@ function seed() {
 
 /** Run a chain file; `prefix` runs first in the same transaction (a mutation). */
 function chain(file, prefix = '', user = 'postgres') {
-  stageText('chain.sql', lf(file));
+  stageText('chain.sql', chainAtCandidate(file));
   const r = docker([...psqlArgs(user)], { input: `BEGIN;\n${prefix}\n\\i /tmp/chain.sql\nROLLBACK;\n`, allowFailure: true });
   const out = `${r.stdout}\n${r.stderr}`;
   const pass = /SMOKE_PASS_ROLLBACK/.test(out);

@@ -36,7 +36,7 @@ import { INVOICE_COLUMNS, INVOICE_ITEM_COLUMNS, INVOICE_POST_VERSION_COLUMNS, IN
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import { isCurrentSeason, openOrInSeasonFilter, otherSeasonLabels } from '../lib/invoiceSeasonWindow';
 import SeasonTag from '../components/invoices/SeasonTag';
-import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { fingerprintIntentPayload, generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { buildInvoicePostTargets, describeInvoicePostScope } from '../lib/invoiceBatchPosting';
 import { postInvoiceTarget } from '../lib/invoicePostVersion';
 import { applyTableSearchSort } from '../lib/tableSearchSort';
@@ -108,8 +108,7 @@ export default function Invoices() {
   // Keep one stable key per standalone invoice or split group across a
   // failed/network-lost retry, and clear only that action's key on success.
   const postKeysRef = useRef<Record<string, string>>({});
-  // Reset the remaining batch keys whenever the selected set changes (Codex P2 fix).
-  // See the `selectedKey` derivation + useEffect below.
+  // The batch void/delete keys are scoped to the exact ids (and reason) each request sends.
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -291,19 +290,6 @@ export default function Invoices() {
     });
   }, [visibleSelectableKey, selected]);
 
-  // Codex P2 fix (PR #59, 2026-05-16): reset batch idempotency keys when the
-  // user changes their selection. Otherwise the page-scoped keys would carry
-  // over — batch-post A succeeds, response lost, user picks different invoices
-  // and clicks Post → server replays A's cached success without posting B.
-  // Hashing the sorted IDs the actions will really send detects intent changes;
-  // identical retries still reuse the key for safe retry-on-network-error.
-  const selectedKey = selectedInvoices.map((i) => i.id).sort().join(',');
-  useEffect(() => {
-    batchVoidIdem.resetKey();
-    batchDeleteIdem.resetKey();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey]);
-
   const selectedPostable = selectedInvoices.filter((i) => ['draft', 'unposted'].includes(i.status));
   const basePostConfirmation = describeInvoicePostScope(selectedPostable);
   // The list shows open invoices from every season, and the server does not check the
@@ -393,22 +379,30 @@ export default function Invoices() {
 
     await runCriticalAction({
       action: async () => {
-        const voidKey = batchVoidIdem.getKey();
+        // One key per set of invoices, in any order: the server binds this key to its request, so edited details after a lost reply are refused with the committed result.
+        const voidScope = fingerprintIntentPayload([...ids].sort());
         const { data, error } = await supabase.rpc('batch_void_invoices', {
           p_invoice_ids: ids,
           p_void_reason: reason,
           p_performed_by: profile?.id,
-          p_idempotency_key: voidKey,
+          p_idempotency_key: batchVoidIdem.getKeyFor(voidScope),
         });
         if (error) {
           // Refused as another batch's retry key: nothing was voided, so start the next try fresh.
           // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
           const bindingRejection = getIdempotencyBindingRejection(error);
-          if (bindingRejection === 'intent' || bindingRejection === 'actor') batchVoidIdem.resetKey();
+          if (bindingRejection === 'intent' || bindingRejection === 'actor') batchVoidIdem.resetKeyFor(voidScope);
+          // A changed reason after a lost reply: the earlier void already committed, so show the current list.
+          if (bindingRejection === 'intent') {
+            setSelected(new Set());
+            await fetchInvoices();
+            throw new Error('An earlier void of these invoices already went through. The list has been refreshed.');
+          }
           throw error;
         }
-        batchVoidIdem.resetKey();
-        return assertRpcResult(data, 'batch_void_invoices');
+        const voided = assertRpcResult(data, 'batch_void_invoices');
+        batchVoidIdem.resetKeyFor(voidScope);
+        return voided;
       },
       toast,
       successMessage: `Voided ${ids.length} invoice(s)`,
@@ -524,15 +518,17 @@ export default function Invoices() {
       action: async () => {
         // Route through the guarded RPC (admin-only, audited, idempotent) instead
         // of a raw .update({ deleted_at }). See migration delete_invoices.
-        const deleteKey = batchDeleteIdem.getKey();
+        // One key per set of invoices, in any order: the server binds this key to its request, so edited details after a lost reply are refused with the committed result.
+        const deleteScope = fingerprintIntentPayload([...ids].sort());
         const { data, error } = await supabase.rpc('delete_invoices', {
           p_invoice_ids: ids,
           p_performed_by: profile?.id,
-          p_idempotency_key: deleteKey,
+          p_idempotency_key: batchDeleteIdem.getKeyFor(deleteScope),
         });
         if (error) throw error;
-        batchDeleteIdem.resetKey();
-        return assertRpcResult<number>(data, 'delete_invoices');
+        const deleted = assertRpcResult<number>(data, 'delete_invoices');
+        batchDeleteIdem.resetKeyFor(deleteScope);
+        return deleted;
       },
       toast,
       setLoading: setDeleting,

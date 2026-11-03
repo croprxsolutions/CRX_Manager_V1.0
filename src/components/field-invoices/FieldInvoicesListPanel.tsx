@@ -13,8 +13,8 @@ import { INVOICE_COLUMNS } from '../../lib/costFields';
 import { runCriticalAction } from '../../lib/criticalAction';
 import { exportToCSV } from '../../lib/csvExport';
 import { downloadReportPdf } from '../../lib/reportPdf';
-import { buildInvoicePdfDataFromRow, buildBatchInvoicePdfData, batchInvoicePrintToast, generateBatchInvoicePdf, downloadInvoicePdf, generateInvoicePdf } from '../../lib/invoicePdf';
-import { sendEmail, pdfToBase64, buildInvoiceEmailPayload, isInvoiceEmailSuppressed } from '../../lib/emailService';
+import { buildInvoicePdfDataFromRow, buildBatchInvoicePdfData, batchInvoicePrintToast, generateBatchInvoicePdf, downloadInvoicePdf } from '../../lib/invoicePdf';
+import { sendEmail, buildInvoiceEmailPayload, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../../lib/emailService';
 import { logActivity } from '../../lib/activityLogger';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -297,9 +297,8 @@ export default function FieldInvoicesListPanel() {
           .maybeSingle();
         const email = (cust as { email?: string | null } | null)?.email;
 
+        // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
         const pdfData = await buildInvoicePdfDataFromRow(toPdfRow(row));
-        const doc = await generateInvoicePdf(pdfData);
-        const base64 = pdfToBase64(doc);
 
         // buildInvoiceEmailPayload throws the honest "no email on file" error
         // before any send, so a missing email never results in a blank/wrong send.
@@ -310,7 +309,7 @@ export default function FieldInvoicesListPanel() {
           invoiceNumber: row.invoice_number,
           invoiceDate: row.invoice_date,
           balanceCents: row.balance_cents,
-          attachmentBase64: base64,
+          snapshot: invoiceEmailSnapshot(pdfData),
         });
         await assertInvoiceSendable(row.id);
         const result = await sendEmail(payload);

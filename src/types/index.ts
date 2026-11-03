@@ -55,12 +55,23 @@ export interface ProductCategory {
   sort_order: number;
 }
 
+export interface UseTimingOption {
+  code: string;
+  label: string;
+  timing_code: string;
+  crop: string | null;
+  category: 'Herbicide' | 'Foliar Fertilizer';
+  sort_order: number;
+  is_active: boolean;
+}
+
 export interface Product {
   id: string;
   product_name: string;
   sku: string | null;
   category: string | null;
   use_timing?: string | null;
+  use_timings: string[];
   vendor: string | null;
   manufacturer: string | null;
   container_size: number | null;
@@ -2221,19 +2232,8 @@ export interface InvoiceLineShareSnapshot {
 
 // ── Invoice & Statement PDF Data Types ──────────────────────────────────
 
-export interface InvoicePrintOptions {
-  show_shares: boolean;
-  show_price_per_acre: boolean;
-  show_epa_registration: boolean;
-  /**
-   * Which printed layout to render (field-app parity #30 — ChemMan "Print" vs
-   * "Old Print"). 'current' (default/undefined) = the modern CRX-branded layout;
-   * 'legacy' = the denser monochrome "Old Print" format some customers still
-   * expect. Money is identical in both — the same InvoicePdfData feeds each, so
-   * Total / Payments / Prepay / Balance Due reconcile regardless of format.
-   */
-  format?: 'current' | 'legacy';
-}
+// Shared with send-email, which draws emailed invoices itself (KNOWN_ISSUES KI-98).
+export type { InvoicePrintOptions } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
 
 export interface StatementOptions {
   mode: 'summary' | 'detailed';
@@ -3572,6 +3572,8 @@ export interface CustomerBalanceRow {
   open_credit: number;
   invoice_count: number;
   oldest_unpaid_date: string | null;
+  // Set (with every amount NULL) when this customer's balance cannot be rebuilt as of the date (KI-95).
+  unavailable_reason?: string | null;
 }
 
 export interface ChemicalHistoryRow {

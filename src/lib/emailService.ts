@@ -1,5 +1,6 @@
 import { supabase } from './db';
 import { COMPANY_ORDERING_EMAIL } from './companyInfo';
+import type { InvoiceEmailSnapshot } from '../../supabase/functions/_shared/invoiceEmailGate.ts';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -42,6 +43,10 @@ export interface PurchaseOrderEmailSnapshot {
   }>;
 }
 
+// What an invoice email's PDF prints, in whole cents; the server refuses the send unless it is the saved invoice (KI-97).
+export { invoiceEmailSnapshot } from '../../supabase/functions/_shared/invoiceEmailGate.ts';
+export type { InvoiceEmailSnapshot } from '../../supabase/functions/_shared/invoiceEmailGate.ts';
+
 interface SendEmailBase {
   to: string;
   subject: string;
@@ -57,13 +62,21 @@ interface SendEmailBase {
   attachments?: Array<{ filename: string; content: string }>; // base64
 }
 
-/** Every customer email names its customer; a PO copy names none and carries its snapshot. */
+/** The server draws the invoice and PO PDFs from the saved record and refuses any the app attaches (KI-98). */
+type NoAppAttachments = { attachments?: undefined };
+
+/**
+ * Every customer email names its customer; a PO copy names none and carries its snapshot.
+ * For an invoice the server writes the subject and body from the saved invoice and ignores
+ * these (still sent so an older server keeps working).
+ */
 export type SendEmailParams =
-  | (SendEmailBase & { email_type: Exclude<EmailType, 'purchase_order'>; customer_id: string })
-  | (SendEmailBase & {
+  | (SendEmailBase & { email_type: Exclude<EmailType, 'purchase_order' | 'invoice'>; customer_id: string })
+  | (SendEmailBase & NoAppAttachments & { email_type: 'invoice'; customer_id: string; invoice_snapshot: InvoiceEmailSnapshot })
+  | (SendEmailBase & NoAppAttachments & {
       email_type: 'purchase_order';
       customer_id?: undefined;
-      purchase_order_snapshot: PurchaseOrderEmailSnapshot;
+      purchase_order_screen: PurchaseOrderEmailSnapshot;
     });
 
 export interface SendEmailResult {
@@ -117,14 +130,13 @@ export function pdfToBase64(doc: { output: (type: string) => string }): string {
 
 // ── buildInvoiceEmailPayload ───────────────────────────────────────────
 // Pure builder for an "email this invoice to the customer" send. Centralises the
-// recipient guard + subject + branded body + idempotency key + attachment filename
+// recipient guard + subject + branded body + idempotency key
 // so every field-app screen (editor toolbar, list rows) sends an IDENTICAL,
 // correctly-addressed payload. Throws the honest, user-facing error when there is
 // no email on file so the caller never sends to a blank/wrong address.
 //
-// The attachment `content` (base64 PDF) is supplied by the caller because building
-// it needs jsPDF; this helper owns only the recipient/payload shape, which is the
-// part worth unit-testing.
+// No PDF goes with it: the send-email server draws the invoice PDF from the saved
+// invoice and attaches that (KNOWN_ISSUES KI-98).
 
 export interface InvoiceEmailInput {
   /** The customer's billing email, already resolved from THIS invoice's customer. */
@@ -135,8 +147,8 @@ export interface InvoiceEmailInput {
   invoiceDate: string;
   /** Authoritative AR balance in cents (GENERATED invoices.balance_cents). */
   balanceCents: number;
-  /** Base64 PDF (no data-URI prefix) — see pdfToBase64(). */
-  attachmentBase64: string;
+  /** What the screen's PDF prints — see invoiceEmailSnapshot(). */
+  snapshot: InvoiceEmailSnapshot;
   /** Unique-per-send token; defaults to a per-invoice + timestamp key. */
   nowMs?: number;
 }
@@ -177,7 +189,7 @@ export function buildInvoiceEmailPayload(input: InvoiceEmailInput): SendEmailPar
     resource_type: 'invoice',
     resource_id: input.invoiceId,
     idempotency_key: `invoice-email-${input.invoiceId}-${input.nowMs ?? Date.now()}`,
-    attachments: [{ filename: `Invoice-${input.invoiceNumber}.pdf`, content: input.attachmentBase64 }],
+    invoice_snapshot: input.snapshot,
   };
 }
 
@@ -213,9 +225,6 @@ export interface PurchaseOrderEmailInput {
   poNumber: string;
   /** Already formatted for display, or null. */
   expectedDeliveryDate: string | null;
-  /** Base64 PDF (no data-URI prefix) — see pdfToBase64(). */
-  attachmentBase64: string;
-  attachmentFilename: string;
   /** The screen's retained idempotency key, so a retry after a lost response replays one send. */
   idempotencyKey: string;
   /** What the PDF prints (dollar unit costs, as stored). */
@@ -251,8 +260,7 @@ export function buildPurchaseOrderEmailPayload(input: PurchaseOrderEmailInput): 
     resource_type: 'purchase_order',
     resource_id: input.purchaseOrderId,
     idempotency_key: input.idempotencyKey,
-    attachments: [{ filename: input.attachmentFilename, content: input.attachmentBase64 }],
-    purchase_order_snapshot: input.snapshot,
+    purchase_order_screen: input.snapshot,
   };
 }
 

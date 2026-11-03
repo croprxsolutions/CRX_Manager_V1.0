@@ -174,7 +174,7 @@ function buildContainer() {
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
-  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
   if (schema.status !== 0) throw new Error(schema.stderr.toString());
   psql('\\i /tmp/20260727174805_extensions.sql'); psql(schema.stdout.toString());
   psql(`CREATE SCHEMA IF NOT EXISTS storage;

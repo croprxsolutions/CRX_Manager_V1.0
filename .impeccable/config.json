@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "arial",
+        "files": [
+          "supabase/functions/_shared/invoiceEmailGate.ts"
+        ],
+        "createdAt": "2026-11-03T04:20:57.097Z",
+        "reason": "Claude: server copy of the existing email frame buildEmailHtml (src/lib/emailService.ts), email-safe font required by mail clients"
+      },
+      {
+        "rule": "overused-font",
+        "value": "arial",
+        "files": [
+          "supabase/functions/_shared/invoiceEmailGate.ts"
+        ],
+        "createdAt": "2026-11-03T04:34:01.109Z",
+        "reason": "Claude: server copy of the existing email frame buildEmailHtml (src/lib/emailService.ts); email-safe font for mail clients"
+      }
+    ]
+  }
+}

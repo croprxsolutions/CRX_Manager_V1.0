@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
+import { jsPDF } from "npm:jspdf@4.2.1";
+import { autoTable } from "npm:jspdf-autotable@5.0.9";
 import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
@@ -7,10 +9,24 @@ import {
   decidePurchaseOrderEmail,
   parsePurchaseOrderSnapshot,
   type PoGateLine,
-  type PoGateResult,
+  type PoGateOrder,
   type PoGateSnapshot,
 } from "../_shared/purchaseOrderEmailGate.ts";
-import { attachmentProblem, emailContentProblem } from "../_shared/emailContentGate.ts";
+import { appSuppliedPdfProblem, attachmentProblem, emailContentProblem } from "../_shared/emailContentGate.ts";
+import {
+  buildInvoiceEmail,
+  invoiceEmailSnapshot,
+  parseInvoiceEmailSnapshot,
+  type InvoiceEmailResult,
+  type InvoiceEmailSnapshot,
+} from "../_shared/invoiceEmailGate.ts";
+import { drawInvoicePdf, loadInvoicePdfData } from "../_shared/pdf/invoicePdf.ts";
+import {
+  buildPurchaseOrderPdfData,
+  drawPurchaseOrderPdf,
+  loadPurchaseOrderVendor,
+  purchaseOrderPdfFilename,
+} from "../_shared/pdf/purchaseOrderPdf.ts";
 
 // =============================================================================
 // CRX send-email — Sprint F #1 lockdown
@@ -39,6 +55,11 @@ import { attachmentProblem, emailContentProblem } from "../_shared/emailContentG
 //   7. The idempotency key is scoped to email_type + record, so a reused key
 //      can never replay or block a different email; a key already used for a
 //      different email is refused (audit finding 8, 2026-11-02).
+//   8. An invoice email's subject, wording, amount and attachment name are built
+//      here from the saved invoice; the caller's are ignored. The screen it was
+//      sent from must show the invoice's money as saved now (KI-97).
+//   9. Invoice and purchase order PDFs are drawn here from the saved record
+//      (_shared/pdf/); a PDF the caller attaches to those is refused (KI-98).
 // =============================================================================
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -110,6 +131,11 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB after base64 decod
 // Rate limit
 const RATE_LIMIT_PER_HOUR = 50;
 
+// jsPDF's data URI is "data:application/pdf;filename=...;base64,<data>".
+function pdfBase64(doc: { output: (type: "datauristring") => string }): string {
+  return doc.output("datauristring").split("base64,")[1] ?? "";
+}
+
 function decodedBase64Length(b64: string): number {
   // base64 expands 3 bytes -> 4 chars (with == padding). Use the standard formula:
   // bytes = (len(b64) * 3 / 4) - padding_count
@@ -117,21 +143,51 @@ function decodedBase64Length(b64: string): number {
   return Math.floor((b64.length * 3) / 4) - padding;
 }
 
-// Reads what the purchase-order gate needs and lets it decide. Any read error
-// refuses the send (503): never send a PO copy on a guess.
+// Reads the saved invoice and its lines and builds the email from them. Any read
+// error refuses the send (503): never state an amount on a guess.
+async function loadInvoiceEmail(
+  adminClient: SupabaseClient,
+  invoiceId: string,
+  snapshot: InvoiceEmailSnapshot,
+): Promise<InvoiceEmailResult> {
+  const { data: invoice, error: invoiceErr } = await adminClient
+    .from("invoices")
+    .select("invoice_number, invoice_type, invoice_date, due_date, total_amount_cents, paid_amount_cents, prepay_applied_cents, balance_cents")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (invoiceErr) return { ok: false, status: 503, error: `Invoice lookup failed: ${invoiceErr.message}` };
+  const { data: lines, error: linesErr } = await adminClient
+    .from("invoice_items")
+    .select("extended_cents")
+    .eq("invoice_id", invoiceId);
+  if (linesErr || !Array.isArray(lines)) {
+    return { ok: false, status: 503, error: `Invoice lines lookup failed: ${linesErr?.message ?? "no list"}` };
+  }
+  return buildInvoiceEmail(invoice, lines.map((line) => line.extended_cents), snapshot);
+}
+
+// Reads what the purchase-order gate needs and lets it decide; on a pass, returns
+// the order and lines read, which the PDF is drawn from. Any read error refuses
+// the send (503): never send a PO copy on a guess.
 async function checkPurchaseOrderEmail(
   adminClient: SupabaseClient,
   purchaseOrderId: string,
   to: string,
   snapshot: PoGateSnapshot,
-): Promise<PoGateResult> {
+): Promise<
+  | { ok: true; order: PoGateOrder; lines: PoGateLine[] }
+  | { ok: false; status: number; error: string }
+> {
   const { data: order, error: orderErr } = await adminClient
     .from("purchase_orders")
     .select("id, po_number, status, vendor, submitted_date, expected_delivery_date, notes")
     .eq("id", purchaseOrderId)
     .maybeSingle();
   if (orderErr) return { ok: false, status: 503, error: `Purchase order lookup failed: ${orderErr.message}` };
-  if (!order) return decidePurchaseOrderEmail(null, [], to, snapshot);
+  if (!order) {
+    const missing = decidePurchaseOrderEmail(null, [], to, snapshot);
+    return missing.ok ? { ok: false, status: 404, error: "Purchase order not found" } : missing;
+  }
 
   const { data: lines, error: linesErr } = await adminClient
     .from("purchase_order_items")
@@ -143,7 +199,9 @@ async function checkPurchaseOrderEmail(
 
   // `product` is a many-to-one embed, so PostgREST returns one object (or null); the
   // untyped client infers an array, hence the cast.
-  return decidePurchaseOrderEmail(order, lines as unknown as PoGateLine[], to, snapshot);
+  const poLines = lines as unknown as PoGateLine[];
+  const decision = decidePurchaseOrderEmail(order, poLines, to, snapshot);
+  return decision.ok ? { ok: true, order, lines: poLines } : decision;
 }
 
 Deno.serve(async (req: Request) => {
@@ -188,26 +246,37 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const {
       to,
-      subject,
-      html,
       email_type,
       customer_id,
       resource_type,
       resource_id,
       idempotency_key,
-      attachments,
-      purchase_order_snapshot,
+      // Renamed from purchase_order_snapshot with KI-98, so a send-email from before
+      // KI-98 refuses this app's PO copy instead of mailing it with no PDF.
+      purchase_order_screen,
+      invoice_snapshot,
     } = body;
+    // An invoice email's subject, body and attachment name are replaced below (step 6c).
+    let { subject, html, attachments } = body;
+    const isInvoiceEmail = email_type === "invoice";
 
-    if (!to || !subject || !html || !email_type) {
+    if (!to || !email_type || (!isInvoiceEmail && (!subject || !html))) {
       return jsonResponse({ error: "to, subject, html, and email_type are required" }, 400);
+    }
+    // What the attached PDF prints; the invoice must still say the same (KI-97).
+    const invoiceSnapshot = isInvoiceEmail ? parseInvoiceEmailSnapshot(invoice_snapshot) : null;
+    if (isInvoiceEmail && !invoiceSnapshot) {
+      return jsonResponse(
+        { error: "Invoice emails require invoice_snapshot (what the PDF shows). Reload the app and send again" },
+        400,
+      );
     }
     const isPurchaseOrderEmail = email_type === PURCHASE_ORDER_EMAIL_TYPE;
     // What the attached PDF printed; the gate refuses unless it is the PO today.
-    const poSnapshot = isPurchaseOrderEmail ? parsePurchaseOrderSnapshot(purchase_order_snapshot) : null;
+    const poSnapshot = isPurchaseOrderEmail ? parsePurchaseOrderSnapshot(purchase_order_screen) : null;
     if (isPurchaseOrderEmail) {
       if (!poSnapshot) {
-        return jsonResponse({ error: "Purchase order emails require purchase_order_snapshot (what the PDF shows)" }, 400);
+        return jsonResponse({ error: "Purchase order emails require purchase_order_screen (what the screen showed). Reload the app and send again" }, 400);
       }
       // A PO copy is about a PO, never a customer.
       if (customer_id) {
@@ -222,15 +291,19 @@ Deno.serve(async (req: Request) => {
     } else if (!customer_id) {
       return jsonResponse({ error: "customer_id is required" }, 400);
     }
-    if (typeof to !== "string" || typeof subject !== "string" || typeof html !== "string") {
+    if (typeof to !== "string" || (!isInvoiceEmail && (typeof subject !== "string" || typeof html !== "string"))) {
       return jsonResponse({ error: "to, subject, html must be strings" }, 400);
     }
     if (idempotency_key != null && (typeof idempotency_key !== "string" || !idempotency_key || idempotency_key.length > 256)) {
       return jsonResponse({ error: "idempotency_key must be a non-empty string of at most 256 characters" }, 400);
     }
-    const contentProblem = emailContentProblem(subject, html);
+    const contentProblem = isInvoiceEmail ? null : emailContentProblem(subject, html);
     if (contentProblem) {
       return jsonResponse({ error: contentProblem }, 400);
+    }
+    const appPdfProblem = appSuppliedPdfProblem(email_type, attachments);
+    if (appPdfProblem) {
+      return jsonResponse({ error: appPdfProblem }, 400);
     }
 
     // 4. email_type allowlist (catch unknown values + per-role gate)
@@ -246,13 +319,24 @@ Deno.serve(async (req: Request) => {
     }
 
     // 5a. Purchase order copy (To-Do 0.15). The recipient (the company ordering
-    // address), the PO's status, every line's cost and the PDF's match to the PO
-    // are all checked server-side.
+    // address), the PO's status, every line's cost and the screen's match to the PO
+    // are all checked server-side, and the PDF is drawn here from the saved PO (KI-98).
     if (isPurchaseOrderEmail && poSnapshot) {
       const poGate = await checkPurchaseOrderEmail(adminClient, resource_id, to, poSnapshot);
       if (!poGate.ok) {
         return jsonResponse({ error: poGate.error }, poGate.status);
       }
+      let vendor;
+      try {
+        vendor = poGate.order.vendor ? await loadPurchaseOrderVendor(adminClient, poGate.order.vendor) : null;
+      } catch (err) {
+        return jsonResponse({ error: `Purchase order vendor lookup failed: ${(err as Error).message}` }, 503);
+      }
+      const poPdf = drawPurchaseOrderPdf(
+        { jsPDF, autoTable },
+        buildPurchaseOrderPdfData(poGate.order, vendor, poGate.lines),
+      );
+      attachments = [{ filename: purchaseOrderPdfFilename(poGate.order.po_number), content: pdfBase64(poPdf) }];
     } else {
       // 5. Customer email match — recipient is validated server-side from customer_id
       // PR-03 fix: column is `farm_name`, not `name`. Surface the error explicitly so
@@ -338,8 +422,6 @@ Deno.serve(async (req: Request) => {
         400,
       );
     }
-    // shortcut: the invoice email's wording, amount and PDF still come from the caller; building them
-    // from the saved invoice here is the planned follow-up (KNOWN_ISSUES KI-97).
     let invoiceGateId = resource_type === "invoice" ? resource_id : null;
     let invoiceGateCustomerId: string | null = null;
 
@@ -550,6 +632,48 @@ Deno.serve(async (req: Request) => {
           );
         }
       }
+    }
+
+    // 6c. The invoice email itself (KI-97): subject, wording, amount and file name
+    // come from the saved invoice, and the screen it was sent from must show its money
+    // as saved. The PDF is drawn here from the saved invoice (KI-98).
+    if (isInvoiceEmail && invoiceSnapshot) {
+      const built = await loadInvoiceEmail(adminClient, resource_id, invoiceSnapshot);
+      if (!built.ok) {
+        return jsonResponse({ error: built.error }, built.status);
+      }
+      // The PDF is read with the service client, so first confirm the sender may read this
+      // invoice under their own row security (a rep sees only invoices they own).
+      const { data: callerInvoice, error: callerInvoiceErr } = await callerClient
+        .from("invoices")
+        .select("id")
+        .eq("id", resource_id)
+        .maybeSingle<{ id: string }>();
+      if (callerInvoiceErr) {
+        return jsonResponse({ error: `Invoice access check failed: ${callerInvoiceErr.message}` }, 503);
+      }
+      if (!callerInvoice) {
+        return jsonResponse({ error: "You do not have access to this invoice" }, 403);
+      }
+      let invoicePdfData;
+      try {
+        invoicePdfData = await loadInvoicePdfData(adminClient, resource_id);
+      } catch (err) {
+        return jsonResponse({ error: `Invoice details lookup failed: ${(err as Error).message}` }, 503);
+      }
+      // The drawn PDF must print the money the email states, as saved now.
+      const pdfCheck = await loadInvoiceEmail(adminClient, resource_id, invoiceEmailSnapshot(invoicePdfData));
+      if (!pdfCheck.ok) {
+        return jsonResponse({ error: `Invoice PDF check: ${pdfCheck.error}` }, pdfCheck.status);
+      }
+      // An unusual stored invoice number (very long, odd characters) must not slip past the content gate.
+      const builtProblem = emailContentProblem(built.subject, built.html);
+      if (builtProblem) {
+        return jsonResponse({ error: builtProblem }, 409);
+      }
+      subject = built.subject;
+      html = built.html;
+      attachments = [{ filename: built.filename, content: pdfBase64(drawInvoicePdf({ jsPDF, autoTable }, invoicePdfData)) }];
     }
 
     // 7. Attachment limits
@@ -805,6 +929,7 @@ Deno.serve(async (req: Request) => {
       }
 
       let finalGateRefusal: string | null = null;
+      let finalGateStatus = finalGateError ? 503 : 409;
       if (finalGateError) {
         finalGateRefusal = `Final invoice eligibility lookup failed: ${finalGateError.message}`;
       } else if (!finalInvoiceRow) {
@@ -824,6 +949,15 @@ Deno.serve(async (req: Request) => {
         finalInvoiceRow.send_disposition !== "sendable"
       ) {
         finalGateRefusal = "Invoice became suppressed or unavailable before send";
+      } else if (isInvoiceEmail && invoiceSnapshot) {
+        // A payment or edit since step 6c would make the stated amount or the PDF wrong.
+        const rebuilt = await loadInvoiceEmail(adminClient, invoiceGateId, invoiceSnapshot);
+        if (!rebuilt.ok) {
+          finalGateRefusal = rebuilt.error;
+          finalGateStatus = rebuilt.status;
+        } else if (rebuilt.subject !== subject || rebuilt.html !== html) {
+          finalGateRefusal = "Invoice changed before send";
+        }
       }
 
       if (finalGateRefusal) {
@@ -851,7 +985,7 @@ Deno.serve(async (req: Request) => {
         }
         return jsonResponse(
           { error: `${finalGateRefusal}; email send refused`, email_log_id: emailLogId },
-          finalGateError ? 503 : 409,
+          finalGateStatus,
         );
       }
     }

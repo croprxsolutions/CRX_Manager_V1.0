@@ -8292,6 +8292,39 @@ export type Database = {
           },
         ]
       }
+      product_use_timing_options: {
+        Row: {
+          category: string
+          code: string
+          created_at: string
+          crop: string | null
+          is_active: boolean
+          label: string
+          sort_order: number
+          timing_code: string
+        }
+        Insert: {
+          category: string
+          code: string
+          created_at?: string
+          crop?: string | null
+          is_active?: boolean
+          label: string
+          sort_order: number
+          timing_code: string
+        }
+        Update: {
+          category?: string
+          code?: string
+          created_at?: string
+          crop?: string | null
+          is_active?: boolean
+          label?: string
+          sort_order?: number
+          timing_code?: string
+        }
+        Relationships: []
+      }
       products: {
         Row: {
           category: string | null
@@ -8341,6 +8374,7 @@ export type Database = {
           unit_size: string | null
           updated_at: string
           use_timing: string | null
+          use_timings: string[]
           vendor: string | null
         }
         Insert: {
@@ -8391,6 +8425,7 @@ export type Database = {
           unit_size?: string | null
           updated_at?: string
           use_timing?: string | null
+          use_timings?: string[]
           vendor?: string | null
         }
         Update: {
@@ -8441,6 +8476,7 @@ export type Database = {
           unit_size?: string | null
           updated_at?: string
           use_timing?: string | null
+          use_timings?: string[]
           vendor?: string | null
         }
         Relationships: [
@@ -13741,6 +13777,7 @@ export type Database = {
           prepay_applied: number
           total_invoiced: number
           total_paid: number
+          unavailable_reason: string
         }[]
       }
       get_customer_delivery_remainders: {

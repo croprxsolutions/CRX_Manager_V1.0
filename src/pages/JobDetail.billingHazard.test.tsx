@@ -81,7 +81,7 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn(), getKeyFor: () => 'test-idem-key', resetKeyFor: vi.fn() }),
 }));
 // Isolate JobDetail from an UNRELATED child that calls its own RPC. RelatedNotes
 // fetches get_notes_for_entity on mount; this file's fixture answers every RPC with

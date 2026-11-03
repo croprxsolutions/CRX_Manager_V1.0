@@ -128,7 +128,7 @@ try {
   }
   assert.ok(ready, 'local PostgreSQL readiness');
   sql(file('supabase/baselines/20260727174805_extensions.sql'));
-  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   assert.equal(schema.status, 0, schema.stderr);
   sql(schema.stdout);
   sql(file('supabase/baselines/20260727174805_acl_lockdown.sql'));

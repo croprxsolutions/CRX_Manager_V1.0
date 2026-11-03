@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { DetailedStatementData } from '../types';
 import {
+  appSuppliedPdfProblem,
   attachmentProblem,
   emailContentProblem,
 } from '../../supabase/functions/_shared/emailContentGate';
@@ -57,9 +59,10 @@ const statement = {
 describe('emailContentProblem accepts every email the app builds', () => {
   const payloads = [
     buildInvoiceEmailPayload({ customerEmail: 'a@b.test', customerId: 'c1', invoiceId: 'i1', invoiceNumber: 'INV-1',
-      invoiceDate: '2026-11-02', balanceCents: 12_345, attachmentBase64: 'JVBERi0x' }),
+      invoiceDate: '2026-11-02', balanceCents: 12_345,
+      snapshot: { invoice_number: 'INV-1', total_amount_cents: 12_345, paid_amount_cents: 0, prepay_applied_cents: 0, balance_cents: 12_345, lines_total_cents: 12_345 } }),
     buildPurchaseOrderEmailPayload({ vendorName: 'Spinner <Ag>', purchaseOrderId: 'po-1', poNumber: 'PO-1',
-      expectedDeliveryDate: '11/3/2026', attachmentBase64: 'JVBERi0x', attachmentFilename: 'Purchase-Order-PO-1.pdf',
+      expectedDeliveryDate: '11/3/2026',
       idempotencyKey: 'k', snapshot: { po_number: 'PO-1', vendor: null, submitted_date: null, expected_delivery_date: null, notes: null, lines: [] } }),
     buildPreNotificationEmailPayload({ customerEmail: 'a@b.test', customerId: 'c1', jobId: 'j1',
       subject: 'Upcoming application', body: 'Hi <Farm> & co\n\nSee you soon' }),
@@ -146,5 +149,39 @@ describe('attachmentProblem', () => {
     expect(attachmentProblem('x.pdf', 'JVBERi0x\n<html>')).not.toBeNull();
     expect(attachmentProblem('x.pdf', 'JVBERA==')).not.toBeNull();
     expect(attachmentProblem(undefined, 'JVBERi0x')).not.toBeNull();
+  });
+});
+
+// KI-98: send-email draws invoice and PO PDFs from the saved record, so it refuses one the app attaches.
+describe('appSuppliedPdfProblem', () => {
+  const pdf = [{ filename: 'x.pdf', content: 'JVBERi0x' }];
+  it.each(['invoice', 'purchase_order'])('refuses a PDF the app attaches to a %s email', (type) => {
+    expect(appSuppliedPdfProblem(type, pdf)).toMatch(/made by the server/);
+    expect(appSuppliedPdfProblem(type, [{}])).toMatch(/made by the server/);
+    expect(appSuppliedPdfProblem(type, 'not a list')).toMatch(/made by the server/);
+  });
+  it.each(['invoice', 'purchase_order'])('accepts a %s email with no attachment', (type) => {
+    expect(appSuppliedPdfProblem(type, undefined)).toBeNull();
+    expect(appSuppliedPdfProblem(type, null)).toBeNull();
+    expect(appSuppliedPdfProblem(type, [])).toBeNull();
+  });
+  it('leaves other emails (statements, quotes) attaching their own PDF', () => {
+    expect(appSuppliedPdfProblem('statement', pdf)).toBeNull();
+    expect(appSuppliedPdfProblem('quote', pdf)).toBeNull();
+  });
+});
+
+// The server must draw with the same PDF library versions the app draws with, or the two PDFs drift.
+describe('send-email PDF library pins', () => {
+  const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+  const sources = [
+    'supabase/functions/send-email/index.ts',
+    'supabase/functions/_shared/pdf/theme.ts',
+  ].map((path) => readFileSync(path, 'utf8')).join('\n');
+  it.each(['jspdf', 'jspdf-autotable'])('%s matches the installed version', (name) => {
+    const installed = lock.packages[`node_modules/${name}`].version;
+    const pins = [...sources.matchAll(new RegExp(`npm:${name}@([0-9.]+)"`, 'g'))].map((m) => m[1]);
+    expect(pins.length).toBeGreaterThan(0);
+    expect(new Set(pins)).toEqual(new Set([installed]));
   });
 });

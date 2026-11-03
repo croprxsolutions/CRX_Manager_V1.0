@@ -28,12 +28,12 @@ import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyM
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
-import { assertInvoiceLinesLoaded, downloadInvoicePdf, generateInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
+import { assertInvoiceLinesLoaded, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
 import { withBelowCostReason } from '../lib/belowCostApproval';
-import { sendEmail, pdfToBase64, buildEmailHtml, isInvoiceEmailSuppressed } from '../lib/emailService';
+import { sendEmail, buildEmailHtml, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../lib/emailService';
 import { logActivity } from '../lib/activityLogger';
 import { runCriticalAction } from '../lib/criticalAction';
 import { retryGenericInvoiceCutover } from '../lib/genericInvoiceCutoverRetry';
@@ -1863,9 +1863,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     }
     await runCriticalAction({
       action: async () => {
+        // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
         const pdfData = await buildInvoicePdfData();
-        const doc = await generateInvoicePdf(pdfData);
-        const base64 = pdfToBase64(doc);
 
         const amountStr = ((invoice.balance_cents || 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
         const html = buildEmailHtml(`
@@ -1887,10 +1886,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           resource_type: 'invoice',
           resource_id: id,
           idempotency_key: `invoice-email-${id}-${Date.now()}`,
-          attachments: [{
-            filename: `Invoice-${invoice.invoice_number || 'DRAFT'}.pdf`,
-            content: base64,
-          }],
+          invoice_snapshot: invoiceEmailSnapshot(pdfData),
         });
 
         if (result.success) {

@@ -55,7 +55,7 @@ describe('send-email invoice authority contracts', () => {
 
 describe('send-email content and replay contracts (audit findings 7 and 8)', () => {
   it('refuses unverified content and ties each customer email to a record its customer owns', () => {
-    const contentCheck = source.indexOf('const contentProblem = emailContentProblem(subject, html);');
+    const contentCheck = source.indexOf('const contentProblem = isInvoiceEmail ? null : emailContentProblem(subject, html);');
     const outboundSend = source.indexOf('await fetch("https://api.resend.com/emails"');
     expect(contentCheck).toBeGreaterThan(-1);
     expect(contentCheck).toBeLessThan(outboundSend);
@@ -79,5 +79,59 @@ describe('send-email content and replay contracts (audit findings 7 and 8)', () 
     expect(source).toContain('if (scopedRow) emailLogId = scopedRow.id;');
     expect(source).not.toContain('?? keyRows?.[0]');
     expect(source).not.toContain('.from("email_log")\n        .select("id, resend_message_id, status")\n        .eq("idempotency_key", idempotency_key)');
+  });
+});
+
+describe('send-email draws invoice and PO PDFs from the saved records (KI-98)', () => {
+  it('refuses an app-attached PDF before logging or sending', () => {
+    const refuse = source.indexOf('const appPdfProblem = appSuppliedPdfProblem(email_type, attachments);');
+    const logInsert = source.indexOf('.from("email_log")\n        .insert({');
+    expect(refuse).toBeGreaterThan(-1);
+    expect(refuse).toBeLessThan(logInsert);
+  });
+
+  it('draws both PDFs on the server, from the saved invoice and the gated PO', () => {
+    expect(source).toContain('invoicePdfData = await loadInvoicePdfData(adminClient, resource_id);');
+    expect(source).toContain('loadInvoiceEmail(adminClient, resource_id, invoiceEmailSnapshot(invoicePdfData))');
+    expect(source).toContain('buildPurchaseOrderPdfData(poGate.order, vendor, poGate.lines)');
+    expect(source).toContain('attachments = [{ filename: purchaseOrderPdfFilename(poGate.order.po_number), content: pdfBase64(poPdf) }];');
+    expect(source).not.toContain('attachments[0]?.content');
+  });
+
+  it('checks the sender may read the invoice under their own row security before drawing it', () => {
+    const access = source.indexOf('const { data: callerInvoice, error: callerInvoiceErr } = await callerClient\n        .from("invoices")');
+    const draw = source.indexOf('invoicePdfData = await loadInvoicePdfData(adminClient, resource_id);');
+    expect(access).toBeGreaterThan(-1);
+    expect(access).toBeLessThan(draw);
+    expect(source).toContain('if (!callerInvoice) {\n        return jsonResponse({ error: "You do not have access to this invoice" }, 403);');
+  });
+
+  it('reads the PO screen copy under a name a pre-KI-98 send-email refuses', () => {
+    expect(source).toContain('parsePurchaseOrderSnapshot(purchase_order_screen)');
+    expect(source).not.toContain('purchase_order_snapshot,');
+  });
+});
+
+describe('send-email builds invoice content from the saved invoice (KI-97)', () => {
+  it('replaces the caller subject, body and file name before logging or sending', () => {
+    const build = source.indexOf('const built = await loadInvoiceEmail(adminClient, resource_id, invoiceSnapshot);');
+    const logInsert = source.indexOf('.from("email_log")\n        .insert({');
+    expect(build).toBeGreaterThan(-1);
+    expect(build).toBeLessThan(logInsert);
+    expect(source).toContain('subject = built.subject;\n      html = built.html;\n      attachments = [{ filename: built.filename, content: pdfBase64(drawInvoicePdf({ jsPDF, autoTable }, invoicePdfData)) }];');
+    expect(source).toContain('if (isInvoiceEmail && !invoiceSnapshot) {');
+    expect(source).toContain('const builtProblem = emailContentProblem(built.subject, built.html);');
+    // The amount comes from the stored row and its lines, never the request body.
+    expect(source).toContain('.select("invoice_number, invoice_type, invoice_date, due_date, total_amount_cents, paid_amount_cents, prepay_applied_cents, balance_cents")');
+    expect(source).toContain('.from("invoice_items")\n    .select("extended_cents")');
+  });
+
+  it('rebuilds the invoice email at the final gate and refuses if it changed', () => {
+    const finalGate = source.indexOf('const finalGateLookup');
+    const outboundSend = source.indexOf('await fetch("https://api.resend.com/emails"');
+    const rebuild = source.indexOf('const rebuilt = await loadInvoiceEmail(adminClient, invoiceGateId, invoiceSnapshot);');
+    expect(rebuild).toBeGreaterThan(finalGate);
+    expect(rebuild).toBeLessThan(outboundSend);
+    expect(source).toContain('rebuilt.subject !== subject || rebuilt.html !== html');
   });
 });

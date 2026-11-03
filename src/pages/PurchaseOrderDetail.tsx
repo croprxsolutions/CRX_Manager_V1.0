@@ -36,7 +36,7 @@ import RelatedNotes from '../components/team/RelatedNotes';
 import HelpTip from '../components/ui/HelpTip';
 import type { PurchaseOrder, PurchaseOrderItem, PurchaseOrderItemCostChange, PurchaseOrderCostChangeSource, POStatus, ReceivingRecord, ReceivingCondition, LinkedEntityType, Vendor } from '../types';
 import ConfirmModal from '../components/ui/ConfirmModal';
-import { buildPurchaseOrderEmailPayload, pdfToBase64, purchaseOrderEmailBlocker, sendEmail } from '../lib/emailService';
+import { buildPurchaseOrderEmailPayload, purchaseOrderEmailBlocker, sendEmail } from '../lib/emailService';
 import { COMPANY_ORDERING_EMAIL } from '../lib/companyInfo';
 import type { PdfPurchaseOrderData } from '../lib/purchaseOrderPdf';
 import { purchaseOrderPdfFingerprint } from '../lib/purchaseOrderFingerprint';
@@ -1064,8 +1064,7 @@ export default function PurchaseOrderDetail() {
     if (!po || !emailPO || !profile) return;
     setEmailingPO(true);
     try {
-      const { generatePurchaseOrderPdf, purchaseOrderPdfFilename } = await import('../lib/purchaseOrderPdf');
-      const doc = await generatePurchaseOrderPdf(emailPO.data);
+      // The server draws the PO PDF from the saved order and attaches it (KI-98).
       const { header, lines } = emailPO;
       const result = await sendEmail(buildPurchaseOrderEmailPayload({
         vendorName: emailPO.data.vendor.name,
@@ -1074,8 +1073,6 @@ export default function PurchaseOrderDetail() {
         expectedDeliveryDate: header.expected_delivery_date
           ? parseLocalDate(header.expected_delivery_date).toLocaleDateString('en-US')
           : null,
-        attachmentBase64: pdfToBase64(doc),
-        attachmentFilename: purchaseOrderPdfFilename(header.po_number),
         idempotencyKey: emailPOIdem.getKey(),
         // The server refuses the send unless this is still the PO.
         snapshot: {

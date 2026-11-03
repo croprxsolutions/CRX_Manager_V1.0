@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-02 for the live ledger only (see the WP-PM-8a changelog note); other evidence retains its stated dates.
+**Last verified:** 2026-11-03 for the live ledger only (see the pm5-registry-refresh changelog note); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -165,11 +165,42 @@ No snapshot/guard migration was found, but the live row count could not be check
 ---
 
 ### KI-97 — Invoice email content is built by the app screen, not by the email service
-**MED · OPEN (planned follow-up from PR #1302, 2026-11-02) · money · unassigned**
+**MED · FIXED, LIVE 2026-11-02 (PR #1340; `send-email` v22) · money · residual tracked as KI-98**
 The `send-email` service checks who may send an invoice email, to whom, and when, and limits the links and map
-images it may carry (PR #1302). The email's wording, amount and attached PDF still come from the app screen.
-Planned: the service builds the invoice email's amount, wording and PDF from the saved invoice itself. #1302 does
-not change this behaviour either way.
+images it may carry (PR #1302). Before this fix, the email's wording, amount and attached PDF came from the app screen.
+Fix (PR #1340): the service writes the invoice email's subject, wording, Amount Due
+(stored balance, whole cents) and attachment name from the saved invoice and ignores the screen's. The PDF is
+still drawn by the app, so the app also sends the money the PDF prints; the service refuses the send unless that
+matches the saved invoice, and checks again just before sending (same method as the purchase-order copy). Left
+open: the PDF file itself is drawn by the signed-in user's app, not the server; and the last check is a read
+before the send, so a payment saved in that split second can still go out with the earlier Amount Due (the
+purchase-order copy has the same window). Both are accepted for now and tracked as KI-98 (Mason, 2026-11-02).
+Proved live 2026-11-02 at 11:45 PM Central: test invoice CS-2026-0058 (test customer) was emailed from the app.
+Its `email_log` row is `sent` with the server-written subject, Amount Due $3,000.00 and `Invoice-CS-2026-0058.pdf`.
+The invoice was posted only for this test and voided right after.
+
+---
+
+### KI-98 — Emailed invoice and purchase-order PDFs are drawn by the sender's app, not the server
+**LOW · FIXED, LIVE 2026-11-03 (PR #1346; `send-email` v23) · money · Claude**
+Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_LOG.md`, same date).
+- **The fix.** `send-email` now draws the invoice and purchase-order PDFs itself, from the saved records
+  (`supabase/functions/_shared/pdf/`, the same drawing code the app prints with). It refuses a PDF the app
+  attaches to those two email types, and the app no longer sends one. The app still sends what its screen showed,
+  so a send is refused if the screen was out of date. Before drawing an invoice it checks that the sender can open
+  that invoice in the app (a rep only their own), because the server reads it with full access.
+- **Proof so far.** One real chemical-sale invoice, one field-application invoice and one purchase order drawn by
+  the old app code and by the new server code came out byte-for-byte the same (apart from the file's creation
+  time).
+- **Still accepted.** `send-email`'s last check is a read just before the provider call, not an atomic step. A
+  change saved in that split second still goes out as it was a moment earlier.
+- **Behaviour change.** An invoice emailed from the editor shows the saved invoice, not unsaved edits on screen.
+- **Live proof (2026-11-03, about 7:00 AM Central).** `send-email` v23 was deployed on Mason's in-chat yes, and
+  the app merged about 20 seconds later. Each step was run on croprxsolutions.app:
+  - The PO-2026-0030 copy email was sent, and its `email_log` row is `sent` with `Purchase-Order-PO-2026-0030.pdf`.
+  - Test invoice INV-2026-1522 ([E2E] Farm Alpha, one $312.72 service line) was posted and emailed. Its row is
+    `sent` with `Invoice-INV-2026-1522.pdf`, and the invoice was then voided.
+  - Both calls returned 200 with no function errors logged.
 
 ---
 
@@ -184,18 +215,45 @@ PR #942), batch 2 (`20261016140000`, PR #951), batch 3a (`20261019200000`, PR #9
 PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invoice`, `unpost_invoice_group`,
 `close_accounting_period`, `reopen_accounting_period`, `transfer_invoice_to_job`, `save_field_app_invoice`,
 `update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
-`create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, not yet applied) binds
+`create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, applied 2026-11-03) binds
 `price_order`, `update_order_items` and `mark_inventory_row_verified` (MED, PR #1042 follow-up 3; Mason: "batch
 it"). Remaining: notification RPCs and about 45 MED/LOW functions (batches 4c and 4d).
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
-**HIGH on money paths · PARTIAL · money · unassigned**
-On a lost reply the app should retry with the same key. Many screens discard the key too early or keep it across
-different records, so a retry could double-apply or replay another record's result. About 14 spots were fixed
-(PR #584); a dozen-plus remain (`KNOWN_UNFIXED_SITES` in `src/__tests__/idempotency-reset-order.test.ts:246`:
-JobDetail, QuoteBuilder, BlendTicketDetail, PrepayWorkspacePanel, FinanceChargePreviewModal and others). The
-`PrepaymentManagerPanel` item may now be covered server-side by KI-10 batch 1 (not confirmed). The automatic
-scanner for this is acknowledged as a weak tripwire.
+**HIGH on money paths · FIXED IN CODE 2026-11-02 (branch `claude/crx-idempotency-keys-4a3741`; live once merged) · money**
+On a lost reply the app should retry with the same key. Many screens discarded the key too early or kept it across
+different records, so a retry could double-apply or replay another record's result. About 14 spots were fixed in
+PR #584; the rest are fixed on this branch, and every one now keeps its key until the save is confirmed. How each
+key is scoped depends on whether the server binds the key to its request (KI-10):
+- **Server binds the request** (`create_quick_delivery`, `batch_apply_prepayments`, `create_order_from_blend_ticket`,
+  `batch_cancel_deliveries`, `batch_void_invoices`, `delete_invoices`, `complete_job`, `draw_down_quote`, `save_job`, and by
+  their own argument check `allocate_payment` and `generate_finance_charges`): one key
+  per form, record, or sorted set of records. An edited retry after a lost reply is refused with the committed
+  result (the screen opens it, or says the earlier save went through and reloads), instead of creating a second
+  one. Scoping these by payload would let an edit
+  mint a fresh key and duplicate the work.
+- **Server does not bind the request** (`assign_job_applicator`, `save_field`, `edit_delivery`, `link_blend_ticket_to_order`, `create_quote_from_template`,
+  `rollover_quote_to_season`, `reassign_delivery`): a save that creates a record (new field, quote from
+  template, season rollover) keeps one key per form or source until confirmed, so an edited retry after a lost
+  reply replays the record already created instead of making a second one (a changed new-field retry opens that
+  field and applies none of the edit unless the saved field and billing splits hold this retry's details); an edit to an existing record uses one key per record
+  and exact request, and only the latest attempt keeps its key, so a retry never replays another record's result or an older,
+  already-superseded edit.
+- NewOrder (`create_direct_order`, `create_rush_order`, both bound) keeps one key per exact request on purpose:
+  its below-cost approval is remembered per key, and a shared key could carry an approval to a different order.
+- Saving an existing job keeps one key per exact edit: re-applying an edit to the same job is harmless, while a
+  new job keeps one key and opens the committed job when an edited retry is refused.
+**Remaining risk:** for the unbound functions, a create retried with different details after a lost reply opens
+the record already created without the later edits, and an edited retry of an existing record applies the new edit
+after the old one. Neither makes a second record or moves money twice; a clear refusal needs server-side binding
+(KI-10 batches 4c/4d), not a screen change. Quotes' Convert to Order
+starts a new key each time its dialog opens, which is accepted: the server answers a repeat with
+`already_converted` and opens the existing order. `KNOWN_UNFIXED_SITES` in
+`src/__tests__/idempotency-reset-order.test.ts` lists only three documented scanner false positives (CustomerDetail,
+BulkTicketUpload, ManualTicketCreate). Proof on the local test copy, with the first reply dropped on purpose:
+Payment Allocation, Quick Delivery, Invoices delete and New Order (edited to B and back to A) each retried with the
+same key and the server replayed the first result. The scanner is still only a weak tripwire: it checks the order
+of the reset, not whether the key is scoped correctly.
 
 ### KI-12 — Quote "Convert to Order" can leave an accepted quote with no order
 **MED (latent) · CAUSE FIXED, LIVE 2026-10-27 (To-Do 1.3; PR #1105 merged as `f1503ba91`) · money/inventory/UI · Mason to decide about one real accepted quote with no order (Q-2026-2059)**
@@ -258,7 +316,7 @@ tiers is not built; the linkage field is not used for money today.
   `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
   (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
 - `invoices.season` defaults to `current_season()`, and the blend-ticket path uses it
-  (`20261020210000:1050,1227`). Fixed by `20261103120000` (once applied), which makes `current_season()` read the
+  (`20261020210000:1050,1227`). Fixed by `20261103120000` (applied 2026-11-03), which makes `current_season()` read the
   Chicago date; the same migration moves the `invoices.invoice_date` default to the Chicago date, so the two
   defaults agree. LOW.
 - Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
@@ -267,11 +325,15 @@ tiers is not built; the linkage field is not used for money today.
 - Two AR-aging views bucket a 30-day-old invoice differently; invoice dates have no future-date limit; three
   filters cut the day at UTC midnight. UNVERIFIED (PR #991 fixed the AR strip; the rest not re-checked). MED.
 
-### KI-19 — Accounting-month close: 26 other callers lack the month lock
-**HIGH-risk lane, dormant · PARTIAL · money · unassigned**
-Vendor-bill and vendor-payment edits are safe against a close (`20260730114102`, `20260730124308`,
-`20260731001654`). About 26 other `check_period_open` callers do not take the same lock, so a simultaneous edit
-could slip past a close. No month is closed live (older record's claim), so it is dormant.
+### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
+**HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**
+`20261103220000_period_check_takes_month_lock` makes `check_period_open` itself take the shared month lock that
+vendor-bill edits already took (`20260730114102`), so all 32 callers (26 had no lock) and a close of the same month now
+wait for each other: an edit racing a close waits and is then refused; a close waits for an in-flight edit. Proof:
+`scripts/smoke/prove-period-check-month-lock-real-schema.mjs` (real psql sessions racing a real close, fail-first).
+Known limit: callers take that lock before or after their invoice row locks, so two edits on one invoice while a close
+of that past month is queued can deadlock; PostgreSQL cancels one (40P01) and nothing is written. No month was closed
+live when this was written.
 
 ### KI-20 — Shelved or disabled money features
 **MED · OPEN · money · unassigned / Mason**
@@ -311,18 +373,24 @@ local replay's screen (a new line added after its product's cost rose shows the 
 ---
 
 ### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
-**MED · PARTLY FIXED (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (PR #1313, applied live 2026-11-02); payment half: open, KI-19 lane**
+**MED · FIXED IN CODE (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migrations `20261103150000` (PR #1313, applied live 2026-11-02) and `20261104120000` (PR #1332); payment half: migration `20261103220000` (live status: each one's `docs/reference/migrations.d/` record)**
 **Report half — fixed by `20261103150000_ar_aging_flags_unrebuildable_customers`** (live status: its
 `docs/reference/migrations.d/` record). `get_ar_aging` still refuses to rebuild a customer whose later activity makes
 the chosen date unknowable, but now returns everyone else and lists that customer with no amounts and an
 `unavailable_reason`; the AR Aging tab shows them in a warning ("cannot be shown as of this date") and its totals say
-they are excluded. Proof: `scripts/smoke/prove-ar-aging-flags-unrebuildable-real-schema.mjs`. Still not covered: a
-rare `HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE` (two posting events with the same audit timestamp) is raised
-outside the per-customer check and still fails the whole report; `get_customer_balance_listing` keeps the
-fail-for-everyone behaviour.
-**Payment half — OPEN, left for the KI-19 month-lock lane (KI-10 retry keys also redefine it):** `allocate_payment`
-accepts a future `p_payment_date` outside closed periods, which trips the same later-activity test (that customer
-now shows as "cannot be shown" even on a current-date report). Fix there: refuse future-dated payments.
+they are excluded. Proof: `scripts/smoke/prove-ar-aging-flags-unrebuildable-real-schema.mjs`.
+**Remaining report gaps — fixed by `20261104120000_balance_reports_flag_unrebuildable_customers`** (live status: its
+`docs/reference/migrations.d/` record). The rare `HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE` (two posting events on
+one invoice with the same audit timestamp) is now caught per customer in `get_ar_aging`, so it flags only that customer;
+and `get_customer_balance_listing` gets the same flag-don't-fail behaviour (flagged rows: every amount, count and date
+blank, plus `unavailable_reason`). The Reports → Customer Balance tab lists flagged customers in a warning, keeps them out
+of the table, and keeps them in the CSV with blank amounts. Proof:
+`scripts/smoke/prove-balance-reports-flag-unrebuildable-real-schema.mjs`. Known over-flag (deferred, LOW impact): a
+posting collision on an invoice already voided or deleted by the date still flags that customer, though the invoice is
+not in the balance. It flags, never shows a wrong amount, and before this fix it failed the whole report.
+**Payment half — fixed by `20261103220000_period_check_takes_month_lock`:** `allocate_payment` refuses a
+`p_payment_date` after today in Central time (`PAYMENT_DATE_IN_FUTURE`), so a payment can no longer make a customer
+unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
 ---
 
@@ -704,15 +772,19 @@ the `invoices_postable` view (every column but `total_cost_cents`), the seven sc
 ### KI-75 — Retry-key detail (extends KI-10, KI-11)
 **HIGH on money paths · OPEN · money**
 `transfer_invoice_to_job` and `update_field_app_invoice_billing` are now bound (batch 4a, `20261102180000`). Still
-open: the after-lock race in `apply_credit_memo_to_invoice`. Screen-side: the `PrepaymentManagerPanel` split-check modal, JobDetail
-reset-before-call defects the scanner cannot see, and payload-sensitive actions in FieldStop, DeliveryDetail and
-OrderDetail.
+open: the after-lock race in `apply_credit_memo_to_invoice`. Screen-side items, closed 2026-11-02 with KI-11 (same
+branch): JobDetail's reset-before-call defects are fixed. DeliveryDetail (edit, reassign, confirm, create invoice)
+and FieldStop (confirm) now keep a key per record or payload. Accepted with no change: the `PrepaymentManagerPanel`
+split-check modal, because batch 1 (`20261016060000`) binds `create_prepay_check_splits` on the server and the
+screen already resets only after a confirmed save. Also accepted: OrderDetail. `update_order_items` keeps one key
+per order, and a payload change is refused with a conflict dialog that reloads the order (by design).
+`price_order` already rotates its key when the payload hash changes. Cancel and split are per-order.
 
 ### KI-76 — Quote, season, invoice and return details (extends KI-12, KI-14, KI-18, KI-20, KI-69)
 **MED/LOW · OPEN · money**
 - Quote re-save can still be refused when a save both deletes or switches a saved line and adds several new lines
   for the same product (LOW).
-- `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (once applied) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
+- `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; since `20261103120000` (applied 2026-11-03) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
 - Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing

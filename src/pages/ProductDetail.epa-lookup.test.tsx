@@ -18,6 +18,7 @@ function baseProduct(overrides: Partial<Product> = {}): Product {
     product_name: 'Test Herbicide',
     sku: 'TEST-1',
     category: 'Herbicide',
+    use_timings: [],
     vendor: 'Test Vendor',
     manufacturer: 'Current Manufacturer',
     container_size: 2.5,

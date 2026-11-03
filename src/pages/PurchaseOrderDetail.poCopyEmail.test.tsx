@@ -85,7 +85,6 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 vi.mock('../lib/emailService', async () => ({
   ...(await vi.importActual<typeof import('../lib/emailService')>('../lib/emailService')),
   sendEmail: mocks.sendEmail,
-  pdfToBase64: () => 'UERG',
 }));
 
 vi.mock('../lib/purchaseOrderPdf', async () => ({
@@ -148,14 +147,16 @@ describe('PurchaseOrderDetail purchase order PDF and emailed copy', () => {
     fireEvent.click(screen.getByRole('button', { name: /send email/i }));
     await waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(1));
     const payload = mocks.sendEmail.mock.calls[0][0];
+    // The server draws the PO PDF from the saved order (KI-98); the app sends none.
+    expect(payload.attachments).toBeUndefined();
+    expect(mocks.generatePurchaseOrderPdf).not.toHaveBeenCalled();
     expect(payload).toMatchObject({
       to: 'mason@croprxsolutions.com',
       email_type: 'purchase_order',
       resource_type: 'purchase_order',
       resource_id: 'po-1',
       idempotency_key: 'idem:email_purchase_order',
-      attachments: [{ filename: 'Purchase-Order-PO-2026-0040.pdf', content: 'UERG' }],
-      purchase_order_snapshot: {
+      purchase_order_screen: {
         vendor: 'Spinner Ag',
         expected_delivery_date: null,
         notes: null,

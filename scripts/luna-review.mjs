@@ -335,6 +335,13 @@ function oversizedAdvice(git, frozen) {
   ].join("\n");
 }
 
+// Any mention of BLOCKER or HIGH withholds the hint, so a missed severity errs toward another round.
+export function nextStepHint(text) {
+  if (/\b(?:BLOCKER|HIGH)\b/i.test(text)) return null;
+  return "Next: no BLOCKER or HIGH. Fix the cheap MED/LOW items (or refute them) in one commit, then go "
+    + "straight to Sol if the change is on the Sol list. Do not run Luna again just for these.";
+}
+
 function reportDidNotRun(reason, advice) {
   console.log(`LUNA RESULT: DID NOT RUN (exit ${EXIT_DID_NOT_RUN}). THIS IS NOT A REVIEW AND NOT A CLEAN RESULT.`);
   console.log(`Why: ${reason}`);
@@ -353,6 +360,8 @@ function report(run, { label, diffLines, files, model, effort }) {
   console.log(`LUNA RESULT: ${run.outcome === "clean" ? "CLEAN" : `FINDINGS ${run.count}`} (exit ${exitCode})`);
   console.log(`Reviewed: ${label}, ${files} file(s), ${diffLines} diff lines, by ${model} at ${effort}.`);
   console.log("Advisory only: this is not a Sol proof and satisfies no gate.");
+  const hint = run.outcome === "clean" ? null : nextStepHint(run.text);
+  if (hint) console.log(hint);
   return exitCode;
 }
 

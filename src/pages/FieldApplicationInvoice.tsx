@@ -41,7 +41,7 @@ import { computeSeason, seasonEndDate, seasonStartDate } from '../utils/season';
 import CustomerSharesTable from '../components/field-app/CustomerSharesTable';
 import type { CustomerSharesBasis } from '../components/field-app/customerSplit';
 import ApplicationServicePicker from '../components/field-app/ApplicationServicePicker';
-import { downloadInvoicePdf, buildInvoicePdfDataFromRow, generateInvoicePdf } from '../lib/invoicePdf';
+import { downloadInvoicePdf, buildInvoicePdfDataFromRow } from '../lib/invoicePdf';
 import { fetchWeatherForDateTime, parseCentroid } from '../lib/weatherCapture';
 import {
   parseDiluentRate,
@@ -59,7 +59,7 @@ import {
   WEATHER_DISCLAIMER,
   type WeatherSetForm,
 } from '../lib/fieldAppWeather';
-import { sendEmail, pdfToBase64, buildInvoiceEmailPayload, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../lib/emailService';
+import { sendEmail, buildInvoiceEmailPayload, invoiceEmailSnapshot, isInvoiceEmailSuppressed } from '../lib/emailService';
 import {
   countSentPostNotifications,
   describePostNotificationSend,
@@ -2661,12 +2661,10 @@ export default function FieldApplicationInvoice() {
           .maybeSingle();
         const email = (cust as { email?: string | null } | null)?.email;
 
-        // Build the money-correct attachment FIRST, then the addressed payload.
+        // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
         // buildInvoiceEmailPayload throws the honest "no email on file" error
         // before any send, so a customer without an email never gets a blank send.
         const pdfData = await buildEditorPdfData('current');
-        const doc = await generateInvoicePdf(pdfData);
-        const base64 = pdfToBase64(doc);
 
         const payload = buildInvoiceEmailPayload({
           customerEmail: email,
@@ -2675,7 +2673,6 @@ export default function FieldApplicationInvoice() {
           invoiceNumber,
           invoiceDate: transactionDate,
           balanceCents: pdfSnapshot.balance_cents,
-          attachmentBase64: base64,
           snapshot: invoiceEmailSnapshot(pdfData),
         });
         await assertInvoiceSendable(id);

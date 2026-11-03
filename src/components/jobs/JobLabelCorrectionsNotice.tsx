@@ -15,9 +15,12 @@ interface Props<T extends LabelCorrectionRow> {
   rows: T[];
   canEdit: boolean;
   onApply: (next: T[]) => void;
+  // Held by the job page so "Keep job values" survives switching job tabs.
+  dismissedSignature: string | null;
+  onDismiss: (signature: string) => void;
 }
 
-function EditableNotice<T extends LabelCorrectionRow>({ rows, onApply }: Omit<Props<T>, 'canEdit'>) {
+function EditableNotice<T extends LabelCorrectionRow>({ rows, onApply, dismissedSignature, onDismiss }: Omit<Props<T>, 'canEdit'>) {
   const { toast } = useToast();
   const idsKey = [...new Set(rows.map((row) => row.product_id).filter(Boolean))].sort().join(',');
   const [loadedLabels, setLoadedLabels] = useState<{
@@ -25,8 +28,6 @@ function EditableNotice<T extends LabelCorrectionRow>({ rows, onApply }: Omit<Pr
     values: Map<string, ProductLabelValues>;
   } | null>(null);
   const [failedIdsKey, setFailedIdsKey] = useState<string | null>(null);
-  // shortcut: dismissal lasts until the page reloads; persist per job if staff ask.
-  const [dismissedSignature, setDismissedSignature] = useState<string | null>(null);
 
   useEffect(() => {
     if (!idsKey) return;
@@ -92,7 +93,7 @@ function EditableNotice<T extends LabelCorrectionRow>({ rows, onApply }: Omit<Pr
             }}>
               Update to current label
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setDismissedSignature(signature)}>
+            <Button type="button" variant="secondary" size="sm" onClick={() => onDismiss(signature)}>
               Keep job values
             </Button>
           </div>
@@ -104,5 +105,12 @@ function EditableNotice<T extends LabelCorrectionRow>({ rows, onApply }: Omit<Pr
 
 export default function JobLabelCorrectionsNotice<T extends LabelCorrectionRow>(props: Props<T>) {
   if (!props.canEdit) return null;
-  return <EditableNotice rows={props.rows} onApply={props.onApply} />;
+  return (
+    <EditableNotice
+      rows={props.rows}
+      onApply={props.onApply}
+      dismissedSignature={props.dismissedSignature}
+      onDismiss={props.onDismiss}
+    />
+  );
 }

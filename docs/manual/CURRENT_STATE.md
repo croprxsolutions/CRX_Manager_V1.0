@@ -284,6 +284,17 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **2026-11-03 ~05:37 UTC (about 11:37 PM Central, 2026-11-02; invoice email content built by the server, KI-97, PR #1340):**
+  the `send-email` Edge Function was deployed live as v22 (was v21) on Mason's in-chat approval ("Yes, merge and
+  deploy"). The deploy used `supabase functions deploy send-email --use-api` from main `4b745fdcc`, after the app
+  half merged.
+  - ACTIVE, with JWT checking on.
+  - All seven deployed files match main, read back through the Supabase connector: `index.ts`, plus `_shared/` cors,
+    auth, sentry, purchaseOrderEmailGate, emailContentGate and the new invoiceEmailGate.
+  - Caller path exercised on croprxsolutions.app: test invoice CS-2026-0058 (customer "[E2E] Farm Alpha", email set to
+    Mason's work address) was posted and emailed from Invoice Detail. Its `email_log` row is `sent` and carries the
+    server-written subject, Amount Due $3,000.00 and `Invoice-CS-2026-0058.pdf`. The invoice was then voided.
+  - The PDF file is still built by the app (accepted for now, KI-98). The rollback is redeploying v21.
 - **2026-11-03 02:16 UTC (9:16 PM Central, 2026-11-02; email record and content checks live, PR #1302):** the
   `send-email` Edge Function was deployed live as v21 (was v20) on Mason's in-chat approval ("yes deploy it"),
   with `supabase functions deploy send-email --use-api` from main `aeeff4880`. ACTIVE with JWT checking on;

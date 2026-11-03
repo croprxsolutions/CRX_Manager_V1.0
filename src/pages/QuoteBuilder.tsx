@@ -53,6 +53,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
+import { clearPendingRetry, loadPendingRetry, savePendingRetry, type PendingRetry } from '../lib/pendingRetry';
 import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
@@ -223,6 +224,8 @@ interface DrawRow {
   extraPrice: 'today' | 'booked';
 }
 
+type DrawRequestLine = { product_id: string; quantity: number; extra_price?: 'today' | 'booked' };
+
 let keyCounter = 0;
 function nextKey() {
   return `_k${++keyCounter}`;
@@ -355,6 +358,9 @@ export default function QuoteBuilder() {
   const [drawRows, setDrawRows] = useState<DrawRow[]>([]);
   const [drawLoading, setDrawLoading] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  // S14: a draw whose reply never came, kept in this tab across a reload (see pendingRetry).
+  const [pendingDraw, setPendingDraw] = useState<PendingRetry<DrawRequestLine[]> | null>(null);
+  const drawPendingName = JSON.stringify(['draw_down_quote', profile?.id || '', id || '']);
   // Booking settlement (roadmap #6c): read-only booked/drawn/remaining + prepay
   // position for an open booking (sent/revised quote), via get_booking_settlement.
   const [bookingSettlement, setBookingSettlement] = useState<BookingSettlement | null>(null);
@@ -3488,6 +3494,7 @@ export default function QuoteBuilder() {
       return false;
     }
     let loaded = false;
+    setPendingDraw(loadPendingRetry<DrawRequestLine[]>(drawPendingName));
     setDrawLoading(true);
     setShowDrawModal(true);
     try {
@@ -3546,40 +3553,52 @@ export default function QuoteBuilder() {
     return loaded;
   };
 
-  const handleDrawDown = async () => {
+  // `resume` re-sends a draw whose reply never came, exactly as it was sent and with its key, so the
+  // server returns the order it already made or makes it once (S14).
+  const handleDrawDown = async (resume?: PendingRetry<DrawRequestLine[]>) => {
     if (!id) return;
-    const draws = drawRows
-      .map((r) => ({ ...r, quantity: parseFloat(r.qty) || 0 }))
-      .filter((d) => d.quantity > 0);
-    if (draws.length === 0) {
-      toast('warning', 'Enter a quantity for at least one product');
-      return;
-    }
-    const closed = draws.find((d) => d.remaining <= 0);
-    if (closed) {
-      toast('error', `${closed.product_name}: nothing left on this booking`);
-      return;
+    let drawPayload: DrawRequestLine[];
+    if (resume) {
+      drawPayload = resume.request;
+    } else {
+      const draws = drawRows
+        .map((r) => ({ ...r, quantity: parseFloat(r.qty) || 0 }))
+        .filter((d) => d.quantity > 0);
+      if (draws.length === 0) {
+        toast('warning', 'Enter a quantity for at least one product');
+        return;
+      }
+      const closed = draws.find((d) => d.remaining <= 0);
+      if (closed) {
+        toast('error', `${closed.product_name}: nothing left on this booking`);
+        return;
+      }
+      // The price choice is sent only for a quantity over what is left, so every other draw
+      // is the same request as before.
+      drawPayload = draws.map((d) => ({
+        product_id: d.product_id,
+        quantity: d.quantity,
+        ...(d.quantity > d.remaining ? { extra_price: d.extraPrice } : {}),
+      }));
     }
     setDrawing(true);
-    // The price choice is sent only for a quantity over what is left, so every other draw
-    // is the same request as before.
-    const drawPayload = draws.map((d) => ({
-      product_id: d.product_id,
-      quantity: d.quantity,
-      ...(d.quantity > d.remaining ? { extra_price: d.extraPrice } : {}),
-    }));
     // One key per quote: the server binds this key to its request, so edited details after a lost reply are refused with the committed result (a re-entered quantity can newly exceed what is left).
+    // A key kept from before a reload wins over a fresh one, for the same reason (S14).
     const drawScope = id ?? '';
+    const drawKey = resume?.key ?? loadPendingRetry<DrawRequestLine[]>(drawPendingName)?.key ?? drawDownIdem.getKeyFor(drawScope);
+    savePendingRetry(drawPendingName, drawKey, drawPayload);
     try {
       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('draw_down_quote', withBelowCostReason('draw_down_quote', {
         p_quote_id: id,
         p_draws: drawPayload,
         p_performed_by: profile!.id,
-        p_idempotency_key: drawDownIdem.getKeyFor(drawScope),
+        p_idempotency_key: drawKey,
       }, reason)));
       if (error) throw error;
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
       drawDownIdem.resetKeyFor(drawScope);
+      clearPendingRetry(drawPendingName);
+      setPendingDraw(null);
       toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? ' — booking fully drawn' : ' — booking stays open'}`
         + (result.extra_order_number ? `. The amount over the booking is order ${result.extra_order_number}.` : ''));
       if (result.warnings && result.warnings.length > 0) {
@@ -3609,6 +3628,8 @@ export default function QuoteBuilder() {
       const bindingRejection = getIdempotencyBindingRejection(error);
       if (bindingRejection) {
         drawDownIdem.resetKeyFor(drawScope);
+        clearPendingRetry(drawPendingName);
+        setPendingDraw(null);
         const committedResult = bindingRejection === 'intent'
           ? getIdempotencyMismatchResult(error, 'draw_down_quote')
           : null;
@@ -5776,6 +5797,21 @@ export default function QuoteBuilder() {
               remaining balance and stays open until it is fully drawn. You can send more than
               is left: the extra goes on its own order at the price you choose.
             </p>
+            {pendingDraw && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm flex items-start justify-between gap-3">
+                <p>
+                  Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}) got no reply,
+                  so it may already have gone through. Finish it to get that order: it is made once, never twice.
+                </p>
+                <button
+                  onClick={() => handleDrawDown(pendingDraw)}
+                  disabled={drawing}
+                  className="shrink-0 px-3 py-1.5 bg-crx-green text-white rounded-lg disabled:opacity-50"
+                >
+                  Finish it
+                </button>
+              </div>
+            )}
             {drawLoading ? (
               <p className="text-sm text-secondary">Loading booking balance…</p>
             ) : (
@@ -5860,7 +5896,7 @@ export default function QuoteBuilder() {
                 Cancel
               </button>
               <button
-                onClick={handleDrawDown}
+                onClick={() => handleDrawDown()}
                 disabled={drawing || drawLoading || !drawRows.some((r) => (parseFloat(r.qty) || 0) > 0)}
                 className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg disabled:opacity-50"
               >

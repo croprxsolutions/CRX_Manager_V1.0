@@ -509,6 +509,7 @@ describe('QuoteBuilder', () => {
     vi.clearAllMocks();
     quoteIdempotencyState.reset();
     quoteIdempotencyHandles.clear();
+    sessionStorage.clear();
     dirtyStates.length = 0;
     authState.role = 'admin';
     mockFrom.mockImplementation(() => buildChain({ data: [], error: null }));
@@ -1280,6 +1281,69 @@ describe('QuoteBuilder', () => {
     expect(mockResetIdempotencyKey).toHaveBeenCalledTimes(1);
     expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringMatching(/^\/orders\//));
     expect(screen.queryByRole('dialog', { name: 'Create Order from Booking' })).not.toBeInTheDocument();
+  });
+
+  // S14 (KI-11): the reply to Partial Order is lost after the server made the order, and the rep
+  // reloads. The in-memory key is gone, so a fresh tap would make a second order. The screen keeps
+  // the unconfirmed draw in this tab and offers to finish it with its original key.
+  describe('a lost Partial Order reply, then a reload', () => {
+    const drawCalls = () => mockRpc.mock.calls
+      .filter(([name]) => name === 'draw_down_quote')
+      .map(([, args]) => args as { p_idempotency_key: string; p_draws: unknown[] });
+
+    async function reloadAndOpenDraw(quoteId: string) {
+      cleanup();
+      // A reload loses the hook's memory: a fresh key would be minted for this booking.
+      quoteIdempotencyState.bump(quoteId);
+      renderQuoteBuilder(quoteId);
+      const createOrderButton = await screen.findByRole('button', { name: /Create Order/ });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+      fireEvent.click(createOrderButton);
+      fireEvent.click(await screen.findByRole('menuitem', { name: /Draw part of booking/ }));
+      return screen.findByRole('dialog', { name: 'Create Order from Booking' });
+    }
+
+    it('finishes the unconfirmed draw with its original key, so it is made once', async () => {
+      const fixture = configureDrawDownFixture({ message: 'Failed to fetch' });
+      await submitOneUnitDraw(fixture.quote.id);
+      await waitFor(() => expect(drawCalls()).toHaveLength(1));
+      const first = drawCalls()[0];
+
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'draw_down_quote'
+        ? { data: { status: 'created', order_id: 'order-1', order_number: 'ORD-1', fully_drawn: false }, error: null }
+        : { data: null, error: null }));
+      const dialog = await reloadAndOpenDraw(fixture.quote.id);
+      expect(await within(dialog).findByText(/got no reply/)).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Finish it' }));
+
+      await waitFor(() => expect(drawCalls()).toHaveLength(2));
+      expect(drawCalls()[1].p_idempotency_key).toBe(first.p_idempotency_key);
+      expect(drawCalls()[1].p_draws).toEqual(first.p_draws);
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-1'));
+      expect(sessionStorage.length).toBe(0);
+    });
+
+    it('offers nothing to finish after a confirmed draw', async () => {
+      const fixture = configureDrawDownFixture({ message: 'unused' });
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'draw_down_quote'
+        ? { data: { status: 'created', order_id: 'order-1', order_number: 'ORD-1', fully_drawn: false }, error: null }
+        : { data: null, error: null }));
+      await submitOneUnitDraw(fixture.quote.id);
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-1'));
+
+      const dialog = await reloadAndOpenDraw(fixture.quote.id);
+      await within(dialog).findByRole('spinbutton');
+      expect(within(dialog).queryByText(/got no reply/)).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole('button', { name: 'Finish it' })).not.toBeInTheDocument();
+    });
+
+    it('forgets the unconfirmed draw once the server refuses its key', async () => {
+      const fixture = configureDrawDownFixture({ message: 'IDEMPOTENCY_ACTOR_MISMATCH' });
+      await submitOneUnitDraw(fixture.quote.id);
+      await waitFor(() => expect(mockResetIdempotencyKey).toHaveBeenCalled());
+      expect(sessionStorage.length).toBe(0);
+    });
   });
 
   it('maps a malformed draw product to a governed operator error', async () => {
@@ -4602,6 +4666,7 @@ describe('QuoteBuilder load failures', () => {
     vi.clearAllMocks();
     quoteIdempotencyState.reset();
     quoteIdempotencyHandles.clear();
+    sessionStorage.clear();
     dirtyStates.length = 0;
     authState.role = 'admin';
     mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));

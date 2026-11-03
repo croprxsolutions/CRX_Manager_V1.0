@@ -233,6 +233,9 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
     const handle = {
       getKey: () => `test-idem-key-${intentScope}-${quoteIdempotencyState.generationFor(intentScope)}`,
       resetKey: () => mockResetIdempotencyKey(intentScope),
+      // One key per named scope until that scope is retired, as the real hook does.
+      getKeyFor: (scopeValue: string) =>
+        `test-idem-key-${scopeValue}-${quoteIdempotencyState.generationFor(scopeValue)}`,
       // Retires a NAMED scope rather than the rendered one, as the real hook does.
       // Without this the page could not retire the key of a quote it has left.
       //

@@ -25,6 +25,7 @@ import { CsbLookupError, findCsbFeatureAt, type CsbFeature } from '../lib/csbLoo
 import { CsbAdoptError, csbFeatureToDrawnParts } from '../lib/csbAdopt';
 import { canRemoveSingleBoundary } from '../lib/fieldBoundaryState';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { fingerprintIntentPayload } from '../lib/idempotency';
 import { Sentry } from '../lib/sentry';
 import { computeBounds } from '../hooks/useFitBounds';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
@@ -110,6 +111,11 @@ function FieldSetupPage() {
   const { toast } = useToast();
   const { profile } = useAuth();
   const saveFieldIdem = useIdempotencyKey('save_field', profile?.id || '');
+  // Only the latest attempt keeps its retry key: going back to an older edit applies it again instead of
+  // replaying a result that a later edit may have replaced.
+  const lastFieldSaveScopeRef = useRef<string | null>(null);
+  // The details the first attempt of a new field sent: if a retry changes them, its reply may be the earlier field.
+  const firstNewAttemptRef = useRef<string | null>(null);
   const saveFieldBoundaryIdem = useIdempotencyKey('set_field_boundary', profile?.id || '');
   const saveFieldOverrideIdem = useIdempotencyKey('set_field_override_acres', profile?.id || '');
   const isNew = id === 'new';
@@ -601,21 +607,58 @@ function FieldSetupPage() {
         pricing_note: s.pricing_note || null,
       }));
 
-      const idemKey = saveFieldIdem.getKey();
+      // save_field checks only the key. A new field keeps one key until confirmed, so an edited retry after a lost
+      // reply replays the field it already created; an edit to an existing field gets a key per exact payload.
+      const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, fieldPayload, billingPayload]);
+      if (lastFieldSaveScopeRef.current && lastFieldSaveScopeRef.current !== saveScope) saveFieldIdem.resetKeyFor(lastFieldSaveScopeRef.current);
+      lastFieldSaveScopeRef.current = saveScope;
+      // Acreage is left out: applying the latest acreage to a field with the same details is what the user wants.
+      const attempt = fingerprintIntentPayload([fieldPayload, billingPayload]);
+      if (isNew && !saveFieldIdem.hasKeyFor('new')) firstNewAttemptRef.current = attempt;
+      const changedNewRetry = isNew && firstNewAttemptRef.current !== attempt;
       const { data, error } = await supabase.rpc('save_field', {
         p_field_id: (isNew ? null : id) as string,
         p_field_payload: fieldPayload,
         p_billing_defaults: billingPayload,
         p_performed_by: profile!.id,
-        p_idempotency_key: idemKey,
+        p_idempotency_key: saveFieldIdem.getKeyFor(saveScope),
       });
 
       if (error) {
         toast('error', rpcAuthErrorMessage(error) ?? error.message);
       } else {
-        saveFieldIdem.resetKey();
         assertRpcResult(data, 'save_field');
+        saveFieldIdem.resetKeyFor(saveScope);
         const savedFieldId = isNew ? data : id;
+
+        // A changed retry's reply may be a field an earlier attempt created with other details. Read it back:
+        // if it holds what this save sent, this save created it and its acreage belongs on it.
+        let createdBySave = !changedNewRetry;
+        if (changedNewRetry) {
+          const { data: saved } = await supabase
+            .from('fields')
+            .select('customer_id, field_name, legal_description, county, state, fsa_farm_number, fsa_tract_number, fsa_field_number, crop_type, soil_type, irrigation, notes, is_active')
+            .eq('id', savedFieldId as string)
+            .maybeSingle();
+          const sent: Record<string, unknown> = { ...fieldPayload };
+          const { data: savedSplits, error: splitsError } = await supabase
+            .from('field_billing_defaults')
+            .select('customer_id, split_pct, is_primary, notes, price_override_cents, pricing_note')
+            .eq('field_id', savedFieldId as string);
+          // Unreadable splits cannot prove this save created the field, so the screen takes the safe warning path.
+          if (splitsError) Sentry.captureException(splitsError, { tags: { source: 'fetch', action: 'verify_new_field_billing' } });
+          const splitKey = (rows: Array<{ customer_id: string; split_pct: number; is_primary: boolean; notes: string | null; price_override_cents: number | null; pricing_note: string | null }>) =>
+            JSON.stringify(rows.map((r) => [r.customer_id, Number(r.split_pct), r.is_primary, r.notes ?? null, r.price_override_cents ?? null, r.pricing_note ?? null]).sort());
+          createdBySave = !!saved && Object.entries(saved).every(([k, v]) => (v ?? null) === (sent[k] ?? null))
+            && !splitsError && Array.isArray(savedSplits) && splitKey(savedSplits) === splitKey(billingPayload);
+        }
+        if (!createdBySave) {
+          toast('warning', 'An earlier save may already have created this field. Opening it now; check its details and re-enter any acreage or boundary.');
+          skipUnsavedPromptRef.current = true;
+          navigate(`/fields/${savedFieldId}`, { replace: true });
+          setSaving(false);
+          return;
+        }
 
         // The field record is saved; now persist its acreage. Track whether any acreage RPC
         // fails so we don't report a misleading success or clear the dirty flag.

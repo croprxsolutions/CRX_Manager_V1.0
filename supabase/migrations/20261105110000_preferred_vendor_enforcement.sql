@@ -49,10 +49,18 @@ $function$;
 -- its text (the commit-time check refuses a product left with links but no preferred one).
 CREATE OR REPLACE FUNCTION public._sync_product_vendor_copy(p_product_id uuid)
 RETURNS void
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
+BEGIN
+  -- Waits out a rename of the preferred vendor, so the name copied below is the committed one.
+  PERFORM 1
+  FROM public.vendors v
+  JOIN public.product_supplier_links l ON l.vendor_id = v.id
+  WHERE l.product_id = p_product_id
+    AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred
+  FOR SHARE OF v;
   UPDATE public.products p
   SET vendor = v.name, updated_at = now()
   FROM public.product_supplier_links l
@@ -61,6 +69,7 @@ AS $function$
     AND l.product_id = p_product_id
     AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred
     AND p.vendor IS DISTINCT FROM v.name;
+END;
 $function$;
 
 CREATE OR REPLACE FUNCTION public.prepare_product_supplier_link()
@@ -197,6 +206,13 @@ SET search_path = public, pg_temp
 AS $function$
 BEGIN
   IF NEW.name IS DISTINCT FROM OLD.name THEN
+    -- Lock the products first and re-read in the next statement, so a preferred-vendor switch that
+    -- committed while this waited is seen and that product keeps its new vendor's name.
+    PERFORM 1 FROM public.products p
+    WHERE p.id IN (SELECT l.product_id FROM public.product_supplier_links l
+                   WHERE l.vendor_id = NEW.id AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred)
+    ORDER BY p.id
+    FOR UPDATE OF p;
     UPDATE public.products p
     SET vendor = NEW.name, updated_at = now()
     FROM public.product_supplier_links l
@@ -602,6 +618,13 @@ BEGIN
   WHERE p.vendor IS DISTINCT FROM v.name;
   IF v_bad <> 0 THEN
     RAISE EXCEPTION 'PREFERRED_VENDOR_ENFORCEMENT_NOT_READY: % products show a vendor other than their preferred vendor', v_bad;
+  END IF;
+  SELECT count(*) INTO v_bad
+  FROM public.product_supplier_links l
+  JOIN public.vendors v ON v.id = l.vendor_id
+  WHERE l.is_active AND l.link_status = 'confirmed' AND l.is_preferred AND v.deleted_at IS NOT NULL;
+  IF v_bad <> 0 THEN
+    RAISE EXCEPTION 'PREFERRED_VENDOR_ENFORCEMENT_NOT_READY: % preferred links point to a deleted vendor', v_bad;
   END IF;
 END
 $check$;

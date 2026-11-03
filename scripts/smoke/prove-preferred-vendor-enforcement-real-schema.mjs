@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -270,6 +270,10 @@ function main() {
   assert.match(early.output, /PREFERRED_VENDOR_ENFORCEMENT_NOT_READY: 1 products with links/);
   assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_product_supplier_links_prepare';"), '0');
   asOwner(`UPDATE public.product_supplier_links SET is_preferred = true WHERE id = '${LINK_A}';`);
+  // A preferred link to a deleted vendor refuses too: the product page would show no vendor.
+  asOwner(`UPDATE public.vendors SET deleted_at = now() WHERE id = '${V.A}';`);
+  assert.match(apply('cand.sql').output, /PREFERRED_VENDOR_ENFORCEMENT_NOT_READY: 1 preferred links point to a deleted vendor/);
+  asOwner(`UPDATE public.vendors SET deleted_at = NULL WHERE id = '${V.A}';`);
   const installed = apply('cand.sql');
   assert.equal(installed.status, 0, installed.output);
   ledger(path.basename(CANDIDATE, '.sql'));
@@ -372,6 +376,23 @@ function main() {
   refused(ADMIN, `SELECT public.delete_vendor('${V.B}', 'k-del-b');`, /VENDOR_IS_PREFERRED: 1 products/);
   ok(ADMIN, `SELECT public.delete_vendor('${V.C}', 'k-del-c');`);
   console.log('[prover] a vendor rename reaches its products; a preferred vendor cannot be deleted, a spare one can');
+
+  // A rename that waits on a preferred-vendor switch away from it re-reads afterwards: the product
+  // shows its new preferred vendor's name, not the old vendor's new name.
+  ok(ADMIN, link(P.ONE, V.A, false, 'k-race-a'));
+  assert.equal(preferredOf(P.ONE), V.B);
+  const switcher = spawn('docker', ['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-c',
+    `BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+     SET LOCAL ROLE authenticated; ${link(P.ONE, V.A, true, 'k-race-switch')} SELECT pg_sleep(4); COMMIT;`],
+  { cwd: ROOT, stdio: 'ignore' });
+  wait(2000);
+  const renameStarted = Date.now();
+  ok(ADMIN, `SELECT public.save_vendor('${V.B}', '{"name":"[PROVER] Beta Raced"}'::jsonb, 'k-race-rename');`);
+  assert.ok(Date.now() - renameStarted > 1000, 'the rename waited on the switch');
+  assert.equal(preferredOf(P.ONE), V.A);
+  assert.equal(vendorOf(P.ONE), '[PROVER] Acme Ag');
+  switcher.unref();
+  console.log('[prover] a rename racing a preferred-vendor switch shows the new preferred vendor');
 
   // Every product with links still has exactly one preferred link, whose name it shows.
   assert.equal(scalar(`SELECT count(*) FROM public.products p WHERE EXISTS (SELECT 1 FROM public.product_supplier_links l

@@ -230,6 +230,24 @@ describe('NewPurchaseOrder save and submit workflow', () => {
     expect(screen.getByPlaceholderText('Enter or select vendor...')).toHaveValue('Other Vendor');
   });
 
+  it('keeps the catalog cost when the PO vendor changes while the lookup is pending', async () => {
+    mockAuth.role = 'admin';
+    let answer: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_product_vendors') return new Promise((resolve) => { answer = resolve; });
+      throw new Error(`Unexpected RPC ${name}`);
+    });
+    render(<NewPurchaseOrder />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select Product' }));
+    fireEvent.click(screen.getByRole('button', { name: /Test Herbicide/ }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('get_product_vendors', expect.anything()));
+    fireEvent.change(screen.getByPlaceholderText('Enter or select vendor...'), { target: { value: 'Other Vendor' } });
+    answer({ data: [{ vendor_name: 'Test Vendor', is_preferred: true, last_cost_cents: 980 }], error: null });
+    await waitFor(() => expect(screen.getByDisplayValue('12.5')).toBeInTheDocument());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByDisplayValue('9.8')).not.toBeInTheDocument();
+  });
+
   it('a rep gets the preferred vendor name but no cost lookup', async () => {
     render(<NewPurchaseOrder />);
     fireEvent.click(await screen.findByRole('button', { name: 'Select Product' }));

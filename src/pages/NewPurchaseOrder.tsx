@@ -58,6 +58,9 @@ export default function NewPurchaseOrder() {
   const isAdmin = profile?.role === 'admin';
 
   const [vendor, setVendor] = useState('');
+  // Read when an async cost lookup returns, so it checks the vendor on the form then.
+  const vendorRef = useRef(vendor);
+  vendorRef.current = vendor;
   const [expectedDate, setExpectedDate] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<POItemDraft[]>([
@@ -221,7 +224,7 @@ export default function NewPurchaseOrder() {
     let cents: number | null = null;
     try {
       const preferred = (await listProductVendors(product.id)).find((v) => v.is_preferred);
-      if (preferred?.vendor_name !== poVendor) return;
+      if (preferred?.vendor_name !== (vendorRef.current.trim() || poVendor)) return;
       cents = preferred.last_cost_cents;
     } catch (err) {
       Sentry.captureException(err);

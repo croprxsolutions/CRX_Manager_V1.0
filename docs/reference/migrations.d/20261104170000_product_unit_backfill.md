@@ -12,6 +12,7 @@ It **overwrites existing rows**, so its live apply needs Mason's own `I approve`
 
 **Readers that see the new Unit afterwards** (none changes a stored amount):
 - `_transfer_job_to_invoice_intent_impl_20260908` and `create_job_from_quote_section` copy the product's Unit as the new line's label; amounts come from the stored line cents.
+  The transfer labels the new invoice line with the product's Unit, not the job line's own unit, for every product (Luna round 6). That is existing behaviour, not caused here: the only job with any of the nine products is already invoiced (live, 2026-11-03), so no existing line is relabelled. Follow-up: the transfer should carry the job line's own unit.
 - `_cost_step2_job_chemicals` fills a missing job-line cost by converting from the product's Unit; with a blank Unit it skipped the conversion, so the corrected Unit makes that fill correct.
 - `preview_product_pricing_changes`, `apply_product_pricing_change_set` and `create_pricing_workbook_export` fingerprint `unit_size`. A pricing preview or price workbook made before the apply is refused for these nine rows afterwards and must be redone. Live, 2026-11-03: one unapplied single-product preview (product page) includes one of the nine.
 

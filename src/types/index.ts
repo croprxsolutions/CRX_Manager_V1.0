@@ -2803,7 +2803,7 @@ export interface ARAgingPricedRow {
   days_90: number;
   over_90: number;
   total_outstanding: number;
-  prepay_balance_cents: number | null;
+  prepay_balance_cents: number;
   open_credit_cents: number;
   unavailable_reason: null;
 }

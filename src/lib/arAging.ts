@@ -4,3 +4,8 @@ import type { ARAgingPricedRow, ARAgingRow } from '../types';
 export function isPricedAgingRow(r: ARAgingRow): r is ARAgingPricedRow {
   return r.unavailable_reason == null && r.total_outstanding != null;
 }
+
+/** get_ar_aging amounts are whole-cent dollars (numeric / 100): add them as integer cents, not floats. */
+export function agingCents(dollars: number): number {
+  return Math.round(Number(dollars) * 100);
+}

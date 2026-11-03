@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase, assertRpcResult } from '../lib/db';
-import { isPricedAgingRow } from '../lib/arAging';
+import { agingCents, isPricedAgingRow } from '../lib/arAging';
 import type { ARAgingRow } from '../types';
 import { formatUSD } from '../lib/money';
 import { todayInBusinessTz } from '../lib/dateUtils';
@@ -69,7 +69,7 @@ export default function AccountsReceivable() {
         if (arErr) throw arErr;
         const arRows = assertRpcResult<ARAgingRow[]>(arData, 'get_ar_aging') || [];
         const pricedRows = arRows.filter(isPricedAgingRow);
-        const owedSum = pricedRows.reduce((s, r) => s + Number(r.total_outstanding), 0);
+        const owedSum = pricedRows.reduce((s, r) => s + agingCents(r.total_outstanding), 0) / 100;
         const excluded = arRows.length - pricedRows.length;
         const { data: prepayRows, error: prepayErr } = await fetchAllRows<{ id: string; balance_cents: number | null }>((from, to) => pageWithList(supabase
           .from('prepay_credits')

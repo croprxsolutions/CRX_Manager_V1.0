@@ -213,7 +213,15 @@ The order was revised by `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 5
 | **0** | PM-0 alone, in a normal session through `ship.md`, not a mission run | Mason asks for it |
 | **1** | PM-1, PM-14, PM-16, PM-2, PM-4, PM-13, PM-11b; then PM-12a if at least 3 hours remain | PM-0 has landed, or Mason says to go without it |
 | **2** | PM-12a if not done, PM-3, PM-8, PM-9, DM-0, PM-5, PM-6a, PM-6b, PM-7, PM-15a, PM-12b | Wave 1 work Mason chose has landed |
-| **3** | PM-15b, PM-11a, PM-10 | Wave 2's migrations are live, PM-15a has landed, and the DATA-11 review, the approved vendor data step and DM-0's data step are done and verified |
+| **3** | PM-15b (step 3 only), PM-11a-1, PM-11a-2, PM-10 | Every condition in "Wave 3 gate" below holds, checked live and recorded in the ledger |
+
+**Wave 3 gate (revised 2026-11-03 after an independent plan review).** Each item is checked read-only at Step 0 and recorded with its date:
+- **Migrations live:** `20261102100000`, `20261102102000`, `20261103210000`, `20261104140000`, `20261104150000`, `20261104180000`, `20261104200000` and `20261105090000`. PM-6b and PM-12b do not gate Wave 3.
+- **DATA-11 decisions** are in `docs/manual/DECISION_LOG.md` (entry 2026-11-03).
+- **The vendor data step** (`20261105100000`, PR #1385) is applied with Mason's explicit go at apply time, and verified: the number of active products with exactly one active, confirmed, preferred link to a live vendor equals the number of active products.
+- **DM-0's gate query** (build sheet §2a, DM-0) returns its targets, and Mason has signed off the remaining inactive rows.
+
+**Landing order for the pending migrations:** `20261105100000` (DATA-11), then `20261105110000` (15b enforcement), then `20261105120000` (PM-6b). If PM-6b must land first, re-stamp the vendor migrations above it rather than apply an earlier stamp after a later one.
 
 Landing between waves follows `ship.md` in a normal session after Mason's word. Stages 2 to 9 are not waves: each needs its own build sheet and review first. A wave that needs more than one run resumes from the ledger.
 
@@ -235,9 +243,10 @@ Landing between waves follows `ship.md` in a normal session after Mason's word. 
 | 13 | WP-PM-6b New-product flow + basic Duplicate 💲 | sol | PM-6a | Build only the parts that don't need the back-fill: opening the new product, missing-price refusals, basic Duplicate (no chemistry copy; after PAR-1, shared values live on the parent record). Otherwise PARK |
 | 14 | WP-PM-7 One cost path + tier-order warning 💲 | sol | PM-2, PM-12a | Full: the cost-writer map first, then changes; integrate and prove both prerequisites |
 | 15a | WP-PM-15 Vendor proposals and compatible writers 💲 | sol | PM-7 | Draft the proposal/review tool and compatible writers; preserve existing behavior. Missing supplier name, SKU, unit or pack remains an unresolved proposal, never a fabricated confirmed link. No live data step tonight. |
-| 15b | WP-PM-15 Vendor enforcement 💲 | sol | PM-7, PM-15a | Draft only with all prerequisites proven; enforcement cannot apply until DATA-11 is reviewed, the live data step is separately approved and verified, and old/new app compatibility is proven. |
-| 16 | WP-PM-11a Setup workbook + rate lock 💲 | sol | PM-8, PM-12a, PM-15a, PM-15b, DM-0 | Draft only when every prerequisite is present in the branch; otherwise PARK. Setup, Rates and Vendors tabs and rate lock as in overlap 11. Not mergeable until DM-0's data step is done. |
-| 17 | WP-PM-10 Bulk import 💲 | sol | PM-5, PM-8, PM-11a (rate lock), DM-0 | Draft only when every prerequisite is present; otherwise PARK. Rates use the shared writer and lock. Not mergeable until DM-0's data step is done. |
+| 15b | WP-PM-15 Vendor enforcement 💲 | sol | PM-7, PM-15a | **Three steps; only step 3 is run work.** **Step 1** (vendor-only links and `link_product_vendor`, `20261105090000`): landed in #1381, live 2026-11-03. **Step 2** (DATA-11 data, `20261105100000`): PR #1385. It writes live data, so it needs Mason's explicit go at apply. **Step 3** (enforcement, `20261105110000`, branch `pm/wp-pm-15b-preferred-vendor-enforcement`): reuse this branch; never open a second enforcement migration. Step 3's database change refuses direct edits of `products.vendor`. The app's existing Vendor edit on saved products must therefore be removed first: deploy an app-only PR that makes Vendor read-only on existing products and drops it from list editing, then apply step 3. Otherwise PARK. **Rollback, in this order:** drop step 3's triggers and functions; deactivate step 2's links (created by its approver at apply time); clear the two vendor texts step 2 filled. None of the steps changes a price or a cost a customer sees. |
+| 16 | WP-PM-11a-1 Rate writer, rate lock, correction 💲 | sol | PM-8, PM-12a, 15b step 3 | The one rate-writing function `set_product_rates`, the "Lock rates" switch and its database check, the locked-state correction operation, and read-only rate columns in the price workbook, as in build sheet §2a WP-PM-11a. Rates reprice customer-facing per-acre prices: prove them to the cent. |
+| 16b | WP-PM-11a-2 Setup workbook 💲 | sol | PM-11a-1, DM-0 gate | Setup and Rates tabs as in build sheet §2a WP-PM-11a; no Vendors tab; the Setup tab never includes `vendor`. Not mergeable until the DM-0 gate holds. |
+| 17 | WP-PM-10 Bulk import 💲 | sol | PM-5, PM-8, PM-11a-1, DM-0 gate | Inserts through the 11a-2 Setup RPC in insert mode if it has landed, otherwise through an insert RPC that 11a-2 then reuses; rates through `set_product_rates`. Re-ground the item list first (build sheet WP-PM-10). Not mergeable until the DM-0 gate holds. |
 | 18 | WP-PM-11b List editing + phone layout | luna | PM-1 | Full |
 | 19 | WP-PM-12b Corrections to existing records | sol | PM-12a | The record map first. Build the "open jobs offer to update" path; posted invoices never change (Mason, 2026-10-28) |
 | 20 | WP-PM-13 Reorder display | luna | — | Full |

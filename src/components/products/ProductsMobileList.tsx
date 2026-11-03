@@ -3,6 +3,7 @@ import { DollarSign, Search } from 'lucide-react';
 import type { MobileProduct } from '../../types';
 import { formatUSD } from '../../lib/money';
 import { matchesProductSearch } from '../../lib/productSearch';
+import { isSetupIncomplete, type SetupFilter } from '../../lib/productSetup';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import EmptyState, { LoadFailedState } from '../ui/EmptyState';
@@ -19,6 +20,8 @@ type Props = {
   onCategoryFilterChange: (value: string) => void;
   onVendorFilterChange: (value: string) => void;
   onStatusFilterChange: (value: 'active' | 'inactive' | 'all') => void;
+  setupFilter?: SetupFilter;
+  onSetupFilterChange?: (value: SetupFilter) => void;
   onOpenProduct: (product: MobileProduct) => void;
   /** Left out for anyone who may not change prices. */
   onChangePrice?: (product: MobileProduct) => void;
@@ -40,6 +43,8 @@ export default function ProductsMobileList({
   onCategoryFilterChange,
   onVendorFilterChange,
   onStatusFilterChange,
+  setupFilter = '',
+  onSetupFilterChange,
   onOpenProduct,
   onChangePrice,
   loadError = false,
@@ -48,13 +53,15 @@ export default function ProductsMobileList({
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(MOBILE_PAGE_SIZE);
 
-  const filteredProducts = useMemo(() => products.filter((product) => {
+  const listProducts = useMemo(() => products.filter((product) => {
     if (categoryFilter && product.category !== categoryFilter) return false;
     if (vendorFilter && product.vendor !== vendorFilter) return false;
     if (statusFilter === 'active' && !product.is_active) return false;
     if (statusFilter === 'inactive' && product.is_active) return false;
     return !search || matchesProductSearch(product, search);
   }), [categoryFilter, products, search, statusFilter, vendorFilter]);
+  const incompleteCount = useMemo(() => listProducts.filter(isSetupIncomplete).length, [listProducts]);
+  const filteredProducts = setupFilter === 'incomplete' ? listProducts.filter(isSetupIncomplete) : listProducts;
 
   const resetVisibleCount = () => setVisibleCount(MOBILE_PAGE_SIZE);
 
@@ -117,6 +124,20 @@ export default function ProductsMobileList({
             <option value="inactive">Inactive</option>
             <option value="all">All statuses</option>
           </select>
+          {onSetupFilterChange && (
+            <select
+              value={setupFilter}
+              onChange={(event) => {
+                onSetupFilterChange(event.target.value as SetupFilter);
+                resetVisibleCount();
+              }}
+              aria-label="Filter by setup"
+              className="col-span-2 min-h-11 min-w-0 rounded-lg border border-gray-200 px-3 py-2 text-base focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+            >
+              <option value="">Any setup</option>
+              <option value="incomplete">Incomplete setup ({incompleteCount})</option>
+            </select>
+          )}
         </div>
       </div>
 
@@ -147,6 +168,7 @@ export default function ProductsMobileList({
                   </Badge>
                 </div>
                 <p className="mt-2 text-sm text-secondary">{product.category || 'Uncategorized'}</p>
+                {isSetupIncomplete(product) && <Badge variant="warning" className="mt-2">Incomplete setup</Badge>}
                 <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-gray-100 pt-3">
                   <div>
                     <dt className="text-xs font-medium text-secondary">Tier 1</dt>

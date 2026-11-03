@@ -83,6 +83,9 @@ ok(checkDangerousCommand('Select-String "DROP TABLE" "C:\\logs\\"; psql < wipe.s
 ok(checkDangerousCommand('grep "DROP TABLE" "C:\\logs\\"; psql < wipe.sql; echo "x"'), "the same quoting after grep stays refused");
 ok(checkDangerousCommand('grep "DROP TABLE" C:\\logs\\; psql < wipe.sql'), "an unquoted backslash before a separator cannot hide a client (Codex App, PR #1337)");
 ok(checkDangerousCommand('rg "DROP TABLE" x\\| psql < wipe.sql'), "an unquoted backslash before a pipe cannot hide a client either");
+ok(checkDangerousCommand(`grep "DROP TABLE" f <# ' #>; psql < wipe.sql; echo '`), "a PowerShell block comment cannot hide a client (Codex App, PR #1337)");
+ok(checkDangerousCommand('grep "DROP TABLE" f --% "; psql < wipe.sql'), "PowerShell's stop-parsing token cannot hide a client");
+ok(!checkDangerousCommand(`grep -n 'psql $(x) DROP TABLE' notes.md`), "a single-quoted $( in a reader pattern runs nothing and stays allowed");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
 ok(!checkDangerousCommand("git push origin feature/x"), "ordinary feature push allowed");

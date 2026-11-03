@@ -355,24 +355,29 @@ function sqlSegmentProgram(segment) {
   const word = (String(segment).trim().split(/\s+/)[0] || "").replace(/["'`^\\]/g, "");
   return word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").toLowerCase();
 }
+// Allowlist, not a blocklist: every escape, expansion, comment or quoting quirk
+// bash and PowerShell read differently (`$'…'`, `\"`, `\;`, `<#…#>`, backtick,
+// `$(`, a line break) was a way to hide a client in a reader (Codex App, PR #1337).
+// Outside quotes only plain word characters remain; a quoted span may not hold
+// `$` or a backtick (both shells expand them in double quotes) or end in `\`.
+function plainReaderSegment(segment) {
+  if (/[\r\n]|\\["']/.test(segment)) return false;
+  return /^[\w\s./\\:*=,@+#?-]*$/.test(segment.replace(/'[^']*'|"[^"$`]*"/g, ""));
+}
 export function checkDestructiveSql(cmd) {
   const text = String(cmd || "");
   if (!DESTRUCTIVE_SQL_RE.test(text)) return null;
   const flagOutsideReader = /(?:^|\s)--?[cf]\s/.test(text) &&
     text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() && !SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)));
   // A client name counts only outside a known reader, so a `grep "…\|psql"`
-  // pattern is a search, not a call (retro on PR #1333). The split respects
-  // quotes; a reader holding a command substitution, or `rg --pre` (which runs
-  // a program on each file, Codex App on PR #1337), can still run a client.
-  // `$'…'`/`$"…"` quoting escapes quotes the splitter cannot follow, and `\"`
-  // escapes a quote in bash but closes it in PowerShell; likewise an unquoted
-  // `\;` `\|` `\&` is one word in bash but a separator in PowerShell (Codex App).
-  // A reader spanning a line break is never exempt: a quote opened inside a
-  // comment or continuation can swallow the next line's command (Codex App).
+  // pattern is a search, not a call (retro on PR #1333). The split follows bash
+  // quoting, so the exemption holds only for a plain reader segment that bash
+  // and PowerShell both split the same way; `rg --pre` runs a program on each
+  // file and is never exempt (Codex App on PR #1337).
   const clientOutsideReader = splitShellSegments(text).some((segment) => {
     const unquoted = segment.replace(/["'`^\\]/g, "");
     return (SQL_CLIENT_RE.test(segment) || SQL_CLIENT_RE.test(unquoted)) &&
-      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || /[\r\n]|\$[('"]|\\["']|`|[<>]\(/.test(segment) || /\\[;|&]/.test(segment.replace(/'[^']*'|"[^"]*"/g, "")) || /(?:^|\s)--pre\b/.test(unquoted));
+      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || !plainReaderSegment(segment) || /(?:^|\s)--pre\b/.test(unquoted));
   });
   if (clientOutsideReader || flagOutsideReader) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";

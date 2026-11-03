@@ -44,6 +44,14 @@ const LEDGER_ONLY = new Set([
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
 // A later or parked file that changes what the back-fill touches or relies on.
+// 20261104150000 (WP-PM-9) pins three live bodies that live stores with CRLF line endings; install
+// them before replaying it, exactly as its own prover does (scripts/smoke/prove-product-forms-seed-each-real-schema.mjs).
+const PM9 = '20261104150000_product_forms_seed_each.sql';
+const LIVE_BODY_MD5 = {
+  'public.field_app_priced_quantity(numeric,text,text,text)': 'bc91a52577840973f18f1710e47edf2b',
+  'public.convert_to_gl_lb(numeric,text,text)': 'ce9265521821c09b0cf74de45afb375b',
+  'public.validate_product_units()': '83a51c58c83cd83bea760bd117410a38',
+};
 const TOUCHED = /unit_size|product_price_per_acre|write_product_change_history|recalc_product_price_per_acre/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
@@ -123,6 +131,38 @@ function installLiveAuthUid() {
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
 }
+function bodyFrom(file, expression) {
+  const match = expression.exec(readFileSync(path.join(MIGRATIONS, file), 'utf8'));
+  assert.ok(match, `${file} no longer contains its pinned function body`);
+  return match[1];
+}
+function restoreLiveBodies() {
+  // Historical replay uses LF staging; validate_product_units had CRLF in live prosrc.
+  const validate = bodyFrom('20260211000000_unit_tracking_pricing_overhaul.sql',
+    /CREATE OR REPLACE FUNCTION validate_product_units\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/)
+    .replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');  // same bytes on an LF or CRLF checkout
+  const field = bodyFrom('20260630180000_field_app_pricing_unit_fix.sql',
+    /CREATE OR REPLACE FUNCTION public.field_app_priced_quantity\([\s\S]*?AS \$fapq\$([\s\S]*?)\$fapq\$;/);
+  const seededConvert = bodyFrom(PM9,
+    /CREATE OR REPLACE FUNCTION public.convert_to_gl_lb\([\s\S]*?AS \$function\$([\s\S]*?)\$function\$;/).replaceAll('\r\n', '\n');
+  const seedArm = "  IF lower(coalesce(p_product_form, '')) IN ('seed','each') THEN RETURN QUERY SELECT NULL::numeric, NULL::text; RETURN; END IF;\n";
+  assert.equal(seededConvert.split(seedArm).length - 1, 1);
+  const convert = seededConvert.replace(seedArm, '');
+  psql(`CREATE OR REPLACE FUNCTION public.validate_product_units() RETURNS trigger LANGUAGE plpgsql
+    SET search_path = public, pg_temp AS $live_validate$${validate}$live_validate$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.field_app_priced_quantity(
+      p_applied_qty numeric, p_rate_unit text, p_inventory_unit text, p_product_form text)
+    RETURNS numeric LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp
+    AS $live_field$${field}$live_field$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.convert_to_gl_lb(
+      p_total_applied numeric, p_rate_unit text, p_product_form text)
+    RETURNS TABLE(converted_value numeric, converted_unit text) LANGUAGE plpgsql IMMUTABLE
+    SET search_path = public AS $live_convert$${convert}$live_convert$;`);
+  for (const [signature, expected] of Object.entries(LIVE_BODY_MD5)) {
+    assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = '${signature}'::regprocedure;`),
+      expected, `${signature} is not the pinned live body before the candidate`);
+  }
+}
 function buildContainer() {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   started = true; // only now is the container ours to remove
@@ -158,6 +198,7 @@ function buildContainer() {
         INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
         WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse');`);
     }
+    if (base === PM9) restoreLiveBodies();
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
     ledger(path.basename(file, '.sql'));

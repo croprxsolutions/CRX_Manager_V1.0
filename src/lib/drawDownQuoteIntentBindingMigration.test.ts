@@ -263,7 +263,7 @@ describe('draw_down_quote actor and intent binding migration', () => {
     const rejectionHandler = drawHandler.slice(drawHandler.indexOf('if (bindingRejection) {'));
     expectOrdered(rejectionHandler, [
       'if (bindingRejection) {',
-      'drawDownIdem.resetKey();',
+      'drawDownIdem.resetKeyFor(drawScope);',
       "getIdempotencyMismatchResult(error, 'draw_down_quote')",
       'if (committedOrderId) {',
       'navigate(`/orders/${committedOrderId}`);',

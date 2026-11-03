@@ -282,7 +282,7 @@ try {
   run(['cp', baselineArtifact('_platform_overlay.sql'), `${NAME}:/tmp/platform.sql`]);
   run(['cp', baselineArtifact('_migration_history.sql'), `${NAME}:/tmp/migration-history.sql`]);
   applyFile('extensions.sql');
-  const decoded = spawnSync('node', ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 60 * 1024 * 1024 });
+  const decoded = spawnSync('node', ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], { cwd: ROOT, maxBuffer: 60 * 1024 * 1024 });
   assert.equal(decoded.status, 0, decoded.stderr?.toString());
   run(psqlArgs(), { input: decoded.stdout });
   adminSql(`

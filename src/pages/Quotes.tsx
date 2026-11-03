@@ -130,7 +130,8 @@ export default function Quotes() {
   const handleDuplicate = async (quoteId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const key = duplicateQuoteIdem.getKey();
+      // Keyed per source quote: a retry reuses it, duplicating another quote gets its own.
+      const key = duplicateQuoteIdem.getKeyFor(quoteId);
       const { data: result, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('duplicate_quote', withBelowCostReason('duplicate_quote', {
         p_source_quote_id: quoteId,
         p_performed_by: profile!.id,
@@ -140,8 +141,8 @@ export default function Quotes() {
         toast('error', `Failed to duplicate quote: ${error.message}`);
         return;
       }
-      duplicateQuoteIdem.resetKey();
       const dupResult = assertRpcResult<{ quote_id: string; quote_number: string }>(result, 'duplicate_quote');
+      duplicateQuoteIdem.resetKeyFor(quoteId);
       toast('success', `Quote duplicated as ${dupResult.quote_number}`);
       navigate(`/quotes/${dupResult.quote_id}`);
     } catch (err: unknown) {

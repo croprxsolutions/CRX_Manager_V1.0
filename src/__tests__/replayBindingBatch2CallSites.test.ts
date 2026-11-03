@@ -109,18 +109,20 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     }
   });
 
-  // Each key resets exactly when its RPC's arguments change: the intent is the argument object
-  // the call sends, JSON-encoded. A delimiter join let two different forms keep one key (Sol), and
-  // a field the RPC never sees must not retire a key whose attempt may have committed (CodeRabbit).
+  // Each key is scoped to exactly its RPC's arguments: the intent is the argument object the call
+  // sends, JSON-encoded by fingerprintIntentPayload. A delimiter join let two different forms keep one
+  // key (Sol), and a field the RPC never sees must not retire a key whose attempt may have committed
+  // (CodeRabbit). Scoping, not a reset on change, also keeps form A's key if the user edits away and back (KI-11).
   const ORDER_INTENT: Array<[string, string, string, string]> = [
-    ['create_direct_order', 'directOrderArgs', 'directOrderIntentHash', 'createOrderIdem'],
-    ['create_rush_order', 'rushOrderArgs', 'rushOrderIntentHash', 'rushOrderIdem'],
+    ['create_direct_order', 'directOrderArgs', 'directOrderScope', 'createOrderIdem'],
+    ['create_rush_order', 'rushOrderArgs', 'rushOrderScope', 'rushOrderIdem'],
   ];
-  for (const [rpc, args, hash, idem] of ORDER_INTENT) {
+  for (const [rpc, args, scope, idem] of ORDER_INTENT) {
     it(`NewOrder: ${rpc} sends exactly the arguments its key's intent hashes`, () => {
       const source = read('src/pages/NewOrder.tsx');
-      expect(source).toContain(`const ${hash} = JSON.stringify(${args});`);
-      expect(source).toMatch(new RegExp(`useEffect\\(\\(\\) => \\{\\s*${idem}\\.resetKey\\(\\);[^}]*\\}, \\[${hash}\\]\\);`));
+      expect(source).toContain(`const ${scope} = fingerprintIntentPayload(${args});`);
+      expect(source).toContain(`${idem}.getKeyFor(${scope})`);
+      expect(source).not.toMatch(new RegExp(`${idem}\\.(?:getKey|resetKey)\\(\\)`));
       expect(source).toMatch(new RegExp(`supabase\\.rpc\\('${rpc}', withBelowCostReason\\('${rpc}', \\{\\s*\\.\\.\\.${args},\\s*p_performed_by: profile\\.id,\\s*p_idempotency_key: (\\w+),\\s*\\}, belowCostReasonFor\\(\\1, reason\\)\\)`));
     });
   }

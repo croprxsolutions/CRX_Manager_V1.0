@@ -246,11 +246,11 @@ export default function FieldStop() {
     try {
       const { data, error } = await supabase.rpc('confirm_delivery', {
         p_delivery_id: id,
-        p_idempotency_key: confirmIdem.getKey(),
+        p_idempotency_key: confirmIdem.getKeyFor(id),
       });
       if (error) throw error;
       assertRpcResult(data, 'confirm_delivery');
-      confirmIdem.resetKey();
+      confirmIdem.resetKeyFor(id);
       toast('success', 'Delivery started');
       await syncAfterArrive();
     } catch (err: unknown) {

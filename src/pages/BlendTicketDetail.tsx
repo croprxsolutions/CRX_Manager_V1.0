@@ -8,7 +8,7 @@ import { Sentry } from '../lib/sentry';
 import { BLEND_TICKET_PRODUCT_COLUMNS, ORDER_COLUMNS, ORDER_ITEM_COLUMNS, PRODUCT_COLUMNS } from '../lib/costFields';
 import { blockedUnitSaveMessage, type UnitLoadState } from '../lib/units';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { getCommittedOrderIdFromMismatch, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { fingerprintIntentPayload, getCommittedOrderIdFromMismatch, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { useAuth } from '../contexts/AuthContext';
 import Button from '../components/ui/Button';
@@ -53,6 +53,9 @@ export function BlendTicketDetail() {
   const ocrThresholds = useOCRThresholds();
   const saveIdem = useIdempotencyKey('save_blend_ticket', profile?.id || '');
   const linkIdem = useIdempotencyKey('link_blend_ticket_to_order', profile?.id || '');
+  // Only the latest attempt keeps its retry key: going back to an older edit applies it again instead of
+  // replaying a result that a later edit may have replaced.
+  const lastLinkScopeRef = useRef<string | null>(null);
   const unlinkIdem = useIdempotencyKey('unlink_blend_ticket_from_order', profile?.id || '');
   const createOrderIdem = useIdempotencyKey('create_order_from_blend_ticket', profile?.id || '');
   const appRecordIdem = useIdempotencyKey('create_application_record_from_blend_ticket', profile?.id || '');
@@ -665,15 +668,14 @@ export function BlendTicketDetail() {
         // Route through the RPC (not a raw .update) for DB-level role/actor
         // enforcement, the status='completed' & review_status='unreviewed' guard,
         // and idempotency. A single ticket is a one-element batch.
-        const approveKey = approveIdem.getKey();
         const { data, error } = await supabase.rpc('batch_approve_blend_tickets', {
           p_ticket_ids: [ticket.id],
           p_approved_by: profile.id,
-          p_idempotency_key: approveKey,
+          p_idempotency_key: approveIdem.getKeyFor(ticket.id),
         });
         if (error) throw error;
-        approveIdem.resetKey();
         const result = assertRpcResult<{ approved_count: number }>(data, 'batch_approve_blend_tickets');
+        approveIdem.resetKeyFor(ticket.id);
         if (result.approved_count < 1) {
           throw new Error('Blend ticket could not be approved — it may already be reviewed or not yet completed.');
         }
@@ -698,15 +700,14 @@ export function BlendTicketDetail() {
         // Route through the RPC (not a raw .update) for DB-level role/actor
         // enforcement, the status='completed' & review_status='unreviewed' guard,
         // and idempotency. A single ticket is a one-element batch.
-        const rejectKey = rejectIdem.getKey();
         const { data, error } = await supabase.rpc('batch_reject_blend_tickets', {
           p_ticket_ids: [ticket.id],
           p_rejected_by: profile.id,
-          p_idempotency_key: rejectKey,
+          p_idempotency_key: rejectIdem.getKeyFor(ticket.id),
         });
         if (error) throw error;
-        rejectIdem.resetKey();
         const result = assertRpcResult<{ rejected_count: number }>(data, 'batch_reject_blend_tickets');
+        rejectIdem.resetKeyFor(ticket.id);
         if (result.rejected_count < 1) {
           throw new Error('Blend ticket could not be rejected — it may already be reviewed or not yet completed.');
         }
@@ -941,16 +942,18 @@ export function BlendTicketDetail() {
     }
     setLinking(true);
     try {
-      const linkKey = linkIdem.getKey();
+      const linkScope = fingerprintIntentPayload([ticket.id, selectedOrderId]);
+      if (lastLinkScopeRef.current && lastLinkScopeRef.current !== linkScope) linkIdem.resetKeyFor(lastLinkScopeRef.current);
+      lastLinkScopeRef.current = linkScope;
       const { data, error } = await supabase.rpc('link_blend_ticket_to_order', {
         p_blend_ticket_id: ticket.id,
         p_order_id: selectedOrderId,
         p_performed_by: profile.id,
-        p_idempotency_key: linkKey,
+        p_idempotency_key: linkIdem.getKeyFor(linkScope),
       });
       if (error) throw error;
-      linkIdem.resetKey();
       const result = assertRpcResult<{ success: boolean; error?: string; order_number?: string; items_linked?: number }>(data, 'link_blend_ticket_to_order');
+      linkIdem.resetKeyFor(linkScope);
       if (!result.success) throw new Error(result.error);
       toast('success', `Linked to order ${result.order_number} (${result.items_linked} items matched)`);
       setShowLinkModal(false);
@@ -983,15 +986,14 @@ export function BlendTicketDetail() {
       return;
     }
     try {
-      const unlinkKey = unlinkIdem.getKey();
       const { data, error } = await supabase.rpc('unlink_blend_ticket_from_order', {
         p_blend_ticket_id: ticket.id,
         p_performed_by: profile.id,
-        p_idempotency_key: unlinkKey,
+        p_idempotency_key: unlinkIdem.getKeyFor(ticket.id),
       });
       if (error) throw error;
-      unlinkIdem.resetKey();
       const result = assertRpcResult<{ success: boolean; error?: string }>(data, 'unlink_blend_ticket_from_order');
+      unlinkIdem.resetKeyFor(ticket.id);
       if (!result.success) throw new Error(result.error);
       toast('success', 'Blend ticket unlinked from order');
       await loadTicketData();
@@ -1158,20 +1160,21 @@ export function BlendTicketDetail() {
     }
     setLinking(true);
     try {
-      const createOrderKey = createOrderIdem.getKey();
+      // One key per ticket: the server binds this key to its request, so edited details after a lost reply are refused with the committed result (the order number is regenerated on each open).
+      const createOrderScope = ticket.id;
       const { data, error } = await supabase.rpc('create_order_from_blend_ticket', {
         p_blend_ticket_id: ticket.id,
         p_order_number: newOrderNumber.trim(),
         p_order_date: newOrderDate,
         p_notes: newOrderNotes || undefined,
         p_performed_by: profile.id,
-        p_idempotency_key: createOrderKey,
+        p_idempotency_key: createOrderIdem.getKeyFor(createOrderScope),
       });
       if (error) {
         // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
         // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
         const bindingRejection = getIdempotencyBindingRejection(error);
-        if (bindingRejection === 'intent' || bindingRejection === 'actor') createOrderIdem.resetKey();
+        if (bindingRejection === 'intent' || bindingRejection === 'actor') createOrderIdem.resetKeyFor(createOrderScope);
         // An intent refusal carries the order an earlier attempt under this key already created: open it
         // instead of letting the next click, with a fresh key, create a second order.
         const committedOrderId = getCommittedOrderIdFromMismatch(error, 'create_order_from_blend_ticket');
@@ -1185,8 +1188,8 @@ export function BlendTicketDetail() {
         if (missingPrice) throw new Error(missingPrice);
         throw error;
       }
-      createOrderIdem.resetKey();
       const result = assertRpcResult<{ success: boolean; error?: string; order_number?: string; order_id?: string; items_created?: number }>(data, 'create_order_from_blend_ticket');
+      createOrderIdem.resetKeyFor(createOrderScope);
       if (!result.success) throw new Error(result.error);
       toast('success', `Order ${result.order_number} created with ${result.items_created} items`);
       setShowCreateOrderModal(false);
@@ -1955,16 +1958,18 @@ export function BlendTicketDetail() {
                   if (!ticket || !profile || linking) return;
                   setLinking(true);
                   try {
-                    const linkKey = linkIdem.getKey();
+                    const linkScope = fingerprintIntentPayload([ticket.id, suggestedOrder.id]);
+                    if (lastLinkScopeRef.current && lastLinkScopeRef.current !== linkScope) linkIdem.resetKeyFor(lastLinkScopeRef.current);
+                    lastLinkScopeRef.current = linkScope;
                     const { data, error } = await supabase.rpc('link_blend_ticket_to_order', {
                       p_blend_ticket_id: ticket.id,
                       p_order_id: suggestedOrder.id,
                       p_performed_by: profile.id,
-                      p_idempotency_key: linkKey,
+                      p_idempotency_key: linkIdem.getKeyFor(linkScope),
                     });
                     if (error) throw error;
-                    linkIdem.resetKey();
                     const result = assertRpcResult<{ success: boolean; error?: string; order_number?: string; items_linked?: number }>(data, 'link_blend_ticket_to_order');
+                    linkIdem.resetKeyFor(linkScope);
                     if (!result.success) throw new Error(result.error);
                     toast('success', `Linked to order ${result.order_number} (${result.items_linked} items matched)`);
                     await loadTicketData();

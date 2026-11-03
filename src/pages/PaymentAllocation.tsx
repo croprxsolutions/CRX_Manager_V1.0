@@ -392,21 +392,25 @@ export default function PaymentAllocation() {
     }
     setSubmitting(true);
     try {
-      const idemKey = allocatePaymentIdem.getKey();
-      const { data, error } = await supabase.rpc('allocate_payment', {
+      const args = {
         p_customer_id: payment.customerId,
         p_total_cents: payment.cents,
         p_allocations: payment.allocations,
         p_payment_method: payment.method,
         p_reference_number: payment.reference || undefined,
         p_notes: payment.notes || undefined,
+      };
+      // One key for this check until it is confirmed: allocate_payment compares a retry's arguments with the
+      // first attempt's, so an edited retry after a lost reply is refused instead of saving a second payment.
+      const { data, error } = await supabase.rpc('allocate_payment', {
+        ...args,
         p_performed_by: profile.id,
-        p_idempotency_key: idemKey,
+        p_idempotency_key: allocatePaymentIdem.getKey(),
       });
 
       if (error) throw error;
-      allocatePaymentIdem.resetKey();
       const result = assertRpcResult<PaymentAllocationResult>(data, 'allocate_payment');
+      allocatePaymentIdem.resetKey();
       setLastResult(result);
 
       const parts = [`Applied ${fmt(result.total_allocated_cents)} to ${result.invoices_paid} invoice(s)`];

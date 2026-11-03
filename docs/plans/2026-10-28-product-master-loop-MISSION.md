@@ -111,7 +111,7 @@ Use Codex for building ("I have a lot of codex usage left").
   - **Real data stays private.** This repository is public. Row-level lists from live data (DM-0, PM-6a, PM-8, DATA-11) go only to `C:\Users\mason\Documents\Obsidian Vault\Products\Product Master review\`, following that vault's `CLAUDE.md`. The ledger, PRs and morning report carry counts, status and that folder's name, never the rows. If the vault is absent, PARK that output.
   - No live smoke chains tonight.
 - **Migrations:**
-  - new files under `supabase/migrations/`, with timestamps above both the live high-water and `origin/main`'s newest file;
+  - new files under `supabase/migrations/`, with timestamps from `npm run next-migration-stamp -- --live <live max version>` (above the live high-water, `origin/main`, every local worktree and every open PR);
   - each package uses its own distinct timestamp;
   - each comes with a rollback note;
   - CHECK changes are supersets;

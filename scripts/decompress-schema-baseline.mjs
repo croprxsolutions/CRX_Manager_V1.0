@@ -32,3 +32,13 @@ if (decoded.length !== expected.decoded_bytes || sha256(decoded) !== expected.de
 }
 
 process.stdout.write(decoded);
+
+// --with-live-rows: disposable test databases only, never a real restore (the data restore brings these back).
+// Live rows that later migrations' postconditions require and the schema-only baseline lacks.
+if (process.argv.includes('--with-live-rows')) {
+  process.stdout.write(`
+-- Live's only warehouse since 20260213160000; KI-85 (20261102220000) requires it active.
+INSERT INTO public.warehouses (id, name, code, state, is_active, is_default, created_at)
+VALUES ('19f7ca09-310d-4d40-8c2f-ba46f333f065', 'Main Warehouse', 'MW', 'IL', true, true, '2026-02-13 05:56:31.323738+00');
+`);
+}

@@ -139,7 +139,7 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  assert.equal(at, all.length - 1, 'the candidate must be the last migration in the replay plan');
+  // Applied live; later migrations carry their own proofs, so replay only up to the candidate (as #1292).
   const before = all.slice(0, at);
   const touched = new RegExp([...WRAPPED, 'idempotency_keys'].join('|'));
   for (const name of PARKED) {
@@ -182,6 +182,12 @@ function buildContainer() {
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     // Batch 2's preflight pins live's auth.uid() body, which live had when batch 2 was applied.
     if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
+    // KI-85's postcondition needs live's active Main Warehouse row, which the schema-only baseline lacks.
+    if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') {
+      psql(`UPDATE public.warehouses SET is_active = true WHERE name = 'Main Warehouse';
+        INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
+        WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse');`);
+    }
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
     ledger(path.basename(file, '.sql'));

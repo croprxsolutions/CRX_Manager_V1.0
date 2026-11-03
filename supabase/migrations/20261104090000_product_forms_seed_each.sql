@@ -154,6 +154,9 @@ BEGIN
         v_product_name
         USING ERRCODE = '22023';
     END IF;
+    -- Store the stock unit's own spelling: quote pricing joins LOWER(rate_unit) untrimmed.
+    NEW.rate_unit := v_inventory_unit;
+    NEW.price_unit := v_inventory_unit;
   END IF;
 
   RETURN NEW;

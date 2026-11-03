@@ -112,14 +112,15 @@ function assertExecutableProofGuards(smokeText: string, proverText: string) {
   ]) expect(smokeText).toContain(anchor);
   expect(smokeText).not.toContain('ALTER TABLE public.products DISABLE TRIGGER');
   expect(proverText).toContain("assert.match(output, /SMOKE_PASS_ROLLBACK/");
-  expect(proverText).toContain('buildBaselineSchema();');
+  expect(proverText).toContain('sanitizeCliOutput');
   expect(proverText).toContain("return_number LIKE 'SMK-%'");
   expect(proverText).toContain("invoice_number LIKE 'SMK-RCC-%'");
   expect(proverText).toContain("receipt residue remained");
-  expect(proverText).toContain('const at = all.indexOf(REPORT_CANDIDATE);');
+  expect(proverText).toContain("--schema', 'public,auth'");
+  expect(proverText).toContain('rmSync(LIVE_SCHEMA, { force: true })');
   expect(proverText).toContain('const preApplyViolations = psqlValue');
   expect(proverText).toContain("if (preApplyViolations !== '0')");
-  expect(proverText).toContain('RETURN_CREDIT_POSTAPPLY_BASELINE_REPLAY_PASS');
+  expect(proverText).toContain('RETURN_CREDIT_POSTAPPLY_LIVE_PASS');
   expect(proverText).toContain('const FORWARD_COMPATIBILITY_REPLAY = [');
   expect(proverText).toContain("'20260813060000_require_completed_delivery_before_invoice_post.sql'");
   expect(proverText).toContain('for (const migration of FORWARD_COMPATIBILITY_REPLAY)');
@@ -335,14 +336,15 @@ describe('return/credit remediation durable guards', () => {
     }
     for (const anchor of [
       "assert.match(output, /SMOKE_PASS_ROLLBACK/",
-      'buildBaselineSchema();',
+      'sanitizeCliOutput',
       "return_number LIKE 'SMK-%'",
       "invoice_number LIKE 'SMK-RCC-%'",
       'receipt residue remained',
-      'const at = all.indexOf(REPORT_CANDIDATE);',
+      "--schema', 'public,auth'",
+      'rmSync(LIVE_SCHEMA, { force: true })',
       'const preApplyViolations = psqlValue',
       "if (preApplyViolations !== '0')",
-      'RETURN_CREDIT_POSTAPPLY_BASELINE_REPLAY_PASS',
+      'RETURN_CREDIT_POSTAPPLY_LIVE_PASS',
       'function forwardReplayState(migration)',
       "assert.notEqual(forwardState, 'drifted'",
       'if (pendingForwardMigrations.length > 0)',

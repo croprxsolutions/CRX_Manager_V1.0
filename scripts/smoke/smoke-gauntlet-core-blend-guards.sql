@@ -878,6 +878,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL(ocr): lifecycle rejection did not roll back atomically';
   END IF;
 
+  PERFORM set_config('app.product_active_rpc', 'on', true); -- stands in for set_product_active
   UPDATE public.products SET is_active = false WHERE id = v_product2;
   BEGIN
     PERFORM public.commit_blend_ticket_ocr_result(
@@ -901,6 +902,7 @@ BEGIN
     END IF;
   END;
   UPDATE public.products SET is_active = true WHERE id = v_product2;
+  PERFORM set_config('app.product_active_rpc', '', true);
   IF (SELECT status FROM public.ocr_processing_queue WHERE id = v_ocr_queue_id) <> 'processing'
      OR (SELECT count(*) FROM public.blend_ticket_products WHERE blend_ticket_id = v_ocr_ticket) <> 2 THEN
     RAISE EXCEPTION 'SMOKE_FAIL(ocr): inactive-product rejection leaked effects';

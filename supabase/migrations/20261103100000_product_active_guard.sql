@@ -269,8 +269,10 @@ BEGIN
   END IF;
   v_token := md5(array_to_string(v_ids, ',') || '|' || p_active::text || '|' || (v_review->'warnings')::text);
   IF p_review_token IS DISTINCT FROM v_token THEN RAISE EXCEPTION 'PRODUCT_ACTIVE_REVIEW_STALE'; END IF;
+  PERFORM set_config('app.product_active_rpc', 'on', true);
   UPDATE public.products SET is_active = p_active, updated_at = now()
     WHERE id = ANY(v_ids) AND is_active IS DISTINCT FROM p_active;
+  PERFORM set_config('app.product_active_rpc', '', true);
   v_result := jsonb_build_object('products', (SELECT jsonb_agg(jsonb_build_object('id', id,
     'product_name', product_name, 'is_active', is_active) ORDER BY id)
     FROM public.products WHERE id = ANY(v_ids)), 'warnings', v_review->'warnings');
@@ -291,6 +293,11 @@ BEGIN
     IF auth.uid() IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
     IF NOT public.is_admin() THEN
       RAISE EXCEPTION 'NOT_AUTHORIZED: admin required' USING ERRCODE = '42501';
+    END IF;
+    -- Only set_product_active may flip the flag, so every change passes its preview and confirm.
+    IF current_setting('app.product_active_rpc', true) IS DISTINCT FROM 'on' THEN
+      RAISE EXCEPTION 'PRODUCT_ACTIVE_RPC_REQUIRED: turn products on or off from the Products screen'
+        USING ERRCODE = '42501';
     END IF;
   END IF;
   IF OLD.is_active AND NOT NEW.is_active THEN
@@ -654,7 +661,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public.set_product_active(uuid[],boolean,text,text)'::regprocedure)
-       IS DISTINCT FROM '22c79c8cc58d2e575ca353511e38c291'
+       IS DISTINCT FROM 'c7e45da9db5697b12709daa419d04a1c'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public.guard_inactive_product_line()'::regprocedure)
        IS DISTINCT FROM 'f57174af7612e724a14a3c035a7c1deb' THEN

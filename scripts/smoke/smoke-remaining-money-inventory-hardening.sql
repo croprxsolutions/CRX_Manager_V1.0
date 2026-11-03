@@ -120,20 +120,6 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- A sales rep cannot turn on the over-receive escape hatch.
-  PERFORM set_config('request.jwt.claims',
-    json_build_object('sub', v_sales, 'role', 'authenticated')::text, true);
-  BEGIN
-    PERFORM receive_po_items('[]'::jsonb, v_sales, 'smk-po-sales-' || v_suffix, true);
-    RAISE EXCEPTION 'SMOKE_FAIL: sales_rep enabled over-receive';
-  EXCEPTION WHEN OTHERS THEN
-    v_err := SQLERRM;
-    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_err NOT LIKE 'Only an active admin can authorize PO over-receiving%' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: wrong sales over-receive error: %', v_err;
-    END IF;
-  END;
-
   -- A token for a now-inactive profile is rejected by both inventory and reports.
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
@@ -146,7 +132,8 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
     IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_err NOT LIKE 'Only an active admin or sales_rep can receive PO items%' THEN
+    -- The role lookup filters is_active = true, so an inactive rep gets the role refusal.
+    IF v_err NOT LIKE 'Only admin or sales_rep can receive PO items%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong inactive receive error: %', v_err;
     END IF;
   END;
@@ -156,7 +143,8 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
     IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_err NOT LIKE 'Access denied: active admin or sales_rep role required%' THEN
+    -- Gross sales is admin-only now, so the inactive rep gets the admin refusal.
+    IF v_err NOT LIKE 'Permission denied: requires admin role%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong inactive report error: %', v_err;
     END IF;
   END;
@@ -200,6 +188,27 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong NULL over-receive error: %', v_err;
     END IF;
   END;
+  -- A sales rep cannot turn on the over-receive escape hatch. The items list is
+  -- validated before the admin check, so this needs a real over-receiving line.
+  BEGIN
+    PERFORM receive_po_items(
+      jsonb_build_array(jsonb_build_object(
+        'po_item_id', v_po_item,
+        'quantity', 11,
+        'over_receive_reason', 'SMOKE sales attempt'
+      )),
+      v_sales,
+      'smk-po-sales-' || v_suffix,
+      true
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: sales_rep enabled over-receive';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'OVER_RECEIVE_ADMIN_REQUIRED%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong sales over-receive error: %', v_err;
+    END IF;
+  END;
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
 
@@ -208,7 +217,7 @@ BEGIN
       'po_item_id', v_po_item,
       'quantity', 11,
       'condition', 'good',
-      'notes', 'SMOKE admin-authorized vendor over-shipment'
+      'over_receive_reason', 'SMOKE admin-authorized vendor over-shipment'
     )),
     v_admin,
     'smk-po-admin-' || v_suffix,

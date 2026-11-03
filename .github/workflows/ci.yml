@@ -5,9 +5,9 @@ name: CI -- Lint, Type Check, Test, Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
     types: [opened, reopened, synchronize, ready_for_review, edited]
 
 # Supersede stale runs only for the same pull request. Every listed PR event,

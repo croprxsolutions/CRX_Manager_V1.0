@@ -1518,7 +1518,7 @@ git() { return 0; }
   assert(sqlValidationJob.includes('test "$CONTAINMENT_RESULT" = "success"'), 'required SQL check must fail closed on every non-success containment result');
   assert(sqlValidationJob.includes('test "$CI_SCOPE_RESULT" = "success"'), 'required SQL check must fail closed on every non-success trusted routing result');
   assert(sqlValidationJob.indexOf('Bind containment and trusted routing into this required check') < sqlValidationJob.indexOf('Checkout code'), 'containment and routing result binding must be the first SQL-check step');
-  assert.match(ci, /^  pull_request:\r?\n    branches: \[main\]\r?$/m, 'CI pull-request trigger must restrict exactly to main so containment dependencies cannot skip open');
+  assert.match(ci, /^  pull_request:\r?\n    branches: \[main, staging\]\r?$/m, 'CI pull-request trigger must restrict exactly to main and staging (the two protected integration branches) so containment dependencies cannot skip open');
   assert(ci.includes('permissions:\n  contents: read'));
   assert(ci.includes('types: [opened, reopened, synchronize, ready_for_review, edited]'));
   assert(!/^    if:/m.test(candidateContainmentJob), 'candidate containment must not conditionally skip: GitHub treats skipped required jobs as successful');
@@ -1557,7 +1557,7 @@ git() { return 0; }
   assert(trustedTargetWorkflow.includes('name: Phase 3C Trusted Base Containment'));
   assert(!trustedTargetWorkflow.includes('name: Phase 3C Private Artifact Containment'));
   assert(trustedTargetWorkflow.includes('types: [opened, reopened, synchronize, edited]'));
-  assert(trustedTargetWorkflow.includes("if: github.event.pull_request.base.ref == 'main'"));
+  assert(trustedTargetWorkflow.includes(`if: contains(fromJSON('["main","staging"]'), github.event.pull_request.base.ref)`));
   assert(trustedTargetWorkflow.includes('contents: read'));
   assert(trustedTargetWorkflow.includes('timeout-minutes: 12'));
   assert(trustedTargetWorkflow.includes('ref: ${{ github.sha }}'));

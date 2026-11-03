@@ -20,7 +20,7 @@ account lookups. Anything not visible that way is marked **Mason to confirm**.
 | **Supabase Edge Function secrets** (project `rhyzpcqhnizqbxphqdkr`) | Keys the server-side functions use: email, OCR, error reporting, CORS | Supabase org members |
 | **GitHub Actions secrets**, app repo `croprxsolutions/CRX_Manager_V1.0` | Values for CI builds and the paused browser tests | Repo admins (Mason) |
 | **GitHub Actions secrets**, private backup repo `masonwells1/CRX_Backups` | Database and file-storage backup credentials, backup passphrase | Repo admins (Mason) |
-| **Mason's Windows Credential Manager** | Mason's Supabase CLI login token (target `Supabase CLI:supabase`), used by agents to apply migrations and to run the read-only db-invariant sweeps | Mason's Windows login only |
+| **Mason's Windows Credential Manager** | Mason's Supabase CLI login token (target `Supabase CLI:supabase`), used by agents to apply migrations, run the read-only db-invariant sweeps, and refresh the schema registry read-only | Mason's Windows login only |
 | **Mason's password manager** | The backup decryption passphrase and account passwords | Mason only |
 
 A local `.env` file (git-ignored) holds a developer's own copy of the browser values. The
@@ -78,8 +78,10 @@ template is `.env.example`.
   Agents read it in memory to apply reviewed migrations, and (Mason's yes, 2026-11-02) to run
   the db-invariant sweeps read-only with `npm run db-sweeps:live`
   (`scripts/db-invariant-sweeps/run-live.mjs`). That script sends only queries the live-data
-  guard recognises, always with `read_only: true`, and never prints or saves the token. Both
-  `scripts/apply-migration-file.mjs` and the sweep runner read it themselves through
+  guard recognises, always with `read_only: true`, and never prints or saves the token.
+  (Mason's yes, 2026-11-03) `node scripts/regenerate-schema-registry.mjs --live` uses it the
+  same way for the six fixed catalog queries that rebuild `.claude/schema-registry.json`.
+  `scripts/apply-migration-file.mjs`, the sweep runner and the registry refresh read it themselves through
   `scripts/lib/supabase-credential.mjs` (2026-11-02), so no session sets `SUPABASE_ACCESS_TOKEN`
   or builds a launcher. For the apply script only, a set `SUPABASE_ACCESS_TOKEN` still wins. The developer should get their own
   Supabase login, not this token.

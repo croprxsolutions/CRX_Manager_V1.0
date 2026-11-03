@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 # The desktop app can point core.hooksPath at another checkout; run this
 # worktree's own hook instead (scripts/agent-health-check.mjs pins these lines).
-if [ -f .husky/pre-commit ] && ! [ "$0" -ef .husky/pre-commit ] && [ "${CRX_OWN_HOOK:-}" != "$PWD/.husky/pre-commit" ]; then
-  CRX_OWN_HOOK="$PWD/.husky/pre-commit" exec sh .husky/pre-commit "$@"
+if [ -f .husky/pre-commit ] && { [ "$0" -ef .husky/pre-commit ]; [ $? -eq 1 ]; }; then
+  exec sh .husky/pre-commit "$@"
 fi
 
 # Keep commits fast and deterministic. This hook checks only staged, high-risk

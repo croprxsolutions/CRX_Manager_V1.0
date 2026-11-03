@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 # The desktop app can point core.hooksPath at another checkout; run this
 # worktree's own hook instead (scripts/agent-health-check.mjs pins these lines).
-if [ -f .husky/pre-push ] && ! [ "$0" -ef .husky/pre-push ] && [ "${CRX_OWN_HOOK:-}" != "$PWD/.husky/pre-push" ]; then
-  CRX_OWN_HOOK="$PWD/.husky/pre-push" exec sh .husky/pre-push "$@"
+if [ -f .husky/pre-push ] && { [ "$0" -ef .husky/pre-push ]; [ $? -eq 1 ]; }; then
+  exec sh .husky/pre-push "$@"
 fi
 
 echo "🛡️ Pre-push safety check..."

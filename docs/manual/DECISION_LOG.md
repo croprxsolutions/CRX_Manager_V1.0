@@ -16,9 +16,10 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 worktrees running the main checkout's 132-commit-stale hooks.
 
 **Decision.** `.husky/pre-commit`, `pre-push` and `commit-msg` start by re-running the current
-worktree's own `.husky/<hook>` when git launched a different file (guarded by `CRX_OWN_HOOK`, so it
-hands off at most once). `checkGitHooksInstalled` passes a `core.hooksPath` pointing elsewhere only
-when those hooks carry the hand-off and this worktree's own hooks live in its own `.husky`.
+worktree's own `.husky/<hook>` when `test -ef` says git launched a different file (the re-run is
+that file, so it hands off at most once; no environment flag can switch it off).
+`checkGitHooksInstalled` passes a `core.hooksPath` pointing elsewhere only when those hooks start
+with the exact `hookHandOff` lines, are executable, and this worktree's own hooks live in its own `.husky`.
 Amends the 2026-08-31 entry below; the shared value is still the relative `.husky`.
 
 **Why.** The Claude desktop app writes `core.hooksPath = C:\CRX_Manager\.husky` into a worktree's

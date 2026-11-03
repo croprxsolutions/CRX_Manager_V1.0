@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 # The desktop app can point core.hooksPath at another checkout; run this
 # worktree's own hook instead (scripts/agent-health-check.mjs pins these lines).
-if [ -f .husky/commit-msg ] && ! [ "$0" -ef .husky/commit-msg ] && [ "${CRX_OWN_HOOK:-}" != "$PWD/.husky/commit-msg" ]; then
-  CRX_OWN_HOOK="$PWD/.husky/commit-msg" exec sh .husky/commit-msg "$@"
+if [ -f .husky/commit-msg ] && { [ "$0" -ef .husky/commit-msg ]; [ $? -eq 1 ]; }; then
+  exec sh .husky/commit-msg "$@"
 fi
 
 # Commit messages are Git objects too. Reject a renamed/encoded private packet

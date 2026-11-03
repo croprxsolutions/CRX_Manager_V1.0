@@ -301,6 +301,12 @@ try {
       const handsOff = checkGitHooksInstalled(hooksRepo);
       assert.equal(handsOff.status, "PASS", "hooks that hand off to this worktree's copy are safe");
       assert.match(handsOff.note, /hands off/);
+      if (process.platform !== "win32") {
+        // git runs the configured copy first; a 0644 one is skipped before it can hand off.
+        chmodSync(path.join(foreign, ".husky/pre-push"), 0o644);
+        assert.match(checkGitHooksInstalled(hooksRepo, "linux").note, /non-executable pre-push/);
+      }
+      for (const name of HAND_OFF_HOOKS) chmodSync(path.join(foreign, ".husky", name), 0o755);
       rmSync(path.join(foreign, ".husky/commit-msg"));
       assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "every hook, commit-msg included, must hand off");
       writeFileSync(path.join(foreign, ".husky/commit-msg"), hookHandOff("commit-msg"));

@@ -3,14 +3,16 @@
 -- owner approved one by one on 2026-11-03 (private review list): one 'LB' spelled 'Lb' to match,
 -- and eight stored as '' (empty text), and stamps their updated_at. Rows are named by id only.
 -- It also adds one trigger (below) so a Unit that matches its inventory unit cannot be changed
--- on its own. No other row, column, grant or function changes.
+-- on its own (its function's EXECUTE is revoked from every API role). No other row, column,
+-- grant or function changes.
 -- Order, quote, job, invoice, delivery and PO lines keep their own stored unit and amounts; no
 -- trigger copies a product's unit into them. The per-acre prices read inventory_unit first, so
 -- they and pricing_version must stay unchanged; the statement below refuses if they move.
--- A database without these products (a fresh rebuild) changes nothing. On a database that has
+-- A database without these products (a fresh rebuild) changes no rows. On a database that has
 -- any of them, all nine must still hold exactly the approved old values, or nothing changes.
 -- write_product_change_history records each row's unit_size change (actor NULL: no signed-in user).
--- ROLLBACK: for each id below, set unit_size back to its old_unit (a reviewed migration).
+-- ROLLBACK (a reviewed migration): drop trg_keep_product_unit and its function first, then set
+-- each id below back to its old_unit.
 
 SET LOCAL lock_timeout = '5s';
 

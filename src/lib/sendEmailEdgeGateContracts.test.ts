@@ -82,16 +82,32 @@ describe('send-email content and replay contracts (audit findings 7 and 8)', () 
   });
 });
 
+describe('send-email draws invoice and PO PDFs from the saved records (KI-98)', () => {
+  it('refuses an app-attached PDF before logging or sending', () => {
+    const refuse = source.indexOf('const appPdfProblem = appSuppliedPdfProblem(email_type, attachments);');
+    const logInsert = source.indexOf('.from("email_log")\n        .insert({');
+    expect(refuse).toBeGreaterThan(-1);
+    expect(refuse).toBeLessThan(logInsert);
+  });
+
+  it('draws both PDFs on the server, from the saved invoice and the gated PO', () => {
+    expect(source).toContain('invoicePdfData = await loadInvoicePdfData(adminClient, resource_id);');
+    expect(source).toContain('loadInvoiceEmail(adminClient, resource_id, invoiceEmailSnapshot(invoicePdfData))');
+    expect(source).toContain('buildPurchaseOrderPdfData(poGate.order, vendor, poGate.lines)');
+    expect(source).toContain('attachments = [{ filename: purchaseOrderPdfFilename(poGate.order.po_number), content: pdfBase64(poPdf) }];');
+    expect(source).not.toContain('attachments[0]?.content');
+  });
+});
+
 describe('send-email builds invoice content from the saved invoice (KI-97)', () => {
   it('replaces the caller subject, body and file name before logging or sending', () => {
     const build = source.indexOf('const built = await loadInvoiceEmail(adminClient, resource_id, invoiceSnapshot);');
     const logInsert = source.indexOf('.from("email_log")\n        .insert({');
     expect(build).toBeGreaterThan(-1);
     expect(build).toBeLessThan(logInsert);
-    expect(source).toContain('subject = built.subject;\n      html = built.html;\n      attachments = [{ filename: built.filename, content: attachments[0]?.content }];');
+    expect(source).toContain('subject = built.subject;\n      html = built.html;\n      attachments = [{ filename: built.filename, content: pdfBase64(drawInvoicePdf({ jsPDF, autoTable }, invoicePdfData)) }];');
     expect(source).toContain('if (isInvoiceEmail && !invoiceSnapshot) {');
     expect(source).toContain('const builtProblem = emailContentProblem(built.subject, built.html);');
-    expect(source).toContain('if (!Array.isArray(attachments) || attachments.length !== 1) {');
     // The amount comes from the stored row and its lines, never the request body.
     expect(source).toContain('.select("invoice_number, invoice_type, invoice_date, due_date, total_amount_cents, paid_amount_cents, prepay_applied_cents, balance_cents")');
     expect(source).toContain('.from("invoice_items")\n    .select("extended_cents")');

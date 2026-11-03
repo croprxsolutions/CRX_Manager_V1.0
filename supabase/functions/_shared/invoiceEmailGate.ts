@@ -3,12 +3,13 @@
 //
 // send-email builds an invoice email's subject, wording, amount and attachment
 // name from the saved invoice; whatever the browser sends for those is ignored.
-// The PDF is still drawn by the app (jsPDF), so the app also sends the money the
-// PDF prints, and the send is refused unless that is the saved invoice today:
-// the same binding the purchase-order copy uses (purchaseOrderEmailGate.ts).
-// Not covered, by design: the PDF bytes themselves (the server trusts the
-// signed-in staff member's app to draw the summary it sent; the email can only
-// go to the customer's own address on file), and the moment between send-email's
+// The PDF is still drawn by the app (jsPDF). The app also sends a summary of the
+// money it put in that PDF, and the send is refused unless the summary is the saved
+// invoice today. That catches a stale or buggy screen; it does NOT prove what the
+// PDF bytes show, because the same app supplies both (purchaseOrderEmailGate.ts
+// works the same way). Accepted for now by Mason, 2026-11-02:
+// the PDF bytes (forwarded unverified, as before this change; only signed-in staff
+// can send, only to the customer's address on file), and the moment between send-email's
 // final re-read of the invoice and the provider call (a payment saved in it still
 // goes out with the earlier Amount Due; the purchase-order copy has the same window).
 // Both are accepted for now and tracked as KNOWN_ISSUES KI-98 (follow-up: server-built PDFs).
@@ -28,7 +29,7 @@ export interface InvoiceEmailRow {
   balance_cents: number | string | null;
 }
 
-/** The money the attached PDF prints, sent by the app alongside the PDF. All whole cents. */
+/** The app's account of the money it printed in the attached PDF (not verified against the bytes). All whole cents. */
 export interface InvoiceEmailSnapshot {
   invoice_number: string;
   total_amount_cents: number;
@@ -142,7 +143,7 @@ export function wrapEmailHtml(bodyContent: string): string {
 
 /**
  * Builds the invoice email from the saved invoice and its lines' amounts, or refuses
- * when the PDF the app attached (described by `snapshot`) is not the invoice today.
+ * when the app's PDF summary (`snapshot`) is not the invoice today (a stale screen).
  */
 export function buildInvoiceEmail(
   invoice: InvoiceEmailRow | null,

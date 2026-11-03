@@ -46,8 +46,9 @@ import {
 //      can never replay or block a different email; a key already used for a
 //      different email is refused (audit finding 8, 2026-11-02).
 //   8. An invoice email's subject, wording, amount and attachment name are built
-//      here from the saved invoice; the caller's are ignored. Its PDF must print
-//      the invoice's money as saved now (_shared/invoiceEmailGate.ts, KI-97).
+//      here from the saved invoice; the caller's are ignored (KI-97). The app's
+//      summary of its PDF must match the saved invoice, which catches a stale
+//      screen; the PDF bytes are still the app's and are NOT verified (KI-98).
 // =============================================================================
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -235,7 +236,7 @@ Deno.serve(async (req: Request) => {
     if (!to || !email_type || (!isInvoiceEmail && (!subject || !html))) {
       return jsonResponse({ error: "to, subject, html, and email_type are required" }, 400);
     }
-    // What the attached PDF prints; the invoice must still say the same (KI-97).
+    // The app's summary of the PDF it built: a stale-screen check, not proof of the PDF bytes (KI-97, KI-98).
     const invoiceSnapshot = isInvoiceEmail ? parseInvoiceEmailSnapshot(invoice_snapshot) : null;
     if (isInvoiceEmail && !invoiceSnapshot) {
       return jsonResponse(
@@ -592,7 +593,8 @@ Deno.serve(async (req: Request) => {
     }
 
     // 6c. The invoice email itself (KI-97): subject, wording, amount and file name
-    // come from the saved invoice, and the one PDF must print its money as saved.
+    // come from the saved invoice; the app's PDF summary must match it. The PDF bytes
+    // themselves are forwarded unverified, as before this change (KI-98).
     if (isInvoiceEmail && invoiceSnapshot) {
       if (!Array.isArray(attachments) || attachments.length !== 1) {
         return jsonResponse({ error: "An invoice email carries exactly one PDF: the invoice" }, 400);
@@ -885,7 +887,7 @@ Deno.serve(async (req: Request) => {
       ) {
         finalGateRefusal = "Invoice became suppressed or unavailable before send";
       } else if (isInvoiceEmail && invoiceSnapshot) {
-        // A payment or edit since step 6c would make the stated amount or the PDF wrong.
+        // A payment or edit since step 6c would make the stated amount (and the app's PDF) stale.
         const rebuilt = await loadInvoiceEmail(adminClient, invoiceGateId, invoiceSnapshot);
         if (!rebuilt.ok) {
           finalGateRefusal = rebuilt.error;

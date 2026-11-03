@@ -26,10 +26,8 @@
 const usdFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const wholeDollarFormatter = new Intl.NumberFormat('en-US');
 
-/** Format an integer number of CENTS as USD. Divides by 100. */
-export function formatCents(cents: number): string {
-  return usdFormatter.format(cents / 100);
-}
+/** Format an integer number of CENTS as USD. Divides by 100. Shared with send-email's PDFs (KI-98). */
+export { formatCents } from '../../supabase/functions/_shared/pdf/theme.ts';
 
 /** Format exact bigint cents without converting them through floating point. */
 export function formatExactCents(cents: bigint): string {

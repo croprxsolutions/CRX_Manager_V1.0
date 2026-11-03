@@ -69,6 +69,16 @@ function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U',
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
+// Chains, sweep predicate and allowlist as they stood when this prover landed (#1239): 20261104130000
+// re-emits save_quote and its implementation, moves the allowlist pin and changes one chain's
+// expected refusal, with its own proof (smoke-any-rep-booked-prices.sql).
+const CANDIDATE_COMMIT = spawnSync('git', ['log', '--diff-filter=A', '--format=%H', '-1', '--', 'scripts/smoke/prove-quote-price-trail-real-schema.mjs'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
+function atCandidate(file) {
+  assert.match(CANDIDATE_COMMIT, /^[0-9a-f]{40}$/, 'cannot find the commit that added this prover');
+  const r = spawnSync('git', ['show', `${CANDIDATE_COMMIT}:${path.relative(ROOT, file).replaceAll('\\', '/')}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  if (r.status !== 0) throw new Error(r.stderr);
+  return r.stdout.replaceAll('\r\n', '\n');
+}
 function stageText(name, text) {
   const staged = path.join(tmpdir(), `${NAME}-${name}`);
   writeFileSync(staged, text, 'utf8');
@@ -115,9 +125,7 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  for (const file of all.slice(at + 1)) {
-    assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
-  }
+  // Applied live; later migrations carry their own proofs, so replay only up to the candidate (as #1292).
   const before = all.slice(0, at);
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);
@@ -135,7 +143,7 @@ function buildContainer() {
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
-  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
   if (schema.status !== 0) throw new Error(schema.stderr.toString());
   psql('\\i /tmp/20260727174805_extensions.sql'); psql(schema.stdout.toString());
   // storage.objects carries metadata and a (bucket_id, name) key, and postgres may read it, as live
@@ -268,13 +276,13 @@ function seed() {
 // What the sweep predicate reports, after an optional change that is always rolled back.
 function sweep(setup = '') {
   return docker([...psqlArgs('supabase_admin'), '-A', '-t'],
-    { input: `BEGIN;\n${setup}\n${lf(PREDICATE).trimEnd().replace(/;$/, '')};\nROLLBACK;\n` }).stdout.trim();
+    { input: `BEGIN;\n${setup}\n${atCandidate(PREDICATE).trimEnd().replace(/;$/, '')};\nROLLBACK;\n` }).stdout.trim();
 }
 // One rolled-back chain, optionally after the (possibly mutated) candidate inside the same
 // never-committed transaction. Returns the first error line psql printed.
 function runChain(file, prefix = '') {
   const name = `chain-${path.basename(file)}`;
-  stageText(name, `${prefix}${lf(path.join(SMOKE, file))}`);
+  stageText(name, `${prefix}${atCandidate(path.join(SMOKE, file))}`);
   const r = docker([...psqlArgs(), '-f', `/tmp/${name}`], { allowFailure: true });
   const output = `${r.stdout}\n${r.stderr}`;
   return output.split(/\r?\n/).find((line) => /ERROR:/.test(line)) ?? `NO ERROR (exit ${r.status}):\n${output.trim()}`;
@@ -353,8 +361,8 @@ try {
   const rows = sweep();
   assert.equal(rows, '', `the sweep predicate reported violations:\n${rows}`);
   console.log('[prover] AFTER quote-price-lock-boundary: no rows');
-  // The save_quote exception pins this body, so a re-emit that forgets the pin fails here.
-  const pinned = JSON.parse(lf(ALLOWLIST)).entries.flatMap((e) => Object.entries(e.reviewed_contracts ?? {})).filter(([k]) => k === SAVE_KEY);
+  // The save_quote exception pinned this body when the candidate landed, so a re-emit that forgot the pin failed here.
+  const pinned = JSON.parse(atCandidate(ALLOWLIST)).entries.flatMap((e) => Object.entries(e.reviewed_contracts ?? {})).filter(([k]) => k === SAVE_KEY);
   const live = contract();
   assert.ok(pinned.length > 0 && pinned.every(([, d]) => d === live), `allowlist pin for the save implementation is stale: want ${live}`);
   console.log(`[prover] AFTER allowlist pin matches the replayed save implementation (${live})`);

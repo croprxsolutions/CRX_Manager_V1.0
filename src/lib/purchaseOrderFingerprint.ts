@@ -2,15 +2,11 @@
  * purchaseOrderFingerprint.ts — what the PO PDF prints, without jsPDF (To-Do 0.15).
  *
  * Kept apart from purchaseOrderPdf.ts so the purchase order page can import it
- * statically while the PDF builder stays a dynamically loaded chunk.
+ * statically while the PDF builder stays a dynamically loaded chunk (the shared
+ * layout module imports no PDF library itself).
  */
 
-/** A banner for a PO that is not a live order, so a vendor never mistakes it for one. */
-export function purchaseOrderStatusBanner(status: string): string | null {
-  if (status === 'draft') return 'DRAFT - NOT YET SUBMITTED';
-  if (status === 'cancelled') return 'CANCELLED - DO NOT FILL';
-  return null;
-}
+import { purchaseOrderStatusBanner } from '../../supabase/functions/_shared/pdf/purchaseOrderPdf.ts';
 
 /**
  * Everything the PO record prints on the PDF, so a changed PO is a new email (not a replay

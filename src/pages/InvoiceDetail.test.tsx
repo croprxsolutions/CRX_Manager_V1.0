@@ -134,7 +134,6 @@ vi.mock('../lib/invoicePdf', async (importOriginal) => ({
 }));
 vi.mock('../lib/emailService', () => ({
   sendEmail: vi.fn(),
-  pdfToBase64: vi.fn(),
   buildEmailHtml: vi.fn(() => '<p>test</p>'),
   isInvoiceEmailSuppressed: vi.fn(() => false),
 }));
@@ -2111,23 +2110,23 @@ describe('InvoiceDetail — Email reads the billed customer by id', () => {
   }
 
   it('emails a customer who is missing from the picker list', async () => {
-    const { generateInvoicePdf } = await import('../lib/invoicePdf');
+    const { buildEmailHtml } = await import('../lib/emailService');
     await emailWithCustomerRead(() => buildChain({ data: { email: 'farm@example.com', billing_address: '9 Barn Rd', city: 'Town', state: 'IL', zip: '62000', account_number: 'A-9', payment_terms: 'Net 30' }, error: null }));
-    await waitFor(() => expect(generateInvoicePdf).toHaveBeenCalled());
+    await waitFor(() => expect(buildEmailHtml).toHaveBeenCalled());
     expect(mockToast).not.toHaveBeenCalledWith('error', 'Customer does not have an email address on file');
   });
 
   // Codex App on #1132: Email stayed clickable during the lookup, so a second click sent twice.
   it('a second click while the customer lookup is running sends nothing more', async () => {
-    // Each send attempt builds the PDF once, so the PDF count is the send count.
-    const { generateInvoicePdf } = await import('../lib/invoicePdf');
+    // Each send attempt builds the email body once, so that count is the send count.
+    const { buildEmailHtml } = await import('../lib/emailService');
     const { chain, resolve } = buildDeferredChain();
     await emailWithCustomerRead(() => chain);
     fireEvent.click(screen.getByRole('button', { name: /^Email$/ }));
     resolve({ data: { email: 'farm@example.com', billing_address: '9 Barn Rd', city: 'Town', state: 'IL', zip: '62000', account_number: 'A-9', payment_terms: 'Net 30' }, error: null });
-    await waitFor(() => expect(generateInvoicePdf).toHaveBeenCalled());
+    await waitFor(() => expect(buildEmailHtml).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 50));
-    expect(generateInvoicePdf).toHaveBeenCalledTimes(1);
+    expect(buildEmailHtml).toHaveBeenCalledTimes(1);
   });
 
   it('still says so when the customer has no email on file', async () => {

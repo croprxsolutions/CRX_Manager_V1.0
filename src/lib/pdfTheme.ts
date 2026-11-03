@@ -1,25 +1,20 @@
 /**
- * pdfTheme.ts — shared typing for all CRX PDF generators.
+ * pdfTheme.ts — shared typing and palette for all CRX PDF generators.
  *
  * jsPDF + jspdf-autotable are dynamically imported at runtime inside each
- * generator (to keep them out of the main bundle). This module only provides
- * the augmented instance type the autoTable plugin produces (`lastAutoTable`).
- * Type-only — no runtime cost.
+ * generator (to keep them out of the main bundle). The palette lives in the Edge
+ * Functions' shared folder so send-email draws the same PDFs (KNOWN_ISSUES KI-98).
  */
-import type jsPDF from 'jspdf';
-
-/** jsPDF instance with `lastAutoTable` from the jspdf-autotable plugin. */
-export type JsPDFWithAutoTable = InstanceType<typeof jsPDF> & {
-  lastAutoTable: { finalY: number };
-};
-
-// ── CRX brand palette (RGB tuples, spread into jsPDF set*Color calls) ────────
-export const CRX_GREEN: [number, number, number] = [26, 122, 80]; // #1A7A50 (crx-green in src/index.css)
-export const CHARCOAL: [number, number, number] = [46, 46, 46]; // #2E2E2E
-export const GRAY: [number, number, number] = [78, 78, 78]; // #4E4E4E
-export const LIGHT_BG: [number, number, number] = [245, 250, 247]; // light green tint
-export const RED: [number, number, number] = [220, 38, 38];
-export const AMBER: [number, number, number] = [217, 119, 6];
-export const TABLE_HEADER_BG: [number, number, number] = [240, 240, 240];
-export const ALT_ROW_BG: [number, number, number] = [252, 252, 252];
-export const BLUE: [number, number, number] = [37, 99, 235];
+export {
+  type JsPDFWithAutoTable,
+  type PdfLib,
+  CRX_GREEN,
+  CHARCOAL,
+  GRAY,
+  LIGHT_BG,
+  RED,
+  AMBER,
+  TABLE_HEADER_BG,
+  ALT_ROW_BG,
+  BLUE,
+} from '../../supabase/functions/_shared/pdf/theme.ts';

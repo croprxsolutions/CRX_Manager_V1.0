@@ -245,7 +245,7 @@ try {
   waitForDatabase();
   const artifacts = ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql'];
   for (const artifact of artifacts) copy(path.join(BASELINE, artifact), artifact);
-  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 20 * 1024 * 1024 });
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows'], { cwd: ROOT, maxBuffer: 20 * 1024 * 1024 });
   if (schema.status !== 0) throw new Error(`baseline decompression failed: ${schema.stderr.toString()}`);
   apply('20260727174805_extensions.sql');
   psql(schema.stdout.toString());

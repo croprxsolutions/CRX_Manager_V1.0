@@ -537,7 +537,9 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_error := SQLERRM;
     IF v_error LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_error <> 'NOT_QUOTE_OWNER' THEN
+    -- Since 20261104130000 another rep may change only the prices of a sent booking (Mason,
+    -- 2026-10-30), so this note change is refused with the price-only error.
+    IF v_error NOT LIKE 'QUOTE_PRICE_ONLY_FOR_OTHER_REPS:%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: quote ownership gate %', v_error;
     END IF;
   END;

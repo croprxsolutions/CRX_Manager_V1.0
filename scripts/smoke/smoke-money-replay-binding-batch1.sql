@@ -100,11 +100,11 @@ BEGIN
   UPDATE public.customers SET prepay_balance_cents = 90000 WHERE id = v_customer;
 
   -- Two payments, each a partial $10.00 on invoice 1, so the invoice stays posted.
-  v_res := public.allocate_payment(v_customer, 1000, 'check', '[SMOKE]-RPB-P1-' || v_suffix, NULL, CURRENT_DATE,
+  v_res := public.allocate_payment(v_customer, 1000, 'check', '[SMOKE]-RPB-P1-' || v_suffix, NULL, (now() AT TIME ZONE 'America/Chicago')::date,
     '[SMOKE] payment 1', jsonb_build_array(jsonb_build_object('invoice_id', v_inv[1], 'amount_cents', 1000)),
     v_admin, 'smk-rpb-' || v_suffix || '-alloc-1');
   v_set_1 := (v_res->>'allocation_set_id')::uuid;
-  v_res := public.allocate_payment(v_customer, 1000, 'check', '[SMOKE]-RPB-P2-' || v_suffix, NULL, CURRENT_DATE,
+  v_res := public.allocate_payment(v_customer, 1000, 'check', '[SMOKE]-RPB-P2-' || v_suffix, NULL, (now() AT TIME ZONE 'America/Chicago')::date,
     '[SMOKE] payment 2', jsonb_build_array(jsonb_build_object('invoice_id', v_inv[1], 'amount_cents', 1000)),
     v_admin, 'smk-rpb-' || v_suffix || '-alloc-2');
   v_set_2 := (v_res->>'allocation_set_id')::uuid;

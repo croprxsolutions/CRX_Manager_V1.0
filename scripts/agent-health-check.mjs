@@ -372,6 +372,19 @@ export function checkClaudeAuth(runner) {
 // 2026-08-31 every worktree created without `npm install` landed in exactly that
 // state, and hand-set absolute overrides pointed several at other checkouts.
 // The tracked .husky/ hooks are plain shell and need no husky runtime.
+// The exact opening every tracked .husky hook carries (the test pins the real files
+// to it). It hands off only when -ef answers "different file" (1); the re-run's $0 IS
+// that file, so it stops there, and a shell without -ef (2) stays put. No env flag.
+export const HAND_OFF_HOOKS = Object.freeze(["commit-msg", "pre-commit", "pre-push"]);
+export function hookHandOff(hook) {
+  return "#!/usr/bin/env sh\n" +
+    "# The desktop app can point core.hooksPath at another checkout; run this\n" +
+    "# worktree's own hook instead (scripts/agent-health-check.mjs pins these lines).\n" +
+    `if [ -f .husky/${hook} ] && { [ "$0" -ef .husky/${hook} ]; [ $? -eq 1 ]; }; then\n` +
+    `  exec sh .husky/${hook} "$@"\n` +
+    "fi\n";
+}
+
 export function checkGitHooksInstalled(root, platform = process.platform) {
   let hooksPath = "";
   try {
@@ -417,9 +430,43 @@ export function checkGitHooksInstalled(root, platform = process.platform) {
   // resolve to that same foreign directory and compare equal.
   const expected = path.join(canonical(root), ".husky");
   const resolved = canonical(path.resolve(root, hooksPath));
+  // Same silent skip, different spelling: on POSIX git ignores a hook that is not
+  // executable. Windows has no executable bit, and Git for Windows does not consult
+  // one, so the question is only meaningful off win32 — CI is where it can bite.
+  const executableOrFail = (hooks) => {
+    if (platform === "win32") return null;
+    const notExecutable = hooks.filter((hook) => {
+      try {
+        accessSync(path.join(resolved, hook), fsConstants.X_OK);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    return notExecutable.length > 0
+      ? check("FAIL", "Git hooks installed", `${hooksPath} has non-executable ${notExecutable.join(", ")} — git skips a non-executable hook in silence; restore the mode with git update-index --chmod=+x`)
+      : null;
+  };
   // path.relative is case-insensitive on win32, which is what we want for a
   // same-directory test on this repository's primary platform.
   if (path.relative(expected, resolved) !== "") {
+    // The desktop app writes an absolute path to the main checkout's .husky. That is
+    // fine when those hooks START with the exact hand-off to this worktree's own copy,
+    // and that copy really lives here (a linked .husky would hand off to itself).
+    const handsOff = HAND_OFF_HOOKS.every((hook) => {
+      try {
+        const own = path.relative(expected, canonical(path.join(expected, hook)));
+        return normalizeEol(readFileSync(path.join(resolved, hook), "utf8")).startsWith(hookHandOff(hook)) &&
+          existsSync(path.join(expected, hook)) && own === hook;
+      } catch {
+        return false;
+      }
+    });
+    if (handsOff) {
+      // git runs the configured copy first, so that copy must be executable too.
+      return executableOrFail(HAND_OFF_HOOKS) ??
+        check("PASS", "Git hooks installed", `${hooksPath} hands off to this worktree's .husky (${HAND_OFF_HOOKS.join(", ")})`);
+    }
     return check("FAIL", "Git hooks installed", `core.hooksPath is ${hooksPath}, which resolves to ${resolved} rather than this worktree's tracked .husky (${expected}) — git would run another checkout's guards or none at all; set core.hooksPath to .husky`);
   }
   const required = ["pre-commit", "pre-push"];
@@ -434,23 +481,7 @@ export function checkGitHooksInstalled(root, platform = process.platform) {
   if (escaping.length > 0) {
     return check("FAIL", "Git hooks installed", `${hooksPath} links ${escaping.join(", ")} outside this worktree — git runs the symlink target, so another checkout's guard would run`);
   }
-  // Same silent skip, different spelling: on POSIX git ignores a hook that is not
-  // executable. Windows has no executable bit, and Git for Windows does not consult
-  // one, so the question is only meaningful off win32 — CI is where it can bite.
-  if (platform !== "win32") {
-    const notExecutable = required.filter((hook) => {
-      try {
-        accessSync(path.join(resolved, hook), fsConstants.X_OK);
-        return false;
-      } catch {
-        return true;
-      }
-    });
-    if (notExecutable.length > 0) {
-      return check("FAIL", "Git hooks installed", `${hooksPath} has non-executable ${notExecutable.join(", ")} — git skips a non-executable hook in silence; restore the mode with git update-index --chmod=+x`);
-    }
-  }
-  return check("PASS", "Git hooks installed", `${hooksPath} (pre-commit, pre-push)`);
+  return executableOrFail(required) ?? check("PASS", "Git hooks installed", `${hooksPath} (pre-commit, pre-push)`);
 }
 
 function checkSessionStaleness() {

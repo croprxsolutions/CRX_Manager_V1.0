@@ -211,7 +211,8 @@ import ProductDetail from './ProductDetail';
 
 /** Answers the source-and-reason prompt a product-page price change opens before its preview. */
 async function giveSourceAndReason(source: string, reason?: string) {
-  fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: source } });
+  fireEvent.change(await screen.findByLabelText('Source'), { target: { value: 'Other' } });
+  fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: source } });
   if (reason !== undefined) {
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: reason } });
   }
@@ -691,7 +692,7 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByText(/Profit as a % of price/)).toBeInTheDocument();
     expect(screen.getByText(/Profit as a % of cost/)).toBeInTheDocument();
     expect(screen.getByText(/A product with all three prices saved opens price-driven/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
     await giveSourceAndReason('Supplier quote', 'Cost change');
@@ -769,18 +770,19 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
     fireEvent.change(screen.getByLabelText('Tier 1 net margin percent'), { target: { value: '37' } });
-    fireEvent.change(screen.getByLabelText('Current Cost'), { target: { value: '55.00' } });
+    expect(screen.getByLabelText('Current Cost').tagName).toBe('OUTPUT');
+    expect(screen.getByLabelText('Current Cost')).toHaveAttribute('aria-live', 'off');
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'price_driven' } });
     expect(screen.getByLabelText('Tier 1 net margin percent')).toHaveValue(20);
     expect(screen.getByLabelText('Tier 1 net margin percent')).toBeDisabled();
-    expect(screen.getByLabelText('Current Cost')).toHaveValue(55);
+    expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
 
     fireEvent.change(screen.getByLabelText('Tier 1 price'), { target: { value: '75' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getAllByLabelText('Pricing mode')[1], { target: { value: 'margin_driven' } });
     expect(screen.getByLabelText('Tier 1 price')).toHaveValue(62.5);
     expect(screen.getByLabelText('Tier 1 price')).toBeDisabled();
-    expect(screen.getByLabelText('Current Cost')).toHaveValue(55);
+    expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
   });
 
   it.each(['.5', '100'])('refuses invalid margin draft %s before asking for a reason', async (margin) => {
@@ -790,7 +792,7 @@ describe('ProductDetail governed pricing flow', () => {
     fireEvent.change(screen.getByLabelText('Tier 1 net margin percent'), { target: { value: margin } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     expect(mockToast).toHaveBeenCalledWith('error', 'Enter each net margin as a plain number below 100.');
-    expect(screen.queryByLabelText('Source (supplier, document, date)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Source')).not.toBeInTheDocument();
     expect(mockPreviewPricing).not.toHaveBeenCalled();
   });
 
@@ -799,14 +801,13 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
 
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
-    fireEvent.change(screen.getByLabelText('Change Note (optional)'), { target: { value: 'Mid-month supplier increase' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
-    // The cost note starts the reason; the source still has to be given.
-    expect(await screen.findByLabelText('Reason for the change')).toHaveValue('Mid-month supplier increase');
+    expect(screen.queryByLabelText('Change Note (optional)')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('Reason for the change')).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Preview changes' })).toBeDisabled();
-    await giveSourceAndReason('Helena list Oct 2026');
+    await giveSourceAndReason('Helena list Oct 2026', 'Mid-month supplier increase');
 
     await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({
       source: 'product_page',
@@ -851,7 +852,7 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
 
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '0.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
 
@@ -868,7 +869,7 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
 
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
     await giveSourceAndReason('Helena list', 'Cost up');
@@ -876,12 +877,12 @@ describe('ProductDetail governed pricing flow', () => {
 
     // Keep the quick-cost modal mounted while apply finishes so its own lock is
     // verified in addition to the main Product fieldset.
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     productLoadResults.push({ data: null, error: new Error('reload failed') });
     fireEvent.click(screen.getByRole('button', { name: 'Apply approved changes' }));
 
     expect(await screen.findByText(/Editing is locked until the latest values load/i)).toBeInTheDocument();
-    expect(screen.getByLabelText('Current Cost')).toBeDisabled();
+    expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
     expect(screen.getByLabelText('New Cost')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
 
@@ -889,7 +890,7 @@ describe('ProductDetail governed pricing flow', () => {
     await waitFor(() => {
       expect(screen.queryByText(/Editing is locked until the latest values load/i)).not.toBeInTheDocument();
     });
-    expect(screen.getByLabelText('Current Cost')).not.toBeDisabled();
+    expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
   });
 
   it('opens the folded section that holds a refused field', async () => {
@@ -910,13 +911,14 @@ describe('ProductDetail governed pricing flow', () => {
     await screen.findByText('Grower Description');
 
     fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'price_driven' } });
-    fireEvent.change(screen.getByLabelText('Current Cost'), {
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
+    fireEvent.change(screen.getByLabelText('New Cost'), {
       target: { value: '90071992547409.93' },
     });
     fireEvent.change(screen.getByLabelText('Tier 1 price'), {
       target: { value: '90071992547410.01' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
     await giveSourceAndReason('Supplier quote 4471', 'New list price');
 
     await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({
@@ -961,7 +963,7 @@ describe('ProductDetail governed pricing flow', () => {
     fireEvent.change(screen.getByLabelText('Grower Description'), {
       target: { value: 'Unsaved grower-facing description' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
 
@@ -978,10 +980,10 @@ describe('ProductDetail governed pricing flow', () => {
     const timing = await screen.findByRole('checkbox', { name: 'Pre-Emerge Corn' });
     fireEvent.click(timing);
     fireEvent.click(timing);
-    fireEvent.click(screen.getByRole('button', { name: /^Update$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
     fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
-    expect(await screen.findByLabelText('Source (supplier, document, date)')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Source')).toBeInTheDocument();
     expect(mockToast).not.toHaveBeenCalledWith('error', 'Save or discard the unsaved Product details before reviewing a pricing change.');
   });
 });

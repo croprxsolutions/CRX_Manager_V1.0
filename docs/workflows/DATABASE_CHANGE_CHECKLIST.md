@@ -22,7 +22,7 @@ supabase/migrations/YYYYMMDDHHMMSS_description.sql
 
 Example: `20260226150000_add_notes_to_deliveries.sql`
 
-- Get the timestamp prefix from `npm run next-migration-stamp -- --live <live max version>`; it is above `origin/main`, every local worktree, every open PR and the live high-water you pass
+- Get the timestamp prefix from `npm run next-migration-stamp -- --live <live high-water>`; it is above `origin/main`, every local worktree, every open PR and the live high-water you pass
 - Use snake_case for the description
 - Keep the description short but clear
 

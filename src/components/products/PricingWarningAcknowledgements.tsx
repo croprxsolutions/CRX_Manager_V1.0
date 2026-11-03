@@ -1,4 +1,5 @@
 import { AlertTriangle } from 'lucide-react';
+import { formatExactCents } from '../../lib/money';
 import {
   PRICING_ACK_REASON_MAX,
   PRICING_WARNING_LABELS,
@@ -16,9 +17,7 @@ interface PricingWarningAcknowledgementsProps {
 
 function centsToDollars(cents: bigint | null): string {
   if (cents === null) return '—';
-  const negative = cents < 0n;
-  const absolute = negative ? -cents : cents;
-  return `${negative ? '-' : ''}$${absolute / 100n}.${(absolute % 100n).toString().padStart(2, '0')}`;
+  return formatExactCents(cents);
 }
 
 function productName(warning: PricingWarning, rows: PricingPreviewRow[]): string {
@@ -42,6 +41,11 @@ function WarningDetail({ warning }: { warning: PricingWarning }) {
           {code === 'OPEN_SENT_QUOTE'
             && `: ${details.open_quote_count} quote${details.open_quote_count === 1 ? '' : 's'}`
             + (details.open_quote_numbers.length > 0 ? ` (${details.open_quote_numbers.join(', ')})` : '')}
+          {code === 'TIER_ORDER' && details.tier_order?.map((pair) => (
+            <span key={pair.higher_tier} className="block">
+              Tier {pair.higher_tier} {formatExactCents(pair.higher_cents)} is below Tier {pair.lower_tier} {formatExactCents(pair.lower_cents)}
+            </span>
+          ))}
         </li>
       ))}
     </ul>

@@ -79,4 +79,5 @@ Admin, sales rep, driver and applicator, plus commission recipients. **Cost and 
 - [[workflows/DATABASE_CHANGE_CHECKLIST|Database Change Checklist]]
 - [[workflows/UI_PATTERNS|UI Patterns]]
 - [[reference/coding-guidelines|Coding Guidelines]] and [[reference/gotchas|Gotchas]]
+- [[reference/product-corrections-record-map|Product label correction record map]]
 - No one pushes straight to `main`. Every change is a pull request with independent review, and money changes get extra review.

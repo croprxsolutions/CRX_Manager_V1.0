@@ -10,6 +10,7 @@
  */
 
 import { normalizeRateUnit } from './labelGuardrails';
+import type { ProductForm } from '../types';
 
 export type ChemDriver = 'rate' | 'qty';
 
@@ -358,6 +359,7 @@ export function chemQuantityExpectedButZero(
 // from the PRODUCT FORM, not the unit text:
 //   • product_form = 'dry'  → POUNDS:  oz = 1/16 lb,  lb = 1
 //   • product_form = liquid → GALLONS: oz = 1/128 gal, pt = 1/8, qt = 1/4, gal = 1
+//   • product_form = seed/each → no weight or volume equivalent
 // So a LIQUID product dosed in bare 'oz' (the field-app default rate_unit) must
 // preview as GALLONS — NOT pounds — to match the invoice + PDF. The #25 preview
 // passes `product_form`; we replicate the server's branch exactly so the on-screen
@@ -416,18 +418,20 @@ const round4 = (x: number): number => Math.round(x * 10000) / 10000;
  * an unrecognized unit, or a unit that doesn't belong to the product's form
  * (caller renders a dash — never a guessed number). Pure + tested.
  *
- * @param productForm  when 'liquid' or 'dry', the gal/lb choice is taken from the
+ * @param productForm  for liquid or dry, the gal/lb choice is taken from the
  *   product form to MATCH the server `convert_to_gl_lb` (the #25 field-app preview).
+ *   Seed and each return null.
  *   When omitted/null, the form is inferred from the free-text unit (legacy path).
  */
 export function toGallonOrLbEquivalent(
   quantity: number,
   unit: string | null | undefined,
-  productForm?: 'liquid' | 'dry' | null,
+  productForm?: ProductForm | null,
 ): AppliedConversion | null {
   if (!Number.isFinite(quantity) || quantity === 0) return null;
   const key = (unit || '').trim().toLowerCase();
   if (key === '') return null;
+  if (productForm === 'seed' || productForm === 'each') return null;
 
   // #25 field-app preview: branch on product_form so screen == saved/PDF.
   if (productForm === 'dry') {
@@ -483,13 +487,14 @@ export function fieldAppPricedQuantity(
   appliedQty: number,
   rateUnit: string | null | undefined,
   inventoryUnit: string | null | undefined,
-  productForm?: 'liquid' | 'dry' | null,
+  productForm?: ProductForm | null,
 ): number | null {
   if (!Number.isFinite(appliedQty)) return null;
   const r = (rateUnit || '').trim().toLowerCase();
   const i = (inventoryUnit || '').trim().toLowerCase();
   if (r === i) return appliedQty;            // same unit: no conversion needed
   if (r === '' || i === '') return null;
+  if (productForm === 'seed' || productForm === 'each') return null;
   const sizes = productForm === 'dry' ? DRY_UNIT_SIZE : LIQUID_UNIT_SIZE;
   const sr = sizes[r];
   const si = sizes[i];
@@ -567,9 +572,10 @@ export function baseUnitOfRate(rateUnit: string | null | undefined): string {
  * using the same server-parity tables as toGallonOrLbEquivalent. Returns null when
  * the unit is unknown for the given form.
  */
-function unitSizeInForm(unitKey: string, form: 'liquid' | 'dry'): number | null {
+function unitSizeInForm(unitKey: string, form: ProductForm): number | null {
   if (form === 'liquid') return unitKey in LIQUID_TO_GALLONS ? LIQUID_TO_GALLONS[unitKey] : null;
-  return unitKey in DRY_TO_POUNDS ? DRY_TO_POUNDS[unitKey] : null;
+  if (form === 'dry') return unitKey in DRY_TO_POUNDS ? DRY_TO_POUNDS[unitKey] : null;
+  return null;
 }
 
 export interface ChemAutofillUnits {
@@ -648,7 +654,7 @@ export function reconcileChemAutofillUnits(
   rateUnit: string | null | undefined,
   costPerStockCents: number,
   pricePerStockCents: number,
-  productForm?: 'liquid' | 'dry' | null,
+  productForm?: ProductForm | null,
 ): ChemAutofillUnits {
   const stock = (stockUnit || '').trim();
   const stockKey = stock.toLowerCase();
@@ -665,7 +671,7 @@ export function reconcileChemAutofillUnits(
   if (baseKey === '' || baseKey === stockKey || stockKey === '') return fallback;
 
   // Determine the form: trust product_form when given, else infer from the stock unit.
-  let form: 'liquid' | 'dry' | null = productForm ?? null;
+  let form: ProductForm | null = productForm ?? null;
   if (form == null) {
     if (stockKey in LIQUID_TO_GALLONS) form = 'liquid';
     else if (stockKey in DRY_TO_POUNDS) form = 'dry';
@@ -844,7 +850,7 @@ const NO_HAZARD: ChemBillingHazard = { hazard: false, quantityUnit: '', priceUni
 export function chemLineBillingHazard(
   row: { quantity: string; rate_per_acre: string; rate_unit?: string | null; unit?: string | null },
   acres: number | string,
-  productForm?: 'liquid' | 'dry' | null,
+  productForm?: ProductForm | null,
 ): ChemBillingHazard {
   const rateBaseRaw = baseUnitOfRate(row.rate_unit);
   const quantityUnit = normalizeRateUnit(rateBaseRaw);
@@ -924,12 +930,13 @@ export function chemLineBillingHazard(
   // No term scales with the number under test, and no term is unbounded.
   const rate = parseFloat(row.rate_per_acre);
   const acreage = exactDecimal(acres);
-  const sizes = productForm === 'dry' ? DRY_UNIT_SIZE : LIQUID_UNIT_SIZE;
-  const sourceSize = sizes[quantityUnit];
-  const targetSize = sizes[priceUnit];
+  const sizes = productForm === 'seed' || productForm === 'each'
+    ? null : productForm === 'dry' ? DRY_UNIT_SIZE : LIQUID_UNIT_SIZE;
+  const sourceSize = sizes?.[quantityUnit];
+  const targetSize = sizes?.[priceUnit];
   if (Number.isFinite(rate) && rate > 0 && acreage != null && acreage.coefficient > 0n
-      && Number.isSafeInteger(sourceSize) && sourceSize > 0
-      && Number.isSafeInteger(targetSize) && targetSize > 0
+      && sourceSize != null && Number.isSafeInteger(sourceSize) && sourceSize > 0
+      && targetSize != null && Number.isSafeInteger(targetSize) && targetSize > 0
       && quantityIsWithinSqlTolerance(String(qty), String(rate), String(acres), sourceSize, targetSize)) {
     return NO_HAZARD;
   }

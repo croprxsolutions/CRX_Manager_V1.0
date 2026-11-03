@@ -6,12 +6,12 @@ import { ilikeOrPattern } from '../../lib/recordSearch';
 import { Sentry } from '../../lib/sentry';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../../lib/costFields';
 import { useAuth } from '../../contexts/AuthContext';
-import type { Product, UnitConversion } from '../../types';
+import type { Product, ProductForm, UnitConversion } from '../../types';
 import { formatCents as fmt } from '../../lib/money';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCents';
 import { useToast } from '../ui/Toast';
 import { toGallonOrLbEquivalent, fieldAppPricedQuantity } from '../../lib/chemCalculator';
-import { unitOptionsForForm, isKnownUnit } from '../../lib/units';
+import { rateUnitOptionsForProduct } from '../../lib/units';
 import {
   compareToMaxRate,
   phiHarvestWarning,
@@ -34,6 +34,7 @@ export interface ChemicalLine {
   unit: string;
   unit_price_cents: number;
   price_unit: string;
+  inventory_unit?: string | null;
   extended_cents: number;
   unit_cost_cents: number;
   sort_order: number;
@@ -51,7 +52,7 @@ export interface ChemicalLine {
    * conversion display (liquid -> gal, dry -> lb). Captured on product select; the
    * server is authoritative via convert_to_gl_lb().
    */
-  product_form?: 'liquid' | 'dry' | null;
+  product_form?: ProductForm | null;
   /**
    * Phase 1 (2026-04-29): when true, the unit_price_cents on this line is a
    * deliberate manual override. The server records price_source = 'manual'.
@@ -331,10 +332,12 @@ export default function FieldAppChemicalEntry({
       product_id: product.id,
       product_name: product.product_name,
       rate_per_acre: product.rate_per_acre || null,
-      rate_unit: product.rate_unit || product.inventory_unit || 'oz',
+      rate_unit: product.product_form === 'seed' || product.product_form === 'each'
+        ? product.inventory_unit || '' : product.rate_unit || product.inventory_unit || 'oz',
       unit: product.inventory_unit || 'oz',
       unit_price_cents: Math.round(tierPrice(product, primaryCustomerTier) * 100),
       price_unit: product.inventory_unit || 'oz',
+      inventory_unit: product.inventory_unit,
       unit_cost_cents: Math.round((product.current_cost || 0) * 100),
       epa_registration: product.epa_registration || undefined,
       // #25: default Vendor from the product (editable); capture product_form for the
@@ -566,10 +569,10 @@ export default function FieldAppChemicalEntry({
                         it would zero the preview here while the server falls back to unit_size and
                         still invoices non-zero. Disabled => can't be selected. */}
                     <option value="" disabled>--</option>
-                    {line.rate_unit && !isKnownUnit(unitConversions, line.product_form, line.rate_unit) && (
+                    {line.rate_unit && !rateUnitOptionsForProduct(unitConversions, line.product_form, line.inventory_unit ?? line.price_unit).some((uc) => uc.unit === line.rate_unit) && (
                       <option value={line.rate_unit}>{line.rate_unit}</option>
                     )}
-                    {unitOptionsForForm(unitConversions, line.product_form).map((uc) => (
+                    {rateUnitOptionsForProduct(unitConversions, line.product_form, line.inventory_unit ?? line.price_unit).map((uc) => (
                       <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                     ))}
                   </select>

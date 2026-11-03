@@ -26,6 +26,8 @@
  * THROWS so the caller aborts and never stamps printed_at (#11 compliance fix).
  */
 import { supabase } from './db';
+import { asProductForm } from './units';
+import type { ProductForm } from '../types';
 import { resolveBilledCustomers } from './billedCustomersResolver';
 import {
   buildApplicatorSheetData,
@@ -70,7 +72,7 @@ interface ProductLabel {
   rei_hours: number | null;
   phi_days: number | null;
   epa_registration: string | null;
-  product_form: 'liquid' | 'dry' | null;
+  product_form: ProductForm | null;
 }
 
 interface ReportFetchOptions {
@@ -129,7 +131,7 @@ export async function fetchChemicalApplicationReportData(
     if (lpErr || !lp) throw (lpErr ?? new Error('Failed to load product label data for the chemical report'));
     (lp as Array<{ id: string; rei_hours: number | null; phi_days: number | null; epa_registration: string | null; product_form: string | null }>)
       .forEach((p) => {
-        const form = p.product_form === 'liquid' || p.product_form === 'dry' ? p.product_form : null;
+        const form = asProductForm(p.product_form);
         labelById.set(p.id, { rei_hours: p.rei_hours, phi_days: p.phi_days, epa_registration: p.epa_registration, product_form: form });
       });
     // A short array (RLS-hidden / deleted product) returns NO error — but a missing

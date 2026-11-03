@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Networkless checks for run-live.mjs: query extraction, refusal, packet capture and token decoding.
+// Networkless checks for run-live.mjs: query extraction, refusal, and packet capture (token decoding: scripts/lib/supabase-credential.test.mjs).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { decodeTokenBlob, extractQueries, packetFrom } from './run-live.mjs';
+import { extractQueries, packetFrom } from './run-live.mjs';
 
 const runner = fileURLToPath(new URL('./run-sweeps.mjs', import.meta.url));
 const printed = spawnSync(process.execPath, [runner], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, SUPABASE_DB_URL: '' } });
@@ -37,13 +37,5 @@ assert.throws(() => packetFrom(first.name, 200, 'not json'), /not JSON/);
 assert.throws(() => packetFrom(first.name, 200, '[]'), /exactly one sweep_result/);
 assert.throws(() => packetFrom(first.name, 200, JSON.stringify([{ sweep_result: packet }, { sweep_result: packet }])), /exactly one/);
 assert.throws(() => packetFrom('other', 200, JSON.stringify([{ sweep_result: packet }])), /for this predicate/);
-
-// Token: UTF-8, UTF-16LE and go-keyring forms decode; a non-token never echoes its value.
-const token = `sbp_${'a1_'.repeat(10)}`;
-const b64 = (text, enc = 'utf8') => Buffer.from(text, enc).toString('base64');
-assert.equal(decodeTokenBlob(b64(token)), token);
-assert.equal(decodeTokenBlob(b64(token, 'utf16le')), token);
-assert.equal(decodeTokenBlob(b64(`go-keyring-base64:${b64(token)}`)), token);
-assert.throws(() => decodeTokenBlob(b64('secret-not-a-token')), (error) => !error.message.includes('secret'));
 
 console.log(`run-live.test.mjs: ok (${queries.length} queries)`);

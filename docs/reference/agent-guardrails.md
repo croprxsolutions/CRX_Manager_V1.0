@@ -23,6 +23,11 @@
 > round must never be routed through `scripts/write-codex-push-proof.mjs`, which unlinks the existing proof for the
 > current HEAD at the start of a run. See `docs/manual/DECISION_LOG.md`, 2026-09-20.
 >
+> **Guard-change round cap (Mason, 2026-11-03).** When the reviewed diff touches `.claude/hooks/` or `.codex/hooks/`,
+> `scripts/luna-review.mjs` allows two completed Luna rounds per branch (an advisory `--sol` run is neither stopped nor counted); the third prints `STOP: third review round
+> on a guard change` and exits 1 without calling Codex (count: `crx-luna-guard-rounds.json` in the git common dir,
+> not a proof). Drop the carve-out or hand the decision to Mason.
+>
 > **A head behind main may merge (Mason, 2026-10-26) — amends every block below.** Mason turned off GitHub's
 > "branch must be up to date" rule (classic branch protection `strict: false`; the `protect-main` ruleset was
 > already `false`), and both merge gates follow: they no longer refuse a head that does not contain GitHub's

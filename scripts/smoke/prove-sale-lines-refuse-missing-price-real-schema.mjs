@@ -209,7 +209,7 @@ const C = { T1: id('c1'), T2: id('c2'), T3: id('c3') };
 const P = { UNPRICED: id('f1'), ZERO: id('f2'), T1ONLY: id('f3'), T2ONLY: id('f4') };
 const Q = { T1: id('e1'), T2: id('e2'), T3: id('e3') };
 const S = { T1: id('51'), T2: id('52'), T3: id('53') };
-const O = { T1: id('d1'), T2: id('d2') };
+const O = { T1: id('d1'), T2: id('d2'), T1_NO_QUOTE: id('d3'), OTHER_CUSTOMER: id('d4') };
 const I = { T1: id('b1') };
 const QI_PRICED = id('a01');
 const OI_LEGACY = id('a02');
@@ -236,7 +236,9 @@ function seed() {
     INSERT INTO public.quote_items (id, quote_id, section_id, product_id, price_per_unit) VALUES
       ('${QI_PRICED}', '${Q.T1}', '${S.T1}', '${P.T1ONLY}', 10),
       ('${QI_LEGACY}', '${Q.T1}', '${S.T1}', '${P.UNPRICED}', 0);
-    INSERT INTO public.orders (id, order_number, customer_id) VALUES ('${O.T1}', 'PV6B-O1', '${C.T1}'), ('${O.T2}', 'PV6B-O2', '${C.T2}');
+    INSERT INTO public.orders (id, order_number, customer_id, quote_id) VALUES ('${O.T1}', 'PV6B-O1', '${C.T1}', '${Q.T1}'),
+      ('${O.T2}', 'PV6B-O2', '${C.T2}', NULL), ('${O.T1_NO_QUOTE}', 'PV6B-O3', '${C.T1}', NULL),
+      ('${O.OTHER_CUSTOMER}', 'PV6B-O4', '${C.T2}', '${Q.T1}');
     INSERT INTO public.order_items (id, order_id, product_id, price_per_unit, total_units_needed, quantity_remaining) VALUES
       ('${OI_LEGACY}', '${O.T1}', '${P.UNPRICED}', 0, 5, 5);
     INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, created_by) VALUES ('${I.T1}', 'PV6B-I1', '${C.T1}', 'field_application', '${U.ADMIN}');
@@ -351,6 +353,23 @@ ${unnamed}`);
   allowed('order: copied from a quote line the quote set at $0', oi(O.T1, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` }));
   refused('order: quote-copied line moved to a product with no price', oi(O.T1, P.UNPRICED, 0, { quote_item_id: `'${QI_PRICED}'` }), 'ORDER_PRICE_MISSING', 'Unpriced');
   refused('order: quote-copied $0 line moved to another product with no price', oi(O.T1, P.T2ONLY, 0, { quote_item_id: `'${QI_LEGACY}'` }), 'ORDER_PRICE_MISSING', 'Tier Two Only');
+  refused('order: points at a $0 line of a quote this order did not come from', oi(O.T1_NO_QUOTE, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` }), 'ORDER_PRICE_MISSING', 'Unpriced');
+  refused('order: points at a $0 line of a quote for another customer', oi(O.T2, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` }), 'ORDER_PRICE_MISSING', 'Unpriced');
+  refused('order: its quote belongs to another customer', oi(O.OTHER_CUSTOMER, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` }), 'ORDER_PRICE_MISSING', 'Unpriced');
+  allowed('order: linked to the quote, then its quote-set $0 line added', `UPDATE public.orders SET quote_id = '${Q.T1}' WHERE id = '${O.T1_NO_QUOTE}';
+    ${oi(O.T1_NO_QUOTE, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` })}`);
+  allowed('order: its quote rewritten unchanged', `UPDATE public.orders SET quote_id = '${Q.T1}' WHERE id = '${O.T1_NO_QUOTE}';
+    ${oi(O.T1_NO_QUOTE, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` })}
+    UPDATE public.orders SET quote_id = quote_id, customer_id = customer_id WHERE id = '${O.T1_NO_QUOTE}';`);
+  refused('order: moved to another quote after a quote-set $0 line', `UPDATE public.orders SET quote_id = '${Q.T1}' WHERE id = '${O.T1_NO_QUOTE}';
+    ${oi(O.T1_NO_QUOTE, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` })}
+    UPDATE public.orders SET quote_id = '${Q.T2}' WHERE id = '${O.T1_NO_QUOTE}';`, 'ORDER_PRICE_MISSING', 'Unpriced');
+  refused('order: moved to another customer after a quote-set $0 line', `UPDATE public.orders SET quote_id = '${Q.T1}' WHERE id = '${O.T1_NO_QUOTE}';
+    ${oi(O.T1_NO_QUOTE, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` })}
+    UPDATE public.orders SET customer_id = '${C.T2}' WHERE id = '${O.T1_NO_QUOTE}';`, 'ORDER_PRICE_MISSING', 'Unpriced');
+  refused('order: moved to another quote, full stack', asAdmin('update_order_items') + `UPDATE public.orders SET quote_id = '${Q.T1}' WHERE id = '${O.T1_NO_QUOTE}';
+    ${oi(O.T1_NO_QUOTE, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` })}
+    UPDATE public.orders SET quote_id = NULL WHERE id = '${O.T1_NO_QUOTE}';`, 'ORDER_PRICE_MISSING', 'Unpriced', { isolate: false });
   refused('order: a price-later line priced at $0', `UPDATE public.order_items SET pricing_pending = true WHERE id = '${OI_LEGACY}';
     UPDATE public.order_items SET pricing_pending = false WHERE id = '${OI_LEGACY}';`, 'ORDER_PRICE_MISSING', 'Unpriced');
   allowed('order: the editor re-sends a legacy $0 line unchanged', `UPDATE public.order_items
@@ -365,7 +384,7 @@ ${unnamed}`);
     SET total_units_needed = 8 WHERE id = '${OI_LEGACY}';`, 'ORDER_PRICE_MISSING', 'Unpriced', { isolate: false });
   allowed('order: fewer units on a legacy $0 line', `UPDATE public.order_items SET total_units_needed = 4 WHERE id = '${OI_LEGACY}';`);
   refused('quote: more $0 units on a legacy line', `UPDATE public.quote_items SET total_units_needed = 9 WHERE id = '${QI_LEGACY}';`, 'QUOTE_PRICE_MISSING', 'Unpriced');
-  console.log('[prover] order lines: missing refused by name (incl. tier at sale); stated $0, priced, price-later, a quote-set $0 copy and delivery updates allowed; a quote-copied line moved to an unpriced product refused');
+  console.log('[prover] order lines: missing refused by name (incl. tier at sale); stated $0, priced, price-later, a quote-set $0 copy and delivery updates allowed; a quote-copied line moved to an unpriced product, or pointing at a quote this order did not come from, refused');
 
   // Invoice lines priced from the tier (the field-app path).
   refused('invoice: tier-priced unpriced at 0', ii(P.UNPRICED, 0, "'tier'"), 'INVOICE_PRICE_MISSING', 'Unpriced');

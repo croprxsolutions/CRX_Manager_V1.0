@@ -1464,6 +1464,7 @@ git() { return 0; }
   assert.equal((prePush.match(/npm run test:supplier-pricing-phase3c-packet/g) ?? []).length, 0, 'pre-push must not run the multi-minute packet suite; CI owns that enforcement');
   assert.equal((prePush.match(/if ! npm run typecheck/g) ?? []).length, 1, 'pre-push typecheck must retain one fail-closed shell guard');
   assert.equal((prePush.match(/if ! npm run build/g) ?? []).length, 1, 'pre-push build must retain one fail-closed shell guard');
+  assert.equal((prePush.match(/if ! npm run check:code-health/g) ?? []).length, 1, 'pre-push code-health must retain one fail-closed shell guard');
   assert(packageScripts['test:supplier-pricing-phase3c-packet'].includes('supplier-pricing-phase3-private-artifacts.test.mjs'));
   assert(!packageScripts['test:correction-guards'].includes('supplier-pricing-phase3-private-artifacts.test.mjs'), 'the multi-minute packet suite must not run on every commit');
   assert.match(
@@ -1478,6 +1479,7 @@ git() { return 0; }
       ['containment', 'node() { return 42; }; npm() { return 0; };'],
       ['typecheck', 'node() { return 0; }; npm() { if [ "$2" = "typecheck" ]; then return 42; fi; return 0; };'],
       ['build', 'node() { return 0; }; npm() { if [ "$2" = "build" ]; then return 42; fi; return 0; };'],
+      ['code-health', 'node() { return 0; }; npm() { if [ "$2" = "check:code-health" ]; then return 42; fi; return 0; };'],
     ]) {
       const hookRun = runPrePushHook(functions, ['origin', 'https://example.invalid/repository.git'], 'refs/heads/test deadbeef refs/heads/test deadbeef\n');
       assert.equal(hookRun.status, 1, `${name} failure must block push with exit 1: ${hookRun.stdout}${hookRun.stderr}`);

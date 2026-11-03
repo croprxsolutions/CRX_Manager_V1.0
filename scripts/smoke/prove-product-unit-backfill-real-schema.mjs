@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261104170000_product_unit_backfill (WP-PM-6a).
+ * Real-schema proof for 20261104200000_product_unit_backfill (WP-PM-6a).
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container and replays
  * every migration before the candidate. Then it proves:
@@ -31,7 +31,7 @@ let started = false;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261104170000_product_unit_backfill.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261104200000_product_unit_backfill.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

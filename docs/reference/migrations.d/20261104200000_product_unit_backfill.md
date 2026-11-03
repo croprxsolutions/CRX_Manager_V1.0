@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20261104170000_product_unit_backfill.sql` (LF SQL sha256: `5bbfac84249fe219304cfda6f164b755e36e8ce887d80ea22306e7d42dfc3203`). DATA migration for WP-PM-6a: sets `products.unit_size` to the row's `inventory_unit` on the nine products the owner approved one by one on 2026-11-03 (the review list is private; the file names rows by id only). One row changes `LB` to `Lb`; eight change `''` (empty text) to `Gal` (seven) or `MG` (one). It also stamps their `updated_at`, and adds one guard trigger (below). No other row, column, grant or policy changes.
+**LOCAL CANDIDATE — NOT APPLIED.** `20261104200000_product_unit_backfill.sql` (LF SQL sha256: `5bbfac84249fe219304cfda6f164b755e36e8ce887d80ea22306e7d42dfc3203`). DATA migration for WP-PM-6a: sets `products.unit_size` to the row's `inventory_unit` on the nine products the owner approved one by one on 2026-11-03 (the review list is private; the file names rows by id only). One row changes `LB` to `Lb`; eight change `''` (empty text) to `Gal` (seven) or `MG` (one). It also stamps their `updated_at`, and adds one guard trigger (below). No other row, column, grant or policy changes.
 
 It **overwrites existing rows**, so its live apply needs Mason's own `I approve` reply for this exact file (`scripts/owner-approve-migration.mjs`; ship.md, Migrations bullet), on top of the normal proofs.
 
@@ -29,11 +29,13 @@ It **overwrites existing rows**, so its live apply needs Mason's own `I approve`
 
 **Rollback.** A reviewed migration that drops `trg_keep_product_unit` and its function, then sets each id's `unit_size` back to its old value (the ids and old values are in the file).
 
-Live ledger preflight, read 2026-11-03 at 12:41 PM Central from `supabase_migrations.schema_migrations`, worked out row by row: each row's effective stamp is the 14-digit timestamp in its `name`, or its `version` when the name has none (627 of the 1,106 rows fall back to `version`):
-- **Effective high-water:** `20261104150000`.
-- **Top row:** `20261104150000_product_forms_seed_each`, ledger version `20261103172003`.
-- **`max(version)`:** `20261103172003`.
-- **Total:** 1,106 rows.
-- **At or above this file:** no row's effective stamp is `>= 20261104170000`, and no row starts with `20261104170000` by name or by version.
+Renamed from `20261104170000_product_unit_backfill` on 2026-11-03: its first live apply was refused (nothing changed) because `20261104180000_vendor_link_proposals` (WP-PM-15a) went live first; that migration only reads products. Open PR #1377 holds `20261104190000`.
 
-So `20261104170000` sorts above everything applied. Read the ledger again at apply time, and after the apply reconcile the new row's `name` and `version` with the disk basename (the B7 rule in ship.md).
+Live ledger preflight, read 2026-11-03 at 1:22 PM Central from `supabase_migrations.schema_migrations`, worked out row by row: each row's effective stamp is the 14-digit timestamp in its `name`, or its `version` when the name has none (627 of the 1,107 rows fall back to `version`):
+- **Effective high-water:** `20261104180000`.
+- **Top row:** `20261104180000_vendor_link_proposals`, ledger version `20261103191530`.
+- **`max(version)`:** `20261103191530`.
+- **Total:** 1,107 rows.
+- **At or above this file:** no row's effective stamp is `>= 20261104200000`, and no row starts with `20261104200000` by name or by version.
+
+So `20261104200000` sorts above everything applied. Read the ledger again at apply time, and after the apply reconcile the new row's `name` and `version` with the disk basename (the B7 rule in ship.md).

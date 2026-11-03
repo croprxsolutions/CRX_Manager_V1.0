@@ -140,11 +140,26 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
     await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
 
     mockHasKey.mockReturnValue(true); // the lost attempt's key is kept
+    fireEvent.change(screen.getByLabelText(/Field Name/), { target: { value: 'South 40' } });
     fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '35' } });
     fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/fields/field-1'));
-    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('An earlier save already created this field'));
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('An earlier save may already have created this field'));
     expect(mockRpc.mock.calls.some(([name]) => name === 'set_field_override_acres')).toBe(false);
+  });
+
+  it('a retry that changes only the acreage saves it on the field', async () => {
+    mockRpc.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')));
+    await renderNewField();
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(1));
+
+    mockHasKey.mockReturnValue(true);
+    fireEvent.change(screen.getByLabelText(/Acres to bill/), { target: { value: '35' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_field_override_acres', expect.objectContaining({ p_field_id: 'field-1', p_override_acres: 35 })));
   });
 });

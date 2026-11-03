@@ -114,7 +114,7 @@ function FieldSetupPage() {
   // Counts confirmed saves: a later confirmed edit settles any older lost attempt, so returning to that
   // older edit must get a fresh key and apply, not replay its stale result.
   const confirmedFieldSavesRef = useRef(0);
-  // What the first attempt of a new field sent: a changed retry under the same key replays that field.
+  // The details the first attempt of a new field sent: if a retry changes them, its reply may be the earlier field.
   const firstNewAttemptRef = useRef<string | null>(null);
   const saveFieldBoundaryIdem = useIdempotencyKey('set_field_boundary', profile?.id || '');
   const saveFieldOverrideIdem = useIdempotencyKey('set_field_override_acres', profile?.id || '');
@@ -610,7 +610,8 @@ function FieldSetupPage() {
       // save_field checks only the key. A new field keeps one key until confirmed, so an edited retry after a lost
       // reply replays the field it already created; an edit to an existing field gets a key per exact payload.
       const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, confirmedFieldSavesRef.current, fieldPayload, billingPayload]);
-      const attempt = fingerprintIntentPayload([fieldPayload, billingPayload, field.override_acres ?? null, geometryDirty ? drawnPolygons : null]);
+      // Acreage is left out: applying the latest acreage to a field with the same details is what the user wants.
+      const attempt = fingerprintIntentPayload([fieldPayload, billingPayload]);
       if (isNew && !saveFieldIdem.hasKeyFor('new')) firstNewAttemptRef.current = attempt;
       const changedNewRetry = isNew && firstNewAttemptRef.current !== attempt;
       const { data, error } = await supabase.rpc('save_field', {
@@ -630,8 +631,8 @@ function FieldSetupPage() {
         const savedFieldId = isNew ? data : id;
 
         if (changedNewRetry) {
-          // The reply may be the field an earlier attempt created; never put this edit's acreage on it.
-          toast('warning', 'An earlier save already created this field. Opening it now; re-apply any later edits there.');
+          // The reply may be a field an earlier attempt created with other details; never put this edit's acreage on it.
+          toast('warning', 'An earlier save may already have created this field. Opening it now; check its details and re-enter any acreage or boundary.');
           skipUnsavedPromptRef.current = true;
           navigate(`/fields/${savedFieldId}`, { replace: true });
           setSaving(false);

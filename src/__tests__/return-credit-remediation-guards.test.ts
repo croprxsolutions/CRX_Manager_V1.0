@@ -116,21 +116,15 @@ function assertExecutableProofGuards(smokeText: string, proverText: string) {
   expect(proverText).toContain("return_number LIKE 'SMK-%'");
   expect(proverText).toContain("invoice_number LIKE 'SMK-RCC-%'");
   expect(proverText).toContain("receipt residue remained");
-  expect(proverText).toContain("--schema', 'public,auth'");
+  expect(proverText).toContain("--schema', 'public,auth,storage'");
   expect(proverText).toContain('rmSync(LIVE_SCHEMA, { force: true })');
-  expect(proverText).toContain('const preApplyViolations = psqlValue');
-  expect(proverText).toContain("if (preApplyViolations !== '0')");
-  expect(proverText).toContain('RETURN_CREDIT_POSTAPPLY_LIVE_PASS');
-  expect(proverText).toContain('const FORWARD_COMPATIBILITY_REPLAY = [');
-  expect(proverText).toContain("'20260813060000_require_completed_delivery_before_invoice_post.sql'");
-  expect(proverText).toContain('for (const migration of FORWARD_COMPATIBILITY_REPLAY)');
-  expect(proverText).toContain('function forwardReplayState(migration)');
-  expect(proverText).toContain("assert.notEqual(forwardState, 'drifted'");
-  expect(proverText).toContain('if (pendingForwardMigrations.length > 0)');
-  expect(proverText).toContain('for (const migration of pendingForwardMigrations)');
-  expect(proverText).toContain("'smk-forward-replay-pricing-apply'");
-  expect(proverText).toContain('applyStandalone(name)');
-  expect(proverText).toContain("apply('helper-guard.sql')");
+  expect(proverText).toContain("'return-credit invariant reported live-schema drift'");
+  expect(proverText).toContain('returns lifecycle invariant reported live-schema drift');
+  expect(proverText).toContain('RETURN_CREDIT_LIVE_SCHEMA_PASS');
+  expect(proverText).toContain('function liveDefinition(signature)');
+  expect(proverText).toContain('function assertLiveRestored(signature)');
+  expect(proverText).toContain("assert.equal(lineageTriggerSql(), liveLineageTrigger");
+  expect(proverText).toContain('assert.deepEqual([...completedProofs].sort(), [...expectedProofs].sort()');
 }
 
 function assertCompletedDeliveryForwardReplayContract(sql: string) {
@@ -340,16 +334,15 @@ describe('return/credit remediation durable guards', () => {
       "return_number LIKE 'SMK-%'",
       "invoice_number LIKE 'SMK-RCC-%'",
       'receipt residue remained',
-      "--schema', 'public,auth'",
+      "--schema', 'public,auth,storage'",
       'rmSync(LIVE_SCHEMA, { force: true })',
-      'const preApplyViolations = psqlValue',
-      "if (preApplyViolations !== '0')",
-      'RETURN_CREDIT_POSTAPPLY_LIVE_PASS',
-      'function forwardReplayState(migration)',
-      "assert.notEqual(forwardState, 'drifted'",
-      'if (pendingForwardMigrations.length > 0)',
-      'for (const migration of pendingForwardMigrations)',
-      "apply('helper-guard.sql')",
+      "'return-credit invariant reported live-schema drift'",
+      'returns lifecycle invariant reported live-schema drift',
+      'RETURN_CREDIT_LIVE_SCHEMA_PASS',
+      'function liveDefinition(signature)',
+      'function assertLiveRestored(signature)',
+      "assert.equal(lineageTriggerSql(), liveLineageTrigger",
+      'assert.deepEqual([...completedProofs].sort(), [...expectedProofs].sort()',
     ]) {
       const mutated = realSchemaProver.split(anchor).join('__REMOVED_GUARD__');
       expect(() => assertExecutableProofGuards(smoke, mutated)).toThrow();

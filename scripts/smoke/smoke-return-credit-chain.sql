@@ -126,9 +126,14 @@ DECLARE
   v_reason       text;
   v_create_header jsonb;
   v_create_items jsonb;
-  v_season integer := public.current_season();
-  v_source_season integer := v_season - 1;
+  v_season integer;
+  v_source_season integer;
 BEGIN
+  -- issue_return_credit switches this transaction to Chicago time; start there so
+  -- CURRENT_DATE cannot change mid-smoke between 6pm and midnight Central.
+  PERFORM set_config('TimeZone', 'America/Chicago', true);
+  v_season := public.current_season();
+  v_source_season := v_season - 1;
   -- --------------------------------------------------------------------
   -- 0. Preconditions + auth as a real active admin
   -- --------------------------------------------------------------------

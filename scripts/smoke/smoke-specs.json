@@ -899,7 +899,7 @@
     },
     "quote_sent_requires_version": {
       "chain": "smoke-quote-sent-requires-version.sql",
-      "description": "Migration 20261105123000: a quote becomes sent or revised only with a sent version on record. save_quote cannot move a draft to sent; the owning rep's direct update to sent or revised is refused while a permitted column still saves; a signed-in insert at sent, revised or accepted is refused while a draft insert works; the admin override cannot move a draft to sent, nor reopen a never-sent cancelled quote to sent. The send, a revision, a re-send, a rewind, a convert and the reopen of an accepted booking still work. Terminal rollback.",
+      "description": "Migration 20261105160000: a quote becomes sent or revised only with a sent version on record. save_quote cannot move a draft to sent; the owning rep's direct update to sent or revised is refused while a permitted column still saves; a signed-in insert at sent, revised or accepted is refused while a draft insert works; the admin override cannot move a draft to sent, nor reopen a never-sent cancelled quote to sent. The send, a revision, a re-send, a rewind, a convert and the reopen of an accepted booking still work. Terminal rollback.",
       "covers": [
         "save_quote",
         "create_quote_version",

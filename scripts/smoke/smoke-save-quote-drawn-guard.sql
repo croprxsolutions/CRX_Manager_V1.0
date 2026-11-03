@@ -137,7 +137,7 @@ BEGIN
   v_quote_id := (v_res->>'quote_id')::uuid;
   v_quote_version := (v_res->>'row_version')::bigint;
 
-  -- The send records V1 and marks the quote sent (a sent quote needs its version, 20261105123000).
+  -- The send records V1 and marks the quote sent (a sent quote needs its version, 20261105160000).
   PERFORM create_quote_version(v_quote_id, v_admin, 'presented', 'smk-sqdg-send-a-' || v_suffix, v_quote_version);
   SELECT (to_jsonb(q)->>'row_version')::bigint INTO v_quote_version FROM quotes q WHERE q.id = v_quote_id;
   v_payload := v_payload || jsonb_build_object('status', 'sent');

@@ -1,5 +1,5 @@
 -- Written 2026-11-03. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261105123000_quote_sent_requires_version.md. Re-read the live
+-- docs/reference/migrations.d/20261105160000_quote_sent_requires_version.md. Re-read the live
 -- ledger before applying.
 --
 -- WHAT: a quote leaves draft for sent or revised only with a sent version on record, so every
@@ -68,7 +68,7 @@ CREATE OR REPLACE FUNCTION public._enforce_quote_status_transition()
 AS $function$
 BEGIN
   -- A quote inserted by a browser session starts as a draft; it becomes sent only through the
-  -- send (20261105123000). Definer-rights code runs as its owner and inserts draft.
+  -- send (20261105160000). Definer-rights code runs as its owner and inserts draft.
   IF TG_OP = 'INSERT' THEN
     IF current_user IN ('anon', 'authenticated') AND NEW.status IS DISTINCT FROM 'draft' THEN
       RAISE EXCEPTION 'QUOTE_SEND_REQUIRED: a new quote must start as a draft'
@@ -79,7 +79,7 @@ BEGIN
 
   IF OLD.status = NEW.status THEN RETURN NEW; END IF;
 
-  -- A quote is sent or revised only with the version the customer was sent (20261105123000).
+  -- A quote is sent or revised only with the version the customer was sent (20261105160000).
   -- The send records its version before it sets the status. Checked before the admin override.
   IF NEW.status IN ('sent', 'revised')
      AND NOT EXISTS (SELECT 1 FROM quote_versions WHERE quote_id = NEW.id) THEN

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261105123000_quote_sent_requires_version.
+ * Real-schema proof for 20261105160000_quote_sent_requires_version.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17
  * container, replays every ordered post-baseline migration before the candidate (all applied live
@@ -36,7 +36,7 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
 const PREDICATE = path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'quote-price-lock-boundary.sql');
-const CANDIDATE = path.join(MIGRATIONS, '20261105123000_quote_sent_requires_version.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261105160000_quote_sent_requires_version.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

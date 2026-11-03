@@ -10,7 +10,7 @@
 --   * Only definer-rights code writes quotes.expires_at (20261101100000). The save implementation's
 --     own handling of it is pinned by its digest in allowlist.json.
 --   * A draft becomes sent or revised only with a sent version, and a browser session inserts a
---     quote only as a draft (20261105123000): both quote status triggers call the rule, and its
+--     quote only as a draft (20261105160000): both quote status triggers call the rule, and its
 --     two checks are still in it. Otherwise a sent quote can have no version to check against.
 --
 -- A second predicate on the same theme stays separate: quote-versions-rpc-owned guards the version

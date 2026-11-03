@@ -133,7 +133,7 @@ BEGIN
   v_quote_after := v_quote_after_second;
   v_quote_stale_draft := v_quote_after;
 
-  -- Since 20261105123000 a draft becomes sent only through the send, which records
+  -- Since 20261105160000 a draft becomes sent only through the send, which records
   -- its version first: a draft -> sent save is refused and nothing lands.
   BEGIN
     PERFORM public.save_quote(v_quote, jsonb_build_object(

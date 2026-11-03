@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a draft becomes sent or revised only with a sent version on record
 -- ----------------------------------------------------------------------------
--- Migration 20261105123000_quote_sent_requires_version. Product P at cost 6.00 (tier 1 7.50).
+-- Migration 20261105160000_quote_sent_requires_version. Product P at cost 6.00 (tier 1 7.50).
 --   A  save_quote cannot mark a draft sent; the draft stays a draft
 --   B  the owning rep cannot mark a draft sent or revised by changing its status
 --   C  a new quote starts as a draft: the rep cannot insert one at another status, and can

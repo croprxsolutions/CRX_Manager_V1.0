@@ -1,7 +1,7 @@
 -- Written 2026-11-03. STATUS: NOT APPLIED (local candidate). Ledger record:
--- docs/reference/migrations.d/20261104210000_sale_lines_refuse_missing_price.md. Stamp sits above
--- 20261104190000 (PR #1377, the live high-water read 2026-11-03) and 20261104200000 (WP-PM-6a,
--- PR #1374, open). Re-read the live ledger first.
+-- docs/reference/migrations.d/20261105120000_sale_lines_refuse_missing_price.md. Stamp sits above
+-- 20261105090000 (PR #1381, the live high-water read 2026-11-03, with 20261104200000 also live).
+-- Re-read the live ledger first.
 --
 -- idempotency-body-check: exempt -- this file adds a trigger function, not a callable RPC; no API
 --   role may execute it. The hook only recognises check_idempotency().

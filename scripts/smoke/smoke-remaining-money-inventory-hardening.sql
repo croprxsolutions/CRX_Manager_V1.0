@@ -16,6 +16,7 @@ DECLARE
   v_count bigint;
   v_err text;
   v_suffix text := substr(md5(random()::text), 1, 8);
+  v_pricing jsonb;
 BEGIN
   SELECT id INTO v_admin FROM profiles
   WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
@@ -33,9 +34,25 @@ BEGIN
 
   INSERT INTO customers (farm_name)
   VALUES ('[SMOKE] Voided Sales ' || v_suffix) RETURNING id INTO v_customer;
-  INSERT INTO products (product_name, category, current_cost)
-  VALUES ('[SMOKE] Voided Product ' || v_suffix, 'Herbicide', 40)
+  -- Pricing-free shell, then cost/price through the governed preview/apply
+  -- path (a priced products INSERT is refused since the Phase 1a cutover; the
+  -- order line below needs a cost basis).
+  INSERT INTO products (product_name, category)
+  VALUES ('[SMOKE] Voided Product ' || v_suffix, 'Herbicide')
   RETURNING id INTO v_product;
+  v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object('product_id', v_product, 'row_version', 1,
+      'pricing_mode', 'price_driven', 'new_cost', '40.00',
+      'tier1_price', '100.00', 'tier2_price', '100.00', 'tier3_price', '100.00')),
+    v_admin, gen_random_uuid()::text);
+  IF NOT COALESCE((v_pricing->>'apply_allowed')::boolean, false) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing preview failed: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,
+    v_pricing->>'request_fingerprint', v_admin, gen_random_uuid()::text);
+  IF (SELECT current_cost FROM products WHERE id = v_product) IS DISTINCT FROM 40.00 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing apply did not set current_cost';
+  END IF;
   INSERT INTO orders (
     order_number, customer_id, salesman_id, order_date, status,
     total_price, total_profit
@@ -103,20 +120,6 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- A sales rep cannot turn on the over-receive escape hatch.
-  PERFORM set_config('request.jwt.claims',
-    json_build_object('sub', v_sales, 'role', 'authenticated')::text, true);
-  BEGIN
-    PERFORM receive_po_items('[]'::jsonb, v_sales, 'smk-po-sales-' || v_suffix, true);
-    RAISE EXCEPTION 'SMOKE_FAIL: sales_rep enabled over-receive';
-  EXCEPTION WHEN OTHERS THEN
-    v_err := SQLERRM;
-    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_err NOT LIKE 'Only an active admin can authorize PO over-receiving%' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: wrong sales over-receive error: %', v_err;
-    END IF;
-  END;
-
   -- A token for a now-inactive profile is rejected by both inventory and reports.
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
@@ -129,7 +132,8 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
     IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_err NOT LIKE 'Only an active admin or sales_rep can receive PO items%' THEN
+    -- The role lookup filters is_active = true, so an inactive rep gets the role refusal.
+    IF v_err NOT LIKE 'Only admin or sales_rep can receive PO items%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong inactive receive error: %', v_err;
     END IF;
   END;
@@ -139,7 +143,8 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
     IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_err NOT LIKE 'Access denied: active admin or sales_rep role required%' THEN
+    -- Gross sales is admin-only now, so the inactive rep gets the admin refusal.
+    IF v_err NOT LIKE 'Permission denied: requires admin role%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong inactive report error: %', v_err;
     END IF;
   END;
@@ -183,6 +188,27 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: wrong NULL over-receive error: %', v_err;
     END IF;
   END;
+  -- A sales rep cannot turn on the over-receive escape hatch. The items list is
+  -- validated before the admin check, so this needs a real over-receiving line.
+  BEGIN
+    PERFORM receive_po_items(
+      jsonb_build_array(jsonb_build_object(
+        'po_item_id', v_po_item,
+        'quantity', 11,
+        'over_receive_reason', 'SMOKE sales attempt'
+      )),
+      v_sales,
+      'smk-po-sales-' || v_suffix,
+      true
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: sales_rep enabled over-receive';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'OVER_RECEIVE_ADMIN_REQUIRED%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: wrong sales over-receive error: %', v_err;
+    END IF;
+  END;
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
 
@@ -191,7 +217,7 @@ BEGIN
       'po_item_id', v_po_item,
       'quantity', 11,
       'condition', 'good',
-      'notes', 'SMOKE admin-authorized vendor over-shipment'
+      'over_receive_reason', 'SMOKE admin-authorized vendor over-shipment'
     )),
     v_admin,
     'smk-po-admin-' || v_suffix,

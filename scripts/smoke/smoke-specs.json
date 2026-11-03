@@ -7,6 +7,23 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "order_replay_binding_batch4b": {
+      "chain": "smoke-order-replay-binding-batch4b.sql",
+      "container_only": true,
+      "container_prover": "prove-order-replay-binding-batch4b-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-order-replay-binding-batch4b-real-schema.mjs, never through run-smoke.mjs against the live database: the fixtures create rush orders, which draw customer-visible order numbers from a non-transactional sequence that a rollback does not return (the prover reports which document-number sequences the chain moved), and plant [SMOKE] customers, products, orders and inventory rows, which the LIVE-DATA GUARD refuses. Proves price_order, update_order_items and mark_inventory_row_verified replay a stored receipt only for the same person and the exact same request, and that a retry carrying an approved below-cost reason still replays (KNOWN_ISSUES KI-10 batch 4b).",
+      "covers": [
+        "price_order",
+        "update_order_items",
+        "mark_inventory_row_verified"
+      ],
+      "area": [
+        "billing",
+        "inventory",
+        "idempotency",
+        "security"
+      ]
+    },
     "money_replay_binding_batch4a": {
       "chain": "smoke-money-replay-binding-batch4a.sql",
       "container_only": true,
@@ -122,7 +139,8 @@
     },
     "historical_ar_report_cutoffs": {
       "chain": "smoke-historical-ar-report-cutoffs.sql",
-      "description": "Section 2 historical AR report proof: an overdue invoice remains visible in both AR Aging and Customer Balance Listing, a fully paid invoice remains in cumulative invoiced/paid/count totals without entering open balance, a future-dated invoice is excluded, a post-cutoff credit application is replayed to the exact gross/open-credit cutoff, later prepay activity fails closed, and anonymous/private-helper grants remain denied. Self-contained fixtures and terminal rollback.",
+      "description": "Section 2 historical AR report proof: an overdue invoice remains visible in both AR Aging and Customer Balance Listing, a fully paid invoice remains in cumulative invoiced/paid/count totals without entering open balance, a future-dated invoice is excluded, a post-cutoff credit application is replayed to the exact gross/open-credit cutoff, later prepay activity fails the shared helper and the Customer Balance Listing closed while AR Aging (since 20261103150000, KI-95) returns that customer flagged with no amounts and the safe customer unchanged, and anonymous/private-helper grants remain denied. Self-contained fixtures and terminal rollback. The real-schema before/after proof for 20261103150000 is the container_prover.",
+      "container_prover": "prove-ar-aging-flags-unrebuildable-real-schema.mjs",
       "covers": [
         "get_ar_aging",
         "get_customer_balance_listing",
@@ -182,7 +200,7 @@
     },
     "section9_po_ap_high_remediation": {
       "chain": "smoke-section9-po-ap-high-remediation.sql",
-      "description": "Section 9 PO/AP HIGH closeout: real save/submit/edit/alternate-location receive/reverse/cancel paths keep Main Warehouse on-order equal to authoritative open remainder; vendor and accounting-period browser mutation grants/policies are absent; cancelled-PO bill creation and billed-PO cancellation fail in the shared PO-first lock contract; AP and receiving mutations replay only the same actor plus exact payload; AP aging uses due-date Current/1-30/31-60/61-90/over-90 boundaries and fails closed for unsupported dates; Due This Month ends at Chicago calendar month-end; a real close_accounting_period call makes update_vendor_bill, record_vendor_payment, void_vendor_payment, and void_vendor_bill reject closed-period history without side effects. Self-contained fixtures and terminal rollback. Companion isolated-PostgreSQL provers cover PO/AP and accounting-period concurrency in both winning orders.",
+      "description": "Section 9 PO/AP HIGH closeout: real save/submit/edit/receive/reverse/cancel paths (a non-Main receipt is refused until stock transfers exist, KI-85) keep Main Warehouse on-order equal to authoritative open remainder; vendor and accounting-period browser mutation grants/policies are absent; cancelled-PO bill creation and billed-PO cancellation fail in the shared PO-first lock contract; AP and receiving mutations replay only the same actor plus exact payload; AP aging uses due-date Current/1-30/31-60/61-90/over-90 boundaries and fails closed for unsupported dates; Due This Month ends at Chicago calendar month-end; a real close_accounting_period call makes update_vendor_bill, record_vendor_payment, void_vendor_payment, and void_vendor_bill reject closed-period history without side effects. Self-contained fixtures and terminal rollback. Companion isolated-PostgreSQL provers cover PO/AP and accounting-period concurrency in both winning orders.",
       "covers": [
         "save_purchase_order",
         "submit_purchase_order",

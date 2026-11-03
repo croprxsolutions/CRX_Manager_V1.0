@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, PROJECT, Refused, TEST_EMAIL,
-  assertAppPortIsLoopback, assertCleanEnvironment, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, portIsOpen,
+  assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, portIsOpen,
 } from './target.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -100,7 +100,9 @@ async function preflight({ needState = true } = {}) {
     throw new Refused('CRX_LOCAL_APP_STATE_DIR may only point at the temp folder.');
   }
   const state = readState();
-  if (!state && needState) throw new Refused('No test app here yet. Run: node scripts/local-app/app.mjs rebuild');
+  if (!state && needState) {
+    throw new Refused('No test app here yet. Run: node scripts/local-app/app.mjs rebuild, unless another checkout owns it (see the README).');
+  }
   if (state) assertLocalState(state);
   assertLocalDockerEndpoint(text(run('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'])));
   assertAppPortIsLoopback(text(run('netstat', ['-ano', '-p', 'tcp'])));
@@ -328,16 +330,16 @@ function stopFrontend() {
   if (listener) run('taskkill', ['/pid', listener[1], '/t', '/f'], { allowFailure: true });
 }
 
-function frontendEnv(state) {
+function frontendEnv(state, supabaseUrl = API_URL) {
   return childEnv({
-    VITE_SUPABASE_URL: API_URL,
+    VITE_SUPABASE_URL: supabaseUrl,
     VITE_SUPABASE_ANON_KEY: state.LOCAL_ANON_KEY,
     // Set empty so a checkout's .env cannot switch on a service outside this computer.
     VITE_MAPBOX_TOKEN: '',
     VITE_SENTRY_DSN: '',
   });
 }
-const VITE = ['node_modules/vite/bin/vite.js', '--config', 'scripts/local-app/vite.config.mjs', '--host', '127.0.0.1', '--port', String(APP_PORT), '--strictPort'];
+const vite = (port) => ['node_modules/vite/bin/vite.js', '--config', 'scripts/local-app/vite.config.mjs', '--host', '127.0.0.1', '--port', String(port), '--strictPort'];
 
 // A test on another branch's database would prove nothing about this one.
 function requireFinishedBuild() {
@@ -352,16 +354,21 @@ async function start() {
   await startDatabase(state);
   await startServices(state);
   if (!(await portIsOpen(APP_PORT))) {
-    spawn(process.execPath, VITE, { cwd: ROOT, env: frontendEnv(state), detached: true, stdio: 'ignore' }).unref();
+    spawn(process.execPath, vite(APP_PORT), { cwd: ROOT, env: frontendEnv(state), detached: true, stdio: 'ignore' }).unref();
     await waitFor('test app', () => portIsOpen(APP_PORT));
   }
   await assertFrontendIsOurs(state.LOCAL_ANON_KEY);
   console.log(`Test app: ${APP_URL}\nSign in with LOCAL_TEST_EMAIL and LOCAL_TEST_PASSWORD from scripts/local-app/.state/local.env`);
 }
 
+// `frontend --port 5201` runs a second copy beside the shared one. It reaches the gateway through
+// its own /_sb relay (vite.config.mjs), so the browser makes no cross-site call.
 async function frontend() {
+  const flag = process.argv.indexOf('--port');
+  const port = flag < 0 ? APP_PORT : assertExtraAppPort(process.argv[flag + 1]);
   const state = await preflight();
-  run(process.execPath, VITE, { env: frontendEnv(state), stdio: 'inherit' });
+  const supabaseUrl = port === APP_PORT ? API_URL : `http://127.0.0.1:${port}/_sb`;
+  run(process.execPath, vite(port), { env: frontendEnv(state, supabaseUrl), stdio: 'inherit' });
 }
 
 async function test() {

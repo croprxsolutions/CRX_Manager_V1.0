@@ -1,8 +1,9 @@
-import { useEffect, useState , useCallback, useRef } from 'react';
+import { useEffect, useState , useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Package, ArrowDownToLine, Pencil, Plus, AlertTriangle, ChevronDown, ChevronUp, Trash2, Download, FileText, TrendingUp, ShoppingCart } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
 import EditableDataTable, { type EditableColumn } from '../components/ui/EditableDataTable';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
@@ -19,6 +20,7 @@ import { LoadFailedState } from '../components/ui/EmptyState';
 import { exportToCSV } from '../lib/csvExport';
 import { downloadReportPdf } from '../lib/reportPdf';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { useActiveWarehouses, warehouseOptions } from '../hooks/useActiveWarehouses';
 import {
   UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE,
   UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE,
@@ -220,6 +222,7 @@ export default function InventoryPage() {
   const [adjustCleanupFailed, setAdjustCleanupFailed] = useState(false);
   const [adjustNote, setAdjustNote] = useState('');
   const [products, setProducts] = useState<PickerProduct[]>([]);
+  const inactiveProductIds = useMemo(() => new Set(products.filter((product) => !product.is_active).map((product) => product.id)), [products]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [productsFailed, setProductsFailed] = useState(false);
   // True while the newest product read is in flight: the list on screen may be an older one.
@@ -229,6 +232,7 @@ export default function InventoryPage() {
   const [customersLoading, setCustomersLoading] = useState(false);
   const [addProductId, setAddProductId] = useState('');
   const [addLocation, setAddLocation] = useState('Main Warehouse');
+  const activeWarehouses = useActiveWarehouses();
   const [addQty, setAddQty] = useState('');
   const [addUnitSize, setAddUnitSize] = useState('');
   const [addReorderPoint, setAddReorderPoint] = useState('');
@@ -486,7 +490,6 @@ export default function InventoryPage() {
     const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('products')
       .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' })
-      .eq('is_active', true)
       .order('product_name')
       .order('id')
       .range(from, to)));
@@ -502,6 +505,9 @@ export default function InventoryPage() {
     setProducts((data || []) as unknown as PickerProduct[]);
     setProductsFailed(false);
   }, [toast]);
+
+  // The position RPC omits status, so load the catalog for an internal Inactive label.
+  useEffect(() => { void fetchProducts(); }, [fetchProducts]);
 
   const fetchCustomers = useCallback(async () => {
     const readId = ++customersReadRef.current;
@@ -682,6 +688,11 @@ export default function InventoryPage() {
         toast('error', 'Please select a product');
         return;
       }
+      if (!products.some((product) => product.id === holdProductId && product.is_active)) {
+        setHoldProductId('');
+        toast('error', 'That product is turned off. Select an active product for a new hold.');
+        return;
+      }
       const qty = parseFloat(holdQty);
       if (!qty || qty <= 0) {
         toast('error', 'Please enter a valid quantity');
@@ -820,7 +831,7 @@ export default function InventoryPage() {
     // A product picked while the list reloaded must still be in the list that arrived (Luna, #1017).
     if (!products.some((p) => p.id === addProductId)) {
       setAddProductId('');
-      toast('error', 'That product is no longer active. Please select a product again.');
+      toast('error', 'That product is no longer in the catalog. Please select a product again.');
       return;
     }
     const qty = parseFloat(addQty) || 0;
@@ -1252,6 +1263,7 @@ export default function InventoryPage() {
       render: (row) => (
         <div className="flex items-center gap-1">
           <span className="font-medium text-nav-dark">{row.product_name}</span>
+          {inactiveProductIds.has(row.product_id) && <Badge variant="default">Inactive</Badge>}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1429,6 +1441,7 @@ export default function InventoryPage() {
   const filteredProducts = products.filter((p) =>
     !productSearch || p.product_name.toLowerCase().includes(productSearch.toLowerCase())
   );
+  const holdPickerProducts = createHoldIntent.isIntentLocked ? filteredProducts : filteredProducts.filter((product) => product.is_active);
 
   if (loading) {
     return (
@@ -1654,6 +1667,7 @@ export default function InventoryPage() {
         <div className={isEditingInventory ? 'hidden' : 'md:hidden'}>
           <InventoryPositionMobileCards
             rows={mobileFiltered}
+            inactiveProductIds={inactiveProductIds}
             isAdmin={isAdmin}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
@@ -1941,14 +1955,14 @@ export default function InventoryPage() {
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green mb-2"
             />
             <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
-              {createHoldIntent.isIntentLocked && holdProductId && !filteredProducts.some((product) => product.id === holdProductId) ? (
+              {createHoldIntent.isIntentLocked && holdProductId && !holdPickerProducts.some((product) => product.id === holdProductId) ? (
                 <p className="px-3 py-4 text-sm text-nav-dark bg-crx-green/10">Saved product (name unavailable)</p>
               ) : productsFailed ? (
                 <p role="alert" className="px-3 py-4 text-sm text-red-600 text-center">{PRODUCTS_FAILED_MESSAGE}</p>
-              ) : filteredProducts.length === 0 ? (
+              ) : holdPickerProducts.length === 0 ? (
                 <p className="px-3 py-4 text-sm text-secondary text-center">No products found</p>
               ) : (
-                filteredProducts.map((p) => (
+                holdPickerProducts.map((p) => (
                   <div key={p.id} className={holdProductId === p.id ? 'bg-crx-green/10' : ''}>
                     <ProductSearchResultRow
                       onClick={() => {
@@ -1957,7 +1971,7 @@ export default function InventoryPage() {
                         setHoldWarning('');
                       }}
                       product={p}
-                      trailing={null}
+                      trailing={p.is_active ? null : <span className="font-semibold text-amber-700">Inactive</span>}
                     />
                   </div>
                 ))
@@ -2066,18 +2080,18 @@ export default function InventoryPage() {
                         setAddUnitSize(p.unit_size || '');
                       }}
                       product={p}
-                      trailing={null}
+                      trailing={p.is_active ? null : <span className="font-semibold text-amber-700">Inactive</span>}
                     />
                   </div>
                 ))
               )}
             </div>
           </div>
-          <Input
+          <Select
             label="Location"
             value={addLocation}
             onChange={(e) => setAddLocation(e.target.value)}
-            placeholder="e.g. Main Warehouse"
+            options={warehouseOptions(activeWarehouses, addLocation).map((name) => ({ value: name, label: name }))}
           />
           <Input
             label="Initial Quantity"

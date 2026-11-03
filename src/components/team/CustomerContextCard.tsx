@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { DollarSign, ShoppingCart, Truck, Star } from 'lucide-react';
 import { supabase, assertRpcResult } from '../../lib/db';
 import { todayInBusinessTz } from '../../lib/dateUtils';
+import { isPricedAgingRow } from '../../lib/arAging';
+import type { ARAgingRow } from '../../types';
 
 interface CustomerContext {
   farm_name: string;
@@ -63,16 +65,19 @@ export default function CustomerContextCard({ customerId }: Props) {
 
         if (!custRes.data) return;
 
-        const arRow = assertRpcResult<Record<string, unknown>[]>(arData, 'get_ar_aging')?.find(
-          (r: Record<string, unknown>) => r.customer_id === customerId
+        const arRow = assertRpcResult<ARAgingRow[]>(arData, 'get_ar_aging')?.find(
+          (r) => r.customer_id === customerId
         );
+        // KI-95: no amounts for a balance that can't be rebuilt; fail as before rather than show $0.
+        if (arRow && !isPricedAgingRow(arRow)) throw new Error(`get_ar_aging: ${String(arRow.unavailable_reason)}`);
 
         const result: CustomerContext = {
           farm_name: custRes.data.farm_name,
           assigned_tier: custRes.data.assigned_tier ?? 1,
           credit_limit_cents: custRes.data.credit_limit_cents ?? 0,
-          total_outstanding: Number((arRow as Record<string, unknown>)?.total_outstanding ?? 0),
-          open_credit_cents: Number((arRow as Record<string, unknown>)?.open_credit_cents ?? 0),
+          // No row means this customer owes nothing today.
+          total_outstanding: Number(arRow?.total_outstanding ?? 0),
+          open_credit_cents: Number(arRow?.open_credit_cents ?? 0),
           open_orders: ordersRes.count ?? 0,
           last_delivery_date: delRes.data?.[0]?.completed_at ?? null,
         };

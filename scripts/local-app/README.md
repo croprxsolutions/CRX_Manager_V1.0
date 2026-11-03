@@ -18,6 +18,7 @@ the version these steps are proven on.
 | `node scripts/local-app/app.mjs status` | Says what is running and which commit and migrations it was built from. |
 | `node scripts/local-app/app.mjs seed` | Puts the invented data back without erasing anything. |
 | `node scripts/local-app/app.mjs stop` | Stops it and keeps its data. |
+| `node scripts/local-app/app.mjs frontend --port 5201` | Runs this checkout's screens on a second port beside the shared copy. Ctrl+C stops it. |
 | `node --test scripts/local-app/target.test.mjs` | Runs the refusal tests. Port 5199 must be free. |
 
 Sign in with `LOCAL_TEST_EMAIL` and `LOCAL_TEST_PASSWORD` from `scripts/local-app/.state/local.env`.
@@ -27,6 +28,22 @@ There is one test copy per computer, and the last `rebuild` owns it. `start`, `s
 checkout whose migrations differ from the test database. Before a package's decisive proof,
 rebuild from that package's branch and copy the commit and migration count from `status` into the PROOF
 line. `.state/build.json` holds the full migration list.
+
+### A second copy of the screens on another port
+
+When another session is using `127.0.0.1:5199`, check your branch's screens with
+`node scripts/local-app/app.mjs frontend --port 5201`. Any port from 1024 to 65535 works except 5199, 54721
+and 54722. It uses the same test database and test user, and listens on `127.0.0.1` only. It runs every check
+the other commands run, the 5199 check included. The browser calls `/_sb` on that same port and the frontend
+passes the call on to the gateway, so the gateway still lets in only pages from 5199. Live updates do not
+pass through, which changes nothing because the test copy has none.
+
+It needs the settings file of the checkout that owns the test database. If your checkout has no
+`scripts/local-app/.state/local.env`, copy that one file from the owning checkout's `scripts/local-app/.state/`.
+The owner is the checkout whose `rebuild` ran last, usually the newest `local.env`. **Do not run `rebuild` to
+get one:** that erases the shared test database under everyone else. The copy stays git-ignored, so keep it
+out of PRs and reports like the original. The second copy shows this checkout's screens against the owner's
+database, so it proves nothing about migrations this checkout adds.
 
 ## What keeps it away from production
 

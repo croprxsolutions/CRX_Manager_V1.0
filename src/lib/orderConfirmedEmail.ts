@@ -1,6 +1,7 @@
 import { supabase } from './db';
 import { sendEmail, buildEmailHtml } from './emailService';
 import { Sentry } from './sentry';
+import { escapeHtml } from './proofNotification';
 
 const fmt = (n: number | null | undefined) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n ?? 0);
@@ -72,7 +73,7 @@ export async function sendOrderConfirmedEmail(orderId: string): Promise<void> {
     const itemSummary = items
       .slice(0, 10)
       .map((i) => `<tr>
-        <td style="padding:6px 12px;border:1px solid #e2e8f0;font-size:13px;">${i.product_name}</td>
+        <td style="padding:6px 12px;border:1px solid #e2e8f0;font-size:13px;">${escapeHtml(i.product_name)}</td>
         <td style="padding:6px 12px;border:1px solid #e2e8f0;font-size:13px;text-align:right;">${i.total_units_needed}</td>
         <td style="padding:6px 12px;border:1px solid #e2e8f0;font-size:13px;text-align:right;">${fmt(i.price_per_unit)}</td>
       </tr>`)
@@ -84,15 +85,15 @@ export async function sendOrderConfirmedEmail(orderId: string): Promise<void> {
     const html = buildEmailHtml(`
       <h2 style="color:#1e293b;margin:0 0 12px;">Order Confirmed</h2>
       <p style="color:#475569;font-size:14px;line-height:1.6;">
-        Hi${customer.contact_name ? ` ${customer.contact_name}` : ''},
+        Hi${customer.contact_name ? ` ${escapeHtml(customer.contact_name)}` : ''},
       </p>
       <p style="color:#475569;font-size:14px;line-height:1.6;">
-        Your order <strong>${order.order_number}</strong> has been confirmed and is being processed.
+        Your order <strong>${escapeHtml(order.order_number)}</strong> has been confirmed and is being processed.
       </p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
         <tr>
           <td style="padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:13px;color:#166534;">Order Number</td>
-          <td style="padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:13px;font-weight:600;color:#166534;">${order.order_number}</td>
+          <td style="padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:13px;font-weight:600;color:#166534;">${escapeHtml(order.order_number)}</td>
         </tr>
         <tr>
           <td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:13px;color:#64748b;">Order Date</td>

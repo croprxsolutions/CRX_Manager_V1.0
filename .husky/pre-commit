@@ -9,6 +9,18 @@ if ! STAGED_FILES="$(git diff --cached --no-renames --name-only --diff-filter=AC
   exit 1
 fi
 
+# Dependency integrity is relevant only when the dependency contract changed.
+# It runs first so a worktree without node_modules stops here, not after every
+# other step (scripts/precommit-deps-first.test.mjs).
+if printf '%s\n' "$STAGED_FILES" | grep -Eq '^(package(-lock)?\.json|\.nvmrc)$'; then
+  echo "🔗 Verifying dependency integrity..."
+  node scripts/verify-deps.mjs || {
+    echo ""
+    echo "❌ DEPENDENCY PROBLEMS — run npm ci or fix peer ranges before committing."
+    exit 1
+  }
+fi
+
 echo "📒 Checking ledger requirement..."
 node scripts/check-ledger-update.mjs || {
   echo ""
@@ -35,6 +47,22 @@ fi
 echo "🛡️ Validating staged SQL migrations..."
 bash scripts/validate-sql.sh || exit 1
 
+# A migration can re-define an RPC that the idempotency/contract registries must
+# name; these tests failed only in CI on PR #1298. They read the working tree.
+if printf '%s\n' "$STAGED_FILES" | grep -Eq '^supabase/migrations/'; then
+  echo "🧾 Checking RPC idempotency and contract registries..."
+  if ! git diff --quiet -- supabase/migrations/ src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts ||
+    [ -n "$(git ls-files --others -- supabase/migrations/ src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts)" ]; then
+    echo "❌ Migrations or RPC registry tests have unstaged or untracked edits — stage or remove them so the commit matches what was tested."
+    exit 1
+  fi
+  npx vitest run src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts || {
+    echo ""
+    echo "❌ RPC REGISTRY TESTS FAILED — add the registry entry this migration needs."
+    exit 1
+  }
+fi
+
 echo "🛡️ Validating staged frontend files..."
 bash scripts/validate-frontend.sh || exit 1
 
@@ -45,16 +73,6 @@ if printf '%s\n' "$STAGED_FILES" | grep -Eq '^(\.agents/|(\.claude|\.codex)/(hoo
   node scripts/check-agent-workflows.mjs || {
     echo ""
     echo "❌ AGENT WORKFLOW PARITY FAILED — keep the effective Claude/Codex guard sets aligned."
-    exit 1
-  }
-fi
-
-# Dependency integrity is relevant only when the dependency contract changed.
-if printf '%s\n' "$STAGED_FILES" | grep -Eq '^(package(-lock)?\.json|\.nvmrc)$'; then
-  echo "🔗 Verifying dependency integrity..."
-  node scripts/verify-deps.mjs || {
-    echo ""
-    echo "❌ DEPENDENCY PROBLEMS — run npm ci or fix peer ranges before committing."
     exit 1
   }
 fi

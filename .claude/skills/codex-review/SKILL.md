@@ -106,10 +106,12 @@ or a single commit — that silently reviews the wrong diff.
 Same hard rule as `codex-cross-review`: a security/migration/money review must start from
 executed live evidence, not claims. Before invoking Codex on a change that touches the DB:
 
-1. `npm run db-sweeps` → execute each predicate read-only via Supabase MCP `execute_sql`
-   (project `rhyzpcqhnizqbxphqdkr`). Capture each actual `sweep_result` packet (`predicate`,
-   `rows`, `function_contracts`) as a private local JSON array, then run
-   `node scripts/db-invariant-sweeps/run-sweeps.mjs --adjudicate <capture.json>`.
+1. `npm run db-sweeps:live` (on Mason's PC) runs every predicate read-only against live
+   (project `rhyzpcqhnizqbxphqdkr`), byte-exact, saves each `sweep_result` packet to a private
+   capture and runs `--adjudicate` over the full set. Without it (cloud, no Credential Manager),
+   run `npm run db-sweeps`, execute each printed block read-only via Supabase MCP `execute_sql`,
+   capture each actual packet (`predicate`, `rows`, `function_contracts`) as a private local
+   JSON array, then run `node scripts/db-invariant-sweeps/run-sweeps.mjs --adjudicate <capture.json>`.
    Do not compare violation keys alone: the adjudicator applies the same parameter and
    function/dependency contract matcher as linked execution, and missing, duplicate, unknown or
    drifting packets fail.
@@ -196,9 +198,10 @@ proof under 24 hours (the migration landing gate; 30 minutes before 2026-10-29).
 **Only on a quiet head (Mason, 2026-10-23).** A fix pushed after Sol for a Codex GitHub App or
 CodeRabbit finding voids the proof, and those two reviewers caused more than half of the commits
 pushed after a PR was marked ready (2026-10-14 to 10-23). So the wrapper first runs a pre-flight
-and refuses, spending no Sol tokens, unless the head contains the exact `origin/main` the review pins
-(the ref every worktree shares: a peer's fetch can move it, and a review of a head missing its base
-can neither merge nor be carried forward, so `git merge origin/main` again, push, and wait); an open
+and refuses, spending no Sol tokens, unless the head contains the base the review pins (`origin/main`,
+or, when a peer worktree's fetch moved that shared ref past the branch, the one commit where the
+branch left main; a branch adding a migration or with several split points keeps `origin/main`, so it
+must `git merge origin/main` again, push, and wait); an open
 non-draft PR has this exact commit as its head;
 the Codex App's summary comment shows a completed review of this commit (or it was pushed 15 minutes
 ago with none, or the commit only merges main cleanly with no shared files: then the App's finished review of
@@ -367,8 +370,8 @@ Notes:
 ## Step 5: Hand back to the push gate
 
 `/codex-review` NEVER pushes, merges, or deploys — it is a read gate. When the verdict is
-clean, hand back to the landing flow in `.claude/commands/ship.md` (summarized in `AGENTS.md`): **push a branch → open a draft PR → finish checks →
-freeze the candidate commit → mark ready (CodeRabbit reviews only on request, since 2026-10-21; fix or refute what arrives) → Step 3B Sol proof LAST (unless the
+clean, hand back to the landing flow in `.claude/commands/ship.md` (summarized in `AGENTS.md`): **push a branch → open the PR (ready when it touches no Sol-list file; otherwise a draft, finish checks,
+freeze the candidate commit, mark ready) (CodeRabbit reviews only on request, since 2026-10-21; fix or refute what arrives) → Step 3B Sol proof LAST (unless the
 documentation-only exemption in Step 3B applies) →
 apply the non-destructive migration, if any → merge with `--match-head-commit <reviewed-head-sha>`**.
 Direct pushes to `main` are impossible (the `protect-main` ruleset, 2026-07-14), so there is no "push to main" step.
@@ -377,9 +380,9 @@ Direct pushes to `main` are impossible (the `protect-main` ruleset, 2026-07-14),
 CodeRabbit makes no automatic reviews (Mason: "Yes turn off auto review"; before that it reviewed
 each PR once, when opened non-draft or marked ready); it reviews only when an agent requests it,
 and it only comments (never APPROVED or CHANGES_REQUESTED). GitHub's
-`protect-main` ruleset no longer requires an approving review (required checks stay). Open the PR
+`protect-main` ruleset no longer requires an approving review (required checks stay). Open a Sol-list PR
 as a draft, bring the branch current and green, freeze the release-candidate commit, then mark it
-ready. If CodeRabbit's review arrives before the merge, fix or refute with evidence every comment,
+ready; any other PR opens ready once Luna is clean (Mason, 2026-11-02). If CodeRabbit's review arrives before the merge, fix or refute with evidence every comment,
 in one push on the SAME PR — no replacement PR. Do not wait for it if it has not reviewed by the
 time checks are green and Sol is clean, never post `@coderabbitai review` to buy a re-review, and
 never use `@coderabbitai resume`. Exception (Mason, 2026-10-21): a PR that touches money, invoices,

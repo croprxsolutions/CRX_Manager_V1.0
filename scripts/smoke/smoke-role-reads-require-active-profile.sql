@@ -121,7 +121,9 @@ BEGIN
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_who, 'role', 'authenticated')::text, true);
     v_err := NULL;
     BEGIN
-      v_res := public.mark_inventory_row_verified(gen_random_uuid(), NULL, CASE WHEN v_case = 'rep_cached' THEN v_key END);
+      -- Batch 4b (20261103130000) requires a key: every other case sends a fresh one.
+      v_res := public.mark_inventory_row_verified(gen_random_uuid(), NULL,
+        CASE WHEN v_case = 'rep_cached' THEN v_key ELSE 'smk-rra-c-' || v_case || '-' || gen_random_uuid()::text END);
     EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
     END;
     IF v_case = 'admin' AND (v_err IS NULL OR v_err NOT LIKE 'INVENTORY_NOT_FOUND:%') THEN

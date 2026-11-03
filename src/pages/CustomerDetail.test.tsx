@@ -504,6 +504,47 @@ describe('CustomerDetail stale whole-record save', () => {
     expect(row).toHaveTextContent('$10,100.00');
   });
 
+  it("shows Outstanding as not available, never $0, when today's balance can't be rebuilt (KI-95)", async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') return customerQuery(() => original);
+      return query({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_ar_aging') {
+        const rows = [{
+          customer_id: 'customer-1', farm_name: 'Original Farm', current_amount: null, days_30: null, days_60: null,
+          days_90: null, over_90: null, total_outstanding: null, unavailable_reason: 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE',
+        }];
+        return { eq: () => Promise.resolve({ data: rows, error: null }) };
+      }
+      return Promise.resolve({ data: [], error: null });
+    });
+
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'financials' }));
+    expect(await screen.findByText('Not available')).toBeInTheDocument();
+    expect(screen.queryByText('Credit Utilization')).not.toBeInTheDocument();
+    expect(screen.getByText('Outstanding').parentElement?.textContent).not.toContain('$');
+  });
+
+  it('says the financials could not be loaded instead of showing $0 when the aging read fails', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') return customerQuery(() => original);
+      return query({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_ar_aging') return { eq: () => Promise.resolve({ data: null, error: { message: 'boom' } }) };
+      return Promise.resolve({ data: [], error: null });
+    });
+
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'financials' }));
+    expect(await screen.findByText('Financials could not be loaded. Reload the page to try again.')).toBeInTheDocument();
+    expect(screen.queryByText('Outstanding')).not.toBeInTheDocument();
+  });
+
   it('reloads the financials tab when the route switches customers without remounting the page', async () => {
     // The financials tab caches its fetch in a ref. CustomerDetail is not
     // remounted when only :id changes, so before this guard existed the tab

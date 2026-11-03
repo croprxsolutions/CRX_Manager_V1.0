@@ -380,7 +380,7 @@ function ApplicationsTab({
         sortable: true,
         render: (row: FieldApplicationRecord) => (
           <span className="whitespace-nowrap">
-            {formatLocalDate(new Date(row.application_date))}
+            {row.application_date}
           </span>
         ),
       },

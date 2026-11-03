@@ -422,7 +422,7 @@ describe('InventoryPage — a lost reply freezes the request instead of minting 
     expect(mocks.toast).toHaveBeenCalledWith('success', 'Hold created successfully');
   });
 
-  it.each(['none', 'customers', 'products', 'inactive-product'] as const)('preserves frozen hold IDs on reload with unavailable lookup: %s', async (lookupFailure) => {
+  it.each(['none', 'customers', 'products', 'missing-product', 'inactive-product'] as const)('preserves frozen hold IDs on reload with lookup change: %s', async (lookupFailure) => {
     mocks.from.mockImplementation((table: string) => {
       if (table === 'products') return query(products);
       if (table === 'customers') return query([{ id: 'customer-a', farm_name: 'Farm A' }]);
@@ -448,7 +448,9 @@ describe('InventoryPage — a lost reply freezes the request instead of minting 
       mocks.from.mockImplementation((table: string) => {
         if (table === 'products') {
           if (lookupFailure === 'products') return query([], { message: 'product lookup unavailable' });
-          return query(lookupFailure === 'inactive-product' ? [] : products);
+          if (lookupFailure === 'missing-product') return query([]);
+          if (lookupFailure === 'inactive-product') return query(products.map((product) => ({ ...product, is_active: false })));
+          return query(products);
         }
         if (table === 'customers') return lookupFailure === 'customers'
           ? query([], { message: 'customer lookup unavailable' })
@@ -459,7 +461,7 @@ describe('InventoryPage — a lost reply freezes the request instead of minting 
 
     await renderPage();
     const recovered = screen.getByRole('dialog', { name: /create.*hold/i });
-    if (lookupFailure === 'products' || lookupFailure === 'inactive-product') {
+    if (lookupFailure === 'products' || lookupFailure === 'missing-product') {
       expect(await within(recovered).findByText('Saved product (name unavailable)')).toBeInTheDocument();
       expect(within(recovered).queryByText('No products found')).not.toBeInTheDocument();
     } else {

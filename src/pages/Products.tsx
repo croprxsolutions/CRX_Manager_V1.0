@@ -312,10 +312,16 @@ export default function Products() {
     [selected, toggleSelect, isAdmin]
   );
 
+  // Exports of selected rows leave turned-off products out; say how many were skipped.
+  const skippedInactiveNote = () => {
+    const skipped = selectedRows.filter((p) => !p.is_active).length;
+    return skipped ? ` (${skipped} turned-off product(s) left out)` : '';
+  };
+
   const handleExportCSV = () => {
     const rows = selectedRows.filter((p) => p.is_active);
     if (rows.length === 0) {
-      toast('warning', 'No active products selected.');
+      toast('warning', `No active products selected${skippedInactiveNote()}.`);
       return;
     }
     const fmtMargin = (v: unknown) => v != null ? `${(Number(v) * 100).toFixed(1)}%` : '';
@@ -341,13 +347,13 @@ export default function Products() {
       ...priceCols,
       { key: 'is_active', header: 'Status', format: (v: unknown) => v ? 'Active' : 'Inactive' },
     ], 'products-internal');
-    toast('success', `Exported ${rows.length} product(s) to CSV`);
+    toast('success', `Exported ${rows.length} product(s) to CSV${skippedInactiveNote()}`);
   };
 
   const handleExportPDF = async () => {
     const rows = selectedRows.filter((p) => p.is_active);
     if (rows.length === 0) {
-      toast('warning', 'No active products selected.');
+      toast('warning', `No active products selected${skippedInactiveNote()}.`);
       return;
     }
     setExporting(true);
@@ -390,7 +396,7 @@ export default function Products() {
         data: pdfData as unknown as Record<string, unknown>[],
         orientation: showCostMarginPdf ? 'landscape' : 'portrait',
       });
-      toast('success', `Downloaded PDF with ${rows.length} product(s)`);
+      toast('success', `Downloaded PDF with ${rows.length} product(s)${skippedInactiveNote()}`);
     } catch (err) {
       toast('error', sanitizeError(err));
     }
@@ -521,7 +527,9 @@ export default function Products() {
             // A raised refusal committed nothing, so the key is retired for a fresh review.
             if (isDefinitiveRpcRejection(rpcError)) productActiveIdem.resetKeyFor(scope);
             closeActiveReview();
-            toast('warning', 'Product details changed since this review. Review the selection again.');
+            toast('warning', hasRpcCode(rpcError, RpcErrorCodes.PRODUCT_DEACTIVATION_BLOCKED)
+              ? sanitizeError(rpcError)
+              : 'Product details changed since this review. Review the selection again.');
             void startActiveReview(ids, active);
             throw new CriticalActionHandledError('Product review changed');
           }

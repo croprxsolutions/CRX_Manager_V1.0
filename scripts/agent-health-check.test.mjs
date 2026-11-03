@@ -30,6 +30,8 @@ import {
   checkCodexRuntimeHooks,
   checkFilesPresent,
   checkGitHooksInstalled,
+  HAND_OFF_HOOKS,
+  hookHandOff,
   compareCodexHooks,
   compareSyncedFiles,
   probeCodexHooks,
@@ -288,6 +290,34 @@ try {
       assert.equal(outside.status, "FAIL");
       assert.match(outside.note, /tracked \.husky/);
 
+      // The desktop app writes the main checkout's .husky; hooks that START with the
+      // exact hand-off to this worktree's own copy make that safe.
+      writeHook(path.join(hooksRepo, ".husky"), "commit-msg");
+      for (const name of HAND_OFF_HOOKS) {
+        writeFileSync(path.join(foreign, ".husky", name), "#!/usr/bin/env sh\n# CRX_OWN_HOOK hand-off\n");
+      }
+      assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "a marker without the hand-off code is not a hand-off");
+      for (const name of HAND_OFF_HOOKS) {
+        writeFileSync(path.join(foreign, ".husky", name), `${hookHandOff(name)}exit 1\n`);
+        chmodSync(path.join(foreign, ".husky", name), 0o755);
+      }
+      const handsOff = checkGitHooksInstalled(hooksRepo);
+      assert.equal(handsOff.status, "PASS", "hooks that hand off to this worktree's copy are safe");
+      assert.match(handsOff.note, /hands off/);
+      if (process.platform !== "win32") {
+        // git runs the configured copy first; a 0644 one is skipped before it can hand off.
+        chmodSync(path.join(foreign, ".husky/pre-push"), 0o644);
+        assert.match(checkGitHooksInstalled(hooksRepo, "linux").note, /non-executable pre-push/);
+      }
+      for (const name of HAND_OFF_HOOKS) chmodSync(path.join(foreign, ".husky", name), 0o755);
+      rmSync(path.join(foreign, ".husky/commit-msg"));
+      assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "every hook, commit-msg included, must hand off");
+      writeFileSync(path.join(foreign, ".husky/commit-msg"), hookHandOff("commit-msg"));
+      chmodSync(path.join(foreign, ".husky/commit-msg"), 0o755);
+      rmSync(path.join(hooksRepo, ".husky/pre-push"));
+      assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "hand-off needs this worktree's own hooks");
+      writeHook(path.join(hooksRepo, ".husky"), "pre-push");
+
       // Any other in-worktree directory holding two executable hooks would pass a
       // containment test while git bypassed the tracked .husky entirely.
       mkdirSync(path.join(hooksRepo, ".other-hooks"), { recursive: true });
@@ -354,6 +384,11 @@ try {
   assert.equal(trackedLines.length, 3, `expected three tracked hooks, got: ${trackedHooks}`);
   for (const line of trackedLines) {
     assert.match(line, /^100755 /, `tracked hook is not executable in the index — git skips it on POSIX: ${line}`);
+  }
+  // Pins the real hooks to the hand-off agent-health accepts (and keeps the three in step).
+  for (const hook of HAND_OFF_HOOKS) {
+    const text = normalizeEol(readFileSync(path.join(repoRoot, ".husky", hook), "utf8"));
+    assert.ok(text.startsWith(hookHandOff(hook)), `.husky/${hook} must start with hookHandOff("${hook}")`);
   }
 
   // scripts/install-git-hooks.mjs — the `prepare` script. A per-worktree

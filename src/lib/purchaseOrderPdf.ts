@@ -13,10 +13,7 @@ import {
 import type { JsPDFWithAutoTable } from './pdfTheme';
 
 export {
-  buildPurchaseOrderPdfData,
   buildPurchaseOrderPdfRows,
-  purchaseOrderPdfFilename,
-  purchaseOrderStatusBanner,
   type PdfPurchaseOrderData,
   type PdfPurchaseOrderLine,
   type PdfPurchaseOrderVendor,

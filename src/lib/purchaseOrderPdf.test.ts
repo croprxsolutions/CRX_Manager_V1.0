@@ -35,9 +35,9 @@ import {
   buildPurchaseOrderPdfRows,
   downloadPurchaseOrderPdf,
   generatePurchaseOrderPdf,
-  purchaseOrderStatusBanner,
   type PdfPurchaseOrderData,
 } from './purchaseOrderPdf';
+import { purchaseOrderStatusBanner } from '../../supabase/functions/_shared/pdf/purchaseOrderPdf';
 
 function makeData(overrides: Partial<PdfPurchaseOrderData> = {}): PdfPurchaseOrderData {
   return {

@@ -8,8 +8,6 @@
 
 import { purchaseOrderStatusBanner } from '../../supabase/functions/_shared/pdf/purchaseOrderPdf.ts';
 
-export { purchaseOrderStatusBanner };
-
 /**
  * Everything the PO record prints on the PDF, so a changed PO is a new email (not a replay
  * of the old one) and an admin never confirms one version and sends another. The vendor's

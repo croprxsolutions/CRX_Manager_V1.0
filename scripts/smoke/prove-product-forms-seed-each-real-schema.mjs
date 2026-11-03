@@ -265,7 +265,8 @@ try {
   const equivalentLine = "  IF lower(coalesce(p_product_form, '')) IN ('seed','each') THEN RETURN QUERY SELECT NULL::numeric, NULL::text; RETURN; END IF;";
   assert.equal(oldEquivalent.split(equivalentNeedle).length - 1, 1);
   assert.equal(newEquivalent, oldEquivalent.replace(equivalentNeedle,
-    `    RETURN;\n  END IF;\n\n${equivalentLine}\n  IF p_product_form = 'dry' THEN`));
+    `    RETURN;\n  END IF;\n\n${equivalentLine}\n  IF p_product_form = 'dry' THEN`)
+    .replace(" SET search_path TO 'public'\n", " SET search_path TO 'public', 'pg_temp'\n"));
 
   assert.equal(scalar(`SELECT prosecdef AND pg_get_userbyid(proowner) = 'postgres'
     AND proconfig @> ARRAY['search_path=public, pg_temp']

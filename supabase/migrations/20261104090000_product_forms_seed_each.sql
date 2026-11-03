@@ -253,7 +253,7 @@ CREATE OR REPLACE FUNCTION public.convert_to_gl_lb(p_total_applied numeric, p_ra
  RETURNS TABLE(converted_value numeric, converted_unit text)
  LANGUAGE plpgsql
  IMMUTABLE
- SET search_path TO 'public'
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
   IF p_total_applied IS NULL OR p_rate_unit IS NULL THEN

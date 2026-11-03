@@ -318,7 +318,8 @@ export const DANGEROUS_CMD_CHECKS = [
   // Git Bash on Mason's PC has no zone database: `TZ=America/Chicago date` prints
   // UTC with no error, and wrong "Central" times reached Mason twice (2026-10-21,
   // 2026-11-03) despite a memory rule. POSIX spellings (`TZ=CST6CDT`) do work.
-  [/(?:^|[;&|(`\r\n]|\benv\s+)\s*TZ=['"]?[A-Za-z_]+\/[^\s;&|'"]+['"]?\s+(?:[A-Za-z_]\w*=\S+\s+)*date\b/, "Blocked `TZ=<Area/City> date`: Git Bash here has no zone database and silently prints UTC. Use node -e \"console.log(new Date().toLocaleString('en-US',{timeZone:'America/Chicago'}))\" instead."],
+  // `export TZ=…; date` is the same mistake one statement apart (Luna, PR on this rule).
+  [/(?:^|[;&|(`\r\n]|\benv\s+)\s*(?:[A-Za-z_]\w*=\S+\s+)*TZ=['"]?[A-Za-z_]+\/[^\s;&|'"]+['"]?\s+(?:[A-Za-z_]\w*=\S+\s+)*date\b|(?:^|[;&|(`\r\n])\s*export\s+TZ=['"]?[A-Za-z_]+\/[^\s;&|'"]+[\s\S]*?(?:^|[;&|(`\r\n])\s*date\b/,"Blocked `TZ=<Area/City> date`: Git Bash here has no zone database and silently prints UTC. Use node -e \"console.log(new Date().toLocaleString('en-US',{timeZone:'America/Chicago'}))\" instead."],
 ];
 
 // Production-deploy spellings that must PROMPT (permissionDecision "ask"), not

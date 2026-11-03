@@ -43,6 +43,9 @@ ok(checkDangerousCommand("TZ=America/Chicago date '+%H:%M %Z'"), "TZ=Area/City d
 ok(checkDangerousCommand("git push && TZ='America/Chicago' date"), "quoted zone after && blocked");
 ok(checkDangerousCommand("echo $(TZ=America/Chicago date +%H)"), "zone date in substitution blocked");
 ok(checkDangerousCommand("env TZ=America/Chicago date"), "env TZ= date blocked");
+ok(checkDangerousCommand("export TZ=America/Chicago; date"), "export then date blocked");
+ok(checkDangerousCommand("FOO=1 TZ=America/Chicago date"), "TZ after another assignment blocked");
+eq(checkDangerousCommand("export TZ=America/Chicago; git log -1"), null, "export without date allowed");
 eq(checkDangerousCommand("TZ=CST6CDT date '+%H:%M %Z'"), null, "POSIX zone date allowed");
 eq(checkDangerousCommand("date -u"), null, "plain date allowed");
 eq(checkDangerousCommand("TZ=America/Chicago git log -1"), null, "zone on a non-date command allowed");

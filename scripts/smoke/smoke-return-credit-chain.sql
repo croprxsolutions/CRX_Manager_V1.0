@@ -129,6 +129,9 @@ DECLARE
   v_season integer := public.current_season();
   v_source_season integer := v_season - 1;
 BEGIN
+  -- issue_return_credit switches this transaction to Chicago time; start there so
+  -- CURRENT_DATE cannot change mid-smoke between 6pm and midnight Central.
+  PERFORM set_config('TimeZone', 'America/Chicago', true);
   -- --------------------------------------------------------------------
   -- 0. Preconditions + auth as a real active admin
   -- --------------------------------------------------------------------

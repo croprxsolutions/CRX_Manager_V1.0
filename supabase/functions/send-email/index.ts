@@ -594,8 +594,10 @@ Deno.serve(async (req: Request) => {
     //    shared by every caller so a second staff member cannot re-send the
     //    same email. Rows written before this change hold the raw key and no
     //    record id, so one counts only when that raw key names this record
-    //    (the app's keys embed the record id); any other raw-key row is
-    //    refused as ambiguous rather than reported as already sent.
+    //    (the app's keys embed the record id) or, for job notices, when the
+    //    key was already matched to this job through job_notifications above;
+    //    any other raw-key row is refused as ambiguous rather than reported
+    //    as already sent.
     let emailLogId: string | null = null;
     const scopedIdempotencyKey = idempotency_key
       ? `${email_type}:${recordRef}:${idempotency_key}`
@@ -612,7 +614,7 @@ Deno.serve(async (req: Request) => {
       const scopedRow = keyRows?.find((row) => row.idempotency_key === scopedIdempotencyKey);
       const legacyRow = scopedRow ? undefined : keyRows?.find((row) => row.idempotency_key === idempotency_key);
       const recordId = recordRef.slice(recordRef.indexOf(":") + 1);
-      if (legacyRow && (!recordId || !idempotency_key.includes(recordId))) {
+      if (legacyRow && !notificationRow && (!recordId || !idempotency_key.includes(recordId))) {
         return jsonResponse({
           error: "This idempotency_key was used before keys were tied to a record and cannot be matched to this one. Send again with a new key.",
         }, 409);

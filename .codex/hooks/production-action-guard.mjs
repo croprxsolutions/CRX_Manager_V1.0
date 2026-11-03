@@ -1458,7 +1458,7 @@ export function evaluateProductionAction({
     if (pushIsForced(segment)) {
       return denied("CODEX PRODUCTION GATE: force-pushing any branch rewrites shared history and requires Mason's explicit approval.");
     }
-    const pushRepoDir = gitPushCwd(segment, actionRepoDir);
+    const pushRepoDir = gitPushCwd(segment, actionRepoDir, command);
     let currentBranch = requestedWorkingDir ? "" : normalize(branch).toLowerCase();
     // The push checks spend the same hard-gate budget as the merge checks: each
     // segment costs a branch lookup plus several git calls in gateMainChange, and

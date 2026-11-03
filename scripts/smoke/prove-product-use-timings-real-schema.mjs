@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261103140000_product_use_timings.
+ * Real-schema proof for 20261103210000_product_use_timings.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17
  * container and replays ordered post-baseline migrations up to this candidate. It exercises
@@ -22,7 +22,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261103140000_product_use_timings.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261103210000_product_use_timings.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -142,6 +142,8 @@ function buildContainer() {
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     // Batch 2's preflight pins live's auth.uid() body, which live had when batch 2 was applied.
     if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
+    // KI-85's postcondition needs live's active Main Warehouse row, which the empty baseline lacks.
+    if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') psql(`INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse' AND is_active);`);
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
     ledger(path.basename(file, '.sql'));

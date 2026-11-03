@@ -172,12 +172,9 @@ PR #942), batch 2 (`20261016140000`, PR #951), batch 3a (`20261019200000`, PR #9
 PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invoice`, `unpost_invoice_group`,
 `close_accounting_period`, `reopen_accounting_period`, `transfer_invoice_to_job`, `save_field_app_invoice`,
 `update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
-`create_rebate_claim`, `transition_rebate_claim`). Remaining: `price_order`, `update_order_items`, notification
-RPCs and about 45 MED/LOW functions (batches 4b to 4d). No open PR.
-Batch 4 includes `mark_inventory_row_verified` (MED, added 2026-10-23, PR #1042 follow-up 3; Mason: "batch it"):
-it matches its saved result on key and operation only, so a reused key with a different `p_inventory_id`, or from
-another admin, returns the first call's result. `IntegrityCleanupPanel.tsx` mints a fresh key per click, so no
-screen reaches it today. Fix with the batch wrapper as in `20261016140000`, with a real-schema prover.
+`create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, not yet applied) binds
+`price_order`, `update_order_items` and `mark_inventory_row_verified` (MED, PR #1042 follow-up 3; Mason: "batch
+it"). Remaining: notification RPCs and about 45 MED/LOW functions (batches 4c and 4d).
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
 **HIGH on money paths · PARTIAL · money · unassigned**

@@ -221,6 +221,8 @@ describe('statement PDF real renderer', () => {
     expect(finance.y).toBeGreaterThanOrEqual(32);
     expect(netDue.page).toBe(finance.page);
     expect(finance.page).toBe(2); // the scenario must force the page break
+    // The page that was left keeps its footer (drawn by the product table).
+    expect(pages[1].join('\n')).toMatch(/Statement generated .*? Page 1\)/);
   });
 
   it('replaces remittance instructions when credits cover the gross invoices', async () => {

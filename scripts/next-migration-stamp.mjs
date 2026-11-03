@@ -68,7 +68,7 @@ function collect() {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   // Every argument must be a known flag followed by its value, so a typo like --lve is refused, not ignored.
   const args = process.argv.slice(2);
-  const flags = {};
+  const flags = Object.create(null);
   for (let i = 0; i < args.length; i += 2) flags[args[i]] = args[i + 1] ?? "";
   const live = flags["--live"];
   const gap = flags["--gap-minutes"] ?? "60";

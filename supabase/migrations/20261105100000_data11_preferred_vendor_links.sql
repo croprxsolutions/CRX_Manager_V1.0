@@ -121,7 +121,7 @@ BEGIN
 
   -- Only the hand-assigned products, and only while their vendor text is still blank.
   UPDATE public.products p
-  SET vendor = v.name
+  SET vendor = v.name, updated_at = now()
   FROM data11_plan d
   JOIN public.vendors v ON v.id = d.vendor_id
   WHERE d.product_id = p.id

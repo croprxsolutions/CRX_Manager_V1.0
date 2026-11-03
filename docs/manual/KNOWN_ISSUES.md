@@ -311,7 +311,7 @@ local replay's screen (a new line added after its product's cost rose shows the 
 ---
 
 ### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
-**MED · PARTLY FIXED (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (KI-95 PR); payment half: open, KI-19 lane**
+**MED · PARTLY FIXED (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (PR #1313, applied live 2026-11-02); payment half: open, KI-19 lane**
 **Report half — fixed by `20261103150000_ar_aging_flags_unrebuildable_customers`** (live status: its
 `docs/reference/migrations.d/` record). `get_ar_aging` still refuses to rebuild a customer whose later activity makes
 the chosen date unknowable, but now returns everyone else and lists that customer with no amounts and an

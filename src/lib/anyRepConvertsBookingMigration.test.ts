@@ -45,7 +45,8 @@ describe('20261027080400 any rep converts a booking', () => {
     expect(smoke).toContain('authorized non-owner conversion did not keep the booking');
     expect(smoke).not.toContain('non-owner sales rep converted another rep');
     expect(smoke).not.toContain('quote-conversion ownership gate');
-    // Editing, versioning and restoring by a non-owner stay refused with NOT_QUOTE_OWNER.
+    // Editing, versioning and restoring by a non-owner stay refused (on a sent booking another rep
+    // may change prices only, since 20261104130000).
     for (const token of [
       'non-owner sales rep quote save succeeded',
       "non-owner sales rep created another rep''s quote version",

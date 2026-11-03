@@ -182,7 +182,7 @@ The invoice was posted only for this test and voided right after.
 ---
 
 ### KI-98 — Emailed invoice and purchase-order PDFs are drawn by the sender's app, not the server
-**LOW · FIX BUILT, AWAITING DEPLOY · money · Claude**
+**LOW · FIXED, LIVE 2026-11-03 (PR #1346; `send-email` v23) · money · Claude**
 Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_LOG.md`, same date).
 - **The fix.** `send-email` now draws the invoice and purchase-order PDFs itself, from the saved records
   (`supabase/functions/_shared/pdf/`, the same drawing code the app prints with). It refuses a PDF the app
@@ -195,11 +195,12 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
 - **Still accepted.** `send-email`'s last check is a read just before the provider call, not an atomic step. A
   change saved in that split second still goes out as it was a moment earlier.
 - **Behaviour change.** An invoice emailed from the editor shows the saved invoice, not unsaved edits on screen.
-- **Becomes FIXED** when the new `send-email` is deployed (Mason's yes) and one real invoice email and one PO
-  copy are checked in `email_log`. Plan: `send-email` first, then merge the app
-  change. Either order is safe: a mismatched app and server refuse invoice and PO emails (the PO screen copy
-  is sent under a new name, `purchase_order_screen`, that the old server does not read) instead of mailing
-  one with no PDF, so in between staff see a "reload and send again" message for a few minutes.
+- **Live proof (2026-11-03, about 7:00 AM Central).** `send-email` v23 was deployed on Mason's in-chat yes, and
+  the app merged about 20 seconds later. Each step was run on croprxsolutions.app:
+  - The PO-2026-0030 copy email was sent, and its `email_log` row is `sent` with `Purchase-Order-PO-2026-0030.pdf`.
+  - Test invoice INV-2026-1522 ([E2E] Farm Alpha, one $312.72 service line) was posted and emailed. Its row is
+    `sent` with `Invoice-INV-2026-1522.pdf`, and the invoice was then voided.
+  - Both calls returned 200 with no function errors logged.
 
 ---
 
@@ -372,15 +373,21 @@ local replay's screen (a new line added after its product's cost rose shows the 
 ---
 
 ### KI-95 — Historical AR aging fails for everyone if one customer cannot be rebuilt
-**MED · FIXED IN CODE (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migration `20261103150000` (PR #1313, applied live 2026-11-02); payment half: migration `20261103220000` (live status: its `docs/reference/migrations.d/` record)**
+**MED · FIXED IN CODE (found 2026-11-02, Ponytail audit #12, confirmed by Sol) · money · report half: migrations `20261103150000` (PR #1313, applied live 2026-11-02) and `20261104120000` (PR #1332); payment half: migration `20261103220000` (live status: each one's `docs/reference/migrations.d/` record)**
 **Report half — fixed by `20261103150000_ar_aging_flags_unrebuildable_customers`** (live status: its
 `docs/reference/migrations.d/` record). `get_ar_aging` still refuses to rebuild a customer whose later activity makes
 the chosen date unknowable, but now returns everyone else and lists that customer with no amounts and an
 `unavailable_reason`; the AR Aging tab shows them in a warning ("cannot be shown as of this date") and its totals say
-they are excluded. Proof: `scripts/smoke/prove-ar-aging-flags-unrebuildable-real-schema.mjs`. Still not covered: a
-rare `HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE` (two posting events with the same audit timestamp) is raised
-outside the per-customer check and still fails the whole report; `get_customer_balance_listing` keeps the
-fail-for-everyone behaviour.
+they are excluded. Proof: `scripts/smoke/prove-ar-aging-flags-unrebuildable-real-schema.mjs`.
+**Remaining report gaps — fixed by `20261104120000_balance_reports_flag_unrebuildable_customers`** (live status: its
+`docs/reference/migrations.d/` record). The rare `HISTORICAL_POSTING_RECONSTRUCTION_UNAVAILABLE` (two posting events on
+one invoice with the same audit timestamp) is now caught per customer in `get_ar_aging`, so it flags only that customer;
+and `get_customer_balance_listing` gets the same flag-don't-fail behaviour (flagged rows: every amount, count and date
+blank, plus `unavailable_reason`). The Reports → Customer Balance tab lists flagged customers in a warning, keeps them out
+of the table, and keeps them in the CSV with blank amounts. Proof:
+`scripts/smoke/prove-balance-reports-flag-unrebuildable-real-schema.mjs`. Known over-flag (deferred, LOW impact): a
+posting collision on an invoice already voided or deleted by the date still flags that customer, though the invoice is
+not in the balance. It flags, never shows a wrong amount, and before this fix it failed the whole report.
 **Payment half — fixed by `20261103220000_period_check_takes_month_lock`:** `allocate_payment` refuses a
 `p_payment_date` after today in Central time (`PAYMENT_DATE_IN_FUTURE`), so a payment can no longer make a customer
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.

@@ -80,6 +80,12 @@ describe('invoice email built from the saved invoice (KI-97)', () => {
     expect(buildInvoiceEmail(invoice, [100_000, 'abc'], snapshot)).toMatchObject({ ok: false, status: 503 });
   });
 
+  it('adds line amounts exactly even past the safe-integer range mid-sum', () => {
+    const max = Number.MAX_SAFE_INTEGER;
+    const twoCents = { ...snapshot, lines_total_cents: 2 };
+    expect(buildInvoiceEmail(invoice, [max, 2, -max], twoCents).ok).toBe(true);
+  });
+
   it('reads bigint cents that arrive as strings', () => {
     const asStrings = { ...invoice, total_amount_cents: '125007', balance_cents: '100007' };
     expect(buildInvoiceEmail(asStrings, ['100000', '25007'], snapshot).ok).toBe(true);

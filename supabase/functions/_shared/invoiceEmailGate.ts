@@ -8,7 +8,9 @@
 // the same binding the purchase-order copy uses (purchaseOrderEmailGate.ts).
 // Not covered, by design: the PDF bytes themselves (the server trusts the
 // signed-in staff member's app to draw the summary it sent; the email can only
-// go to the customer's own address on file).
+// go to the customer's own address on file), and the moment between send-email's
+// final re-read of the invoice and the provider call (a payment saved in it still
+// goes out with the earlier Amount Due; the purchase-order copy has the same window).
 //
 // Pure, with no Deno or Supabase imports, so the app's Vitest suite tests it
 // directly (src/lib/invoiceEmailGate.test.ts).
@@ -155,7 +157,8 @@ export function buildInvoiceEmail(
   if (total === null || paid === null || prepay === null || balance === null || lineCents.includes(null)) {
     return { ok: false, status: 503, error: "Invoice amounts could not be read as whole cents; send refused" };
   }
-  const linesTotal = (lineCents as number[]).reduce((sum, cents) => sum + cents, 0);
+  // BigInt: exact however the lines add up along the way.
+  const linesTotal = (lineCents as number[]).reduce((sum, cents) => sum + BigInt(cents), 0n);
 
   const invoiceNumber = invoice.invoice_number || "DRAFT";
   if (
@@ -164,7 +167,7 @@ export function buildInvoiceEmail(
     snapshot.paid_amount_cents !== paid ||
     snapshot.prepay_applied_cents !== prepay ||
     snapshot.balance_cents !== balance ||
-    snapshot.lines_total_cents !== linesTotal
+    BigInt(snapshot.lines_total_cents) !== linesTotal
   ) {
     return { ok: false, status: 409, error: "The invoice changed after its PDF was built. Reload it and send again" };
   }

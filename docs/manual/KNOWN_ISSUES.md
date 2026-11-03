@@ -172,7 +172,9 @@ Fix (branch `claude/goofy-gauss-3449d8`): the service writes the invoice email's
 (stored balance, whole cents) and attachment name from the saved invoice and ignores the screen's. The PDF is
 still drawn by the app, so the app also sends the money the PDF prints; the service refuses the send unless that
 matches the saved invoice, and checks again just before sending (same method as the purchase-order copy). Left
-open: the PDF file itself is drawn by the signed-in user's app, not the server. Becomes FIXED when the new
+open: the PDF file itself is drawn by the signed-in user's app, not the server; and the last check is a read
+before the send, so a payment saved in that split second can still go out with the earlier Amount Due (the
+purchase-order copy has the same window). Becomes FIXED when the new
 `send-email` version is deployed and one real invoice email is checked.
 
 ---

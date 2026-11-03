@@ -1,13 +1,13 @@
--- Smoke chain: vendor-only product links through link_product_vendor (REQUIRES 20261105090000).
+-- Smoke chain: vendor-only product links through link_product_vendor (REQUIRES 20261105110000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so every link it records is rolled back.
 -- Proves, as a real signed-in browser session (role authenticated with each live profile's claims)
--- and as a signed-out visitor (role anon), on a real active product with no links and two real
+-- and as a signed-out visitor (role anon), on an invented product with no links and two real
 -- active vendors:
 --   * the installed body is exactly 20261105090000's, anon cannot execute it;
 --   * an admin's first link is recorded vendor-only (no item facts, not reusable) and is preferred
 --     even when not asked, a same-key replay returns the same answer, and making a second vendor
 --     preferred leaves exactly one preferred;
---   * the product's vendor text is not touched;
+--   * the product's vendor name follows the preferred vendor (20261105110000);
 --   * an active sales rep, driver, applicator and commission-recipient profile are refused
 --     ADMIN_REQUIRED, and a signed-out visitor is refused EXECUTE.
 -- Every other rule is proven on invented rows by scripts/smoke/prove-vendor-only-links-real-schema.mjs.
@@ -20,9 +20,9 @@ DECLARE
   v_role text;
   v_refused boolean;
   v_product uuid;
-  v_vendor_text text;
   v_vendor_a uuid;
   v_vendor_b uuid;
+  v_name_b text;
   v_first jsonb;
   v_again jsonb;
   v_second jsonb;
@@ -37,15 +37,15 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: anon can execute link_product_vendor';
   END IF;
 
-  SELECT p.id, p.vendor INTO v_product, v_vendor_text FROM public.products p
-   WHERE p.is_active AND NOT EXISTS (SELECT 1 FROM public.product_supplier_links l WHERE l.product_id = p.id)
-   ORDER BY p.created_at, p.id LIMIT 1;
   SELECT v.id INTO v_vendor_a FROM public.vendors v WHERE v.deleted_at IS NULL ORDER BY v.created_at, v.id LIMIT 1;
-  SELECT v.id INTO v_vendor_b FROM public.vendors v WHERE v.deleted_at IS NULL AND v.id <> v_vendor_a ORDER BY v.created_at, v.id LIMIT 1;
+  SELECT v.id, v.name INTO v_vendor_b, v_name_b FROM public.vendors v WHERE v.deleted_at IS NULL AND v.id <> v_vendor_a ORDER BY v.created_at, v.id LIMIT 1;
   SELECT p.id INTO v_admin FROM public.profiles p WHERE p.role = 'admin' AND p.is_active ORDER BY p.created_at LIMIT 1;
-  IF v_product IS NULL OR v_vendor_a IS NULL OR v_vendor_b IS NULL OR v_admin IS NULL THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: need an unlinked active product, two active vendors and an active admin';
+  IF v_vendor_a IS NULL OR v_vendor_b IS NULL OR v_admin IS NULL THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: need two active vendors and an active admin';
   END IF;
+  INSERT INTO public.products (product_name, sku, vendor, inventory_unit, is_active)
+  VALUES ('[SMOKE] vendor-only link', 'SMOKE-LPV-' || md5(clock_timestamp()::text), NULL, 'gal', true)
+  RETURNING id INTO v_product;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -74,8 +74,8 @@ BEGIN
      OR (SELECT is_preferred FROM public.product_supplier_links WHERE id = (v_first->>'id')::uuid) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: switching the preferred vendor did not leave exactly one preferred (% preferred)', v_n;
   END IF;
-  IF (SELECT vendor FROM public.products WHERE id = v_product) IS DISTINCT FROM v_vendor_text THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: linking changed the product vendor text';
+  IF (SELECT vendor FROM public.products WHERE id = v_product) IS DISTINCT FROM v_name_b THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the product vendor name is not the preferred vendor''s';
   END IF;
 
   FOR v_role IN SELECT unnest(ARRAY['sales_rep', 'driver', 'applicator', 'entity_recipient']) LOOP

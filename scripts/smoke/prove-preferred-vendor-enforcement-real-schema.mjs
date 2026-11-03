@@ -217,10 +217,16 @@ const LINK_A = id('d1');
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
     ('${ADMIN}', 'pv-admin@example.invalid', '{"full_name":"[PROVER] Admin","role":"admin"}'::jsonb),
-    ('${REP}', 'pv-rep@example.invalid', '{"full_name":"[PROVER] Rep","role":"sales_rep"}'::jsonb);`);
+    ('${REP}', 'pv-rep@example.invalid', '{"full_name":"[PROVER] Rep","role":"sales_rep"}'::jsonb),
+    ('${id('a3')}', 'pv-driver@example.invalid', '{"full_name":"[PROVER] Driver","role":"driver"}'::jsonb),
+    ('${id('a4')}', 'pv-applicator@example.invalid', '{"full_name":"[PROVER] Applicator","role":"applicator"}'::jsonb),
+    ('${id('a5')}', 'pv-recipient@example.invalid', '{"full_name":"[PROVER] Recipient","role":"entity_recipient"}'::jsonb);`);
   psql(`SET session_replication_role = replica;
     UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
+    UPDATE public.profiles SET role = 'driver', is_active = true WHERE id = '${id('a3')}';
+    UPDATE public.profiles SET role = 'applicator', is_active = true WHERE id = '${id('a4')}';
+    UPDATE public.profiles SET role = 'entity_recipient', is_active = true WHERE id = '${id('a5')}';
     INSERT INTO public.vendors (id, name) VALUES
       ('${V.A}', '[PROVER] Acme Ag'), ('${V.B}', '[PROVER] Beta Supply'), ('${V.C}', '[PROVER] Spare Co');
     INSERT INTO public.products (id, product_name, sku, vendor, inventory_unit, is_active) VALUES
@@ -359,6 +365,14 @@ function main() {
       WHERE l.product_id = p.id AND l.is_active AND l.link_status = 'confirmed')
     AND (SELECT count(*) FROM public.product_supplier_links l JOIN public.vendors v ON v.id = l.vendor_id
       WHERE l.product_id = p.id AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred AND v.name = p.vendor) <> 1;`), '0');
+  // The live smoke chains pass here too, and leave nothing behind.
+  const before = scalar('SELECT count(*) FROM public.product_supplier_links;');
+  for (const chain of ['smoke-preferred_vendor_enforcement.sql', 'smoke-link_product_vendor_vendor_only.sql']) {
+    const out = psql(lf(path.join(path.dirname(fileURLToPath(import.meta.url)), chain)), { allowFailure: true });
+    assert.match(`${out.stdout}${out.stderr}`, /SMOKE_PASS_ROLLBACK/, `${chain}: ${out.stdout}${out.stderr}`);
+  }
+  assert.equal(scalar('SELECT count(*) FROM public.product_supplier_links;'), before);
+  console.log('[prover] both live smoke chains pass and roll back');
   console.log('PREFERRED_VENDOR_ENFORCEMENT_PROOF_PASS');
 }
 try { main(); }

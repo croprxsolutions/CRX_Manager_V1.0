@@ -94,20 +94,15 @@ describe('Button', () => {
   });
 
   // Chevron
-  it('shows chevron for primary variant by default', () => {
-    const { container } = render(<Button>Go</Button>);
-    // ChevronRight renders as SVG
-    const svgs = container.querySelectorAll('svg');
-    expect(svgs.length).toBeGreaterThan(0);
+  it('shows no chevron by default, even on primary', () => {
+    const { container } = render(<Button>Save</Button>);
+    expect(container.querySelectorAll('svg').length).toBe(0);
   });
 
-  it('hides chevron when showChevron is false', () => {
-    const { container } = render(
-      <Button showChevron={false}>Go</Button>
-    );
-    // No SVGs when no chevron and no loading
-    const svgs = container.querySelectorAll('svg');
-    expect(svgs.length).toBe(0);
+  it('shows the chevron when showChevron is set', () => {
+    const { container } = render(<Button showChevron>Next</Button>);
+    // ChevronRight renders as SVG
+    expect(container.querySelectorAll('svg').length).toBe(1);
   });
 
   it('does not show chevron when loading', () => {

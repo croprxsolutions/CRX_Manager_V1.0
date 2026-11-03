@@ -1229,6 +1229,7 @@ export default function BulkFieldImport({ open, onClose, onSuccess }: BulkFieldI
             {step < 6 && (
               <Button
                 onClick={handleNext}
+                showChevron={step > 1 && step < 5}
                 disabled={!canAdvance()}
                 loading={parsing || uploading}
                 icon={step === 1 ? <Upload className="w-4 h-4" /> : step === 5 ? <CheckCircle className="w-4 h-4" /> : undefined}

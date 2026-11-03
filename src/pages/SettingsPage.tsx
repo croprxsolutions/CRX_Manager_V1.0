@@ -8,6 +8,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import SplitHeading from '../components/ui/SplitHeading';
+import SectionJumpBar from '../components/ui/SectionJumpBar';
 import Skeleton from '../components/ui/Skeleton';
 import EmptyState, { LoadFailedState } from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
@@ -747,6 +748,17 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <SplitHeading title="App" accent="Settings" />
 
+      {!settingsLoadError && settingsLoaded && (
+        <SectionJumpBar
+          sections={[
+            { id: 'settings-company', label: 'Company' },
+            { id: 'settings-users', label: 'Users', count: users.length },
+            { id: 'settings-billing', label: 'Billing' },
+            { id: 'settings-field', label: 'Field jobs' },
+          ]}
+        />
+      )}
+
       {settingsLoadError ? (
         <Card>
           <LoadFailedState
@@ -755,7 +767,7 @@ export default function SettingsPage() {
           />
         </Card>
       ) : !settingsLoaded ? null : (
-      <Card>
+      <Card id="settings-company" className="scroll-mt-32">
         <CardHeader
           title="Company"
           accent="Info"
@@ -779,7 +791,7 @@ export default function SettingsPage() {
       </Card>
       )}
 
-      <Card>
+      <Card id="settings-users" className="scroll-mt-32">
         <CardHeader
           title="User"
           accent="Management"
@@ -863,7 +875,7 @@ export default function SettingsPage() {
 
       {!settingsLoadError && settingsLoaded && (
       <>
-      <Card>
+      <Card id="settings-billing" className="scroll-mt-32">
         <CardHeader
           title="Default"
           accent="Settings"
@@ -1053,7 +1065,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* §5: Label-rate guardrail mode (WARN by default — never blocks a save). */}
-      <Card>
+      <Card id="settings-field" className="scroll-mt-32">
         <CardHeader
           title="Label-Rate"
           accent="Guardrail"

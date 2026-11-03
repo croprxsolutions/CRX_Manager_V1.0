@@ -1744,7 +1744,7 @@ export default function Deliveries() {
             emptyTitle="No deliveries scheduled"
             emptyDescription="Deliveries are created from orders. Open an order and click 'Schedule Delivery' to get started."
             emptyAction={
-              <Button icon={<Truck className="w-4 h-4" />} onClick={() => navigate('/orders')}>
+              <Button icon={<Truck className="w-4 h-4" />} showChevron onClick={() => navigate('/orders')}>
                 View Orders
               </Button>
             }

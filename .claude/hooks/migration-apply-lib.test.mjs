@@ -216,6 +216,16 @@ denies(evaluate(fixture({ snapshot: { captured_at: iso(-48 * 3600 * 1000), appli
   "h old (captured", "snapshot older than 24h");
 denies(evaluate(fixture({ snapshot: { applied: [{ version: "20260101000000", name: "20260101000000_baseline" }] } })),
   "no usable captured_at", "snapshot with no captured_at (freshness unknowable)");
+// The apply script re-reads the live ledger before it transmits, so snapshot age
+// is not its ordering evidence: an old or undated snapshot passes there.
+allows(evaluate(fixture({ snapshot: { captured_at: iso(-1393 * 3600 * 1000), applied: [{ version: "20260101000000", name: "20260101000000_baseline" }] } }),
+  { liveOrderingRecheck: true }), "old snapshot passes when the caller re-checks the live ledger");
+allows(evaluate(fixture({ snapshot: { applied: [{ version: "20260101000000", name: "20260101000000_baseline" }] } }),
+  { liveOrderingRecheck: true }), "undated snapshot passes when the caller re-checks the live ledger");
+// ...but the snapshot still answers ordering: an old one that already shows a newer
+// applied row refuses there too.
+denies(evaluate(fixture({ snapshot: { captured_at: iso(-1393 * 3600 * 1000), applied: [{ version: "20270101000000", name: "20270101000000_much_newer" }] } }),
+  { liveOrderingRecheck: true }), "MIGRATION ORDERING GUARD", "old snapshot still refuses a replay it can see");
 denies(evaluate(fixture({ snapshot: { captured_at: iso(0), applied: [{ version: "x", name: "no_timestamp_here" }] } })),
   "not one carries a 14-digit migration timestamp", "snapshot carrying no 14-digit timestamp to compare against");
 denies(evaluate(fixture({ snapshot: "not json at all" })), "could not read the applied-migration snapshot",
@@ -1506,14 +1516,16 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timest
   // at the source instead: the snapshot is deleted before the first fetch().
   const applySource = readFileSync(path.resolve(__scriptsDir, "apply-migration-file.mjs"), "utf8");
   const invalidateAt = applySource.indexOf("rmSync(snapshotPath)");
-  const firstFetchAt = applySource.indexOf("await fetch(");
+  // The transmission, not the read-only ledger refresh the script runs before its gate.
+  const firstFetchAt = applySource.indexOf("const res = await fetch(");
   ok(invalidateAt > 0 && firstFetchAt > 0 && invalidateAt < firstFetchAt,
     "the snapshot is invalidated before the first transmission in the script's own code");
   ok(applySource.indexOf("evaluateMigrationApply(") < invalidateAt,
     "and only after the gate verdict was taken");
 
-  // Driven end to end, the run now stops at the landing gate: nothing transmits
-  // and the snapshot survives a refusal.
+  // Driven end to end with a token, the run now stops at the pre-gate ledger
+  // refresh (the dead proxy below fails it): nothing transmits and the snapshot
+  // survives a refusal.
   const res = spawnSync(process.execPath, [
     path.resolve(__scriptsDir, "apply-migration-file.mjs"),
     path.join(root, "supabase", "migrations", `${MIG}.sql`),
@@ -1535,7 +1547,7 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timest
       no_proxy: "",
     }),
   });
-  ok(res.stderr.includes("MIGRATION LANDING GATE"), "the offline run stops at the PR landing gate");
+  ok(res.stderr.includes("LEDGER REFRESH FAILED"), "an unreadable live ledger refuses before the gate");
   ok(!res.stdout.includes("Transmitting"), "and never transmits");
   ok(existsSync(snapshot), "a refused run leaves the snapshot intact");
   ok(res.status === 2, `a refused run exits 2 (got ${res.status})`);

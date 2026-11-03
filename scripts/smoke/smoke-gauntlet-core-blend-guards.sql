@@ -2197,9 +2197,22 @@ BEGIN
     v_admin,
     v_key_prefix || '-billing-status-noop'
   )::jsonb;
+  -- Batch 4a: the same key with a different status is refused, not replayed.
+  BEGIN
+    PERFORM public.update_blend_ticket_billing_status(
+      v_wrong_customer_ticket,
+      'billed',
+      v_admin,
+      v_key_prefix || '-billing-status-noop'
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL(blend): no-op billing key reused for a different status was replayed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF position('IDEMPOTENCY_INTENT_MISMATCH' IN SQLERRM) = 0 THEN RAISE; END IF;
+  END;
   v_replay := public.update_blend_ticket_billing_status(
     v_wrong_customer_ticket,
-    'billed',
+    NULL,
     v_admin,
     v_key_prefix || '-billing-status-noop'
   )::jsonb;
@@ -2234,9 +2247,22 @@ BEGIN
     v_admin,
     v_key_prefix || '-billing-status'
   )::jsonb;
+  -- Batch 4a: the same key with a different status is refused, not replayed.
+  BEGIN
+    PERFORM public.update_blend_ticket_billing_status(
+      v_ticket,
+      'unbilled',
+      v_admin,
+      v_key_prefix || '-billing-status'
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL(blend): billing key reused for a different status was replayed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF position('IDEMPOTENCY_INTENT_MISMATCH' IN SQLERRM) = 0 THEN RAISE; END IF;
+  END;
   v_replay := public.update_blend_ticket_billing_status(
     v_ticket,
-    'unbilled',
+    'billed',
     v_admin,
     v_key_prefix || '-billing-status'
   )::jsonb;

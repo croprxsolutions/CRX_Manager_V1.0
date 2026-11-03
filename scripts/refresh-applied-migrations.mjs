@@ -20,6 +20,11 @@
 //     node scripts/refresh-applied-migrations.mjs < rows.json
 //     cat rows.json | node scripts/refresh-applied-migrations.mjs
 //
+//   Or pass the file the Supabase MCP `list_migrations` tool saved to disk
+//   (shape {"migrations":[{version,name},...]}) as the one argument:
+//
+//     node scripts/refresh-applied-migrations.mjs path/to/list_migrations.txt
+//
 //   Accepts either a bare array or {result: [...]} / {applied: [...]}, and rows
 //   shaped as strings, {name}, or {version}.
 //
@@ -31,15 +36,16 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { ledgerRowsToNames } from "../.claude/hooks/migration-ordering-lib.mjs";
 
 const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const outPath = path.join(projectDir, ".claude", "session-state", "applied-migrations.json");
 
 let raw = "";
 try {
-  raw = readFileSync(0, "utf8");
+  raw = readFileSync(process.argv[2] ?? 0, "utf8");
 } catch {
-  console.error("refresh-applied-migrations: no input on stdin.");
+  console.error(`refresh-applied-migrations: no input on ${process.argv[2] ?? "stdin"}.`);
   process.exit(1);
 }
 
@@ -121,16 +127,7 @@ if (!rows) {
 // version as a `<version>_<name>` prefix. normalizeMigrationName() understands
 // that shape — it is the same one the live ledger produced on 2026-07-15.
 const TS = /\d{14}/;
-const applied = rows
-  .map((r) => {
-    if (typeof r === "string") return r;
-    const name = (r?.name ?? "").toString().trim();
-    const version = (r?.version ?? "").toString().trim();
-    if (name && TS.test(name)) return name;
-    if (version && name) return `${version}_${name}`;
-    return version || name || "";
-  })
-  .filter(Boolean);
+const applied = ledgerRowsToNames(rows);
 
 const withoutTimestamp = applied.filter((n) => !TS.test(n));
 if (withoutTimestamp.length) {

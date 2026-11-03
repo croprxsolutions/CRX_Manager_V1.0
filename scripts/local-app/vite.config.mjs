@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { mergeConfig } from 'vite';
 import appConfig from '../../vite.config.ts';
-import { denyInsideCheckout } from './target.mjs';
+import { API_URL, APP_URL, denyInsideCheckout } from './target.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -15,6 +15,16 @@ export default mergeConfig(appConfig, {
   // list replaces Vite's own, so the first line repeats its defaults (Vite 8.3.5). Nothing outside
   // this checkout is served at all, which is what keeps a parent checkout's .claude folder out.
   server: {
+    // A second copy on another port (`frontend --port`) calls the gateway through here, as the one
+    // page origin the gateway allows. Vite's own host and origin checks still guard that port.
+    proxy: {
+      '/_sb': {
+        target: API_URL,
+        ws: true,
+        rewrite: (url) => url.replace(/^\/_sb/, ''),
+        configure: (proxy) => proxy.on('proxyReq', (request) => request.setHeader('origin', APP_URL)),
+      },
+    },
     fs: {
       allow: [ROOT],
       deny: [

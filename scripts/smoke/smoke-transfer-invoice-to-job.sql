@@ -59,7 +59,7 @@ BEGIN
 
   -- Forged actor must be rejected (no mutation).
   BEGIN
-    PERFORM transfer_invoice_to_job(v_inv, v_forged, NULL);
+    PERFORM transfer_invoice_to_job(v_inv, v_forged, '[SMOKE] rt-forged-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: forged actor allowed';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -108,7 +108,7 @@ BEGIN
   SELECT status INTO v_invR.status FROM invoices WHERE id=v_inv2;
   IF v_invR.status<>'posted' THEN RAISE EXCEPTION 'SMOKE_FAIL: post_invoice did not post (%)', v_invR.status; END IF;
   BEGIN
-    PERFORM transfer_invoice_to_job(v_inv2, v_admin, NULL);
+    PERFORM transfer_invoice_to_job(v_inv2, v_admin, '[SMOKE] rt-posted-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: reversed a POSTED invoice';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -119,7 +119,7 @@ BEGIN
   INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, total_amount_cents, created_by)
     VALUES ('[SMOKE] RT-ENG-'||v_sfx, v_cust, 'field_application', 'draft', CURRENT_DATE, 0, v_admin) RETURNING id INTO v_eng_inv;
   BEGIN
-    PERFORM transfer_invoice_to_job(v_eng_inv, v_admin, NULL);
+    PERFORM transfer_invoice_to_job(v_eng_inv, v_admin, '[SMOKE] rt-eng-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: reversed a non-job field invoice';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;

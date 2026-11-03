@@ -450,9 +450,11 @@ export function withoutDataHeredocs(cmd) {
   for (let i = 0; i < lines.length; i += 1) {
     const open = lines[i].replace(/\r$/, "").match(
       // `(` and a backtick are refused around it: `tee >(bash)` and `$(…)` run code.
-      /(?:^|&&|;)\s*(?:cat|tee|git\s+(?:commit|tag))(?![\w-])[^|;&<()`]*<<(-?)\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\(\w+))[^|;&<()`]*$/,
+      // A backslash after it continues the line (`cat <<'EOF' \` then `| bash`).
+      /(?:^|&&|;)\s*(?:cat|tee|git\s+(?:commit|tag))(?![\w-])[^|;&<()`\\]*<<(-?)\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\(\w+))[^|;&<()`\\]*$/,
     );
-    if (!open) continue;
+    // …and one before it joins this line to an earlier command.
+    if (!open || (i > 0 && /\\\r?$/.test(lines[i - 1]))) continue;
     const delimiter = open[2] ?? open[3] ?? open[4];
     let end = i + 1;
     while (end < lines.length && lines[end].replace(/\r$/, "").replace(open[1] ? /^\t+/ : /^$/, "") !== delimiter) end += 1;

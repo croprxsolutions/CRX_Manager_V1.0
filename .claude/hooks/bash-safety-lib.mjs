@@ -355,7 +355,12 @@ export function checkAskCommand(cmd) {
 // run a client named by a variable (Sol, PR #1193), so `git log -c` beside
 // the words stays refused, as it was before.
 const DESTRUCTIVE_SQL_RE = /\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i;
-const SQL_CLIENT_RE = /\b(?:psql|pgcli)\b|supabase\s+sql/i;
+const SQL_CLIENT_RE = /\b(?:psql|pgcli)\b|supabase\s+(?:sql|db)\b/i;
+// Programs that can run SQL through a driver (pg, the Supabase client) or a
+// nested shell. One of them followed anywhere later by the destructive words
+// counts as a client call (2026-11-03, Sol on the P4 proposal): `node -e
+// "…DROP TABLE…"` used to pass unless a `-c` happened to sit beside it.
+const SQL_SCRIPT_RUNNERS = new Set(["node", "deno", "bun", "tsx", "ts-node", "npx", "pnpm", "yarn", "python", "python3", "py", "ruby", "perl", "php", "bash", "sh", "zsh", "pwsh", "powershell", "cmd"]);
 const SQL_SAFE_READ_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "ls"]);
 // Programs that only print, search or record their arguments, never run them
 // (2026-11-03: `git grep TRUNCATE`, commit messages and PR bodies naming psql
@@ -416,7 +421,13 @@ export function checkDestructiveSql(cmd) {
         // rg options that run a program, as read-only-search-lib's rgOptionRunsProgram lists them.
         (sqlSegmentProgram(segment) === "rg" && /(?:^|\s)(?:--(?:hostname-bin|search-zip)\b|-[^-\s]*z)/i.test(unquoted)));
   });
-  if (clientOutsideReader || flagOutsideReader) {
+  let at = 0;
+  const scriptRunner = text.split(/(\|\||&&|[;\r\n|&]+)/).some((segment) => {
+    const start = at;
+    at += segment.length;
+    return SQL_SCRIPT_RUNNERS.has(sqlSegmentProgram(segment)) && DESTRUCTIVE_SQL_RE.test(text.slice(start));
+  });
+  if (clientOutsideReader || flagOutsideReader || scriptRunner) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";
   }
   return null;

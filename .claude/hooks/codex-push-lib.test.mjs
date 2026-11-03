@@ -136,6 +136,8 @@ for (const command of [
   `cat <<EOF > a.sh\ngit ${pushVerb} origin main\nEOF`,
   `tee >(bash) <<'EOF'\ngit ${pushVerb} origin main\nEOF`,
   `cat > a.md <<'EOF'\ngit ${pushVerb} origin main\n`,
+  `cat <<'EOF' \\\n| bash\ngit ${pushVerb} origin main\nEOF`,
+  `bash \\\ncat <<'EOF'\ngit ${pushVerb} origin main\nEOF`,
 ]) assert.equal(isGitPush(withoutDataHeredocs(command)), true, command);
 assert.equal(pushContextIsAmbiguous("$env:GIT_DIR='C:/other/.git'; git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("GIT_WORK_TREE=/tmp/other git push origin main"), true);

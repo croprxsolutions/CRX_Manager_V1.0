@@ -1188,6 +1188,15 @@ for (const command of [
     "a push inside a here-document fed to bash is still inspected");
   ok(/not an existing folder/.test(run(`git -C "${dir}/missing" ${pushVerb} origin feature`).stdout),
     "a push into a folder that does not exist is refused with a clear reason");
+  // P1 must never fail open: with no git to run, a real repo's push still refuses.
+  const noGitEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^path$/i.test(key)));
+  noGitEnv.PATH = fs.mkdtempSync(path.join(os.tmpdir(), "crx-no-git-"));
+  for (const command of [`git -C "${dir}" ${pushVerb} origin feature`, `cd ${bashDir} && git ${pushVerb} origin feature`]) {
+    const noGit = spawnSync(process.execPath, [path.join(__dirname, "codex-push-guard.mjs")],
+      { input: JSON.stringify({ cwd: os.tmpdir(), tool_name: "Bash", tool_input: { command } }), encoding: "utf8", env: noGitEnv });
+    ok(/could not determine the repository\/branch/.test(noGit.stdout), `no git on PATH still refuses: ${command}`);
+  }
+  fs.rmSync(noGitEnv.PATH, { recursive: true, force: true });
 
   // (c) a variable pointing at a protected main push is still refused.
   const literalMain = run(`git -C "${dir}" ${pushVerb} origin HEAD:main`).stdout;

@@ -471,7 +471,7 @@ refused commands from those sessions before and after the change.
    segment — the eight pinned exploit spellings), a `..` step after `cd` into a worktree, and
    `find -delete`, `git clean` or `rsync --delete` aimed at any worktree. The schema registry, caller
    graph and active-areas files now count only when the delete or move is in the same command
-   segment that names them, and a data-only here-document body is not read. The Temp scratchpad and
+   segment that names them. The Temp scratchpad and
    `~/.claude/projects` were never the review state and now pass. The "WRITE to .husky /
    .claude/hooks" rule and the "direct shell access to review proof" rule are unchanged. Known
    over-blocks kept: a command naming the state directory itself (or a bare `session-state`) beside
@@ -480,8 +480,12 @@ refused commands from those sessions before and after the change.
 4. **Destructive SQL (`bash-safety-lib.mjs`).** A data-only here-document body is not read, and
    `git grep|log|show|diff|status|add|commit|tag|switch|checkout|branch|mv|restore` (subcommand
    right after `git`), `echo`, `printf`, `gh pr` and `gh issue` count as readers under the same plain
-   quoting rules. `git grep -O` (runs a pager), `git -c …`, other `gh` commands, interpreters
-   (`node -e`, `python`, `sed`) and any real `psql`/`pgcli`/`supabase sql` call still count.
+   quoting rules. `git grep -O` (runs a pager), `git -c …`, other `gh` commands, `sed`, and any real
+   `psql`/`pgcli`/`supabase sql`/`supabase db` call (direct, through `npx`, or fed a here-document)
+   still count. Tightened at the same time (Sol on the proposal): a script runner (`node`, `deno`,
+   `bun`, `tsx`, `npx`, `python`, `ruby`, `perl`, `bash`, `sh`, `pwsh`, `cmd` …) followed anywhere
+   later by the destructive words now counts as a client call, since it can run SQL through `pg` or
+   the Supabase client; before, `node -e "…DROP TABLE…"` passed unless a `-c` sat beside it.
 
 ### Guard narrowing (2026-10-18 decision)
 

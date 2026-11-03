@@ -99,6 +99,24 @@ ok(checkDangerousCommand("python - <<'EOF'\nimport os; os.system('psql -c \"DROP
 ok(checkDangerousCommand('echo "DROP TABLE x;" | psql'), "echo piped into psql stays refused");
 ok(checkDangerousCommand('gh x-ext psql "DROP TABLE x"'), "a gh extension may run a program, so it stays refused");
 ok(checkDangerousCommand('supabase sql "DROP SCHEMA public"'), "supabase sql DROP SCHEMA stays refused");
+// Every route that can run SQL here stays refused (Sol on the P4 proposal, 2026-11-03).
+for (const [command, label] of [
+  ['npx supabase db execute "TRUNCATE customers"', "npx supabase db"],
+  ['npx psql "$DB" -c "DROP TABLE x"', "npx psql"],
+  ["node -e \"new (require('pg').Client)().query('DROP TABLE x')\"", "node script using pg"],
+  ["node scripts/run-sql.mjs 'TRUNCATE customers'", "node script file given SQL"],
+  ["python3 - <<'EOF'\nimport psycopg\npsycopg.connect().execute('DROP SCHEMA public')\nEOF", "python heredoc using a driver"],
+  ["deno run -A x.ts 'DROP TABLE x'", "deno"],
+  ["bash -c 'psql -c \"DROP TABLE x\"'", "bash -c psql"],
+  ["sh <<'EOF'\npsql -c 'TRUNCATE x'\nEOF", "heredoc fed to sh"],
+  ["cat wipe.sql | psql \"$DB\" # DROP TABLE", "file piped into psql"],
+]) ok(checkDangerousCommand(command), `SQL route stays refused: ${label}`);
+// Text that runs nothing stays allowed, including a script run BEFORE the words.
+for (const command of [
+  'git commit -m "docs: TRUNCATE is refused" && node scripts/check.mjs',
+  'grep -rn "DROP TABLE" supabase/migrations/20261103_x.sql',
+  'ls supabase/migrations/20260101_drop_table_legacy.sql',
+]) ok(!checkDangerousCommand(command), `text that runs nothing allowed: ${command}`);
 ok(checkDangerousCommand('rg --pre psql "DROP SCHEMA" db.sql'), "rg --pre running a client stays refused (Codex App, PR #1337)");
 ok(checkDangerousCommand(`rg --p''re=psql "DROP SCHEMA" db.sql`), "a quote-split --pre= spelling stays refused");
 // A reader spanning a line break is never exempt (Codex App, PR #1337).

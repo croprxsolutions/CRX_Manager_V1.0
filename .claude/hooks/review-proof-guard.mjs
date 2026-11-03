@@ -15,7 +15,6 @@ import {
   nativePatchEnvelope,
   reviewProofPathMentioned,
   reviewStateDirectoryMentioned,
-  withoutDataHeredocs,
 } from "./codex-push-lib.mjs";
 
 function deny(reason) {
@@ -553,9 +552,7 @@ if (shellTool) {
   // mention must appear in the SAME view, so test per-view; the raw (base) view
   // still covers Windows `\`-separated paths, where the backslash is a real
   // separator and dropping it would corrupt the path.
-  // A data-only here-document body (a note, a script written to a file) deletes
-  // nothing, whatever words it holds (2026-11-03); see withoutDataHeredocs.
-  const destructiveViews = shellCommandViews(withoutDataHeredocs(command));
+  const destructiveViews = shellCommandViews(command);
   const hitsDestructiveVerb = (v) =>
     DESTRUCTIVE_VERB_RE.test(v) || FIND_TRAVERSAL_DELETE_RE.test(v) || GIT_CLEAN_RE.test(v) || RSYNC_DELETE_RE.test(v);
   // namesStateDir now also matches a component-aware / glob-obscured reference

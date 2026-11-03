@@ -1,0 +1,4 @@
+## 2026-11-03 - Live high-water query counts ledger name stamps
+
+- The docs for `npm run next-migration-stamp -- --live <live high-water>` (create-migration skill, run-loop command, Product Master mission, database checklist, the script header) now read the live high-water with `select max(greatest(version, coalesce(substring(name from '[0-9]{14}'), version))) from supabase_migrations.schema_migrations;` instead of a bare `max(version)`. This matches the ordering rule in `.claude/hooks/migration-ordering-lib.mjs`: a row's name stamp counts, and taking the greater of name stamp and version keeps the pick above both.
+- Read-only live check on 2026-11-03 (1104 rows, no name carries two stamps): bare `max(version)` `20261103132202`; new query `20261104130000`. A stamp picked from the bare figure could have landed below an applied migration.

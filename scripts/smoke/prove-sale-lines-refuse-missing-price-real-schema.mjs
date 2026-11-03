@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for WP-PM-6b's missing-price refusals (20261105120000). Builds the checked-in
+ * Real-schema proof for WP-PM-6b's missing-price refusals (20261105140000). Builds the checked-in
  * schema baseline in a network-disabled PostgreSQL container, replays migrations up to the
  * candidate, applies it, and checks with invented rows that a quote line, an order line and a
  * tier-priced invoice line (the field-app path) for a product with no price for the line's tier is
@@ -25,7 +25,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261105120000_sale_lines_refuse_missing_price.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261105140000_sale_lines_refuse_missing_price.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

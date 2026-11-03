@@ -36,7 +36,7 @@ describe('sanitizeError', () => {
       .toBe(`Nothing was saved. ${sentence}`);
   });
 
-  // The RAISE texts of 20261105120000_sale_lines_refuse_missing_price.sql with the product filled in.
+  // The RAISE texts of 20261105140000_sale_lines_refuse_missing_price.sql with the product filled in.
   it.each([
     ['QUOTE_PRICE_MISSING', "Atrazine 4L has no price for this quote's tier, so its line would show $0. Type a price on the line, or set the product's prices first (give it a $0 price if you give it away)."],
     ['ORDER_PRICE_MISSING', "Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter a price for the line, or set the product's prices first (give it a $0 price if you give it away)."],

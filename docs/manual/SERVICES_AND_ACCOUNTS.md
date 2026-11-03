@@ -81,7 +81,7 @@ template is `.env.example`.
   guard recognises, always with `read_only: true`, and never prints or saves the token. Both
   `scripts/apply-migration-file.mjs` and the sweep runner read it themselves through
   `scripts/lib/supabase-credential.mjs` (2026-11-02), so no session sets `SUPABASE_ACCESS_TOKEN`
-  or builds a launcher; the env var, when set, still wins. The developer should get their own
+  or builds a launcher. For the apply script only, a set `SUPABASE_ACCESS_TOKEN` still wins. The developer should get their own
   Supabase login, not this token.
 - **Staging project:** none yet (`.env.staging.example` is a template). Goal 6 builds it.
 

@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied. Needs Mason's `I approve` (it overwrites existing rows).** `20261105100000_data11_preferred_vendor_links.sql` (LF SQL sha256: `b2c1015cd674f437f8e540ba80fc08cc6895aad04cf9e95900ad3c6e3be511e2`). WP-PM-15b data step, Mason's DATA-11 decisions 2, 3 and 4 (2026-11-03). REQUIRES `20261105090000`.
+**LOCAL CANDIDATE, not applied. Needs Mason's `I approve` (it overwrites existing rows).** `20261105170000_data11_preferred_vendor_links.sql` (LF SQL sha256: `b2c1015cd674f437f8e540ba80fc08cc6895aad04cf9e95900ad3c6e3be511e2`). WP-PM-15b data step, Mason's DATA-11 decisions 2, 3 and 4 (2026-11-03). REQUIRES `20261105090000`.
 
 What it does:
 - Gives every active product with no vendor link a vendor-only link (item details not yet known), marked preferred. The link goes to the one vendor its vendor text already names, directly, by an approved alias, or by an approved legacy resolution.
@@ -17,3 +17,5 @@ Proof: `node scripts/smoke/prove-data11-preferred-links-real-schema.mjs` prints 
 - a second run refusing.
 
 Live preflight (2026-11-03): the plan fingerprint (including vendor text and the id of each link it marks preferred) matches, and all 10 lone-link products' vendor text names their link's vendor; the ledger high-water is `20261105090000` once step 1 is applied.
+
+Live ledger preflight, read 2026-11-03 23:43 UTC (5:43 PM Central) with read-only `execute_sql`: 1111 rows; effective high-water `20261105130000` (`20261105130000_month_end_deliveries_skip_cancelled`, ledger version `20261103223741`); no ledger name contains `data11`. **Renumbered `20261105100000` -> `20261105170000`** the same day because that month-end migration went live first and the old stamp would have sorted below the high-water. Read the ledger again at apply time.

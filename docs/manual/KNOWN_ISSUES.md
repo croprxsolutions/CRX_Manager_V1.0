@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-03 for the live ledger only (see the WP-PM-7 changelog note); other evidence retains its stated dates.
+**Last verified:** 2026-11-03 for the live ledger only (see the WP-PM-7 and pm5-registry-refresh changelog notes); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 

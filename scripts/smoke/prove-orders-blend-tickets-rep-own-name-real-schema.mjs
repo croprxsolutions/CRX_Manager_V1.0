@@ -84,6 +84,14 @@ function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U',
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
+// Covering chains as they stood when the candidate landed: later edits call functions that later migrations add.
+const CANDIDATE_COMMIT = spawnSync('git', ['log', '--diff-filter=A', '--format=%H', '-1', '--', path.relative(ROOT, CANDIDATE)], { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
+function chainAtCandidate(file) {
+  assert.match(CANDIDATE_COMMIT, /^[0-9a-f]{40}$/, 'cannot find the commit that added the candidate');
+  const r = spawnSync('git', ['show', `${CANDIDATE_COMMIT}:${path.relative(ROOT, file).replaceAll('\\', '/')}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  if (r.status !== 0) throw new Error(r.stderr);
+  return r.stdout.replaceAll('\r\n', '\n');
+}
 function stageText(name, text) {
   const staged = path.join(tmpdir(), `${NAME}-${name}`);
   writeFileSync(staged, text, 'utf8');
@@ -216,7 +224,7 @@ function seed() {
 
 /** Run a chain file; `prefix` runs first in the same transaction (a mutation). */
 function chain(file, prefix = '', user = 'postgres') {
-  stageText('chain.sql', lf(file));
+  stageText('chain.sql', chainAtCandidate(file));
   const r = docker([...psqlArgs(user)], { input: `BEGIN;\n${prefix}\n\\i /tmp/chain.sql\nROLLBACK;\n`, allowFailure: true });
   const out = `${r.stdout}\n${r.stderr}`;
   const pass = /SMOKE_PASS_ROLLBACK/.test(out);

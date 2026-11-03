@@ -78,6 +78,7 @@ ok(checkDangerousCommand(`grep "DROP TABLE" \\\n# it's\npsql < wipe.sql`), "a li
 ok(checkDangerousCommand(`grep "DROP TABLE" f # it's\rpsql < wipe.sql`), "a carriage return counts as a line break for the exemption");
 ok(checkDangerousCommand('grep foo\\ #; psql --command="DROP TABLE customers"'), "an escaped space cannot fake a comment that hides psql (Luna, PR #1337)");
 ok(checkDangerousCommand('grep foo\u00a0#; psql --command="DROP TABLE customers"'), "a no-break space cannot fake a comment that hides psql");
+ok(checkDangerousCommand(`grep $'it\\'s' f; psql < wipe.sql # DROP TABLE x`), "ANSI-C quoting cannot hide a client in a reader segment (Codex App, PR #1337)");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
 ok(!checkDangerousCommand("git push origin feature/x"), "ordinary feature push allowed");

@@ -440,6 +440,53 @@ missing from `SQL_BUILTIN_FNS` while its siblings (`pg_get_functiondef`, `pg_get
 that is cross-tool permission laundering. Ask Mason for the scoped `REAL-DATA-OK` the guard's own
 message names, or fix the guard deliberately.
 
+### Guard false-alarm narrowing (2026-11-03)
+
+A coaching review counted guard refusals from 11/1 to 11/3; four rules mostly refused harmless
+commands, and Mason approved narrowing all four ("Yes, P1–P4"). Each was replayed against the real
+refused commands from those sessions before and after the change.
+
+1. **Push gate, "could not determine the repository/branch" (`codex-push-guard.mjs`, shared
+   `codex-push-lib.mjs`).** The cause was not a missing git: Git Bash writes `C:\x` as `/c/x`, Node
+   resolved that to `C:\c\x`, and Node reports a missing working folder as `spawnSync git ENOENT`.
+   `nativeFolder` now reads `/c/…` as `C:/…` on Windows, and a push whose folder does not exist (or is
+   a shell variable the guard cannot read) is refused with that reason before git runs. Refusing
+   when git itself fails is unchanged.
+2. **Push gate, "directory-changing … pushes cannot be bound safely" (same lib, also used by
+   `.codex/hooks/production-action-guard.mjs`).** Unchanged except that a bare `cd`/`popd` with no
+   folder (`cd && git push`, which goes home) now counts as a directory change too. Any push in a
+   command that changes directory stays refused; use `git -C <repo> push`.
+3. **Review proof guard, "destructive or overwriting shell commands touching the .claude review
+   state directory" (`review-proof-guard.mjs`).** `.claude/worktrees` now counts as the worktrees
+   folder or one whole worktree, not every file inside one. A worktree root used as the folder a
+   command runs in (`cd <root> && …`, `git -C <root> …`, or `W=<root>` read only as `$W`) is not a
+   target. Still refused: a worktree's own `.claude` or `session-state`, any path below a worktree the
+   guard cannot read for certain (`$X`, `%X%`, `!X!`, a backtick, a cmd `^`, a glob, a `.`/`..`
+   segment — the eight pinned exploit spellings), a `..` step after `cd` into a worktree, and
+   `find -delete`, `git clean` or `rsync --delete` aimed at any worktree. The schema registry, caller
+   graph and active-areas files now count only when the delete or move is in the same command
+   segment that names them. The Temp scratchpad and
+   `~/.claude/projects` were never the review state and now pass. The "WRITE to .husky /
+   .claude/hooks" rule and the "direct shell access to review proof" rule are unchanged. Known
+   over-blocks kept: a command naming the state directory itself (or a bare `session-state`) beside
+   a destructive word, and a worktree path used as a plain operand (`git clone <root>`) next to an
+   unrelated `rm`.
+4. **Destructive SQL (`bash-safety-lib.mjs`).** Unchanged. New tests pin that every real SQL route
+   (psql directly, through `npx`, `bash -c`, a here-document, a written `.sql` file) stays refused.
+
+**Dropped (Mason, "Yes, ship safe parts").** A shortcut that skipped here-document bodies written by
+`cat`/`tee`/`git commit` as "text that runs nothing" was tried for P2 and P4 and removed: five review
+rounds each found a new way to make that text run (a quoted opener, a line continuation into
+`bash`, a written file run later, a redirect after `<<`, a function named `cat`). A text guard cannot
+know what a word will do at run time, so commit messages, notes and PR bodies that mention a push or
+SQL words keep being judged as on `main`. A broader SQL "script runner" rule (Sol's request) was
+dropped with it, so `node`/`python` scripts that run SQL through a driver are handled as on `main`.
+Binding a push to a leading `cd <folder>` (P2) was dropped too: each review round found another way
+the shell picks a different folder (`cd -`, `CDPATH`, a bare `cd`, a drive-relative `\repo`).
+Treating plain `git grep`/`git log` as readers in the SQL guard (P4) was dropped last: a pager set
+in git's config can run a program the command text never names. Known over-refusal kept: a push
+of a branch literally named `cd` (`git push origin cd`) reads as a bare `cd`.
+
 ### Guard narrowing (2026-10-18 decision)
 
 An audit of which guards blocked safe work, checked by an independent adversarial Opus review
@@ -452,8 +499,8 @@ separately, the permission change.
    destructive word (34 sessions) now counts `.claude` only as a whole target (`.claude`, `.claude/`,
    a glob directly under it, Bash extglob `@(…)`/`+(…)`/`!(…)` included; an extglob that obscures the
    `.claude` name itself, such as `.clau@(de)`, counts too). It never counts the user-home `~/.claude` (Claude's memory).
-   `.claude/worktrees/…` keeps the old breadth at any depth, because every worktree holds its own
-   state directory. A delete or move after `cd` into the repo's `.claude` (or below it) is denied
+   `.claude/worktrees/…` kept the old breadth at any depth until 2026-11-03; see "Guard false-alarm
+   narrowing (2026-11-03)" below for what counts now. A delete or move after `cd` into the repo's `.claude` (or below it) is denied
    command-wide, since its own segment names no protected path; an unreadable cd target (`cd $D`)
    counts when the command names the repo's `.claude`. The guard inputs directly in the repo's
    `.claude` folder (schema registry, caller graph, active areas) are protected the same way (delete,

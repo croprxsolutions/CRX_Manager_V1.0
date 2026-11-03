@@ -224,11 +224,40 @@ describe('ProductDetail brands section', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
     await waitFor(() => expect(H.savedPayload?.use_timings).toEqual(['pre_emerge_corn', 'post_emerge_soybeans']));
     expect(H.savedPayload).not.toHaveProperty('use_timing');
+    // An untouched vendor is not re-sent (WP-PM-15a), so an open page never overwrites a newer one.
+    expect(H.savedPayload).not.toHaveProperty('vendor');
     first.unmount();
     render(<ProductDetail />);
     const reloaded = await screen.findByRole('group', { name: 'Use Timing' });
     expect(within(reloaded).getByRole('checkbox', { name: 'Pre-Emerge Corn' })).toBeChecked();
     expect(within(reloaded).getByRole('checkbox', { name: 'Post-Emerge Soybeans' })).toBeChecked();
+  });
+
+  it('still saves a vendor that was changed on the page', async () => {
+    render(<ProductDetail />);
+    const vendor = await screen.findByRole('combobox', { name: 'Vendor' });
+    fireEvent.change(vendor, { target: { value: 'Other Vendor' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload?.vendor).toBe('Other Vendor'));
+  });
+
+  it('saves a cleared vendor as blank', async () => {
+    render(<ProductDetail />);
+    const vendor = await screen.findByRole('combobox', { name: 'Vendor' });
+    fireEvent.change(vendor, { target: { value: '' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload).toHaveProperty('vendor', null));
+  });
+
+  it('sends the vendor when creating a product', async () => {
+    H.routeId = 'new';
+    render(<ProductDetail />);
+    fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Vendor' }), { target: { value: 'New Vendor' } });
+    await screen.findByRole('option', { name: 'Herbicide' });
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^(Save|Create)/ })[0]);
+    await waitFor(() => expect(H.savedPayload?.vendor).toBe('New Vendor'));
   });
 
   it('creates a product with two timings and reloads both', async () => {

@@ -14,7 +14,7 @@ Codex, and Mason alike. The landing path is:
 
 **push a branch → open the PR (finished and Luna-clean; a DRAFT only when it touches a Sol-list file) → finish required checks → freeze the candidate → mark a draft
 ready; an off-list PR is already ready (CodeRabbit, advisory since 2026-10-19, makes no automatic reviews since 2026-10-21; a
-money or Mason-named PR gets one requested full review; fix or refute any comments that arrive
+PR with the `needs-coderabbit` label gets one requested full review; fix or refute any comments that arrive
 before the merge, but do not wait for a review nobody requested) → exact-SHA Sol proof → merge with
 `--match-head-commit <reviewed-head-sha>`.** The **merge** is what deploys production via Vercel's
 git integration; Vercel's one-click rollback is the accepted safety net.
@@ -138,16 +138,16 @@ If ready, state the remaining landing steps explicitly — this skill does **not
    it changes code (not only a comment or a doc) post `@codex review` once so the Codex App reviews the
    final head before the merge. CodeRabbit is **advisory** since 2026-10-19 (Mason) and never submits APPROVED or
    CHANGES_REQUESTED. Since 2026-10-21 it makes no automatic reviews: marking ready starts none,
-   and it reviews only when an agent posts `@coderabbitai full review` on a money or Mason-named PR. GitHub's `protect-main`
+   and it reviews only when an agent posts `@coderabbitai full review` on a PR carrying the `needs-coderabbit` label. GitHub's `protect-main`
    ruleset no longer requires an approving review (required status checks stay). If CodeRabbit's
    review arrives before the merge, fix or refute with evidence every comment, in one push. Do not
    wait for it if it has not reviewed by the time checks are green and Sol is clean, and never post
    `@coderabbitai review` to buy a re-review. A failed CodeRabbit pre-merge "error" check is a
    finding to fix or refute, not a blocker. **A fix goes on the SAME PR** — no replacement PR. Never
    use `@coderabbitai resume` or any other `@coderabbitai` command, except this one (Mason,
-   2026-10-21): a PR that touches money, invoices, payments, inventory, or costs in any way, or one Mason asks
-   to have reviewed, needs a clean CodeRabbit review of its current head plus a clean Sol, so post
-   `@coderabbitai full review` once for its frozen, green head if CodeRabbit has not reviewed it
+   2026-10-29): no PR needs CodeRabbit, money PRs included, unless it carries the `needs-coderabbit`
+   label (an agent adds it when Mason asks for a CodeRabbit review). Such a PR needs one completed
+   review on any commit, so post `@coderabbitai full review` once if CodeRabbit has not reviewed it
    (rules: `docs/reference/coderabbit-native-review.md`). The legacy `ready-for-coderabbit`
    label route no longer triggers a review; `docs/reference/coderabbit-native-review.md` describes it.
 5. Run the `gpt-6-sol` high-effort proof for a change on `docs/reference/sol-required-paths.md`

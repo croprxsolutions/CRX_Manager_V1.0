@@ -9,7 +9,7 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { scratchHookEnvironment } from "./git-test-env.mjs";
-import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded } from "./codex-push-lib.mjs";
+import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded, leadingCdFolder, nativeFolder, withoutDataHeredocs } from "./codex-push-lib.mjs";
 
 const now = Date.parse("2026-07-13T18:00:00.000Z");
 const sha = "a".repeat(40);
@@ -97,8 +97,46 @@ assert.equal(pushUsesBulkMode("git push origin --branches"), true);
 assert.equal(pushUsesBulkMode("git push origin --mirror"), true);
 assert.equal(pushUsesBulkMode("git push origin --prune"), true);
 assert.equal(pushUsesBulkMode("git push origin feature"), false);
-assert.equal(pushContextIsAmbiguous("cd C:/other && git push origin main"), true);
+// P2 (2026-11-03): a leading literal `cd` binds; anything less certain does not.
+assert.equal(pushContextIsAmbiguous("cd C:/other && git push origin main"), false);
+assert.equal(pushContextIsAmbiguous("cd /c/other; git add a && git push origin main"), false);
+assert.equal(pushContextIsAmbiguous('W="C:/other"; cd "$W" && git push origin main'), false);
+assert.equal(pushContextIsAmbiguous("cd C:/a && git -C C:/b push origin x; cd C:/c"), false);
+assert.equal(pushContextIsAmbiguous("git -C C:/b push origin x; cd C:/c"), false);
+for (const command of [
+  "cd C:/a && cd C:/b && git push origin main",
+  "cd C:/a || git push origin main",
+  "cd C:/a & git push origin main",
+  "(cd C:/a && git push origin main)",
+  "cd $X && git push origin main",
+  'W="C:/a"; W="C:/b"; cd "$W" && git push origin main',
+  "cd ~/a && git push origin main",
+  "git push origin main; cd C:/c",
+  "echo; cd C:/a && git push origin main",
+  "cd C:/a && pushd C:/b && git push origin main",
+  "git -C rel push origin x; cd C:/c",
+  "cd C:/a && GIT_DIR=C:/b/.git git push origin main",
+]) assert.equal(pushContextIsAmbiguous(command), true, command);
 assert.equal(pushContextIsAmbiguous("Set-Location C:/other; git.exe push origin main"), true);
+assert.equal(leadingCdFolder("cd \"C:/x y\" && git push"), "C:/x y");
+assert.equal(leadingCdFolder("cd C:/x; git status"), "C:/x");
+assert.equal(leadingCdFolder("cd C:/x;; git status"), null);
+// P1 (2026-11-03): Git Bash `/c/...` paths name the real drive on Windows.
+assert.equal(nativeFolder("/c/CRX_Manager/x", "win32"), "C:/CRX_Manager/x");
+assert.equal(nativeFolder("/d", "win32"), "D:");
+assert.equal(nativeFolder("/cx/y", "win32"), "/cx/y");
+assert.equal(nativeFolder("/c/x", "linux"), "/c/x");
+// A data-only here-document never runs the push it mentions.
+const pushVerb = "pu" + "sh";
+assert.equal(isGitPush(withoutDataHeredocs(`cat > a.md <<'EOF'\nrun git ${pushVerb} origin main\nEOF`)), false);
+assert.equal(isGitPush(withoutDataHeredocs(`git commit -q -F - <<'EOF'\nfix: git ${pushVerb} msg\nEOF\ngit ${pushVerb} origin x`)), true);
+for (const command of [
+  `bash <<'EOF'\ngit ${pushVerb} origin main\nEOF`,
+  `cat <<'EOF' | bash\ngit ${pushVerb} origin main\nEOF`,
+  `cat <<EOF > a.sh\ngit ${pushVerb} origin main\nEOF`,
+  `tee >(bash) <<'EOF'\ngit ${pushVerb} origin main\nEOF`,
+  `cat > a.md <<'EOF'\ngit ${pushVerb} origin main\n`,
+]) assert.equal(isGitPush(withoutDataHeredocs(command)), true, command);
 assert.equal(pushContextIsAmbiguous("$env:GIT_DIR='C:/other/.git'; git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("GIT_WORK_TREE=/tmp/other git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("git -C C:/other push origin main"), false);

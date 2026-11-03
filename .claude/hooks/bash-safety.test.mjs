@@ -81,7 +81,24 @@ ok(checkDangerousCommand('docker exec c psql -c "TRUNCATE t"'), "docker exec psq
 ok(checkDangerousCommand("cat <<'SQL' | psql\nDROP TABLE customers;\nSQL"), "cat piped into psql with DROP TABLE still blocked");
 ok(checkDangerousCommand('grep -l "DROP TABLE" f | xargs cat | psql'), "readers feeding psql still blocked");
 ok(checkDangerousCommand(`grep "$(psql -c 'DROP SCHEMA x')" f`), "a client run from a reader's command substitution still blocked");
-ok(checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git stays a non-reader");
+// P4 (2026-11-03): plain git searches, commit messages, echo/printf and PR text
+// name SQL words without running a client; real refusals from 11/1–11/3.
+ok(!checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git grep is a reader when grep follows git directly");
+ok(!checkDangerousCommand(`git grep -ln "TRUNCATE" -- '.claude/hooks/*.test.mjs'; git grep -n "pgcli\\|psql\\|git log -c" -- '*.test.mjs' | head`), "git grep for TRUNCATE and psql allowed");
+ok(!checkDangerousCommand("git switch -c fix-x && git add a.mjs && git commit -q -F - <<'EOF'\nfix: psql beside DROP SCHEMA in a grep pattern\nEOF"), "a commit message here-document naming psql and DROP SCHEMA allowed");
+ok(!checkDangerousCommand('git commit -q -m "stop refusing psql -c TRUNCATE in a search"'), "a commit message naming psql -c TRUNCATE allowed");
+ok(!checkDangerousCommand("cat > notes.md <<'EOF'\nrun psql -c \"DROP TABLE x\" only in a container\nEOF"), "a note written by cat naming psql allowed");
+ok(!checkDangerousCommand('gh pr create --title "x" --body "psql -c TRUNCATE is still refused"'), "a PR body naming psql allowed");
+ok(!checkDangerousCommand('echo "psql -c DROP TABLE is refused"'), "echo naming psql allowed");
+ok(checkDangerousCommand('git -c alias.x="!psql" x "DROP SCHEMA"'), "git with a global option before the subcommand stays a non-reader");
+ok(checkDangerousCommand('git grep -O"psql -c" "DROP SCHEMA"'), "git grep opening a pager program stays refused");
+ok(checkDangerousCommand('git commit -m "$(psql -c \'DROP TABLE x\')"'), "a client in a commit message's command substitution stays refused");
+ok(checkDangerousCommand("cat <<'EOF' | psql\nDROP TABLE customers;\nEOF"), "a here-document piped to psql stays refused");
+ok(checkDangerousCommand("psql <<'EOF'\nDROP TABLE customers;\nEOF"), "a here-document fed to psql stays refused");
+ok(checkDangerousCommand("python - <<'EOF'\nimport os; os.system('psql -c \"DROP TABLE x\"')\nEOF"), "an interpreter here-document naming psql stays refused");
+ok(checkDangerousCommand('echo "DROP TABLE x;" | psql'), "echo piped into psql stays refused");
+ok(checkDangerousCommand('gh x-ext psql "DROP TABLE x"'), "a gh extension may run a program, so it stays refused");
+ok(checkDangerousCommand('supabase sql "DROP SCHEMA public"'), "supabase sql DROP SCHEMA stays refused");
 ok(checkDangerousCommand('rg --pre psql "DROP SCHEMA" db.sql'), "rg --pre running a client stays refused (Codex App, PR #1337)");
 ok(checkDangerousCommand(`rg --p''re=psql "DROP SCHEMA" db.sql`), "a quote-split --pre= spelling stays refused");
 // A reader spanning a line break is never exempt (Codex App, PR #1337).

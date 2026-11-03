@@ -414,6 +414,12 @@ Cross-check the SHA against Vercel's own `list_deployments` for project
 
 ## Never name the worktree path in a destructive shell command — CLAUDE worktrees (2026-08-20)
 
+> **Narrowed 2026-11-03:** a file inside a worktree, or a worktree root used as the folder a command
+> runs in (`cd <root> && rm x`, `git -C <root> mv a b`), no longer trips `review-proof-guard`. The
+> worktree root itself, its `.claude`, an unreadable or `..` path, and `find -delete`/`git clean`/
+> `rsync --delete` aimed at a worktree still do. Details: "Guard false-alarm narrowing (2026-11-03)"
+> in `agent-guardrails.md`. The two ❌ rows below now run; the rest of this page still applies.
+
 **Scope: Claude-managed worktrees only.** Claude creates them at `<repo>/.claude/worktrees/<name>/`;
 Codex worktrees live outside the repo (`~/.codex/worktrees/…`) and have **no such collision** — see
 the Claude-only list in `scripts/agent-manifest-parity.mjs`. `review-proof-guard.mjs` itself is

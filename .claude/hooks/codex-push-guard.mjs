@@ -11,7 +11,7 @@
 // Non-pushes and ordinary non-production pushes pass. Ambiguous push context,
 // force intent, and broad multi-ref modes fail closed.
 
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import {
@@ -39,6 +39,7 @@ import {
   MAX_HOOK_INPUT_LENGTH,
   readHookInputBounded,
   sanitizeForMessage,
+  withoutDataHeredocs,
 } from "./codex-push-lib.mjs";
 
 function passthrough() { process.exit(0); }               // emit nothing → normal flow (git push is allow-listed)
@@ -84,8 +85,11 @@ if (nestedCommands.tooDeep) deny(nestedTooDeepDenial("CODEX GATE"));
 if (nestedCommands.commands.some((inner) => isGitPush(inner))) {
   deny("CODEX GATE: this command runs a git push inside another shell or an evaluator (bash -c, cmd /c, pwsh -Command or -EncodedCommand, eval, Invoke-Expression, Start-Process). The review gate reads the outer command's text, so it cannot prove where a push carried that way would go. Run the push as its own plain command: `git -C <repo> push <remote> <refspec>`.");
 }
-if (!isGitPush(cmd)) passthrough();
-if (pushContextIsAmbiguous(cmd)) {
+// From here on a data-only here-document body (a PR body, a script written to a
+// file) is not read as a push; see withoutDataHeredocs.
+const pushText = withoutDataHeredocs(cmd);
+if (!isGitPush(pushText)) passthrough();
+if (pushContextIsAmbiguous(pushText)) {
   deny("CODEX GATE: directory-changing or GIT_DIR/GIT_WORK_TREE-prefixed pushes cannot be bound safely to the inspected worktree. Use `git -C <repo> push`.");
 }
 // Claude's shell cwd can persist across tool calls. The hook payload's cwd is
@@ -120,7 +124,7 @@ if (inheritedSelectors.length > 0) {
 // both sides of a pipeline execute.
 // Quote-aware, so a separator inside a quoted value cannot manufacture a phantom
 // segment boundary (Codex round 9).
-const pushCommands = shellSegments(cmd)
+const pushCommands = shellSegments(pushText)
   .map((segment) => segment.trim())
   .filter((segment) => isGitPush(segment));
 
@@ -135,7 +139,14 @@ for (const pushCmd of pushCommands) {
     deny("CODEX GATE: force-pushing any branch rewrites shared history and requires Mason's explicit approval. Use a normal push or a compensating commit.");
   }
 
-  const pushRepoDir = gitPushCwd(pushCmd, projectDir, cmd);
+  const pushRepoDir = gitPushCwd(pushCmd, projectDir, pushText);
+  // Checked first: Node reports a missing cwd as `spawnSync git ENOENT`, which
+  // read as "git is not installed" and hid the real problem.
+  let isFolder = false;
+  try { isFolder = statSync(pushRepoDir).isDirectory(); } catch { /* missing */ }
+  if (!isFolder) {
+    deny(`CODEX GATE: this push runs in ${sanitizeForMessage(pushRepoDir, 200)}, which is not an existing folder (or is written with a shell variable the guard cannot read), so it cannot be bound to a repository and is denied. Use \`git -C <existing repo folder> push\`.`);
+  }
   let branch = "";
   try {
     branch = git(["rev-parse", "--abbrev-ref", "HEAD"], pushRepoDir);

@@ -377,7 +377,8 @@ export function shellArgvWord(word) {
 // `fullCmd` (optional) is the whole command the push sits in, so a `-C "$W"`
 // can be read as the literal W was given earlier in it (folderVariableValue).
 export function gitPushCwd(cmd, fallbackCwd, fullCmd = "") {
-  const base = path.resolve(fallbackCwd || process.cwd());
+  const lead = leadingCdFolder(fullCmd);
+  const base = path.resolve(fallbackCwd || process.cwd(), lead === null ? "" : nativeFolder(lead));
   const prefix = String(cmd || "").match(GIT_PUSH_PREFIX_RE)?.[1] || "";
   const optionRe = new RegExp(`(?:^|\\s)-C\\s+(${GIT_ARG})`, "g");
   let cwd = base;
@@ -385,9 +386,81 @@ export function gitPushCwd(cmd, fallbackCwd, fullCmd = "") {
   while ((match = optionRe.exec(prefix)) !== null) {
     const name = match[1].match(/^(?:"\$(\w+)"|"\$\{(\w+)\}"|\$(\w+)|\$\{(\w+)\})$/)?.slice(1).find(Boolean);
     const literal = name ? folderVariableValue(fullCmd, name) : null;
-    cwd = path.resolve(cwd, literal ?? unquoteShellArg(match[1]));
+    cwd = path.resolve(cwd, nativeFolder(literal ?? unquoteShellArg(match[1])));
   }
   return cwd;
+}
+
+// Git Bash writes `C:\x` as `/c/x`, which Node on Windows resolves to `C:\c\x`.
+// That folder does not exist, and Node reports a missing cwd as `spawnSync git
+// ENOENT` — 24 correct pushes were refused that way on 2026-11-01..03.
+export function nativeFolder(folder, platform = process.platform) {
+  const text = String(folder ?? "");
+  if (platform !== "win32") return text;
+  return text.replace(/^\/([A-Za-z])(?=\/|$)/, (_, drive) => `${drive.toUpperCase()}:`);
+}
+
+const DIRECTORY_CHANGE_RE = /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|pushd|popd|set-location|pop-location)\s+/i;
+// `cd <literal> && …` (or `;` / a newline) as the command's FIRST statement, with
+// no other directory change anywhere after it: every later git runs in that one
+// folder, so a push there can be bound to it (2026-11-03: about half of 43
+// "cannot be bound safely" refusals were this shape). Returns the literal, or
+// null for anything else — a variable, `~`, a glob, `cd X || …`, `cd X &`, a
+// subshell, or a second `cd`/`pushd` — which keeps the fail-closed refusal.
+// shortcut: `cd X; git push` runs in the old folder if the cd fails; the guards
+// refuse a folder that does not exist, so only a permission error is left.
+// `W=<literal>; cd "$W" && …` counts too, when folderVariableValue proves W.
+export function leadingCdFolder(fullCmd) {
+  const text = String(fullCmd || "");
+  const assign = text.match(
+    /^\s*[A-Za-z_]\w*=(?:"[^"$`\\]*"|'[^']*'|[^\s"'$`\\;&|<>()~*?[\]{}#]+)[^\S\r\n]*(?:;(?!;)|&&|\r?\n)/,
+  )?.[0] || "";
+  const head = text.slice(assign.length).match(
+    /^\s*cd[^\S\r\n]+(?:"([^"$`\\]*)"|'([^']*)'|([^\s"'$`\\;&|<>()~*?[\]{}#]+)|"?\$\{?([A-Za-z_]\w*)\}?"?)[^\S\r\n]*(?:&&|;(?!;)|\r?\n)/,
+  );
+  if (!head) return null;
+  if (DIRECTORY_CHANGE_RE.test(text.slice(assign.length + head[0].length))) return null;
+  const folder = head[4] ? folderVariableValue(text, head[4]) : head[1] ?? head[2] ?? head[3];
+  return folder ? folder : null;
+}
+
+// True when every push in the command names its folder with an absolute `-C`
+// (a literal, or a variable folderVariableValue proves): a `cd` elsewhere in
+// the command then cannot change where that push goes.
+export function everyPushHasAbsoluteFolder(fullCmd) {
+  const pushes = shellSegments(fullCmd).filter((segment) => isGitPush(segment));
+  return pushes.length > 0 && pushes.every((segment) => {
+    const prefix = segment.match(GIT_PUSH_PREFIX_RE)?.[1] || "";
+    const first = prefix.match(new RegExp(`(?:^|\\s)-C\\s+(${GIT_ARG})`))?.[1];
+    if (!first) return false;
+    const name = first.match(/^(?:"\$(\w+)"|"\$\{(\w+)\}"|\$(\w+)|\$\{(\w+)\})$/)?.slice(1).find(Boolean);
+    const folder = name ? folderVariableValue(fullCmd, name) : (/[$`]/.test(first) ? null : unquoteShellArg(first));
+    return folder !== null && path.isAbsolute(nativeFolder(folder));
+  });
+}
+
+// A here-document whose body is only data — a quoted delimiter (so nothing in it
+// expands) written by `cat`, `tee` or `git commit`/`git tag` with nothing piped
+// on — never runs a `git push` it mentions. Its body is blanked so the push
+// guards stop reading PR bodies and scripts as pushes. Any other here-document
+// (fed to bash, python, node, or a pipe) keeps its body. No closing line keeps
+// everything, which can only over-refuse.
+export function withoutDataHeredocs(cmd) {
+  const lines = String(cmd || "").split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const open = lines[i].replace(/\r$/, "").match(
+      // `(` and a backtick are refused around it: `tee >(bash)` and `$(…)` run code.
+      /(?:^|&&|;)\s*(?:cat|tee|git\s+(?:commit|tag))(?![\w-])[^|;&<()`]*<<(-?)\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\(\w+))[^|;&<()`]*$/,
+    );
+    if (!open) continue;
+    const delimiter = open[2] ?? open[3] ?? open[4];
+    let end = i + 1;
+    while (end < lines.length && lines[end].replace(/\r$/, "").replace(open[1] ? /^\t+/ : /^$/, "") !== delimiter) end += 1;
+    if (end >= lines.length) break;
+    for (let j = i + 1; j < end; j += 1) lines[j] = "";
+    i = end;
+  }
+  return lines.join("\n");
 }
 
 // `W="C:/x"; git -C "$W" push` (2026-11-02: five harmless pushes denied with
@@ -424,7 +497,7 @@ export function folderVariableValue(fullCmd, name) {
 export function pushContextIsAmbiguous(cmd) {
   const text = String(cmd || "");
   if (!isGitPush(text)) return false;
-  return /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|pushd|popd|set-location|pop-location)\s+/i.test(text) ||
+  return (DIRECTORY_CHANGE_RE.test(text) && leadingCdFolder(text) === null && !everyPushHasAbsoluteFolder(text)) ||
     // `[^\S\r\n]*`, not `\s*`: `\s*` re-read a whole run of newlines from every
     // newline in it (quadratic). A later newline in the run is itself a separator
     // start, so what matches is unchanged.

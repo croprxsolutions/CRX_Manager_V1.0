@@ -16,6 +16,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
+import { withoutDataHeredocs } from "./codex-push-lib.mjs";
 
 // computedJavaScriptScriptArgument (below) recognises a JavaScript runtime whose
 // SCRIPT argument cannot be read from the text (`node "$F"`). Nothing refuses on
@@ -356,10 +357,26 @@ export function checkAskCommand(cmd) {
 const DESTRUCTIVE_SQL_RE = /\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i;
 const SQL_CLIENT_RE = /\b(?:psql|pgcli)\b|supabase\s+sql/i;
 const SQL_SAFE_READ_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "ls"]);
+// Programs that only print, search or record their arguments, never run them
+// (2026-11-03: `git grep TRUNCATE`, commit messages and PR bodies naming psql
+// were refused). `git` counts only with one of these subcommands RIGHT after it,
+// so `git -c alias.x=!…` stays a non-reader (Sol, PR #1193); `git grep -O`
+// opens a pager program, so it loses the exemption. A gh alias or extension can
+// run a shell, so only `gh pr`/`gh issue` count.
+const SQL_INERT_GIT_SUBCOMMANDS = new Set(["grep", "log", "show", "diff", "status", "add", "commit", "tag", "switch", "checkout", "branch", "mv", "restore"]);
+function sqlSegmentInert(segment) {
+  const words = String(segment).trim().split(/\s+/).map((w) => w.replace(/["'`^\\]/g, "").toLowerCase());
+  const program = sqlSegmentProgram(segment);
+  if (program === "echo" || program === "printf") return true;
+  if (program === "gh") return words[1] === "pr" || words[1] === "issue";
+  if (program !== "git" || !SQL_INERT_GIT_SUBCOMMANDS.has(words[1])) return false;
+  return !(words[1] === "grep" && words.some((w) => /^-[^-]*o|^--open-files-in-pager/i.test(w)));
+}
 function sqlSegmentProgram(segment) {
   const word = (String(segment).trim().split(/\s+/)[0] || "").replace(/["'`^\\]/g, "");
   return word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").toLowerCase();
 }
+const sqlReaderHead = (segment) => SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || sqlSegmentInert(segment);
 // Allowlist, not a blocklist: every escape, expansion, comment or quoting quirk
 // bash and PowerShell read differently (`$'…'`, `\"`, `\;`, `<#…#>`, backtick,
 // `$(`, a line break, PowerShell `@args` splatting) was a way to hide a client
@@ -380,10 +397,13 @@ function plainReaderSegment(segment) {
   return /^[\w\s./\\:*=,+#?-]*$/.test(outside);
 }
 export function checkDestructiveSql(cmd) {
-  const text = String(cmd || "");
+  // A data-only here-document body (a commit message, a note written to a file)
+  // runs no SQL, whatever words it holds (2026-11-03); see withoutDataHeredocs.
+  const text = withoutDataHeredocs(String(cmd || ""));
   if (!DESTRUCTIVE_SQL_RE.test(text)) return null;
   const flagOutsideReader = /(?:^|\s)--?[cf]\s/.test(text) &&
-    text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() && !SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)));
+    text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() && !SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) &&
+      !(sqlSegmentInert(segment) && plainReaderSegment(segment)));
   // A client name counts only outside a known reader, so a `grep "…\|psql"`
   // pattern is a search, not a call (retro on PR #1333). The split follows bash
   // quoting, so the exemption holds only for a plain reader segment that bash
@@ -392,7 +412,7 @@ export function checkDestructiveSql(cmd) {
   const clientOutsideReader = splitShellSegments(text).some((segment) => {
     const unquoted = segment.replace(/["'`^\\]/g, "");
     return (SQL_CLIENT_RE.test(segment) || SQL_CLIENT_RE.test(unquoted)) &&
-      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || !plainReaderSegment(segment) || /(?:^|\s)--pre\b/.test(unquoted) ||
+      (!sqlReaderHead(segment) || !plainReaderSegment(segment) || /(?:^|\s)--pre\b/.test(unquoted) ||
         // rg options that run a program, as read-only-search-lib's rgOptionRunsProgram lists them.
         (sqlSegmentProgram(segment) === "rg" && /(?:^|\s)(?:--(?:hostname-bin|search-zip)\b|-[^-\s]*z)/i.test(unquoted)));
   });

@@ -212,6 +212,8 @@ export default function CustomerDetail() {
   const initialLoadDone = useRef(false);
   // Set when the user picks a tier, so the Settings default never overwrites their choice.
   const tierChosenRef = useRef(false);
+  // Set for the one render that applies the Settings default tier, which is not an edit.
+  const applyingDefaultTierRef = useRef(false);
   // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
   const loadedCustomerRef = useRef<typeof customer | null>(null);
   const loadedAddressesRef = useRef<typeof addresses | null>(null);
@@ -354,6 +356,10 @@ export default function CustomerDetail() {
   }, [id, toast]);
 
   useEffect(() => {
+    if (applyingDefaultTierRef.current) {
+      applyingDefaultTierRef.current = false;
+      return;
+    }
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
     if (customer === loadedCustomerRef.current && addresses === loadedAddressesRef.current) return;
@@ -428,19 +434,24 @@ export default function CustomerDetail() {
     if (!isNew && id) {
       void fetchCustomerSnapshot();
     } else {
-      // New customer — start on the Settings Default Tier (unless the user already picked
-      // one), then mark ready, so the default does not count as an unsaved edit.
-      // Same deferred-flag hazard as the snapshot loader above: navigating from
-      // /customers/new to an existing customer while this is pending would otherwise
-      // re-arm the flag and mark that customer's loaded snapshot dirty.
+      // New customer — mark ready immediately. Same deferred-flag hazard as the
+      // snapshot loader above: navigating from /customers/new to an existing
+      // customer while this timer is pending would otherwise re-arm the flag
+      // and mark that customer's loaded snapshot dirty.
+      setTimeout(() => {
+        if (currentIdRef.current !== id) return;
+        initialLoadDone.current = true;
+      }, 0);
+      // Then start on the Settings Default Tier, unless the user already picked one.
+      // Applying it is not an edit, so it alone never raises the unsaved-changes prompt.
       tierChosenRef.current = false;
       void loadDefaultTier().then((tier) => {
-        if (currentIdRef.current !== id) return;
-        if (!tierChosenRef.current) setCustomer((c) => ({ ...c, assigned_tier: tier }));
-        setTimeout(() => {
-          if (currentIdRef.current !== id) return;
-          initialLoadDone.current = true;
-        }, 0);
+        if (currentIdRef.current !== id || tierChosenRef.current) return;
+        setCustomer((c) => {
+          if (c.assigned_tier === tier) return c;
+          applyingDefaultTierRef.current = true;
+          return { ...c, assigned_tier: tier };
+        });
       });
     }
   }, [id, isNew, fetchCustomerSnapshot]);

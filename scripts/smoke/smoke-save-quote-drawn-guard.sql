@@ -116,7 +116,7 @@ BEGIN
   );
 
   -- --------------------------------------------------------------------
-  -- 2. Quote A: create draft @500, flip to sent (an open booking)
+  -- 2. Quote A: create draft @500, send it (an open booking)
   -- --------------------------------------------------------------------
   v_payload := jsonb_build_object(
     'quote_number', '[SMOKE] QG-' || v_suffix,
@@ -137,12 +137,10 @@ BEGIN
   v_quote_id := (v_res->>'quote_id')::uuid;
   v_quote_version := (v_res->>'row_version')::bigint;
 
-  v_payload := v_payload || jsonb_build_object(
-    'status', 'sent',
-    'row_version_expected', v_quote_version
-  );
-  v_res := save_quote(v_quote_id, v_payload, v_sections, v_admin, NULL);
-  v_quote_version := (v_res->>'row_version')::bigint;
+  -- The send records V1 and marks the quote sent (a sent quote needs its version, 20261105123000).
+  PERFORM create_quote_version(v_quote_id, v_admin, 'presented', 'smk-sqdg-send-a-' || v_suffix, v_quote_version);
+  SELECT (to_jsonb(q)->>'row_version')::bigint INTO v_quote_version FROM quotes q WHERE q.id = v_quote_id;
+  v_payload := v_payload || jsonb_build_object('status', 'sent');
 
   SELECT status INTO v_status FROM quotes WHERE id = v_quote_id;
   SELECT COALESCE(SUM(total_units_needed), 0) INTO v_booked
@@ -270,12 +268,9 @@ BEGIN
   v_res := save_quote(NULL, v_payload, v_sections, v_admin, NULL);
   v_quote_b_id := (v_res->>'quote_id')::uuid;
   v_quote_b_version := (v_res->>'row_version')::bigint;
-  v_payload := v_payload || jsonb_build_object(
-    'status', 'sent',
-    'row_version_expected', v_quote_b_version
-  );
-  v_res := save_quote(v_quote_b_id, v_payload, v_sections, v_admin, NULL);
-  v_quote_b_version := (v_res->>'row_version')::bigint;
+  PERFORM create_quote_version(v_quote_b_id, v_admin, 'presented', 'smk-sqdg-send-b-' || v_suffix, v_quote_b_version);
+  SELECT (to_jsonb(q)->>'row_version')::bigint INTO v_quote_b_version FROM quotes q WHERE q.id = v_quote_b_id;
+  v_payload := v_payload || jsonb_build_object('status', 'sent');
 
   -- reduce 300 -> 50: allowed (no draws)
   v_sections := jsonb_build_array(jsonb_build_object(

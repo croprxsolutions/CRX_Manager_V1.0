@@ -41,9 +41,11 @@ The database trigger `_enforce_quote_status_transition()` is authoritative. With
 | `accepted` | `sent` |
 | `declined`, `expired`, `cancelled`, `closed_by_application`, `closed_short` | terminal — no outgoing edge |
 
-Three qualifications, all enforced in that same trigger:
+Qualifications, all enforced in that same trigger:
 
+- A new quote inserted by a signed-in user (`anon` or `authenticated`) must start as `draft` (`QUOTE_SEND_REQUIRED`); `save_quote` already refuses a new non-draft quote.
 - A no-op update (`OLD.status = NEW.status`) is always allowed.
+- A quote moves to `sent` or `revised`, from any status, only when a `quote_versions` row exists for it (`QUOTE_SEND_REQUIRED`). This is checked before the admin override, so the admin Reopen cannot mark a never-sent quote sent. The send records its version before it sets the status (20261105123000).
 - `_is_admin_override()` returns before both the edge table and the `closed_short` active-job condition, so an explicit admin override bypasses both.
 - `closed_short` has an additional safety condition: it is refused with `BOOKING_HAS_ACTIVE_JOBS` while any non-deleted job on the quote is `scheduled` or `in_progress`.
 

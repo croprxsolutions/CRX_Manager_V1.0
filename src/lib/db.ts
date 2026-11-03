@@ -124,6 +124,8 @@ export const RpcErrorCodes = {
   // accepted save refuse a quote whose prices, lines or customer differ from the version last
   // sent. The detail after the token is a plain-English instruction (re-send, or rewind).
   QUOTE_RESEND_REQUIRED: 'QUOTE_RESEND_REQUIRED',
+  // A quote becomes sent or revised only once a version was sent (migration 20261105123000).
+  QUOTE_SEND_REQUIRED: 'QUOTE_SEND_REQUIRED',
   // draw_down_quote per-tier order lines (migration 20260816120000). A booked
   // line with no unit price cannot be billed, and the split lines must add back
   // up to the quantity requested.

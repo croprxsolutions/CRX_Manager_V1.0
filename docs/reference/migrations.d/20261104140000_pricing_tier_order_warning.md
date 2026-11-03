@@ -3,3 +3,12 @@
 The preflight pins the live warning function, warning-set helper, and three consumer bodies as read on 2026-11-02. Rollback: re-create it from 20261027050000 (~228-334) as CREATE OR REPLACE. The existing five warning codes and their details must remain unchanged on the same previews. A stated $0 is a real final tier price.
 
 Live migration high-water read 2026-11-03 (after the restamp from `20261103230000`): `20261104130000_any_rep_changes_booked_prices`; the five preflight md5 pins re-checked against live the same day and match. Re-check before apply.
+
+Live ledger preflight, read 2026-11-03 at about 10:00 AM Central from `supabase_migrations.schema_migrations`:
+- **Effective high-water:** the greatest 14-digit name stamp is `20261104130000`.
+- **Top row:** `20261104130000_any_rep_changes_booked_prices`, ledger version `20261103132202`.
+- **`max(version)`:** `20261103132202`.
+- **Total:** 1,104 rows.
+- **This migration:** no row starts with `20261104140000`, by name or by version.
+
+So `20261104140000` sorts above everything applied. Read the ledger again at apply time.

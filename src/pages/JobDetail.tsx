@@ -88,6 +88,7 @@ import type { JobStatus, Customer, Product, Field, Vehicle, Profile, BlendRecipe
 import type { Json } from '../types/supabase';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductPicker';
+import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
 import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
 import { JOB_CHEMICAL_COLUMNS, JOB_COLUMNS, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import { sendEmail } from '../lib/emailService';
@@ -4492,6 +4493,7 @@ export default function JobDetail() {
               )}
             </div>
           </div>
+          <JobLabelCorrectionsNotice rows={chemRows} canEdit={canEdit && !isNew} onApply={setChemRows} />
           {chemRows.length === 0 ? (
             <p className="text-sm text-secondary text-center py-4">No chemicals added.</p>
           ) : (

@@ -69,7 +69,7 @@ BEGIN
   ) RETURNING id INTO v_same_b;
 
   UPDATE public.invoices
-     SET status = 'posted'
+     SET status = 'posted', posted_at = now()  -- invoices_financial_status_requires_posted_at
    WHERE id IN (v_old_invoice, v_same_a, v_same_b);
 
   SELECT array_agg(s.reference_number),

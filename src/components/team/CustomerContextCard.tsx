@@ -66,6 +66,8 @@ export default function CustomerContextCard({ customerId }: Props) {
         const arRow = assertRpcResult<Record<string, unknown>[]>(arData, 'get_ar_aging')?.find(
           (r: Record<string, unknown>) => r.customer_id === customerId
         );
+        // KI-95: no amounts for a balance that can't be rebuilt; fail as before rather than show $0.
+        if (arRow?.unavailable_reason) throw new Error(`get_ar_aging: ${String(arRow.unavailable_reason)}`);
 
         const result: CustomerContext = {
           farm_name: custRes.data.farm_name,

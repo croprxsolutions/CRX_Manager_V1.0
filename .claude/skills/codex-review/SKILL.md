@@ -198,9 +198,10 @@ proof under 24 hours (the migration landing gate; 30 minutes before 2026-10-29).
 **Only on a quiet head (Mason, 2026-10-23).** A fix pushed after Sol for a Codex GitHub App or
 CodeRabbit finding voids the proof, and those two reviewers caused more than half of the commits
 pushed after a PR was marked ready (2026-10-14 to 10-23). So the wrapper first runs a pre-flight
-and refuses, spending no Sol tokens, unless the head contains the exact `origin/main` the review pins
-(the ref every worktree shares: a peer's fetch can move it, and a review of a head missing its base
-can neither merge nor be carried forward, so `git merge origin/main` again, push, and wait); an open
+and refuses, spending no Sol tokens, unless the head contains the base the review pins (`origin/main`,
+or, when a peer worktree's fetch moved that shared ref past the branch, the one commit where the
+branch left main; a branch adding a migration or with several split points keeps `origin/main`, so it
+must `git merge origin/main` again, push, and wait); an open
 non-draft PR has this exact commit as its head;
 the Codex App's summary comment shows a completed review of this commit (or it was pushed 15 minutes
 ago with none, or the commit only merges main cleanly with no shared files: then the App's finished review of

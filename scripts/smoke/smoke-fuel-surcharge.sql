@@ -26,6 +26,7 @@
 DO $smoke$
 DECLARE
   v_admin uuid;
+  v_pricing jsonb;
   v_sfx   text := substr(gen_random_uuid()::text,1,8);
   v_cust  uuid;
   v_field uuid;
@@ -58,8 +59,23 @@ BEGIN
     VALUES ('[SMOKE] Fuel Field '||v_sfx, v_cust, v_acres) RETURNING id INTO v_field;
   INSERT INTO field_billing_defaults (field_id, customer_id, split_pct, is_primary)
     VALUES (v_field, v_cust, 100, true);
-  INSERT INTO products (product_name, unit_size, current_cost, tier1_price)
-    VALUES ('[SMOKE] Fuel Prod '||v_sfx, 'gal', 1.00, 10.00) RETURNING id INTO v_prod;
+  -- Pricing-free shell, then cost/price through the governed preview/apply
+  -- path (a priced products INSERT is refused since the Phase 1a cutover).
+  INSERT INTO products (product_name, unit_size)
+    VALUES ('[SMOKE] Fuel Prod '||v_sfx, 'gal') RETURNING id INTO v_prod;
+  v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object('product_id', v_prod, 'row_version', 1,
+      'pricing_mode', 'price_driven', 'new_cost', '1.00',
+      'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00')),
+    v_admin, gen_random_uuid()::text);
+  IF NOT COALESCE((v_pricing->>'apply_allowed')::boolean, false) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing preview failed: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,
+    v_pricing->>'request_fingerprint', v_admin, gen_random_uuid()::text);
+  IF (SELECT tier1_price FROM products WHERE id = v_prod) IS DISTINCT FROM 10.00 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing apply did not set tier1_price';
+  END IF;
 
   v_locations := jsonb_build_array(jsonb_build_object(
     'field_id', v_field, 'map_number', 1,
@@ -181,6 +197,7 @@ END $smoke$;
 DO $med$
 DECLARE
   v_admin uuid;
+  v_pricing jsonb;
   v_sfx   text := substr(gen_random_uuid()::text,1,8);
   v_cust  uuid;
   v_field uuid;
@@ -212,8 +229,21 @@ BEGIN
     VALUES ('[SMOKE] FuelFix Field '||v_sfx, v_cust, v_acres) RETURNING id INTO v_field;
   INSERT INTO field_billing_defaults (field_id, customer_id, split_pct, is_primary)
     VALUES (v_field, v_cust, 100, true);
-  INSERT INTO products (product_name, unit_size, current_cost, tier1_price)
-    VALUES ('[SMOKE] FuelFix Prod '||v_sfx, 'gal', 1.00, 10.00) RETURNING id INTO v_prod;
+  INSERT INTO products (product_name, unit_size)
+    VALUES ('[SMOKE] FuelFix Prod '||v_sfx, 'gal') RETURNING id INTO v_prod;
+  v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object('product_id', v_prod, 'row_version', 1,
+      'pricing_mode', 'price_driven', 'new_cost', '1.00',
+      'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00')),
+    v_admin, gen_random_uuid()::text);
+  IF NOT COALESCE((v_pricing->>'apply_allowed')::boolean, false) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing preview failed: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,
+    v_pricing->>'request_fingerprint', v_admin, gen_random_uuid()::text);
+  IF (SELECT tier1_price FROM products WHERE id = v_prod) IS DISTINCT FROM 10.00 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed pricing apply did not set tier1_price';
+  END IF;
 
   -- App service with BOTH vehicle_id AND created_by NULL — the exact condition
   -- that made preview's whole-record null test false (the MED1 trigger).

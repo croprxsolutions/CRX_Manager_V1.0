@@ -1301,6 +1301,9 @@ export default function OrderDetail() {
       await fetchOrder();
     } catch (err) {
       if (isBelowCostApprovalHandledError(err)) return;
+      // Retire the key only when the refusal proves nothing ran under it; keep it on 'receipt'.
+      const bindingRejection = getIdempotencyBindingRejection(err);
+      if (bindingRejection === 'intent' || bindingRejection === 'actor') priceOrderIdem.resetKey();
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'price_order' } });
       if (hasRpcCode(err, RpcErrorCodes.INSUFFICIENT_ROLE)) toast('error', 'Only admin or sales can price orders.');
       else toast('error', sanitizeError(err));

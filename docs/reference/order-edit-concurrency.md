@@ -152,8 +152,8 @@ with evidence.
   (`smoke-order-draw-lock.sql`, `smoke-govern-invoice-order-money-lifecycle.sql`) now send the
   order's current version when the versioned form exists, so they prove the same rules before and
   after this migration. A disposable database run exercised both paths before and after it.
-  `smoke-item-profit-sameproduct-edit.sql` recreates the old form for a June migration, is in no
-  smoke-specs chain, and is now marked historical. `prove-payment-allocation-no-direct-writes-real-schema.mjs`
+  `smoke-item-profit-sameproduct-edit.sql` recreated the old form for a June migration and was in no
+  smoke-specs chain; it was deleted on 2026-11-02 as obsolete. `prove-payment-allocation-no-direct-writes-real-schema.mjs`
   pins live function bodies from 2026-10-22 and fails closed when they change, by design.
 - **Refuted (Major):** requiring an idempotency key. The project contract is
   `p_idempotency_key text DEFAULT NULL`, and the page and offline replay always send a key, so a

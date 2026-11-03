@@ -100,4 +100,14 @@ describe('Customer card for a customer past the first 1,000 aging rows', () => {
     await vi.waitFor(() => expect(screen.queryByText(/Loading context/)).not.toBeInTheDocument());
     expect(screen.queryByText(/AR:/)).not.toBeInTheDocument();
   });
+
+  it('shows no balance for a customer the aging cannot rebuild (KI-95), rather than $0', async () => {
+    H.agingRows.push({
+      customer_id: 'customer-flagged', total_outstanding: null, open_credit_cents: null,
+      unavailable_reason: 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE',
+    });
+    render(<CustomerContextCard customerId="customer-flagged" />);
+    await vi.waitFor(() => expect(screen.queryByText(/Loading context/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/AR:/)).not.toBeInTheDocument();
+  });
 });

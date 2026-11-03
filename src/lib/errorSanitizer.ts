@@ -255,6 +255,18 @@ export function sanitizeError(error: unknown): string {
         ? (error as Record<string, unknown>).message as string
         : 'An unexpected error occurred';
 
+  if (/^PRODUCT_INACTIVE(?::|$)/.test(message)) {
+    return message.slice('PRODUCT_INACTIVE'.length).replace(/^:\s*/, '').trim()
+      || 'This product is turned off. Ask an admin to reactivate it.';
+  }
+  if (/^PRODUCT_DEACTIVATION_BLOCKED(?::|$)/.test(message)) {
+    return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
+      || 'This product cannot be turned off while required work is open. Review its blockers.';
+  }
+  if (/^PRODUCT_ACTIVE_REVIEW_STALE(?::|$)/.test(message)) {
+    return 'Product details changed since the review. Review the selection again.';
+  }
+
   const returnStatus = message.match(/^RETURN_NOT_APPROVED:([a-z_]+)$/i)?.[1];
   if (returnStatus) {
     const statusLabel = returnStatus.replace(/_/g, ' ');

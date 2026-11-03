@@ -81,3 +81,17 @@ export function todayInBusinessTz(now: Date = new Date()): string {
 
   return `${year}-${month}-${day}`;
 }
+
+/**
+ * Calendar days from a YYYY-MM-DD date-only value to today's BUSINESS_TIMEZONE
+ * date (0 for today, 1 for yesterday), on any device clock and across DST.
+ * Timestamps must not be passed: their UTC date can differ from the business day.
+ */
+export function daysSinceBusinessDate(dateStr: string, now: Date = new Date()): number {
+  if (!dateStr) return 0;
+  const utcDay = (ymd: string) => {
+    const [year, month, day] = ymd.split('-').map(Number);
+    return Date.UTC(year, month - 1, day) / 86400000;
+  };
+  return utcDay(todayInBusinessTz(now)) - utcDay(dateStr);
+}

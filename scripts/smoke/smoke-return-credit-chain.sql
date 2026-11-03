@@ -93,6 +93,7 @@ DECLARE
   v_cancel_return_id uuid;
   v_target_invoice_id uuid;
   v_unlinked_credit_id uuid;
+  v_ticket_photo uuid;
   v_target_invoice_item_id uuid;
   v_billing_set_id uuid;
   v_billing_line_id uuid;
@@ -289,12 +290,26 @@ BEGIN
   -- Use the canonical completion boundary. The later completed-delivery posting
   -- guard makes this mandatory and deliberately rejects a direct status write;
   -- running the real RPC also exercises its inventory/order/audit reconciliation.
+  -- 20261022075000: a completion names its saved proof; a rollback-scoped ticket photo.
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+  VALUES ('delivery-photos', 'delivery-photos/' || v_delivery_id || '/smoke-rcc-ticket.jpg', v_admin::text, '{"size": 1024, "mimetype": "image/jpeg"}'::jsonb);
+  INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
+  VALUES (v_delivery_id, 'delivery-photos/' || v_delivery_id || '/smoke-rcc-ticket.jpg', 'x', v_admin, 'Signed paper delivery ticket', 0)
+  RETURNING id INTO v_ticket_photo;
   v_res := public.complete_delivery(
     v_delivery_id, '[SMOKE] RCC Receiver', v_admin,
-    NULL, NULL, NULL, 'smk-rcc-complete-' || v_suffix, now()
+    NULL, NULL, NULL, 'smk-rcc-complete-' || v_suffix, now(),
+    'paper_ticket', v_ticket_photo::text
   );
   IF v_res->>'delivery_id' IS DISTINCT FROM v_delivery_id::text THEN
     RAISE EXCEPTION 'SMOKE_SETUP: canonical complete_delivery returned an unexpected receipt: %', v_res;
+  END IF;
+  -- Completion auto-drafts an invoice for everything delivered; the chain builds its own
+  -- source invoices below, so cancel that draft to leave room under the delivered cap.
+  UPDATE invoices SET status = 'cancelled'
+   WHERE id = (v_res #>> '{auto_invoice,invoice_id}')::uuid AND status = 'draft';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: completion did not auto-draft the expected invoice: %', v_res;
   END IF;
   DELETE FROM inventory WHERE id = v_inventory_id;
   SELECT count(*) INTO v_n FROM inventory
@@ -669,7 +684,8 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_reason := SQLERRM;
     IF v_reason LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_reason NOT LIKE 'DELIVERY_HAS_RECEIVED_RETURN%' THEN
+    -- cancel_delivery now refuses any completed delivery before the return check.
+    IF v_reason NOT LIKE 'DELIVERY_COMPLETED_USE_VOID%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: expected approved-return delivery cancel rejection, got %', v_reason;
     END IF;
   END;
@@ -718,8 +734,10 @@ BEGIN
   -- delivery reversal guard. Simulate a pre-fix/concurrent reversal by moving
   -- the delivery out of completed, confirm receipt fails without inventory,
   -- then restore the disposable fixture for the canonical path.
+  -- Not 'voided': since 20261029160000 a void first needs the posted invoices voided.
+  -- Any non-completed status exercises the same receipt revalidation.
   PERFORM set_config('app.admin_override', 'true', true);
-  UPDATE deliveries SET status = 'voided' WHERE id = v_delivery_id;
+  UPDATE deliveries SET status = 'in_progress' WHERE id = v_delivery_id;
   PERFORM set_config('app.admin_override', 'false', true);
   BEGIN
     PERFORM receive_return(
@@ -744,7 +762,9 @@ BEGIN
   END IF;
   PERFORM set_config('app.admin_override', 'true', true);
   PERFORM set_config('crx.delivery_completion_authorized', v_delivery_id::text, true);
+  PERFORM set_config('crx.delivery_completion_evidence', v_delivery_id::text, true);
   UPDATE deliveries SET status = 'completed' WHERE id = v_delivery_id;
+  PERFORM set_config('crx.delivery_completion_evidence', '', true);
   PERFORM set_config('crx.delivery_completion_authorized', '', true);
   PERFORM set_config('app.admin_override', 'false', true);
   RAISE NOTICE 'RETURN_RECEIPT_SOURCE_DELIVERY_REVALIDATION_PROVEN';
@@ -901,7 +921,8 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_reason := SQLERRM;
     IF v_reason LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_reason NOT LIKE 'DELIVERY_HAS_RECEIVED_RETURN%' THEN
+    -- cancel_delivery now refuses any completed delivery before the return check.
+    IF v_reason NOT LIKE 'DELIVERY_COMPLETED_USE_VOID%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: expected received-return delivery cancel rejection, got %', v_reason;
     END IF;
   END;
@@ -991,8 +1012,10 @@ BEGIN
   -- Ordinary non-credit sale lines remain fail-closed below current cost. The
   -- next credit is exempt only by the transaction-local server context.
   BEGIN
-    INSERT INTO invoices (invoice_number, customer_id, order_id, invoice_type, status, invoice_date, due_date, total_amount_cents, created_by)
-    VALUES ('SMK-RCC-BELOW-' || v_suffix, v_customer_id, v_order_id, 'chemical_sale', 'draft', current_date, current_date, 1000, v_admin)
+    -- Per delivery: the order is already billed per delivery, and a whole-order
+    -- invoice now trips ORDER_INVOICE_OVERLAPS_DELIVERY_INVOICE first.
+    INSERT INTO invoices (invoice_number, customer_id, order_id, delivery_id, invoice_type, status, invoice_date, due_date, total_amount_cents, created_by)
+    VALUES ('SMK-RCC-BELOW-' || v_suffix, v_customer_id, v_order_id, v_delivery_id, 'chemical_sale', 'draft', current_date, current_date, 1000, v_admin)
     RETURNING id INTO v_target_invoice_id;
     INSERT INTO invoice_items (invoice_id, order_item_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, unit_size)
     VALUES (v_target_invoice_id, v_order_item_1, v_product_id, '[SMOKE] ordinary below cost', 1, 1000, 1000, 500, 'gal');
@@ -1104,9 +1127,16 @@ BEGIN
     v_followup_delivery_id, v_order_item_3, v_product_id, 1, 0, 'gal'
   );
   UPDATE deliveries SET status = 'in_progress' WHERE id = v_followup_delivery_id;
+  -- 20261022075000: a completion names its saved proof; a rollback-scoped ticket photo.
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+  VALUES ('delivery-photos', 'delivery-photos/' || v_followup_delivery_id || '/smoke-rcc-followup-ticket.jpg', v_admin::text, '{"size": 1024, "mimetype": "image/jpeg"}'::jsonb);
+  INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
+  VALUES (v_followup_delivery_id, 'delivery-photos/' || v_followup_delivery_id || '/smoke-rcc-followup-ticket.jpg', 'x', v_admin, 'Signed paper delivery ticket', 0)
+  RETURNING id INTO v_ticket_photo;
   v_res := public.complete_delivery(
     v_followup_delivery_id, '[SMOKE] RCC Follow-up Receiver', v_admin,
-    NULL, NULL, NULL, 'smk-rcc-followup-complete-' || v_suffix, now()
+    NULL, NULL, NULL, 'smk-rcc-followup-complete-' || v_suffix, now(),
+    'paper_ticket', v_ticket_photo::text
   );
   v_followup_invoice_id := (v_res #>> '{auto_invoice,invoice_id}')::uuid;
   IF v_followup_invoice_id IS NULL THEN
@@ -1236,8 +1266,8 @@ BEGIN
   -- transaction-local. A later negative line in this same transaction must
   -- hit the ordinary guard after issue_return_credit clears its flag.
   BEGIN
-    INSERT INTO invoices (invoice_number, customer_id, order_id, invoice_type, status, invoice_date, due_date, total_amount_cents, created_by)
-    VALUES ('SMK-RCC-AFTER-' || v_suffix, v_customer_id, v_order_id, 'chemical_sale', 'draft', current_date, current_date, 0, v_admin)
+    INSERT INTO invoices (invoice_number, customer_id, order_id, delivery_id, invoice_type, status, invoice_date, due_date, total_amount_cents, created_by)
+    VALUES ('SMK-RCC-AFTER-' || v_suffix, v_customer_id, v_order_id, v_delivery_id, 'chemical_sale', 'draft', current_date, current_date, 0, v_admin)
     RETURNING id INTO v_target_invoice_id;
     INSERT INTO invoice_items (invoice_id, order_item_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, unit_size)
     VALUES (v_target_invoice_id, v_order_item_1, v_product_id, '[SMOKE] post-credit below cost', -1, 1000, -1000, 500, 'gal');
@@ -1431,8 +1461,8 @@ BEGIN
   -- customer year-end invoice set. The posted credit memo belongs to the
   -- current credit season, leaving the prior customer summary unchanged. The
   -- detailed statement keeps the same credit in its open-credit disclosure.
-  -- A sales rep can read the assigned customer but neither an unassigned
-  -- customer nor a mixed batch. The admin path remains unrestricted.
+  -- A sales rep reads ANY customer's year-end summary, assigned or not, alone
+  -- or in a batch (Mason, 2026-10-13; 20261013220000). The admin path is unchanged.
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_sales_rep, 'role', 'authenticated')::text, true);
   v_res := public.get_customer_year_end_summary(v_customer_id, v_source_season);
@@ -1444,26 +1474,14 @@ BEGIN
      OR v_res #>> '{0,customer,id}' IS DISTINCT FROM v_customer_id::text THEN
     RAISE EXCEPTION 'SMOKE_FAIL: assigned-only sales-rep year-end batch returned %', v_res;
   END IF;
-  BEGIN
-    PERFORM public.get_customer_year_end_summary(v_other_customer_id, v_season);
-    RAISE EXCEPTION 'SMOKE_FAIL: unassigned sales rep read another customer year-end summary';
-  EXCEPTION WHEN OTHERS THEN
-    v_reason := SQLERRM;
-    IF v_reason LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_reason IS DISTINCT FROM 'CUSTOMER_SCOPE_DENIED' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: unassigned year-end scope raised %', v_reason;
-    END IF;
-  END;
-  BEGIN
-    PERFORM public.get_batch_year_end_summaries(ARRAY[v_customer_id, v_other_customer_id], v_season);
-    RAISE EXCEPTION 'SMOKE_FAIL: mixed authorized/unauthorized year-end batch was accepted';
-  EXCEPTION WHEN OTHERS THEN
-    v_reason := SQLERRM;
-    IF v_reason LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_reason IS DISTINCT FROM 'CUSTOMER_SCOPE_DENIED' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: mixed year-end batch scope raised %', v_reason;
-    END IF;
-  END;
+  v_res := public.get_customer_year_end_summary(v_other_customer_id, v_season);
+  IF v_res #>> '{customer,id}' IS DISTINCT FROM v_other_customer_id::text THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: sales rep could not read an unassigned customer year-end summary: %', v_res;
+  END IF;
+  v_res := public.get_batch_year_end_summaries(ARRAY[v_customer_id, v_other_customer_id], v_season);
+  IF jsonb_array_length(v_res) <> 2 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: sales-rep mixed year-end batch returned %', v_res;
+  END IF;
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM public.get_customer_year_end_summary(v_other_customer_id, v_season);
@@ -1727,11 +1745,13 @@ BEGIN
   ) VALUES (
     v_billing_set_id, 'chemical', '[SMOKE] reversal snapshot sentinel', 1, 5000, 5000
   ) RETURNING id INTO v_billing_line_id;
+  -- A split set is a field-application invoice (a product line on an orderless
+  -- chemical_sale is refused: FROM_SCRATCH_INVOICE_PRODUCT_LINE_REFUSED).
   INSERT INTO invoices (
     invoice_number, customer_id, invoice_type, status, invoice_date, due_date,
     total_amount_cents, created_by, field_app_billing_set_id
   ) VALUES (
-    'SMK-RCC-TARGET-' || v_suffix, v_customer_id, 'chemical_sale', 'draft',
+    'SMK-RCC-TARGET-' || v_suffix, v_customer_id, 'field_application', 'draft',
     CURRENT_DATE, CURRENT_DATE - 1, 5000, v_admin, v_billing_set_id
   ) RETURNING id INTO v_target_invoice_id;
   INSERT INTO invoice_items (
@@ -1920,6 +1940,12 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_SETUP: exact legacy RMA is not in the expected approved state';
   END IF;
 
+  -- Live stock for this product can drift (it was negative on 2026-11-02); this
+  -- step's receive-then-cancel oracle needs the zero baseline it was written for.
+  -- Rolled back with everything else.
+  UPDATE inventory SET quantity_available = 0
+   WHERE product_id = 'fad3ea45-cd8c-4bb8-b0ce-8a515941586c'::uuid
+     AND location = 'Main Warehouse';
   v_res := receive_return(
     v_legacy_return_id, v_admin, 'smk-rcc-' || v_suffix || '-legacy-receive'
   );
@@ -1995,11 +2021,11 @@ BEGIN
   v_same_product_order_item_2 := gen_random_uuid();
   v_same_product_return_id := gen_random_uuid();
   SET LOCAL session_replication_role = replica;
-  INSERT INTO products (id, product_name, current_cost, unit_size, inventory_unit)
+  INSERT INTO products (id, product_name, unit_size, inventory_unit)
   VALUES (
     v_same_product_product_id,
     '[SMOKE] same-product cancel aggregate ' || v_suffix,
-    5, 'gal', 'gal'
+    'gal', 'gal'
   );
   INSERT INTO inventory (
     product_id, location, quantity_available, quantity_prebooked, unit_size
@@ -2173,11 +2199,14 @@ BEGIN
   );
   PERFORM set_config('app.admin_override', 'true', true);
   PERFORM set_config('crx.delivery_completion_authorized', v_rounding_delivery_id::text, true);
+  -- Fixture construction: the 20261022075000 evidence marker admits this direct write.
+  PERFORM set_config('crx.delivery_completion_evidence', v_rounding_delivery_id::text, true);
   UPDATE deliveries
      SET status = 'completed',
          completed_at = now(),
          signed_by = '[SMOKE] RCC Rounding Receiver'
    WHERE id = v_rounding_delivery_id;
+  PERFORM set_config('crx.delivery_completion_evidence', '', true);
   PERFORM set_config('crx.delivery_completion_authorized', '', true);
   PERFORM set_config('app.admin_override', 'false', true);
 

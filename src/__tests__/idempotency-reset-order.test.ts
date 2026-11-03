@@ -162,6 +162,8 @@ type Reason = 'recovery' | 'throw-on-error' | 'intent-rotation';
 const ALLOWED_REASONS: Record<string, Reason[]> = {
   'src/components/deliveries/QuickDeliveryModal.tsx': ['recovery'],
   'src/pages/Returns.tsx': ['recovery'],
+  // WP-PM-3: set_product_active's raised refusals (stale review, new blocker, inactive, access) retire the key.
+  'src/pages/Products.tsx': ['recovery'],
   'src/pages/InvoiceDetail.tsx': ['recovery', 'throw-on-error'],
   // The post-call reset is throw-on-error; the one in the catch is a replay-binding batch 2
   // (20261016140000) getIdempotencyBindingRejection recovery.

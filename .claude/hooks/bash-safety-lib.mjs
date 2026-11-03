@@ -429,7 +429,8 @@ export function checkDestructiveSql(cmd) {
   const scriptRunner = text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() &&
     !((SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || sqlSegmentInert(segment)) && plainReaderSegment(segment)) &&
     segment.replace(/["'`^\\]/g, " ").split(/[\s()=,]+/).some((word) =>
-      SQL_SCRIPT_RUNNERS.has(word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").toLowerCase())));
+      // A version suffix (`python3.11`, `node22`, `pwsh-7`) is the same runner (Luna round 3).
+      SQL_SCRIPT_RUNNERS.has(word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").replace(/[-.\d]+$/, "").toLowerCase())));
   if (clientOutsideReader || flagOutsideReader || scriptRunner) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";
   }

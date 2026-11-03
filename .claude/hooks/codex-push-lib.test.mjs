@@ -143,6 +143,11 @@ for (const command of [
   `echo "; cat <<'EOF'"\ngit ${pushVerb} origin HEAD:main\nEOF`,
   `echo '\n; cat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
   `bash <<'X'\ncat <<'EOF'\nX\ngit ${pushVerb} origin HEAD:main\nEOF`,
+  // Luna round 3: a written file that is run later keeps its body.
+  `cat > push.sh <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nbash push.sh`,
+  `cat > "$TEMP/p.sh" <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nsh "$TEMP/p.sh"`,
+  `tee -a run.sh <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nsource ./run.sh`,
+  `cat > a.sh <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nbash *.sh`,
 ]) assert.equal(isGitPush(withoutDataHeredocs(command)), true, command);
 assert.equal(pushContextIsAmbiguous("$env:GIT_DIR='C:/other/.git'; git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("GIT_WORK_TREE=/tmp/other git push origin main"), true);

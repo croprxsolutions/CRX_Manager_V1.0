@@ -120,6 +120,10 @@ for (const [command, label] of [
   ["env -u UNUSED node scripts/run-sql.mjs 'DROP TABLE customers'", "env option with an argument"],
   ["eval \"node -e 'new (require(\\\"pg\\\").Pool)().query(\\\"DROP TABLE customers\\\")'\"", "eval"],
   ["git commit -m \"docs: TRUNCATE is refused\" && node scripts/check.mjs", "a runner anywhere beside the words (over-refusal kept on purpose)"],
+  // Luna round 3, 2026-11-03.
+  ["cat > wipe.sql <<'EOF'\nDROP TABLE customers;\nEOF\npsql -f wipe.sql", "a written SQL file run by psql"],
+  ["python3.11 run-sql.py 'DROP TABLE customers'", "versioned python"],
+  ["node22 run.mjs 'TRUNCATE customers'", "versioned node"],
 ]) ok(checkDangerousCommand(command), `SQL route stays refused: ${label}`);
 // Text that runs nothing stays allowed, including a script run BEFORE the words.
 for (const command of [

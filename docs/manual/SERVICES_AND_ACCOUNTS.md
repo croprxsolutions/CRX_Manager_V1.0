@@ -20,7 +20,7 @@ account lookups. Anything not visible that way is marked **Mason to confirm**.
 | **Supabase Edge Function secrets** (project `rhyzpcqhnizqbxphqdkr`) | Keys the server-side functions use: email, OCR, error reporting, CORS | Supabase org members |
 | **GitHub Actions secrets**, app repo `croprxsolutions/CRX_Manager_V1.0` | Values for CI builds and the paused browser tests | Repo admins (Mason) |
 | **GitHub Actions secrets**, private backup repo `masonwells1/CRX_Backups` | Database and file-storage backup credentials, backup passphrase | Repo admins (Mason) |
-| **Mason's Windows Credential Manager** | Mason's Supabase CLI login token (target `Supabase CLI:supabase`), used by agents to apply migrations | Mason's Windows login only |
+| **Mason's Windows Credential Manager** | Mason's Supabase CLI login token (target `Supabase CLI:supabase`), used by agents to apply migrations and to run the read-only db-invariant sweeps | Mason's Windows login only |
 | **Mason's password manager** | The backup decryption passphrase and account passwords | Mason only |
 
 A local `.env` file (git-ignored) holds a developer's own copy of the browser values. The
@@ -75,7 +75,10 @@ template is `.env.example`.
   optionally, in a developer's local environment for live-schema tests
   (`CRX_LIVE_SCHEMA_SERVICE_ROLE_KEY`). Never put it in Vercel or in browser code.
 - **Management token:** Mason's Supabase CLI token sits in his Windows Credential Manager.
-  Agents read it in memory to apply reviewed migrations. The developer should get their own
+  Agents read it in memory to apply reviewed migrations, and (Mason's yes, 2026-11-02) to run
+  the db-invariant sweeps read-only with `npm run db-sweeps:live`
+  (`scripts/db-invariant-sweeps/run-live.mjs`). That script sends only queries the live-data
+  guard recognises, always with `read_only: true`, and never prints or saves the token. The developer should get their own
   Supabase login, not this token.
 - **Staging project:** none yet (`.env.staging.example` is a template). Goal 6 builds it.
 

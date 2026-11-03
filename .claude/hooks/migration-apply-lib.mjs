@@ -359,6 +359,11 @@ export function evaluateMigrationApply({
   // its 15-second budget; the apply script has no hook timeout and leaves it unset.
   landingDeadlineMs,
   landingGate,
+  // Set only by scripts/apply-migration-file.mjs, which re-reads the LIVE ledger
+  // (checkLiveMigrationOrdering) right before it transmits. There the snapshot's
+  // age proves nothing, so an old or undated snapshot is not refused. The MCP hook
+  // leaves it unset and keeps the 24h freshness rule: it has no live re-check.
+  liveOrderingRecheck = false,
 } = {}) {
   const stateDir = path.join(projectDir, ".claude", "session-state");
   const targetProject = String(projectId || "").trim();
@@ -521,7 +526,8 @@ export function evaluateMigrationApply({
   // clean checkout has none — if that abstained, the guard would be absent
   // exactly when it is most needed, recreating the incident it exists to stop
   // (Codex P1, PR #348). A missing, unreadable, or stale snapshot therefore
-  // refuses the apply and tells the operator how to produce one. Only the
+  // refuses the apply and tells the operator how to produce one (stale only on the
+  // MCP door; see liveOrderingRecheck). Only the
   // library's internal "this name has no timestamp" case abstains.
   // Hoisted: the owner-approval check at the end refuses a migration the ledger
   // already holds (an approval covers one install).
@@ -591,7 +597,9 @@ export function evaluateMigrationApply({
       }
 
       const capturedAt = Date.parse(parsed?.captured_at ?? "");
-      if (Number.isFinite(capturedAt)) {
+      if (liveOrderingRecheck) {
+        // Freshness is the live re-check's job on this door; see the parameter.
+      } else if (Number.isFinite(capturedAt)) {
         snapshotAgeMs = now - capturedAt;
         if (snapshotAgeMs > SNAPSHOT_MAX_AGE_MS) {
           return block(

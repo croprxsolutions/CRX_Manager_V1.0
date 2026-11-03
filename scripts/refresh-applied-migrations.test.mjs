@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,11 +24,14 @@ let passed = 0;
 
 // Each run gets its own CLAUDE_PROJECT_DIR so a test can never touch the real
 // session-state snapshot.
-function run(input) {
+function run(input, { asFileArg = false } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "refresh-applied-"));
   try {
-    const res = spawnSync(process.execPath, [script], {
-      input: typeof input === "string" ? input : JSON.stringify(input),
+    const text = typeof input === "string" ? input : JSON.stringify(input);
+    const inFile = path.join(dir, "input.json");
+    if (asFileArg) writeFileSync(inFile, text);
+    const res = spawnSync(process.execPath, asFileArg ? [script, inFile] : [script], {
+      input: asFileArg ? "" : text,
       encoding: "utf8",
       env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
     });
@@ -126,6 +129,15 @@ check("refuses a snapshot where nothing carries a timestamp", () => {
   const res = run({ result: [{ version: "abc", name: "initial_schema" }] });
   assert.notEqual(res.status, 0);
   assert.equal(res.written, null);
+});
+
+check("reads a saved list_migrations file ({migrations:[...]}) passed as a path", () => {
+  const res = run(
+    { migrations: [{ version: "20261102140000", name: "completed_delivery_is_voided" }] },
+    { asFileArg: true },
+  );
+  assert.equal(res.status, 0, res.stderr);
+  assert.deepEqual(res.written.applied, ["20261102140000_completed_delivery_is_voided"]);
 });
 
 console.log(`refresh-applied-migrations: ${passed} assertions passed`);

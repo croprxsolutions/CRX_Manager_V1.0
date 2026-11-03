@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied.** `20261105110000_preferred_vendor_enforcement.sql` (LF SQL sha256: `9d96a742bcd5acf1301af28772a967705216d4ab9d18ad6eeac94f50f3ab8c08`). WP-PM-15b enforcement step. REQUIRES `20261105100000` (DATA-11) live first: its install refuses with `PREFERRED_VENDOR_ENFORCEMENT_NOT_READY`, changing nothing, while any product with links lacks exactly one preferred link, shows other vendor text, or prefers a deleted vendor.
+**LOCAL CANDIDATE, not applied.** `20261105110000_preferred_vendor_enforcement.sql` (LF SQL sha256: `c815a66ad923e14e8d7e29208c5615122d63b98fe2f0e2e23a356b9845121f8e`). WP-PM-15b enforcement step. REQUIRES `20261105100000` (DATA-11) live first: its install refuses with `PREFERRED_VENDOR_ENFORCEMENT_NOT_READY`, changing nothing, while any product with links lacks exactly one preferred link, shows other vendor text, or prefers a deleted vendor.
 
 What it does:
 - A product with active confirmed vendor links has exactly one preferred link (a deferred constraint trigger; `PREFERRED_VENDOR_REQUIRED` at commit otherwise).
@@ -12,6 +12,6 @@ What it does:
 
 Grants: every new function is revoked from PUBLIC, anon, authenticated and service_role; EXECUTE goes to `authenticated` only on `unlink_product_vendor` and `get_product_vendors`. All are SECURITY DEFINER with `search_path = public, pg_temp`.
 
-Rollback: drop the seven triggers and nine functions this file creates, and restore `get_vendor_link_proposals` from `20261104180000`. No data is written, so nothing needs restoring.
+Rollback: drop the seven triggers and eleven functions this file creates (including `unlink_product_vendor` and `get_product_vendors`), and restore `get_vendor_link_proposals` from `20261104180000`. No data is written, so nothing needs restoring.
 
 Proof: `node scripts/smoke/prove-preferred-vendor-enforcement-real-schema.mjs` prints `PREFERRED_VENDOR_ENFORCEMENT_PROOF_PASS`.

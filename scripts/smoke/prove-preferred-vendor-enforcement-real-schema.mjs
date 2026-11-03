@@ -364,7 +364,12 @@ function main() {
   const del = psql(`DELETE FROM public.product_supplier_links WHERE product_id = '${lone}';`, { allowFailure: true });
   assert.match(`${del.stdout}${del.stderr}`, /PREFERRED_VENDOR_REQUIRED/);
   assert.equal(preferredOf(lone), V.A);
-  console.log('[prover] deleting the only preferred link is refused');
+  for (const change of ["is_active = false", "link_status = 'rejected'"]) {
+    const off = psql(`UPDATE public.product_supplier_links SET ${change} WHERE product_id = '${lone}';`, { allowFailure: true });
+    assert.match(`${off.stdout}${off.stderr}`, /PREFERRED_VENDOR_REQUIRED/, change);
+    assert.equal(preferredOf(lone), V.A);
+  }
+  console.log('[prover] deleting, deactivating or unconfirming the only preferred link is refused');
 
   // The proposals report tells vendor-only links apart and still lists their missing item fields.
   const report = JSON.parse(ok(ADMIN, 'SELECT public.get_vendor_link_proposals();'));

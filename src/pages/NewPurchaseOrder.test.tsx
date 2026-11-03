@@ -245,6 +245,8 @@ describe('NewPurchaseOrder save and submit workflow', () => {
     fireEvent.change(screen.getByPlaceholderText('Enter or select vendor...'), { target: { value: 'Other Vendor' } });
     expect(screen.getByDisplayValue('12.5')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('9.8')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Enter or select vendor...'), { target: { value: 'Test Vendor' } });
+    expect(screen.getByDisplayValue('9.8')).toBeInTheDocument();
   });
 
   it('keeps the catalog cost when the PO vendor changes while the lookup is pending', async () => {

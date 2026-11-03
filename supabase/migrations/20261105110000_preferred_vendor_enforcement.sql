@@ -148,9 +148,10 @@ BEGIN
       INTO v_links, v_preferred
     FROM public.product_supplier_links
     WHERE product_id = v_product_id;
-    -- Deleting a product's only (preferred) link is refused too, unless the product itself is gone.
+    -- Deleting, deactivating, unconfirming or moving a product's only (preferred) link is refused
+    -- too, unless the product itself is gone.
     IF (v_links > 0 AND v_preferred <> 1)
-       OR (TG_OP = 'DELETE' AND OLD.product_id = v_product_id AND OLD.is_preferred AND OLD.is_active
+       OR (TG_OP <> 'INSERT' AND OLD.product_id = v_product_id AND OLD.is_preferred AND OLD.is_active
            AND OLD.link_status = 'confirmed' AND v_links = 0
            AND EXISTS (SELECT 1 FROM public.products WHERE id = v_product_id)) THEN
       RAISE EXCEPTION 'PREFERRED_VENDOR_REQUIRED: this product has vendors but no preferred vendor; make another vendor preferred before removing this one'

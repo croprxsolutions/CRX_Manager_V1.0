@@ -41,7 +41,8 @@ interface POItemDraft {
   costFromAdmin?: boolean;
   /** The user typed this line's unit cost, so no suggestion replaces it. */
   costEdited?: boolean;
-  costSuggestedFor?: string;
+  // The preferred vendor's last cost, applied while the PO is for that vendor.
+  suggestion?: { vendor: string; cents: number };
 }
 
 let keyCounter = 0;
@@ -207,7 +208,7 @@ export default function NewPurchaseOrder() {
               unit_size: product.unit_size || '',
               costFromAdmin: isAdmin,
               costEdited: false,
-              costSuggestedFor: undefined,
+              suggestion: undefined,
             }
           : i
       )
@@ -227,7 +228,7 @@ export default function NewPurchaseOrder() {
     let suggestedFor = '';
     try {
       const preferred = (await listProductVendors(product.id)).find((v) => v.is_preferred);
-      if (!preferred || preferred.vendor_name !== vendorRef.current.trim()) return;
+      if (!preferred) return;
       cents = preferred.last_cost_cents;
       suggestedFor = preferred.vendor_name;
     } catch (err) {
@@ -235,19 +236,24 @@ export default function NewPurchaseOrder() {
       return;
     }
     if (cents === null || !Number.isSafeInteger(cents)) return;
+    const suggestion = { vendor: suggestedFor, cents };
+    const applies = suggestedFor === vendorRef.current.trim();
     setItems((prev) => prev.map((i) => (
       i.key === itemKey && i.product_id === product.id && !i.costEdited && i.unit_cost === (product.current_cost || 0)
-        ? { ...i, unit_cost: cents / 100, costFromAdmin: true, costSuggestedFor: suggestedFor }
+        ? { ...i, suggestion, ...(applies ? { unit_cost: cents / 100, costFromAdmin: true } : {}) }
         : i
     )));
   };
 
-  // A suggested cost belongs to its vendor: a PO for another vendor goes back to the catalog cost.
+  // A suggested cost belongs to its vendor: a PO for another vendor uses the catalog cost, and
+  // switching back to that vendor brings the suggestion back.
   const changeVendor = (next: string) => {
     setVendor(next);
     setItems((prev) => prev.map((i) => (
-      i.costSuggestedFor && i.costSuggestedFor !== next.trim() && !i.costEdited
-        ? { ...i, unit_cost: products.find((p) => p.id === i.product_id)?.current_cost || 0, costSuggestedFor: undefined }
+      i.suggestion && !i.costEdited
+        ? { ...i, unit_cost: i.suggestion.vendor === next.trim()
+            ? i.suggestion.cents / 100
+            : products.find((p) => p.id === i.product_id)?.current_cost || 0 }
         : i
     )));
   };

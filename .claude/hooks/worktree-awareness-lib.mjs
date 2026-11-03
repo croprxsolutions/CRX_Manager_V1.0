@@ -71,7 +71,7 @@ export function mergedPrHeadsFromCache(text) {
   if (!data || !Array.isArray(data.prs)) return null;
   const heads = new Map();
   for (const pr of data.prs) {
-    if (pr && typeof pr.headRefOid === "string" && pr.headRefOid) heads.set(pr.headRefOid.toLowerCase(), pr.number);
+    if (pr && typeof pr.headRefOid === "string" && pr.headRefOid && Number.isInteger(pr.number) && pr.number > 0) heads.set(pr.headRefOid.toLowerCase(), pr.number);
   }
   return heads;
 }

@@ -194,7 +194,8 @@ ok(formatSiblingReport([{ ...reportInput[2], dirt: { total: 25, importer: 24, re
 }
 eq(mergedPrHeadsFromCache("not json"), null, "an unreadable cache is no list at all");
 eq(mergedPrHeadsFromCache(JSON.stringify({ prs: "nope" })), null, "a malformed cache is no list at all");
-eq(mergedPrHeadsFromCache(JSON.stringify({ prs: [{ number: 7, headRefOid: "ABC" }, { number: 8 }] })).get("abc"), 7, "head ids are matched case-insensitively and bad rows skipped");
+eq(mergedPrHeadsFromCache(JSON.stringify({ prs: [{ number: 7, headRefOid: "ABC" }, { number: 8 }, { number: 0, headRefOid: "def" }] })).has("def") ? "bad" : 7, 7, "a row without a real PR number is skipped");
+eq(mergedPrHeadsFromCache(JSON.stringify({ prs: [{ number: 7, headRefOid: "ABC" }, { number: 8 }] })).get("abc"), 7,"head ids are matched case-insensitively and bad rows skipped");
 
 const grouped = groupUnknownReasons([
   "origin/main parked-state metadata is unreadable",

@@ -80,7 +80,7 @@ function readMergedPrHeads() {
   const heads = mergedPrHeadsFromCache(text);
   let fetchedAt = 0;
   try { fetchedAt = Number(JSON.parse(text).fetchedAt) || 0; } catch { /* refresh below */ }
-  if (Date.now() - fetchedAt > MERGED_PR_CACHE_MAX_AGE_MS) {
+  if (Math.abs(Date.now() - fetchedAt) > MERGED_PR_CACHE_MAX_AGE_MS) { // abs: a clock set back must not freeze the cache
     // The lock stops a burst of session starts from each launching a refresh.
     const lock = `${cachePath}.refreshing`;
     let lockAge = Infinity;

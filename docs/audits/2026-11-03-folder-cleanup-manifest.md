@@ -1,6 +1,6 @@
 # Folder cleanup manifest — 2026-11-03 (PHASE 1: inventory only)
 
-**Status:** READY FOR APPROVAL (Sol review done, no blocker; see the end). Nothing has been deleted, pushed (except this doc's branch), or changed on the live database.
+**Status:** SAFE LIST EXECUTED 2026-11-03 on Mason's approval ("Yes, safe list"); see "Execution result" at the end. The other lists are untouched. Nothing was changed on the live database.
 **Taken:** 2026-11-03, about 10:00–10:45 AM Central, from `origin/main` at `5c121e0b2`, after `git fetch --prune`.
 
 ## Summary
@@ -192,3 +192,16 @@ Codex `gpt-6-sol`, high effort, read-only, on 2026-11-03. Its brief was to find 
 Sol could not run `gh` inside its sandbox, so it did not repeat the PR head checks or session ownership. Both were done in this session from GitHub's own data: every PR's final commit compared with each folder's HEAD, plus GitHub's commit-to-PR lookup for no-PR heads, and the app's live session list. Step 1 of the deletion plan re-checks both right before removal.
 
 **Final status: READY FOR APPROVAL.** Nothing is deleted until Mason says yes in the audit session.
+
+## Execution result (2026-11-03, about 10:45–11:30 AM Central)
+
+Mason approved the SAFE list in the audit session. Steps 1–4 of the deletion plan ran per folder. A dry run came first; it caught a script bug where "stop" did not stop, which was fixed before anything ran. A one-folder trial came next.
+
+- **Removed (46 worktrees)**, each with `git worktree remove`, without `--force`, prune, `git clean` or stash: every SAFE row except the three below.
+- **Pulled from the batch at re-check (2):** `great-heyrovsky-547a0b` and `pr-1316-status-bbcf4d`. After the audit, new guard-fix sessions moved into them (new branches, uncommitted work). They are live and were left alone.
+- **Backed up only:** `C:\CRX_apply_1181`, a standalone clone. Mason deletes the folder himself.
+- **Backups:** `C:\CRX_Backups\cleanup-2026-11-03\<folder>\` holds 47 folders, 1.9 GB in all. Each has a `repo.bundle` (all pass `git bundle verify`) and, where there were ignored files, `ignored.zip` plus `files.txt`, with the zip listing matching the file list for every folder. Keep these on this PC only: they include generated invoice PDFs.
+- **Live `C:\CRX_Manager\node_modules`:** 540 entries before and after. The `node_modules` links in `CRX_PMDb` and `CRX_ship_wait` were unlinked before their folders were removed, and their targets after.
+- **Restore one folder:** `git clone <backup>\repo.bundle <new-folder>`, then unzip `ignored.zip` into it.
+
+Still not done (separate approvals): the "after archive", "action first" and "other folders" lists, the three merged remote branches, Docker, and `%TEMP%\crx-*`.

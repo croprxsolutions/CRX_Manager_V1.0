@@ -163,7 +163,7 @@ describe('send-email purchase order wiring', () => {
   it('skips the customer lookup only for a PO copy, which carries no customer_id and must carry its snapshot', () => {
     expect(source).toContain('Purchase order emails must not carry a customer_id');
     expect(source).toContain("Purchase order emails require resource_type='purchase_order' and resource_id");
-    expect(source).toContain('Purchase order emails require purchase_order_snapshot');
+    expect(source).toContain('Purchase order emails require purchase_order_screen');
     expect(source).toContain('} else if (!customer_id) {');
   });
 });

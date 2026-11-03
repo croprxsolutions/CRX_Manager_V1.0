@@ -156,7 +156,7 @@ describe('PurchaseOrderDetail purchase order PDF and emailed copy', () => {
       resource_type: 'purchase_order',
       resource_id: 'po-1',
       idempotency_key: 'idem:email_purchase_order',
-      purchase_order_snapshot: {
+      purchase_order_screen: {
         vendor: 'Spinner Ag',
         expected_delivery_date: null,
         notes: null,

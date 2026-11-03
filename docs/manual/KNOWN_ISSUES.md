@@ -193,9 +193,10 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
   change saved in that split second still goes out as it was a moment earlier.
 - **Behaviour change.** An invoice emailed from the editor shows the saved invoice, not unsaved edits on screen.
 - **Becomes FIXED** when the new `send-email` is deployed (Mason's yes) and one real invoice email and one PO
-  copy are checked in `email_log`. Deploy order matters: `send-email` FIRST, then merge the app change. The other
-  order would let the old server send a PO copy with no PDF. In between, invoice and PO emails from the old app
-  fail with a "reload and send again" message until the new app is live (a few minutes).
+  copy are checked in `email_log`. Plan: `send-email` first, then merge the app
+  change. Either order is safe: a mismatched app and server refuse invoice and PO emails (the PO screen copy
+  is sent under a new name, `purchase_order_screen`, that the old server does not read) instead of mailing
+  one with no PDF, so in between staff see a "reload and send again" message for a few minutes.
 
 ---
 

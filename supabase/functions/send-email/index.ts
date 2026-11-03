@@ -251,7 +251,9 @@ Deno.serve(async (req: Request) => {
       resource_type,
       resource_id,
       idempotency_key,
-      purchase_order_snapshot,
+      // Renamed from purchase_order_snapshot with KI-98, so a send-email from before
+      // KI-98 refuses this app's PO copy instead of mailing it with no PDF.
+      purchase_order_screen,
       invoice_snapshot,
     } = body;
     // An invoice email's subject, body and attachment name are replaced below (step 6c).
@@ -271,10 +273,10 @@ Deno.serve(async (req: Request) => {
     }
     const isPurchaseOrderEmail = email_type === PURCHASE_ORDER_EMAIL_TYPE;
     // What the attached PDF printed; the gate refuses unless it is the PO today.
-    const poSnapshot = isPurchaseOrderEmail ? parsePurchaseOrderSnapshot(purchase_order_snapshot) : null;
+    const poSnapshot = isPurchaseOrderEmail ? parsePurchaseOrderSnapshot(purchase_order_screen) : null;
     if (isPurchaseOrderEmail) {
       if (!poSnapshot) {
-        return jsonResponse({ error: "Purchase order emails require purchase_order_snapshot (what the PDF shows)" }, 400);
+        return jsonResponse({ error: "Purchase order emails require purchase_order_screen (what the screen showed). Reload the app and send again" }, 400);
       }
       // A PO copy is about a PO, never a customer.
       if (customer_id) {

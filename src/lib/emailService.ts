@@ -76,7 +76,7 @@ export type SendEmailParams =
   | (SendEmailBase & NoAppAttachments & {
       email_type: 'purchase_order';
       customer_id?: undefined;
-      purchase_order_snapshot: PurchaseOrderEmailSnapshot;
+      purchase_order_screen: PurchaseOrderEmailSnapshot;
     });
 
 export interface SendEmailResult {
@@ -260,7 +260,7 @@ export function buildPurchaseOrderEmailPayload(input: PurchaseOrderEmailInput): 
     resource_type: 'purchase_order',
     resource_id: input.purchaseOrderId,
     idempotency_key: input.idempotencyKey,
-    purchase_order_snapshot: input.snapshot,
+    purchase_order_screen: input.snapshot,
   };
 }
 

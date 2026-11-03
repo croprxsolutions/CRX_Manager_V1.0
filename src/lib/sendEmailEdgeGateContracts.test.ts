@@ -97,6 +97,11 @@ describe('send-email draws invoice and PO PDFs from the saved records (KI-98)', 
     expect(source).toContain('attachments = [{ filename: purchaseOrderPdfFilename(poGate.order.po_number), content: pdfBase64(poPdf) }];');
     expect(source).not.toContain('attachments[0]?.content');
   });
+
+  it('reads the PO screen copy under a name a pre-KI-98 send-email refuses', () => {
+    expect(source).toContain('parsePurchaseOrderSnapshot(purchase_order_screen)');
+    expect(source).not.toContain('purchase_order_snapshot,');
+  });
 });
 
 describe('send-email builds invoice content from the saved invoice (KI-97)', () => {

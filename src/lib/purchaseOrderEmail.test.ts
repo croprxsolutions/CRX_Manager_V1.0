@@ -46,7 +46,7 @@ describe('buildPurchaseOrderEmailPayload', () => {
       resource_type: 'purchase_order',
       resource_id: 'po-1',
       idempotency_key: 'key-1',
-      purchase_order_snapshot: snapshot,
+      purchase_order_screen: snapshot,
     });
     expect(payload.customer_id).toBeUndefined();
     // The server draws the PO PDF from the saved order (KI-98).

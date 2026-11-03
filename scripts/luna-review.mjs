@@ -302,7 +302,8 @@ function guardRounds(git, root) {
     } catch {
       counts = null;
     }
-    if (!counts || typeof counts !== "object" || Array.isArray(counts)) {
+    const saved = counts?.[branch];
+    if (!counts || typeof counts !== "object" || Array.isArray(counts) || (saved !== undefined && !Number.isSafeInteger(saved))) {
       throw new Error(`Guard-round counter is unreadable: ${file}. Check it by hand; do not delete it to get another round.`);
     }
   }

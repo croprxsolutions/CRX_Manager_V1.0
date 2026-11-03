@@ -179,7 +179,7 @@ const uncapped = lunaRoundsOn("src/a.ts");
 assert.equal(uncapped.spawned, 3);
 assert.doesNotMatch(uncapped.printed, /STOP:/);
 // A damaged counter fails closed instead of starting the count over.
-for (const counter of ["{\"feature\": 2", "null"]) {
+for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   const damaged = lunaRoundsOn(".claude/hooks/x.mjs", counter);
   assert.equal(damaged.spawned, 0, counter);
   assert.deepEqual(damaged.exits, [EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN], counter);

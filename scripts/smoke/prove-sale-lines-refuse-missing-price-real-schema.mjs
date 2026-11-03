@@ -329,6 +329,15 @@ ${unnamed}`);
   refused('quote: a priced line rewritten to $0 for an unpriced product',
     `UPDATE public.quote_items SET product_id = '${P.UNPRICED}', price_per_unit = 0 WHERE id = '${QI_PRICED}';`, 'QUOTE_PRICE_MISSING', 'Unpriced');
   allowed('quote: a legacy $0 line whose notes change', `UPDATE public.quote_items SET notes = 'x' WHERE id = '${QI_LEGACY}';`);
+  refused('quote: a price under a cent is $0', qi(Q.T1, S.T1, P.UNPRICED, 0.001), 'QUOTE_PRICE_MISSING', 'Unpriced');
+  // save_quote writes a changed tier after the lines, so the tier write re-checks them.
+  refused('quote: tier changed so a $0 line has no price', `${qi(Q.T2, S.T2, P.T2ONLY, 0)}
+    UPDATE public.quotes SET tier = 1 WHERE id = '${Q.T2}';`, 'QUOTE_PRICE_MISSING', 'Tier Two Only');
+  allowed('quote: tier rewritten unchanged', `${qi(Q.T2, S.T2, P.T2ONLY, 0)}
+    UPDATE public.quotes SET tier = tier WHERE id = '${Q.T2}';`);
+  allowed('quote: tier changed, lines still priced', `${qi(Q.T2, S.T2, P.ZERO, 0)}
+    UPDATE public.quotes SET tier = 3 WHERE id = '${Q.T2}';`);
+  console.log('[prover] a quote tier change re-checks its $0 lines by name');
   console.log('[prover] quote lines: missing refused by name (tier 1, NULL price, tier 2/3 fallback, rewrite); stated $0, typed price, typed $0 and untouched legacy lines allowed');
 
   // Order lines: price_tier_at_sale, else the customer's tier.
@@ -339,11 +348,18 @@ ${unnamed}`);
   allowed('order: stated $0', oi(O.T1, P.ZERO, 0));
   allowed('order: priced line', oi(O.T1, P.UNPRICED, 9));
   allowed('order: price-later line', oi(O.T1, P.UNPRICED, 0, { pricing_pending: true }));
-  allowed('order: copied from a quote line', oi(O.T1, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` }));
+  allowed('order: copied from a quote line the quote set at $0', oi(O.T1, P.UNPRICED, 0, { quote_item_id: `'${QI_LEGACY}'` }));
+  refused('order: quote-copied line moved to a product with no price', oi(O.T1, P.UNPRICED, 0, { quote_item_id: `'${QI_PRICED}'` }), 'ORDER_PRICE_MISSING', 'Unpriced');
+  refused('order: quote-copied $0 line moved to another product with no price', oi(O.T1, P.T2ONLY, 0, { quote_item_id: `'${QI_LEGACY}'` }), 'ORDER_PRICE_MISSING', 'Tier Two Only');
   refused('order: a price-later line priced at $0', `UPDATE public.order_items SET pricing_pending = true WHERE id = '${OI_LEGACY}';
     UPDATE public.order_items SET pricing_pending = false WHERE id = '${OI_LEGACY}';`, 'ORDER_PRICE_MISSING', 'Unpriced');
+  allowed('order: the editor re-sends a legacy $0 line unchanged', `UPDATE public.order_items
+    SET price_per_unit = price_per_unit, product_id = product_id, pricing_pending = pricing_pending WHERE id = '${OI_LEGACY}';`);
+  allowed('order: legacy line re-sent unchanged, full stack', `UPDATE public.order_items
+    SET price_per_unit = price_per_unit, product_id = product_id WHERE id = '${OI_LEGACY}';`, { isolate: false });
+  refused('order: a legacy $0 line moved to another unpriced product', `UPDATE public.order_items SET product_id = '${P.T2ONLY}' WHERE id = '${OI_LEGACY}';`, 'ORDER_PRICE_MISSING', 'Tier Two Only');
   allowed('order: a delivery against a legacy $0 line', `UPDATE public.order_items SET quantity_delivered = 2, quantity_remaining = 3 WHERE id = '${OI_LEGACY}';`);
-  console.log('[prover] order lines: missing refused by name (incl. tier at sale); stated $0, priced, price-later, quote-copied and delivery updates allowed');
+  console.log('[prover] order lines: missing refused by name (incl. tier at sale); stated $0, priced, price-later, a quote-set $0 copy and delivery updates allowed; a quote-copied line moved to an unpriced product refused');
 
   // Invoice lines priced from the tier (the field-app path).
   refused('invoice: tier-priced unpriced at 0', ii(P.UNPRICED, 0, "'tier'"), 'INVOICE_PRICE_MISSING', 'Unpriced');

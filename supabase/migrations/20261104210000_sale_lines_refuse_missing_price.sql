@@ -1,6 +1,7 @@
 -- Written 2026-11-03. STATUS: NOT APPLIED (local candidate). Ledger record:
 -- docs/reference/migrations.d/20261104210000_sale_lines_refuse_missing_price.md. Stamp sits above
--- 20261104190000 (PR #1377) and 20261104200000 (WP-PM-6a, PR #1374). Re-read the live ledger first.
+-- 20261104190000 (PR #1377, the live high-water read 2026-11-03) and 20261104200000 (WP-PM-6a,
+-- PR #1374, open). Re-read the live ledger first.
 --
 -- idempotency-body-check: exempt -- this file adds a trigger function, not a callable RPC; no API
 --   role may execute it. The hook only recognises check_idempotency().
@@ -13,8 +14,10 @@
 --   trigger function now refuses, by product name, whichever path writes the row:
 --     QUOTE_PRICE_MISSING   quote_items: no price_override and price_per_unit 0 or NULL.
 --     ORDER_PRICE_MISSING   order_items: price_per_unit 0 or NULL, not a price-later line
---                           (pricing_pending) and not copied from a quote line (quote_item_id; the
---                           quote line was checked when it was saved).
+--                           (pricing_pending) and not a copy of a quote line that the quote itself
+--                           set at $0 for this same product (quote_item_id; the quote line was
+--                           checked when it was saved). A quote-copied line moved to another product
+--                           or repriced to $0 is checked.
 --     INVOICE_PRICE_MISSING invoice_items: price_source = 'tier' (priced from the product's tier
 --                           price; this is the field-app path) and unit_price_cents 0 or NULL.
 --   Each refuses only when the product states no price for the line's tier: its own tier price,
@@ -31,17 +34,25 @@
 --
 -- NOT CHANGED: every RPC and its body; RLS policies; grants on existing objects; existing rows. An
 --   UPDATE that touches none of the listed columns (a delivery's quantity_delivered, a status, a
---   posting) does not fire the trigger.
+--   posting) does not fire the trigger, and an UPDATE that rewrites them with the same values (the
+--   order editor re-sends every line on each save) passes without a check.
 --
 -- LIVE EVIDENCE (read-only execute_sql, 2026-11-03, counts only): rows the rule would catch today:
 --   quote_items 0 (any quote); invoice_items with price_source 'tier' 0 (any invoice); order_items 2,
---   both on open orders. Those two stay as they are; an edit that rewrites their price or product
---   is refused until a price is entered. Active products with no tier price at all: 2.
+--   both on fulfilled orders; 0 quote-version snapshot lines. Those two stay as they are, and saving those orders with them unchanged
+--   still works; changing their price to $0 again, their product, or their price-later flag is
+--   refused until a price is entered. Active products with no tier price at all: 2.
 --
 -- LIMITS (accepted): checked when a line is written, like the job rule. A line saved at $0 for a
 --   product whose price is later cleared stays as it is until rewritten. A blend-ticket order line
 --   carries no quote_item_id, so a product with no list price that its quote deliberately gave at $0
---   is refused on the order; give the product a $0 price (a stated $0 is a price).
+--   is refused on the order; give the product a $0 price (a stated $0 is a price). save_quote and
+--   save_invoice delete and re-insert lines, so a legacy $0 line for an unpriced product is checked
+--   again when its quote or invoice is next saved (live count 0 for both). An over-draw line on a
+--   booked quote is checked at the customer's tier, not the quote's. rollover_quote_to_season
+--   drops price overrides, so rolling a giveaway line for an unpriced product is refused. A quote's
+--   tier change is checked against its existing $0 lines (trigger on quotes.tier), because
+--   save_quote writes the tier after the lines.
 --
 -- CALLERS (app callers of functions whose writes this now checks, 2026-11-03):
 -- caller-analysis: save_quote :: QuoteBuilder.tsx; a line for a product with no price for the quote's tier and no typed price is refused with QUOTE_PRICE_MISSING; the screen shows the refusal on save
@@ -49,13 +60,23 @@
 -- caller-analysis: update_order_items :: OrderDetail.tsx; same rule when a line's price or product is rewritten
 -- caller-analysis: create_rush_order :: NewOrder.tsx; price-later lines (pricing_pending) are not checked
 -- caller-analysis: price_order :: OrderDetail.tsx; a price of 0 for an unpriced product is refused when pricing a pending line
--- caller-analysis: convert_quote_to_order :: QuoteBuilder.tsx; lines carry quote_item_id and are not checked again
+-- caller-analysis: convert_quote_to_order :: QuoteBuilder.tsx; lines that still carry their quote line's product and $0 are not checked again
 -- caller-analysis: create_order_from_blend_ticket :: BlendTicketDetail.tsx; already refuses a missing price first (BLEND_TICKET_PRICE_MISSING)
+-- caller-analysis: bulk_import_order :: BulkOrderImport.tsx; an imported line at $0 for an unpriced product is refused with ORDER_PRICE_MISSING; the import shows the refusal
+-- caller-analysis: draw_down_quote :: QuoteBuilder.tsx; draw-down lines copy their quote line; an over-draw extra line at $0 for an unpriced product is refused with ORDER_PRICE_MISSING
+-- caller-analysis: save_invoice :: InvoiceDetail.tsx; a tier-priced line at $0 for an unpriced product is refused with INVOICE_PRICE_MISSING
+-- caller-analysis: create_quick_delivery :: QuickDeliveryModal.tsx; a line for a product with no price for the customer's tier is refused with ORDER_PRICE_MISSING and nothing is saved
+-- caller-analysis: create_quote_from_template :: QuoteBuilder.tsx; a template product with no price for the quote's tier is refused with QUOTE_PRICE_MISSING
+-- caller-analysis: rollover_quote_to_season :: QuoteBuilder.tsx; a rolled line for a product with no price at today's tier is refused with QUOTE_PRICE_MISSING
+-- caller-analysis: restore_quote_version :: QuoteBuilder.tsx; restored $0 lines for a product with no price are refused (live snapshot count 0)
+-- caller-analysis: duplicate_quote :: Quotes.tsx, CustomerDetail.tsx; copied $0 lines for a product with no price are refused
+-- caller-analysis: consolidate_draft_invoices :: OrderDetail.tsx; a moved tier-priced $0 line for an unpriced product is refused (live count 0)
 -- caller-analysis: save_field_app_invoice :: FieldApplicationInvoice.tsx; a tier-priced line at $0 for an unpriced product is refused with INVOICE_PRICE_MISSING; the screen shows the refusal on save
 --
 -- ROLLBACK: DROP TRIGGER trigger_b_quote_item_price_required ON public.quote_items;
 --   DROP TRIGGER trigger_b_order_item_price_required ON public.order_items;
 --   DROP TRIGGER trigger_b_invoice_item_price_required ON public.invoice_items;
+--   DROP TRIGGER trigger_b_quote_tier_price_required ON public.quotes;
 --   DROP FUNCTION public._sale_line_price_required(). No data to restore.
 
 SET LOCAL lock_timeout = '5s';
@@ -72,7 +93,8 @@ BEGIN
   END IF;
   IF to_regproc('public._sale_line_price_required') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname IN ('trigger_b_quote_item_price_required',
-                  'trigger_b_order_item_price_required', 'trigger_b_invoice_item_price_required')) THEN
+                  'trigger_b_order_item_price_required', 'trigger_b_invoice_item_price_required',
+                  'trigger_b_quote_tier_price_required')) THEN
     RAISE EXCEPTION 'SALE_LINE_PRICE_REQUIRED_EXISTS: this migration has already run';
   END IF;
   IF (SELECT count(*) FROM information_schema.columns
@@ -107,18 +129,63 @@ DECLARE
   v_product_name text;
   v_stated numeric;
 BEGIN
+  -- save_quote writes a changed tier after it prices the lines, so the lines are checked again
+  -- against the tier as it is written.
+  IF TG_TABLE_NAME = 'quotes' THEN
+    IF NEW.tier IS NOT DISTINCT FROM OLD.tier THEN
+      RETURN NEW;
+    END IF;
+    SELECT p.product_name INTO v_product_name
+      FROM quote_items qi JOIN products p ON p.id = qi.product_id
+     WHERE qi.quote_id = NEW.id AND qi.price_override IS NULL AND round(COALESCE(qi.price_per_unit, 0), 2) = 0
+       AND COALESCE(CASE COALESCE(NEW.tier, 1) WHEN 3 THEN p.tier3_price WHEN 2 THEN p.tier2_price ELSE p.tier1_price END,
+                    p.tier1_price) IS NULL
+     ORDER BY p.product_name LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION
+        'QUOTE_PRICE_MISSING: % has no price for this quote''s tier, so its line would show $0. Type a price on the line, or set the product''s prices first (give it a $0 price if you give it away).',
+        v_product_name USING ERRCODE = 'P0001';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF NEW.product_id IS NULL THEN
     RETURN NEW;
   END IF;
-  -- Only a line that would show or bill $0 is checked.
+  -- Editors re-send every line; a rewrite with the same pricing values is not a new decision.
+  IF TG_OP = 'UPDATE' AND (
+       (TG_TABLE_NAME = 'quote_items'
+        AND (to_jsonb(NEW) -> 'quote_id', to_jsonb(NEW) -> 'product_id', to_jsonb(NEW) -> 'price_per_unit', to_jsonb(NEW) -> 'price_override')
+            IS NOT DISTINCT FROM
+            (to_jsonb(OLD) -> 'quote_id', to_jsonb(OLD) -> 'product_id', to_jsonb(OLD) -> 'price_per_unit', to_jsonb(OLD) -> 'price_override'))
+    OR (TG_TABLE_NAME = 'order_items'
+        AND (to_jsonb(NEW) -> 'order_id', to_jsonb(NEW) -> 'product_id', to_jsonb(NEW) -> 'quote_item_id', to_jsonb(NEW) -> 'price_per_unit',
+             to_jsonb(NEW) -> 'pricing_pending', to_jsonb(NEW) -> 'price_tier_at_sale')
+            IS NOT DISTINCT FROM
+            (to_jsonb(OLD) -> 'order_id', to_jsonb(OLD) -> 'product_id', to_jsonb(OLD) -> 'quote_item_id', to_jsonb(OLD) -> 'price_per_unit',
+             to_jsonb(OLD) -> 'pricing_pending', to_jsonb(OLD) -> 'price_tier_at_sale'))
+    OR (TG_TABLE_NAME = 'invoice_items'
+        AND (to_jsonb(NEW) -> 'invoice_id', to_jsonb(NEW) -> 'product_id', to_jsonb(NEW) -> 'unit_price_cents', to_jsonb(NEW) -> 'price_source',
+             to_jsonb(NEW) -> 'price_tier_at_sale')
+            IS NOT DISTINCT FROM
+            (to_jsonb(OLD) -> 'invoice_id', to_jsonb(OLD) -> 'product_id', to_jsonb(OLD) -> 'unit_price_cents', to_jsonb(OLD) -> 'price_source',
+             to_jsonb(OLD) -> 'price_tier_at_sale'))) THEN
+    RETURN NEW;
+  END IF;
+  -- Only a line that would show or bill $0 (to the cent) is checked.
   IF TG_TABLE_NAME = 'quote_items' THEN
-    IF NEW.price_override IS NOT NULL OR COALESCE(NEW.price_per_unit, 0) <> 0 THEN
+    IF NEW.price_override IS NOT NULL OR round(COALESCE(NEW.price_per_unit, 0), 2) <> 0 THEN
       RETURN NEW;
     END IF;
     SELECT q.tier INTO v_tier FROM quotes q WHERE q.id = NEW.quote_id;
   ELSIF TG_TABLE_NAME = 'order_items' THEN
-    IF COALESCE(NEW.pricing_pending, false) OR NEW.quote_item_id IS NOT NULL
-       OR COALESCE(NEW.price_per_unit, 0) <> 0 THEN
+    IF COALESCE(NEW.pricing_pending, false) OR round(COALESCE(NEW.price_per_unit, 0), 2) <> 0 THEN
+      RETURN NEW;
+    END IF;
+    -- A copy of a quote line the quote itself set at $0 for this product keeps that decision.
+    IF NEW.quote_item_id IS NOT NULL AND EXISTS (
+         SELECT 1 FROM quote_items qi
+          WHERE qi.id = NEW.quote_item_id AND qi.product_id = NEW.product_id
+            AND COALESCE(qi.price_override, qi.price_per_unit, 0) = 0) THEN
       RETURN NEW;
     END IF;
     SELECT COALESCE(NEW.price_tier_at_sale::integer, c.assigned_tier) INTO v_tier
@@ -169,6 +236,11 @@ CREATE TRIGGER trigger_b_order_item_price_required
   ON public.order_items
   FOR EACH ROW EXECUTE FUNCTION public._sale_line_price_required();
 
+CREATE TRIGGER trigger_b_quote_tier_price_required
+  BEFORE UPDATE OF tier
+  ON public.quotes
+  FOR EACH ROW EXECUTE FUNCTION public._sale_line_price_required();
+
 CREATE TRIGGER trigger_b_invoice_item_price_required
   BEFORE INSERT OR UPDATE OF invoice_id, product_id, unit_price_cents, price_source, price_tier_at_sale
   ON public.invoice_items
@@ -192,8 +264,14 @@ BEGIN
   END IF;
   IF (SELECT count(*) FROM pg_trigger t
        WHERE t.tgname IN ('trigger_b_quote_item_price_required', 'trigger_b_order_item_price_required',
-                          'trigger_b_invoice_item_price_required')
-         AND t.tgenabled = 'O' AND t.tgfoid = to_regprocedure('public._sale_line_price_required()')) <> 3 THEN
+                          'trigger_b_invoice_item_price_required', 'trigger_b_quote_tier_price_required')
+         AND t.tgenabled = 'O' AND t.tgfoid = to_regprocedure('public._sale_line_price_required()')
+         AND NOT t.tgisinternal
+         AND t.tgtype = CASE t.tgname WHEN 'trigger_b_quote_tier_price_required' THEN 19 ELSE 23 END  -- ROW, BEFORE, (INSERT,) UPDATE
+         AND t.tgrelid = CASE t.tgname WHEN 'trigger_b_quote_item_price_required' THEN 'public.quote_items'::regclass
+                                       WHEN 'trigger_b_order_item_price_required' THEN 'public.order_items'::regclass
+                                       WHEN 'trigger_b_quote_tier_price_required' THEN 'public.quotes'::regclass
+                                       ELSE 'public.invoice_items'::regclass END) <> 4 THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: a price-required trigger is missing or not enabled';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK: quote, order and tier-priced invoice lines refuse an unpriced product at $0';

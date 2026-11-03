@@ -5,7 +5,7 @@
 | Record | Copies what | When | Does a product correction reach it? |
 |---|---|---|---|
 | `job_chemicals` | `rei_hours`, `phi_days` | Values are copied when a product is picked on a line, when a recipe is loaded (`src/lib/recipeHelpers.ts`), or when a crop program is loaded (`src/lib/cropProgramHelpers.ts`); `save_job` saves the line. A job made from a quote leaves these values blank. Blank lines follow the product's current value at print time on any job status; filled-in lines keep their copied value. | Blank lines: yes, automatically. Filled-in lines: only if a user accepts the offer on an open job and saves. |
-| `invoice_items` | `epa_registration` | When an invoice line is made. | No. Posted invoices are regulated printed records. Draft lines also stay as copied in this package. |
+| `invoice_items` | `epa_registration` | When an invoice line is made. | No. Posted invoices are regulated printed records. Draft lines also keep their copy (Mason, 2026-11-02). |
 | `rup_sales_records` | `epa_registration`, `signal_word` | When a restricted-use pesticide sale is posted. | No. A wrong posted record needs a formal correction (void), not a silent edit. |
 | Quotes and orders (`quote_items`, `order_items`) | No product label facts | They read the product's current values when needed. | Yes, automatically; there is no stored label copy. |
 | WPS notice | No product label facts | Job Detail reads `products` when printing. | Yes, automatically. |
@@ -27,6 +27,6 @@ New, completed, invoiced, and cancelled jobs never show this offer. Posted invoi
 
 ## Follow-ups for the owner
 
-1. Draft or unposted invoice lines keep the EPA number copied when made. Should they offer an update too?
+1. Decided (Mason, 2026-11-02): draft or unposted invoice lines keep the EPA number copied when made; no update offer is built for them (`docs/manual/DECISION_LOG.md`).
 2. Should the product page list open jobs still carrying old REI or PHI values? That list is not built here because Product Detail is being changed by other work.
 3. The database's `save_job` does not itself refuse edits to a completed job; the screen blocks them. A server-side status check is separate follow-up work.

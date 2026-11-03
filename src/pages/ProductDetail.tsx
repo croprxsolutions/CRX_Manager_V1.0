@@ -238,6 +238,7 @@ export default function ProductDetail() {
     notes: '',
     quoting_notes: '',
     is_active: true,
+    // ProductDetailRoute remounts this page per id, so Duplicate's /products/new runs this initializer afresh.
     ...(duplicateSource ? duplicateProductDraft(duplicateSource) : {}),
   }));
   const [costHistory, setCostHistory] = useState<CostHistory[]>([]);

@@ -350,4 +350,5 @@ The app-wide look Mason chose on 2026-11-02. It joins packed, label-left rows wi
 
 ### Shared pieces
 - `SectionJumpBar` (`src/components/ui/SectionJumpBar.tsx`): the sticky jump pills. Pass `sections` (`id`, `label`, optional `count`). Give each section element the matching `id`. The bar marks the section in view as active.
-- Section bands, the label-left row, the phone header and the quantity stepper are built in the screen rebuilds that first need them; move each into `src/components/ui/` the second time it is needed.
+- Section bands, the label-left row, the phone header and the quantity stepper are built in the screen rebuilds that first need them; move each into `src/components/ui/` the second time it is needed. The section band, sub-part heading with its Save and "Unsaved" chip, and label-left row first live in `src/pages/SettingsPage.tsx` (`SettingsSection`, `SubPart`, `Row`).
+- A sub-part's Save turns on when one of its values differs from what was loaded or last saved; `SettingsPage.tsx` keeps one map of saved values and compares each sub-part's keys against it.

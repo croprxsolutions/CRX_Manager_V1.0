@@ -63,4 +63,35 @@ describe('SectionJumpBar while scrolling', () => {
     scrollTo({ a: -900, b: 100, c: 900 });
     expect(active()).toBe('Billing');
   });
+
+  it('lights a short last section once the page is scrolled to its end', () => {
+    render(
+      <>
+        <SectionJumpBar sections={[...sections, { id: 'c', label: 'Company' }]} />
+        <div id="a" />
+        <div id="b" />
+        <div id="c" />
+      </>,
+    );
+    const tops: Record<string, number> = { a: -2000, b: -300, c: 500 };
+    for (const [id, top] of Object.entries(tops)) {
+      document.getElementById(id)!.getBoundingClientRect = () => ({ top }) as DOMRect;
+    }
+    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 3000 });
+    const atScroll = (y: number) => act(() => {
+      Object.defineProperty(window, 'scrollY', { configurable: true, value: y });
+      fireEvent.scroll(window);
+    });
+    try {
+      // Company's top (500px) never passes the bars, but the page can scroll no further.
+      atScroll(3000 - window.innerHeight);
+      expect(screen.getByRole('link', { current: 'location' }).textContent).toBe('Company');
+      // Not yet at the end: Billing is the section scrolled past.
+      atScroll(1000);
+      expect(screen.getByRole('link', { current: 'location' }).textContent).toBe('Billing');
+    } finally {
+      delete (document.documentElement as unknown as Record<string, unknown>).scrollHeight;
+      Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+    }
+  });
 });

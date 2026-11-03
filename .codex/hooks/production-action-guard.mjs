@@ -23,7 +23,6 @@ import {
   ghMergeRequest,
   gitPushCwd,
   isGitPush,
-  withoutDataHeredocs,
   mainPushSource,
   mcpMergeRequest,
   mergeRequestKey,
@@ -1330,9 +1329,7 @@ export function evaluateProductionAction({
   if (SHELL_MUTATION_RE.test(command) && PROTECTED_HARNESS_FRAGMENT_RE.test(command)) {
     return denied(`CODEX PRODUCTION GATE: direct shell mutation of the production/review harness is blocked. ${HARNESS_REPAIR_PATH}`);
   }
-  // A data-only here-document body never runs a push it mentions (withoutDataHeredocs).
-  const pushText = withoutDataHeredocs(command);
-  if (isGitPush(pushText) && pushContextIsAmbiguous(pushText)) {
+  if (isGitPush(command) && pushContextIsAmbiguous(command)) {
     return denied("CODEX PRODUCTION GATE: directory-changing or GIT_DIR/GIT_WORK_TREE-prefixed pushes cannot be bound safely to the inspected worktree. Use `git -C <repo> push`.");
   }
   const suppliedEnv = toolInput.env && typeof toolInput.env === "object" ? toolInput.env : {};
@@ -1451,7 +1448,7 @@ export function evaluateProductionAction({
     }
   }
 
-  for (const segment of splitCommandSegments(pushText).filter((part) => isGitPush(part))) {
+  for (const segment of commandSegments.filter((part) => isGitPush(part))) {
     if (/--git-dir|--work-tree/i.test(segment)) {
       return denied("CODEX PRODUCTION GATE: pushes using explicit --git-dir/--work-tree contexts are denied because the guard cannot safely bind them to the inspected worktree. Use `git -C <repo> push` instead.");
     }
@@ -1461,7 +1458,7 @@ export function evaluateProductionAction({
     if (pushIsForced(segment)) {
       return denied("CODEX PRODUCTION GATE: force-pushing any branch rewrites shared history and requires Mason's explicit approval.");
     }
-    const pushRepoDir = gitPushCwd(segment, actionRepoDir, pushText);
+    const pushRepoDir = gitPushCwd(segment, actionRepoDir, command);
     let currentBranch = requestedWorkingDir ? "" : normalize(branch).toLowerCase();
     // The push checks spend the same hard-gate budget as the merge checks: each
     // segment costs a branch lookup plus several git calls in gateMainChange, and

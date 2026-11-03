@@ -440,64 +440,6 @@ export function everyPushHasAbsoluteFolder(fullCmd) {
   });
 }
 
-// A here-document whose body is only data — a quoted delimiter (so nothing in it
-// expands) written by `cat`, `tee` or `git commit`/`git tag` with nothing piped
-// on — never runs a `git push` it mentions. Its body is blanked so the push
-// guards stop reading PR bodies and scripts as pushes. Any other here-document
-// (fed to bash, python, node, or a pipe) keeps its body. No closing line keeps
-// everything, which can only over-refuse.
-// Quoting is tracked over the shell text (Luna, 2026-11-03: `echo "; cat
-// <<'EOF'"` must not blank the next line), and the first `<<` that is not a
-// provable data here-document stops the pass: its body is not shell text, so
-// nothing after it is judged.
-export function withoutDataHeredocs(cmd) {
-  // A function, alias or PATH change can make `cat`/`tee`/`git` run a shell
-  // (`cat(){ bash; }`; Luna round 4): then no body is provably data.
-  if (/(?:^|[\s;&|(])(?:function\s+[\w-]+|[\w-]+\s*\(\s*\)|alias\s|unalias\s|enable\s|hash\s|source\s|\.\s+\S|(?:PATH|BASH_ENV|ENV|GIT_EDITOR|GIT_EXEC_PATH)\s*=)/i.test(String(cmd || ""))) {
-    return String(cmd || "");
-  }
-  const lines = String(cmd || "").split("\n");
-  let state = "";
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i].replace(/\r$/, "");
-    if (state || !line.includes("<<")) {
-      state = shellQuoteState(`${lines[i]}\n`, state);
-      continue;
-    }
-    const open = line.match(
-      // `(` and a backtick are refused around it: `tee >(bash)` and `$(…)` run code.
-      // A backslash after it continues the line (`cat <<'EOF' \` then `| bash`).
-      /(?:^|&&|;)\s*(?:cat|tee|git\s+(?:commit|tag))(?![\w-])[^|;&<()`\\]*<<(-?)\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\(\w+))([^|;&<()`\\"']*)$/,
-    );
-    // …and one before it joins this line to an earlier command.
-    if (!open || (i > 0 && /\\\r?$/.test(lines[i - 1])) || shellQuoteState(line.slice(0, line.lastIndexOf("<<")))) break;
-    const delimiter = open[2] ?? open[3] ?? open[4];
-    let end = i + 1;
-    while (end < lines.length && lines[end].replace(/\r$/, "").replace(open[1] ? /^\t+/ : /^$/, "") !== delimiter) end += 1;
-    if (end >= lines.length) break;
-    // A file it writes may be RUN later (`cat > push.sh <<'EOF'` … `bash push.sh`;
-    // Luna round 3): a here-document that writes anywhere (`>` before or after
-    // `<<`, or `tee`) keeps its body whenever any command follows it.
-    const writesFile = />/.test(open[0].replace(/<<-?\s*\S+/, " ")) || /^(?:&&|;)?\s*tee(?![\w-])/.test(open[0]);
-    if (writesFile && lines.slice(end + 1).some((rest) => rest.trim())) break;
-    for (let j = i + 1; j < end; j += 1) lines[j] = "";
-    i = end;
-  }
-  return lines.join("\n");
-}
-
-// The POSIX quote open at the end of `text` ("" when none), starting in `state`.
-function shellQuoteState(text, state = "") {
-  for (let k = 0; k < text.length; k += 1) {
-    const c = text[k];
-    if (state === "'") { if (c === "'") state = ""; continue; }
-    if (c === "\\") { k += 1; continue; }
-    if (state === '"') { if (c === '"') state = ""; continue; }
-    if (c === "'" || c === '"') state = c;
-  }
-  return state;
-}
-
 // `W="C:/x"; git -C "$W" push` (2026-11-02: five harmless pushes denied with
 // `spawnSync git ENOENT`). Returns W's literal only when the FIRST statement of
 // the command is `W=<literal>` ending in `;`, `&&` or a newline (always runs, in

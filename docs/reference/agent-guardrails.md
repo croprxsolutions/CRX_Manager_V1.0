@@ -225,7 +225,7 @@ Runs on the `Bash|PowerShell` matcher, before a shell command executes. Determin
 
 | Hook | What it blocks |
 |------|----------------|
-| `bash-safety.mjs` (+ shared `bash-safety-lib.mjs`) | **Destructive raw SQL needs a database client (2026-10-29, Mason):** `DROP TABLE`/`DROP SCHEMA`/`TRUNCATE` is refused only beside `psql`, `pgcli` or `supabase sql`; a bare `-c` (`grep -c TRUNCATE`, `git log -c`) no longer counts. Since 2026-11-02 a client name inside a reader's search pattern (`grep`, `rg`, `cat`, `head`, `tail`, `wc`, `ls`; the command is split with quotes respected) no longer counts either, but only for a plain reader: called by its bare name (not `./grep`); outside quotes just word characters, spaces and `. / \ : * = , + # ? -`; single-quoted text without `| & < > ^ % " !` (cmd.exe does not quote with `'`), double-quoted text without `$`, a backtick, `%` or `!`; no backslash before a quote and no smart quote (PowerShell treats them as quotes); one line. Anything else (a command substitution, `$'…'`, `\;`, a PowerShell `<# #>` comment or `--%`) can split differently in bash and PowerShell, so it still counts, as do `rg --pre`, `--hostname-bin` and `--search-zip`/`-z` (each runs a program), `rg` with an unquoted `*` or `?` (a file named `--pre=…` could match), and `git` with a global option before its subcommand. Since 2026-11-03 plain `git grep`/`log`/`commit`-style subcommands, `echo`, `printf`, `gh pr`/`gh issue` and data-only here-documents no longer count (see "Guard false-alarm narrowing (2026-11-03)"). Force push, `git reset --hard`, discard-all (`git checkout .` / `git restore .`), `git clean -f`, `--no-verify`, recursive `rm -rf` targeting `src`/`supabase`/`docs`, uninstalling a core dependency, staging `.env` for commit, shell-redirect writes to `.env*` (e.g. `echo X > .env`, added 2026-07-13), `supabase db push` (any spelling — npx-optional since 2026-07-16) / `migration repair` / `migration up` / `db reset`, `dropdb`/`createdb`, force-deleting `main`/`master`/`production`, `git push --mirror`/`--prune`, `git filter-branch`/`filter-repo`, `rm -rf /<path>` outside known scratch dirs, suspicious `npm run reset/nuke/wipe`, `DROP TABLE`/`DROP SCHEMA`/`TRUNCATE` via `psql`/`supabase sql`, Bash-based modification (redirect or `sed`/`perl`/`awk -i`) of an EXISTING file under `supabase/migrations/` (creating new migration files is allowed), **and (2026-07-13, npm-script indirection) the RESOLVED body of any `npm run <script>` target from `package.json`** — recursing into scripts it calls, max depth 3, so a dangerous command hidden behind an innocuous script name is still caught. The whole pattern table now lives in `bash-safety-lib.mjs`, shared with `mcp-tool-guard.mjs` below (one source of truth, no drift) **Since 2026-10-02 (Mason):** a computed script path (`node "$F"`) is no longer refused; that rule only guarded the maintenance producer retired on 2026-09-05. **Since 2026-11-03 (Mason):** `TZ=<Area/City> date` (e.g. `TZ=America/Chicago date`) is refused, because Git Bash here has no zone database and silently prints UTC; POSIX zones (`TZ=CST6CDT`) and searches for the text stay allowed. |
+| `bash-safety.mjs` (+ shared `bash-safety-lib.mjs`) | **Destructive raw SQL needs a database client (2026-10-29, Mason):** `DROP TABLE`/`DROP SCHEMA`/`TRUNCATE` is refused only beside `psql`, `pgcli` or `supabase sql`; a bare `-c` (`grep -c TRUNCATE`, `git log -c`) no longer counts. Since 2026-11-02 a client name inside a reader's search pattern (`grep`, `rg`, `cat`, `head`, `tail`, `wc`, `ls`; the command is split with quotes respected) no longer counts either, but only for a plain reader: called by its bare name (not `./grep`); outside quotes just word characters, spaces and `. / \ : * = , + # ? -`; single-quoted text without `| & < > ^ % " !` (cmd.exe does not quote with `'`), double-quoted text without `$`, a backtick, `%` or `!`; no backslash before a quote and no smart quote (PowerShell treats them as quotes); one line. Anything else (a command substitution, `$'…'`, `\;`, a PowerShell `<# #>` comment or `--%`) can split differently in bash and PowerShell, so it still counts, as do `rg --pre`, `--hostname-bin` and `--search-zip`/`-z` (each runs a program), `rg` with an unquoted `*` or `?` (a file named `--pre=…` could match), and `git` other than a plain `git grep`/`git log` (since 2026-11-03; see "Guard false-alarm narrowing (2026-11-03)"). Force push, `git reset --hard`, discard-all (`git checkout .` / `git restore .`), `git clean -f`, `--no-verify`, recursive `rm -rf` targeting `src`/`supabase`/`docs`, uninstalling a core dependency, staging `.env` for commit, shell-redirect writes to `.env*` (e.g. `echo X > .env`, added 2026-07-13), `supabase db push` (any spelling — npx-optional since 2026-07-16) / `migration repair` / `migration up` / `db reset`, `dropdb`/`createdb`, force-deleting `main`/`master`/`production`, `git push --mirror`/`--prune`, `git filter-branch`/`filter-repo`, `rm -rf /<path>` outside known scratch dirs, suspicious `npm run reset/nuke/wipe`, `DROP TABLE`/`DROP SCHEMA`/`TRUNCATE` via `psql`/`supabase sql`, Bash-based modification (redirect or `sed`/`perl`/`awk -i`) of an EXISTING file under `supabase/migrations/` (creating new migration files is allowed), **and (2026-07-13, npm-script indirection) the RESOLVED body of any `npm run <script>` target from `package.json`** — recursing into scripts it calls, max depth 3, so a dangerous command hidden behind an innocuous script name is still caught. The whole pattern table now lives in `bash-safety-lib.mjs`, shared with `mcp-tool-guard.mjs` below (one source of truth, no drift) **Since 2026-10-02 (Mason):** a computed script path (`node "$F"`) is no longer refused; that rule only guarded the maintenance producer retired on 2026-09-05. **Since 2026-11-03 (Mason):** `TZ=<Area/City> date` (e.g. `TZ=America/Chicago date`) is refused, because Git Bash here has no zone database and silently prints UTC; POSIX zones (`TZ=CST6CDT`) and searches for the text stay allowed. |
 
 Two more Bash-matcher PreToolUse guards — `active-area-guard.mjs` and `codex-push-guard.mjs` — are documented in the Correction-mined guards table further down this page.
 
@@ -456,9 +456,7 @@ refused commands from those sessions before and after the change.
    `.codex/hooks/production-action-guard.mjs`).** A leading `cd <literal>` (or `W=<literal>; cd "$W"`)
    followed by `&&`, `;` or a new line, with no other directory change anywhere after it, now binds
    every push to that folder (`leadingCdFolder`). A `cd` elsewhere no longer matters when every push
-   names an absolute `git -C` folder (`everyPushHasAbsoluteFolder`). A data-only here-document body
-   (`cat`/`tee`/`git commit` with a quoted delimiter and nothing piped on) is no longer read as a push
-   (`withoutDataHeredocs`). Still refused: `cd X || …`, `cd X &`, a subshell, a second `cd`/`pushd`,
+   names an absolute `git -C` folder (`everyPushHasAbsoluteFolder`). Still refused: `cd X || …`, `cd X &`, a subshell, a second `cd`/`pushd`,
    a `cd` into a variable the guard cannot prove, a `cd` after a push with no `-C`, `GIT_DIR`/
    `GIT_WORK_TREE`, and a push inside a here-document fed to a shell. Force, bulk and main-bound
    proof checks apply to the bound folder exactly as before.
@@ -477,19 +475,18 @@ refused commands from those sessions before and after the change.
    over-blocks kept: a command naming the state directory itself (or a bare `session-state`) beside
    a destructive word, and a worktree path used as a plain operand (`git clone <root>`) next to an
    unrelated `rm`.
-4. **Destructive SQL (`bash-safety-lib.mjs`).** A data-only here-document body is not read, and
-   `git grep|log|show|diff|status|add|commit|tag|switch|checkout|branch|mv|restore` (subcommand
-   right after `git`), `echo`, `printf`, `gh pr` and `gh issue` count as readers under the same plain
-   quoting rules. `git grep -O` (runs a pager), `git -c …`, other `gh` commands, `sed`, and any real
-   `psql`/`pgcli`/`supabase sql`/`supabase db` call (direct, through `npx`, or fed a here-document)
-   still count. Tightened at the same time (Sol on the proposal, Luna rounds 1–2): a script runner
-   (`node`, `deno`, `bun`, `tsx`, `npx`, `python`, `ruby`, `perl`, `bash`, `sh`, `pwsh`, `cmd`,
-   `eval`, `iex` …, with or without a version suffix) named in any segment that is not plain text,
-   with the destructive words in any segment that is not plain text, now counts as a client call,
-   since it can run SQL through `pg` or the Supabase client (including SQL exported first,
-   `env -u X node …`, `eval "node …"`). Before, `node -e "…DROP TABLE…"` passed unless a `-c` sat
-   beside it. A here-document is never treated as data when the command defines a function or
-   alias, changes `PATH`, or writes a file and then runs anything after it.
+4. **Destructive SQL (`bash-safety-lib.mjs`).** Only `git grep` and `git log` with the subcommand
+   right after `git` count as readers, under the same plain quoting rules; any `-O`/`-o` cluster,
+   `--open-files-in-pager`, `--ext-diff` or `--textconv` loses it, as does `git -c …` or `git -C …`.
+   Everything else is exactly as before.
+
+**Dropped (Mason, "Yes, ship safe parts").** A shortcut that skipped here-document bodies written by
+`cat`/`tee`/`git commit` as "text that runs nothing" was tried for P2 and P4 and removed: five review
+rounds each found a new way to make that text run (a quoted opener, a line continuation into
+`bash`, a written file run later, a redirect after `<<`, a function named `cat`). A text guard cannot
+know what a word will do at run time, so commit messages, notes and PR bodies that mention a push or
+SQL words keep being judged as on `main`. A broader SQL "script runner" rule (Sol's request) was
+dropped with it, so `node`/`python` scripts that run SQL through a driver are handled as on `main`.
 
 ### Guard narrowing (2026-10-18 decision)
 

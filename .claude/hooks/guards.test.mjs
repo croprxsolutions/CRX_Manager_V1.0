@@ -1165,8 +1165,8 @@ for (const command of [
   }
 
   // P1/P2 (2026-11-03): a leading literal `cd`, a `cd` beside an absolute `-C`
-  // push, a Git Bash `/c/…` folder and a data-only here-document all bind to the
-  // real folder now, and that folder's gates still apply.
+  // push and a Git Bash `/c/…` folder all bind to the real folder now, and that
+  // folder's gates still apply.
   const bashDir = process.platform === "win32" ? dir.replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`) : dir;
   for (const command of [
     `cd "${dir}" && git ${pushVerb} origin feature`,
@@ -1174,7 +1174,6 @@ for (const command of [
     `W="${dir}"; cd "$W" && git ${pushVerb} origin feature`,
     `git -C ${bashDir} ${pushVerb} -u origin feature 2>&1 | tail -3`,
     `cd "${dir}" && git -C "${dir}" ${pushVerb} origin feature; cd "${os.tmpdir().replace(/\\/g, "/")}"`,
-    `cat > "${dir}/body.md" <<'EOF'\nthen cd somewhere and git ${pushVerb} origin main\nEOF`,
   ]) {
     eq(run(command).stdout.trim(), "", `bindable push passes: ${command}`);
   }

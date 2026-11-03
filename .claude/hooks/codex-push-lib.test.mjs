@@ -9,7 +9,7 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { scratchHookEnvironment } from "./git-test-env.mjs";
-import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded, leadingCdFolder, nativeFolder, withoutDataHeredocs } from "./codex-push-lib.mjs";
+import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded, leadingCdFolder, nativeFolder } from "./codex-push-lib.mjs";
 
 const now = Date.parse("2026-07-13T18:00:00.000Z");
 const sha = "a".repeat(40);
@@ -127,35 +127,6 @@ assert.equal(nativeFolder("/d", "win32"), "D:/");
 assert.equal(nativeFolder("/d/", "win32"), "D:/");
 assert.equal(nativeFolder("/cx/y", "win32"), "/cx/y");
 assert.equal(nativeFolder("/c/x", "linux"), "/c/x");
-// A data-only here-document never runs the push it mentions.
-const pushVerb = "pu" + "sh";
-assert.equal(isGitPush(withoutDataHeredocs(`cat > a.md <<'EOF'\nrun git ${pushVerb} origin main\nEOF`)), false);
-assert.equal(isGitPush(withoutDataHeredocs(`git commit -q -F - <<'EOF'\nfix: git ${pushVerb} msg\nEOF\ngit ${pushVerb} origin x`)), true);
-for (const command of [
-  `bash <<'EOF'\ngit ${pushVerb} origin main\nEOF`,
-  `cat <<'EOF' | bash\ngit ${pushVerb} origin main\nEOF`,
-  `cat <<EOF > a.sh\ngit ${pushVerb} origin main\nEOF`,
-  `tee >(bash) <<'EOF'\ngit ${pushVerb} origin main\nEOF`,
-  `cat > a.md <<'EOF'\ngit ${pushVerb} origin main\n`,
-  `cat <<'EOF' \\\n| bash\ngit ${pushVerb} origin main\nEOF`,
-  `bash \\\ncat <<'EOF'\ngit ${pushVerb} origin main\nEOF`,
-  // Luna BLOCKER: an opener inside quotes, or after an earlier non-data heredoc.
-  `echo "; cat <<'EOF'"\ngit ${pushVerb} origin HEAD:main\nEOF`,
-  `echo '\n; cat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
-  `bash <<'X'\ncat <<'EOF'\nX\ngit ${pushVerb} origin HEAD:main\nEOF`,
-  // Luna round 3: a written file that is run later keeps its body.
-  `cat > push.sh <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nbash push.sh`,
-  `cat > "$TEMP/p.sh" <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nsh "$TEMP/p.sh"`,
-  `tee -a run.sh <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nsource ./run.sh`,
-  `cat > a.sh <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\nbash *.sh`,
-  `cat <<'EOF' > push.sh\ngit ${pushVerb} origin HEAD:main\nEOF\nbash push.sh`,
-  `cat > x <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF\ncp x y; bash y`,
-  // Luna round 4: a function, alias or PATH change can make `cat` run a shell.
-  `cat(){ bash; }; cat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
-  `function cat { bash; }\ncat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
-  `alias cat=bash; cat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
-  `PATH=/tmp/evil:$PATH cat <<'EOF'\ngit ${pushVerb} origin HEAD:main\nEOF`,
-]) assert.equal(isGitPush(withoutDataHeredocs(command)), true, command);
 assert.equal(pushContextIsAmbiguous("$env:GIT_DIR='C:/other/.git'; git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("GIT_WORK_TREE=/tmp/other git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("git -C C:/other push origin main"), false);

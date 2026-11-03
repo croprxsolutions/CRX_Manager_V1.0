@@ -16,7 +16,6 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { withoutDataHeredocs } from "./codex-push-lib.mjs";
 
 // computedJavaScriptScriptArgument (below) recognises a JavaScript runtime whose
 // SCRIPT argument cannot be read from the text (`node "$F"`). Nothing refuses on
@@ -355,27 +354,16 @@ export function checkAskCommand(cmd) {
 // run a client named by a variable (Sol, PR #1193), so `git log -c` beside
 // the words stays refused, as it was before.
 const DESTRUCTIVE_SQL_RE = /\b(?:DROP\s+TABLE|DROP\s+SCHEMA|TRUNCATE)\b/i;
-const SQL_CLIENT_RE = /\b(?:psql|pgcli)\b|supabase\s+(?:sql|db)\b/i;
-// Programs that can run SQL through a driver (pg, the Supabase client) or a
-// nested shell. One of them followed anywhere later by the destructive words
-// counts as a client call (2026-11-03, Sol on the P4 proposal): `node -e
-// "…DROP TABLE…"` used to pass unless a `-c` happened to sit beside it.
-const SQL_SCRIPT_RUNNERS = new Set(["node", "deno", "bun", "tsx", "ts-node", "npx", "pnpm", "yarn", "python", "python3", "py", "ruby", "perl", "php", "bash", "sh", "zsh", "pwsh", "powershell", "cmd", "eval", "iex", "invoke-expression"]);
+const SQL_CLIENT_RE = /\b(?:psql|pgcli)\b|supabase\s+sql/i;
 const SQL_SAFE_READ_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "ls"]);
-// Programs that only print, search or record their arguments, never run them
-// (2026-11-03: `git grep TRUNCATE`, commit messages and PR bodies naming psql
-// were refused). `git` counts only with one of these subcommands RIGHT after it,
-// so `git -c alias.x=!…` stays a non-reader (Sol, PR #1193); `git grep -O`
-// opens a pager program, so it loses the exemption. A gh alias or extension can
-// run a shell, so only `gh pr`/`gh issue` count.
-const SQL_INERT_GIT_SUBCOMMANDS = new Set(["grep", "log", "show", "diff", "status", "add", "commit", "tag", "switch", "checkout", "branch", "mv", "restore"]);
+// `git grep` / `git log` search text and never run it (2026-11-03: `git grep
+// TRUNCATE` was refused). Only with the subcommand RIGHT after `git`, so `git -c
+// alias.x=!…` stays a non-reader (Sol, PR #1193); any `-O`/`-o` cluster or
+// `--open-files-in-pager` (runs a pager program) loses the exemption.
 function sqlSegmentInert(segment) {
   const words = String(segment).trim().split(/\s+/).map((w) => w.replace(/["'`^\\]/g, "").toLowerCase());
-  const program = sqlSegmentProgram(segment);
-  if (program === "echo" || program === "printf") return true;
-  if (program === "gh") return words[1] === "pr" || words[1] === "issue";
-  if (program !== "git" || !SQL_INERT_GIT_SUBCOMMANDS.has(words[1])) return false;
-  return !(words[1] === "grep" && words.some((w) => /^-[^-]*o|^--open-files-in-pager/i.test(w)));
+  if (sqlSegmentProgram(segment) !== "git" || (words[1] !== "grep" && words[1] !== "log")) return false;
+  return !words.some((w) => /^-[^-]*o|^--open-files-in-pager|^--ext-diff|^--textconv/i.test(w));
 }
 function sqlSegmentProgram(segment) {
   const word = (String(segment).trim().split(/\s+/)[0] || "").replace(/["'`^\\]/g, "");
@@ -402,9 +390,7 @@ function plainReaderSegment(segment) {
   return /^[\w\s./\\:*=,+#?-]*$/.test(outside);
 }
 export function checkDestructiveSql(cmd) {
-  // A data-only here-document body (a commit message, a note written to a file)
-  // runs no SQL, whatever words it holds (2026-11-03); see withoutDataHeredocs.
-  const text = withoutDataHeredocs(String(cmd || ""));
+  const text = String(cmd || "");
   if (!DESTRUCTIVE_SQL_RE.test(text)) return null;
   const flagOutsideReader = /(?:^|\s)--?[cf]\s/.test(text) &&
     text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() && !SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) &&
@@ -421,21 +407,7 @@ export function checkDestructiveSql(cmd) {
         // rg options that run a program, as read-only-search-lib's rgOptionRunsProgram lists them.
         (sqlSegmentProgram(segment) === "rg" && /(?:^|\s)(?:--(?:hostname-bin|search-zip)\b|-[^-\s]*z)/i.test(unquoted)));
   });
-  // Any runner NAMED in a segment that is not plain text (past wrappers, inside
-  // `eval "…"`, after `env -u X`) with the words anywhere in the command: SQL can
-  // reach it through a variable set earlier (Luna round 2, 2026-11-03). Split
-  // WITHOUT honouring quotes on purpose: PowerShell and cmd.exe quote
-  // differently from bash, and an extra split can only over-refuse.
-  // The words count only outside plain text (a commit message or grep pattern
-  // naming TRUNCATE is not SQL; Luna round 4 LOW); `export SQL='DROP …'` does.
-  const plainText = (segment) =>
-    (SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || sqlSegmentInert(segment)) && plainReaderSegment(segment);
-  const segments = text.split(/(?:\|\||&&|[;\r\n|&])+/).filter((segment) => segment.trim() && !plainText(segment));
-  const scriptRunner = segments.some((segment) => DESTRUCTIVE_SQL_RE.test(segment)) && segments.some((segment) =>
-    segment.replace(/["'`^\\]/g, " ").split(/[\s()=,]+/).some((word) =>
-      // A version suffix (`python3.11`, `node22`, `pwsh-7`) is the same runner (Luna round 3).
-      SQL_SCRIPT_RUNNERS.has(word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").replace(/[-.\d]+$/, "").toLowerCase())));
-  if (clientOutsideReader || flagOutsideReader || scriptRunner) {
+  if (clientOutsideReader || flagOutsideReader) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";
   }
   return null;

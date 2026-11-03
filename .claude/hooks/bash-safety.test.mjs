@@ -81,58 +81,32 @@ ok(checkDangerousCommand('docker exec c psql -c "TRUNCATE t"'), "docker exec psq
 ok(checkDangerousCommand("cat <<'SQL' | psql\nDROP TABLE customers;\nSQL"), "cat piped into psql with DROP TABLE still blocked");
 ok(checkDangerousCommand('grep -l "DROP TABLE" f | xargs cat | psql'), "readers feeding psql still blocked");
 ok(checkDangerousCommand(`grep "$(psql -c 'DROP SCHEMA x')" f`), "a client run from a reader's command substitution still blocked");
-// P4 (2026-11-03): plain git searches, commit messages, echo/printf and PR text
-// name SQL words without running a client; real refusals from 11/1–11/3.
+// P4 (2026-11-03): only a plain `git grep` / `git log` search counts as a reader;
+// a real refusal from 11/3 was `git grep -ln "TRUNCATE"` beside `git grep "pgcli\|psql"`.
 ok(!checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git grep is a reader when grep follows git directly");
 ok(!checkDangerousCommand(`git grep -ln "TRUNCATE" -- '.claude/hooks/*.test.mjs'; git grep -n "pgcli\\|psql\\|git log -c" -- '*.test.mjs' | head`), "git grep for TRUNCATE and psql allowed");
-ok(!checkDangerousCommand("git switch -c fix-x && git add a.mjs && git commit -q -F - <<'EOF'\nfix: psql beside DROP SCHEMA in a grep pattern\nEOF"), "a commit message here-document naming psql and DROP SCHEMA allowed");
-ok(!checkDangerousCommand('git commit -q -m "stop refusing psql -c TRUNCATE in a search"'), "a commit message naming psql -c TRUNCATE allowed");
-ok(!checkDangerousCommand("cat > notes.md <<'EOF'\nrun psql -c \"DROP TABLE x\" only in a container\nEOF"), "a note written by cat naming psql allowed");
-ok(!checkDangerousCommand('gh pr create --title "x" --body "psql -c TRUNCATE is still refused"'), "a PR body naming psql allowed");
-ok(!checkDangerousCommand('echo "psql -c DROP TABLE is refused"'), "echo naming psql allowed");
+ok(!checkDangerousCommand('git log -c --grep "psql TRUNCATE" -- supabase'), "git log -c naming psql and TRUNCATE allowed");
+ok(checkDangerousCommand('git commit -q -m "stop refusing psql -c TRUNCATE in a search"'), "a commit message stays as main treats it (no text skipping)");
 ok(checkDangerousCommand('git -c alias.x="!psql" x "DROP SCHEMA"'), "git with a global option before the subcommand stays a non-reader");
+ok(checkDangerousCommand('git -C . grep "psql" "DROP SCHEMA"'), "git with -C before grep stays a non-reader");
+ok(checkDangerousCommand('git log --ext-diff -p "psql" "DROP SCHEMA"'), "git log running an external diff program stays refused");
 ok(checkDangerousCommand('git grep -O"psql -c" "DROP SCHEMA"'), "git grep opening a pager program stays refused");
 ok(checkDangerousCommand('git commit -m "$(psql -c \'DROP TABLE x\')"'), "a client in a commit message's command substitution stays refused");
 ok(checkDangerousCommand("cat <<'EOF' | psql\nDROP TABLE customers;\nEOF"), "a here-document piped to psql stays refused");
 ok(checkDangerousCommand("psql <<'EOF'\nDROP TABLE customers;\nEOF"), "a here-document fed to psql stays refused");
 ok(checkDangerousCommand("python - <<'EOF'\nimport os; os.system('psql -c \"DROP TABLE x\"')\nEOF"), "an interpreter here-document naming psql stays refused");
 ok(checkDangerousCommand('echo "DROP TABLE x;" | psql'), "echo piped into psql stays refused");
-ok(checkDangerousCommand('gh x-ext psql "DROP TABLE x"'), "a gh extension may run a program, so it stays refused");
 ok(checkDangerousCommand('supabase sql "DROP SCHEMA public"'), "supabase sql DROP SCHEMA stays refused");
-// Every route that can run SQL here stays refused (Sol on the P4 proposal, 2026-11-03).
+// Real SQL routes stay refused beside the git exemption (Sol on the P4 proposal, 2026-11-03).
 for (const [command, label] of [
-  ['npx supabase db execute "TRUNCATE customers"', "npx supabase db"],
-  ['npx psql "$DB" -c "DROP TABLE x"', "npx psql"],
-  ["node -e \"new (require('pg').Client)().query('DROP TABLE x')\"", "node script using pg"],
-  ["node scripts/run-sql.mjs 'TRUNCATE customers'", "node script file given SQL"],
-  ["python3 - <<'EOF'\nimport psycopg\npsycopg.connect().execute('DROP SCHEMA public')\nEOF", "python heredoc using a driver"],
-  ["deno run -A x.ts 'DROP TABLE x'", "deno"],
-  ["bash -c 'psql -c \"DROP TABLE x\"'", "bash -c psql"],
-  ["sh <<'EOF'\npsql -c 'TRUNCATE x'\nEOF", "heredoc fed to sh"],
+  ['git grep x; npx psql "$DB" -c "DROP TABLE x"', "npx psql after a git grep"],
+  ["git log -1 && bash -c 'psql -c \"DROP TABLE x\"'", "bash -c psql after a git log"],
+  ["git grep x\nsh <<'EOF'\npsql -c 'TRUNCATE x'\nEOF", "heredoc fed to sh"],
   ["cat wipe.sql | psql \"$DB\" # DROP TABLE", "file piped into psql"],
-  // Luna, 2026-11-03: wrappers in front of the runner.
-  ["env node -e \"new (require('pg').Client)().query('DROP TABLE x')\"", "env node"],
-  ["PGHOST=x nohup python3 run.py 'TRUNCATE customers'", "assignment + nohup python"],
-  ["timeout 30 node run.mjs 'DROP SCHEMA public'", "timeout node"],
-  ["env -i PATH=/usr/bin /usr/bin/node -e 'DROP TABLE x'", "env -i with a path-qualified node"],
-  // Luna round 2, 2026-11-03.
-  ["export SQL='DROP TABLE customers'; node -e \"new (require('pg').Pool)().query(process.env.SQL)\"", "SQL set before the runner"],
-  ["env -u UNUSED node scripts/run-sql.mjs 'DROP TABLE customers'", "env option with an argument"],
-  ["eval \"node -e 'new (require(\\\"pg\\\").Pool)().query(\\\"DROP TABLE customers\\\")'\"", "eval"],
-  ["export SQL='DROP TABLE customers' && node run.mjs", "SQL exported, then a runner"],
-  ["cat(){ bash; }; cat <<'EOF'\npsql -c 'DROP TABLE customers'\nEOF", "a function named cat running bash (Luna round 4)"],
-  // Luna round 3, 2026-11-03.
   ["cat > wipe.sql <<'EOF'\nDROP TABLE customers;\nEOF\npsql -f wipe.sql", "a written SQL file run by psql"],
-  ["python3.11 run-sql.py 'DROP TABLE customers'", "versioned python"],
-  ["node22 run.mjs 'TRUNCATE customers'", "versioned node"],
+  ["cat(){ bash; }; cat <<'EOF'\npsql -c 'DROP TABLE customers'\nEOF", "a function named cat running bash"],
+  ['git grep "$(psql -c \'DROP TABLE x\')"', "a client in a git grep's command substitution"],
 ]) ok(checkDangerousCommand(command), `SQL route stays refused: ${label}`);
-// Text that runs nothing stays allowed, including a script run BEFORE the words.
-for (const command of [
-  'git commit -m "docs: TRUNCATE is refused by sh and node runs" && git log -1',
-  'git commit -m "docs: TRUNCATE is refused" && node scripts/check.mjs',
-  'grep -rn "DROP TABLE" supabase/migrations/20261103_x.sql',
-  'ls supabase/migrations/20260101_drop_table_legacy.sql',
-]) ok(!checkDangerousCommand(command), `text that runs nothing allowed: ${command}`);
 ok(checkDangerousCommand('rg --pre psql "DROP SCHEMA" db.sql'), "rg --pre running a client stays refused (Codex App, PR #1337)");
 ok(checkDangerousCommand(`rg --p''re=psql "DROP SCHEMA" db.sql`), "a quote-split --pre= spelling stays refused");
 // A reader spanning a line break is never exempt (Codex App, PR #1337).

@@ -39,7 +39,6 @@ import {
   MAX_HOOK_INPUT_LENGTH,
   readHookInputBounded,
   sanitizeForMessage,
-  withoutDataHeredocs,
 } from "./codex-push-lib.mjs";
 
 function passthrough() { process.exit(0); }               // emit nothing → normal flow (git push is allow-listed)
@@ -85,11 +84,8 @@ if (nestedCommands.tooDeep) deny(nestedTooDeepDenial("CODEX GATE"));
 if (nestedCommands.commands.some((inner) => isGitPush(inner))) {
   deny("CODEX GATE: this command runs a git push inside another shell or an evaluator (bash -c, cmd /c, pwsh -Command or -EncodedCommand, eval, Invoke-Expression, Start-Process). The review gate reads the outer command's text, so it cannot prove where a push carried that way would go. Run the push as its own plain command: `git -C <repo> push <remote> <refspec>`.");
 }
-// From here on a data-only here-document body (a PR body, a script written to a
-// file) is not read as a push; see withoutDataHeredocs.
-const pushText = withoutDataHeredocs(cmd);
-if (!isGitPush(pushText)) passthrough();
-if (pushContextIsAmbiguous(pushText)) {
+if (!isGitPush(cmd)) passthrough();
+if (pushContextIsAmbiguous(cmd)) {
   deny("CODEX GATE: directory-changing or GIT_DIR/GIT_WORK_TREE-prefixed pushes cannot be bound safely to the inspected worktree. Use `git -C <repo> push`.");
 }
 // Claude's shell cwd can persist across tool calls. The hook payload's cwd is
@@ -124,7 +120,7 @@ if (inheritedSelectors.length > 0) {
 // both sides of a pipeline execute.
 // Quote-aware, so a separator inside a quoted value cannot manufacture a phantom
 // segment boundary (Codex round 9).
-const pushCommands = shellSegments(pushText)
+const pushCommands = shellSegments(cmd)
   .map((segment) => segment.trim())
   .filter((segment) => isGitPush(segment));
 
@@ -139,7 +135,7 @@ for (const pushCmd of pushCommands) {
     deny("CODEX GATE: force-pushing any branch rewrites shared history and requires Mason's explicit approval. Use a normal push or a compensating commit.");
   }
 
-  const pushRepoDir = gitPushCwd(pushCmd, projectDir, pushText);
+  const pushRepoDir = gitPushCwd(pushCmd, projectDir, cmd);
   // Checked first: Node reports a missing cwd as `spawnSync git ENOENT`, which
   // read as "git is not installed" and hid the real problem.
   let isFolder = false;

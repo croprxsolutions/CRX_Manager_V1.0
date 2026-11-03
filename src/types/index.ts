@@ -4,7 +4,7 @@ import type { Database, Json } from './supabase';
 export type FinancialAuditLog = Database['public']['Tables']['financial_audit_log']['Row'];
 
 export type UserRole = 'admin' | 'sales_rep' | 'driver' | 'applicator';
-export type ProductForm = 'liquid' | 'dry';
+export type ProductForm = 'liquid' | 'dry' | 'seed' | 'each';
 export type SalesSheetFormat = 'pdf' | 'csv';
 export type ContainerType = 'Jug' | 'Drum' | 'Pallet' | 'Mini-Bulk' | 'Shuttle' | 'Bag' | 'Tote' | 'Ea' | 'Jar';
 export type UnitType = 'liquid' | 'dry' | 'both';

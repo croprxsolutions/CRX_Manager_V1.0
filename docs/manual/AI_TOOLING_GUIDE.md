@@ -133,7 +133,7 @@ in CI (`Guard, Packet, and Contract Regression Tests`, Linux and Windows).
 |---|---|---|
 | `scripts/write-codex-push-proof.mjs` | Runs one read-only Sol review of `origin/main...HEAD` from a clean, committed checkout and writes `.claude/session-state/codex-review-<head>.json` only if Codex ends with `CODEX_PROOF_VERDICT: CLEAN`. `--carry-forward` reuses a clean review after a plain merge of a newer `main` (rules in `.claude/skills/codex-review/SKILL.md`, Step 3B). A clean proof lasts 24 hours on an unchanged head and base. | The Codex CLI at its standard install location, signed in to an OpenAI account that can use `gpt-6-sol` |
 | `scripts/write-apply-proofs.mjs` | Runs the reviewer charters and Sol on one migration file and writes the content-bound apply proofs (valid 30 minutes). | Codex CLI |
-| `scripts/apply-migration-file.mjs` | Applies one migration file to live through the same rule book as the hook. Dry run without `--confirm`. | The proofs above and a Supabase access token |
+| `scripts/apply-migration-file.mjs` | Applies one migration file to live through the same rule book as the hook. Dry run without `--confirm`. | The proofs above and a Supabase access token (`SUPABASE_ACCESS_TOKEN`, or read from Mason's Windows Credential Manager) |
 | `scripts/owner-approve-migration.mjs` | Builds Mason's approval request for a destructive, overwriting or access-changing migration. | A Claude session where Mason replies |
 | `scripts/run-claude-review.mjs` | Claude's reviewer for Codex-built work (the mirror of the Codex review). | Claude Code |
 

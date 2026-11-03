@@ -127,7 +127,7 @@ assert.match(printed.join("\n"), /max_output_tokens/);
 
 // Guard-change round cap: the third Luna round on a branch whose diff touches a hook is a STOP,
 // exits as findings and never reaches Codex. Other branches run as often as asked.
-function lunaRoundsOn(file) {
+function lunaRoundsOn(file, counter) {
   const dir = mkdtempSync(path.join(tmpdir(), "crx-luna-cap-"));
   const git = (...gitArgs) => execFileSync(fixedGitExecutable(), ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.autocrlf=false", ...gitArgs], { cwd: dir, encoding: "utf8" });
   git("init", "-q");
@@ -140,6 +140,7 @@ function lunaRoundsOn(file) {
   writeFileSync(path.join(dir, file), "change\n");
   git("add", file);
   git("commit", "-q", "-m", "change");
+  if (counter !== undefined) writeFileSync(path.join(dir, ".git", "crx-luna-guard-rounds.json"), counter);
   const out = [];
   let spawned = 0;
   const savedLog = console.log;
@@ -177,6 +178,12 @@ for (const hook of [".claude/hooks/x.mjs", ".codex/hooks/y.mjs"]) {
 const uncapped = lunaRoundsOn("src/a.ts");
 assert.equal(uncapped.spawned, 3);
 assert.doesNotMatch(uncapped.printed, /STOP:/);
+// A damaged counter fails closed instead of starting the count over.
+for (const counter of ["{\"feature\": 2", "null"]) {
+  const damaged = lunaRoundsOn(".claude/hooks/x.mjs", counter);
+  assert.equal(damaged.spawned, 0, counter);
+  assert.deepEqual(damaged.exits, [EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN], counter);
+}
 
 // Other broken runs stay broken.
 for (const [finalText, kind] of [

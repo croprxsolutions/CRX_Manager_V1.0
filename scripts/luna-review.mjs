@@ -295,14 +295,27 @@ function guardRounds(git, root) {
   const file = path.join(path.resolve(root, gitOutput(git, ["rev-parse", "--git-common-dir"]).trim()), "crx-luna-guard-rounds.json");
   const branch = gitOutput(git, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
   let counts = {};
-  try {
-    counts = JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    // No file yet, or a broken one: start over.
+  if (existsSync(file)) {
+    // A damaged count fails closed: resetting it would reopen the cap.
+    try {
+      counts = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      counts = null;
+    }
+    if (!counts || typeof counts !== "object" || Array.isArray(counts)) {
+      throw new Error(`Guard-round counter is unreadable: ${file}. Check it by hand; do not delete it to get another round.`);
+    }
   }
+  const count = Number(counts[branch]) || 0;
   return {
-    count: Number(counts[branch]) || 0,
-    record: () => writeFileSync(file, JSON.stringify({ ...counts, [branch]: (Number(counts[branch]) || 0) + 1 }, null, 2)),
+    count,
+    record: () => {
+      try {
+        writeFileSync(file, JSON.stringify({ ...counts, [branch]: count + 1 }, null, 2));
+      } catch (error) {
+        console.error(`[luna-review] WARNING: guard-round count not saved (${error.message}).`);
+      }
+    },
   };
 }
 

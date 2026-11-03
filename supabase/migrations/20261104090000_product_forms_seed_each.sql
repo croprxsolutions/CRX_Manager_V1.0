@@ -337,7 +337,11 @@ BEGIN
        ) THEN
       RAISE EXCEPTION 'PRODUCT_FORM_UNITS_RULE_ROWS_DRIFT';
     END IF;
+  ELSIF EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit IN ('Lb','Unit','Ea')) THEN
+    -- Some but not all: the missing rule would refuse every product stocked in that unit.
+    RAISE EXCEPTION 'PRODUCT_FORM_UNITS_RULE_ROWS_INCOMPLETE: Lb, Unit and Ea must all be in unit_conversions';
   ELSE
-    RAISE NOTICE 'Skipping product_form_units exact-row postflight: Lb, Unit, Ea are not all present';
+    -- A schema-only rebuild has no unit rows at all.
+    RAISE NOTICE 'Skipping product_form_units exact-row postflight: no Lb, Unit or Ea rows';
   END IF;
 END $postflight$;

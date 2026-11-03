@@ -73,6 +73,7 @@ ok(checkDangerousCommand('rg --pre psql "DROP SCHEMA" db.sql'), "rg --pre runnin
 ok(checkDangerousCommand(`rg --p''re=psql "DROP SCHEMA" db.sql`), "a quote-split --pre= spelling stays refused");
 ok(checkDangerousCommand(`grep "DROP TABLE" f # it's\npsql < wipe.sql`), "a quote in a comment cannot hide the next line's client (Codex App, PR #1337)");
 ok(checkDangerousCommand('grep foo\\ #; psql --command="DROP TABLE customers"'), "an escaped space cannot fake a comment that hides psql (Luna, PR #1337)");
+ok(checkDangerousCommand('grep foo #; psql --command="DROP TABLE customers"'), "a no-break space cannot fake a comment that hides psql");
 ok(!checkDangerousCommand('grep -n "DROP SCHEMA" notes.md # psql docs'), "a comment naming psql after a reader is not a client call");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
@@ -350,6 +351,10 @@ eq(splitShellSegments("rg x # it's\nnode y").length, 2, "a quote inside a commen
 eq(splitShellSegments("echo a#b; node y").length, 2, "a # inside a word is not a comment");
 eq(splitShellSegments("echo foo\\ #; node y").length, 2, "an escaped space before # is not a word break (Luna, PR #1337)");
 eq(splitShellSegments("echo 'a'#; node y").length, 2, "a # right after a closing quote is not a comment");
+eq(splitShellSegments("echo foo #; node y").length, 2, "a no-break space is not a bash blank, so # is not a comment");
+eq(splitShellSegments("echo foo\v#; node y").length, 2, "a vertical tab is not a bash blank either");
+eq(splitShellSegments("echo foo\r#; node y").length, 3, "a carriage return never starts a comment");
+eq(splitShellSegments("echo foo\t# x; node y").length, 1, "a tab is a bash blank, so # starts a comment");
 //     4. Round 2 (Codex App P2 on 939c2d3cf): a quoted redirection target with
 //        whitespace is ONE word, both in the token walk after the runtime and
 //        in the head-word scan, so skipping the target cannot expose half of it

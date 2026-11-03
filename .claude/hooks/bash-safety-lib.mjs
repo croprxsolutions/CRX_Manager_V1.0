@@ -122,11 +122,13 @@ export function splitShellSegments(text) {
     if ((char === "&" && !redirectionAmpersand) || char === ";" || char === "|" || char === "\r" || char === "\n") {
       segments.push(current);
       current = "";
-      wordStart = true;
+      // Bash treats `\r` as an ordinary character, so it never starts a comment.
+      wordStart = char !== "\r";
       continue;
     }
     current += char;
-    wordStart = /[\s(]/.test(char);
+    // Only bash's own blanks count: a no-break space or `\v` is part of the word.
+    wordStart = char === " " || char === "\t" || char === "(";
   }
   segments.push(current);
   return segments;

@@ -1,36 +1,36 @@
 # Product Master: Wave 2 report (2026-11-02, attempt 2)
 
-## Current status (2026-11-03 7:15 AM Central)
+## Current status (2026-11-03 10:55 AM Central)
 
-**Status:** **1 landed** (Use Timing), **3 PRs open** (Corrections, One cost path, Seed/each forms), **4 waiting** on those PRs or not started. Wave 2 is **not finished**. Wave 3 has not started.
+**Status:** **3 landed** (Use Timing, Corrections, One cost path), **1 PR open** (Seed/each forms), **4 waiting** on it or not started. Wave 2 is **not finished**. Wave 3 has not started.
 
-**Recommended next step:** do the WP-PM-12b click-through on its Vercel preview (steps below). It is the only open Wave 2 step that needs you.
+**Recommended next step:** nothing needs you right now. WP-PM-9's session is landing #1342 next (apply its migration, then merge).
 
 | Package | Status | Where |
 |---|---|---|
-| WP-PM-5 Use Timing | **LANDED.** Migration `20261103210000` applied 11:27 PM Central 11-02 with your approval. Merged as `c69209353` at 11:31 PM. 317/317 timings back-filled with 0 mismatches. Live save test on "2, 4D Ester 6# - 2.5 Gal": two timings saved and survived a reload, then it was reverted. Read back from live: Pre-Emerge Corn only. Registry refresh merged ([#1343](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1343)). | [#1316](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1316) merged |
-| WP-PM-12b Corrections | **PR open, no migration.** Sol clean on `48cfcb0bc`, carried to `da04b0823`. `40a066a63` is docs only (your EPA decision). Main was merged in since then, now head `07330f84c`. The PR is marked ready and CI is re-running. **Owed:** your preview click-through. | [#1341](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1341) |
-| WP-PM-7 One cost path, tier-order warning 💲 | **Draft PR.** Luna: 1 LOW, deferred. Sol clean on exact head `f1a15f169` (about 12:35 AM Central 11-03). 18 checks pass. **Blocked:** its stamp `20261103230000` is now below live (see Stamp alert). It needs a new stamp (`20261104140000`), a re-proof and a new Sol. **Update 8:00 AM Central:** re-stamped and pushed. Head `d28e096a6`, migration `20261104140000_pricing_tier_order_warning`, main merged in, and the prover passes. Its session reports Sol clean on that exact head. Checks were still running at this point. Also owed: a preview click-through. | [#1345](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1345) |
-| WP-PM-9 Seed and each forms | **PR open (marked ready).** Sol clean on `6f99da763`. **Re-stamped** to `20261104150000` (head `fe36a4b70`, 20 checks pass, checked 7:47 AM Central). It needs exact-head Sol before the apply, and it lands after WP-PM-7's migration is live. | [#1342](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1342) |
+| WP-PM-5 Use Timing | **LANDED** 11-02. Migration `20261103210000` applied 11:27 PM Central with your approval, merged as `c69209353`, live save test passed. | [#1316](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1316) merged |
+| WP-PM-12b Corrections | **LANDED.** No migration. Preview click-through passed twice; a tab-switch bug it found was fixed (`3fb509c5c`). Merged 8:44 AM Central 11-03 as `82d9bd105`. | [#1341](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1341) merged |
+| WP-PM-7 One cost path, tier-order warning 💲 | **LANDED.** Migration `20261104140000_pricing_tier_order_warning` applied about 10:00 AM Central 11-03 (with your yes; confirmed in the live ledger), merged 10:03 AM as `7a4ddc33f`. Live check about 10:43 AM: the tier-order warning shows and the product was not changed. Follow-up [#1367](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1367) re-keyed three sweep entries. | [#1345](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1345) merged |
+| WP-PM-9 Seed and each forms | **PR open (ready).** Head `beb1fc4dd`, no failing checks (3 still running at 10:53 AM Central). Migration `20261104150000` is **not live yet**; its session owns the exact-head Sol, the apply and the merge. | [#1342](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1342) |
 | WP-PM-6a Unit audit | Waits on WP-PM-9 landing. Audit done (vault list). | |
 | WP-PM-6b New-product flow 💲 | Waits on WP-PM-6a. | |
-| WP-PM-15a Vendor proposals 💲 | Waits on WP-PM-7 landing. | |
+| WP-PM-15a Vendor proposals 💲 | Unblocked now that WP-PM-7 is live. Not started. | |
 | WP-PM-8b Incomplete badge, near-match warnings, rate help | Not started. | |
 | DM-0 Data clean-up | Your data step (vault list). | |
 
-**Stamp alert (found 7:15 AM Central).** Every database change is named with a stamp (a date and number), and a new one must sort above everything already live. Live is now at `20261104120000_balance_reports_flag_unrebuildable_customers`, applied 6:53 AM Central 11-03 by another PR. That is above both WP-PM-7's `20261103230000` and WP-PM-9's `20261104090000`. Both owner sessions were told to re-stamp with `npm run next-migration-stamp` (now on main): They agreed WP-PM-7 takes `20261104140000` and WP-PM-9 `20261104150000` (#1347 holds `20261104130000`). Each then re-runs its proof and Sol on the new head.
+**Live high-water:** `20261104140000` (WP-PM-7). Any new migration needs a stamp above it; WP-PM-9 holds `20261104150000`. Get the next one with `npm run next-migration-stamp`.
 
-**Landing order:** WP-PM-12b (no migration) any time after your click-through, then WP-PM-7, then WP-PM-9, then 6a, then 6b and 15a. Each applies its migration before its merge, and the next one merges main and re-checks.
+**What held things up this morning:**
+- **Stamps:** another PR's migration went live at 6:53 AM Central above both WP-PM-7's and WP-PM-9's stamps, so both were re-stamped and re-proved.
+- **Pushes blocked about an hour:** main's new code-health check (#1352) flagged one of main's own files, which blocked every branch that merged main. Taha's one-line fix [#1357](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1357) was merged at 9:20 AM Central and cleared it.
+- **No one owned the apply:** WP-PM-7's own session had been told never to apply or merge, so another session had to take the branch. Next time, each owner session is told up front that it lands its own PR, live apply included.
 
-**WP-PM-12b click-through.** Preview: <https://crx-manager-v1-0-git-pm-wp-pm-12b-c-0cf32e-mason-wells-projects.vercel.app>. It saves to the live database, so use a throwaway job.
-1. Open a scheduled job that has a chemical line.
-2. On the Chemicals tab, type an REI different from the product's label. Save, then reload.
-3. An amber notice, "Some lines differ from the product's current label", lists old → new.
-4. Click "Update to current label", Save, then reload. The notice is gone and the line shows the product's value.
-5. On another line with a different value, click "Keep job values". The notice hides.
-6. Open a completed job. No notice appears.
+**Leftover on live (harmless):** the WP-PM-7 live check left one price change set (`a27b2386`) in "previewed" on a test product. Nothing was applied, and prices did not change. The app has no cancel button for a previewed change set, so it stays there.
 
-**Follow-ups named this round (not Wave 2 scope):**
+**Landing order from here:** WP-PM-9 (apply, then merge), then 6a, then 6b. 15a and 8b can start any time.
+
+**Follow-ups named (not Wave 2 scope):**
+- a cancel button for a previewed price change set (every live test leaves one behind);
 - a product-page list of open jobs still on old label values;
 - a server-side status check in `save_job`, which does not itself refuse edits to completed jobs;
 - WP-PM-7 deferred LOWs: emoji character count, older `toFixed` displays, the raw select in the cost modal.

@@ -18,11 +18,17 @@ If the user already described the change before invoking this skill, skip the qu
 
 ## Step 2: Generate the Migration File
 
-1. Get the current timestamp for the filename:
+1. Get the version stamp for the filename from the stamp helper. It reads `origin/main`, every
+   local worktree and every open PR, and prints a stamp at least an hour above all of them, so it
+   cannot collide with work in flight. When the migration will be applied live, first read the live
+   high-water read-only (`SELECT max(version) FROM supabase_migrations.schema_migrations;`) and pass it:
 
 ```bash
-date -u +"%Y%m%d%H%M%S"
+npm run next-migration-stamp -- --live <live max version>
 ```
+
+   Do not use `date` for the stamp. If the helper prints `NO STAMP` (for example `gh` is missing),
+   say so and do not guess one.
 
 2. Create the file at `supabase/migrations/<timestamp>_<short_snake_case_description>.sql`
    - Keep the description part under 50 characters

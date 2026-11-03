@@ -463,9 +463,20 @@ export default function QuoteBuilder() {
   const seasonEnd = seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz())));
   // Settings "Default Quote Valid Days": where "Pick a date" starts (null = season end).
   const [quoteValidDays, setQuoteValidDays] = useState<number | null>(null);
+  // Set when "Pick a date" is chosen before the setting arrives, so the start is redone once it does.
+  const pickedBeforeValidDaysRef = useRef(false);
+  const validDaysLoadedRef = useRef(false);
   useEffect(() => {
     let cancelled = false;
-    void loadQuoteValidDays().then((days) => { if (!cancelled) setQuoteValidDays(days); });
+    void loadQuoteValidDays().then((days) => {
+      if (cancelled) return;
+      validDaysLoadedRef.current = true;
+      setQuoteValidDays(days);
+      if (pickedBeforeValidDaysRef.current) {
+        pickedBeforeValidDaysRef.current = false;
+        setChosenExpiryDate((current) => (current === null ? null : pickedExpiryStart(todayInBusinessTz(), days, seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz()))))));
+      }
+    });
     return () => { cancelled = true; };
   }, []);
   const [headerNotes, setHeaderNotes] = useState('');
@@ -1371,6 +1382,7 @@ export default function QuoteBuilder() {
       ? "This quote's customer could not be loaded. Refresh the page before saving."
       : null);
     setTier(q.tier);
+    pickedBeforeValidDaysRef.current = false;
     setChosenExpiryDate(q.chosen_expiry_date ?? null);
     setHeaderNotes(q.header_notes || '');
     setFooterNotes(q.footer_notes || '');
@@ -4879,9 +4891,11 @@ export default function QuoteBuilder() {
             <select
               id="quote-expires"
               value={chosenExpiryDate ? 'date' : 'season'}
-              onChange={(e) => setChosenExpiryDate(
-                e.target.value === 'date' ? pickedExpiryStart(todayInBusinessTz(), quoteValidDays, seasonEnd) : null,
-              )}
+              onChange={(e) => {
+                const pickDate = e.target.value === 'date';
+                pickedBeforeValidDaysRef.current = pickDate && !validDaysLoadedRef.current;
+                setChosenExpiryDate(pickDate ? pickedExpiryStart(todayInBusinessTz(), quoteValidDays, seasonEnd) : null);
+              }}
               className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >
               <option value="season">
@@ -4895,7 +4909,7 @@ export default function QuoteBuilder() {
                 aria-label="Expiry date"
                 value={chosenExpiryDate}
                 min={todayInBusinessTz()}
-                onChange={(e) => setChosenExpiryDate(e.target.value || seasonEnd)}
+                onChange={(e) => { pickedBeforeValidDaysRef.current = false; setChosenExpiryDate(e.target.value || seasonEnd); }}
                 className="mt-2 w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               />
             )}

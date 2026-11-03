@@ -38,6 +38,15 @@ ok(checkDangerousCommand("rm -rf src"), "rm -rf src blocked");
 ok(checkDangerousCommand("rm -rf supabase"), "rm -rf supabase blocked");
 ok(checkDangerousCommand("git add file.txt .env"), "staging .env blocked");
 ok(checkDangerousCommand("npx supabase db push"), "supabase db push blocked");
+// An Area/City zone with `date` prints UTC silently in Git Bash; POSIX zones and searches stay allowed.
+ok(checkDangerousCommand("TZ=America/Chicago date '+%H:%M %Z'"), "TZ=Area/City date blocked");
+ok(checkDangerousCommand("git push && TZ='America/Chicago' date"), "quoted zone after && blocked");
+ok(checkDangerousCommand("echo $(TZ=America/Chicago date +%H)"), "zone date in substitution blocked");
+ok(checkDangerousCommand("env TZ=America/Chicago date"), "env TZ= date blocked");
+eq(checkDangerousCommand("TZ=CST6CDT date '+%H:%M %Z'"), null, "POSIX zone date allowed");
+eq(checkDangerousCommand("date -u"), null, "plain date allowed");
+eq(checkDangerousCommand("TZ=America/Chicago git log -1"), null, "zone on a non-date command allowed");
+eq(checkDangerousCommand("grep -n 'TZ=America/Chicago date' notes.md"), null, "quoted search text allowed");
 ok(checkDangerousCommand("supabase db push"), "bare (non-npx) supabase db push blocked — 2026-07-16 review B1");
 ok(checkDangerousCommand("cd repo && supabase db push --linked"), "supabase db push blocked mid-compound-command");
 ok(checkDangerousCommand("supabase migration up"), "bare supabase migration up blocked — sibling live-apply spelling");

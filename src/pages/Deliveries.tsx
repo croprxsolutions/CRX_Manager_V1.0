@@ -901,8 +901,8 @@ export default function Deliveries() {
     }
     await runCriticalAction({
       action: async () => {
-        // One key per exact request: a retry reuses it, a different selection or reason gets its own.
-        const cancelScope = fingerprintIntentPayload([ids, reason]);
+        // One key per set of deliveries, in any order: the server binds this key to its request, so edited details after a lost reply are refused with the committed result.
+        const cancelScope = fingerprintIntentPayload([...ids].sort());
         const { data, error } = await supabase.rpc('batch_cancel_deliveries', {
           p_delivery_ids: ids,
           p_cancel_reason: reason,
@@ -1166,7 +1166,9 @@ export default function Deliveries() {
       }
       await runCriticalAction({
         action: async () => {
-          const reassignKey = reassignIdem.getKey();
+          // One key per delivery: reassign_delivery does not bind its request, so a shared key would
+          // replay delivery A's result for delivery B after a lost reply.
+          const reassignKey = reassignIdem.getKeyFor(deliveryId);
           const { data, error } = await supabase.rpc('reassign_delivery', {
             p_delivery_id: deliveryId,
             p_new_driver: profile.id,
@@ -1175,7 +1177,7 @@ export default function Deliveries() {
           });
           if (error) throw error;
           assertRpcResult(data, 'reassign_delivery');
-          reassignIdem.resetKey();
+          reassignIdem.resetKeyFor(deliveryId);
           logActivity({ event: 'reassign_delivery', description: `Took delivery ${deliveryId}`, performedBy: profile.id, entityType: 'delivery', entityId: deliveryId });
         },
         toast,

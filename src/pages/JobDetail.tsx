@@ -3216,8 +3216,8 @@ export default function JobDetail() {
 
   const handleComplete = async () => {
     const stillOnThisJob = captureRouteEpoch();
-    // One key per job and exact completion details: a retry reuses it, edited details get their own.
-    const completeScope = fingerprintIntentPayload([id, appliedInfo]);
+    // One key per job: the server binds this key to its request, so edited details after a lost reply are refused with the committed result.
+    const completeScope = id ?? '';
     setCompleting(true);
     try {
       // #68: after-the-fact completion — the office is recording a job that was

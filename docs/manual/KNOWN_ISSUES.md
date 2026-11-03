@@ -192,15 +192,29 @@ it"). Remaining: notification RPCs and about 45 MED/LOW functions (batches 4c an
 **HIGH on money paths · FIXED IN CODE 2026-11-02 (branch `claude/crx-idempotency-keys-4a3741`; live once merged) · money**
 On a lost reply the app should retry with the same key. Many screens discarded the key too early or kept it across
 different records, so a retry could double-apply or replay another record's result. About 14 spots were fixed in
-PR #584. The rest are now fixed: Invoices (batch void/delete), PaymentAllocation, PrepayWorkspacePanel,
-FinanceChargePreviewModal, QuoteBuilder, JobDetail, BlendTicketDetail, QuickDeliveryModal, Deliveries,
-DeliveryRemainders, NewOrder, Quotes and FieldSetup. Each keeps its key until the save is confirmed, and takes a
-new key when the record or payload changes (`getKeyFor(fingerprintIntentPayload(...))`). `KNOWN_UNFIXED_SITES` in
-`src/__tests__/idempotency-reset-order.test.ts` now lists only three documented scanner false positives
-(CustomerDetail, BulkTicketUpload, ManualTicketCreate). Proof on the local test copy, with the first reply
-dropped on purpose: Payment Allocation, Quick Delivery and Invoices delete each retried with the same key, and
-the server replayed the first result (one payment, one delivery/invoice, one delete). The scanner is still only a
-weak tripwire: it checks the order of the reset, not whether the key is scoped correctly.
+PR #584; the rest are fixed on this branch, and every one now keeps its key until the save is confirmed. How each
+key is scoped depends on whether the server binds the key to its request (KI-10):
+- **Server binds the request** (`create_quick_delivery`, `batch_apply_prepayments`, `create_order_from_blend_ticket`,
+  `batch_cancel_deliveries`, `batch_void_invoices`, `delete_invoices`, `complete_job`, `draw_down_quote`): one key
+  per form, record, or sorted set of records. An edited retry after a lost reply is refused with the committed
+  result, which the screen opens instead of creating a second one. Scoping these by payload would let an edit
+  mint a fresh key and duplicate the work.
+- **Server does not bind the request** (`allocate_payment`, `generate_finance_charges`, `save_job`,
+  `assign_job_applicator`, `save_field`, `edit_delivery`, `link_blend_ticket_to_order`, `create_quote_from_template`,
+  `rollover_quote_to_season`, `reassign_delivery`): one key per record and exact request, so a retry can never
+  replay another record's result.
+- NewOrder (`create_direct_order`, `create_rush_order`, both bound) keeps one key per exact request on purpose:
+  its below-cost approval is remembered per key, and a shared key could carry an approval to a different order.
+**Remaining risk:** for the unbound functions, editing the form after a lost reply and saving again can still do
+the work twice (most visibly a second payment in Payment Allocation, partly caught by its duplicate-payment
+warning). That needs server-side binding (KI-10 batches 4c/4d), not a screen change. Quotes' Convert to Order
+starts a new key each time its dialog opens, which is accepted: the server answers a repeat with
+`already_converted` and opens the existing order. `KNOWN_UNFIXED_SITES` in
+`src/__tests__/idempotency-reset-order.test.ts` lists only three documented scanner false positives (CustomerDetail,
+BulkTicketUpload, ManualTicketCreate). Proof on the local test copy, with the first reply dropped on purpose:
+Payment Allocation, Quick Delivery, Invoices delete and New Order (edited to B and back to A) each retried with the
+same key and the server replayed the first result. The scanner is still only a weak tripwire: it checks the order
+of the reset, not whether the key is scoped correctly.
 
 ### KI-12 — Quote "Convert to Order" can leave an accepted quote with no order
 **MED (latent) · CAUSE FIXED, LIVE 2026-10-27 (To-Do 1.3; PR #1105 merged as `f1503ba91`) · money/inventory/UI · Mason to decide about one real accepted quote with no order (Q-2026-2059)**

@@ -3560,8 +3560,8 @@ export default function QuoteBuilder() {
       quantity: d.quantity,
       ...(d.quantity > d.remaining ? { extra_price: d.extraPrice } : {}),
     }));
-    // One key per quote and exact draw: a retry reuses it, changed quantities get their own.
-    const drawScope = fingerprintIntentPayload([id, drawPayload]);
+    // One key per quote: the server binds this key to its request, so edited details after a lost reply are refused with the committed result (a re-entered quantity can newly exceed what is left).
+    const drawScope = id ?? '';
     try {
       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('draw_down_quote', withBelowCostReason('draw_down_quote', {
         p_quote_id: id,

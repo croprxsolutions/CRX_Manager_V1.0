@@ -128,7 +128,7 @@ export default function FinanceChargePreviewModal({
     setGenerating(true);
     try {
       // One key per exact run: a retry reuses it, a different date or customer set gets its own.
-      const scope = fingerprintIntentPayload([asOfDate, customerIds ?? null]);
+      const scope = fingerprintIntentPayload([asOfDate, customerIds ? [...customerIds].sort() : null]);
       const params = {
         p_as_of_date: asOfDate,
         p_performed_by: profile.id,

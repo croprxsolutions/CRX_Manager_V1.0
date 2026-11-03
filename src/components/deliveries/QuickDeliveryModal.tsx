@@ -13,7 +13,7 @@ import { supabase, assertRpcResult } from '../../lib/db';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
-import { fingerprintIntentPayload, getIdempotencyMismatchResult, isMissingIntentBindingColumn, legacyIntentChanged } from '../../lib/idempotency';
+import { getIdempotencyMismatchResult, isMissingIntentBindingColumn, legacyIntentChanged } from '../../lib/idempotency';
 import { localToday } from '../../lib/dateUtils';
 import { Sentry } from '../../lib/sentry';
 import { PRODUCT_COLUMNS } from '../../lib/costFields';
@@ -406,9 +406,9 @@ export default function QuickDeliveryModal({
         delivery_notes: deliveryNotes || null,
         skip_invoice: !createInvoice,
       });
-      // One key per exact request: a retry reuses it, a changed form gets its own.
-      const scope = fingerprintIntentPayload(intent);
-      const key = quickDeliveryIdem.getKeyFor(scope);
+      // One key for this form until a save is confirmed. create_quick_delivery binds the key to its
+      // request, so an edited retry after a lost reply is refused with the committed delivery below.
+      const key = quickDeliveryIdem.getKey();
       const capability = await supabase
         .from('idempotency_keys')
         .select('request_fingerprint')
@@ -436,7 +436,7 @@ export default function QuickDeliveryModal({
         const receipt = getIdempotencyMismatchResult(error, 'create_quick_delivery');
         const committedDeliveryId = receipt?.delivery_id;
         if (typeof committedDeliveryId === 'string') {
-          quickDeliveryIdem.resetKeyFor(scope);
+          quickDeliveryIdem.resetKey();
           legacyQuickIntentRef.current = null;
           resetForm();
           toast('warning', 'The earlier quick delivery already completed. Opening the committed delivery instead of creating a duplicate.');
@@ -448,7 +448,7 @@ export default function QuickDeliveryModal({
         throw error;
       }
       const result = assertRpcResult<{ delivery_id: string; delivery_number: string; invoice_number: string | null; credit_warning?: boolean; stock_warning?: boolean; short_stock_count?: number }>(data, 'create_quick_delivery');
-      quickDeliveryIdem.resetKeyFor(scope);
+      quickDeliveryIdem.resetKey();
       legacyQuickIntentRef.current = null;
       const invoiceMsg = result.invoice_number
         ? ` with draft invoice ${result.invoice_number}`

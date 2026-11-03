@@ -1155,8 +1155,8 @@ export function BlendTicketDetail() {
     }
     setLinking(true);
     try {
-      // One key per ticket and exact order details: a retry reuses it, edited details get their own.
-      const createOrderScope = fingerprintIntentPayload([ticket.id, newOrderNumber.trim(), newOrderDate, newOrderNotes || null]);
+      // One key per ticket: the server binds this key to its request, so edited details after a lost reply are refused with the committed result (the order number is regenerated on each open).
+      const createOrderScope = ticket.id;
       const { data, error } = await supabase.rpc('create_order_from_blend_ticket', {
         p_blend_ticket_id: ticket.id,
         p_order_number: newOrderNumber.trim(),

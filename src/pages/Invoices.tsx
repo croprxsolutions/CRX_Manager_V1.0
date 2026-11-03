@@ -379,8 +379,8 @@ export default function Invoices() {
 
     await runCriticalAction({
       action: async () => {
-        // One key per exact request: a retry reuses it, a different selection or reason gets its own.
-        const voidScope = fingerprintIntentPayload([ids, reason]);
+        // One key per set of invoices, in any order: the server binds this key to its request, so edited details after a lost reply are refused with the committed result.
+        const voidScope = fingerprintIntentPayload([...ids].sort());
         const { data, error } = await supabase.rpc('batch_void_invoices', {
           p_invoice_ids: ids,
           p_void_reason: reason,
@@ -512,7 +512,8 @@ export default function Invoices() {
       action: async () => {
         // Route through the guarded RPC (admin-only, audited, idempotent) instead
         // of a raw .update({ deleted_at }). See migration delete_invoices.
-        const deleteScope = fingerprintIntentPayload(ids);
+        // One key per set of invoices, in any order: the server binds this key to its request, so edited details after a lost reply are refused with the committed result.
+        const deleteScope = fingerprintIntentPayload([...ids].sort());
         const { data, error } = await supabase.rpc('delete_invoices', {
           p_invoice_ids: ids,
           p_performed_by: profile?.id,

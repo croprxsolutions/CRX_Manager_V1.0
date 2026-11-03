@@ -206,19 +206,36 @@ BEGIN
       v_ar.total_outstanding, v_ar.open_credit_cents, v_ar.unavailable_reason;
   END IF;
 
-  -- Customer Balance Listing still fails closed (outside KI-95's report fix).
-  v_failed_closed := false;
-  BEGIN
-    PERFORM 1 FROM public.get_customer_balance_listing(v_cutoff);
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE:%' THEN
-      v_failed_closed := true;
-    ELSE
-      RAISE;
-    END IF;
-  END;
-  IF NOT v_failed_closed THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: Customer Balance Listing did not propagate unsupported historical reconstruction';
+  -- KI-95 (20261103160000): Customer Balance Listing flags the unrebuildable
+  -- customer the same way, with every amount blank, and keeps the safe row.
+  SELECT *
+    INTO v_listing
+    FROM public.get_customer_balance_listing(v_cutoff) b
+   WHERE b.customer_id = v_unsafe_customer;
+  IF v_listing.customer_id IS DISTINCT FROM v_unsafe_customer
+     OR v_listing.unavailable_reason IS DISTINCT FROM 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE'
+     OR num_nonnulls(v_listing.total_invoiced, v_listing.total_paid, v_listing.prepay_applied,
+                     v_listing.outstanding_balance, v_listing.open_credit, v_listing.invoice_count,
+                     v_listing.oldest_unpaid_date) <> 0 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: Customer Balance Listing did not flag the unrebuildable customer without amounts, got reason=% balance=%',
+      v_listing.unavailable_reason, v_listing.outstanding_balance;
+  END IF;
+  IF (SELECT count(*) FROM public.get_customer_balance_listing(v_cutoff) b WHERE b.customer_id = v_unsafe_customer) <> 1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: Customer Balance Listing returned the flagged customer more than once';
+  END IF;
+
+  SELECT *
+    INTO v_listing
+    FROM public.get_customer_balance_listing(v_cutoff) b
+   WHERE b.customer_id = v_customer;
+  IF v_listing.customer_id IS DISTINCT FROM v_customer
+     OR v_listing.total_invoiced IS DISTINCT FROM 150.00::numeric
+     OR v_listing.outstanding_balance IS DISTINCT FROM 100.00::numeric
+     OR v_listing.open_credit IS DISTINCT FROM 30.00::numeric
+     OR v_listing.invoice_count IS DISTINCT FROM 2::bigint
+     OR v_listing.unavailable_reason IS NOT NULL THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: one unrebuildable customer changed a safe customer''s listing row, got balance=% credit=% reason=%',
+      v_listing.outstanding_balance, v_listing.open_credit, v_listing.unavailable_reason;
   END IF;
 
   IF has_function_privilege('anon', 'public.get_ar_aging(date)', 'EXECUTE')

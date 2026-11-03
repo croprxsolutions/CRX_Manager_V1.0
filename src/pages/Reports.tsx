@@ -1,5 +1,5 @@
 import { useEffect, useState , useCallback, useMemo, useRef } from 'react';
-import { Download, CheckCircle2, FileText, Sprout } from 'lucide-react';
+import { Download, CheckCircle2, FileText, Sprout, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Card from '../components/ui/Card';
 import DataTable, { type Column } from '../components/ui/DataTable';
@@ -12,6 +12,7 @@ import { hasPageAccess } from '../lib/pagePermissions';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
 import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
+import { unavailableReasonText } from '../lib/historicalBalanceReasons';
 import { exportToCSV, fmtCSV, fmtDateCSV, formatProductMoneyCSV } from '../lib/csvExport';
 import { formatExactUSD, formatUSD } from '../lib/money';
 import { parseDollarsToCentsSigned } from '../lib/parseCents';
@@ -228,6 +229,9 @@ export default function Reports() {
   const [grossSalesData, setGrossSalesData] = useState<GrossSalesRow[]>([]);
   const [grossSalesGroupBy, setGrossSalesGroupBy] = useState<'product' | 'customer' | 'salesman'>('product');
   const [custBalanceData, setCustBalanceData] = useState<CustomerBalanceRow[]>([]);
+  // Customers whose balance cannot be shown as of this date (no amounts): listed, never in the table.
+  // Flagged rows carry no amounts (all NULL), so the type keeps arithmetic off them.
+  const [custBalanceUnavailable, setCustBalanceUnavailable] = useState<Pick<CustomerBalanceRow, 'customer_id' | 'farm_name' | 'unavailable_reason'>[]>([]);
   const [commBalanceData, setCommBalanceData] = useState<CommissionBalanceRow[]>([]);
   const [commPaymentDetailData, setCommPaymentDetailData] = useState<CommissionPaymentDetailRow[]>([]);
   const [commissionAsOfDate, setCommissionAsOfDate] = useState('');
@@ -524,11 +528,14 @@ export default function Reports() {
     if (seq !== reportLoadSeq.current) return;
     if (error) {
       setCustBalanceData([]);
+      setCustBalanceUnavailable([]);
       markReportFailed('financial:customer_balance');
       toast('error', `Customer balance failed: ${error.message}`);
       return;
     }
-    setCustBalanceData(assertRpcResult<CustomerBalanceRow[]>(data, 'get_customer_balance_listing'));
+    const allRows = assertRpcResult<CustomerBalanceRow[]>(data, 'get_customer_balance_listing');
+    setCustBalanceData(allRows.filter((r) => !r.unavailable_reason));
+    setCustBalanceUnavailable(allRows.filter((r) => r.unavailable_reason));
     reportLoaded('financial:customer_balance');
   }, [endDate, toast, reportLoaded, markReportFailed]);
 
@@ -1180,14 +1187,21 @@ export default function Reports() {
         { key: 'order_count', header: 'Orders' },
       ], `gross_sales_by_${grossSalesGroupBy}`);
     } else if (financialTab === 'customer_balance') {
-      exportToCSV(custBalanceData as unknown as Record<string, unknown>[], [
+      // Customers that cannot be shown as of this date stay in the file, with blank amounts.
+      const blankIfFlagged = (format: (v: unknown) => string) => (v: unknown) => (v === null || v === undefined ? '' : format(v));
+      exportToCSV([...custBalanceData, ...custBalanceUnavailable] as unknown as Record<string, unknown>[], [
         { key: 'farm_name', header: 'Customer' },
-        { key: 'total_invoiced', header: 'Invoiced', format: fmtCSV },
-        { key: 'total_paid', header: 'Paid', format: fmtCSV },
-        { key: 'outstanding_balance', header: 'Balance', format: fmtCSV },
-        { key: 'open_credit', header: 'Credit Available', format: fmtCSV },
+        { key: 'total_invoiced', header: 'Invoiced', format: blankIfFlagged(fmtCSV) },
+        { key: 'total_paid', header: 'Paid', format: blankIfFlagged(fmtCSV) },
+        { key: 'outstanding_balance', header: 'Balance', format: blankIfFlagged(fmtCSV) },
+        { key: 'open_credit', header: 'Credit Available', format: blankIfFlagged(fmtCSV) },
         { key: 'invoice_count', header: 'Invoices' },
         { key: 'oldest_unpaid_date', header: 'Oldest Unpaid', format: fmtDateCSV },
+        {
+          key: 'unavailable_reason',
+          header: 'Note',
+          format: (v) => (v ? `Cannot be shown as of this date: ${unavailableReasonText(String(v))}` : ''),
+        },
       ], 'customer_balance_listing');
     } else if (financialTab === 'commission_balance' && isAdmin) {
       if (!commissionExportReady) {
@@ -1339,6 +1353,10 @@ export default function Reports() {
     { key: 'margin_pct', header: 'Margin', sortable: true, render: (r) => `${r.margin_pct.toFixed(1)}%` },
     { key: 'order_count', header: 'Orders', sortable: true },
   ];
+
+  const custUnavailableItem = (r: (typeof custBalanceUnavailable)[number]) => (
+    <li key={r.customer_id}><span className="font-medium">{r.farm_name}</span>{' — '}{unavailableReasonText(r.unavailable_reason)}</li>
+  );
 
   const custBalanceCols: Column<CustomerBalanceRow>[] = [
     { key: 'farm_name', header: 'Customer', sortable: true, render: (r) => <span className="font-medium text-nav-dark">{r.farm_name}</span> },
@@ -1666,7 +1684,28 @@ export default function Reports() {
             <div className="p-5">
               {isAdmin && financialTab === 'pnl' && <DataTable data={pnlData as unknown as Record<string, unknown>[]} columns={pnlCols as unknown as Column<Record<string, unknown>>[]} emptyTitle="No P&L data" emptyDescription="Select a date range to generate P&L" loading={loading} />}
               {isAdmin && financialTab === 'gross_sales' && <DataTable data={grossSalesData as unknown as Record<string, unknown>[]} columns={grossSalesCols as unknown as Column<Record<string, unknown>>[]} searchable searchKeys={['group_name']} emptyTitle="No gross sales data" emptyDescription="Select a date range" loading={loading} />}
-              {financialTab === 'customer_balance' && <DataTable data={custBalanceData as unknown as Record<string, unknown>[]} columns={custBalanceCols as unknown as Column<Record<string, unknown>>[]} searchable searchKeys={['farm_name']} emptyTitle="No outstanding balances" loading={loading} />}
+              {financialTab === 'customer_balance' && !loading && custBalanceUnavailable.length > 0 && (
+                <div role="alert" className="mb-4 flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                  <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" aria-hidden="true" />
+                  <div>
+                    <p className="font-semibold">
+                      {custBalanceUnavailable.length === 1 ? '1 customer cannot' : `${custBalanceUnavailable.length} customers cannot`} be shown as of this date
+                    </p>
+                    <p className="mt-0.5">Their balance on this date can't be rebuilt exactly, so it is not guessed. They are left out of the table below.</p>
+                    <ul className="mt-2 list-disc pl-5 space-y-0.5">
+                      {custBalanceUnavailable.slice(0, 10).map(custUnavailableItem)}
+                    </ul>
+                    {/* A date far back can flag most customers: the first ten, then the rest on request. */}
+                    {custBalanceUnavailable.length > 10 && (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer font-medium">Show all {custBalanceUnavailable.length}</summary>
+                        <ul className="mt-1 list-disc pl-5 space-y-0.5">{custBalanceUnavailable.slice(10).map(custUnavailableItem)}</ul>
+                      </details>
+                    )}
+                  </div>
+                </div>
+              )}
+              {financialTab === 'customer_balance' && <DataTable data={custBalanceData as unknown as Record<string, unknown>[]} columns={custBalanceCols as unknown as Column<Record<string, unknown>>[]} searchable searchKeys={['farm_name']} emptyTitle={custBalanceUnavailable.length > 0 ? 'No balances can be shown for this date' : 'No outstanding balances'} loading={loading} />}
               {isAdmin && financialTab === 'commission_balance' && (
                 <>
                   <h3 className="mb-4 text-base font-semibold text-nav-dark">Balance by salesperson</h3>

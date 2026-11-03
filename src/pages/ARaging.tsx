@@ -32,6 +32,7 @@ import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { escapeHtml } from '../lib/proofNotification';
 import { buildStatementEmailContent } from '../lib/statementEmail';
 import { logActivity } from '../lib/activityLogger';
+import { unavailableReasonText } from '../lib/historicalBalanceReasons';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import StatementPrintDialog from '../components/statements/StatementPrintDialog';
 import FinanceChargePreviewModal from '../components/invoices/FinanceChargePreviewModal';
@@ -44,12 +45,6 @@ import type { ARAgingRow as BaseARagingRow, CustomerStatementRow, SeasonComparis
 type TabKey = 'aging' | 'statement' | 'season';
 type ARAgingRow = BaseARagingRow & { prepay_balance_cents: number | null; open_credit_cents: number | null };
 
-// Why get_ar_aging could not rebuild a customer's balance as of the chosen date (KI-95).
-const UNAVAILABLE_REASONS: Record<string, string> = {
-  HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE: 'a payment, prepay or write-off was entered after this date',
-  HISTORICAL_VOID_RECONSTRUCTION_UNAVAILABLE: 'an invoice was voided after this date',
-  HISTORICAL_UNPOST_RECONSTRUCTION_UNAVAILABLE: 'an invoice was unposted after this date',
-};
 
 function statementKey(customerId: string, start: string, end: string): string {
   return `${customerId}|${start}|${end}`;
@@ -230,7 +225,7 @@ export default function ARaging() {
     <li key={r.customer_id}>
       <span className="font-medium">{r.farm_name}</span>
       {' — '}
-      {UNAVAILABLE_REASONS[r.unavailable_reason ?? ''] ?? 'later activity changed this balance'}
+      {unavailableReasonText(r.unavailable_reason)}
     </li>
   );
 
@@ -959,7 +954,7 @@ export default function ARaging() {
                         {
                           key: 'unavailable_reason',
                           header: 'Note',
-                          format: (v) => (v ? `Cannot be shown as of this date: ${UNAVAILABLE_REASONS[String(v)] ?? 'later activity changed this balance'}` : ''),
+                          format: (v) => (v ? `Cannot be shown as of this date: ${unavailableReasonText(String(v))}` : ''),
                         },
                       ],
                       'ar_aging_report'

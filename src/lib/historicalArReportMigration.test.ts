@@ -112,8 +112,9 @@ describe('historical AR report migration', () => {
     expect(smoke).toContain(
       "v_ar.unavailable_reason IS DISTINCT FROM 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE'",
     );
+    // KI-95: the Customer Balance Listing flags it the same way (20261103160000).
     expect(smoke).toContain(
-      'PERFORM 1 FROM public.get_customer_balance_listing(v_cutoff);',
+      "v_listing.unavailable_reason IS DISTINCT FROM 'HISTORICAL_BALANCE_RECONSTRUCTION_UNAVAILABLE'",
     );
     expect(smoke).toContain("RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'");
     expect(registry).toContain('smoke-historical-ar-report-cutoffs.sql');

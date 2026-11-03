@@ -3553,6 +3553,8 @@ export interface CustomerBalanceRow {
   open_credit: number;
   invoice_count: number;
   oldest_unpaid_date: string | null;
+  // Set (with every amount NULL) when this customer's balance cannot be rebuilt as of the date (KI-95).
+  unavailable_reason?: string | null;
 }
 
 export interface ChemicalHistoryRow {

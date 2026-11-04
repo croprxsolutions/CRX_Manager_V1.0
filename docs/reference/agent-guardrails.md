@@ -90,14 +90,17 @@
 >
 > **Post-apply carry (Mason, 2026-11-04).** The records committed after a live migration apply no longer void the Sol
 > review. `node scripts/write-codex-push-proof.mjs --carry-post-apply` mints a carried proof (`carry.mode`
-> `post_apply`, same `base_sha` as the source) with no model call, only when HEAD is ONE ordinary commit on top of a
+> `post_apply`, same `base_sha` as the source) only when HEAD is ONE ordinary commit on top of a
 > head with a clean Sol proof under 24 hours old (the original full review too), and every file it touches is a
 > regular non-executable file among: `docs/reference/migrations.d/*.md` and `docs/changelog.d/*.md` (edited or
 > added), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), and
 > `scripts/db-invariant-sweeps/allowlist.json`, where every changed entry keeps its position, predicate and other
 > fields, keeps the signature before `#` with a NEW 12-hex hash, appends to its justification, and has a real
-> `YYYY-MM-DD` `dated`; no entry is added or removed and nothing outside `entries` changes. Anything else refuses, and the
-> full review runs. `carriedSolProof()` accepts `post_apply` only with an unchanged base, so every gate that
+> `YYYY-MM-DD` `dated` that never moves back; no entry is added or removed and nothing outside `entries` changes.
+> Anything else refuses, and the full review runs. Notes alone carry with no model call (`carry.records_check`
+> `none`). The registry and the allowlist feed guards and the live sweeps, so a change to either carries only after
+> a focused Sol records check of that one commit (`buildPostApplyCheckPrompt`, packet = reviewed head → HEAD plus the
+> PR's migrations) returns CLEAN (`records_check` `sol`; Sol HIGH x2 on the PR that added this). `carriedSolProof()` accepts `post_apply` only with an unchanged base, so every gate that
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
 > **Sol pre-flight (Mason, 2026-10-23).** A full `write-codex-push-proof.mjs` run first checks the head is quiet and

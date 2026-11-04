@@ -253,9 +253,10 @@ live, commit the paperwork as ONE commit on top of the reviewed head: `docs/refe
 `docs/changelog.d/*.md`, `docs/manual/KNOWN_ISSUES.md`, `.claude/schema-registry.json`, and
 `scripts/db-invariant-sweeps/allowlist.json` re-keys (same signature, new 12-hex hash, wording appended to
 the justification, new `dated`; no entry added, removed or otherwise changed). Then run
-`node scripts/write-codex-push-proof.mjs --carry-post-apply`. No model call; any other file, an
-executable or symlink, or a stale or unclean review refuses and needs the full review. Code fixes go in
-their own commit before it, and they need Sol.
+`node scripts/write-codex-push-proof.mjs --carry-post-apply`. Notes alone carry with no model call; a
+registry or allowlist change carries only after a focused Sol check of that one commit (a few minutes)
+returns CLEAN. Any other file, an executable or symlink, or a stale or unclean review refuses and needs
+the full review. Code fixes go in their own commit before it, and they need Sol.
 
 **Skip Step 3B for a change off `docs/reference/sol-required-paths.md`** (Mason, 2026-10-30): both
 merge gates read the PR's real file list and accept it on green checks.

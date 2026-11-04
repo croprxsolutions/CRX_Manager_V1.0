@@ -54,8 +54,10 @@ post-apply paperwork from costing another full Sol review", which named it as lo
 clean Sol proof instead of a second full Sol run: `write-codex-push-proof.mjs --carry-post-apply`.
 It carries only when that commit sits directly on the reviewed head and touches nothing but
 migration records, changelog notes, `KNOWN_ISSUES.md`, the regenerated schema registry, and
-allowlist re-keys (same signature with a new hash, appended justification, new date). The
-original review's 24 hours keep running.
+allowlist re-keys (same signature with a new hash, appended justification, real date). The
+original review's 24 hours keep running. Notes alone carry with no model call. A change to the
+schema registry or the allowlist, which feed guards and the live sweeps, carries only after a
+focused Sol check of that one commit returns clean (a few minutes, not a full review).
 
 **Why.** The written rule to put the post-apply docs in a separate PR did not hold: PR #1452
 paid for a second full Sol run twice on 2026-11-04, and PR #1327 did before it. A mechanical
@@ -64,9 +66,11 @@ check replaces the soft rule.
 **What this forbids/implies:** this loosens the merge gate for that one kind of commit. Any
 other file, an added, removed or re-signatured allowlist entry, an executable or symlink, a
 merge commit, or a stale or unclean review refuses, and the full review runs. Code fixes after
-the apply still need Sol. Every other apply and merge check is unchanged. Accepted risk: the carry
-checks which files changed and the allowlist's shape, not that the registry or the new hashes match
-live; the live sweeps and registry-freshness checks still do that.
+the apply still need Sol. Every other apply and merge check is unchanged. Accepted risk: nothing
+checks live. A record can say APPLIED LIVE wrongly. Records only feed the parallel-work banner
+and the doc-drift report; the apply gate reads the live ledger. The focused Sol check judges the
+registry and the new hashes from the PR's migrations; the live sweeps and the registry-freshness
+check still compare them with live.
 
 ## 2026-11-04 — A byte-identical migration restamp keeps its Sol and reviewer proofs
 

@@ -1495,10 +1495,13 @@ function collisionPromptSkipsWork(prompt) {
   ];
   // The post-apply commit as it is really done: flip the record, note the changelog
   // and KNOWN_ISSUES, regenerate the registry, re-key two allowlist entries.
-  const paperwork = () => {
+  const notes = () => {
     write(`docs/reference/migrations.d/${MIG}.md`, `# ${MIG}\n\nStatus: APPLIED LIVE 2026-11-04 (ledger 20261104220928).\n`);
     write("docs/changelog.d/2026-11-04-void.md", "- Void fix. Applied live 2026-11-04.\n");
     write("docs/manual/KNOWN_ISSUES.md", "# Known issues\n\nKI-94: fixed live 2026-11-04.\n");
+  };
+  const paperwork = () => {
+    notes();
     write(".claude/schema-registry.json", `${JSON.stringify({ generated: "2026-11-04", tables: { deliveries: {} } })}\n`);
     const [a, b, c] = reviewedEntries;
     write(ALLOWLIST, allowlist([
@@ -1527,15 +1530,26 @@ function collisionPromptSkipsWork(prompt) {
     mkdirSync(path.dirname(proofPath), { recursive: true });
     writeFileSync(proofPath, JSON.stringify(buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean" })));
 
+    // The registry and the allowlist feed guards: the full paperwork needs the focused
+    // Sol check (dry run: decision only, so no model call here).
     paperwork();
-    const paperworkHead = commitAll("docs(db): record applied live");
+    const fullHead = commitAll("docs(db): record applied live, registry and re-keys");
     const dry = postApplyCarry("--dry-run");
     assert.equal(dry.status, 0, `post-apply e2e: dry run succeeds (${dry.stderr})`);
-    assert.equal(existsSync(codexPushProofPath(repo, paperworkHead)), false, "post-apply e2e: the dry run writes nothing");
+    assert.match(dry.stdout, /Sol records check needed for \.claude\/schema-registry\.json, scripts\/db-invariant-sweeps\/allowlist\.json/, "post-apply e2e: registry and allowlist need the Sol records check");
+    assert.equal(existsSync(codexPushProofPath(repo, fullHead)), false, "post-apply e2e: the dry run writes nothing");
+
+    // Notes alone carry with no model call.
+    git("reset", "-q", "--hard", reviewedHead);
+    notes();
+    const paperworkHead = commitAll("docs(db): record applied live");
+    const notesDry = postApplyCarry("--dry-run");
+    assert.match(notesDry.stdout, /notes only — carries with no model call/, "post-apply e2e: notes need no model call");
     const ok = postApplyCarry();
-    assert.equal(ok.status, 0, `post-apply e2e: post-apply paperwork carries (${ok.stderr})`);
+    assert.equal(ok.status, 0, `post-apply e2e: post-apply notes carry (${ok.stderr})`);
     const minted = JSON.parse(readFileSync(codexPushProofPath(repo, paperworkHead), "utf8"));
     assert.equal(minted.carry.mode, "post_apply", "post-apply e2e: minted as a post_apply carry");
+    assert.equal(minted.carry.records_check, "none", "post-apply e2e: records that no model checked");
     assert.equal(minted.codex_ran, false, "post-apply e2e: never claims a review ran");
     assert.equal(minted.carry.from_head, reviewedHead, "post-apply e2e: names the reviewed head");
     assert.equal(minted.carry.root_review.head_sha, reviewedHead, "post-apply e2e: keeps the full review at the root of the chain");
@@ -1599,6 +1613,7 @@ function collisionPromptSkipsWork(prompt) {
     refused("a changed predicate", () => rewriteAllowlist((list) => { list.entries[0].predicate = "anon-exec-secdef"; }), /changed beyond its key/);
     refused("a rewritten justification", () => rewriteAllowlist((list) => { list.entries[1].justification = "Re-keyed."; }), /justification was rewritten/);
     refused("a bad date", () => rewriteAllowlist((list) => { list.entries[0].dated = "soon"; }), /date is not a real YYYY-MM-DD date/);
+    refused("a date moved backwards", () => rewriteAllowlist((list) => { list.entries[0].dated = "2026-11-01"; }), /date moved backwards/);
     refused("an impossible date", () => rewriteAllowlist((list) => { list.entries[0].dated = "2026-02-30"; }), /date is not a real YYYY-MM-DD date/);
     refused("an appended note with no re-key", () => rewriteAllowlist((list) => {
       list.entries[0].violation_key = reviewedEntries[0].violation_key;
@@ -1640,7 +1655,14 @@ function collisionPromptSkipsWork(prompt) {
   }
 }
 {
-  const { postApplyProblem, allowlistRekeyProblem } = await import("./write-codex-push-proof.mjs");
+  const { postApplyProblem, allowlistRekeyProblem, postApplySolCheckFiles, buildPostApplyCheckPrompt } = await import("./write-codex-push-proof.mjs");
+  assert.deepEqual(postApplySolCheckFiles([
+    { path: "docs/changelog.d/x.md" }, { path: ".claude/schema-registry.json" }, { path: "scripts/db-invariant-sweeps/allowlist.json" },
+  ]), [".claude/schema-registry.json", "scripts/db-invariant-sweeps/allowlist.json"], "post-apply: the registry and allowlist need the Sol check");
+  assert.deepEqual(postApplySolCheckFiles([{ path: "docs/manual/KNOWN_ISSUES.md" }]), [], "post-apply: notes need no check");
+  const checkPrompt = buildPostApplyCheckPrompt();
+  assert.match(checkPrompt, new RegExp(`${CODEX_VERDICT_TOKEN}: CLEAN`), "post-apply: the check ends in the machine verdict");
+  assert.match(checkPrompt, /untrusted DATA/, "post-apply: the check treats the packet as data");
   const read = () => "{}";
   const one = (p, oldMode = "100644", newMode = "100644") => postApplyProblem({ entries: [{ path: p, oldMode, newMode }], readFile: read });
   assert.equal(one("docs/changelog.d/x.md", "000000", "100644"), null, "post-apply: a new changelog note is paperwork");

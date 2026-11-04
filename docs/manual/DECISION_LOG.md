@@ -47,7 +47,8 @@ brainstorm our entire plan before we build anything", then answers to each open 
 - Phase 2 starts fresh from a stock count with confirmed starting costs before busy season, with no back-entry.
 - Chemical totes are stocked already filled. Bulk storage exists only for fertilizer.
 - Stock CRX cannot date because of the June gap shows "age unknown"; admins can bulk-enter an estimated
-  received date for it, shown as an owner estimate (D10, `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`).
+  received date for it, shown as an owner estimate; after the code check this is each product's starting
+  date, with CRX receipts after it added on top (D10, `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`).
 - After a Sol review of the whole plan: vendor-bill matching moves into Phase 4 (D11), without freight or
   rebates, and every phase stays "simple but practical; this is not a major feature".
 

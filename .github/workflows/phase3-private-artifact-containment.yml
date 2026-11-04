@@ -4,7 +4,7 @@ name: Phase 3C Trusted Base Containment
 
 on:
   pull_request_target:
-    branches: [main]
+    branches: [main, staging]
     types: [opened, reopened, synchronize, edited]
 
 # No PR writes, statuses, comments, deployments, or secrets are needed.
@@ -18,7 +18,7 @@ concurrency:
 jobs:
   phase3-private-artifact-containment:
     name: Phase 3C Trusted Base Containment
-    if: github.event.pull_request.base.ref == 'main'
+    if: contains(fromJSON('["main","staging"]'), github.event.pull_request.base.ref)
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:

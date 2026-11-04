@@ -348,7 +348,19 @@ Two things sit outside the block and differ by target:
          AND (SELECT sum(quantity) FROM release_expected) = 4643.1
          AND (SELECT count(*) FROM release_recorded) = 32
          AND NOT EXISTS (SELECT * FROM release_expected EXCEPT SELECT * FROM release_recorded)
-         AND NOT EXISTS (SELECT * FROM release_recorded EXCEPT SELECT * FROM release_expected);
+         AND NOT EXISTS (SELECT * FROM release_recorded EXCEPT SELECT * FROM release_expected)
+  UNION ALL
+  -- DATA-11 (20261105170000): every active product has exactly one active, confirmed preferred
+  -- link to a live vendor whose name is the product's vendor text (live 2026-11-04: 596 of 596).
+  SELECT 'preferred vendor links',
+         NOT EXISTS (
+           SELECT 1 FROM public.products p
+            WHERE p.is_active
+              AND (SELECT count(*) FROM public.product_supplier_links l
+                     JOIN public.vendors v ON v.id = l.vendor_id
+                    WHERE l.product_id = p.id AND l.is_preferred AND l.is_active
+                      AND l.link_status = 'confirmed' AND v.deleted_at IS NULL
+                      AND v.name = p.vendor) <> 1);
   ```
 
   The test copy has no business rows, so this order has only been run on an empty

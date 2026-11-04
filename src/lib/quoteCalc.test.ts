@@ -776,11 +776,18 @@ describe('billedLine', () => {
 
   it('rounds a half cent away from zero, as PostgreSQL ROUND does', () => {
     expect(billedLine(0.5, 0, 0.01).totalPrice).toBe(0.01);
-    expect(billedLine(1.005, 0, 1).totalPrice).toBe(1.01);
+    expect(billedLine(0.25, 0, 0.1).totalPrice).toBe(0.03);
   });
 
-  it('multiplies a manual price with more than two decimals exactly', () => {
-    expect(billedLine(17.6625, 0, 3).totalPrice).toBe(52.99);
+  it('settles a half-hundredth quantity up, as the database does, not down through float noise', () => {
+    // 0.01 unit/acre on 14.5 acres is 0.145 units: the database bills 0.15, Math.round gave 0.14.
+    expect(billedLine(1, 0, 14.5 * 0.01)).toMatchObject({ units: 0.15, totalPrice: 0.15 });
+    expect(billedLine(1000, 0, 14.5 * 0.01).totalPrice).toBe(150);
+  });
+
+  it('rounds a half-hundredth margin up, as the database does', () => {
+    // (0.32 - 0.03) / 0.32 × 100 is exactly 90.625; floats give 90.62499999999999.
+    expect(billedLine(0.32, 0.03, 1).netMargin).toBe(90.63);
   });
 
   it('bills nothing for no quantity', () => {

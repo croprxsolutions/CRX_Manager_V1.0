@@ -114,6 +114,13 @@ function exactDollars(a: number, b: number): number {
   return ((ma[1] === '-') !== (mb[1] === '-') ? -1 : 1) * Number(cents) / 100;
 }
 
+// A float rounded to 0.01 the way PostgreSQL rounds the exact numeric: 0.145 × 100 is
+// 14.499999999999998 in floats (Math.round gives 0.14) but 0.145 rounds to 0.15 in the database.
+// Twelve significant digits drop the float noise before the exact half-away-from-zero rounding.
+function roundDecimal2(n: number): number {
+  return exactDollars(Number(n.toPrecision(12)), 1);
+}
+
 /**
  * A quote line's quantity and money, figured as save_quote figures them (S09): the quantity is
  * settled to 0.01 first, then price × quantity and cost × quantity are each rounded to the cent.
@@ -121,10 +128,10 @@ function exactDollars(a: number, b: number): number {
  * line the database stores and bills at $513.36 (3.68 gal × $139.50).
  */
 export function billedLine(pricePerUnit: number, cost: number, rawUnits: number) {
-  const units = Math.round(rawUnits * 100) / 100;
+  const units = roundDecimal2(rawUnits);
   const totalPrice = exactDollars(pricePerUnit, units);
   const profit = Math.round((totalPrice - exactDollars(cost, units)) * 100) / 100;
-  const netMargin = totalPrice > 0 ? Math.round((profit / totalPrice) * 100 * 100) / 100 : 0;
+  const netMargin = totalPrice > 0 ? roundDecimal2((profit / totalPrice) * 100) : 0;
   return { units, totalPrice, profit, netMargin };
 }
 

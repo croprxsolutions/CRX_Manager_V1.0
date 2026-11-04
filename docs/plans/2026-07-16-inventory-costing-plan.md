@@ -1,6 +1,65 @@
 # Inventory Costing (Average Recorded PO Cost) — Scoped Plan
 
-> **STATUS 2026-11-04 — still PARKED, never built. Refreshed 2026-11-04; building any phase needs Mason's
+> **CURRENT STATUS (Mason, 2026-11-04, decision D12): ALL COSTING PHASES PARKED AS ROADMAP.** After a harsh
+> Sol (gpt-6-sol, high) review of the whole proposal, Mason chose to hold this work for later and focus on
+> more important features: "i dont want this to be hard to manage or it wil be a overbuilt system that no one
+> uses". Phases 1, 2, 4 and 5 below are **roadmap ideas only**; each is revisited only when its trigger in
+> section 0.2 is met, and each still needs its own go-ahead, a fresh plan check and full reviews. Before next
+> season, only the short practical list in section 0.1 is in scope. Everything below section 0 is kept as the
+> design record.
+
+## 0. Decision D12: what happens now
+
+### 0.1 Pre-season quick wins (in scope before next season; each still built only on Mason's go-ahead)
+
+1. **Fix the two stock-accuracy bugs before the count:** one blend ticket can deduct its stock twice
+   (KNOWN_ISSUES KI-93); voiding a delivery can put back more reserved stock than completion took (KI-94).
+   Database fixes, so each gets the full review.
+2. **Review the 14 March orders that still hold stock as booked** (TO_DO_LIST rows 0.10 and 15.2). Clear one
+   only after confirming it is delivered or dead; never automatically.
+3. **Run the physical stock count as a controlled process** (TO_DO_LIST 15.2): a cutoff time, receipts and
+   deliveries during the count accounted for, every correction approved, the 19 negative-stock rows fixed only
+   from the count, and the resulting on-hand and reservations checked. Use the existing cycle-count screens.
+   The count sheet holds product, package, unit, counted quantity and the approved adjustment, nothing more.
+4. **Verify units only for products actually stocked or about to be bought** (the 66 in stock), not the whole
+   catalog; the wider unit clean-up stays in the product plan.
+5. **Set reorder points for a short list** of fast movers and seasonal essentials (TO_DO_LIST 0.8: the Need
+   Reordering screen works, but 0 of 595 active products have a reorder point). Use recent demand and supplier
+   lead time; adjust after spring.
+6. **Go back to entering POs and receiving in CRX** (D9). A habit, not code; every later report depends on it.
+7. **Relabel "Inventory Value" as "Pricing-basis value"** on the Inventory card and Reports tab, columns and CSV
+   headings. Labels only; the calculation is unchanged.
+
+The sales-rep write-permission item already on the to-do list ("Rules that only limit sales reps", a must
+before the first regular rep) is handled as its own small security fix, separate from any costing report.
+
+### 0.2 Roadmap ideas and their triggers
+
+- **Stock age and aged-stock list (Phase 1):** only if the count shows a meaningful amount of stranded stock.
+  Try a spreadsheet from the count, last receipt and recent sales first; build a report only if it is used for
+  repeat buying or clearance decisions. If built, drop the holding-cost numbers, the supplier-price exposure
+  and the starting-date history (see 0.3).
+- **What stock on the shelf cost (Phase 2):** only after a full season of POs and receiving in CRX, with units
+  reliable for the products in use, and once Mason and the accountant name a decision the number would change.
+- **Vendor-bill matching and special-order corrected margin (Phase 4):** only if bills are entered in CRX
+  routinely and PO-versus-bill differences are frequent enough to change decisions (today: 6 bills, no lines).
+- **Quote warnings (Phase 5):** only if real underpricing slips past the existing below-cost approval and the
+  quote cost-rise alert.
+
+### 0.3 Cut (not to be built at this business's size)
+
+The 10% holding-cost-so-far and monthly charge (precise-looking numbers on guessed dates); the supplier-price
+exposure report (10 quotes is too thin); per-product starting-date history, split lines, replacement batches
+and re-entry after every return or correction (nobody will maintain it); the Option B event-sourced cost engine;
+a dedicated valuation-opening workbook and coverage dashboards; freight and rebate allocation, lot costing,
+multi-warehouse costing and generalized repack costing; aged-stock quote warnings, GMROI and "margin after
+carrying cost".
+
+**Order and cautions (Sol):** the count comes first; entering estimated dates or costs before it would be
+wasted. A recorded balance is not a physical count. The roughly 56,600 booked units mix products and units, so
+review order by order. Before any new figure is called inventory value for the books, ask the accountant.
+
+> **Earlier status (superseded by D12 above): 2026-11-04 — still PARKED, never built. Refreshed 2026-11-04; building any phase needs Mason's
 > separate go-ahead.** The recommended first step is **Phase 1 (reporting only)**; its detailed build plan is
 > `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md` (one small owner-estimate table, decision D10).
 > The engine below is Phase 2 and stays parked until Mason un-parks it (section 12).
@@ -523,9 +582,8 @@ Taken from report section 7, plus this plan's own. Mason answered D2-D9 in a pla
 he asked to plan the whole thing before anything is built. Live check that day: the last receipt in CRX was
 2026-06-10 and no PO has been created in the last 60 days.
 
-- **NEEDS MASON - DECISION REQUIRED (D1): approve building Phase 1** (reports plus one small owner-estimate
-  table and its save action; build plan `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`). Still
-  open: Mason wants the full plan settled and checked against the code first.
+- **D1 — DECIDED (by D12): Phase 1 is not built now.** It stays a roadmap idea with the trigger in section
+  0.2 (build plan `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`, kept as the design record).
 - **D2 — DECIDED: admins only.** The new cost numbers (holding charge, replacement cost, stock age) follow
   today's rule: only admins see any cost. Reps see nothing new.
 - **D3 — DECIDED: 270 days.** Stock older than 270 days is flagged (Phase 1 dead-stock list; Phase 5 quote
@@ -558,6 +616,11 @@ he asked to plan the whole thing before anything is built. Live check that day: 
   without freight or rebates (section 9). Mason also asked that every phase stay simple and practical.
 - **Special-order margin — DECIDED: show both.** Phase 4 keeps the margin booked at the sale and shows the
   corrected margin beside it once the bill lands; invoices never change (section 9, item 4).
+- **D12 — DECIDED: park all costing phases as roadmap; do the pre-season list.** Mason (2026-11-04), after a
+  harsh Sol review: "i am thinking of holding alot of this work for later since i have more important features
+  i need to focus on but want to look for ideas and to do future roadmap work and also pick out quikc must have
+  wins before next season starts", then "Yes, record it". Section 0 holds the list, triggers and cuts. This
+  answers D1: Phase 1 is not built now.
 - **Ask the accountant:** which cost basis QuickBooks should carry once CRX can produce a complete one, and
   whether carryover stock needs a write-down to net realizable value. (Rebate booking is moot while D7 stands.)
 

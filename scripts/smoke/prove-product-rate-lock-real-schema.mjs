@@ -264,8 +264,10 @@ const setRates = (rows, key, actor = ADMIN) =>
   `SELECT public.set_product_rates('${JSON.stringify(rows)}'::jsonb, '${actor}', '${key}');`;
 const lock = (on, reason, key, actor = ADMIN) =>
   `SELECT public.set_product_rate_lock(${on}, ${reason === null ? 'NULL' : `'${reason}'`}, '${actor}', '${key}');`;
-const correct = (p, rate, unit, suggested, version, reason, key, actor = ADMIN) =>
-  `SELECT public.correct_product_rates('${p}', ${rate}, '${unit}', '${suggested}', ${version}, '${reason}', '${actor}', '${key}');`;
+// The confirmed prices default to a fresh preview; pass them to test what was shown.
+const correct = (p, rate, unit, suggested, version, reason, key, actor = ADMIN,
+  prices = `(public.preview_product_rate_correction('${p}', ${rate}, '${unit}')->'after')`) =>
+  `SELECT public.correct_product_rates('${p}', ${rate}, '${unit}', '${suggested}', ${version}, ${prices}, '${reason}', '${actor}', '${key}');`;
 const events = () => scalar(`SELECT coalesce(string_agg(event_type, ',' ORDER BY id), '-') FROM public.product_rate_events;`);
 
 function main() {
@@ -398,8 +400,22 @@ function main() {
   // The preview shows the per-acre prices the correction then saves.
   const previewSql = `SELECT public.preview_product_rate_correction('${P.GAL}', 16, 'oz');`;
   refused(REP, previewSql, /ADMIN_REQUIRED/);
+  // Pricing takes any one unit row matching regardless of case, so rows that disagree refuse the unit.
+  asOwner("INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('OZ', 128, 'liquid');");
+  refused(ADMIN, previewSql, /PRODUCT_RATE_UNIT_INVALID/);
+  refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor-case', ADMIN, "'{}'::jsonb"), /PRODUCT_RATE_UNIT_INVALID/);
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'OZ';");
+  ok(ADMIN, previewSql);
+  asOwner("DELETE FROM public.unit_conversions WHERE unit = 'OZ';");
   const preview = JSON.parse(ok(ADMIN, previewSql));
-  const fix = correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor');
+  const shown = `'${JSON.stringify(preview.after)}'::jsonb`;
+  refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor-noprice', ADMIN, 'NULL'), /PRODUCT_AND_EXPECTED_VERSION_REQUIRED/);
+  // A unit factor changed after the preview moves the prices but not pricing_version: refused, nothing saved.
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 2 WHERE unit = 'oz';");
+  refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor-moved', ADMIN, shown), /PRODUCT_RATE_PREVIEW_CHANGED/);
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
+  assert.equal(events(), 'locked');
+  const fix = correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor', ADMIN, shown);
   const corrected = JSON.parse(ok(ADMIN, fix));
   for (const t of [1, 2, 3]) {
     const k = `tier${t}_price_per_acre`;

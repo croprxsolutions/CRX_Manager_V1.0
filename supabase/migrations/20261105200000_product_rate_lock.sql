@@ -18,13 +18,15 @@
 --     expects to replace; a row changed since is refused by product name. The product page still
 --     writes rates directly while unlocked; the guard below covers it when locked.
 --   * set_product_rate_lock(locked, reason): any admin, with a reason, logged.
---   * correct_product_rates(product, ..., expected pricing_version, reason): one product at a time,
---     admin, reason, retry key; the only write the guard lets through while locked. It is recognised
+--   * correct_product_rates(product, ..., expected pricing_version, previewed prices, reason): one
+--     product at a time, admin, reason, retry key; refused unless the saved per-acre prices are the
+--     ones the admin previewed. The only write the guard lets through while locked. It is recognised
 --     by a row in the private product_rate_correction_passes table that only this function writes,
 --     holding the product id and the transaction id, never by anything a client sends.
 --   * Both writers refuse a changed rate unit that unit_conversions does not know for the product's
 --     form (the price workbook's rule), since an unknown unit prices per acre as one ounce; a kept
---     legacy unit and every unit must also have a factor above zero, outside seed and each products,
+--     legacy unit and every unit must also have a factor above zero, the same in every row spelled
+--     alike but for case (live: oz/Oz, Lb/LB and qt/Qt each agree), outside seed and each products,
 --     whose unit is their stock unit (live: every rated product passes).
 --   * The price workbook can no longer change rates: a rate change in its change rows is refused.
 --   * tier1/2/3_price_per_acre get whole-cent CHECKs (live has none off the cent, read 2026-11-03).
@@ -283,8 +285,9 @@ REVOKE ALL ON FUNCTION public._product_rate_value(jsonb) FROM PUBLIC, anon, auth
 
 -- The price workbook's unit rule (20260722091359), tightened: a new unit must be a unit_conversions key
 -- for the product's form (or type both); an unchanged legacy unit is kept only while it is a key of any
--- form. Either way its factor must be above zero, since per-acre pricing prices an unknown unit as one
--- ounce and a zero factor as $0. A rate needs a unit, except on seed and each products, where
+-- form. Either way its factor must be above zero, and the same in every row spelled alike but for case,
+-- since per-acre pricing prices an unknown unit as one ounce, a zero factor as $0, and takes any one
+-- of those rows. A rate needs a unit, except on seed and each products, where
 -- validate_product_units fills it from the stock unit (their unchanged unit is kept as it is).
 CREATE FUNCTION public._product_rate_unit_ok(p_rate numeric, p_new_unit text, p_old_unit text, p_form text) RETURNS boolean
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
@@ -294,9 +297,12 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
     WHEN COALESCE(p_form IN ('seed', 'each'), false)
          AND p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') THEN true
     ELSE EXISTS (SELECT 1 FROM public.unit_conversions uc
-                  WHERE lower(uc.unit) = lower(p_new_unit) AND uc.factor_oz > 0
+                  WHERE lower(uc.unit) = lower(p_new_unit)
                     AND (p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '')
                          OR p_form IS NULL OR uc.unit_type = p_form OR uc.unit_type = 'both'))
+      -- Pricing takes any one row matching regardless of case, so every such row must agree.
+      AND (SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
+             FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
   END;
 $function$;
 ALTER FUNCTION public._product_rate_unit_ok(numeric, text, text, text) OWNER TO postgres;
@@ -520,6 +526,7 @@ CREATE FUNCTION public.correct_product_rates(
   p_rate_unit text,
   p_suggested_rate text,
   p_expected_pricing_version bigint,
+  p_expected_prices jsonb,
   p_reason text,
   p_performed_by uuid,
   p_idempotency_key text DEFAULT NULL
@@ -530,6 +537,7 @@ DECLARE
   v_existing jsonb;
   v_request_fp text;
   v_name text;
+  v_tier text;
   v_product public.products%ROWTYPE;
   v_unit text := NULLIF(btrim(p_rate_unit), '');
   v_suggested text := NULLIF(btrim(p_suggested_rate), '');
@@ -542,7 +550,8 @@ BEGIN
   IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED';
   END IF;
-  IF p_product_id IS NULL OR p_expected_pricing_version IS NULL THEN
+  IF p_product_id IS NULL OR p_expected_pricing_version IS NULL
+     OR jsonb_typeof(p_expected_prices) IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'PRODUCT_AND_EXPECTED_VERSION_REQUIRED';
   END IF;
   IF p_reason IS NULL OR p_reason !~ '[^[:space:]]' THEN RAISE EXCEPTION 'REASON_REQUIRED: say why'; END IF;
@@ -556,7 +565,8 @@ BEGIN
 
   v_request_fp := md5(jsonb_build_object('actor_id', v_actor, 'product_id', p_product_id,
     'rate_per_acre', p_rate_per_acre, 'rate_unit', v_unit, 'suggested_rate', v_suggested,
-    'expected_pricing_version', p_expected_pricing_version, 'reason', btrim(p_reason))::text);
+    'expected_pricing_version', p_expected_pricing_version, 'expected_prices', p_expected_prices,
+    'reason', btrim(p_reason))::text);
   v_existing := public.check_idempotency(p_idempotency_key, 'correct_product_rates');
   IF v_existing IS NOT NULL THEN
     IF v_existing->>'actor_id' IS DISTINCT FROM v_actor::text
@@ -591,6 +601,14 @@ BEGIN
   INSERT INTO public.product_rate_correction_passes (txid, product_id) VALUES (txid_current(), p_product_id);
   v_write := public._write_product_rates(p_product_id, p_rate_per_acre, v_unit, v_suggested);
   DELETE FROM public.product_rate_correction_passes WHERE txid = txid_current() AND product_id = p_product_id;
+  -- The prices must be the ones the admin confirmed: a unit conversion changed since the preview
+  -- moves them without moving pricing_version. Raising undoes the write.
+  FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
+    IF (v_write->'after'->v_tier) IS DISTINCT FROM (p_expected_prices->v_tier) THEN
+      RAISE EXCEPTION 'PRODUCT_RATE_PREVIEW_CHANGED: the per-acre prices changed since the preview; preview again'
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END LOOP;
 
   SELECT full_name INTO v_name FROM public.profiles WHERE id = v_actor;
   INSERT INTO public.product_rate_events
@@ -604,10 +622,10 @@ BEGIN
   RETURN v_result;
 END;
 $function$;
-ALTER FUNCTION public.correct_product_rates(uuid, numeric, text, text, bigint, text, uuid, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.correct_product_rates(uuid, numeric, text, text, bigint, text, uuid, text)
+ALTER FUNCTION public.correct_product_rates(uuid, numeric, text, text, bigint, jsonb, text, uuid, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.correct_product_rates(uuid, numeric, text, text, bigint, jsonb, text, uuid, text)
   FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.correct_product_rates(uuid, numeric, text, text, bigint, text, uuid, text)
+GRANT EXECUTE ON FUNCTION public.correct_product_rates(uuid, numeric, text, text, bigint, jsonb, text, uuid, text)
   TO authenticated;
 
 -- Read-only: the tier 1-3 per-acre prices a correction would save, shown before the admin confirms it.
@@ -659,7 +677,7 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_RATE_LOCK_NOT_UNLOCKED_SINGLE_ROW';
   END IF;
   IF has_function_privilege('anon', 'public.set_product_rates(jsonb,uuid,text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.correct_product_rates(uuid,numeric,text,text,bigint,text,uuid,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.set_product_rate_lock(boolean,text,uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.preview_product_rate_correction(uuid,numeric,text)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._write_product_rates(uuid,numeric,text,text)', 'EXECUTE')

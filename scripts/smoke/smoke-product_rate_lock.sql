@@ -26,7 +26,8 @@ BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
     ('public.set_product_rates(jsonb,uuid,text)', 'e51c04a318d1862773f909a48d92cb33'),
     ('public.set_product_rate_lock(boolean,text,uuid,text)', '46b19757c668c9e3fc7611aa0e545f27'),
-    ('public.correct_product_rates(uuid,numeric,text,text,bigint,text,uuid,text)', '18ef38bc7ce96e90990e719e02462681'),
+    ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '37aeacd8ba0abb2333f13a48762f682b'),
+    ('public._product_rate_unit_ok(numeric,text,text,text)', '8177b1aaaddb1659d00d19f28c3924df'),
     ('public.guard_product_rate_lock()', '9a4fa35ae3a1533e755d840aed47fa62'),
     ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
     ('public.preview_product_rate_correction(uuid,numeric,text)', '8604511cd222c804da7913992b2f8daa')) AS pins(sig, body_md5) LOOP
@@ -87,7 +88,8 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: set_product_rates wrote while locked';
   END IF;
   v_fix := public.correct_product_rates(v_product, 16, 'oz', '16 oz/A',
-    (SELECT pricing_version FROM public.products WHERE id = v_product), 'smoke', v_admin, 'smoke-rl-fix-' || v_product);
+    (SELECT pricing_version FROM public.products WHERE id = v_product),
+    public.preview_product_rate_correction(v_product, 16, 'oz')->'after', 'smoke', v_admin, 'smoke-rl-fix-' || v_product);
   EXECUTE 'RESET ROLE';
 
   IF (v_first->>'changed_count')::int <> 1 OR v_again IS DISTINCT FROM v_first THEN
@@ -117,7 +119,7 @@ BEGIN
         ELSIF v_sig = 'lock' THEN
           PERFORM public.set_product_rate_lock(false, 'smoke', v_uid, 'smoke-rl-' || v_role);
         ELSE
-          PERFORM public.correct_product_rates(v_product, 1, 'oz', '', 0, 'smoke', v_uid, 'smoke-rl-' || v_role);
+          PERFORM public.correct_product_rates(v_product, 1, 'oz', '', 0, '{}'::jsonb, 'smoke', v_uid, 'smoke-rl-' || v_role);
         END IF;
         EXECUTE 'RESET ROLE';
       EXCEPTION WHEN OTHERS THEN

@@ -1,6 +1,7 @@
 import { assertRpcResult, supabase } from './db';
 import { BUSINESS_TIMEZONE } from './dateUtils';
-import type { ProductRateLock, ProductRatePreview, ProductRateWriteResult } from '../types';
+import type { ProductRateLock, ProductRatePerAcre, ProductRatePreview, ProductRateWriteResult } from '../types';
+import type { Json } from '../types/supabase';
 
 /** The one "Lock rates" record (20261105200000). Every signed-in staff member may read it. */
 export async function loadProductRateLock(): Promise<ProductRateLock> {
@@ -50,6 +51,7 @@ export async function correctProductRates(input: {
   rateUnit: string;
   suggestedRate: string;
   expectedPricingVersion: number;
+  expectedPrices: ProductRatePerAcre;
   reason: string;
   performedBy: string;
   idempotencyKey: string;
@@ -60,6 +62,7 @@ export async function correctProductRates(input: {
     p_rate_unit: input.rateUnit,
     p_suggested_rate: input.suggestedRate,
     p_expected_pricing_version: input.expectedPricingVersion,
+    p_expected_prices: input.expectedPrices as unknown as Json,
     p_reason: input.reason,
     p_performed_by: input.performedBy,
     p_idempotency_key: input.idempotencyKey,

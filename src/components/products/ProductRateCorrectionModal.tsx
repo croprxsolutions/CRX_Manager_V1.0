@@ -64,6 +64,8 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
     toast('error', sanitizeError(error));
     // The product or the lock changed since this page loaded it: reload rather than retry.
     if (hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_STALE) || hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_NOT_LOCKED)) onCorrected();
+    // A unit conversion changed since the preview: show the new prices before another save.
+    if (hasRpcCode(error, RpcErrorCodes.PRODUCT_RATE_PREVIEW_CHANGED)) setPreview(null);
   };
   const showPreview = async () => {
     setSaving(true);
@@ -77,6 +79,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
     }
   };
   const save = async () => {
+    if (!previewed) return;
     setSaving(true);
     try {
       const corrected = await correctProductRates({
@@ -85,6 +88,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
         rateUnit: unit,
         suggestedRate: suggested,
         expectedPricingVersion: product.pricing_version,
+        expectedPrices: previewed.after,
         reason: reason.trim(),
         performedBy: profileId,
         idempotencyKey: getKey(),

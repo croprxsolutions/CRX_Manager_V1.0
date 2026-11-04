@@ -21,7 +21,8 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
   // The switch's direction is fixed when the window opens, so a reload after a failed save never flips it.
   const [target, setTarget] = useState<boolean | null>(null);
   const open = target !== null;
-  const setOpen = (next: boolean) => setTarget(next && lock ? !lock.is_locked : null);
+  // Closing forgets the reason, so every audited switch is given a fresh one.
+  const setOpen = (next: boolean) => { setTarget(next && lock ? !lock.is_locked : null); if (!next) setReason(''); };
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const { getKey, resetKey } = useIdempotencyKey('set_product_rate_lock', profileId, `${target}:${reason.trim()}`);

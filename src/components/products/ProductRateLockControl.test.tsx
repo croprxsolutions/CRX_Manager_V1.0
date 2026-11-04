@@ -22,6 +22,15 @@ describe('rate lock switch failure paths', () => {
     expect(onRetry).toHaveBeenCalled();
   });
 
+  it('asks for a fresh reason after a cancelled switch', () => {
+    render(<ProductRateLockControl lock={open} loadFailed={false} onRetry={vi.fn()} isAdmin profileId="u1" onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Lock rates' }));
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'season' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Lock rates' }));
+    expect(screen.getByLabelText('Reason (required)')).toHaveValue('');
+  });
+
   it('shows the current state when another admin switched it first', async () => {
     mockSet.mockRejectedValue(new Error('PRODUCT_RATE_LOCK_UNCHANGED: rates are already locked'));
     mockLoad.mockResolvedValue(locked);

@@ -2136,7 +2136,9 @@ export default function ProductDetail() {
           profileId={profile?.id ?? ''}
           unitOptions={rateUnitOptionsForProduct(unitConversions, persistedProduct.product_form, persistedProduct.inventory_unit).map((uc) => uc.unit)}
           onClose={() => setCorrectingRates(false)}
-          onCorrected={() => { setCorrectingRates(false); void fetchProduct(); loadRateLock(); }}
+          // A correction bumps pricing_version, so reload the cost-basis workspace and histories too;
+          // the window stays over the form until then, so no edit is lost to the reload.
+          onCorrected={() => { loadRateLock(); void handlePricingReload().then(() => setCorrectingRates(false)); }}
         />
       )}
       <UnsavedChangesModal

@@ -437,7 +437,12 @@ function main() {
     `BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
      SET LOCAL ROLE authenticated; ${setRates([row(P.OTHER, '8', 'oz', '8 oz/A', [null, null, null])], 'k-race')} SELECT pg_sleep(4); COMMIT;`],
   { cwd: ROOT, stdio: 'ignore' });
-  wait(2000);
+  // Take the lock only once the upload has saved and sleeps inside its open transaction.
+  const inFlight = "SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event = 'PgSleep' AND query LIKE '%k-race%';";
+  for (let tries = 0; scalar(inFlight) !== '1'; tries += 1) {
+    assert.ok(tries < 100, 'the racing upload never reached its sleep inside the transaction');
+    wait(200);
+  }
   const started = Date.now();
   ok(ADMIN, lock(true, 'season set again', 'k-relock'));
   assert.ok(Date.now() - started > 1000, 'the lock waited on the upload in flight');

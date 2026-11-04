@@ -222,6 +222,11 @@ vi.mock('../lib/productRateLock', async (importOriginal) => ({
   loadProductRateLock: mockLoadRateLock,
 }));
 const ratesOpen = { is_locked: false, changed_by_name: null, changed_at: '2026-11-03T00:00:00Z', reason: null };
+// The correction window has its own tests; here it only reports a saved correction.
+vi.mock('../components/products/ProductRateCorrectionModal', () => ({
+  default: ({ open, onCorrected }: { open: boolean; onCorrected: () => void }) =>
+    open ? <button type="button" onClick={onCorrected}>Finish correction</button> : null,
+}));
 
 import ProductDetail from './ProductDetail';
 
@@ -944,6 +949,13 @@ describe('ProductDetail governed pricing flow', () => {
     expect(banner).toHaveTextContent('Rates are locked.');
     expect(within(banner).getByRole('button', { name: 'Correct rates' })).toBeInTheDocument();
     expect(screen.getByLabelText('Rate Per Acre')).toBeDisabled();
+
+    // A correction bumps pricing_version, so the cost-basis workspace reloads with the product.
+    await waitFor(() => expect(mockGetCostBasisWorkspace).toHaveBeenCalled());
+    const workspaceLoads = mockGetCostBasisWorkspace.mock.calls.length;
+    fireEvent.click(within(banner).getByRole('button', { name: 'Correct rates' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    await waitFor(() => expect(mockGetCostBasisWorkspace.mock.calls.length).toBeGreaterThan(workspaceLoads));
   });
 
   it('opens the folded section that holds a refused field', async () => {

@@ -4,7 +4,8 @@
  * completion took. Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays
  * migrations up to the candidate, shows the bug on invented rows (3 reserved, 10 delivered, void leaves 10
  * reserved), applies the candidate (a second apply refuses), then completes and voids five cases: short,
- * fully reserved, part delivered, nothing reserved, and a legacy line with no record.
+ * fully reserved, part delivered, nothing reserved, and a legacy line with no record. Then applies the follow-up
+ * 20261106233000 (a second apply refuses) and shows only the legacy void's ledger row is flagged for review.
  *
  * Run: node scripts/smoke/prove-void-delivery-exact-reservation-real-schema.mjs   (needs local Docker image)
  * Prints VOID_DELIVERY_EXACT_RESERVATION_PROOF_PASS on success.
@@ -24,6 +25,7 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261106230000_void_delivery_restores_exact_reservation.sql');
+const FOLLOWUP = path.join(MIGRATIONS, '20261106233000_void_delivery_flags_legacy_reservation.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -141,7 +143,8 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  for (const file of all.slice(at + 1)) {
+  assert.equal(all[at + 1], FOLLOWUP, 'the legacy-flag follow-up must sort right after the candidate');
+  for (const file of all.slice(at + 2)) {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
@@ -345,6 +348,25 @@ function main() {
   assert.equal(replay.status, 0, replay.stderr);
   assert.equal(stock(0), '100.00/3.00');
   console.log('[prover] a second void is refused, a replayed void changes nothing');
+
+  // FOLLOW-UP: only a legacy line's void row is flagged for review, with the note; quantities are unchanged.
+  stageText('followup.sql', lf(FOLLOWUP));
+  const flagFirst = apply('followup.sql');
+  assert.equal(flagFirst.status, 0, flagFirst.output);
+  const flagAgain = apply('followup.sql');
+  assert.notEqual(flagAgain.status, 0, 'a second apply of the follow-up must refuse');
+  assert.match(flagAgain.output, /PREFLIGHT_VOID_LEGACY_FLAG_DRIFT/);
+  PHASE += 1;
+  ADMIN = id('a1');
+  CUSTOMER = id('c1');
+  seed();
+  assert.deepEqual(runCases('flagged'), expect);
+  KEYS.forEach((k, i) => {
+    assert.equal(scalar(`SELECT requires_review::text || ' ' || (notes LIKE '%completed before the KI-94 fix%')::text
+      FROM public.inventory_transactions WHERE product_id = '${P(i)}' AND transaction_type = 'void_delivery_reversal';`),
+    k === 'legacy' ? 'true true' : 'false false', `${k}: review flag`);
+  });
+  console.log('[prover] FOLLOW-UP: applied once (a second apply refuses); only the legacy void row is flagged for review');
 
   // The column refuses a negative amount; grants on the two impls are unchanged (postgres only).
   const neg = psql(`UPDATE public.delivery_items SET quantity_prebooked_released = -1 WHERE id = '${DI(0)}';`, { allowFailure: true });

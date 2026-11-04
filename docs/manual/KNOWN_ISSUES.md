@@ -531,7 +531,9 @@ Completion (`supabase/migrations/20261014210000_order_invoices_rep_own_name.sql`
 Prebooked 3, delivered 10, voided: prebooked becomes 10, so available stock reads low. Fully reserved deliveries are
 unaffected. Cancelling a completed delivery is refused since PR #1284, so only void remains. Fix (Option A): completion
 records per delivery line what it took (`delivery_items.quantity_prebooked_released`) and void puts back exactly that.
-Residual: a line completed before the migration has no record and still restores the delivered quantity. Live
+Residual: a line completed before the migration has no record and still restores the delivered quantity; since
+`20261106233000` (not yet applied; Mason chose "flag them for review") that void's ledger row is marked
+`requires_review` with a note to check reserved stock. Live
 read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20); nothing is corrected.
 
 ## Database and release process

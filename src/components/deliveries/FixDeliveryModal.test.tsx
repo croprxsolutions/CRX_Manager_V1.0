@@ -110,4 +110,37 @@ describe('FixDeliveryModal', () => {
     expect(second).toBe(first);
     expect(third).not.toBe(first);
   });
+
+  // A lost reply, then a reload that shows the delivery is no longer completed.
+  async function lostReplyThenUndone(replay: { data: unknown; error: unknown }) {
+    let previews = 0;
+    let fixes = 0;
+    H.rpc.mockImplementation(async (name: string) => {
+      if (name === 'preview_fix_delivery') {
+        previews += 1;
+        return { data: previews === 1 ? plan() : plan({ can_fix: false, refusals: [{ code: 'NOT_COMPLETED', message: 'Only a completed delivery can be fixed.' }] }), error: null };
+      }
+      fixes += 1;
+      return fixes === 1 ? { data: null, error: { message: 'Failed to fetch' } } : replay;
+    });
+    renderModal();
+    fireEvent.change(await screen.findByLabelText(/What was wrong/), { target: { value: 'Entered 100, delivered 10' } });
+    fireEvent.change(screen.getByLabelText(/to confirm/), { target: { value: 'FIX DEL-7' } });
+    fireEvent.click(screen.getByRole('button', { name: /Fix Delivery/ }));
+    await screen.findByText('Only a completed delivery can be fixed.');
+    await waitFor(() => expect(H.rpc.mock.calls.filter(([n]) => n === 'fix_delivery')).toHaveLength(2));
+    const [first, second] = H.rpc.mock.calls.filter(([n]) => n === 'fix_delivery').map(([, a]) => a);
+    expect(second).toEqual(first);
+  }
+
+  it('offers the re-entry link only when replaying the kept key returns the fix receipt', async () => {
+    await lostReplyThenUndone({ data: { success: true, delivery_id: 'd1', delivery_number: 'DEL-7', order_id: 'o1', customer_id: 'c1', invoices: [], commissions_restored: 1 }, error: null });
+    expect(await screen.findByText(/This delivery was already undone/)).toBeInTheDocument();
+  });
+
+  it('shows no success when the delivery was undone some other way', async () => {
+    await lostReplyThenUndone({ data: null, error: { message: 'FIX_DELIVERY_REFUSED: NOT_COMPLETED' } });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(/This delivery was already undone/)).not.toBeInTheDocument();
+  });
 });

@@ -136,10 +136,12 @@ describe('Return product from a delivery', () => {
     await waitFor(() => expect(within(dialog).getByLabelText<HTMLSelectElement>('Original Order').value).toBe('order-0003'));
   });
 
-  it('does not call the pre-filled customer inactive when the customer list failed to load', async () => {
+  it('clears the pre-filled customer, without calling it inactive, when the customer list failed to load', async () => {
     H.failing.add('customers');
     render(<MemoryRouter initialEntries={['/returns?customer=customer-1&order=order-0003']}><Returns /></MemoryRouter>);
-    await screen.findByRole('dialog', { name: 'New Return / RMA' });
+    const dialog = await screen.findByRole('dialog', { name: 'New Return / RMA' });
+    // Nothing proves the customer active, and create_return does not check, so the pre-fill must not stay.
+    await waitFor(() => expect(within(dialog).getByLabelText<HTMLSelectElement>('Customer').value).toBe(''));
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load customers. Close the form and try again.'));
     await new Promise((r) => setTimeout(r, 50));
     expect(H.toast).not.toHaveBeenCalledWith('error', expect.stringContaining('inactive'));
@@ -155,6 +157,17 @@ describe('Return product from a delivery', () => {
     const customer = within(dialog).getByLabelText<HTMLSelectElement>('Customer');
     await waitFor(() => expect(customer.querySelectorAll('option')).toHaveLength(2));
     await new Promise((r) => setTimeout(r, 50));
+    expect(H.toast).not.toHaveBeenCalledWith('error', expect.stringContaining('inactive'));
+  });
+
+  it('a late inactive-customer check after the form was closed shows nothing', async () => {
+    let release = () => {};
+    H.held.customers = new Promise<void>((r) => { release = r; });
+    render(<MemoryRouter initialEntries={['/returns?customer=gone-customer&order=order-0003']}><Returns /></MemoryRouter>);
+    const dialog = await screen.findByRole('dialog', { name: 'New Return / RMA' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    release();
+    await new Promise((r) => setTimeout(r, 100));
     expect(H.toast).not.toHaveBeenCalledWith('error', expect.stringContaining('inactive'));
   });
 });

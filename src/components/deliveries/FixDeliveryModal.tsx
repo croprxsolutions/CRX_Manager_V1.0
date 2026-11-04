@@ -36,6 +36,8 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
   const [saving, setSaving] = useState(false);
   // A fix whose reply was lost: the delivery is already undone, so offer the re-entry link.
   const [submittedScope, setSubmittedScope] = useState<string | null>(null);
+  // Set only when the server's receipt for that kept key confirms the fix ran.
+  const [undoneOrderId, setUndoneOrderId] = useState<string | null>(null);
   const planRequestRef = useRef(0);
 
   const loadPlan = useCallback(async () => {
@@ -57,6 +59,7 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
     if (!open) return;
     setReason('');
     setTyped('');
+    setUndoneOrderId(null);
     void loadPlan();
   }, [open, loadPlan]);
 
@@ -99,9 +102,32 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
     }
   };
 
-  // The fix went through but its reply was lost: the delivery is no longer completed and this key was kept.
-  const alreadyUndone = !!plan && !!submittedScope && fixIdem.hasKeyFor(submittedScope)
-    && plan.refusals.some((r) => r.code === 'NOT_COMPLETED');
+  // A kept key and a delivery that is no longer completed may mean our fix ran and its reply was lost,
+  // or that someone else undid it. Replaying the same request returns the receipt only if ours ran.
+  useEffect(() => {
+    if (!plan || !submittedScope || !fixIdem.hasKeyFor(submittedScope)) return;
+    if (!plan.refusals.some((r) => r.code === 'NOT_COMPLETED')) return;
+    const [scopeDelivery, scopeReason, scopeToken] = JSON.parse(submittedScope) as [string, string, string];
+    const scope = submittedScope;
+    void (async () => {
+      const { data, error } = await supabaseUntyped.rpc('fix_delivery', {
+        p_delivery_id: scopeDelivery,
+        p_reason: scopeReason,
+        p_plan_token: scopeToken,
+        p_idempotency_key: fixIdem.getKeyFor(scope),
+      });
+      if (error) {
+        // Not ours (or unreachable): show only the refusal reasons, never the success notice.
+        if (getIdempotencyBindingRejection(error)) fixIdem.resetKeyFor(scope);
+        return;
+      }
+      const result = assertRpcResult<FixDeliveryResult>(data, 'fix_delivery');
+      fixIdem.resetKeyFor(scope);
+      setSubmittedScope(null);
+      setUndoneOrderId(result.order_id);
+    })().catch((err) => Sentry.captureException(err, { tags: { source: 'rpc', action: 'fix_delivery_replay' } }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan]);
 
   return (
     <Modal open={open} onClose={onClose} closeDisabled={saving} title="Fix Delivery">
@@ -115,7 +141,7 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
         {loadError && <p role="alert" className="p-3 rounded-lg bg-red-50 text-red-800">{loadError}</p>}
         {!plan && !loadError && <p className="text-secondary">Checking this delivery…</p>}
 
-        {alreadyUndone && <AlreadyUndoneNotice orderId={plan?.order_id ?? null} onClose={onClose} />}
+        {undoneOrderId && <AlreadyUndoneNotice orderId={undoneOrderId} onClose={onClose} />}
 
         {plan && <FixRefusals refusals={plan.refusals} />}
 

@@ -420,17 +420,18 @@ export default function Returns() {
     if (prefill) {
       void loadCustomerOrders(prefill.customer_id);
       void loadOrderItems(prefill.order_id, prefill.customer_id);
-      // The picker lists active customers only; never keep a hidden customer selected.
+      // The picker lists active customers only; never keep a hidden customer selected. A failed list
+      // cannot prove the customer active (create_return does not check), so it clears the pre-fill too.
       void customersLoaded.then((list) => {
-        // A newer create form owns the screen; this older check must not touch it.
-        if (session !== createSessionRef.current || !list || list.some((c) => c.id === prefill.customer_id)) return;
+        // A newer or closed create form owns the screen; this older check must not touch it.
+        if (session !== createSessionRef.current || list?.some((c) => c.id === prefill.customer_id)) return;
         if (newFormCustomerRef.current !== prefill.customer_id) return;
         customerOrdersRequestRef.current += 1;
         orderItemsRequestRef.current += 1;
         setNewForm((f) => ({ ...f, customer_id: '', order_id: '' }));
         setCustomerOrders([]);
         setOrderItems([]);
-        toast('error', 'This customer is inactive, so a return cannot be started for them here.');
+        if (list) toast('error', 'This customer is inactive, so a return cannot be started for them here.');
       });
     }
     setShowCreate(true);
@@ -449,6 +450,7 @@ export default function Returns() {
 
   const closeCreate = () => {
     if (creating) return;
+    createSessionRef.current += 1;
     customerOrdersRequestRef.current += 1;
     orderItemsRequestRef.current += 1;
     setShowCreate(false);

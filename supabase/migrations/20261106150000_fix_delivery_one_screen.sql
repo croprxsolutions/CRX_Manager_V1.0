@@ -312,6 +312,26 @@ ALTER TABLE public.commissions ADD COLUMN replaces_commission_id uuid;
 COMMENT ON COLUMN public.commissions.replaces_commission_id IS
   'Set only by fix_delivery: the cancelled commission this row re-creates. Reports skip a cancelled commission that a row replaces.';
 
+-- The reports trust the link, so nothing but fix_delivery (crx.fix_delivery_restore='on') may set or change it.
+CREATE OR REPLACE FUNCTION public.guard_commission_replaces_link()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $fn$
+BEGIN
+  IF NEW.replaces_commission_id IS DISTINCT FROM (CASE WHEN TG_OP = 'UPDATE' THEN OLD.replaces_commission_id END)
+     AND COALESCE(current_setting('crx.fix_delivery_restore', true), 'off') <> 'on' THEN
+    RAISE EXCEPTION 'COMMISSION_REPLACES_LINK_LOCKED: only Fix Delivery sets replaces_commission_id'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+REVOKE ALL ON FUNCTION public.guard_commission_replaces_link() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER trg_commissions_replaces_link_guard
+  BEFORE INSERT OR UPDATE OF replaces_commission_id ON public.commissions
+  FOR EACH ROW EXECUTE FUNCTION public.guard_commission_replaces_link();
+
 CREATE OR REPLACE FUNCTION public.fix_delivery(
   p_delivery_id uuid,
   p_reason text,
@@ -425,6 +445,7 @@ BEGIN
   END IF;
 
   -- The order stands, so the rep keeps the commission void_invoice just cancelled.
+  PERFORM set_config('crx.fix_delivery_restore', 'on', true);
   INSERT INTO commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage,
                            commission_amount, order_profit, order_date, season, order_number, customer_name,
                            status, replaces_commission_id)
@@ -434,6 +455,7 @@ BEGIN
     FROM commissions c
    WHERE c.id = ANY (v_pending_commission_ids) AND c.status = 'cancelled';
   GET DIAGNOSTICS v_commissions_restored = ROW_COUNT;
+  PERFORM set_config('crx.fix_delivery_restore', 'off', true);
 
   v_result := jsonb_build_object(
     'success', true,
@@ -470,7 +492,10 @@ BEGIN
      OR has_function_privilege('anon', 'public.preview_fix_delivery(uuid)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._fix_delivery_plan(uuid)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public._fix_delivery_plan(uuid)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.fix_delivery(uuid, text, text, text)', 'EXECUTE') THEN
+     OR NOT has_function_privilege('authenticated', 'public.fix_delivery(uuid, text, text, text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.guard_commission_replaces_link()', 'EXECUTE')
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.commissions'::regclass
+                     AND tgname = 'trg_commissions_replaces_link_guard' AND tgenabled = 'O') THEN
     RAISE EXCEPTION 'FIX_DELIVERY_GRANTS_DRIFT';
   END IF;
 END

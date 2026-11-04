@@ -498,6 +498,15 @@ function scenarios() {
     ${check(`(SELECT amount FROM public._get_bottom_line_pnl_cost_impl_20261019(CURRENT_DATE, CURRENT_DATE) WHERE line_item='Commissions')=30`, 'P&L counts only the edited copy')}
     ${asUser(ADMIN)} DO $m$ BEGIN IF (public.get_monthly_summary(CURRENT_DATE, CURRENT_DATE)->'commissions'->>'earned_cents')::bigint <> 3000 THEN RAISE EXCEPTION 'PROOF_FAIL: month-end counts the original again after an order edit'; END IF; END $m$;`,
     'an order edit that changes the copy\'s amount does not make the original count again');
+  // Only fix_delivery may write the link the reports trust. Browser roles have no write grant on
+  // commissions at all; the trigger also refuses the table owner (any other database function).
+  refused(`RESET ROLE; UPDATE public.commissions SET replaces_commission_id=NULL WHERE replaces_commission_id='${COMM}';`,
+    'nothing but Fix Delivery can unlink a re-created commission', /COMMISSION_REPLACES_LINK_LOCKED/);
+  refused(`RESET ROLE; INSERT INTO public.commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage, commission_amount, order_profit, order_date, season, order_number, customer_name, status, replaces_commission_id)
+      SELECT order_id, customer_id, recipient, recipient_user_id, split_percentage, 0, order_profit, order_date, season, order_number, customer_name, 'pending', id FROM public.commissions WHERE id='${COMM}';`,
+    'nothing but Fix Delivery can insert a row that hides a cancelled commission', /COMMISSION_REPLACES_LINK_LOCKED/);
+  refused(`${asUser(ADMIN)} UPDATE public.commissions SET replaces_commission_id=NULL WHERE replaces_commission_id='${COMM}';`,
+    'an admin in the browser cannot write commissions directly', /permission denied for table commissions/);
 }
 
 try {

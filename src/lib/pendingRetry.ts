@@ -15,21 +15,30 @@ export interface PendingRetry<T> {
   key: string;
   request: T;
   sentAt: number;
+  /** Past the receipt's lifetime: it can no longer be finished safely, only checked by hand. */
+  expired?: boolean;
 }
 
 const storageKey = (name: string) => `crx:pending-retry:${name}`;
 
-export function loadPendingRetry<T>(name: string): PendingRetry<T> | null {
+export function loadPendingRetry<T>(
+  name: string,
+  isValidRequest: (request: unknown) => request is T = (_request): _request is T => true,
+): PendingRetry<T> | null {
   try {
     const raw = sessionStorage.getItem(storageKey(name));
     if (!raw) return null;
     const pending = JSON.parse(raw) as PendingRetry<T>;
     if (typeof pending?.key !== 'string' || typeof pending.sentAt !== 'number'
-        || Date.now() - pending.sentAt > RECEIPT_LIFETIME_MS) {
+        || !isValidRequest(pending.request)
+        || !Number.isFinite(pending.sentAt)) {
       sessionStorage.removeItem(storageKey(name));
       return null;
     }
-    return pending;
+    // An expired entry is kept, so the screen can warn before another send instead of forgetting it.
+    // A send time in the future (the clock moved back) leaves its age unknown: treat it as expired.
+    const age = Date.now() - pending.sentAt;
+    return { ...pending, expired: age < 0 || age > RECEIPT_LIFETIME_MS };
   } catch {
     return null;
   }
@@ -37,7 +46,10 @@ export function loadPendingRetry<T>(name: string): PendingRetry<T> | null {
 
 export function savePendingRetry<T>(name: string, key: string, request: T): void {
   try {
-    sessionStorage.setItem(storageKey(name), JSON.stringify({ key, request, sentAt: Date.now() }));
+    // A retry of the same key keeps the first send time: the server's receipt expires from then.
+    const kept = loadPendingRetry<T>(name);
+    const sentAt = kept?.key === key ? kept.sentAt : Date.now();
+    sessionStorage.setItem(storageKey(name), JSON.stringify({ key, request, sentAt }));
   } catch {
     // No storage: the in-memory key still covers retries until a reload.
   }

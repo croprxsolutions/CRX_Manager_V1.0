@@ -17,12 +17,12 @@ import type { Json } from '../types/supabase';
  * the "Lock rates" switch applies. Each tab is previewed and confirmed on its own; the database
  * refuses a row changed since the download, by product name.
  */
-export const SETUP_WORKBOOK_SHEET = 'Setup';
-export const RATES_WORKBOOK_SHEET = 'Rates';
+const SETUP_WORKBOOK_SHEET = 'Setup';
+const RATES_WORKBOOK_SHEET = 'Rates';
 const MANIFEST_SHEET = '_crx_manifest';
 // A later format (for example after products are grouped into parents) changes this, so an older
 // download is refused as a whole.
-export const SETUP_WORKBOOK_FORMAT_VERSION = 'crx-product-setup-v1';
+const SETUP_WORKBOOK_FORMAT_VERSION = 'crx-product-setup-v1';
 /** The most rows one tab's save (and set_product_rates) takes at once. */
 export const MAX_SETUP_WORKBOOK_SAVE_ROWS = 2000;
 
@@ -33,7 +33,7 @@ const SETUP_TEXT_FIELDS = [
 const SETUP_DECIMAL_FIELDS = ['container_size', 'max_label_rate'] as const;
 const SETUP_WHOLE_FIELDS = ['rei_hours', 'phi_days'] as const;
 /** Every field the Setup tab may change, in sheet order. */
-export const SETUP_EDITABLE_FIELDS = [
+const SETUP_EDITABLE_FIELDS = [
   'product_name', 'sku', 'category', 'manufacturer', 'container_size', 'container_type',
   'epa_registration', 'is_rup', 'signal_word', 'rei_hours', 'phi_days', 'max_label_rate',
   'max_label_rate_unit', 'use_timings', 'notes', 'internal_notes', 'quoting_notes',

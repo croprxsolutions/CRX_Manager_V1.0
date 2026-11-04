@@ -36,6 +36,79 @@ const RATE_PROBLEM: Record<string, string> = {
 const rateText = (r: RatePreviewRow['before']) =>
   r ? `${r.rate_per_acre ?? '(blank)'} ${r.rate_unit ?? ''}${r.suggested_rate ? ` · "${r.suggested_rate}"` : ''}`.trim() : '';
 
+const plural = (n: number) => `${n} ${n === 1 ? 'product' : 'products'}`;
+
+function SetupTabPreview({ setup, saved, busy, blocked, onConfirm }: {
+  setup: SetupPreview; saved: string[] | null; busy: boolean; blocked: boolean; onConfirm: () => void;
+}) {
+  return (
+    <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Setup tab preview">
+      <h3 className="font-semibold text-nav-dark">Setup tab: {plural(setup.changes.length)} to change</h3>
+      {[...setup.stale, ...setup.invalid].map((p) => (
+        <p key={p.product_id} className="text-red-700">{p.product_name}: {p.problem}</p>
+      ))}
+      {(setup.stale.length > 0 || setup.invalid.length > 0) && (
+        <p className="text-red-700">Fix these rows, or download a fresh workbook, before saving this tab.</p>
+      )}
+      {setup.changes.length > 0 && (
+        <div className="max-h-64 overflow-auto">
+          <table className="w-full text-left">
+            <thead><tr className="text-secondary"><th className="font-medium">Product</th><th className="font-medium">Field</th><th className="font-medium">Now</th><th className="font-medium">New</th></tr></thead>
+            <tbody>
+              {setup.changes.flatMap((row) => row.display.map((d) => (
+                <tr key={`${row.product_id}-${d.field}`}><td>{row.product_name}</td><td>{d.field}</td><td>{d.before}</td><td className="font-medium text-nav-dark">{d.after}</td></tr>
+              )))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {saved
+        ? <p className="text-green-700">Saved: {saved.join(', ')}</p>
+        : <Button onClick={onConfirm} loading={busy} disabled={blocked}>Confirm Setup tab</Button>}
+    </section>
+  );
+}
+
+function RatesTabPreview({ locked, edited, changes, problems, saved, busy, blocked, onConfirm }: {
+  locked: boolean; edited: number; changes: RatePreviewRow[]; problems: RatePreviewRow[];
+  saved: number | null; busy: boolean; blocked: boolean; onConfirm: () => void;
+}) {
+  return (
+    <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Rates tab preview">
+      <h3 className="font-semibold text-nav-dark">Rates tab: {plural(changes.length)} to change</h3>
+      {locked && (
+        <p className="text-red-700">Rates are locked. An admin can correct one product at a time from its product page, with a reason.</p>
+      )}
+      {problems.map((p) => (
+        <p key={p.product_id} className="text-red-700">{p.product_name ?? p.product_id}: {RATE_PROBLEM[p.status]}</p>
+      ))}
+      {changes.length > 0 && (
+        <div className="max-h-64 overflow-auto">
+          <table className="w-full text-left">
+            <thead><tr className="text-secondary"><th className="font-medium">Product</th><th className="font-medium">Rate now → new</th>
+              {TIERS.map((t) => <th key={t} className="font-medium">Tier {t} per acre</th>)}</tr></thead>
+            <tbody>
+              {changes.map((r) => (
+                <tr key={r.product_id}>
+                  <td>{r.product_name}</td>
+                  <td>{rateText(r.before)} → <span className="font-medium text-nav-dark">{rateText(r.after)}</span></td>
+                  {TIERS.map((t) => (
+                    <td key={t}>{money(r.before?.[`tier${t}_price_per_acre`])} → <span className="font-medium text-nav-dark">{money(r.after?.[`tier${t}_price_per_acre`])}</span></td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {edited === 0 && <p className="text-secondary">No rate edits in this file.</p>}
+      {saved != null
+        ? <p className="text-green-700">Saved rates for {plural(saved)}.</p>
+        : <Button onClick={onConfirm} loading={busy} disabled={blocked}>Confirm Rates tab</Button>}
+    </section>
+  );
+}
+
 /**
  * The setup workbook (WP-PM-11a-2): product details and rates in one spreadsheet, separate from the
  * price sheet. Each tab is previewed and confirmed on its own; nothing saves until its Confirm.
@@ -167,65 +240,11 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
         </div>
 
         {setup && (
-          <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Setup tab preview">
-            <h3 className="font-semibold text-nav-dark">Setup tab: {setup.changes.length} {setup.changes.length === 1 ? 'product' : 'products'} to change</h3>
-            {[...setup.stale, ...setup.invalid].map((p) => (
-              <p key={p.product_id} className="text-red-700">{p.product_name}: {p.problem}</p>
-            ))}
-            {(setup.stale.length > 0 || setup.invalid.length > 0) && (
-              <p className="text-red-700">Fix these rows, or download a fresh workbook, before saving this tab.</p>
-            )}
-            {setup.changes.length > 0 && (
-              <div className="max-h-64 overflow-auto">
-                <table className="w-full text-left">
-                  <thead><tr className="text-secondary"><th className="font-medium">Product</th><th className="font-medium">Field</th><th className="font-medium">Now</th><th className="font-medium">New</th></tr></thead>
-                  <tbody>
-                    {setup.changes.flatMap((row) => row.display.map((d) => (
-                      <tr key={`${row.product_id}-${d.field}`}><td>{row.product_name}</td><td>{d.field}</td><td>{d.before}</td><td className="font-medium text-nav-dark">{d.after}</td></tr>
-                    )))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {setupSaved
-              ? <p className="text-green-700">Saved: {setupSaved.join(', ')}</p>
-              : <Button onClick={() => void confirmSetup()} loading={busy} disabled={setupBlocked}>Confirm Setup tab</Button>}
-          </section>
+          <SetupTabPreview setup={setup} saved={setupSaved} busy={busy} blocked={setupBlocked} onConfirm={() => void confirmSetup()} />
         )}
-
         {rates && (
-          <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Rates tab preview">
-            <h3 className="font-semibold text-nav-dark">Rates tab: {rateChanges.length} {rateChanges.length === 1 ? 'product' : 'products'} to change</h3>
-            {rates.preview?.rates_locked && (
-              <p className="text-red-700">Rates are locked. An admin can correct one product at a time from its product page, with a reason.</p>
-            )}
-            {rateProblems.map((p) => (
-              <p key={p.product_id} className="text-red-700">{p.product_name ?? p.product_id}: {RATE_PROBLEM[p.status]}</p>
-            ))}
-            {rateChanges.length > 0 && (
-              <div className="max-h-64 overflow-auto">
-                <table className="w-full text-left">
-                  <thead><tr className="text-secondary"><th className="font-medium">Product</th><th className="font-medium">Rate now → new</th>
-                    {TIERS.map((t) => <th key={t} className="font-medium">Tier {t} per acre</th>)}</tr></thead>
-                  <tbody>
-                    {rateChanges.map((r) => (
-                      <tr key={r.product_id}>
-                        <td>{r.product_name}</td>
-                        <td>{rateText(r.before)} → <span className="font-medium text-nav-dark">{rateText(r.after)}</span></td>
-                        {TIERS.map((t) => (
-                          <td key={t}>{money(r.before?.[`tier${t}_price_per_acre`])} → <span className="font-medium text-nav-dark">{money(r.after?.[`tier${t}_price_per_acre`])}</span></td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {rates.rows.length === 0 && <p className="text-secondary">No rate edits in this file.</p>}
-            {ratesSaved != null
-              ? <p className="text-green-700">Saved rates for {ratesSaved} products.</p>
-              : <Button onClick={() => void confirmRates()} loading={busy} disabled={ratesBlocked}>Confirm Rates tab</Button>}
-          </section>
+          <RatesTabPreview locked={Boolean(rates.preview?.rates_locked)} edited={rates.rows.length} changes={rateChanges}
+            problems={rateProblems} saved={ratesSaved} busy={busy} blocked={ratesBlocked} onConfirm={() => void confirmRates()} />
         )}
       </div>
     </Modal>

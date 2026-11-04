@@ -1,6 +1,6 @@
 ## 2026-11-03 — Re-saving a draft invoice no longer adds a cent to a split delivery (S16b)
 
-- New migration `20261106130000_invoice_resave_keeps_line_cents.sql` (NOT APPLIED; record in
+- New migration `20261106130000_invoice_resave_keeps_line_cents.sql` (applied live 2026-11-04; record in
   `docs/reference/migrations.d/`). An order line delivered in parts carries its cents through each
   part: 5 gal at $5.33 ($26.65) delivered in two halves is invoiced $13.33 + $13.32. Saving the
   second draft invoice again with only a note changed re-rounded its line to 2.5 × $5.33 = $13.33,

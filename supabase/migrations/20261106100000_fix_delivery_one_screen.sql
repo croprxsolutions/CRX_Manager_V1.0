@@ -116,7 +116,7 @@ BEGIN
            'paid_cents', COALESCE(i.paid_amount_cents, 0),
            'prepay_applied_cents', COALESCE(i.prepay_applied_cents, 0),
            'action', CASE WHEN i.status IN ('draft', 'unposted') THEN 'cancel' ELSE 'void' END
-         ) ORDER BY i.invoice_number), '[]'::jsonb)
+         ) ORDER BY i.invoice_number, i.id), '[]'::jsonb)
     INTO v_invoices
     FROM invoices i
    WHERE i.delivery_id = p_delivery_id
@@ -173,7 +173,7 @@ BEGIN
 
   -- void_delivery also cancels the order's draft invoices that have no delivery; show them so
   -- nothing is a surprise (same scope as its auto-cancel).
-  SELECT COALESCE(jsonb_agg(jsonb_build_object('id', i.id, 'invoice_number', i.invoice_number) ORDER BY i.invoice_number), '[]'::jsonb)
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('id', i.id, 'invoice_number', i.invoice_number, 'total_cents', i.total_amount_cents) ORDER BY i.invoice_number, i.id), '[]'::jsonb)
     INTO v_order_drafts
     FROM invoices i
    WHERE i.order_id = v_delivery.order_id AND i.status = 'draft' AND i.deleted_at IS NULL
@@ -183,7 +183,7 @@ BEGIN
            'product_name', p.product_name,
            'quantity', di.quantity_delivered,
            'unit', COALESCE(di.unit_size, p.unit_size)
-         ) ORDER BY p.product_name), '[]'::jsonb)
+         ) ORDER BY p.product_name, di.id), '[]'::jsonb)
     INTO v_items
     FROM delivery_items di
     LEFT JOIN products p ON p.id = di.product_id
@@ -200,7 +200,9 @@ BEGIN
     'refusals', v_refusals,
     'invoices', v_invoices,
     'other_draft_invoices', v_order_drafts,
-    'items', v_items
+    'items', v_items,
+    -- What the preview showed; fix_delivery refuses when it no longer matches.
+    'plan_token', md5(jsonb_build_object('invoices', v_invoices, 'other_draft_invoices', v_order_drafts, 'items', v_items)::text)
   );
 END;
 $function$;
@@ -231,7 +233,7 @@ GRANT EXECUTE ON FUNCTION public.preview_fix_delivery(uuid) TO authenticated, se
 CREATE OR REPLACE FUNCTION public.fix_delivery(
   p_delivery_id uuid,
   p_reason text,
-  p_expected_invoice_ids uuid[],
+  p_plan_token text,
   p_idempotency_key text DEFAULT NULL::text
 )
 RETURNS jsonb
@@ -242,8 +244,6 @@ AS $function$
 DECLARE
   v_actor uuid := auth.uid();
   v_reason text := btrim(COALESCE(p_reason, ''));
-  v_expected uuid[];
-  v_actual uuid[];
   v_fingerprint text;
   v_replay jsonb;
   v_plan jsonb;
@@ -260,12 +260,11 @@ BEGIN
   IF NOT is_admin() THEN RAISE EXCEPTION 'Admin access required to fix a delivery'; END IF;
   IF v_reason = '' THEN RAISE EXCEPTION 'Reason is required to fix a delivery'; END IF;
 
-  SELECT COALESCE(array_agg(x ORDER BY x), '{}') INTO v_expected FROM unnest(p_expected_invoice_ids) x;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,
     'delivery_id', p_delivery_id,
     'reason', v_reason,
-    'invoice_ids', to_jsonb(v_expected)
+    'plan_token', p_plan_token
   ));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'fix_delivery', v_actor, v_fingerprint);
   IF v_replay IS NOT NULL THEN
@@ -302,13 +301,8 @@ BEGIN
     RAISE EXCEPTION 'FIX_DELIVERY_REFUSED: %', v_plan -> 'refusals' -> 0 ->> 'message'
       USING DETAIL = (v_plan -> 'refusals')::text;
   END IF;
-  -- Expected = every invoice the preview showed: the delivery's own and the order drafts void_delivery cancels.
-  SELECT COALESCE(array_agg(x ORDER BY x), '{}') INTO v_actual
-    FROM (SELECT (e ->> 'id')::uuid x FROM jsonb_array_elements(v_plan -> 'invoices') e
-          UNION ALL
-          SELECT (e ->> 'id')::uuid FROM jsonb_array_elements(v_plan -> 'other_draft_invoices') e) ids;
-  IF v_actual IS DISTINCT FROM v_expected THEN
-    RAISE EXCEPTION 'FIX_DELIVERY_PREVIEW_STALE: the invoices on this delivery or order changed; reopen Fix delivery to see the new plan';
+  IF (v_plan ->> 'plan_token') IS DISTINCT FROM p_plan_token THEN
+    RAISE EXCEPTION 'FIX_DELIVERY_PREVIEW_STALE: the delivery or its invoices changed since the preview; reopen Fix delivery to see the new plan';
   END IF;
 
   FOR v_invoice IN SELECT e FROM jsonb_array_elements(v_plan -> 'invoices') e LOOP
@@ -352,18 +346,135 @@ BEGIN
   RETURN v_result;
 END;
 $function$;
-REVOKE ALL ON FUNCTION public.fix_delivery(uuid, text, uuid[], text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.fix_delivery(uuid, text, uuid[], text) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.fix_delivery(uuid, text, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.fix_delivery(uuid, text, text, text) TO authenticated, service_role;
 
 -- Postflight: the grants above are what landed.
 DO $postflight$
 BEGIN
-  IF has_function_privilege('anon', 'public.fix_delivery(uuid, text, uuid[], text)', 'EXECUTE')
+  IF has_function_privilege('anon', 'public.fix_delivery(uuid, text, text, text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.preview_fix_delivery(uuid)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._fix_delivery_plan(uuid)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public._fix_delivery_plan(uuid)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.fix_delivery(uuid, text, uuid[], text)', 'EXECUTE') THEN
+     OR NOT has_function_privilege('authenticated', 'public.fix_delivery(uuid, text, text, text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'FIX_DELIVERY_GRANTS_DRIFT';
   END IF;
 END
 $postflight$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 4. Reports skip cancelled commissions. A fix leaves the cancelled original next to its pending
+--    copy (cancelled rows keep their amount and cannot reopen), so summing every status counted
+--    it twice; this also stops any other voided invoice's cancelled commission from counting.
+--    Each body below is the live one (pinned by hash) with only its commission line changed.
+-- ---------------------------------------------------------------------------------------------
+DO $reports_preflight$
+BEGIN
+  IF encode(sha256(convert_to(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public.get_monthly_summary(date,date)'::regprocedure), chr(13) || chr(10), chr(10)), 'UTF8')), 'hex')
+       <> '079f77c1628821088ea02830ac12a4ae918b297419aaf8d4e4dc3e804ca96c10'
+     OR encode(sha256(convert_to(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure), chr(13) || chr(10), chr(10)), 'UTF8')), 'hex')
+       <> '307c94d4e8de83c91b0b7ca680d529c6834e56ef5bc5b10c5c6d054fc1a265d2' THEN
+    RAISE EXCEPTION 'FIX_DELIVERY_REPORTS_PREFLIGHT_DRIFT';
+  END IF;
+END
+$reports_preflight$;
+
+CREATE OR REPLACE FUNCTION public.get_monthly_summary(p_period_start date, p_period_end date)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v_result jsonb;
+BEGIN
+  PERFORM require_admin();
+  SELECT jsonb_build_object(
+    'period_start', p_period_start,
+    'period_end', p_period_end,
+    'invoices', jsonb_build_object(
+      'posted_count', (SELECT count(*) FROM public.invoices WHERE invoice_date BETWEEN p_period_start AND p_period_end AND status IN ('posted', 'overdue', 'paid') AND deleted_at IS NULL),
+      'total_amount_cents', COALESCE((SELECT sum(total_amount_cents) FROM public.invoices WHERE invoice_date BETWEEN p_period_start AND p_period_end AND status IN ('posted', 'overdue', 'paid') AND deleted_at IS NULL), 0),
+      'total_cost_cents', COALESCE((SELECT sum(CASE
+        WHEN inv.invoice_type = 'credit_memo'
+         AND EXISTS (SELECT 1 FROM public.returns r WHERE r.credit_invoice_id = inv.id)
+          THEN inv.total_cost_cents
+        ELSE (SELECT COALESCE(sum(ROUND(ii.cost_cents * ii.quantity)::bigint), 0)
+              FROM public.invoice_items ii WHERE ii.invoice_id = inv.id)
+      END) FROM public.invoices inv WHERE inv.invoice_date BETWEEN p_period_start AND p_period_end AND inv.status IN ('posted', 'overdue', 'paid') AND inv.deleted_at IS NULL), 0),
+      'draft_count', (SELECT count(*) FROM public.invoices WHERE invoice_date BETWEEN p_period_start AND p_period_end AND status IN ('draft', 'unposted') AND deleted_at IS NULL),
+      'voided_count', (SELECT count(*) FROM public.invoices WHERE invoice_date BETWEEN p_period_start AND p_period_end AND status = 'voided' AND deleted_at IS NULL)
+    ),
+    'payments', jsonb_build_object('count', (SELECT count(*) FROM public.payments WHERE payment_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL), 'total_cents', COALESCE((SELECT sum((amount * 100)::bigint) FROM public.payments WHERE payment_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL), 0)),
+    'orders', jsonb_build_object('count', (SELECT count(*) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 'total_cents', COALESCE((SELECT sum((total_price * 100)::bigint) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 0)),
+    'deliveries', jsonb_build_object('count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status NOT IN ('cancelled', 'voided') AND deleted_at IS NULL), 'completed_count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status = 'completed' AND deleted_at IS NULL)),
+    'applications', jsonb_build_object('count', (SELECT count(*) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 'total_acres', COALESCE((SELECT sum(total_acres) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 0)),
+    'commissions', jsonb_build_object('earned_cents', COALESCE((SELECT sum((commission_amount * 100)::bigint) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status <> 'cancelled'), 0), 'paid_count', (SELECT count(*) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status = 'paid')),
+    'ar_balance_cents', COALESCE((SELECT sum(balance_cents) FROM public.invoices WHERE status IN ('posted', 'overdue') AND balance_cents > 0 AND deleted_at IS NULL), 0)
+  ) INTO v_result;
+  RETURN v_result;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public._get_bottom_line_pnl_cost_impl_20261019(p_start_date date, p_end_date date)
+ RETURNS TABLE(line_item text, amount numeric, pct_of_revenue numeric)
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_revenue numeric := 0;
+  v_cogs numeric := 0;
+  v_gross_profit numeric := 0;
+  v_commissions numeric := 0;
+  v_net_profit numeric := 0;
+BEGIN
+  SELECT
+    COALESCE(SUM(i.total_amount_cents), 0) / 100.0,
+    COALESCE(SUM(CASE
+      WHEN i.invoice_type = 'credit_memo'
+       AND EXISTS (SELECT 1 FROM public.returns r WHERE r.credit_invoice_id = i.id)
+        THEN i.total_cost_cents
+      ELSE (SELECT COALESCE(SUM(ROUND(ii.cost_cents * ii.quantity)::bigint), 0)
+            FROM public.invoice_items ii WHERE ii.invoice_id = i.id)
+    END), 0) / 100.0
+  INTO v_revenue, v_cogs
+  FROM public.invoices i
+  WHERE i.status IN ('posted', 'overdue', 'paid')
+    AND i.invoice_date >= p_start_date
+    AND i.invoice_date <= p_end_date
+    AND i.deleted_at IS NULL;
+
+  v_gross_profit := v_revenue - v_cogs;
+  SELECT COALESCE(SUM(commission_amount), 0) INTO v_commissions
+  FROM public.commissions
+  WHERE order_date >= p_start_date AND order_date <= p_end_date AND status <> 'cancelled';
+  v_net_profit := v_gross_profit - v_commissions;
+
+  RETURN QUERY VALUES
+    ('Revenue'::text, v_revenue, 100.0::numeric),
+    ('Cost of Goods Sold', v_cogs, CASE WHEN v_revenue > 0 THEN ROUND(v_cogs / v_revenue * 100, 1) ELSE 0 END),
+    ('Gross Profit', v_gross_profit, CASE WHEN v_revenue > 0 THEN ROUND(v_gross_profit / v_revenue * 100, 1) ELSE 0 END),
+    ('Commissions', v_commissions, CASE WHEN v_revenue > 0 THEN ROUND(v_commissions / v_revenue * 100, 1) ELSE 0 END),
+    ('Net Profit', v_net_profit, CASE WHEN v_revenue > 0 THEN ROUND(v_net_profit / v_revenue * 100, 1) ELSE 0 END);
+END;
+$function$;
+
+-- Postflight: CREATE OR REPLACE kept owner, attributes and grants; only the commission line moved.
+DO $reports_postflight$
+DECLARE
+  v_monthly text := (SELECT prosrc FROM pg_proc WHERE oid = 'public.get_monthly_summary(date,date)'::regprocedure);
+  v_pnl text := (SELECT prosrc FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure);
+BEGIN
+  IF position('AND status <> ''cancelled''), 0)' IN v_monthly) = 0
+     OR position('PERFORM require_admin();' IN v_monthly) = 0
+     OR position('AND status <> ''cancelled'';' IN v_pnl) = 0
+     OR NOT (SELECT prosecdef AND pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.get_monthly_summary(date,date)'::regprocedure)
+     OR (SELECT prosecdef FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure)
+     OR has_function_privilege('anon', 'public.get_monthly_summary(date,date)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.get_monthly_summary(date,date)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FIX_DELIVERY_REPORTS_POSTFLIGHT_DRIFT';
+  END IF;
+END
+$reports_postflight$;

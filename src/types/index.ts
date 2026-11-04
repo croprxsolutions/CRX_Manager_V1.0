@@ -1223,8 +1223,10 @@ export interface FixDeliveryPlan {
   can_fix: boolean;
   refusals: Array<{ code: string; message: string }>;
   invoices: Array<{ id: string; invoice_number: string; status: InvoiceStatus; total_cents: number; paid_cents: number; prepay_applied_cents: number; action: 'cancel' | 'void' }>;
-  other_draft_invoices: Array<{ id: string; invoice_number: string }>;
+  other_draft_invoices: Array<{ id: string; invoice_number: string; total_cents: number }>;
   items: Array<{ product_name: string | null; quantity: number; unit: string | null }>;
+  /** Fingerprint of what the preview showed; fix_delivery refuses when it no longer matches. */
+  plan_token: string;
 }
 /** fix_delivery's result: the order and customer to re-enter the corrected delivery for. */
 export interface FixDeliveryResult {

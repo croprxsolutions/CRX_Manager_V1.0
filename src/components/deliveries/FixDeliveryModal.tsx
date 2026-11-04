@@ -65,16 +65,15 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
 
   const handleFix = async () => {
     if (!profile || !plan || !ready) return;
-    // Every invoice the preview showed, so the server refuses if any changed since.
-    const invoiceIds = [...plan.invoices, ...plan.other_draft_invoices].map((i) => i.id).sort();
-    const scope = JSON.stringify([deliveryId, reason.trim(), invoiceIds]);
+    // The token covers everything the preview showed, so the server refuses if any of it changed since.
+    const scope = JSON.stringify([deliveryId, reason.trim(), plan.plan_token]);
     setSaving(true);
     setSubmittedScope(scope);
     try {
       const { data, error } = await supabaseUntyped.rpc('fix_delivery', {
         p_delivery_id: deliveryId,
         p_reason: reason.trim(),
-        p_expected_invoice_ids: invoiceIds,
+        p_plan_token: plan.plan_token,
         p_idempotency_key: fixIdem.getKeyFor(scope),
       });
       if (error) throw error;

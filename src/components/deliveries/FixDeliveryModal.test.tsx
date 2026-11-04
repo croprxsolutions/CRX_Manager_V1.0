@@ -15,7 +15,7 @@ import FixDeliveryModal from './FixDeliveryModal';
 
 const plan = (over = {}) => ({
   delivery_id: 'd1', delivery_number: 'DEL-7', order_id: 'o1', order_number: 'ORD-1', customer_id: 'c1',
-  can_fix: true, refusals: [], other_draft_invoices: [],
+  can_fix: true, refusals: [], other_draft_invoices: [], plan_token: 'tok1',
   invoices: [{ id: 'i2', invoice_number: 'INV-2', status: 'posted', total_cents: 12345, paid_cents: 0, prepay_applied_cents: 0, action: 'void' }],
   items: [{ product_name: 'Roundup', quantity: 10, unit: 'gal' }],
   ...over,
@@ -49,7 +49,7 @@ describe('FixDeliveryModal', () => {
     fireEvent.click(button);
     await screen.findByText('New delivery page');
     expect(H.rpc).toHaveBeenCalledWith('fix_delivery', expect.objectContaining({
-      p_delivery_id: 'd1', p_reason: 'Entered 100, delivered 10', p_expected_invoice_ids: ['i2'], p_idempotency_key: expect.any(String),
+      p_delivery_id: 'd1', p_reason: 'Entered 100, delivered 10', p_plan_token: 'tok1', p_idempotency_key: expect.any(String),
     }));
   });
 

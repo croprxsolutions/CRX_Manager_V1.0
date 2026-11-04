@@ -210,8 +210,10 @@ function refused(sql,label,pattern) {
 }
 // Runs as the table owner so the assertion reads the real rows, not what RLS lets the caller see.
 function check(cond,msg) { return `RESET ROLE; DO $chk$ BEGIN IF NOT (${cond}) THEN RAISE EXCEPTION 'PROOF_FAIL: ${msg}'; END IF; END $chk$;`; }
-const fix = (key, reason='[PROVER] wrong amount', ids=`ARRAY['${INV}']::uuid[]`) =>
-  `${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','${reason}',${ids},'${key}');`;
+// The token the admin's preview showed on the seeded state; a change after it makes the fix stale.
+let TOKEN = '';
+const fix = (key, reason='[PROVER] wrong amount', token=TOKEN) =>
+  `${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','${reason}','${token}','${key}');`;
 const stock = `(SELECT quantity_available FROM public.inventory WHERE product_id='${PRODUCT}' AND location='Main Warehouse')`;
 
 function seed() {
@@ -269,9 +271,9 @@ function scenarios() {
     ${check(`(SELECT (p->'items'->0->>'quantity')::numeric=10 FROM pq)`, 'preview shows the delivered quantity')}`,
     'the preview shows the quantity that goes back into stock, not the planned one');
   refused(`${asUser(REP)} SELECT public.preview_fix_delivery('${DELIVERY}');`, 'a sales rep cannot preview a fix', /Admin access required/);
-  refused(`${asUser(REP)} SELECT public.fix_delivery('${DELIVERY}','x',ARRAY['${INV}']::uuid[],'k-rep');`, 'a sales rep cannot fix a delivery', /Admin access required/);
-  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','x',ARRAY['${INV}']::uuid[],NULL);`, 'a key is required', /IDEMPOTENCY_KEY_REQUIRED/);
-  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','  ',ARRAY['${INV}']::uuid[],'k-blank');`, 'a reason is required', /Reason is required/);
+  refused(`${asUser(REP)} SELECT public.fix_delivery('${DELIVERY}','x','x','k-rep');`, 'a sales rep cannot fix a delivery', /Admin access required/);
+  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','x','x',NULL);`, 'a key is required', /IDEMPOTENCY_KEY_REQUIRED/);
+  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','  ','x','k-blank');`, 'a reason is required', /Reason is required/);
   refused(`${asUser(ADMIN)} SELECT public._fix_delivery_plan('${DELIVERY}');`, 'the plan helper is not callable by app roles', /permission denied/);
 
   const before = Number(scalar(`SELECT ${stock};`));
@@ -283,7 +285,9 @@ function scenarios() {
     ${check(`${stock}=${before + 10}`, 'stock restored once')}
     ${check(`(SELECT status FROM public.commissions WHERE id='${COMM}')='cancelled'`, 'old commission kept as cancelled history')}
     ${check(`(SELECT count(*) FROM public.commissions WHERE order_id='${ORDER}' AND status='pending' AND commission_amount=40 AND recipient_user_id='${REP}')=1`, 'rep keeps one pending commission')}
-    ${check(`EXISTS (SELECT 1 FROM public.activity_feed WHERE event_type='delivery_fixed' AND related_entity_id='${DELIVERY}')`, 'activity recorded')}`,
+    ${check(`EXISTS (SELECT 1 FROM public.activity_feed WHERE event_type='delivery_fixed' AND related_entity_id='${DELIVERY}')`, 'activity recorded')}
+    ${check(`(SELECT amount FROM public._get_bottom_line_pnl_cost_impl_20261019(CURRENT_DATE, CURRENT_DATE) WHERE line_item='Commissions')=40`, 'P&L counts the commission once')}
+    ${asUser(ADMIN)} DO $m$ BEGIN IF (public.get_monthly_summary(CURRENT_DATE, CURRENT_DATE)->'commissions'->>'earned_cents')::bigint <> 4000 THEN RAISE EXCEPTION 'PROOF_FAIL: month-end counts the commission twice'; END IF; END $m$;`,
     'fix undoes invoice and delivery together, restores stock once, keeps the commission');
 
   allowed(`${fix('k-replay')} ${fix('k-replay')}
@@ -291,12 +295,14 @@ function scenarios() {
     ${check(`${stock}=${before + 10}`, 'replay did not restore stock twice')}`,
     'an exact retry replays the stored result and changes nothing more');
   refused(`${fix('k-intent')} ${fix('k-intent','[PROVER] edited reason')}`, 'reusing a key with an edited reason is refused', /IDEMPOTENCY_INTENT_MISMATCH/);
-  refused(fix('k-stale','[PROVER] wrong amount',`ARRAY[]::uuid[]`), 'a stale preview (different invoice set) is refused', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(fix('k-stale','[PROVER] wrong amount','not-the-preview'), 'a stale preview token is refused', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
     INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id)
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}');
     ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-draft')}`, 'an order draft added after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET total_amount_cents=20000 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${fix('k-new-amount')}`, 'an invoice amount changed after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
 
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET paid_amount_cents=100 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-paid')}`, 'a payment on the invoice refuses the fix', /FIX_DELIVERY_REFUSED: A payment is applied/);
@@ -332,7 +338,7 @@ function scenarios() {
   allowed(`RESET ROLE; CREATE FUNCTION public.prover_boom() RETURNS trigger LANGUAGE plpgsql AS $b$ BEGIN RAISE EXCEPTION 'PROVER_BOOM'; END $b$;
     CREATE TRIGGER prover_boom BEFORE UPDATE OF status ON public.deliveries FOR EACH ROW EXECUTE FUNCTION public.prover_boom();
     ${asUser(ADMIN)} DO $d$ BEGIN
-      PERFORM public.fix_delivery('${DELIVERY}','[PROVER] wrong amount',ARRAY['${INV}']::uuid[],'k-boom');
+      PERFORM public.fix_delivery('${DELIVERY}','[PROVER] wrong amount','${TOKEN}','k-boom');
       RAISE EXCEPTION 'PROOF_FAIL: fix succeeded despite the delivery failure';
     EXCEPTION WHEN OTHERS THEN IF SQLERRM NOT LIKE '%PROVER_BOOM%' THEN RAISE; END IF; END $d$;
     ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='posted'`, 'invoice stayed posted after the failed fix')}
@@ -348,6 +354,8 @@ try {
     console.log('[prover] candidate applied');
   }
   if (scalar(`SELECT count(*) FROM public.deliveries WHERE id='${DELIVERY}';`) === '0') seed();
+  TOKEN = scalar(`SELECT public._fix_delivery_plan('${DELIVERY}')->>'plan_token';`);
+  assert.match(TOKEN, /^[0-9a-f]{32}$/, 'the preview carries a plan token');
   scenarios();
   console.log('[prover] PASS: fix_delivery real-schema proof');
 } finally {

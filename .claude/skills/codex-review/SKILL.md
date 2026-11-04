@@ -248,6 +248,15 @@ new one), then run `node scripts/write-codex-push-proof.mjs --carry-restamp` and
 `node scripts/write-apply-proofs.mjs --restamp-from <old-name> <new-name>`. No model call; anything
 beyond that refuses and needs the full review. Mason's owner approval never carries.
 
+**Records updated after a live apply? Carry it (Mason, 2026-11-04).** After the migration is applied
+live, commit the paperwork as ONE commit on top of the reviewed head: `docs/reference/migrations.d/*.md`,
+`docs/changelog.d/*.md`, `docs/manual/KNOWN_ISSUES.md`, `.claude/schema-registry.json`, and
+`scripts/db-invariant-sweeps/allowlist.json` re-keys (same signature, new 12-hex hash, wording appended to
+the justification, new `dated`; no entry added, removed or otherwise changed). Then run
+`node scripts/write-codex-push-proof.mjs --carry-post-apply`. No model call; any other file, an
+executable or symlink, or a stale or unclean review refuses and needs the full review. Code fixes go in
+their own commit before it, and they need Sol.
+
 **Skip Step 3B for a change off `docs/reference/sol-required-paths.md`** (Mason, 2026-10-30): both
 merge gates read the PR's real file list and accept it on green checks.
 

@@ -2154,7 +2154,9 @@ function gitBlob(root, sha, file) {
   return result.error || result.status !== 0 ? null : String(result.stdout);
 }
 
-function resolveRestamp(root, nowMs) {
+// The facts for a carry over ONE ordinary commit on top of the reviewed head, or
+// { problem }. `problemOf({ entries, readFile })` judges what that commit changed.
+function resolveSingleCommitCarry(root, nowMs, problemOf) {
   const headSha = runGit(["rev-parse", "HEAD"], { cwd: root });
   const parents = runGit(["rev-list", "--parents", "-n", "1", headSha], { cwd: root }).split(/\s+/).slice(1);
   if (!CARRY_SHA_RE.test(headSha) || parents.length !== 1 || !CARRY_SHA_RE.test(parents[0])) {
@@ -2175,7 +2177,7 @@ function resolveRestamp(root, nowMs) {
   } catch {
     return { problem: "could not list the changed files" };
   }
-  const problem = restampProblem({
+  const problem = problemOf({
     entries,
     readFile: (side, file) => gitBlob(root, side === "old" ? fromHead : headSha, file),
   });
@@ -2188,7 +2190,7 @@ function runCarryRestamp(root, options) {
     process.stderr.write("Restamp carry requires a clean worktree.\n");
     return 1;
   }
-  const facts = resolveRestamp(root, Date.now());
+  const facts = resolveSingleCommitCarry(root, Date.now(), restampProblem);
   if (facts.problem) {
     process.stderr.write(
       `Restamp carry refused: ${facts.problem}. No proof written — run the full review instead: ` +
@@ -2200,6 +2202,12 @@ function runCarryRestamp(root, options) {
     `Restamp carry: reviewed head ${facts.fromHead.slice(0, 12)} → head ${facts.headSha.slice(0, 12)} ` +
     `(base ${facts.source.base_sha.slice(0, 12)}); ${facts.entries.length} file(s), only the migration's timestamp changed.\n`,
   );
+  return mintSingleCommitCarry(root, options, facts, "restamp");
+}
+
+// Write the carried proof for `facts` unless this is a dry run or anything moved
+// since the check. The base stays the reviewed head's base.
+function mintSingleCommitCarry(root, options, facts, mode) {
   if (options.dryRun) {
     process.stdout.write("[dry-run] No proof written.\n");
     return 0;
@@ -2218,11 +2226,111 @@ function runCarryRestamp(root, options) {
   const proofPath = codexPushProofPath(root, facts.headSha);
   mkdirSync(path.dirname(proofPath), { recursive: true });
   const proof = buildCarryForwardProof({
-    headSha: facts.headSha, baseSha: facts.source.base_sha, source: facts.source, mode: "restamp",
+    headSha: facts.headSha, baseSha: facts.source.base_sha, source: facts.source, mode,
   });
   writeFileSync(proofPath, `${JSON.stringify(proof, null, 2)}\n`, "utf8");
-  process.stdout.write(`Carried Sol proof written to ${proofPath} (mode: restamp).\n`);
+  process.stdout.write(`Carried Sol proof written to ${proofPath} (mode: ${mode}).\n`);
   return 0;
+}
+
+// ── post-apply carry (Mason, 2026-11-04) ────────────────────────────────────
+// A migration is applied live BEFORE merge, then its records are updated in one
+// more commit, which voided the Sol proof and cost a second full Sol run (PRs
+// #1327 and #1452, twice). `--carry-post-apply` keeps the reviewed head's clean
+// proof when HEAD is ONE commit on top of it that only touches the post-apply
+// paperwork below, in regular non-executable files. The invariant allowlist may
+// only re-key existing entries: the same signature with a new hash, wording
+// appended to the justification, and a new `dated`. Anything else refuses.
+const POST_APPLY_EDITABLE_RE = /^(?:docs\/reference\/migrations\.d\/[^/]+\.md|docs\/changelog\.d\/[^/]+\.md|docs\/manual\/KNOWN_ISSUES\.md|\.claude\/schema-registry\.json)$/;
+const POST_APPLY_ADDABLE_RE = /^docs\/(?:reference\/migrations\.d|changelog\.d)\/[^/]+\.md$/;
+const POST_APPLY_ALLOWLIST = "scripts/db-invariant-sweeps/allowlist.json";
+const REKEYED_KEY_RE = /^(.+)#([0-9a-f]{12})$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// null when `before` → `after` (allowlist.json texts) only re-keys entries, else why not.
+export function allowlistRekeyProblem(before, after) {
+  let oldList;
+  let newList;
+  try {
+    oldList = JSON.parse(before);
+    newList = JSON.parse(after);
+  } catch {
+    return "the allowlist is not valid JSON";
+  }
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const oldEntries = oldList?.entries;
+  const newEntries = newList?.entries;
+  if (!Array.isArray(oldEntries) || !Array.isArray(newEntries)) return "the allowlist has no entries list";
+  if (!same({ ...oldList, entries: null }, { ...newList, entries: null })) return "the allowlist changed outside its entries";
+  if (oldEntries.length !== newEntries.length) return "an allowlist entry was added or removed";
+  for (let i = 0; i < oldEntries.length; i += 1) {
+    const was = oldEntries[i];
+    const now = newEntries[i];
+    if (same(was, now)) continue;
+    const label = `allowlist entry ${i + 1}`;
+    if (!was || !now || typeof was !== "object" || typeof now !== "object" || Array.isArray(was) || Array.isArray(now)) {
+      return `${label} is not an object`;
+    }
+    const { violation_key: oldKey, justification: oldWhy, dated: oldDated, ...oldRest } = was;
+    const { violation_key: newKey, justification: newWhy, dated: newDated, ...newRest } = now;
+    if (!same(Object.keys(was).sort(), Object.keys(now).sort()) || !same(oldRest, newRest)) {
+      return `${label} changed beyond its key, justification and date`;
+    }
+    if (newKey !== oldKey) {
+      const o = REKEYED_KEY_RE.exec(String(oldKey));
+      const n = REKEYED_KEY_RE.exec(String(newKey));
+      if (typeof oldKey !== "string" || typeof newKey !== "string" || !o || !n || o[1] !== n[1]) {
+        return `${label} changed its signature, not just its hash`;
+      }
+    }
+    if (typeof oldWhy !== "string" || typeof newWhy !== "string" || !newWhy.startsWith(oldWhy)) {
+      return `${label}'s justification was rewritten, not appended to`;
+    }
+    if (newDated !== oldDated && !ISO_DATE_RE.test(String(newDated))) return `${label}'s date is not YYYY-MM-DD`;
+  }
+  return null;
+}
+
+// null when `entries` (gitChangedEntries of reviewed head → HEAD) is only
+// post-apply paperwork, otherwise why not. `readFile` is as in restampProblem.
+export function postApplyProblem({ entries, readFile }) {
+  if (entries.length === 0) return "the commit changes nothing";
+  for (const { path: file, oldMode, newMode } of entries) {
+    const added = oldMode === ABSENT_MODE && newMode === "100644";
+    if (!(oldMode === "100644" && newMode === "100644") && !(added && POST_APPLY_ADDABLE_RE.test(file))) {
+      return `${file} was ${newMode === ABSENT_MODE ? "deleted" : "added or changed type or mode"}`;
+    }
+    if (file === POST_APPLY_ALLOWLIST) {
+      const before = readFile("old", file);
+      const after = readFile("new", file);
+      if (before === null || after === null) return `${file} could not be read`;
+      const problem = allowlistRekeyProblem(Buffer.from(before, "latin1").toString("utf8"), Buffer.from(after, "latin1").toString("utf8"));
+      if (problem) return problem;
+    } else if (!POST_APPLY_EDITABLE_RE.test(file)) {
+      return `${file} is not post-apply paperwork`;
+    }
+  }
+  return null;
+}
+
+function runCarryPostApply(root, options) {
+  if (!worktreeIsClean(root)) {
+    process.stderr.write("Post-apply carry requires a clean worktree.\n");
+    return 1;
+  }
+  const facts = resolveSingleCommitCarry(root, Date.now(), postApplyProblem);
+  if (facts.problem) {
+    process.stderr.write(
+      `Post-apply carry refused: ${facts.problem}. No proof written — run the full review instead: ` +
+      "node scripts/write-codex-push-proof.mjs\n",
+    );
+    return 1;
+  }
+  process.stdout.write(
+    `Post-apply carry: reviewed head ${facts.fromHead.slice(0, 12)} → head ${facts.headSha.slice(0, 12)} ` +
+    `(base ${facts.source.base_sha.slice(0, 12)}); ${facts.entries.length} file(s), only post-apply records changed.\n`,
+  );
+  return mintSingleCommitCarry(root, options, facts, "post_apply");
 }
 
 // ── arg parsing ────────────────────────────────────────────────────────────
@@ -2250,7 +2358,7 @@ export function parseArgs(argv) {
   // dies on the clock is indistinguishable from a run that had nothing to say, so
   // the cap must sit well clear of a normal review, not just above the last one.
   // 1200s is ~2.3x the measured worst case and still leaves a hung run bounded.
-  const parsed = { dryRun: false, help: false, carryForward: false, carryRestamp: false, timeoutSec: DEFAULT_TIMEOUT_SEC };
+  const parsed = { dryRun: false, help: false, carryForward: false, carryRestamp: false, carryPostApply: false, timeoutSec: DEFAULT_TIMEOUT_SEC };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--timeout") {
@@ -2262,6 +2370,8 @@ export function parseArgs(argv) {
       parsed.carryForward = true;
     } else if (arg === "--carry-restamp") {
       parsed.carryRestamp = true;
+    } else if (arg === "--carry-post-apply") {
+      parsed.carryPostApply = true;
     } else if (arg === "--help" || arg === "-h") {
       parsed.help = true;
     } else {
@@ -2295,6 +2405,11 @@ function usage() {
     "                   migration a new timestamp (byte-identical SQL, the old stamp replaced by the",
     "                   new one elsewhere), keep that clean review with no model call. Refuses",
     "                   (use the full review) when anything else changed.",
+    "  --carry-post-apply  When HEAD is one commit on top of a reviewed head that only updated the",
+    "                   records after a live migration apply (migrations.d and changelog.d notes,",
+    "                   KNOWN_ISSUES.md, the schema registry, and allowlist re-keys: same signature,",
+    "                   new hash, appended justification), keep that clean review with no model",
+    "                   call. Refuses (use the full review) when anything else changed.",
   ].join("\n");
 }
 
@@ -2315,9 +2430,12 @@ export function run(argv = process.argv.slice(2)) {
     process.stderr.write("Not inside a git work tree — cannot mint a Codex push proof.\n");
     return 2;
   }
-  if (options.carryForward && options.carryRestamp) throw new Error("Use --carry-forward or --carry-restamp, not both.");
+  if ([options.carryForward, options.carryRestamp, options.carryPostApply].filter(Boolean).length > 1) {
+    throw new Error("Use only one of --carry-forward, --carry-restamp and --carry-post-apply.");
+  }
   if (options.carryForward) return runCarryForward(root, options);
   if (options.carryRestamp) return runCarryRestamp(root, options);
+  if (options.carryPostApply) return runCarryPostApply(root, options);
 
   let codexBin;
   try {

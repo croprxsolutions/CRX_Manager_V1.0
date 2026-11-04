@@ -229,16 +229,17 @@ let keyCounter = 0;
 // to admins and reps). null when the read failed.
 async function loadQuotePriceChanges(quoteId: string): Promise<QuotePriceChange[] | null> {
   // supabaseUntyped: quote_price_changes is not in the generated types yet.
-  const { data, error } = await supabaseUntyped
+  const { data, error } = await fetchAllRows<QuotePriceChange>((from, to) => pageWithList(supabaseUntyped
     .from('quote_price_changes')
-    .select('id, quote_item_id, product_id, new_price_cents, sent_version, grower_confirmed_by')
+    .select('id, quote_item_id, product_id, new_price_cents, sent_version, grower_confirmed_by', { count: 'exact' })
     .eq('quote_id', quoteId)
-    .order('id');
+    .order('id')
+    .range(from, to)));
   if (error) {
     Sentry.captureException(error, { tags: { source: 'read', action: 'load_quote_price_changes' } });
     return null;
   }
-  return (data ?? []) as QuotePriceChange[];
+  return data ?? [];
 }
 
 function nextKey() {

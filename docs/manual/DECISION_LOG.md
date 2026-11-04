@@ -30,6 +30,26 @@ second owner approval. It was the third such collision.
 **What this forbids/implies:** Mason's owner approval (`owner-approve-migration.mjs`, his
 `I approve`) never carries; a parked migration is re-approved for the new stamp. Destructive-
 migration approval is never carried. Every other apply and merge check is unchanged.
+## 2026-11-04 — Inventory costing: plan settled before any build
+
+**Source:** Mason, 2026-11-04, a planning session on the research report (PR #1428): "I want to plan and
+brainstorm our entire plan before we build anything", then answers to each open question.
+
+**Decision.** For the inventory-costing plan (`docs/plans/2026-07-16-inventory-costing-plan.md`, section 12):
+- Only admins see the new cost numbers.
+- The holding-cost rate is a flat 10% a year, as an admin setting he can change later.
+- Stock is flagged at 270 days.
+- No lot tracking; estimated age is enough.
+- No freight or rebates for now, so Phase 3 is dropped.
+- Special orders show both the booked and the corrected margin.
+- The build order is Phase 1 → 2 → 4 → 5.
+- Purchases go back through CRX POs and receiving (since June they were made by phone and email).
+- Phase 2 starts fresh from a stock count with confirmed starting costs before busy season, with no back-entry.
+- Chemical totes are stocked already filled. Bulk storage exists only for fertilizer.
+
+**Rule.** Nothing in the plan is built until Mason gives a separate go-ahead for that phase (D1 is still open).
+Each phase gets its own plan, Luna review and Sol review.
+
 ## 2026-11-04 — A trigger's TRUNCATE event no longer counts as deleting data
 
 **Source:** Mason, 2026-11-04, in the retro of the WP-PM-11a-1 session (PR #1425): "spin up item 2".

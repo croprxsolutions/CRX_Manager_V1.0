@@ -15,6 +15,8 @@ import { Link, Outlet, RouterProvider, createMemoryRouter } from 'react-router';
 
 // Same module copy for the page's useNavigate and the hook's useBlocker
 // (see QuoteBuilder.saveNavigation.test.tsx).
+// The Vendors section has its own tests; these page tests do not mock its reads.
+vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
 vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
 const { mockFrom, mockToast, mockInsert } = vi.hoisted(() => ({ mockFrom: vi.fn(), mockToast: vi.fn(), mockInsert: vi.fn() }));

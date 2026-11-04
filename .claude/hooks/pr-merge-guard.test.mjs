@@ -11,6 +11,8 @@ import {
   ghApiMutates,
   ghApiRepoPath,
   ghMergeRequest,
+  createHardGateBudget,
+  firstAcceptedProof,
   headContainsBaseOnGitHub,
   mcpMergeRequest,
   newestCheckRollup,
@@ -606,8 +608,9 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   eq((gateRequestSource.match(/advisoryQueue\.push\(request\)/g) || []).length, 2,
     "exactly two allow points: a valid Sol proof, or a pull request off the Sol list");
   // An earlier-commit Sol proof covers only later commits that are low risk themselves (Sol, 2026-10-29).
-  ok(/proofValidForMerge\(\{ data, headSha[^\n]*\)\s*&& \(String\(data\.head_sha\)\.toLowerCase\(\) === String\(headSha\)\.toLowerCase\(\)\s*\|\| !solRiskOnGitHub\(\{ baseSha: data\.head_sha, headSha, repo: request\.repo, gh: hardGateGh \}\)\.risky\)\)/.test(gateRequestSource),
-    "an earlier Sol proof is accepted only when the commits after it are low risk");
+  ok(/firstAcceptedProof\(proofs, headSha, \(data, exactHead\) =>\s*proofValidForMerge\(\{ data, headSha[^\n]*\)\s*&& \(exactHead \|\| !solRiskOnGitHub\(\{ baseSha: data\.head_sha, headSha, repo: request\.repo, gh: hardGateGh \}\)\.risky\)\);/.test(gateRequestSource),
+    "an earlier Sol proof is accepted only when the commits after it are low risk; exact-head proofs are tried first");
+  ok(/const valid = proof !== null;/.test(gateRequestSource), "only an accepted proof opens the Sol allow point");
   ok(/const risk = solRiskOnGitHub\(\{\s*baseSha,\s*headSha,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\);/.test(gateRequestSource),
     "the risk check spends the shared hard-gate budget");
   eq((guardSource.match(/\brisk\s*=/g) || []).length, 1, "`risk` is assigned exactly once, from the module's answer");
@@ -693,6 +696,49 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(!check(proof({ head_sha: E }), { isAncestor: unsure }), "an unreadable 'is it in main?' answer refuses");
   ok(!check(proof({ head_sha: E }), { isAncestor: unsure, prCommits: new Set([E, H]) }), "...through the commit list too");
   ok(!check(proof({ head_sha: E })), "a commit the head does not contain never counts");
+}
+// firstAcceptedProof (PR #1389, 2026-11-03): earlier-commit proofs read first
+// spent the 27s budget (~1s per GitHub call) before the exact-head proof was read.
+{
+  const H = "a".repeat(40);   // the PR head
+  const B = "b".repeat(40);   // main, which the head and every reviewed commit contain
+  const now = Date.now();
+  const proof = (head_sha, over = {}) => ({
+    codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+    head_sha, base_sha: B, timestamp: new Date(now - 60_000).toISOString(), ...over,
+  });
+  const older = ["1", "2", "3", "4", "5", "6"].map((c) => proof(c.repeat(40)));
+  const prCommits = new Set([...older.map((p) => p.head_sha), H]);
+  // The gate's accept test against a fake GitHub: each call costs 1s of the real 27s budget.
+  const scan = (proofs, find) => {
+    let t = 0;
+    let calls = 0;
+    const budget = createHardGateBudget({ deadlineMs: 27_000, callTimeoutMs: 0, clock: () => t });
+    const call = () => { if (!budget.admit()) throw new Error("budget spent"); calls++; t += 1000; };
+    const isAncestor = (a, b) => { call(); return b === H || a === B; };  // older commits are not in main
+    const solRisky = () => { call(); call(); return false; };
+    const accept = (data, exactHead) =>
+      proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B, isAncestor, prCommits })
+        && (exactHead || !solRisky());
+    try { return { accepted: find(proofs, accept), calls }; } catch { return { spent: true, calls }; }
+  };
+  const readdirOrder = [...older, proof(H)];
+  ok(scan(readdirOrder, (ps, accept) => {
+    // Every older proof refused late (e.g. its later commits touch the Sol list).
+    for (const d of ps) if (accept(d, d.head_sha === H) && d.head_sha === H) return d;
+    return null;
+  }).spent, "checking the earlier proofs first spends the whole budget (the PR #1389 refusal)");
+  const fast = scan(readdirOrder, (ps, accept) => firstAcceptedProof(ps, H, accept));
+  eq(fast.accepted?.head_sha, H, "the exact-head proof is accepted though it is read last");
+  ok(fast.calls <= 2, `...after ${fast.calls} GitHub calls, well inside the budget`);
+  eq(scan(older, (ps, accept) => firstAcceptedProof(ps, H, accept)).accepted?.head_sha, older[0].head_sha,
+    "with no exact-head proof an earlier one still counts");
+  const stale = proof(H, { timestamp: new Date(now - 25 * 3600_000).toISOString() });
+  eq(scan([stale, ...older], (ps, accept) => firstAcceptedProof(ps, H, accept)).accepted?.head_sha, older[0].head_sha,
+    "a stale exact-head proof never counts; the scan moves on");
+  eq(scan([proof(H, { verdict: "blocked" })], (ps, accept) => firstAcceptedProof(ps, H, accept)).accepted, null,
+    "a blocked exact-head proof is refused");
+  eq(firstAcceptedProof([], H, () => true), null, "no proofs, no proof");
 }
 ok(
   /function\s+listWorktreesFromProjectDir\(\)\s*\{\s*if \(!hardGateBudget\.admit\(\)\) deny\(/.test(guardSource),

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Disposable, network-disabled real-schema proof for Fix delivery (20261106130000).
+// Disposable, network-disabled real-schema proof for Fix delivery (20261106150000).
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,7 +15,7 @@ const VERBOSE = process.env.CRX_PROVER_VERBOSE === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261106130000_fix_delivery_one_screen.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261106150000_fix_delivery_one_screen.sql');
 // Storage/photo files the container cannot replay; none touches billing (asserted in plan()).
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

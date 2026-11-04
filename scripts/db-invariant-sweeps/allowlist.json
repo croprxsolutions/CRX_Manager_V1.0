@@ -1042,8 +1042,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_bottom_line_pnl(p_start_date date, p_end_date date)#3be09b824753",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "get_bottom_line_pnl(p_start_date date, p_end_date date)#44611e993de8",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Post-apply key computed 2026-11-04 for 20261106150000_fix_delivery_one_screen (PR #1437) before its apply: the cost-exposure-review predicate was run read-only on live with only get_monthly_summary and _get_bottom_line_pnl_cost_impl_20261019 swapped for the migration's bodies (same owner and settings); the run reproduced 108 current allowlisted keys unchanged. The only change in the chain is that commissions with status 'cancelled' are no longer counted; the admin gate is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1126,8 +1126,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_monthly_summary(p_period_start date, p_period_end date)#9a7eba16983c",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-03 after 20261105130000 (PR #1392, ledger 20261103223741): only the deliveries.count line changed (now skips cancelled/voided); PERFORM require_admin() still gates every caller, anon has no EXECUTE, body sha 079f77c1.",
+      "violation_key": "get_monthly_summary(p_period_start date, p_period_end date)#a5c4bfd4dcca",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-03 after 20261105130000 (PR #1392, ledger 20261103223741): only the deliveries.count line changed (now skips cancelled/voided); PERFORM require_admin() still gates every caller, anon has no EXECUTE, body sha 079f77c1. Post-apply key computed 2026-11-04 for 20261106150000_fix_delivery_one_screen (PR #1437) before its apply: the cost-exposure-review predicate was run read-only on live with only get_monthly_summary and _get_bottom_line_pnl_cost_impl_20261019 swapped for the migration's bodies (same owner and settings); the run reproduced 108 current allowlisted keys unchanged. The only change in the chain is that commissions with status 'cancelled' are no longer counted; the admin gate is unchanged.",
       "dated": "2026-11-02"
     },
     {
@@ -1471,6 +1471,12 @@
       "violation_key": "get_product_vendors(p_product_id uuid)#4c60f96c20c4",
       "justification": "Reviewed live 2026-11-03 (pg_proc prosrc read; body matches supabase/migrations/20261105180000_preferred_vendor_enforcement.sql, PR #1407 WP-PM-15b): SAFE. SECURITY DEFINER, owner postgres, search_path public, pg_temp; EXECUTE to authenticated only (anon false). Refuses with no auth.uid() and refuses every caller that is not an active admin or sales_rep profile. The three cost fields (last_cost_cents, last_quoted_package_cost_cents, last_cost_as_of) are each wrapped in CASE WHEN public.is_admin() (active admin only), so a sales rep gets NULL. Rows come from active confirmed product_supplier_links with a LEFT JOIN LATERAL to supplier_price_observations, so a row's presence and its order (preferred, vendor name, id) never depend on a price. A sales rep does see the non-cost link fields (vendor name, preferred flag, supplier SKU, product name, unit, pack) that table RLS keeps admin-only; that widening is by design in WP-PM-15b and carries no cost or pricing. The only public helper reached is is_admin(). Re-read the chain when it changes.",
       "dated": "2026-11-03"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "fix_delivery(p_delivery_id uuid, p_reason text, p_plan_token text, p_idempotency_key text)#2ede0a286602",
+      "justification": "New in 20261106150000_fix_delivery_one_screen (PR #1437), read 2026-11-04 from the migration and keyed before its apply with the same read-only live computation as get_monthly_summary: SAFE. Callable by: admin only (auth.uid() and is_admin() checked before any read or write). It returns the delivery and order ids, the delivery number, the customer id, each invoice's id, number and sale total, and a count of commissions restored; no cost, profit or margin field. It copies a cancelled commission's order_profit into the re-created pending row inside the database without returning it. preview_fix_delivery does not flag. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-04"
     }
   ]
 }

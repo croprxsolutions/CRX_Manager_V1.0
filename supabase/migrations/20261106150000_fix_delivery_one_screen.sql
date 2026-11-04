@@ -1,5 +1,5 @@
 -- Written 2026-11-03. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261106130000_fix_delivery_one_screen.md.
+-- docs/reference/migrations.d/20261106150000_fix_delivery_one_screen.md.
 --
 -- WHAT: "Fix delivery" — one admin action that undoes a completed delivery AND its invoice together,
 --   so the delivery can be re-entered with the right amount or product (Mason, 2026-11-03: "I want

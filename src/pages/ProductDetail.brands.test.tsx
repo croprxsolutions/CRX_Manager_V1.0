@@ -281,6 +281,13 @@ describe('ProductDetail brands section', () => {
     await waitFor(() => expect(H.savedPayload).toHaveProperty('signal_word', null));
   });
 
+  it('names each label dropdown for screen readers', async () => {
+    render(<ProductDetail />);
+    for (const name of ['Signal Word', 'Type', 'Inventory Unit', 'Rate Unit']) {
+      expect(await screen.findByRole('combobox', { name })).toBeInTheDocument();
+    }
+  });
+
   it('sends the vendor when creating a product', async () => {
     H.routeId = 'new';
     render(<ProductDetail />);

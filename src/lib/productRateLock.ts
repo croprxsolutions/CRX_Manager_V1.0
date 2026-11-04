@@ -1,0 +1,22 @@
+import { supabase } from './db';
+import { BUSINESS_TIMEZONE } from './dateUtils';
+import type { ProductRateLock } from '../types';
+
+/** The one "Lock rates" record (20261106120000). Every signed-in staff member may read it. */
+export async function loadProductRateLock(): Promise<ProductRateLock> {
+  const { data, error } = await supabase
+    .from('product_rate_lock')
+    .select('is_locked, changed_by_name, changed_at, reason')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** Who switched the rate lock, when and why, in one line. */
+export function rateLockSummary(lock: ProductRateLock): string {
+  if (!lock.changed_by_name) return lock.is_locked ? 'Rates are locked.' : 'Rates are not locked.';
+  const when = new Date(lock.changed_at).toLocaleString('en-US', { timeZone: BUSINESS_TIMEZONE });
+  return `${lock.is_locked ? 'Locked' : 'Unlocked'} by ${lock.changed_by_name} on ${when}${lock.reason ? `: ${lock.reason}` : ''}`;
+}
+
+export const PRODUCT_RATE_KEYS = ['rate_per_acre', 'rate_unit', 'suggested_rate'] as const;

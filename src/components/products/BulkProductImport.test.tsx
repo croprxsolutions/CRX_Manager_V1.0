@@ -197,7 +197,7 @@ describe('BulkProductImport', () => {
     expect(await screen.findByText(/Chem: Choose a category from the product category list/)).toBeInTheDocument();
   });
 
-  it.each(['-1', 'not-a-number'])('refuses invalid imported Rate Per Acre %s', async (rate) => {
+  it.each(['-1', 'not-a-number', '0.1234567', '1e21', '123456789012.123456'])('refuses invalid imported Rate Per Acre %s', async (rate) => {
     render(<BulkProductImport {...defaultProps} />);
     const csv = `product_name,rate_per_acre\nChem,${rate}`;
     const file = new File([csv], 'products.csv', { type: 'text/csv' });
@@ -224,6 +224,36 @@ describe('BulkProductImport', () => {
     fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['product_name,rate_per_acre\nChem,13', true],
+    ['product_name,rate_per_acre,product_form\nChem,13,liquid', true],
+    ['product_name,rate_per_acre,product_form\nCorn,1,seed', false],
+    ['product_name,rate_per_acre,product_form\nTote,1,Each', false],
+  ])('needs a rate unit for a rate except on seed and each: %s', async (csv, refused) => {
+    render(<BulkProductImport {...defaultProps} />);
+    const file = new File([csv], 'products.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    if (refused) expect(await screen.findByText(/Row 2: A rate per acre needs a rate unit/)).toBeInTheDocument();
+    else expect(await screen.findByText('Valid Products')).toBeInTheDocument();
+  });
+
+  it('imports nothing while rates are locked when a row sets a rate', async () => {
+    vi.mocked(supabase.from).mockImplementation(((table: string) => chainable(table === 'product_rate_lock'
+      ? { data: { is_locked: true }, error: null } : { data: [], error: null })) as unknown as typeof supabase.from);
+    render(<BulkProductImport {...defaultProps} />);
+    const csv = 'product_name,rate_per_acre,rate_unit\nChem,13,oz';
+    const file = new File([csv], 'products.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText('Valid Products');
+    fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/^Nothing was imported: 1 row sets a rate/)));
+    expect(supabase.from).not.toHaveBeenCalledWith('products');
   });
 
   it('treats a whitespace-only number cell as blank', async () => {

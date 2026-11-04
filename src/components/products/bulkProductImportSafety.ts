@@ -73,6 +73,15 @@ export function isRetiredPricingColumn(header: string): boolean {
 }
 
 /** Explicit allowlist: no future ParsedProduct property can be spread into products. */
+/**
+ * Whether a row sets a rate, which the database refuses while rates are locked (20261106120000).
+ * A seed or each product's rate unit is copied from its stock unit, so it is not a rate.
+ */
+export function importRowSetsRates(product: ParsedProduct): boolean {
+  return product.rate_per_acre != null || Boolean(product.suggested_rate?.trim())
+    || (Boolean(product.rate_unit?.trim()) && !['seed', 'each'].includes(product.product_form?.trim().toLowerCase() ?? ''));
+}
+
 export function buildProductInsert(product: ParsedProduct) {
   return {
     product_name: product.product_name.trim(),
@@ -87,7 +96,7 @@ export function buildProductInsert(product: ParsedProduct) {
     suggested_rate: product.suggested_rate,
     rate_per_acre: product.rate_per_acre,
     rate_unit: product.rate_unit,
-    product_form: product.product_form,
+    product_form: product.product_form?.trim().toLowerCase(),
     inventory_unit: product.inventory_unit,
     container_unit: product.container_unit,
     container_type: product.container_type,

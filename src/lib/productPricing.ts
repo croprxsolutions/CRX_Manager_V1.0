@@ -1,6 +1,7 @@
 import type { Json } from '../types/supabase';
 import type { ProductCostBasisSelectionSource, ProductCostBasisType } from '../types';
 import { assertRpcResult, supabase } from './db';
+import { PRODUCT_RATE_KEYS } from './productRateLock';
 
 export type PricingSource = 'pricing_worksheet' | 'product_page' | 'products_inline';
 export type PricingMode = 'margin_driven' | 'price_driven';
@@ -541,8 +542,21 @@ export async function previewProductPricingChanges(
     p_idempotency_key: input.idempotencyKey,
   });
   if (error) throw error;
-  const result = assertRpcResult<PricingPreviewResultWire>(data, 'preview_product_cost_basis_changes');
-  return normalizePricingPreviewResult(result);
+  const result = normalizePricingPreviewResult(
+    assertRpcResult<PricingPreviewResultWire>(data, 'preview_product_cost_basis_changes'));
+  if (input.source === 'pricing_worksheet') assertWorkbookLeavesRatesAlone(result);
+  return result;
+}
+
+/** Rates are read-only in the price workbook (WP-PM-11a-1); an edited rate cell stops the upload. */
+export function assertWorkbookLeavesRatesAlone(result: PricingPreviewResult): void {
+  const names = result.rows
+    .filter((row) => PRODUCT_RATE_KEYS.some((key) => row.effect?.product_info_changes?.[key] !== undefined))
+    .map((row) => row.effect?.product_name ?? `row ${row.sequence}`);
+  if (names.length > 0) {
+    throw new Error('Nothing was saved. Rates are read-only in the price workbook; change them on the product page. '
+      + `Rate cells were changed for: ${names.slice(0, 20).join(', ')}`);
+  }
 }
 
 /** Plain-English label for each warning the database can raise on a pricing preview. */

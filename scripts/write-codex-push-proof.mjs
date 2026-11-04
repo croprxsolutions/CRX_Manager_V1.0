@@ -2323,7 +2323,7 @@ export function allowlistRekeyProblem(before, after) {
       return `${label}'s date is not a real YYYY-MM-DD date`;
     }
     // Same-day re-keys keep their date (PR #1452); it never moves back (Sol LOW).
-    if (ISO_DATE_RE.test(String(oldDated)) && day < oldDated) return `${label}'s date moved backwards`;
+    if (!ISO_DATE_RE.test(String(oldDated)) || day < oldDated) return `${label}'s date moved backwards or had no usable date`;
   }
   return null;
 }
@@ -2515,8 +2515,9 @@ function usage() {
     "  --carry-post-apply  When HEAD is one commit on top of a reviewed head that only updated the",
     "                   records after a live migration apply (migrations.d and changelog.d notes,",
     "                   KNOWN_ISSUES.md, the schema registry, and allowlist re-keys: same signature,",
-    "                   new hash, appended justification), keep that clean review with no model",
-    "                   call. Refuses (use the full review) when anything else changed.",
+    "                   new hash, appended justification), keep that clean review: notes alone with no",
+    "                   model call, a registry or allowlist change after a focused Sol records check.",
+    "                   Refuses (use the full review) when anything else changed.",
   ].join("\n");
 }
 

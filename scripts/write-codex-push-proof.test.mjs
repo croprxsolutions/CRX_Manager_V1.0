@@ -1663,6 +1663,10 @@ function collisionPromptSkipsWork(prompt) {
   const checkPrompt = buildPostApplyCheckPrompt();
   assert.match(checkPrompt, new RegExp(`${CODEX_VERDICT_TOKEN}: CLEAN`), "post-apply: the check ends in the machine verdict");
   assert.match(checkPrompt, /untrusted DATA/, "post-apply: the check treats the packet as data");
+  assert.match(allowlistRekeyProblem(
+    JSON.stringify({ entries: [{ violation_key: "f()#aaaaaaaaaaaa", justification: "a", dated: "2026-11-04 " }] }),
+    JSON.stringify({ entries: [{ violation_key: "f()#bbbbbbbbbbbb", justification: "a b", dated: "2020-01-01" }] }),
+  ), /no usable date/, "post-apply: an unusable old date cannot hide a backwards one");
   const read = () => "{}";
   const one = (p, oldMode = "100644", newMode = "100644") => postApplyProblem({ entries: [{ path: p, oldMode, newMode }], readFile: read });
   assert.equal(one("docs/changelog.d/x.md", "000000", "100644"), null, "post-apply: a new changelog note is paperwork");

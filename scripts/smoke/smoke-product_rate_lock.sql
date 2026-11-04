@@ -1,8 +1,8 @@
--- Smoke chain: the product rate lock (REQUIRES 20261106120000).
+-- Smoke chain: the product rate lock (REQUIRES 20261106155000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so every rate, switch and log row it writes is
 -- rolled back. Proves, as a real signed-in browser session (role authenticated with each live
 -- profile's claims) and as a signed-out visitor (role anon), on an invented product:
---   * the installed bodies are exactly 20261106120000's and anon cannot execute the three functions;
+--   * the installed bodies are exactly 20261106155000's and anon cannot execute the three functions;
 --   * unlocked, an admin's set_product_rates saves the rates and a same-key replay answers the same;
 --   * an admin locks rates with a reason; a direct browser rate edit and set_product_rates are then
 --     refused PRODUCT_RATES_LOCKED; an admin's one-product correction saves and is logged;
@@ -25,15 +25,16 @@ DECLARE
   v_prices jsonb;
 BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
-    ('public.set_product_rates(jsonb,uuid,text)', '06ff0dda8aff08f04e0a914145665e58'),
+    ('public.set_product_rates(jsonb,uuid,text)', '0cce6eb46a6dea8275a230dbed1521ae'),
     ('public.set_product_rate_lock(boolean,text,uuid,text)', '46b19757c668c9e3fc7611aa0e545f27'),
-    ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '4c5a4ba8d3527375cf120817a8faf0fd'),
-    ('public._product_rate_unit_ok(numeric,text,text,text)', '8177b1aaaddb1659d00d19f28c3924df'),
-    ('public.guard_product_rate_lock()', '151026b1d240ccc46008c11597b44ca3'),
+    ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '274822598a0c63882ed40373ae8d0405'),
+    ('public._product_rate_unit_ok(numeric,text,text,text,text)', '37ef9d56f2ab80a74931e722da6dffb2'),
+    ('public.guard_product_rate_lock()', 'd20a3f77abf53807a43ced181b45c6d4'),
+    ('public.guard_unit_conversions_rate_lock()', '5f4ca03dbbb27600bff5f281b271824f'),
     ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
-    ('public.preview_product_rate_correction(uuid,numeric,text)', 'b7156b259b0e1e71391674dc474072fa')) AS pins(sig, body_md5) LOOP
+    ('public.preview_product_rate_correction(uuid,numeric,text)', '04f0a1b3b08b123db35b7e3ebeb3fd75')) AS pins(sig, body_md5) LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM v_md5 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: % is not the body of 20261106120000', v_sig;
+      RAISE EXCEPTION 'SMOKE_FAIL: % is not the body of 20261106155000', v_sig;
     END IF;
     IF v_sig <> 'public.guard_product_rate_lock()' AND has_function_privilege('anon', v_sig, 'EXECUTE') THEN
       RAISE EXCEPTION 'SMOKE_FAIL: anon can execute %', v_sig;

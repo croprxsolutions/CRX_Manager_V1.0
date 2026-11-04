@@ -2,6 +2,12 @@
 
 **Date:** 2026-11-03 · **Type:** research and recommendation, read-only (no app code or live data was changed) · **Builds on:** `docs/research/2026-11-03-ag-retail-software/` and the parked plan `docs/plans/2026-07-16-inventory-costing-plan.md`
 
+> **Superseded in part (2026-11-04).** Mason has since answered the section 7 decisions, and the plan has
+> changed: Phase 1 adds one small owner-estimate table, Phase 3 is dropped, and vendor-bill matching moved to
+> Phase 4. The current plan is `docs/plans/2026-07-16-inventory-costing-plan.md` (section 12 for decisions)
+> and `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`. This report is kept as the research
+> record.
+
 ---
 
 ## One-screen summary for Mason

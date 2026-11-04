@@ -552,7 +552,7 @@ CREATE FUNCTION public.correct_product_rates(
   p_rate_unit text,
   p_suggested_rate text,
   p_expected_pricing_version bigint,
-  p_expected_prices jsonb,
+  p_expected jsonb,
   p_reason text,
   p_performed_by uuid,
   p_idempotency_key text DEFAULT NULL
@@ -577,7 +577,10 @@ BEGIN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED';
   END IF;
   IF p_product_id IS NULL OR p_expected_pricing_version IS NULL
-     OR jsonb_typeof(p_expected_prices) IS DISTINCT FROM 'object' THEN
+     OR jsonb_typeof(p_expected->'prices') IS DISTINCT FROM 'object'
+     OR jsonb_typeof(p_expected->'rate_per_acre') NOT IN ('string', 'number', 'null')
+     OR jsonb_typeof(p_expected->'rate_unit') NOT IN ('string', 'null')
+     OR jsonb_typeof(p_expected->'suggested_rate') NOT IN ('string', 'null') THEN
     RAISE EXCEPTION 'PRODUCT_AND_EXPECTED_VERSION_REQUIRED';
   END IF;
   IF p_reason IS NULL OR p_reason !~ '[^[:space:]]' THEN RAISE EXCEPTION 'REASON_REQUIRED: say why'; END IF;
@@ -591,7 +594,7 @@ BEGIN
 
   v_request_fp := md5(jsonb_build_object('actor_id', v_actor, 'product_id', p_product_id,
     'rate_per_acre', p_rate_per_acre, 'rate_unit', v_unit, 'suggested_rate', v_suggested,
-    'expected_pricing_version', p_expected_pricing_version, 'expected_prices', p_expected_prices,
+    'expected_pricing_version', p_expected_pricing_version, 'expected', p_expected,
     'reason', btrim(p_reason))::text);
   v_existing := public.check_idempotency(p_idempotency_key, 'correct_product_rates');
   IF v_existing IS NOT NULL THEN
@@ -610,7 +613,12 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND'; END IF;
   -- Seed and each rates use the stock unit, as the preview does.
   IF v_product.product_form IN ('seed', 'each') THEN v_unit := v_product.inventory_unit; END IF;
-  IF v_product.pricing_version IS DISTINCT FROM p_expected_pricing_version THEN
+  -- pricing_version moves only with prices, so the rates the admin started from are compared too:
+  -- a suggested-rate-only correction by another admin leaves the version where it was.
+  IF v_product.pricing_version IS DISTINCT FROM p_expected_pricing_version
+     OR public._product_rate_value(p_expected->'rate_per_acre') IS DISTINCT FROM v_product.rate_per_acre
+     OR NULLIF(p_expected->>'rate_unit', '') IS DISTINCT FROM NULLIF(v_product.rate_unit, '')
+     OR NULLIF(btrim(p_expected->>'suggested_rate'), '') IS DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '') THEN
     RAISE EXCEPTION 'PRODUCT_RATES_STALE: % changed since you opened it; reload and try again', v_product.product_name;
   END IF;
   IF p_rate_per_acre IS NOT DISTINCT FROM v_product.rate_per_acre
@@ -630,7 +638,7 @@ BEGIN
   -- The prices must be the ones the admin confirmed: a unit conversion changed since the preview
   -- moves them without moving pricing_version. Raising undoes the write.
   FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
-    IF (v_write->'after'->v_tier) IS DISTINCT FROM (p_expected_prices->v_tier) THEN
+    IF (v_write->'after'->v_tier) IS DISTINCT FROM (p_expected->'prices'->v_tier) THEN
       RAISE EXCEPTION 'PRODUCT_RATE_PREVIEW_CHANGED: the per-acre prices changed since the preview; preview again'
         USING ERRCODE = 'check_violation';
     END IF;

@@ -51,7 +51,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
   const [preview, setPreview] = useState<{ input: string; prices: ProductRatePreview } | null>(null);
   const [result, setResult] = useState<ProductRateWriteResult | null>(null);
   const { getKey, resetKey } = useIdempotencyKey('correct_product_rates', profileId,
-    JSON.stringify([product.id, product.pricing_version, rate, unit, suggested, reason.trim()]));
+    JSON.stringify([product.id, product.pricing_version, product.rate_per_acre, product.rate_unit, product.suggested_rate, rate, unit, suggested, reason.trim()]));
 
   // 9 whole digits keep the rate exact as a JavaScript number on its way to the database.
   const rateValid = rate.trim() === '' || /^\d{1,9}(\.\d{1,6})?$/.test(rate.trim());
@@ -91,7 +91,12 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
         rateUnit: unit,
         suggestedRate: suggested,
         expectedPricingVersion: product.pricing_version,
-        expectedPrices: previewed.after,
+        expected: {
+          prices: previewed.after,
+          rate_per_acre: product.rate_per_acre == null ? null : String(product.rate_per_acre),
+          rate_unit: product.rate_unit ?? null,
+          suggested_rate: product.suggested_rate ?? null,
+        },
         reason: reason.trim(),
         performedBy: profileId,
         idempotencyKey: getKey(),

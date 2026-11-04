@@ -27,7 +27,7 @@ BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
     ('public.set_product_rates(jsonb,uuid,text)', '06ff0dda8aff08f04e0a914145665e58'),
     ('public.set_product_rate_lock(boolean,text,uuid,text)', '46b19757c668c9e3fc7611aa0e545f27'),
-    ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '37aeacd8ba0abb2333f13a48762f682b'),
+    ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '22959da39b0396d1a0dc5af31b5f44f8'),
     ('public._product_rate_unit_ok(numeric,text,text,text)', '8177b1aaaddb1659d00d19f28c3924df'),
     ('public.guard_product_rate_lock()', '151026b1d240ccc46008c11597b44ca3'),
     ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
@@ -91,7 +91,8 @@ BEGIN
   END IF;
   v_fix := public.correct_product_rates(v_product, 16, 'oz', '16 oz/A',
     (SELECT pricing_version FROM public.products WHERE id = v_product),
-    public.preview_product_rate_correction(v_product, 16, 'oz')->'after', 'smoke', v_admin, 'smoke-rl-fix-' || v_product);
+    jsonb_build_object('prices', public.preview_product_rate_correction(v_product, 16, 'oz')->'after',
+      'rate_per_acre', '13', 'rate_unit', 'oz', 'suggested_rate', '13 oz/A'), 'smoke', v_admin, 'smoke-rl-fix-' || v_product);
   EXECUTE 'RESET ROLE';
 
   IF (v_first->>'changed_count')::int <> 1 OR v_again IS DISTINCT FROM v_first THEN

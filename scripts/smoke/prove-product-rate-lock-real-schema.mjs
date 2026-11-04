@@ -272,8 +272,10 @@ const lock = (on, reason, key, actor = ADMIN) =>
   `SELECT public.set_product_rate_lock(${on}, ${reason === null ? 'NULL' : `'${reason}'`}, '${actor}', '${key}');`;
 // The confirmed prices default to a fresh preview; pass them to test what was shown.
 const correct = (p, rate, unit, suggested, version, reason, key, actor = ADMIN,
-  prices = `(public.preview_product_rate_correction('${p}', ${rate}, '${unit}')->'after')`) =>
-  `SELECT public.correct_product_rates('${p}', ${rate}, '${unit}', '${suggested}', ${version}, ${prices}, '${reason}', '${actor}', '${key}');`;
+  prices = `(public.preview_product_rate_correction('${p}', ${rate}, '${unit}')->'after')`,
+  // The rates the admin started from: the row as it is now, unless a test passes an older view.
+  current = `(SELECT jsonb_build_object('rate_per_acre', rate_per_acre::text, 'rate_unit', rate_unit, 'suggested_rate', suggested_rate) FROM public.products WHERE id = '${p}')`) =>
+  `SELECT public.correct_product_rates('${p}', ${rate}, '${unit}', '${suggested}', ${version}, ${prices === 'NULL' ? 'NULL' : `${current} || jsonb_build_object('prices', ${prices})`}, '${reason}', '${actor}', '${key}');`;
 const events = () => scalar(`SELECT coalesce(string_agg(event_type, ',' ORDER BY id), '-') FROM public.product_rate_events;`);
 
 function main() {
@@ -432,8 +434,13 @@ function main() {
   asOwner("UPDATE public.unit_conversions SET factor_oz = 2 WHERE unit = 'oz';");
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor-moved', ADMIN, shown), /PRODUCT_RATE_PREVIEW_CHANGED/);
   asOwner("UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
+  // A page opened before another admin's suggested-rate-only correction (same pricing_version) is stale.
+  refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor-stale', ADMIN, shown,
+    `jsonb_build_object('rate_per_acre', '13', 'rate_unit', 'oz', 'suggested_rate', '12 oz/A')`), /PRODUCT_RATES_STALE/);
   assert.equal(events(), 'locked');
-  const fix = correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor', ADMIN, shown);
+  // The page's view is fixed when it opens, so a replay sends the same starting rates.
+  const opened = scalar(`SELECT jsonb_build_object('rate_per_acre', rate_per_acre::text, 'rate_unit', rate_unit, 'suggested_rate', suggested_rate) FROM public.products WHERE id = '${P.GAL}';`);
+  const fix = correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor', ADMIN, shown, `'${opened}'::jsonb`);
   const corrected = JSON.parse(ok(ADMIN, fix));
   for (const t of [1, 2, 3]) {
     const k = `tier${t}_price_per_acre`;

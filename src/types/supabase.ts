@@ -13309,7 +13309,7 @@ export type Database = {
       }
       correct_product_rates: {
         Args: {
-          p_expected_prices: Json
+          p_expected: Json
           p_expected_pricing_version: number
           p_idempotency_key?: string
           p_performed_by: string

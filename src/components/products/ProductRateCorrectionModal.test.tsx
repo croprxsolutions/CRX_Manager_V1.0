@@ -42,7 +42,7 @@ describe('correct rates while locked', () => {
     expect(screen.getByText('$5.25')).toBeInTheDocument();
     expect(mockCorrect).toHaveBeenCalledWith(expect.objectContaining({
       productId: 'p1', ratePerAcre: 16, rateUnit: 'oz', suggestedRate: '13 oz/A', expectedPricingVersion: 7, reason: 'label fix',
-      expectedPrices: values(16, 5),
+      expected: { prices: values(16, 5), rate_per_acre: '13', rate_unit: 'oz', suggested_rate: '13 oz/A' },
     }));
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(onCorrected).toHaveBeenCalled();

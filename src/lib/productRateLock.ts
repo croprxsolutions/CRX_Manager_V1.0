@@ -51,7 +51,8 @@ export async function correctProductRates(input: {
   rateUnit: string;
   suggestedRate: string;
   expectedPricingVersion: number;
-  expectedPrices: ProductRatePerAcre;
+  /** The previewed prices and the rates the admin started from (rate as text, exactly as loaded). */
+  expected: { prices: ProductRatePerAcre; rate_per_acre: string | null; rate_unit: string | null; suggested_rate: string | null };
   reason: string;
   performedBy: string;
   idempotencyKey: string;
@@ -62,7 +63,7 @@ export async function correctProductRates(input: {
     p_rate_unit: input.rateUnit,
     p_suggested_rate: input.suggestedRate,
     p_expected_pricing_version: input.expectedPricingVersion,
-    p_expected_prices: input.expectedPrices as unknown as Json,
+    p_expected: input.expected as unknown as Json,
     p_reason: input.reason,
     p_performed_by: input.performedBy,
     p_idempotency_key: input.idempotencyKey,

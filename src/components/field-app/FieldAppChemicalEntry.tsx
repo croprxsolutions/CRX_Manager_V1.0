@@ -72,8 +72,9 @@ export interface ChemicalLine {
   max_label_rate_unit?: string | null;
   rei_hours?: number | null;
   phi_days?: number | null;
-  /** UI-only, NOT persisted: the product had no price at the primary customer's tier when picked. */
-  price_missing?: boolean;
+  /** UI-only, NOT persisted: the picked product's tier prices, so the missing-price warning follows
+   * the primary customer's current tier. Absent on lines reloaded from a saved invoice. */
+  tier_prices?: Pick<Product, 'tier1_price' | 'tier2_price' | 'tier3_price'>;
   /**
    * #56 (UI-only, NOT persisted): a hand-entered "custom line" with no catalog
    * product. Renders a free-text name input instead of the product search box.
@@ -338,8 +339,9 @@ export default function FieldAppChemicalEntry({
       rate_unit: product.product_form === 'seed' || product.product_form === 'each'
         ? product.inventory_unit || '' : product.rate_unit || product.inventory_unit || 'oz',
       unit: product.inventory_unit || 'oz',
-      unit_price_cents: Math.round(tierPrice(product, primaryCustomerTier) * 100),
-      price_missing: isTierPriceMissing(product, primaryCustomerTier),
+      // Exact cents; a price the whole-cent parser refuses previews as $0 (the server prices the line)
+      unit_price_cents: parseDollarsToCents(String(tierPrice(product, primaryCustomerTier))) ?? 0,
+      tier_prices: { tier1_price: product.tier1_price, tier2_price: product.tier2_price, tier3_price: product.tier3_price },
       price_unit: product.inventory_unit || 'oz',
       inventory_unit: product.inventory_unit,
       unit_cost_cents: Math.round((product.current_cost || 0) * 100),
@@ -622,8 +624,8 @@ export default function FieldAppChemicalEntry({
                     )}
                   </div>
                   {/* Early warning only: the database refuses this line on save (INVOICE_PRICE_MISSING) */}
-                  {line.price_missing && !line.manual_override && !readOnly && (
-                    <p role="alert" className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-800">
+                  {line.tier_prices && isTierPriceMissing(line.tier_prices, primaryCustomerTier) && !line.manual_override && !readOnly && (
+                    <p role="status" className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-800">
                       <AlertTriangle className="w-3 h-3 shrink-0" /> No tier {primaryCustomerTier} price
                     </p>
                   )}

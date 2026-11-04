@@ -5286,7 +5286,7 @@ export default function QuoteBuilder() {
                               {/* Early warning only: the database refuses this line on save (QUOTE_PRICE_MISSING) */}
                               {!customerView && prod && item.price_override == null && !item.price_per_unit
                                 && isTierPriceMissing(prod, tier) && (
-                                <p role="alert" className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
+                                <p role="status" className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
                                   <AlertTriangle className="w-3 h-3 shrink-0" />
                                   No tier {tier} price. Type one.
                                 </p>

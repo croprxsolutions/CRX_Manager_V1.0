@@ -66,7 +66,10 @@ export function getStatedTierPriceCents(product: Product, tierNum: 1 | 2 | 3): n
 
 /** True when the product states no price for the tier (nor tier 1). The database refuses a $0
  * sale line for such a product (QUOTE/ORDER/INVOICE_PRICE_MISSING); a stated $0 is a price. */
-export function isTierPriceMissing(product: Product, tierNum: number): boolean {
+export function isTierPriceMissing(
+  product: Pick<Product, 'tier1_price' | 'tier2_price' | 'tier3_price'>,
+  tierNum: number,
+): boolean {
   const own = tierNum === 1 ? product.tier1_price : tierNum === 2 ? product.tier2_price : product.tier3_price;
   return (own ?? product.tier1_price) == null;
 }

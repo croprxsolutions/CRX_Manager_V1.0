@@ -310,8 +310,8 @@ export default function NewOrder() {
     fetchData();
   }, [fetchData]);
 
-  // Tier price lookup, as the database prices an order line: a stated $0 stays $0; only a missing
-  // tier-2/3 price falls back to tier 1
+  // Tier price lookup, by the rule the database checks order lines against: a stated $0 stays $0;
+  // only a missing tier-2/3 price falls back to tier 1
   const getTierPrice = useCallback(
     (product: Product, tierNum: number): number => getQuoteTierPrice(product, tierNum),
     []
@@ -1110,7 +1110,7 @@ export default function NewOrder() {
                     const prod = products.find((p) => p.id === item.product_id);
                     if (priceLater || !prod || item.price_per_unit || !isTierPriceMissing(prod, customerTier)) return null;
                     return (
-                      <p role="alert" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      <p role="status" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                         <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                         {prod.product_name} has no tier {customerTier} price. Type a price per unit before saving.
                       </p>

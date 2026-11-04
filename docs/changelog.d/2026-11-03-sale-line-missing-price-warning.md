@@ -10,8 +10,10 @@
 - New Order's tier lookup now matches the database and Quote Builder (`getQuoteTierPrice`): a stated
   $0 tier-2/3 price stays $0 instead of showing the tier-1 price; only a missing one falls back to
   tier 1. Its price box shows a grey `0.00` placeholder like Quote Builder's.
-- Field app: the warning uses the primary customer's tier, as the line's price preview already does;
-  it is set when the product is picked, so it does not follow a later change of primary customer.
+- Field app: the line keeps the picked product's tier prices, so the warning follows the primary
+  customer's current tier, as the price preview does. Not warned (the save refusal still catches
+  them): lines reloaded from a saved invoice, and other customers in a split billed at a tier the
+  product has no price for. The tier preview price is now exact cents.
 - Proof: local test copy (invented data, no live data), tier-2 customer. New Order: unpriced product
   warned, cleared after typing $15; tier-1-only product priced $20; stated-$0 tier-2 product $0, no
   warning. Quote Builder (tier 2) and field-app line: unpriced product warned, cleared after typing a

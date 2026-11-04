@@ -301,7 +301,7 @@
    so it outranks the sizing utilities, and only below the width where the bottom navigation
    shows, so desktop keeps its sizes. */
 @media (width < 48rem) {
-  :is(input:not([type='checkbox'], [type='radio'], [type='hidden'], [type='file']), select, textarea) {
+  :is(input:not([type='checkbox'], [type='radio'], [type='hidden'], [type='file'], [type='submit'], [type='reset'], [type='button'], [type='image'], [type='range'], [type='color']), select, textarea) {
     font-size: 1rem;
   }
   .phone-touch :is(input:not([type='checkbox'], [type='radio'], [type='hidden'], [type='file']), select, textarea) {

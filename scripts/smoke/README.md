@@ -49,7 +49,10 @@ Three modes:
    Credential Manager and never prints or saves it (approved 2026-11-03,
    `docs/manual/SERVICES_AND_ACCOUNTS.md`). It sends only `.sql` files named
    in `smoke-specs.json`, from this folder, and refuses one with no
-   `SMOKE_PASS_ROLLBACK`. It never sends container-only or psql-only chains.
+   `RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK…`. Each request ends with one fixed
+   statement that always raises, so a chain that somehow finishes without
+   raising is rolled back and graded FAIL. It never sends container-only or
+   psql-only chains.
    Never retype a chain into MCP `execute_sql`.
 2. **Claude-first (fallback).** Without `--live` or `SUPABASE_DB_URL`, the
    runner prints each selected chain with banners and instructions. Use it

@@ -18,7 +18,8 @@
  *   3. --live: sends each chain file, byte for byte, as ONE statement to the
  *      live project through the Supabase Management API and grades the result
  *      itself. Only chains named in smoke-specs.json, from this folder, that
- *      raise SMOKE_PASS_ROLLBACK. The token is read in memory from Windows
+ *      raise SMOKE_PASS_ROLLBACK; a fixed trailing raise in the same request
+ *      rolls back any chain that finishes without raising. The token is read in memory from Windows
  *      Credential Manager and never printed or saved. Not read_only: chains
  *      write fixtures, then the terminal raise rolls them back. Mason approved
  *      this use on 2026-11-03 (docs/manual/SERVICES_AND_ACCOUNTS.md).
@@ -246,8 +247,8 @@ export function readLiveChain(specs, key) {
   // Resolve links too, so a symlink in this folder cannot send a file from elsewhere.
   if (path.dirname(realpathSync(file)) !== realpathSync(SMOKE_DIR)) throw notHere;
   const sql = readFileSync(file, 'utf8');
-  // The token must be raised, not merely mentioned: a chain that never raises would commit its writes.
-  // shortcut: comment stripping is lexical (a "--" inside a string can hide later text); registry chains are reviewed SQL.
+  // Fast refusal for a file that only mentions the token. The rollback itself is guaranteed by
+  // LIVE_ROLLBACK_TRAILER, not by this check (comment stripping is lexical).
   const code = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
   if (!new RegExp(`RAISE\\s+EXCEPTION\\s+'${PASS_TOKEN}`, 'i').test(code)) {
     throw new Error(`"${key}" chain ${spec.chain} never raises ${PASS_TOKEN}; refusing it.`);
@@ -271,12 +272,27 @@ export function liveResultText(status, bodyText) {
     .replace(/^ERROR:\s+[0-9A-Z]{5}:\s+/, 'ERROR:  ');
 }
 
+/**
+ * Sent after the unchanged chain in the same request. The Management API runs a
+ * multi-statement request as one transaction (checked on live 2026-11-03), so if
+ * a chain ever finishes without raising, this raise rolls back everything it
+ * wrote. A chain that raises as designed stops before reaching it. Its message
+ * is not the pass token, so that run grades FAIL.
+ */
+export const LIVE_ROLLBACK_TRAILER =
+  "\n;\nDO $$ BEGIN RAISE EXCEPTION 'SMOKE_FAIL: chain finished without raising; run-smoke --live rolled it back'; END $$;\n";
+
+/** The request body --live sends: the chain file unchanged, then the rollback trailer. */
+export function liveQuery(specs, key) {
+  return readLiveChain(specs, key) + LIVE_ROLLBACK_TRAILER;
+}
+
 async function runViaLive(key, specs, token) {
   try {
     const res = await fetch(LIVE_QUERY_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: readLiveChain(specs, key) }),
+      body: JSON.stringify({ query: liveQuery(specs, key) }),
       signal: AbortSignal.timeout(180_000),
     });
     return interpretResult(liveResultText(res.status, await res.text()));

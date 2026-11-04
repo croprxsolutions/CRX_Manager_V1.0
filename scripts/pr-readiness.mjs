@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 import { isCodexBotLogin } from "../.claude/hooks/codex-bot-review-lib.mjs";
 
 const REPO = "croprxsolutions/CRX_Manager_V1.0";
-const THREADS_QUERY = `query($n:Int!){repository(owner:"croprxsolutions",name:"CRX_Manager_V1.0"){pullRequest(number:$n){
-reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved isOutdated comments(first:1){nodes{author{login} path}}}}}}}`;
+const THREADS_QUERY = `query($n:Int!,$after:String){repository(owner:"croprxsolutions",name:"CRX_Manager_V1.0"){pullRequest(number:$n){
+reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{isResolved isOutdated comments(first:1){nodes{author{login} path}}}}}}}`;
 
 // The App leaves either a codex-review-state comment naming the head or a formal review on it.
 export function codexReviewedHead(view) {
@@ -18,7 +18,7 @@ export function codexReviewedHead(view) {
   if (!head) return false;
   const byComment = (view.comments || []).some((c) => isCodexBotLogin(c.author?.login)
     && new RegExp(`"commit_sha":"${head}"[^}]*"status":"completed"`).test(c.body || ""));
-  const byReview = (view.reviews || []).some((r) => isCodexBotLogin(r.author?.login)
+  const byReview = (view.reviews || []).some((r) => isCodexBotLogin(r.author?.login) && r.state !== "PENDING"
     && String(r.commit?.oid || "").toLowerCase() === head);
   return byComment || byReview;
 }
@@ -37,6 +37,7 @@ export function checkCounts(rollup = []) {
   return { total: rollup.length, pending, bad };
 }
 
+// Outdated threads are left out: they never hold a merge (AGENTS.md, review threads).
 export function openThreads(threadsNode) {
   return (threadsNode?.nodes || [])
     .filter((t) => !t.isResolved && !t.isOutdated)
@@ -46,13 +47,12 @@ export function openThreads(threadsNode) {
 export function formatBlock(n, view, threadsNode, sol) {
   const { total, pending, bad } = checkCounts(view.statusCheckRollup);
   const threads = openThreads(threadsNode);
-  const more = threadsNode?.pageInfo?.hasNextPage ? " (first 100 threads only)" : "";
   return [
     `#${n} ${view.title}`,
     `  head=${view.headRefOid} author=${view.author?.login} draft=${view.isDraft} mergeState=${view.mergeStateStatus}`,
     `  checks: ${total} total, ${pending} pending, ${bad.length} bad${bad.length ? ` (${bad.join("; ")})` : ""}`,
     `  codex App on head: ${codexReviewedHead(view) ? "yes" : "NO"}`,
-    `  open threads: ${threads.length}${more}${threads.map((t) => `\n    - ${t}`).join("")}`,
+    `  open threads: ${threads.length}${threads.map((t) => `\n    - ${t}`).join("")}`,
     `  ${sol}`,
   ].join("\n");
 }
@@ -74,11 +74,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     try {
       const view = JSON.parse(gh(["pr", "view", n, "--repo", REPO, "--json",
         "title,author,headRefOid,mergeStateStatus,isDraft,statusCheckRollup,comments,reviews"]));
-      const threads = JSON.parse(gh(["api", "graphql", "-F", `n=${n}`, "-f", `query=${THREADS_QUERY}`]))
-        .data.repository.pullRequest.reviewThreads;
+      const threads = { nodes: [] };
+      for (let after = null, page; !page || page.pageInfo.hasNextPage; after = page.pageInfo.endCursor) {
+        page = JSON.parse(gh(["api", "graphql", "-F", `n=${n}`, "-f", `query=${THREADS_QUERY}`, ...(after ? ["-f", `after=${after}`] : [])]))
+          .data.repository.pullRequest.reviewThreads;
+        threads.nodes.push(...page.nodes);
+      }
       // sol-needed exits 1 for SOL NEEDED, so read its output, not its exit code.
       const solRun = spawnSync(process.execPath, [fileURLToPath(new URL("./sol-needed.mjs", import.meta.url)), n], { encoding: "utf8" });
-      const sol = (solRun.stdout || solRun.stderr || "SOL NEEDED: sol-needed printed nothing").trim();
+      if (![0, 1].includes(solRun.status)) throw new Error(`sol-needed failed: ${(solRun.stderr || solRun.error?.message || "no output").trim()}`);
+      const sol = solRun.stdout.trim();
       console.log(formatBlock(n, view, threads, sol) + "\n");
     } catch (error) {
       failed = true;

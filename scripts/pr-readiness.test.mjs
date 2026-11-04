@@ -17,6 +17,7 @@ assert.equal(codexReviewedHead({ headRefOid: HEAD, comments: [stateComment(OLD)]
 assert.equal(codexReviewedHead({ headRefOid: HEAD, comments: [stateComment(OLD)], reviews: [review(HEAD)] }), true);
 assert.equal(codexReviewedHead({ headRefOid: HEAD, reviews: [review(OLD)] }), false);
 assert.equal(codexReviewedHead({ headRefOid: HEAD, reviews: [review(HEAD, "taha")] }), false);
+assert.equal(codexReviewedHead({ headRefOid: HEAD, reviews: [{ ...review(HEAD), state: "PENDING" }] }), false);
 // An unknown head never matches an unknown review commit.
 assert.equal(codexReviewedHead({ headRefOid: "", reviews: [{ author: { login: "chatgpt-codex-connector" }, commit: { oid: "" } }] }), false);
 

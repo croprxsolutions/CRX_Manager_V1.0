@@ -41,6 +41,9 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
+// Applied live after the candidate and built on its links (WP-PM-15b); the candidate ran live
+// without it, and this proof replays only what sorts before the candidate.
+const APPLIED_AFTER = new Set(['20261105180000_preferred_vendor_enforcement.sql']);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 const TOUCHED = /(product_supplier_links|vendor_aliases|legacy_vendor_resolution|normalize_vendor_alias|FUNCTION\s+(public\.)?"?is_admin\b)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
@@ -149,6 +152,7 @@ function plan() {
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
   for (const file of all.slice(at + 1)) {
+    if (APPLIED_AFTER.has(path.basename(file))) continue;
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);

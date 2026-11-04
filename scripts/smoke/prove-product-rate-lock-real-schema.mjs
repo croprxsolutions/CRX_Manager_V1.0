@@ -336,6 +336,11 @@ function main() {
   refused(ADMIN, setRates([row(P.OTHER, '16', 'Bushel', '', ['8', 'Bushel', null])], 'k-legacy'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
   refused(ADMIN, `UPDATE public.products SET rate_per_acre = 16 WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
   refused(ADMIN, setRates([row(P.OTHER, '16', 'Zero', '', ['8', 'Bushel', null])], 'k-zero'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
+  // The stock unit is pricing's divisor: an unknown one prices as one ounce ($100/gal at 13 oz/A would be $1,300/A).
+  asOwner(`UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL, inventory_unit = 'Jug' WHERE id = '${P.OTHER}';`);
+  refused(ADMIN, setRates([row(P.OTHER, '13', 'oz', '', [null, null, null])], 'k-stock'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
+  refused(ADMIN, `UPDATE public.products SET rate_per_acre = 13, rate_unit = 'oz' WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
+  asOwner(`UPDATE public.products SET inventory_unit = 'gal' WHERE id = '${P.OTHER}';`);
   // Clearing the rate still works: no rate prices nothing.
   ok(ADMIN, `UPDATE public.products SET rate_per_acre = NULL WHERE id = '${P.OTHER}';`);
   // A kept unit listed only for the other form, with a real factor, stays (live: two dry products keep liquid oz).

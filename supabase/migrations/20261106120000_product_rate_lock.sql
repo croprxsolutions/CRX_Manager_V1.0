@@ -194,7 +194,8 @@ BEGIN
      AND (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
           OR NULLIF(OLD.rate_unit, '') IS DISTINCT FROM v_new_unit)
      AND NOT public._product_rate_unit_ok(NEW.rate_per_acre, v_new_unit,
-                                          CASE WHEN TG_OP = 'UPDATE' THEN OLD.rate_unit END, NEW.product_form) THEN
+                                          CASE WHEN TG_OP = 'UPDATE' THEN OLD.rate_unit END, NEW.product_form,
+                                          COALESCE(NULLIF(NEW.inventory_unit, ''), NEW.unit_size)) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form'
       USING ERRCODE = 'check_violation';
   END IF;
@@ -301,7 +302,10 @@ REVOKE ALL ON FUNCTION public._product_rate_value(jsonb) FROM PUBLIC, anon, auth
 -- since per-acre pricing prices an unknown unit as one ounce, a zero factor as $0, and takes any one
 -- of those rows. A rate needs a unit, except on seed and each products, where
 -- validate_product_units fills it from the stock unit (their unchanged unit is kept as it is).
-CREATE FUNCTION public._product_rate_unit_ok(p_rate numeric, p_new_unit text, p_old_unit text, p_form text) RETURNS boolean
+-- The stock unit (inventory_unit, else unit_size, as pricing reads it) is held to the same factor rule,
+-- since pricing divides by it; on seed and each products the two units are the same and cancel out.
+CREATE FUNCTION public._product_rate_unit_ok(p_rate numeric, p_new_unit text, p_old_unit text, p_form text,
+                                             p_stock_unit text) RETURNS boolean
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
   -- Clearing a rate always passes: no rate prices nothing, and the next rate write checks the unit.
   SELECT CASE WHEN p_rate IS NULL THEN true
@@ -315,10 +319,13 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
       -- Pricing takes any one row matching regardless of case, so every such row must agree.
       AND (SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
              FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
+      AND (COALESCE(p_form IN ('seed', 'each'), false)
+           OR COALESCE((SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
+                          FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_stock_unit)), false))
   END;
 $function$;
-ALTER FUNCTION public._product_rate_unit_ok(numeric, text, text, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._product_rate_unit_ok(numeric, text, text, text) FROM PUBLIC, anon, authenticated, service_role;
+ALTER FUNCTION public._product_rate_unit_ok(numeric, text, text, text, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._product_rate_unit_ok(numeric, text, text, text, text) FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE FUNCTION public.set_product_rates(
   p_rows jsonb,
@@ -418,7 +425,8 @@ BEGIN
     IF NOT public._product_rate_value_ok(v_row->'rate_per_acre') THEN
       v_invalid := v_invalid || v_product.product_name;
     ELSIF NOT public._product_rate_unit_ok(public._product_rate_value(v_row->'rate_per_acre'),
-                                            NULLIF(btrim(v_row->>'rate_unit'), ''), v_product.rate_unit, v_product.product_form) THEN
+                                            NULLIF(btrim(v_row->>'rate_unit'), ''), v_product.rate_unit, v_product.product_form,
+                                            COALESCE(NULLIF(v_product.inventory_unit, ''), v_product.unit_size)) THEN
       v_bad_unit := v_bad_unit || v_product.product_name;
     -- Stale = anything the preview's per-acre prices were computed from has moved: pricing_version
     -- covers tier prices and the rates; pack size, stock unit and form are compared directly.
@@ -632,7 +640,8 @@ BEGIN
      AND v_suggested IS NOT DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '') THEN
     RAISE EXCEPTION 'PRODUCT_RATE_CORRECTION_NO_CHANGE: the new rates match the current ones';
   END IF;
-  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form) THEN
+  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form,
+                                      COALESCE(NULLIF(v_product.inventory_unit, ''), v_product.unit_size)) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form';
   END IF;
 
@@ -690,7 +699,8 @@ BEGIN
   -- validate_product_units stores a seed or each product's stock unit as its rate unit; the unit is
   -- checked after that swap, as correct_product_rates checks it.
   IF v_product.product_form IN ('seed', 'each') THEN v_unit := v_product.inventory_unit; END IF;
-  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form) THEN
+  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form,
+                                      COALESCE(NULLIF(v_product.inventory_unit, ''), v_product.unit_size)) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form';
   END IF;
   v_t1 := COALESCE(v_product.tier1_price, 0);

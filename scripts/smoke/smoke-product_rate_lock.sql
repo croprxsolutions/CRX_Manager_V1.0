@@ -25,13 +25,13 @@ DECLARE
   v_prices jsonb;
 BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
-    ('public.set_product_rates(jsonb,uuid,text)', '06ff0dda8aff08f04e0a914145665e58'),
+    ('public.set_product_rates(jsonb,uuid,text)', '0cce6eb46a6dea8275a230dbed1521ae'),
     ('public.set_product_rate_lock(boolean,text,uuid,text)', '46b19757c668c9e3fc7611aa0e545f27'),
-    ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '4c5a4ba8d3527375cf120817a8faf0fd'),
-    ('public._product_rate_unit_ok(numeric,text,text,text)', '8177b1aaaddb1659d00d19f28c3924df'),
-    ('public.guard_product_rate_lock()', '151026b1d240ccc46008c11597b44ca3'),
+    ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', 'b95fd9ce80a94afd20f284751ad5fca9'),
+    ('public._product_rate_unit_ok(numeric,text,text,text,text)', '42a6879b02f8a23ca0f511947dd76982'),
+    ('public.guard_product_rate_lock()', 'cba2f1e79cda0c863d998dc110121831'),
     ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
-    ('public.preview_product_rate_correction(uuid,numeric,text)', 'b7156b259b0e1e71391674dc474072fa')) AS pins(sig, body_md5) LOOP
+    ('public.preview_product_rate_correction(uuid,numeric,text)', '04f0a1b3b08b123db35b7e3ebeb3fd75')) AS pins(sig, body_md5) LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM v_md5 THEN
       RAISE EXCEPTION 'SMOKE_FAIL: % is not the body of 20261106120000', v_sig;
     END IF;

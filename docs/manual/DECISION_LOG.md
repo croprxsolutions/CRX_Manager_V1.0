@@ -10,6 +10,21 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-04 — Claude hooks run the same in Cursor; no Cursor-only hook file
+
+**Source:** Mason, 2026-11-04, asking to set up Cursor to work on CRX alongside Claude and Codex, with the rule
+that no guard is weakened to make Cursor work.
+
+**Decision.** Cursor uses the existing `.claude/settings.json` hooks (it imports them) rather than a separate
+`.cursor/hooks.json`, so one manifest keeps every guard for Claude Code and Cursor. Hook commands must run in both
+Git Bash and PowerShell 7: paths start `$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}`, and the merge guard's
+fallback is `|| echo '<denial>'; exit 0`. Detail and the measured Cursor behavior:
+`docs/reference/agent-guardrails.md` ("Cursor runs these hooks too").
+
+**What this forbids/implies:** no other shell variable in a `.claude/settings.json` hook command
+(`scripts/windows-hook-command.test.mjs` fails on one). A fallback that must deny exits 0, because Cursor ignores
+the output of a hook that exits non-zero. Cursor's Supabase and Vercel plugins stay signed out until this lands.
+
 ## 2026-11-04 — Inventory costing parked as roadmap; short pre-season list instead
 
 **Source:** Mason, 2026-11-04, after a harsh Sol (gpt-6-sol, high) review of the whole inventory proposal:

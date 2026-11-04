@@ -381,42 +381,42 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/sql-safety.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/sql-safety.mjs\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/money-safety.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/money-safety.mjs\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/idempotency-body-check.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/idempotency-body-check.mjs\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/actor-binding-check.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/actor-binding-check.mjs\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/status-enum-check.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/status-enum-check.mjs\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/generated-column-check.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/generated-column-check.mjs\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/env-guard.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/env-guard.mjs\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/grant-change-guard.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/grant-change-guard.mjs\"",
             "timeout": 15
           }
         ]
@@ -426,12 +426,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/bash-safety.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/bash-safety.mjs\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/codex-push-guard.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/codex-push-guard.mjs\"",
             "timeout": 15
           }
         ]
@@ -441,7 +441,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/migration-apply-guard.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/migration-apply-guard.mjs\"",
             "timeout": 15,
             "onFailure": "block"
           }
@@ -452,7 +452,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/mcp-tool-guard.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/mcp-tool-guard.mjs\"",
             "timeout": 15
           }
         ]
@@ -462,7 +462,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/live-testdata-guard.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/live-testdata-guard.mjs\"",
             "timeout": 15,
             "onFailure": "block"
           }
@@ -473,7 +473,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/merge-guard-launcher.mjs\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/pr-merge-guard.mjs\" || printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"PR MERGE GATE: the merge check could not start, so shell and MCP calls are denied until it is fixed. File edits still work.\"}}'",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/merge-guard-launcher.mjs\" \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/pr-merge-guard.mjs\" || echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"PR MERGE GATE: the merge check could not start, so shell and MCP calls are denied until it is fixed. File edits still work.\"}}'; exit 0",
             "timeout": 45
           }
         ]
@@ -483,7 +483,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/review-proof-guard.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/review-proof-guard.mjs\"",
             "timeout": 15
           }
         ]
@@ -493,7 +493,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/unattended-autopilot.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/unattended-autopilot.mjs\"",
             "timeout": 15
           }
         ]
@@ -505,7 +505,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/posttool-router.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/posttool-router.mjs\"",
             "timeout": 20
           }
         ]
@@ -517,7 +517,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-wrap.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/stop-wrap.mjs\"",
             "timeout": 15
           }
         ]
@@ -528,7 +528,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prompt-router.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/prompt-router.mjs\"",
             "timeout": 15
           }
         ]
@@ -539,12 +539,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-heartbeat.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/session-heartbeat.mjs\"",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-context-reminder.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/session-context-reminder.mjs\"",
             "timeout": 10
           }
         ]
@@ -554,17 +554,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-snapshot.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/session-snapshot.mjs\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-staleness.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/session-staleness.mjs\"",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-awareness.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/worktree-awareness.mjs\"",
             "timeout": 10
           }
         ]
@@ -574,7 +574,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-cleanup.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/worktree-cleanup.mjs\"",
             "timeout": 120,
             "async": true
           }

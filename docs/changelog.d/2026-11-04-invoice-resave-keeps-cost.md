@@ -1,6 +1,6 @@
 ## 2026-11-04 — Re-saving a draft invoice keeps the cost it was invoiced at (#13)
 
-- New migration `20261106140000_invoice_resave_keeps_cost.sql` (NOT APPLIED; record in
+- New migration `20261106140000_invoice_resave_keeps_cost.sql` (APPLIED LIVE 2026-11-04 19:42 UTC, ledger `20261104194231`; record in
   `docs/reference/migrations.d/`). Saving a draft invoice rebuilt every product line at today's
   product cost, and the below-cost check judged the rebuilt line against today's cost. Once a
   product's cost rose above the invoiced price, even a note edit on the draft was refused. An
@@ -12,6 +12,8 @@
   (smoke cases C, D and E).
 - Sol fix: a draft line repriced above its order price keeps that price and its invoiced cost on a
   note-only re-save after a later cost rise (smoke case F); repricing it again is still checked.
+- Post-apply: both function bodies match the local replay; the live smoke (cases A-F) passes and
+  rolls back.
 - New smoke chain `smoke-invoice-resave-keeps-cost.sql` (spec `invoice_resave_keeps_cost`).
 - `src/lib/rpcContracts.test.ts`: `_enforce_below_cost_line` is listed again as a re-emitted
   trigger-only guard while this candidate is not applied (as for `20261019010000`).

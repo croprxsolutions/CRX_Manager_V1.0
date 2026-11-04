@@ -1345,6 +1345,26 @@ describe('QuoteBuilder', () => {
       expect(sessionStorage.length).toBe(0);
     });
 
+    it('keeps the draw for a hand check when the server refuses its receipt', async () => {
+      const fixture = configureDrawDownFixture({ message: 'IDEMPOTENCY_RESULT_INVALID' });
+      await submitOneUnitDraw(fixture.quote.id);
+      await waitFor(() => expect(mockResetIdempotencyKey).toHaveBeenCalled());
+      expect(sessionStorage.length).toBe(1);
+
+      const dialog = await reloadAndOpenDraw(fixture.quote.id);
+      expect(await within(dialog).findByRole('button', { name: 'I checked' })).toBeInTheDocument();
+      expect(within(dialog).queryByRole('button', { name: 'Finish it' })).not.toBeInTheDocument();
+    });
+
+    it('does not send a draw when the browser cannot keep its safety note', async () => {
+      const fixture = configureDrawDownFixture({ message: 'Failed to fetch' });
+      const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+      await submitOneUnitDraw(fixture.quote.id);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('could not keep a safety note')));
+      expect(drawCalls()).toHaveLength(0);
+      setItem.mockRestore();
+    });
+
     it('keeps an earlier lost draw when a later retry is refused before its receipt is read', async () => {
       const fixture = configureDrawDownFixture({ message: 'Failed to fetch' });
       await submitOneUnitDraw(fixture.quote.id);
@@ -1374,14 +1394,14 @@ describe('QuoteBuilder', () => {
       sessionStorage.setItem(sessionStorage.key(0)!, JSON.stringify({ ...stored, sentAt: stored.sentAt - 24 * 60 * 60 * 1000 - 1 }));
       fireEvent.click(finish);
 
-      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('too old to finish safely')));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('can no longer be finished safely')));
       expect(drawCalls()).toHaveLength(1);
       expect(within(dialog).queryByRole('button', { name: 'Finish it' })).not.toBeInTheDocument();
 
       // A new draw is refused too, until the rep says they checked the booking's orders.
       fireEvent.change(await within(dialog).findByRole('spinbutton'), { target: { value: '1' } });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
-      await waitFor(() => expect(mockToast.mock.calls.filter(([, text]) => String(text).includes('too old to finish safely'))).toHaveLength(2));
+      await waitFor(() => expect(mockToast.mock.calls.filter(([, text]) => String(text).includes('can no longer be finished safely'))).toHaveLength(2));
       expect(drawCalls()).toHaveLength(1);
       fireEvent.click(within(dialog).getByRole('button', { name: 'I checked' }));
       expect(sessionStorage.length).toBe(0);

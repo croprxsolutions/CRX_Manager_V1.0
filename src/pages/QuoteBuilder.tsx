@@ -53,7 +53,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection } from '../lib/idempotency';
-import { clearPendingRetry, loadPendingRetry, savePendingRetry, type PendingRetry } from '../lib/pendingRetry';
+import { clearPendingRetry, loadPendingRetry, markPendingRetryForCheck, savePendingRetry, type PendingRetry } from '../lib/pendingRetry';
 import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
@@ -3658,18 +3658,23 @@ export default function QuoteBuilder() {
     // A key kept from before a reload wins over a fresh one, for the same reason (S14).
     const drawScope = id ?? '';
     const kept = loadPendingRetry(drawPendingName, isDrawRequest);
-    // Past the receipt's lifetime the server can no longer tell whether that draw was made, so any
-    // send could make a second order: refuse until the rep has checked the booking's orders.
+    // Past the receipt's lifetime (or with its receipt refused) the server can no longer tell whether
+    // that draw was made, so any send could make a second order: refuse until the rep has checked.
     if (kept?.expired || (resume && kept?.key !== resume.key)) {
       setPendingDraw(kept);
       setDrawing(false);
-      toast('error', 'An earlier Partial Order here got no reply, may have gone through, and is too old to finish safely. Check the orders on this booking first.');
+      toast('error', 'An earlier Partial Order here did not finish, may have gone through, and can no longer be finished safely. Check the orders on this booking first.');
       return;
     }
     const drawKey = resume?.key ?? kept?.key ?? drawDownIdem.getKeyFor(drawScope);
     // An earlier send with this key got no reply, so it may have made the order.
     const earlierUnresolved = kept?.key === drawKey;
-    savePendingRetry(drawPendingName, drawKey, drawPayload);
+    // Without the note, a lost reply could not be finished after a reload, and a fresh key could draw twice.
+    if (!savePendingRetry(drawPendingName, drawKey, drawPayload)) {
+      setDrawing(false);
+      toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
+      return;
+    }
     try {
       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('draw_down_quote', withBelowCostReason('draw_down_quote', {
         p_quote_id: id,
@@ -3719,8 +3724,18 @@ export default function QuoteBuilder() {
       const bindingRejection = getIdempotencyBindingRejection(error);
       if (bindingRejection) {
         drawDownIdem.resetKeyFor(drawScope);
-        clearPendingRetry(drawPendingName);
-        setPendingDraw(null);
+        // A receipt under this key (refused as damaged, missing or for other quantities) means an
+        // earlier send may have made an order: keep the note, flagged for a hand check, which blocks
+        // new draws until the rep confirms. Another user's key says nothing was made here.
+        if (bindingRejection === 'actor') {
+          clearPendingRetry(drawPendingName);
+        } else {
+          markPendingRetryForCheck(drawPendingName);
+        }
+        // Flagged here too, so a failed storage write cannot bring back "Finish it" on this screen;
+        // after a reload, finishing re-sends the same key and the server refuses it again.
+        const keptAfter = loadPendingRetry(drawPendingName, isDrawRequest);
+        setPendingDraw(keptAfter && bindingRejection !== 'actor' ? { ...keptAfter, expired: true } : keptAfter);
         const committedResult = bindingRejection === 'intent'
           ? getIdempotencyMismatchResult(error, 'draw_down_quote')
           : null;
@@ -3730,6 +3745,8 @@ export default function QuoteBuilder() {
           : null;
 
         if (committedOrderId) {
+          clearPendingRetry(drawPendingName);
+          setPendingDraw(null);
           setShowDrawModal(false);
           toast('warning', 'An earlier attempt with this retry already created an order. No new draw was made — opening that order now.');
           navigate(`/orders/${committedOrderId}`);
@@ -5895,8 +5912,8 @@ export default function QuoteBuilder() {
             {pendingDraw?.expired && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm flex items-start justify-between gap-3">
                 <p>
-                  Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}) got no reply
-                  and may have gone through, but it is too old to finish safely. Check the orders on this booking before drawing again.
+                  Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}) did not finish
+                  and may have gone through, but it can no longer be finished safely. Check the orders on this booking before drawing again.
                 </p>
                 <button
                   onClick={() => {

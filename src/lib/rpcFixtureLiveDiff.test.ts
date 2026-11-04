@@ -391,6 +391,29 @@ describe('Live pg_proc snapshot integrity', () => {
     // production RPC.
     expect(Object.keys(QUEUED_MIGRATION_FUNCTIONS)).toEqual([]);
   });
+
+  it('lists no function that only a not-yet-applied migration creates', () => {
+    // Pre-listing a new function "ahead of the apply" made this snapshot claim it was live
+    // (PR #1421; the same trap hit #1276 and #1400). Ship the migration in a DB-only PR first.
+    const root = join(HERE, '..', '..');
+    const migrationsDir = join(root, 'supabase', 'migrations');
+    const recordsDir = join(root, 'docs', 'reference', 'migrations.d');
+    const created = (file: string) => new Set(
+      [...readFileSync(join(migrationsDir, file), 'utf8')
+        .matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?(\w+)"?\s*\(/gi)]
+        .map((m) => m[1].toLowerCase()));
+    const unapplied = new Set(readdirSync(recordsDir)
+      .filter((f) => f !== 'README.md' && readFileSync(join(recordsDir, f), 'utf8').startsWith('**LOCAL CANDIDATE — NOT APPLIED'))
+      .map((f) => f.replace(/\.md$/, '.sql')));
+    // Any mention in an applied migration counts: some functions were made by a dynamic RENAME.
+    const mentionedElsewhere = new Set(readdirSync(migrationsDir)
+      .filter((f) => f.endsWith('.sql') && !unapplied.has(f))
+      .flatMap((f) => readFileSync(join(migrationsDir, f), 'utf8').toLowerCase().match(/\w+/g) ?? []));
+    const premature = [...unapplied]
+      .filter((file) => statSync(join(migrationsDir, file), { throwIfNoEntry: false }))
+      .flatMap((file) => [...created(file)].filter((name) => !mentionedElsewhere.has(name) && LIVE_FUNCTIONS.has(name)));
+    expect(premature, `${premature.join(', ')} is not live yet: ship its migration in a DB-only PR, apply it, then add the name here from a live read`).toEqual([]);
+  });
 });
 
 describe('rpcContracts.test.ts fixture arrays vs live pg_proc', () => {

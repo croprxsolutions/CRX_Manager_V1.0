@@ -29,7 +29,9 @@
 --   * an active write-off (void_invoice leaves the write_offs row active);
 --   * a delivery completed in a closed accounting period;
 --   * a posted/paid/overdue invoice dated in a closed accounting period;
---   * a pending order commission already in an active payout batch.
+--   * a pending order commission already in an active payout batch;
+--   * the order's commission was already cancelled (an earlier invoice void) with no live commission
+--     left: a fix restores only the pending commissions it cancels itself, so it would finish with none.
 --
 -- 3. COMMISSIONS: void_invoice cancels the order's PENDING commissions when no other active invoice
 --   remains on the order (20260718221505), and a cancelled commission can never be reopened
@@ -228,6 +230,17 @@ BEGIN
       'message', 'This order''s commission is in a payout batch. Void that commission payment first.');
   END IF;
 
+  -- An earlier ordinary void already cancelled the order's commission: the fix would restore nothing.
+  IF v_delivery.order_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM commissions c
+                  WHERE c.order_id = v_delivery.order_id AND c.status = 'cancelled' AND c.deleted_at IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM commissions r WHERE r.replaces_commission_id = c.id))
+     AND NOT EXISTS (SELECT 1 FROM commissions c
+                      WHERE c.order_id = v_delivery.order_id AND c.status <> 'cancelled' AND c.deleted_at IS NULL) THEN
+    v_refusals := v_refusals || jsonb_build_object('code', 'COMMISSION_ALREADY_CANCELLED',
+      'message', 'This order''s commission was cancelled when its invoice was voided earlier, and Fix delivery cannot bring it back. Restore the rep''s commission before fixing this delivery.');
+  END IF;
+
   -- The restored copy must name a user (trg_commissions_recipient_resolved, 20260722134252).
   IF v_delivery.order_id IS NOT NULL AND EXISTS (
     SELECT 1 FROM commissions c
@@ -312,7 +325,9 @@ ALTER TABLE public.commissions ADD COLUMN replaces_commission_id uuid;
 COMMENT ON COLUMN public.commissions.replaces_commission_id IS
   'Set only by fix_delivery: the cancelled commission this row re-creates. Reports skip a cancelled commission that a row replaces.';
 
--- The reports trust the link, so nothing but fix_delivery (crx.fix_delivery_restore='on') may set or change it.
+-- The reports trust the link, so nothing but fix_delivery (crx.fix_delivery_restore='on', running as its
+-- owner, who also owns this guard; the postflight checks that) may set or change it: a service_role
+-- session can set the flag but is not the owner.
 CREATE OR REPLACE FUNCTION public.guard_commission_replaces_link()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -320,7 +335,9 @@ SET search_path = public, pg_temp
 AS $fn$
 BEGIN
   IF NEW.replaces_commission_id IS DISTINCT FROM (CASE WHEN TG_OP = 'UPDATE' THEN OLD.replaces_commission_id END)
-     AND COALESCE(current_setting('crx.fix_delivery_restore', true), 'off') <> 'on' THEN
+     AND (COALESCE(current_setting('crx.fix_delivery_restore', true), 'off') <> 'on'
+          OR current_user <> (SELECT pg_get_userbyid(p.proowner) FROM pg_proc p
+                               WHERE p.oid = 'public.guard_commission_replaces_link'::regproc)) THEN
     RAISE EXCEPTION 'COMMISSION_REPLACES_LINK_LOCKED: only Fix Delivery sets replaces_commission_id'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
@@ -494,6 +511,8 @@ BEGIN
      OR has_function_privilege('service_role', 'public._fix_delivery_plan(uuid)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.fix_delivery(uuid, text, text, text)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.guard_commission_replaces_link()', 'EXECUTE')
+     OR (SELECT proowner FROM pg_proc WHERE oid = 'public.guard_commission_replaces_link'::regproc)
+        IS DISTINCT FROM (SELECT proowner FROM pg_proc WHERE oid = 'public.fix_delivery(uuid, text, text, text)'::regprocedure)
      OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.commissions'::regclass
                      AND tgname = 'trg_commissions_replaces_link_guard' AND tgenabled = 'O') THEN
     RAISE EXCEPTION 'FIX_DELIVERY_GRANTS_DRIFT';

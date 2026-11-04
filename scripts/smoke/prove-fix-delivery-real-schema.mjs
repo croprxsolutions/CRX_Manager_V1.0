@@ -284,6 +284,10 @@ function scenarios() {
     ${check(`(SELECT amount FROM public._get_bottom_line_pnl_cost_impl_20261019(CURRENT_DATE, CURRENT_DATE) WHERE line_item='Commissions')=50`, 'P&L keeps a cancelled commission nothing replaced')}
     ${asUser(ADMIN)} DO $m$ BEGIN IF (public.get_monthly_summary(CURRENT_DATE, CURRENT_DATE)->'commissions'->>'earned_cents')::bigint <> 5000 THEN RAISE EXCEPTION 'PROOF_FAIL: month-end dropped a cancelled commission nothing replaced'; END IF; END $m$;`,
     'a cancelled commission with no live copy still counts in past months, next to a different live one');
+  // An earlier ordinary invoice void already cancelled the commission: the fix would restore none, so it refuses.
+  refused(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET status='cancelled' WHERE id='${COMM}';
+    ALTER TABLE public.commissions ENABLE TRIGGER USER; ${fix('k-comm-gone')}`,
+    'an order whose commission an earlier void cancelled refuses the fix', /FIX_DELIVERY_REFUSED: This order's commission was cancelled/);
   const before = Number(scalar(`SELECT ${stock};`));
   allowed(`${fix('k-ok')}
     ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='voided'`, 'invoice voided')}
@@ -507,6 +511,10 @@ function scenarios() {
     'nothing but Fix Delivery can insert a row that hides a cancelled commission', /COMMISSION_REPLACES_LINK_LOCKED/);
   refused(`${asUser(ADMIN)} UPDATE public.commissions SET replaces_commission_id=NULL WHERE replaces_commission_id='${COMM}';`,
     'an admin in the browser cannot write commissions directly', /permission denied for table commissions/);
+  refused(`RESET ROLE; SET LOCAL ROLE service_role; SELECT set_config('crx.fix_delivery_restore','on',true);
+    INSERT INTO public.commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage, commission_amount, order_profit, order_date, season, order_number, customer_name, status, replaces_commission_id)
+      SELECT order_id, customer_id, recipient, recipient_user_id, split_percentage, 0, order_profit, order_date, season, order_number, customer_name, 'pending', id FROM public.commissions WHERE id='${COMM}';`,
+    'a service-role session that sets the Fix Delivery flag still cannot set the link', /COMMISSION_REPLACES_LINK_LOCKED/);
 }
 
 try {

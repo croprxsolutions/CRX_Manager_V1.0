@@ -36,6 +36,7 @@ import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult
 import { fetchAllRows } from '../lib/pagedRead';
 import { fetchOpenBookings, type OpenBooking } from '../lib/openBookings';
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
+import { getQuoteTierPrice, isTierPriceMissing } from '../lib/quoteCalc';
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
@@ -309,14 +310,10 @@ export default function NewOrder() {
     fetchData();
   }, [fetchData]);
 
-  // Tier price lookup — cascades: tier3 → tier2 → tier1 fallback
+  // Tier price lookup, by the rule the database checks order lines against: a stated $0 stays $0;
+  // only a missing tier-2/3 price falls back to tier 1
   const getTierPrice = useCallback(
-    (product: Product, tierNum: number): number => {
-      const t1 = product.tier1_price || 0;
-      if (tierNum === 1) return t1;
-      if (tierNum === 2) return product.tier2_price || t1;
-      return product.tier3_price || t1;
-    },
+    (product: Product, tierNum: number): number => getQuoteTierPrice(product, tierNum),
     []
   );
 
@@ -1028,6 +1025,8 @@ export default function NewOrder() {
                             });
                           }}
                           aria-label="Price per unit"
+                          // A stated $0 tier price shows as 0.00, not as a missing price.
+                          placeholder={item.product_id ? '0.00' : undefined}
                           className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green ${
                             item.price_override != null
                               ? 'border-amber-400 bg-amber-50'
@@ -1105,6 +1104,18 @@ export default function NewOrder() {
                       </div>
                     )}
                   </div>
+
+                  {(() => {
+                    // Early warning only: the database refuses this line on save (ORDER_PRICE_MISSING)
+                    const prod = products.find((p) => p.id === item.product_id);
+                    if (priceLater || !prod || item.price_per_unit || !isTierPriceMissing(prod, customerTier)) return null;
+                    return (
+                      <p role="status" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                        {prod.product_name} has no tier {customerTier} price. Type a price per unit before saving.
+                      </p>
+                    );
+                  })()}
 
                   {!isFieldStaff && item.product_id && item.quantity > 0 && (
                     <div className="bg-gray-50 rounded-lg p-3 text-sm">

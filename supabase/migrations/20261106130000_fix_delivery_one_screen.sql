@@ -61,7 +61,7 @@ DECLARE
   v_order_drafts jsonb;
   v_items jsonb;
 BEGIN
-  SELECT d.id, d.delivery_number, d.status, d.order_id, d.customer_id, d.deleted_at, o.order_number
+  SELECT d.id, d.delivery_number, d.status, d.order_id, d.customer_id, d.deleted_at, d.completed_at, d.scheduled_date, o.order_number
     INTO v_delivery
     FROM deliveries d
     LEFT JOIN orders o ON o.id = d.order_id
@@ -149,11 +149,14 @@ BEGIN
      AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
      AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue');
 
+  -- void_delivery would also cancel the order's split drafts (no delivery), losing the other payers' bills.
   IF EXISTS (SELECT 1 FROM invoices i
-              WHERE i.delivery_id = p_delivery_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
+              WHERE (i.delivery_id = p_delivery_id
+                     OR (i.order_id = v_delivery.order_id AND i.delivery_id IS NULL AND i.status = 'draft'))
+                AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
                 AND i.status NOT IN ('voided', 'cancelled') AND i.invoice_group_id IS NOT NULL) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'SPLIT_INVOICE',
-      'message', 'This delivery is billed on a split invoice. Void the split group from the invoice page first.');
+      'message', 'This delivery or its order has a split invoice. Void the split group from the invoice page first.');
   END IF;
 
   IF EXISTS (SELECT 1 FROM invoices i
@@ -261,8 +264,12 @@ BEGIN
     'invoices', v_invoices,
     'other_draft_invoices', v_order_drafts,
     'items', v_items,
-    -- What the preview showed (including the delivery, its order and customer); fix_delivery refuses when it no longer matches.
-    'plan_token', md5(jsonb_build_object('delivery_id', v_delivery.id, 'order_id', v_delivery.order_id, 'customer_id', v_delivery.customer_id,
+    -- What the preview showed (including the delivery, its numbers, completion date, order and customer);
+    -- fix_delivery refuses when it no longer matches.
+    'plan_token', md5(jsonb_build_object('delivery_id', v_delivery.id, 'delivery_number', v_delivery.delivery_number,
+                                         'completed_at', v_delivery.completed_at, 'scheduled_date', v_delivery.scheduled_date,
+                                         'order_id', v_delivery.order_id, 'order_number', v_delivery.order_number,
+                                         'customer_id', v_delivery.customer_id,
                                          'invoices', v_invoices, 'other_draft_invoices', v_order_drafts, 'items', v_items)::text)
   );
 END;
@@ -419,13 +426,17 @@ BEGIN
     'order_id', v_order_id,
     'customer_id', v_plan -> 'customer_id',
     'invoices', v_plan -> 'invoices',
+    'other_draft_invoices', v_plan -> 'other_draft_invoices',
     'commissions_restored', v_commissions_restored
   );
 
   INSERT INTO activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id, customer_id)
   VALUES ('delivery_fixed',
           'Fixed delivery ' || (v_plan ->> 'delivery_number') || ': undid it and ' ||
-            jsonb_array_length(v_plan -> 'invoices') || ' invoice(s) for re-entry. Reason: ' || v_reason,
+            jsonb_array_length(v_plan -> 'invoices') || ' invoice(s) for re-entry' ||
+            CASE WHEN jsonb_array_length(v_plan -> 'other_draft_invoices') > 0
+                 THEN ', and cancelled ' || jsonb_array_length(v_plan -> 'other_draft_invoices') || ' order draft invoice(s)'
+                 ELSE '' END || '. Reason: ' || v_reason,
           v_actor, 'delivery', p_delivery_id, (v_plan ->> 'customer_id')::uuid);
 
   PERFORM public.save_idempotency(p_idempotency_key, 'fix_delivery', v_result);

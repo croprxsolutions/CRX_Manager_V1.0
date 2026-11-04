@@ -304,6 +304,8 @@ function scenarios() {
     ${fix('k-new-amount')}`, 'an invoice amount changed after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET invoice_date=invoice_date - 1 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-date')}`, 'an invoice re-dated after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; ALTER TABLE public.deliveries DISABLE TRIGGER USER; UPDATE public.deliveries SET completed_at=completed_at - interval '1 hour' WHERE id='${DELIVERY}'; ALTER TABLE public.deliveries ENABLE TRIGGER USER;
+    ${fix('k-new-completed')}`, 'a delivery completion time changed after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET credit_applied_cents=500 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-credit')}`, 'a credit applied after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; SELECT set_config('app.crx_below_cost_operation','create_direct_order',true);
@@ -343,7 +345,21 @@ function scenarios() {
     ALTER TABLE public.accounting_periods ENABLE TRIGGER USER;
     ${fix('k-closed-chicago')}`, 'a 02:00 UTC completion on the 1st counts as the prior Chicago day, in a closed month', /FIX_DELIVERY_REFUSED: This delivery was completed in a closed month/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET invoice_group_id=gen_random_uuid() WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
-    ${fix('k-split')}`, 'a split-group invoice refuses the fix', /FIX_DELIVERY_REFUSED: This delivery is billed on a split invoice/);
+    ${fix('k-split')}`, 'a split-group invoice refuses the fix', /FIX_DELIVERY_REFUSED: This delivery or its order has a split invoice/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,invoice_group_id)
+      VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-SPLIT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',gen_random_uuid());
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','[PROVER] wrong amount',(SELECT public.preview_fix_delivery('${DELIVERY}')->>'plan_token'),'k-order-split');`,
+    'an order-level split draft refuses the fix', /FIX_DELIVERY_REFUSED: This delivery or its order has a split invoice/);
+  allowed(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id)
+      VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT2','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}');
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','[PROVER] wrong amount',(SELECT public.preview_fix_delivery('${DELIVERY}')->>'plan_token'),'k-order-draft-count');
+    ${check(`(SELECT status FROM public.invoices WHERE id='${ORDER_INV}')='cancelled'`, 'order draft cancelled')}
+    ${check(`EXISTS (SELECT 1 FROM public.activity_feed WHERE event_type='delivery_fixed' AND related_entity_id='${DELIVERY}' AND description LIKE '%and cancelled 1 order draft invoice(s)%')`, 'activity counts the order draft')}`,
+    'the activity entry counts the order draft the fix cancels');
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
     INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,posted_at)
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-INV','${ORDER}','${CUSTOMER}','chemical_sale','posted',CURRENT_DATE,'${ADMIN}','${REP}',now());

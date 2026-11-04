@@ -137,7 +137,7 @@ and use the cost basis the accountant approves.
 **Detailed build plan:** `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`. It adds decision
 D10 (a bulk estimated-date entry). **Where this section and the build plan differ, the build plan wins.**
 
-One small append-only table (owner starting dates) and one admin save function; no change to any inventory
+Two small append-only tables (owner starting dates: batches and lines) and one admin save function; no change to any inventory
 writer, prices, orders, invoices or commissions. New read-only, admin-only RPCs (`SECURITY DEFINER` with
 `SET search_path = public, pg_temp`, explicit grants, role check inside) and **two setting rows** (holding
 rate, aged-days threshold), validated in the database (a small, non-destructive migration).
@@ -147,8 +147,9 @@ rate, aged-days threshold), validated in the database (a small, non-destructive 
 1. **Rename** today's Inventory Cost report and Inventory page total to **"Pricing-basis valuation"**. Never
    silently change what an existing report means.
 2. **Estimated aging report:** a starting date per product entered by Mason (D10), plus CRX receiving records
-   after it, newest first, up to today's on-hand (build plan section 3). Only receipts whose units match date
-   stock; the rest is "age unknown". The ledger is **not** replayed: the code check showed it cannot be tied to
+   after it, newest first, up to today's on-hand (build plan section 3). Dates are trusted only while the
+   history since the starting date is plain receipts (units matching), deliveries and jobs that add up to
+   on-hand; otherwise the row asks for a new starting date. The ledger is **not** replayed: the code check showed it cannot be tied to
    receipts reliably. Past quantities are never silently repaired inside a report. It stays an **estimate** in
    every phase (D6). Rows below zero are listed as **"negative stock — not aged"**; rows at zero are left out.
 3. **Estimated holding charge** for dated stock (receipt or starting date, shown separately): annual rate ×
@@ -161,8 +162,9 @@ rate, aged-days threshold), validated in the database (a small, non-destructive 
 
 ### 3.2 Coverage and partial-total rules (apply to every phase's reports)
 
-- Every column shows its **coverage**: the share of eligible product-location rows, and of unit-normalized
-  quantity, that it can measure.
+- Every column shows its **coverage**: the share of eligible product-location rows, and of pricing-basis
+  value, that it can measure. A unit-normalized quantity coverage is added only once Gate 0 verifies units;
+  quantities in different units are never summed.
 - Any sum over incomplete coverage is labelled **"partial"**, with the excluded rows and their likely
   materiality listed beside it. An unqualified total appears only at **complete, reconciled** coverage.
 - Age-bucket dollars appear only labelled *quantity × stated valuation basis*; neither cost basis identifies
@@ -178,9 +180,29 @@ nothing; prove the renamed report's totals equal the old ones to the cent.
 **Sol-required paths:** yes — `supabase/` (RPCs and the setting migration) and `src/pages/Reports.tsx`
 (also `InventoryPage` if its file name carries a money word; run the classifier).
 
-## 4. Phase 2 — The average-cost engine (PARKED; the original C1-C4)
+## 4. Phase 2 — Cost of stock on hand (PARKED)
 
-**Perpetual moving weighted-average pool per product + location, value in integer cents, event-sourced,
+### 4.0 Phase 2 scope: the small design (recommended, 2026-11-04)
+
+Mason: "keep it simple but practical, this is not a major feature". Sol's code check showed a report cannot
+rebuild a running average from today's data (no receipt links, no posting order). So Phase 2 reuses Phase 1's
+age layers and gives each one a cost:
+- **Starting-point lines** get Mason's confirmed cost per unit, entered at the physical stock count before busy
+  season (D9), as a new starting batch with costs.
+- **Receipts after the starting point** get the PO-line unit cost **frozen at receipt**: one new column on
+  `receiving_records`, written by the receiving function (the only existing writer this touches). Receipts
+  before the build have no frozen cost and are covered by the stock count.
+- **Value of stock on hand** = Σ layer quantity × layer cost; **average** = value ÷ quantity, labelled "average
+  recorded cost of stock on hand" with the share from CRX receipts shown. Rows that fail Phase 1's "adds up"
+  check show "value unknown — re-enter starting date".
+- No event stream, no guards on stock writers, no cost forwarding. Vendor-bill cost replaces PO cost on a
+  receipt's layer once Phase 4 settles it.
+
+**Option B — the full event-sourced engine (sections 4.1-4.7 below):** kept as a design record only. It needs
+its own approval, and the code prerequisites in section 4.8 items 13-14, and is built only if the small design
+proves not good enough.
+
+**Option B: perpetual moving weighted-average pool per product + location, value in integer cents, event-sourced,
 T0-forward, reporting-only screens.**
 
 - **Pool math:** state = physical on-hand quantity `Q` + total on-hand value `V` (integer cents). Displayed
@@ -303,7 +325,7 @@ events, moves Bulk's average recorded PO cost per gallon (exact attributable cen
 added for the tote), keeps provisional/estimated status, and creates no P&L. A vendor-filled tote keeps its own
 receipt cost. A safe undo restores the exact cents. No container, labor or yield allocation.
 
-### 4.7 Phase 2 sub-steps
+### 4.7 Option B sub-steps (not the default Phase 2 scope; see 4.0)
 
 - **Gate 0 (section 5)** — verified common unit. Must pass before C1 can value any receipt.
 - **C1 — Dark foundation:** tables, private cents-pool engine, negative-stock variance, companion events in
@@ -317,13 +339,9 @@ receipt cost. A safe undo restores the exact cents. No container, labor or yield
 
 ### 4.8 Questions Phase 2's own plan must answer (Sol review, 2026-11-04)
 
-Phase 2 is the heaviest piece, and Sol's code check judged the full engine (event stream, two deferred
-guards, opening workbook, cost forwarding) heavy for a management estimate. **Recommended default, in line
-with Mason's "keep it simple":** start Phase 2 as an **advisory average from CRX receipts**: Mason's confirmed
-opening cost per product at the stock count, then a simple weighted average updated only by CRX receipts and
-reduced proportionally by on-hand, recomputed by a report rather than by every stock writer. It touches no
-existing writer. Build the full event-sourced engine below only if that proves not good enough. Whichever is
-chosen, its plan must answer each of these that applies, with a worked example and a test, before any build:
+Phase 2's scope is the small design in section 4.0. Items 1-12 and 14 below apply mainly to **Option B** (the
+full engine); its plan must answer each one, with a worked example and a test, before any build. For the small
+design, items 9 (units), 10 (PO cost edits: the frozen receipt cost never changes) and 12 (admin-only) apply:
 1. **Negative stock:** the exact equations for issuing with no average, repairing a deficit and resolving an
    unresolved issue (Sol #23).
 2. **Receipt reversal after some stock sold:** reversing the whole receipt can leave negative value; define a
@@ -428,25 +446,28 @@ PO line, and `vendor_bills` has no line table.
    quantity (one bill line may cover part of a receipt). Matching sets the receipt's cost status (section 6).
    Amounts in integer cents; matching is an idempotent admin-only RPC; matched quantity can never exceed the
    received quantity, enforced in PostgreSQL under a row lock.
-2. **Special-order link.** When stock is bought for a specific order line, an admin links the order line to
-   the **receiving record** (the actual shipment) with a quantity in the same unit-verified unit (Gate 0). A
-   PO received in several shipments, or serving several orders, is split by these receipt-level links. Only
-   explicit links count; an unlinked sale is never matched to a PO by guesswork (Sol #36). PostgreSQL keeps
-   the **sum of all active links** to a receipt within its received quantity, and to an order line within its
-   quantity, and the sum of all bill matches to a receipt within its received quantity, each checked under row
-   locks.
-3. **A report, not new postings.** The corrected special-order margin is **calculated** from the invoiced sale
-   lines: booked cost is `invoice_items.cost_cents` (the cost frozen on the invoiced units, not today's
-   `order_items.cost_per_unit`), versus each linked receipt's PO cost, then that receipt's matched bill cost
-   once billed, for the invoiced quantity not yet credited (so a partial return removes its share, Sol #38).
-   It writes nothing to invoices, commissions or the inventory pool, so nothing is counted twice (Sol #35).
+2. **Special-order link.** For a special order, an admin links each **invoiced sale line** (`invoice_items`)
+   to the **receiving record** (the actual shipment) that supplied it, with a quantity in the same
+   unit-verified unit (Gate 0). Linking at the invoice line settles which shipment supplied which invoiced
+   units, across partial deliveries and invoices. Only explicit links count; an unlinked sale is never matched
+   to a PO by guesswork (Sol #36). PostgreSQL keeps the **sum of all active links** to a receipt within its
+   received quantity, and to an invoice line within its quantity minus credited quantity, and the sum of all
+   bill matches to a receipt within its received quantity, each checked under row locks.
+3. **A report, not new postings.** For each link: booked cost = `invoice_items.cost_cents` (a **per-unit**
+   snapshot) × linked quantity; corrected cost = the receipt's frozen PO unit cost (section 4.0) × linked
+   quantity, except that units covered by the receipt's matched bill lines use the bill price. Bill-matched
+   units are applied to links in link order, and the report shows the "billed" and "pending bill" portions
+   separately until the receipt is fully settled. Each line is rounded once to cents. Credits reduce the
+   linked quantity first (Sol #38). It writes nothing to invoices, commissions or the inventory pool, so
+   nothing is counted twice (Sol #35).
 4. **Two margins side by side** (Mason, special-order decision): *booked margin* (today's, unchanged) and
-   *corrected margin* (labelled "pending bill" until the receipt is settled).
+   *corrected margin* (with its pending-bill portion shown).
 5. If Phase 2 is live, a matched bill difference reaches the inventory pool only through the method Phase 2's
    plan chose (section 4.8, item 4).
 6. **Receipt reversal:** today `reverse_receiving_record` refuses a receipt whenever its PO has **any** active
    vendor bill. Once bill lines exist, the rule changes to refuse only a receipt with its own active bill
-   matches (which must be unmatched first).
+   matches or special-order links; those must be unmatched or unlinked first, through recorded,
+   append-only actions.
 
 **Sol-required paths:** yes — `supabase/`, money reports and any `src/` file with a money word.
 

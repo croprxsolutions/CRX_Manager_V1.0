@@ -19,8 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const NAME = process.env.CRX_PROVER_REUSE_CONTAINER || `crx-sale-line-price-${process.pid}-${Date.now().toString(36)}`;
-const REUSE = Boolean(process.env.CRX_PROVER_REUSE_CONTAINER);
+const NAME = `crx-sale-line-price-${process.pid}-${Date.now().toString(36)}`;
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -453,4 +452,4 @@ DROP TRIGGER trigger_c_quote_item_price_required_at_commit ON public.quote_items
 }
 
 try { main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

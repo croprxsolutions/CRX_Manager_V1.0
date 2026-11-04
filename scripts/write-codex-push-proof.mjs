@@ -1557,6 +1557,19 @@ export function solPreflight(root, headSha, baseSha) {
   return { ...evaluateSolPreflight(facts), facts };
 }
 
+// Pre-push runs the src/ code-health ratchet; failing it after Sol means a fix and a second
+// Sol run (2026-11-04: New PO went 3 lines over max-lines). Run it first when src/ changed;
+// an unreadable diff runs it anyway.
+export function codeHealthBeforeSol(root, baseSha, headSha, {
+  git = (args) => runGit(args, { cwd: root, fallback: null }),
+  spawn = spawnSync,
+} = {}) {
+  const changed = git(["diff", "--name-only", `${baseSha}...${headSha}`, "--", "src/"]);
+  if (changed === "") return { ok: true, ran: false, output: "" };
+  const result = spawn(process.execPath, ["scripts/check-code-health.mjs"], { cwd: root, encoding: "utf8" });
+  return { ok: result.status === 0, ran: true, output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim() };
+}
+
 function preflightReport({ problems, notes }) {
   const lines = [];
   for (const note of notes) lines.push(`  note: ${note}`);
@@ -2225,6 +2238,14 @@ export function run(argv = process.argv.slice(2)) {
     return 1;
   }
   if (preflight.notes.length) process.stdout.write(`Sol pre-flight passed:\n${preflightReport(preflight)}\n`);
+  const health = codeHealthBeforeSol(root, baseBefore, headBefore);
+  if (!health.ok) {
+    process.stderr.write(
+      "SOL PRE-FLIGHT: src/ fails the code-health check that pre-push runs, so no Sol tokens were spent.\n" +
+      `${health.output}\nFix it (node scripts/check-code-health.mjs), commit, then re-run this command.\n`,
+    );
+    return 1;
+  }
   let reviewWorkspace;
   let result;
   let codexRun = { codexBin, fallbackUsed: false, primaryResult: null };

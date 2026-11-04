@@ -10,6 +10,25 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-03 — A migration's apply accepts a carried-forward Sol proof
+
+**Source:** Mason, about 11 PM Central on 2026-11-03 (session 0beec9c6, after the PR #1389 landing): "Yes, update the rule".
+
+**Decision.** A migration's live apply needs a Sol proof bound to its exact head, which may be
+a full Sol review or `node scripts/write-codex-push-proof.mjs --carry-forward` of one after a
+conflict-free merge of main. This supersedes "a migration always needs Sol of its exact head"
+(ship.md Step 8). No gate code changes: the apply gate's `proofValid` already accepted carried
+proofs. A carry with no model call needs every new main change to be plain documentation, since
+the PR's own migration is not; any code, database or shared-file change from main gets the
+focused Sol collision check.
+
+**Why.** PR #1389 (2026-11-03) waited out five main moves. Each cost a full Sol run plus the
+15-minute wait for the Codex GitHub App, about 20 minutes per round, for merges that changed
+nothing in the migration.
+
+**What this forbids/implies:** the carry is run before the apply, on the head that will merge.
+A conflict, a hand edit in the merge or any doubt refuses the carry, and the full review runs.
+
 ## 2026-11-03 — Live smoke chains run byte-exact with Mason's Supabase token
 
 **Source:** Mason, about 7:30 PM Central on 2026-11-03 (session d0657249, retro proposal 1): "Do 1 (approve token)".

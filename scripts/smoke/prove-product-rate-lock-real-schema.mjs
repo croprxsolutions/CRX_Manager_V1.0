@@ -366,8 +366,10 @@ function main() {
   asOwner(`UPDATE public.products SET product_form = 'dry', inventory_unit = 'Lb', rate_per_acre = 8, rate_unit = 'oz' WHERE id = '${P.OTHER}';`);
   ok(ADMIN, `UPDATE public.products SET rate_per_acre = 9 WHERE id = '${P.OTHER}';`);
   asOwner(`UPDATE public.products SET product_form = DEFAULT, inventory_unit = 'gal', rate_per_acre = NULL, rate_unit = NULL WHERE id = '${P.OTHER}';`);
+  // asOwner runs with triggers off, so clear the per-acre prices too: a lock refuses stale ones.
   asOwner(`DELETE FROM public.unit_conversions WHERE unit = 'Zero';
-    UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL WHERE id = '${P.OTHER}';`);
+    UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL, tier1_price_per_acre = NULL,
+      tier2_price_per_acre = NULL, tier3_price_per_acre = NULL WHERE id = '${P.OTHER}';`);
   refused(ADMIN, lock(true, '	', 'k-tab-reason'), /REASON_REQUIRED/);
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', versionOf(P.GAL), 'label fix', 'k-cor-open'), /PRODUCT_RATES_NOT_LOCKED/);
   // Per-acre prices are whole cents, 0 or more, and finite (triggers off, so the recalculation cannot hide it).
@@ -572,6 +574,15 @@ function main() {
   assert.equal(rates(P.OTHER), '8|oz|9 oz/A|5.00|4.50|4.00');
   ok(ADMIN, "UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
   console.log('[prover] a direct product save waits for a unit conversion change already saving, then prices with it');
+
+  // The factor went back to 1 but the save above stored prices at 2: locking now would freeze stale prices.
+  refused(ADMIN, lock(true, 'stale', 'k-lock-stale'), /PRODUCT_RATES_STALE: per-acre prices no longer match/);
+  ok(ADMIN, `UPDATE public.products SET rate_per_acre = 8 WHERE id = '${P.OTHER}';`);  // a save reprices it
+  assert.equal(rates(P.OTHER), '8|oz|9 oz/A|2.50|2.25|2.00');
+  ok(ADMIN, lock(true, 'prices current', 'k-lock-fresh'));
+  ok(ADMIN, lock(false, 'open for the smoke', 'k-unlock3'));
+  assert.equal(events(), 'locked,corrected,unlocked,locked,unlocked,locked,unlocked');
+  console.log('[prover] locking is refused while a stored per-acre price is stale, and works once it is saved again');
 
   // The live smoke chain passes here too, and leaves nothing behind.
   const before = scalar('SELECT count(*) FROM public.product_rate_events;');

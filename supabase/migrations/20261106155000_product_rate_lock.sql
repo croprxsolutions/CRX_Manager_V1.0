@@ -18,6 +18,7 @@
 --     rate write after it prices with the new factor (a moved preview is refused).
 --     Every products insert or update takes the lock row FOR SHARE in a trigger that runs first, so
 --     a product save prices with the factor of a change that committed before it, never a stale one.
+--     Locking is refused while any stored per-acre price differs from what the factors price today.
 --   * set_product_rates(rows): the bulk rate writer the CSV import (WP-PM-10) and the setup workbook
 --     (WP-PM-11a-2) will call (admin, retry key, all-or-nothing). Each row carries the rate values it
 --     expects to replace and the per-acre prices its preview showed; a row changed since, or whose
@@ -567,6 +568,7 @@ DECLARE
   v_name text;
   v_lock public.product_rate_lock%ROWTYPE;
   v_result jsonb;
+  v_stale text;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
@@ -592,6 +594,23 @@ BEGIN
   IF v_lock.is_locked = p_locked THEN
     RAISE EXCEPTION 'PRODUCT_RATE_LOCK_UNCHANGED: rates are already %',
       CASE WHEN p_locked THEN 'locked' ELSE 'unlocked' END;
+  END IF;
+  -- A lock freezes the stored per-acre prices, so they must be what unit_conversions prices today: an
+  -- unlocked factor change reprices nothing until a product's next save. Same formula as
+  -- recalc_product_price_per_acre; the FOR UPDATE above holds off saves and factor changes meanwhile.
+  IF p_locked THEN
+    SELECT string_agg(s.product_name, ', ' ORDER BY s.product_name) INTO v_stale FROM (
+      SELECT p.product_name FROM public.products p
+       WHERE p.tier1_price_per_acre IS DISTINCT FROM public.product_price_per_acre(COALESCE(p.tier1_price, 0),
+               p.rate_per_acre, p.rate_unit, p.inventory_unit, p.unit_size)
+          OR p.tier2_price_per_acre IS DISTINCT FROM public.product_price_per_acre(
+               COALESCE(NULLIF(p.tier2_price, 0), COALESCE(p.tier1_price, 0)), p.rate_per_acre, p.rate_unit, p.inventory_unit, p.unit_size)
+          OR p.tier3_price_per_acre IS DISTINCT FROM public.product_price_per_acre(
+               COALESCE(NULLIF(p.tier3_price, 0), COALESCE(p.tier1_price, 0)), p.rate_per_acre, p.rate_unit, p.inventory_unit, p.unit_size)
+       ORDER BY p.product_name LIMIT 20) s;
+    IF v_stale IS NOT NULL THEN
+      RAISE EXCEPTION 'PRODUCT_RATES_STALE: per-acre prices no longer match the unit conversions for %; save each on its product page, then lock', v_stale;
+    END IF;
   END IF;
   SELECT full_name INTO v_name FROM public.profiles WHERE id = v_actor;
   UPDATE public.product_rate_lock

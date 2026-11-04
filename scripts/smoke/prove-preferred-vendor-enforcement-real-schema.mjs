@@ -392,6 +392,18 @@ function main() {
   assert.notEqual(deletedLink.status, 0);
   assert.match(`${deletedLink.stdout}
 ${deletedLink.stderr}`, /VENDOR_DELETED/);
+  // Making an existing secondary link preferred after its vendor was deleted is refused too.
+  const deletedPreferred = psql(`BEGIN;
+    INSERT INTO public.vendors (id, name) VALUES ('${id('f9')}', '[PROVER] Gone Co');
+    INSERT INTO public.product_supplier_links (product_id, vendor_id, comparison_status, link_status, is_preferred, confirmed_by, confirmed_at, created_by)
+      VALUES ('${P.ONE}', '${id('f9')}', 'pending', 'confirmed', false, '${ADMIN}', now(), '${ADMIN}');
+    UPDATE public.vendors SET deleted_at = now() WHERE id = '${id('f9')}';
+    UPDATE public.product_supplier_links SET is_preferred = false WHERE product_id = '${P.ONE}' AND is_preferred;
+    UPDATE public.product_supplier_links SET is_preferred = true WHERE product_id = '${P.ONE}' AND vendor_id = '${id('f9')}';
+    COMMIT;`, { user: 'supabase_admin', allowFailure: true });
+  assert.notEqual(deletedPreferred.status, 0);
+  assert.match(`${deletedPreferred.stdout}
+${deletedPreferred.stderr}`, /VENDOR_DELETED/);
   console.log('[prover] a vendor rename reaches its products; a preferred vendor cannot be deleted, a spare one can');
 
   // A rename that waits on a preferred-vendor switch away from it re-reads afterwards: the product

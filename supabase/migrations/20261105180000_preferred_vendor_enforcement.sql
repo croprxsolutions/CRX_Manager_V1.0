@@ -61,6 +61,14 @@ BEGIN
   WHERE l.product_id = p_product_id
     AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred
   FOR SHARE OF v;
+  -- A fresh read after the lock: a vendor deleted meanwhile cannot become or stay preferred.
+  IF EXISTS (
+    SELECT 1 FROM public.product_supplier_links l JOIN public.vendors v ON v.id = l.vendor_id
+    WHERE l.product_id = p_product_id
+      AND l.is_active AND l.link_status = 'confirmed' AND l.is_preferred AND v.deleted_at IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION 'VENDOR_DELETED: this vendor was deleted; choose another vendor' USING ERRCODE = 'check_violation';
+  END IF;
   UPDATE public.products p
   SET vendor = v.name, updated_at = now()
   FROM public.product_supplier_links l

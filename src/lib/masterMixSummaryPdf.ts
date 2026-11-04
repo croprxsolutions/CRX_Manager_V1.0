@@ -20,17 +20,18 @@
  * Then the included-jobs and (never silently) the excluded-jobs lists, so the combined
  * total is never quietly wrong.
  *
- * Loader/office-facing batch sheet → COMPANY_FOOTER_THANKS. Landscape (the per-load
+ * Loader/office-facing batch sheet → companyFooterThanks. Landscape (the per-load
  * tables can be wide). Follows the shared dynamic-import + helper pattern of
  * applicatorSheetPdf.ts (drawFooter / ensureRoom, dynamic jsPDF + jspdf-autotable).
  */
 import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from './pdfTheme';
-import { COMPANY_NAME, COMPANY_CITY, COMPANY_FOOTER_THANKS } from './companyInfo';
+import { companyFooterThanks, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { fmtNum } from './applicatorSheetData';
 import type { MasterMixSummaryData, MasterMixLoadGroup } from './masterMixSummaryData';
 
 /** Footer rule + customer-safe company line on every page. */
-function drawFooter(doc: JsPDFWithAutoTable, margin: number): void {
+function drawFooter(doc: JsPDFWithAutoTable, margin: number, company: CompanyInfo): void {
   const pageW = doc.internal.pageSize.getWidth();
   const footerY = doc.internal.pageSize.getHeight() - 30;
   doc.setDrawColor(200, 200, 200);
@@ -38,7 +39,7 @@ function drawFooter(doc: JsPDFWithAutoTable, margin: number): void {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
-  doc.text(COMPANY_FOOTER_THANKS, pageW / 2, footerY + 12, { align: 'center' });
+  doc.text(doc.splitTextToSize(companyFooterThanks(company), pageW - margin * 2).slice(0, 2), pageW / 2, footerY + 12, { align: 'center' });
 }
 
 /** Page-break guard: add a page when the next block won't fit. Returns new y. */
@@ -141,6 +142,7 @@ function drawMasterMix(
   doc: JsPDFWithAutoTable,
   autoTable: typeof import('jspdf-autotable').default,
   data: MasterMixSummaryData,
+  company: CompanyInfo,
 ): void {
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 40;
@@ -157,8 +159,10 @@ function drawMasterMix(
   doc.text('Master Mix Summary', margin, 26);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(COMPANY_NAME, margin, 40);
-  doc.text(COMPANY_CITY, margin, 50);
+  fitCompanyNameFont(doc, company.name, pageW / 2 - margin, 9);
+  doc.text(company.name, margin, 40);
+  fitCompanyNameFont(doc, company.address, pageW / 2 - margin, 9);
+  doc.text(company.address, margin, 50);
   doc.setFontSize(9);
   doc.text(`${jobsMixed} job${jobsMixed !== 1 ? 's' : ''} in this batch`, pageW - margin, 26, { align: 'right' });
   doc.text(`Generated: ${new Date().toLocaleDateString()}`, pageW - margin, 40, { align: 'right' });
@@ -347,16 +351,17 @@ export async function generateMasterMixSummaryPdf(
 ): Promise<void> {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
 
-  drawMasterMix(doc, autoTable, data);
+  drawMasterMix(doc, autoTable, data, company);
 
   // Footer on every page (drawn last so the page count is final).
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    drawFooter(doc, 40);
+    drawFooter(doc, 40, company);
   }
 
   doc.save(filename || `master-mix-summary-${data.included_jobs.length}-jobs.pdf`);

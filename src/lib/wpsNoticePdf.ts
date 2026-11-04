@@ -14,10 +14,11 @@
  * Follows the dynamic-import + pdfTheme pattern of the other PDF generators (e.g. deliveryPdf.ts).
  */
 import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from './pdfTheme';
-import { COMPANY_NAME, COMPANY_FOOTER_THANKS } from './companyInfo';
+import { companyFooterThanks, type CompanyInfo } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 
 /** Footer rule + company line (drawn on every page at the end). */
-function drawFooter(doc: JsPDFWithAutoTable, margin: number) {
+function drawFooter(doc: JsPDFWithAutoTable, margin: number, company: CompanyInfo) {
   const pageW = doc.internal.pageSize.getWidth();
   const footerY = doc.internal.pageSize.getHeight() - 30;
   doc.setDrawColor(200, 200, 200);
@@ -25,7 +26,7 @@ function drawFooter(doc: JsPDFWithAutoTable, margin: number) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
-  doc.text(COMPANY_FOOTER_THANKS, pageW / 2, footerY + 12, { align: 'center' });
+  doc.text(doc.splitTextToSize(companyFooterThanks(company), pageW - margin * 2).slice(0, 2), pageW / 2, footerY + 12, { align: 'center' });
 }
 
 export interface WpsNoticeField {
@@ -58,6 +59,7 @@ export interface WpsNoticeData {
 export async function generateWpsNoticePdf(data: WpsNoticeData, filename?: string): Promise<void> {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
   const pageW = doc.internal.pageSize.getWidth();
@@ -86,7 +88,7 @@ export async function generateWpsNoticePdf(data: WpsNoticeData, filename?: strin
   doc.setFontSize(10);
   doc.setTextColor(...GRAY);
   const dateStr = new Date(data.application_date + 'T00:00:00').toLocaleDateString();
-  doc.text(`From: ${COMPANY_NAME} (commercial applicator)`, margin, y);
+  doc.text(`From: ${company.name} (commercial applicator)`, margin, y);
   y += 14;
   doc.text(
     `Application date: ${dateStr}${data.scheduled_time ? `   ·   Scheduled time: ${data.scheduled_time}` : ''}${data.applicator_name ? `   ·   Applicator: ${data.applicator_name}` : ''}   ·   Job: ${data.job_number}`,
@@ -208,7 +210,7 @@ export async function generateWpsNoticePdf(data: WpsNoticeData, filename?: strin
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    drawFooter(doc, margin);
+    drawFooter(doc, margin, company);
   }
 
   doc.save(filename || `wps-notice-${data.job_number}.pdf`);

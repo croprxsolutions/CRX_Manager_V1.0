@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
+| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 58 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
@@ -536,6 +536,14 @@ Completion (`supabase/migrations/20261014210000_order_invoices_rep_own_name.sql`
 Prebooked 3, delivered 10, voided: prebooked becomes 10, so available stock reads low. Fully reserved deliveries are
 unaffected. Cancelling a completed delivery is refused since PR #1284, so only void remains. Fix needs a decision
 first (Sol): put back exactly what completion took (store it), or rebuild the order's outstanding reservation.
+
+### KI-100 — A spray job can leave a booking with a remainder no Partial Order can take
+**MED · OPEN (deferred from PR #1362) · database · Taha**
+Since `20261106110000` (S02) a Partial Order must be in whole hundredths, but `_sync_quote_job_reservations`
+stores a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking leaves 9.9921875 gal,
+which no draw can take, so the booking never closes. Live impact on 2026-11-04: none (`job_product_draws` has 0 rows).
+- **Next step.** A small migration rounding job reservations to 0.01 (Sol-listed: inventory), before spray jobs
+  reserve from bookings in earnest.
 
 ## Database and release process
 

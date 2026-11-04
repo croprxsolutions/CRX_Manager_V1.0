@@ -3574,8 +3574,11 @@ export default function QuoteBuilder() {
       });
       const rows = Array.from(bookedByProduct.entries())
         .filter(([, booked]) => booked > 0)
-        .map(([productId, booked]): DrawRow => {
-          const drawn = drawnByProduct.get(productId) || 0;
+        .map(([productId, bookedSum]): DrawRow => {
+          // Quantities are whole hundredths (S02); summing them as floats shows 333.34000000000003
+          // and makes a typed 16.66 look 3.55e-15 over, so settle each figure to hundredths.
+          const booked = Math.round(bookedSum * 100) / 100;
+          const drawn = Math.round((drawnByProduct.get(productId) || 0) * 100) / 100;
           const product = products.find((p) => p.id === productId);
           // The quote is saved (checked above), so the screen's lines are the booked lines.
           const bookedLines = sections.flatMap((sec) => sec.items)
@@ -3586,7 +3589,7 @@ export default function QuoteBuilder() {
             unit: product?.inventory_unit ?? null,
             booked,
             drawn,
-            remaining: Math.max(booked - drawn, 0),
+            remaining: Math.max(Math.round((booked - drawn) * 100) / 100, 0),
             qty: '',
             bookedPrice: bookedLines.length ? bookedLines[bookedLines.length - 1].price_per_unit : null,
             todayPrice: product ? getQuoteTierPrice(product, tier) : null,
@@ -3623,6 +3626,13 @@ export default function QuoteBuilder() {
       const closed = draws.find((d) => d.remaining <= 0);
       if (closed) {
         toast('error', `${closed.product_name}: nothing left on this booking`);
+        return;
+      }
+      // S02: bookings are saved to 0.01, so a finer draw (333.333) would leave a remainder nothing can draw.
+      // Read from the typed text, not the float: 333.33 * 100 is not exactly 33333.
+      const tooFine = draws.find((d) => !/^\d*(\.\d{0,2})?$/.test(d.qty.trim()));
+      if (tooFine) {
+        toast('error', `${tooFine.product_name}: use at most 2 decimal places (for example 333.33), the same as the booking.`);
         return;
       }
       // The price choice is sent only for a quantity over what is left, so every other draw
@@ -3782,6 +3792,8 @@ export default function QuoteBuilder() {
         toast('error', errMsg);
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_PRODUCT_INVALID)) {
         toast('error', 'A draw line has an invalid product reference. Refresh the booking and try again.');
+      } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_QUANTITY_PRECISION)) {
+        toast('error', 'Use at most 2 decimal places for each quantity (for example 333.33), the same as the booking.');
       } else if (hasRpcCode(error, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
         toast('error', resendRequiredMessage(error));
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKED_PRICE_REQUIRED)) {
@@ -5935,7 +5947,7 @@ export default function QuoteBuilder() {
                   </thead>
                   <tbody>
                     {drawRows.map((row, idx) => {
-                      const over = (parseFloat(row.qty) || 0) - row.remaining;
+                      const over = Math.round(((parseFloat(row.qty) || 0) - row.remaining) * 100) / 100;
                       const setRow = (patch: Partial<DrawRow>) => {
                         const next = [...drawRows];
                         next[idx] = { ...row, ...patch };
@@ -5953,7 +5965,7 @@ export default function QuoteBuilder() {
                             <input
                               type="number"
                               min={0}
-                              step="any"
+                              step="0.01"
                               value={row.qty}
                               // Locked while the order is created: a later change would not be in it.
                               disabled={drawing || row.remaining <= 0}

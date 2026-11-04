@@ -161,6 +161,7 @@ export const RpcErrorCodes = {
   // draw_down_quote intent wrapper: reject malformed product identifiers with
   // a governed token before PostgreSQL attempts the UUID cast.
   BOOKING_PRODUCT_INVALID: 'BOOKING_PRODUCT_INVALID',
+  BOOKING_QUANTITY_PRECISION: 'BOOKING_QUANTITY_PRECISION',
   // draw_down_quote cutover barrier (migration 20260816110000). Raised only
   // while the tier-split cutover holds its advisory key; the draw is refused
   // instantly having written nothing, and retrying after the cutover succeeds.

@@ -464,6 +464,16 @@ function scenarios() {
     ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='posted'`, 'invoice stayed posted after the failed fix')}
     ${check(`(SELECT status FROM public.commissions WHERE id='${COMM}')='pending'`, 'commission untouched after the failed fix')}`,
     'a failure in the delivery step rolls back the invoice void (all or nothing)');
+
+  // Lost response: the fix commits, then the browser retries the same key in a new transaction. Last,
+  // because it keeps the fixed state.
+  const committedBefore = Number(scalar(`SELECT ${stock};`));
+  psql(`BEGIN; ${fix('k-committed')} COMMIT;`);
+  allowed(`${fix('k-committed')}
+    ${check(`(SELECT count(*) FROM public.commissions WHERE order_id='${ORDER}' AND status='pending')=1`, 'committed retry did not add a second commission')}
+    ${check(`${stock}=${committedBefore + 10}`, 'committed retry did not restore stock twice')}
+    ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='voided'`, 'invoice stays voided')}`,
+    'a retry after the fix committed replays the stored result and changes nothing more');
 }
 
 try {

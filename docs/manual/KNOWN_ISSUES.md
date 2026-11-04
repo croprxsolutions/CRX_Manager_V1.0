@@ -40,7 +40,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
-| WP-PM-11a-1 rate lock deferrals (KI-99, KI-100; not applied) | 2 |
+| WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
@@ -415,8 +415,8 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
 ### KI-99 — A CSV import can end partly saved if rates are locked mid-upload
-**MED · product import · LOCAL CANDIDATE `20261106155000` — NOT APPLIED**
-The CSV import checks the rate lock once, then saves rows one at a time. If an admin locks rates between two rated rows, the earlier rows stay saved and the later ones are refused (`PRODUCT_RATES_LOCKED`); no locked rate is ever changed. WP-PM-10 replaces the row-by-row save with the all-or-nothing `set_product_rates`. Source: the WP-PM-11a-1 changelog note.
+**FIXED in the same candidate (#1442) · product import**
+A CSV file that sets rates now saves in one insert, so a lock switched on mid-upload refuses the whole file and nothing is imported. Files with no rates still save row by row. Source: the WP-PM-11a-1 changelog note.
 
 ### KI-100 — An open product page learns of a lock change only on reload or a refused save
 **LOW · product UI · LOCAL CANDIDATE `20261106155000` — NOT APPLIED**

@@ -256,6 +256,28 @@ describe('BulkProductImport', () => {
     expect(supabase.from).not.toHaveBeenCalledWith('products');
   });
 
+  it('saves a rate-setting file in one insert, so a refusal imports nothing', async () => {
+    vi.mocked(supabase.from).mockImplementation(((table: string) => chainable(table === 'product_rate_lock'
+      ? { data: { is_locked: false }, error: null }
+      : { data: null, error: { message: 'PRODUCT_RATES_LOCKED: rates are locked' } })) as unknown as typeof supabase.from);
+    render(<BulkProductImport {...defaultProps} />);
+    const csv = 'product_name,rate_per_acre,rate_unit\nChem,13,oz\nPlain,,';
+    const file = new File([csv], 'products.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    await screen.findByText('Valid Products');
+    fireEvent.click(screen.getByRole('button', { name: /Import 2 Product/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/^Nothing was imported/)));
+    const inserts = vi.mocked(supabase.from).mock.calls.filter(([t]) => String(t) === 'products');
+    expect(inserts).toHaveLength(1);
+    const builder = vi.mocked(supabase.from).mock.results.find((_, i) => String(vi.mocked(supabase.from).mock.calls[i][0]) === 'products')?.value;
+    expect(builder.insert).toHaveBeenCalledWith(
+      [expect.objectContaining({ product_name: 'Chem', rate_per_acre: 13 }), expect.objectContaining({ product_name: 'Plain' })],
+      { defaultToNull: false });
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
+  });
+
   it('treats a whitespace-only number cell as blank', async () => {
     render(<BulkProductImport {...defaultProps} />);
     const csv = 'product_name,container_size,rate_per_acre\nChem,   ,   ';

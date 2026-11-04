@@ -300,6 +300,18 @@ function main() {
   refused(ADMIN, setRates([row(P.GAL, '14', 'oz', '13 oz/A', [null, null, null])], 'k-set-1'), /IDEMPOTENCY_PAYLOAD_MISMATCH/);
   console.log('[prover] set_product_rates saves rates and per-acre prices to the cent; a replay answers the same');
 
+  // A suggested-rate-only write moves pricing_version, so a product page opened before it (it saves
+  // only while pricing_version is unchanged) saves nothing instead of restoring the old suggested rate.
+  const pageVersion = versionOf(P.GAL);
+  ok(ADMIN, setRates([row(P.GAL, '13', 'oz', '12 oz/A', ['13', 'oz', '13 oz/A'])], 'k-sugg'));
+  assert.equal(Number(versionOf(P.GAL)), Number(pageVersion) + 1);
+  assert.equal(ok(ADMIN, `WITH u AS (UPDATE public.products SET notes = 'old page', suggested_rate = '13 oz/A'
+    WHERE id = '${P.GAL}' AND pricing_version = ${pageVersion} RETURNING id) SELECT count(*) FROM u;`), '0');
+  assert.equal(rates(P.GAL), '13|oz|12 oz/A|4.06|3.66|3.25');
+  ok(ADMIN, setRates([row(P.GAL, '13', 'oz', '13 oz/A', ['13', 'oz', '12 oz/A'])], 'k-sugg-back'));
+  assert.equal(rates(P.GAL), '13|oz|13 oz/A|4.06|3.66|3.25');
+  console.log('[prover] a suggested-rate-only write moves pricing_version, so an older product page saves nothing');
+
   // A row whose rates changed since export is refused by product name, and nothing in the batch saves.
   refused(ADMIN, setRates([row(P.OTHER, '8', 'oz', '', [null, null, null]),
     row(P.GAL, '20', 'oz', '', [null, null, null])], 'k-stale'), /PRODUCT_RATES_STALE: .*\[PROVER\] Gal/);
@@ -336,11 +348,18 @@ function main() {
   refused(ADMIN, setRates([row(P.OTHER, '16', 'Bushel', '', ['8', 'Bushel', null])], 'k-legacy'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
   refused(ADMIN, `UPDATE public.products SET rate_per_acre = 16 WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
   refused(ADMIN, setRates([row(P.OTHER, '16', 'Zero', '', ['8', 'Bushel', null])], 'k-zero'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
+  // A kept seed or each unit may be unlisted, but a zero factor would price nothing per acre.
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(5, 'Zero', 'Zero', 'seed', 'Zero');`), 'f');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(5, 'Bag', 'Bag', 'seed', 'Bag');`), 't');
   // The stock unit is pricing's divisor: an unknown one prices as one ounce ($100/gal at 13 oz/A would be $1,300/A).
   asOwner(`UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL, inventory_unit = 'Jug' WHERE id = '${P.OTHER}';`);
   refused(ADMIN, setRates([row(P.OTHER, '13', 'oz', '', [null, null, null])], 'k-stock'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
   refused(ADMIN, `UPDATE public.products SET rate_per_acre = 13, rate_unit = 'oz' WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
   asOwner(`UPDATE public.products SET inventory_unit = 'gal' WHERE id = '${P.OTHER}';`);
+  // A rated product priced through the unit_size fallback re-runs the unit rule when unit_size changes.
+  asOwner(`UPDATE public.products SET inventory_unit = NULL, unit_size = 'gal', product_form = NULL WHERE id = '${P.GAL}';`);
+  refused(ADMIN, `UPDATE public.products SET unit_size = 'Jug' WHERE id = '${P.GAL}';`, /PRODUCT_RATE_UNIT_INVALID/);
+  asOwner(`UPDATE public.products SET inventory_unit = 'gal', unit_size = NULL, product_form = DEFAULT WHERE id = '${P.GAL}';`);
   // Clearing the rate still works: no rate prices nothing.
   ok(ADMIN, `UPDATE public.products SET rate_per_acre = NULL WHERE id = '${P.OTHER}';`);
   // A kept unit listed only for the other form, with a real factor, stays (live: two dry products keep liquid oz).
@@ -388,6 +407,16 @@ function main() {
   ownerRefused(`UPDATE public.products SET rate_unit = 'pt' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
   // Per-acre pricing reads the unit untrimmed, so a trailing space is a unit change.
   refused(ADMIN, `UPDATE public.products SET rate_unit = 'oz ' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
+  // A stock-unit or form change on a rated product moves its per-acre price ($40/gal at 13 oz/A is $4.06/A;
+  // read per quart it is $16.25/A), so it is a rate change too. Set units and forms are already frozen by
+  // guard_product_setup_fields; the open paths are the unit_size fallback and filling a blank one in.
+  asOwner(`UPDATE public.products SET inventory_unit = NULL, unit_size = 'gal', product_form = NULL WHERE id = '${P.GAL}';`);
+  refused(ADMIN, `UPDATE public.products SET unit_size = 'qt' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
+  ownerRefused(`UPDATE public.products SET unit_size = 'qt' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
+  refused(ADMIN, `UPDATE public.products SET inventory_unit = 'qt' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
+  refused(ADMIN, `UPDATE public.products SET product_form = 'dry' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
+  ok(ADMIN, `UPDATE public.products SET notes = 'unit fallback kept' WHERE id = '${P.GAL}';`);
+  asOwner(`UPDATE public.products SET inventory_unit = 'gal', unit_size = NULL, product_form = DEFAULT WHERE id = '${P.GAL}';`);
   // Switching an unrated product with no rate unit to Seed copies the stock unit into rate_unit, which
   // prices nothing, so it saves while locked. (A different unit already there is refused by validate_product_units.)
   ok(ADMIN, `UPDATE public.products SET product_form = 'seed' WHERE id = '${P.DRY}';`);

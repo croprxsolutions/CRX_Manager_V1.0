@@ -194,7 +194,7 @@ function buildContainer() {
 
 const id = (n) => `7e330000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ADMIN=id(1), REP=id(2), CUSTOMER=id(3), PRODUCT=id(4);
-const ORDER=id(10), LINE=id(11), DELIVERY=id(12), INV=id(13), COMM=id(14), ORDER_INV=id(15), RET=id(16), PAYOUT=id(17), LINE2=id(18);
+const ORDER=id(10), LINE=id(11), DELIVERY=id(12), INV=id(13), COMM=id(14), ORDER_INV=id(15), RET=id(16), PAYOUT=id(17), LINE2=id(18), CM=id(19);
 function asUser(uid) {
   return `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
     SELECT set_config('request.jwt.claim.sub', '${uid}', true); SET LOCAL ROLE authenticated;`;
@@ -323,7 +323,31 @@ function scenarios() {
   refused(`RESET ROLE; ALTER TABLE public.accounting_periods DISABLE TRIGGER USER;
     INSERT INTO public.accounting_periods (period_start,period_end,status) VALUES (date_trunc('month',CURRENT_DATE)::date,(date_trunc('month',CURRENT_DATE)+interval '1 month - 1 day')::date,'closed');
     ALTER TABLE public.accounting_periods ENABLE TRIGGER USER;
-    ${fix('k-closed')}`, 'an invoice in a closed month refuses the fix', /FIX_DELIVERY_REFUSED: The invoice is dated in a closed month/);
+    ${fix('k-closed')}`, 'an invoice in a closed month refuses the fix', /FIX_DELIVERY_REFUSED: The invoice, or a credit applied to it, is dated in a closed month/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents,posted_at)
+      VALUES ('${CM}','PROVER-FIX-CM','${ORDER}','${CUSTOMER}','credit_memo','posted',CURRENT_DATE - 40,'${ADMIN}','${REP}',-500,now());
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ALTER TABLE public.credit_memo_applications DISABLE TRIGGER USER;
+    INSERT INTO public.credit_memo_applications (credit_memo_id,target_invoice_id,amount_cents,applied_by,applied_at)
+      VALUES ('${CM}','${INV}',500,'${ADMIN}',now() - interval '40 days');
+    ALTER TABLE public.credit_memo_applications ENABLE TRIGGER USER;
+    ALTER TABLE public.accounting_periods DISABLE TRIGGER USER;
+    INSERT INTO public.accounting_periods (period_start,period_end,status) VALUES
+      (date_trunc('month',(now() - interval '40 days')::date)::date,(date_trunc('month',(now() - interval '40 days')::date)+interval '1 month - 1 day')::date,'closed');
+    ALTER TABLE public.accounting_periods ENABLE TRIGGER USER;
+    ${asUser(ADMIN)} CREATE TEMP TABLE pc ON COMMIT DROP AS SELECT public.preview_fix_delivery('${DELIVERY}') p;
+    ${check(`(SELECT NOT (p->>'can_fix')::boolean FROM pc)`, 'the preview already refuses')}
+    ${fix('k-closed-credit')}`, 'a credit applied to the invoice in a closed month refuses the fix at preview', /FIX_DELIVERY_REFUSED: The invoice, or a credit applied to it, is dated in a closed month/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents,prepay_applied_cents)
+      VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000,2000);
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${fix('k-draft-money')}`, 'an order draft holding prepay refuses the fix', /FIX_DELIVERY_REFUSED: A draft invoice on this order has a payment/);
+  refused(`RESET ROLE; INSERT INTO public.idempotency_keys (idempotency_key,operation,result)
+      VALUES ('k-pre-used:void_invoice:${INV}','void_invoice','{"success":true}');
+    ${fix('k-pre-used')}`,
+    'an inner invoice key already used by another request refuses the fix', /IDEMPOTENCY_INTENT_MISMATCH/);
   refused(`RESET ROLE; ALTER TABLE public.delivery_external_billings DISABLE TRIGGER USER;
     INSERT INTO public.delivery_external_billings (delivery_id,reason) VALUES ('${DELIVERY}','[PROVER] billed in Chem Man');
     ALTER TABLE public.delivery_external_billings ENABLE TRIGGER USER;

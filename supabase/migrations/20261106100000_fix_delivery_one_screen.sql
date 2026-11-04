@@ -108,6 +108,19 @@ BEGIN
       'message', 'This order is billed on one invoice that covers more than this delivery. Void that invoice from the invoice page first.');
   END IF;
 
+  -- void_delivery cancels the order's drafts outright, so a draft holding money would strand it
+  -- (same refusal as void_order's ORDER_VOID_DRAFT_HAS_APPLIED_MONEY).
+  IF v_delivery.order_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM invoices i
+     WHERE i.order_id = v_delivery.order_id AND i.delivery_id IS NULL AND i.status = 'draft'
+       AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
+       AND (COALESCE(i.paid_amount_cents, 0) <> 0 OR COALESCE(i.prepay_applied_cents, 0) <> 0
+            OR COALESCE(i.write_off_cents, 0) <> 0 OR COALESCE(i.credit_applied_cents, 0) <> 0)
+  ) THEN
+    v_refusals := v_refusals || jsonb_build_object('code', 'DRAFT_HAS_MONEY',
+      'message', 'A draft invoice on this order has a payment, prepay, credit or write-off recorded. Reverse it from the invoice page first.');
+  END IF;
+
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'id', i.id,
            'invoice_number', i.invoice_number,
@@ -145,9 +158,16 @@ BEGIN
   IF EXISTS (SELECT 1 FROM invoices i
                JOIN accounting_periods ap ON ap.status = 'closed' AND i.invoice_date BETWEEN ap.period_start AND ap.period_end
               WHERE i.delivery_id = p_delivery_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
-                AND i.status IN ('posted', 'paid', 'overdue')) THEN
+                AND i.status IN ('posted', 'paid', 'overdue'))
+     -- void_invoice also reverses each credit-memo application in that application's own month.
+     OR EXISTS (SELECT 1 FROM invoices i
+                  JOIN credit_memo_applications cma ON cma.reversed_at IS NULL
+                   AND (cma.credit_memo_id = i.id OR cma.target_invoice_id = i.id)
+                  JOIN accounting_periods ap ON ap.status = 'closed' AND cma.applied_at::date BETWEEN ap.period_start AND ap.period_end
+                 WHERE i.delivery_id = p_delivery_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
+                   AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue')) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'CLOSED_PERIOD',
-      'message', 'The invoice is dated in a closed month. Reopen that month or issue a credit instead.');
+      'message', 'The invoice, or a credit applied to it, is dated in a closed month. Reopen that month or issue a credit instead.');
   END IF;
 
   IF v_delivery.order_id IS NOT NULL AND EXISTS (
@@ -307,6 +327,13 @@ BEGIN
   END IF;
   IF (v_plan ->> 'plan_token') IS DISTINCT FROM p_plan_token THEN
     RAISE EXCEPTION 'FIX_DELIVERY_PREVIEW_STALE: the delivery or its invoices changed since the preview; reopen Fix delivery to see the new plan';
+  END IF;
+
+  -- This key has no receipt yet, and the inner receipts commit only with it, so an inner key
+  -- already used means another request took it; void_invoice's receipt would replay that one.
+  IF EXISTS (SELECT 1 FROM idempotency_keys k, jsonb_array_elements(v_plan -> 'invoices') e
+              WHERE k.idempotency_key = p_idempotency_key || ':void_invoice:' || (e ->> 'id')) THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH';
   END IF;
 
   FOR v_invoice IN SELECT e FROM jsonb_array_elements(v_plan -> 'invoices') e LOOP

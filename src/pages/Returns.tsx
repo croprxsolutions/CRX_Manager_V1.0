@@ -291,7 +291,8 @@ export default function Returns() {
     }
     const list = (custRes.data || []) as unknown as Customer[];
     setCustomers(list);
-    return list;
+    // null = unknown: a failed read must not pass for "this customer is inactive".
+    return custRes.error ? null : list;
   };
 
   const loadOrderItems = async (orderId: string, customerId: string, preserveDraftItems = false) => {
@@ -419,7 +420,7 @@ export default function Returns() {
       // The picker lists active customers only; never keep a hidden customer selected.
       void customersLoaded.then((list) => {
         // A newer create form owns the screen; this older check must not touch it.
-        if (session !== createSessionRef.current || list.some((c) => c.id === prefill.customer_id)) return;
+        if (session !== createSessionRef.current || !list || list.some((c) => c.id === prefill.customer_id)) return;
         customerOrdersRequestRef.current += 1;
         orderItemsRequestRef.current += 1;
         setNewForm((f) => (f.customer_id === prefill.customer_id ? { ...f, customer_id: '', order_id: '' } : f));

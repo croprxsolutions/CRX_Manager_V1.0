@@ -116,4 +116,13 @@ describe('Return product from a delivery', () => {
     await waitFor(() => expect(within(dialog).getByLabelText<HTMLSelectElement>('Customer').value).toBe('customer-1'));
     await waitFor(() => expect(within(dialog).getByLabelText<HTMLSelectElement>('Original Order').value).toBe('order-0003'));
   });
+
+  it('does not call the pre-filled customer inactive when the customer list failed to load', async () => {
+    H.failing.add('customers');
+    render(<MemoryRouter initialEntries={['/returns?customer=customer-1&order=order-0003']}><Returns /></MemoryRouter>);
+    await screen.findByRole('dialog', { name: 'New Return / RMA' });
+    await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load customers. Close the form and try again.'));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(H.toast).not.toHaveBeenCalledWith('error', expect.stringContaining('inactive'));
+  });
 });

@@ -52,8 +52,10 @@ oldest stock is assumed to have sold first). Each layer has a date, a quantity a
 1. **CRX receipts dated on or after 2026-06-11** (after the gap began): always usable.
 2. **The product's latest owner estimate** (section 4), for the quantity it covers.
 3. **CRX receipts dated on or before 2026-06-10:** usable **only** if the product had no delivery, job or
-   adjustment after its latest receipt (its stock is untouched since then). Otherwise skipped (D10: gap stock
-   shows "age unknown").
+   adjustment after its **last receipt dated on or before 2026-06-10** (its pre-gap stock is untouched since
+   then). Otherwise skipped (D10: gap stock shows "age unknown"). The check is anchored to that last pre-gap
+   receipt, never to the newest receipt, so a new CRX receipt cannot erase gap-era movements: if 50 units of
+   gap stock sit beside 10 newly received units, the 10 are dated and the 50 stay "age unknown".
 
 A receipt layer is usable only when the receipt's unit, the inventory row's unit and the product's inventory
 unit all match. If any differ, that receipt is skipped. Phase 1 never converts units; that waits for Gate 0. An

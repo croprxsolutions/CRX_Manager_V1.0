@@ -35,7 +35,8 @@
 --   remains on the order (20260718221505), and a cancelled commission can never be reopened
 --   (stamp_commission_cancellation_history). A fixed delivery does not undo the order, so the rep must
 --   keep the commission: every pending order commission this call cancelled is re-inserted as a new
---   pending row with the same recipient, split and amount. The cancelled row stays as history.
+--   pending row with the same recipient, split and amount. The cancelled row stays as history, and the
+--   copy names it in the new commissions.replaces_commission_id column (see 4 below).
 --
 -- IDEMPOTENCY: p_idempotency_key is required. The intent fingerprint binds actor, delivery, reason
 --   and the confirmed invoice set. Inner calls use keys derived from it, so a retry after a lost
@@ -305,6 +306,12 @@ GRANT EXECUTE ON FUNCTION public.preview_fix_delivery(uuid) TO authenticated, se
 -- ---------------------------------------------------------------------------------------------
 -- 3. Execute.
 -- ---------------------------------------------------------------------------------------------
+-- The cancelled commission a Fix Delivery copy replaces. No foreign key: an admin may still delete the
+-- original, and a link to a deleted row hides nothing.
+ALTER TABLE public.commissions ADD COLUMN replaces_commission_id uuid;
+COMMENT ON COLUMN public.commissions.replaces_commission_id IS
+  'Set only by fix_delivery: the cancelled commission this row re-creates. Reports skip a cancelled commission that a row replaces.';
+
 CREATE OR REPLACE FUNCTION public.fix_delivery(
   p_delivery_id uuid,
   p_reason text,
@@ -420,10 +427,10 @@ BEGIN
   -- The order stands, so the rep keeps the commission void_invoice just cancelled.
   INSERT INTO commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage,
                            commission_amount, order_profit, order_date, season, order_number, customer_name,
-                           status)
+                           status, replaces_commission_id)
   SELECT c.order_id, c.customer_id, c.recipient, c.recipient_user_id, c.split_percentage,
          c.commission_amount, c.order_profit, c.order_date, c.season, c.order_number, c.customer_name,
-         'pending'
+         'pending', c.id
     FROM commissions c
    WHERE c.id = ANY (v_pending_commission_ids) AND c.status = 'cancelled';
   GET DIAGNOSTICS v_commissions_restored = ROW_COUNT;
@@ -470,10 +477,9 @@ END
 $postflight$;
 
 -- ---------------------------------------------------------------------------------------------
--- 4. Reports skip a cancelled commission only when a copy replaced it: a later row for the same
---    order, recipient, split and amount, whatever its status (an order's commissions are minted once,
---    together, so only Fix Delivery makes such a row; shortcut: no link column, add one if another flow
---    re-mints). If the copy is cancelled later too, it counts once in its place. A fix leaves the
+-- 4. Reports skip a cancelled commission only when a row replaced it (replaces_commission_id, set by
+--    Fix Delivery). The link holds whatever later happens to the copy: an order edit changes its amount,
+--    or a later void cancels it, and the commission still counts once. A fix leaves the
 --    cancelled original next to its pending copy (cancelled rows keep their amount and cannot
 --    reopen), so summing every status counted it twice. A commission an ordinary void cancelled has
 --    no copy and still counts, so no past month's total moves.
@@ -519,7 +525,7 @@ BEGIN
     'orders', jsonb_build_object('count', (SELECT count(*) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 'total_cents', COALESCE((SELECT sum((total_price * 100)::bigint) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 0)),
     'deliveries', jsonb_build_object('count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status NOT IN ('cancelled', 'voided') AND deleted_at IS NULL), 'completed_count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status = 'completed' AND deleted_at IS NULL)),
     'applications', jsonb_build_object('count', (SELECT count(*) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 'total_acres', COALESCE((SELECT sum(total_acres) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 0)),
-    'commissions', jsonb_build_object('earned_cents', COALESCE((SELECT sum((c.commission_amount * 100)::bigint) FROM public.commissions c WHERE c.order_date BETWEEN p_period_start AND p_period_end AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.order_id = c.order_id AND r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id AND r.recipient = c.recipient AND r.split_percentage = c.split_percentage AND r.commission_amount = c.commission_amount AND r.created_at > c.created_at))), 0), 'paid_count', (SELECT count(*) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status = 'paid')),
+    'commissions', jsonb_build_object('earned_cents', COALESCE((SELECT sum((c.commission_amount * 100)::bigint) FROM public.commissions c WHERE c.order_date BETWEEN p_period_start AND p_period_end AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.replaces_commission_id = c.id))), 0), 'paid_count', (SELECT count(*) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status = 'paid')),
     'ar_balance_cents', COALESCE((SELECT sum(balance_cents) FROM public.invoices WHERE status IN ('posted', 'overdue') AND balance_cents > 0 AND deleted_at IS NULL), 0)
   ) INTO v_result;
   RETURN v_result;
@@ -556,12 +562,12 @@ BEGIN
     AND i.deleted_at IS NULL;
 
   v_gross_profit := v_revenue - v_cogs;
-  -- A cancelled commission still counts unless a later copy replaced it (Fix Delivery re-creates the
+  -- A cancelled commission still counts unless a row replaced it (Fix Delivery re-creates the
   -- order's commission), so an ordinary invoice void does not change a past month's total.
   SELECT COALESCE(SUM(c.commission_amount), 0) INTO v_commissions
   FROM public.commissions c
   WHERE c.order_date >= p_start_date AND c.order_date <= p_end_date
-    AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.order_id = c.order_id AND r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id AND r.recipient = c.recipient AND r.split_percentage = c.split_percentage AND r.commission_amount = c.commission_amount AND r.created_at > c.created_at));
+    AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.replaces_commission_id = c.id));
   v_net_profit := v_gross_profit - v_commissions;
 
   RETURN QUERY VALUES
@@ -579,9 +585,9 @@ DECLARE
   v_monthly text := (SELECT prosrc FROM pg_proc WHERE oid = 'public.get_monthly_summary(date,date)'::regprocedure);
   v_pnl text := (SELECT prosrc FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure);
 BEGIN
-  IF position('r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id' IN v_monthly) = 0
+  IF position('r.replaces_commission_id = c.id' IN v_monthly) = 0
      OR position('PERFORM require_admin();' IN v_monthly) = 0
-     OR position('r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id' IN v_pnl) = 0
+     OR position('r.replaces_commission_id = c.id' IN v_pnl) = 0
      OR NOT (SELECT prosecdef AND pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.get_monthly_summary(date,date)'::regprocedure)
      OR (SELECT prosecdef FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure)
      OR has_function_privilege('anon', 'public.get_monthly_summary(date,date)', 'EXECUTE')

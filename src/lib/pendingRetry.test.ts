@@ -19,8 +19,33 @@ describe('pendingRetry', () => {
     vi.useFakeTimers();
     savePendingRetry('draw', 'key-1', []);
     vi.advanceTimersByTime(24 * 60 * 60 * 1000 + 1);
-    expect(loadPendingRetry('draw')).toBeNull();
+    expect(loadPendingRetry('draw')).toMatchObject({ key: 'key-1', expired: true });
+  });
+
+  it('keeps the first send time when the same key is sent again', () => {
+    vi.useFakeTimers();
+    savePendingRetry('draw', 'key-1', []);
+    const first = loadPendingRetry('draw')!.sentAt;
+    vi.advanceTimersByTime(23 * 60 * 60 * 1000);
+    savePendingRetry('draw', 'key-1', []);
+    expect(loadPendingRetry('draw')!.sentAt).toBe(first);
+    vi.advanceTimersByTime(60 * 60 * 1000 + 1);
+    expect(loadPendingRetry('draw')!.expired).toBe(true);
+    savePendingRetry('draw', 'key-2', []);
+    expect(loadPendingRetry('draw')!.sentAt).toBe(Date.now());
+  });
+
+  it('drops an entry whose request is the wrong shape', () => {
+    savePendingRetry('draw', 'key-1', { not: 'a list' });
+    expect(loadPendingRetry('draw', Array.isArray)).toBeNull();
     expect(sessionStorage.length).toBe(0);
+  });
+
+  it('treats a send time in the future as expired, and drops one that is not a number', () => {
+    sessionStorage.setItem('crx:pending-retry:draw', JSON.stringify({ key: 'key-1', request: [], sentAt: Date.now() + 60_000 }));
+    expect(loadPendingRetry('draw')).toMatchObject({ key: 'key-1', expired: true });
+    sessionStorage.setItem('crx:pending-retry:draw', '{"key":"key-1","request":[],"sentAt":1e999}');
+    expect(loadPendingRetry('draw')).toBeNull();
   });
 
   it('drops a malformed entry and survives storage that throws', () => {

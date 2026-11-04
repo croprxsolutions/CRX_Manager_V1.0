@@ -174,6 +174,7 @@ export default function Returns() {
   const [orderItems, setOrderItems] = useState<ReturnableOrderItem[]>([]);
   const customerOrdersRequestRef = useRef(0);
   const orderItemsRequestRef = useRef(0);
+  const createSessionRef = useRef(0);
 
   // Detail modal
   const [showDetail, setShowDetail] = useState(false);
@@ -394,6 +395,7 @@ export default function Returns() {
   };
 
   const openCreate = (prefill?: { customer_id: string; order_id: string }) => {
+    const session = ++createSessionRef.current;
     customerOrdersRequestRef.current += 1;
     orderItemsRequestRef.current += 1;
     const customersLoaded = loadCreateData();
@@ -416,7 +418,8 @@ export default function Returns() {
       void loadOrderItems(prefill.order_id, prefill.customer_id);
       // The picker lists active customers only; never keep a hidden customer selected.
       void customersLoaded.then((list) => {
-        if (list.some((c) => c.id === prefill.customer_id)) return;
+        // A newer create form owns the screen; this older check must not touch it.
+        if (session !== createSessionRef.current || list.some((c) => c.id === prefill.customer_id)) return;
         customerOrdersRequestRef.current += 1;
         orderItemsRequestRef.current += 1;
         setNewForm((f) => (f.customer_id === prefill.customer_id ? { ...f, customer_id: '', order_id: '' } : f));

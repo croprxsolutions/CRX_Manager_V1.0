@@ -88,7 +88,9 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
       // Retire the key only when the server says it belongs to another request; a lost reply keeps it.
       const binding = getIdempotencyBindingRejection(err);
       if (binding === 'intent' || binding === 'actor') fixIdem.resetKeyFor(scope);
-      // Reload so the screen shows what is true now (refusal reasons, a changed plan, or already undone).
+      // Reload so the screen shows what is true now (refusal reasons, a changed plan, or already undone);
+      // a reloaded plan must be confirmed again.
+      setTyped('');
       void loadPlan();
       Sentry.captureException(err, { tags: { source: 'rpc', action: 'fix_delivery' } });
       toast('error', sanitizeError(err));

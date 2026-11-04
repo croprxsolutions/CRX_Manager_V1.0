@@ -60,6 +60,24 @@ describe('FixDeliveryModal', () => {
     expect(screen.queryByLabelText(/to confirm/)).toBeNull();
     await waitFor(() => expect(screen.getByRole('button', { name: /Fix Delivery/ })).toBeDisabled());
   });
+  it('makes a plan reloaded after a stale refusal be confirmed again', async () => {
+    let previews = 0;
+    H.rpc.mockImplementation(async (name: string) => {
+      if (name === 'preview_fix_delivery') {
+        previews += 1;
+        return { data: previews === 1 ? plan() : plan({ plan_token: 'tok2', other_draft_invoices: [{ id: 'i9', invoice_number: 'INV-9', total_cents: 0 }] }), error: null };
+      }
+      return { data: null, error: { message: 'FIX_DELIVERY_PREVIEW_STALE: changed' } };
+    });
+    renderModal();
+    await screen.findByText(/Invoice INV-2/);
+    fireEvent.change(screen.getByLabelText(/What was wrong/), { target: { value: 'Entered 100, delivered 10' } });
+    fireEvent.change(screen.getByLabelText(/to confirm/), { target: { value: 'FIX DEL-7' } });
+    fireEvent.click(screen.getByRole('button', { name: /Fix Delivery/ }));
+    await screen.findByText(/Draft invoice INV-9/);
+    expect(screen.getByLabelText(/to confirm/)).toHaveValue('');
+    expect(screen.getByRole('button', { name: /Fix Delivery/ })).toBeDisabled();
+  });
   it('keeps the retry key after a lost reply and retires it only when the server says it is another request', async () => {
     let fixCalls = 0;
     H.rpc.mockImplementation(async (name: string) => {

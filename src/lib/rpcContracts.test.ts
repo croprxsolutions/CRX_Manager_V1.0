@@ -3065,10 +3065,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Restored 2026-10-16 when src/types/supabase.ts was regenerated from live after
   // 20261016060000 applied (ledger 20261016121253): the helper is now in the generated
   // types, so it is discovered again even though its migration is below the high-water.
-  _write_product_rates:
-    'internal rate writer (20261105200000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',
   _bind_replay_receipt_20261015:
     'idempotency infrastructure helper (20261016060000, replay-binding batch 1): stamps the actor and request fingerprint on the receipt its calling wrapper just wrote; every API-role EXECUTE is revoked',
+  // Local candidate 20261105200000 (WP-PM-11a-1): internal helper behind the two rate writers.
+  _write_product_rates:
+    'internal rate writer (20261105200000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',
   // Pruned on the 2026-08-11 merge of origin/main, per the standing rule below that a
   // dead exemption silently pre-suppresses any future RPC reusing the name:
   //   _guard_job_commission_split_immutable remains parked with Wave A under

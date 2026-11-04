@@ -787,6 +787,8 @@ export default function ProductDetail() {
       toast('error', sanitizeError(err));
       if (hasRpcCode(err, RpcErrorCodes.PRODUCT_RATES_LOCKED)) {
         // Rates were locked meanwhile: put the saved rates back so the rest of the edit can save.
+        // Forget the stale open lock first, so a failed refresh still leaves the rates read-only.
+        setRateLock(null);
         loadRateLock();
         setProduct((current) => ({ ...current, rate_per_acre: persistedProduct?.rate_per_acre ?? null,
           rate_unit: persistedProduct?.rate_unit ?? null, suggested_rate: persistedProduct?.suggested_rate ?? null }));

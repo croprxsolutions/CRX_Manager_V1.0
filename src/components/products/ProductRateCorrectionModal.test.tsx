@@ -20,7 +20,7 @@ describe('correct rates while locked', () => {
   it('previews per-acre prices, then sends one product with the version it loaded and the reason', async () => {
     mockPreview.mockResolvedValue({ before: values(13, 4.06), after: values(16, 5) });
     mockCorrect.mockResolvedValue({ product_id: 'p1', product_name: 'Alpha', pricing_version: 8,
-      before: values(13, 4.06), after: values(16, 5) });
+      before: values(13, 4.06), after: values(16, 5.25) });
     const onCorrected = vi.fn();
     render(<ProductRateCorrectionModal open product={product} profileId="u1" unitOptions={['oz', 'Gal']}
       onClose={vi.fn()} onCorrected={onCorrected} />);
@@ -38,7 +38,8 @@ describe('correct rates while locked', () => {
     fireEvent.change(screen.getByLabelText('Rate Per Acre'), { target: { value: '16' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save correction' }));
     await waitFor(() => expect(screen.getByText('Saved and logged. Per-acre prices now:')).toBeInTheDocument());
-    expect(screen.getByText('$4.06')).toBeInTheDocument();
+    // The saved result's After price, which differs from the preview's $5.00.
+    expect(screen.getByText('$5.25')).toBeInTheDocument();
     expect(mockCorrect).toHaveBeenCalledWith(expect.objectContaining({
       productId: 'p1', ratePerAcre: 16, rateUnit: 'oz', suggestedRate: '13 oz/A', expectedPricingVersion: 7, reason: 'label fix',
     }));

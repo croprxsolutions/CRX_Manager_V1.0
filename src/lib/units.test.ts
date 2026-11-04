@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { unitOptionsForForm, isKnownUnit, blockedUnitSaveMessage } from './units';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, blockedUnitSaveMessage, FORM_UNIT_RULES, asProductForm } from './units';
 import type { UnitConversion } from '../types';
 
 const CONV = [
@@ -8,18 +10,52 @@ const CONV = [
   { id: '3', unit: 'Lb', factor_oz: 16, unit_type: 'dry' },
   { id: '4', unit: 'Dry oz', factor_oz: 1, unit_type: 'dry' },
   { id: '5', unit: 'Ea', factor_oz: 1, unit_type: 'both' },
+  { id: '6', unit: 'Unit', factor_oz: 1, unit_type: 'both' },
 ] as unknown as UnitConversion[];
 
 describe('unitOptionsForForm', () => {
   it('returns all units when form is null/undefined', () => {
-    expect(unitOptionsForForm(CONV, null).map((u) => u.unit)).toEqual(['oz', 'Gal', 'Lb', 'Dry oz', 'Ea']);
-    expect(unitOptionsForForm(CONV, undefined)).toHaveLength(5);
+    expect(unitOptionsForForm(CONV, null).map((u) => u.unit)).toEqual(['oz', 'Gal', 'Lb', 'Dry oz', 'Ea', 'Unit']);
+    expect(unitOptionsForForm(CONV, undefined)).toHaveLength(6);
   });
   it('filters to liquid + both for a liquid product', () => {
-    expect(unitOptionsForForm(CONV, 'liquid').map((u) => u.unit)).toEqual(['oz', 'Gal', 'Ea']);
+    expect(unitOptionsForForm(CONV, 'liquid').map((u) => u.unit)).toEqual(['oz', 'Gal', 'Ea', 'Unit']);
   });
   it('filters to dry + both for a dry product', () => {
-    expect(unitOptionsForForm(CONV, 'dry').map((u) => u.unit)).toEqual(['Lb', 'Dry oz', 'Ea']);
+    expect(unitOptionsForForm(CONV, 'dry').map((u) => u.unit)).toEqual(['Lb', 'Dry oz', 'Ea', 'Unit']);
+  });
+  it('offers only exact rule units for seed and each', () => {
+    expect(unitOptionsForForm(CONV, 'seed').map((u) => u.unit)).toEqual(['Lb', 'Unit']);
+    expect(unitOptionsForForm(CONV, 'each').map((u) => u.unit)).toEqual(['Ea', 'Unit']);
+    expect(asProductForm(' Each ')).toBe('each');
+    expect(asProductForm('grain')).toBeNull();
+  });
+  it('matches the SQL seed rows exactly', () => {
+    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261104150000_product_forms_seed_each.sql'), 'utf8');
+    const values = migration.match(/FROM \(VALUES ([^\n]+)\) v\(form, unit\)/)?.[1];
+    expect(values).toBeDefined();
+    const rows = [...(values ?? '').matchAll(/\('([^']+)','([^']+)'\)/g)];
+    expect(rows.map((row) => [row[1], row[2]])).toEqual([
+      ...FORM_UNIT_RULES.seed.map((unit) => ['seed', unit]),
+      ...FORM_UNIT_RULES.each.map((unit) => ['each', unit]),
+    ]);
+  });
+});
+
+describe('rateUnitOptionsForProduct', () => {
+  it('offers only the seed stock unit', () => {
+    expect(rateUnitOptionsForProduct(CONV, 'seed', 'Lb').map((u) => u.unit)).toEqual(['Lb']);
+    expect(rateUnitOptionsForProduct(CONV, 'seed', 'Unit').map((u) => u.unit)).toEqual(['Unit']);
+    expect(rateUnitOptionsForProduct(CONV, 'seed', 'lb').map((u) => u.unit)).toEqual(['Lb']);
+    expect(rateUnitOptionsForProduct(CONV, 'seed', null)).toEqual([]);
+  });
+  it('offers only the each stock unit', () => {
+    expect(rateUnitOptionsForProduct(CONV, 'each', 'Ea').map((u) => u.unit)).toEqual(['Ea']);
+  });
+  it('preserves liquid and dry options', () => {
+    for (const form of ['liquid', 'dry', null]) {
+      expect(rateUnitOptionsForProduct(CONV, form, 'Lb')).toEqual(unitOptionsForForm(CONV, form));
+    }
   });
 });
 

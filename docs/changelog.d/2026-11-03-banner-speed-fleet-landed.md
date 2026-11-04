@@ -1,0 +1,5 @@
+## 2026-11-03 - Worktree banner runs its git calls concurrently; /fleet reads squash-merged PRs
+
+- `.claude/hooks/worktree-awareness.mjs` ran about five git commands per worktree one after another (~140 ms per folder). With ~55 worktrees that took ~10.4s against the hook's 10s timeout, so the banner could be dropped. It now runs those per-worktree commands eight at a time before building the report, and the existing call sites read the results (any miss still runs the old way). With 17 worktrees the run went from ~2.7-3.2s to ~1.2s, and the banner text is byte-for-byte unchanged.
+- `scripts/fleet-status.mjs` (`/fleet`) labelled merge state by git ancestry alone, so squash-merged branches still read UNMERGED there. It now uses the same merged-PR cache and `LANDED via merged PR #N` label as the banner. It stays offline by default; `--fetch` also refreshes a stale merged-PR list.
+- A test now runs the real banner hook against throwaway worktrees, and another checks that both readers label through the shared helper.

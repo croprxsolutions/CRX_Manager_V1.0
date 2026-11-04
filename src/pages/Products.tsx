@@ -16,7 +16,7 @@ import PricingSourceReasonModal, { type PricingSourceReason } from '../component
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, supabaseUntyped, sanitizeError, checkMutationResult, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
-import { listProductCategories } from '../lib/productSetup';
+import { isSetupIncomplete, listProductCategories, type SetupFilter } from '../lib/productSetup';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
@@ -89,10 +89,10 @@ const INLINE_PRICING_FIELDS = new Set([
   'tier3_price',
 ]);
 
+// The vendor is a copy of the preferred vendor (WP-PM-15b); it changes on the product page's Vendors section.
 const INLINE_NONPRICING_FIELDS = new Set([
   'product_name',
   'category',
-  'vendor',
 ]);
 
 type ActiveReviewEntry = { product_id: string; product_name: string; kind: string; number: string | null; message: string };
@@ -157,6 +157,7 @@ export default function Products() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [vendorFilter, setVendorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
+  const [setupFilter, setSetupFilter] = useState<SetupFilter>('');
   const [categories, setCategories] = useState<string[]>([]);
   const [categoryChoices, setCategoryChoices] = useState<ProductCategory[]>([]);
   const [vendors, setVendors] = useState<string[]>([]);
@@ -292,13 +293,15 @@ export default function Products() {
     void fetchProducts();
   };
 
-  const filtered = products.filter((p) => {
+  const listFiltered = products.filter((p) => {
     if (categoryFilter && p.category !== categoryFilter) return false;
     if (vendorFilter && p.vendor !== vendorFilter) return false;
     if (statusFilter === 'active' && !p.is_active) return false;
     if (statusFilter === 'inactive' && p.is_active) return false;
     return true;
   });
+  const incompleteCount = listFiltered.filter(isSetupIncomplete).length;
+  const filtered = setupFilter === 'incomplete' ? listFiltered.filter(isSetupIncomplete) : listFiltered;
 
   const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
     useRowSelection({
@@ -572,7 +575,6 @@ export default function Products() {
   ];
 
   const filterCategoryNames = [...new Set([...categories, ...categoryChoices.filter((choice) => choice.is_active).map((choice) => choice.name)])].sort();
-  const vendorOptions = vendors.map((v) => ({ value: v, label: v }));
 
   /** Render the one input family selected for this row. The server computes every effect. */
   const createTierEditRender = (tierNum: 1 | 2 | 3) => {
@@ -784,9 +786,7 @@ export default function Products() {
           if (!name) throw new Error('Enter a product name before saving.');
           nonpricingFields.product_name = name;
         }
-        for (const field of ['vendor', 'category'] as const) {
-          if (nonpricingFields[field] === '') nonpricingFields[field] = null;
-        }
+        if (nonpricingFields.category === '') nonpricingFields.category = null;
         const updateResult = await supabase
           .from('products')
           .update({ ...nonpricingFields, updated_at: new Date().toISOString() })
@@ -973,6 +973,7 @@ export default function Products() {
         <div className="max-w-xs">
           <p className="font-medium text-nav-dark truncate">{row.product_name}</p>
           {row.sku && <p className="text-xs text-gray-400">{row.sku}</p>}
+          {isSetupIncomplete(row) && <Badge variant="warning" className="mt-1">Incomplete setup</Badge>}
         </div>
       ),
     },
@@ -1000,9 +1001,6 @@ export default function Products() {
       key: 'vendor',
       header: 'Vendor',
       sortable: true,
-      editable: isAdmin,
-      editType: 'select',
-      editOptions: vendorOptions,
     },
     ...(isAdmin && showSensitive
       ? [
@@ -1333,6 +1331,8 @@ export default function Products() {
             onCategoryFilterChange={setCategoryFilter}
             onVendorFilterChange={setVendorFilter}
             onStatusFilterChange={setStatusFilter}
+            setupFilter={setupFilter}
+            onSetupFilterChange={setSetupFilter}
             onOpenProduct={(product) => navigate(`/products/${product.id}`)}
             onChangePrice={isAdmin ? (product) => setQuickPriceProductId(product.id) : undefined}
             loadError={loadError}
@@ -1422,6 +1422,15 @@ export default function Products() {
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
                   <option value="all">All statuses</option>
+                </select>
+                <select
+                  value={setupFilter}
+                  onChange={(e) => setSetupFilter(e.target.value as SetupFilter)}
+                  aria-label="Filter by setup"
+                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                >
+                  <option value="">Any setup</option>
+                  <option value="incomplete">Incomplete setup ({incompleteCount})</option>
                 </select>
                 {canBulkAction && !loadError && filtered.some((p) => isAdmin || p.is_active) && (
                   <button

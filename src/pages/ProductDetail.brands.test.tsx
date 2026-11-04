@@ -66,6 +66,8 @@ function baseProduct(overrides: Partial<Product> = {}): Product {
   };
 }
 
+// The Vendors section has its own tests; these page tests do not mock its reads.
+vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
 vi.mock('../lib/db', () => {
   function chainable(resolveWith: unknown) {
     const builder: Record<string, unknown> = {};
@@ -224,11 +226,74 @@ describe('ProductDetail brands section', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
     await waitFor(() => expect(H.savedPayload?.use_timings).toEqual(['pre_emerge_corn', 'post_emerge_soybeans']));
     expect(H.savedPayload).not.toHaveProperty('use_timing');
+    // An untouched vendor is not re-sent (WP-PM-15a), so an open page never overwrites a newer one.
+    expect(H.savedPayload).not.toHaveProperty('vendor');
     first.unmount();
     render(<ProductDetail />);
     const reloaded = await screen.findByRole('group', { name: 'Use Timing' });
     expect(within(reloaded).getByRole('checkbox', { name: 'Pre-Emerge Corn' })).toBeChecked();
     expect(within(reloaded).getByRole('checkbox', { name: 'Post-Emerge Soybeans' })).toBeChecked();
+  });
+
+  it('locks the vendor of an existing product; it follows the preferred vendor', async () => {
+    render(<ProductDetail />);
+    expect(await screen.findByRole('combobox', { name: 'Vendor' })).toBeDisabled();
+  });
+
+  it('does not re-send untouched label fields, so an open page never overwrites a Label Review commit', async () => {
+    H.product = baseProduct({
+      epa_registration: '100-1', signal_word: 'Caution', rei_hours: 12, phi_days: 30,
+      max_label_rate: 32, max_label_rate_unit: 'fl oz/acre',
+    });
+    render(<ProductDetail />);
+    const group = await screen.findByRole('group', { name: 'Use Timing' });
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'Pre-Emerge Corn' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload?.use_timings).toEqual(['pre_emerge_corn']));
+    for (const field of ['epa_registration', 'signal_word', 'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit']) {
+      expect(H.savedPayload).not.toHaveProperty(field);
+    }
+  });
+
+  it('still saves a label field that was changed on the page', async () => {
+    H.product = baseProduct({ epa_registration: '100-1', signal_word: 'Caution' });
+    render(<ProductDetail />);
+    fireEvent.change(await screen.findByDisplayValue('Caution'), { target: { value: 'Warning' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload?.signal_word).toBe('Warning'));
+    expect(H.savedPayload).not.toHaveProperty('epa_registration');
+  });
+
+  it('still saves a label field that was cleared on the page', async () => {
+    H.product = baseProduct({ signal_word: 'Caution' });
+    render(<ProductDetail />);
+    fireEvent.change(await screen.findByDisplayValue('Caution'), { target: { value: '' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
+    await waitFor(() => expect(H.savedPayload).toHaveProperty('signal_word', null));
+  });
+
+  it('names each label dropdown for screen readers', async () => {
+    render(<ProductDetail />);
+    for (const name of ['Signal Word', 'Type', 'Inventory Unit', 'Rate Unit']) {
+      expect(await screen.findByRole('combobox', { name })).toBeInTheDocument();
+    }
+  });
+
+  it('names the read-only Max Label Rate value for screen readers', async () => {
+    H.product = baseProduct({ max_label_rate: 32, max_label_rate_unit: 'fl oz/acre' });
+    render(<ProductDetail />);
+    expect(await screen.findByRole('definition', { name: 'Max Label Rate' })).toHaveTextContent('32 fl oz/acre');
+  });
+
+  it('sends the vendor when creating a product', async () => {
+    H.routeId = 'new';
+    render(<ProductDetail />);
+    fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Vendor' }), { target: { value: 'New Vendor' } });
+    await screen.findByRole('option', { name: 'Herbicide' });
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /^(Save|Create)/ })[0]);
+    await waitFor(() => expect(H.savedPayload?.vendor).toBe('New Vendor'));
   });
 
   it('creates a product with two timings and reloads both', async () => {

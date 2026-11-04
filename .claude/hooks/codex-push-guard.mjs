@@ -11,7 +11,7 @@
 // Non-pushes and ordinary non-production pushes pass. Ambiguous push context,
 // force intent, and broad multi-ref modes fail closed.
 
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import {
@@ -136,6 +136,13 @@ for (const pushCmd of pushCommands) {
   }
 
   const pushRepoDir = gitPushCwd(pushCmd, projectDir, cmd);
+  // Checked first: Node reports a missing cwd as `spawnSync git ENOENT`, which
+  // read as "git is not installed" and hid the real problem.
+  let isFolder = false;
+  try { isFolder = statSync(pushRepoDir).isDirectory(); } catch { /* missing */ }
+  if (!isFolder) {
+    deny(`CODEX GATE: this push runs in ${sanitizeForMessage(pushRepoDir, 200)}, which is not an existing folder (or is written with a shell variable the guard cannot read), so it cannot be bound to a repository and is denied. Use \`git -C <existing repo folder> push\`.`);
+  }
   let branch = "";
   try {
     branch = git(["rev-parse", "--abbrev-ref", "HEAD"], pushRepoDir);

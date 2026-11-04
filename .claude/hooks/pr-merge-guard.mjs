@@ -41,6 +41,7 @@ import {
   ghMergeRequest,
   mcpMergeRequest,
   mergeRequestKey,
+  firstAcceptedProof,
   proofSearchDirs,
   proofValidForMerge,
   pullRequestChecksGreen,
@@ -611,28 +612,23 @@ function gateRequest(request) {
 
   // The PR's own commits: a Sol proof of an earlier one counts, with no GitHub call per proof file.
   const prCommits = new Set((Array.isArray(pr.commits) ? pr.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
-  let valid = false;
-  let carried = null;
-  outer:
+  const proofs = [];
   for (const stateDir of proofSearchDirs(projectDir, listWorktreesFromProjectDir)) {
     try {
       if (!existsSync(stateDir)) continue;
       for (const f of readdirSync(stateDir)) {
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(f)) continue;
-        let data;
-        try { data = JSON.parse(readFileSync(path.join(stateDir, f), "utf8")); } catch { continue; }
-        // A proof of an earlier commit covers the commits after it unless those
-        // touch the Sol list; same module, same budgeted gh.
-        if (proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, prCommits })
-          && (String(data.head_sha).toLowerCase() === String(headSha).toLowerCase()
-            || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky)) {
-          valid = true;
-          carried = data.carried_forward === true ? data.carry : null;
-          break outer;
-        }
+        try { proofs.push(JSON.parse(readFileSync(path.join(stateDir, f), "utf8"))); } catch { continue; }
       }
     } catch { /* unreadable directory means no proof HERE — keep looking */ }
   }
+  // A proof of an earlier commit covers the commits after it unless those
+  // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
+  const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, prCommits })
+      && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
+  const valid = proof !== null;
+  const carried = proof?.carried_forward === true ? proof.carry : null;
   // The ALLOW point for THIS request. Every hard denial above has had its
   // chance; the advisory lookup is queued, not run, so a later merge in the same
   // command still reaches its own hard denials first.

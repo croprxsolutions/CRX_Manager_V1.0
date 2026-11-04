@@ -57,7 +57,7 @@ import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
-import { billedLine, catalogPricePerAcre, getQuoteTierPrice, validateCommissionSplits } from '../lib/quoteCalc';
+import { billedLine, catalogPricePerAcre, getQuoteTierPrice, isTierPriceMissing, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
 import {
   buildRowVersionPatch,
@@ -74,13 +74,14 @@ import { sendOrderConfirmedEmail } from '../lib/orderConfirmedEmail';
 import { trackBusinessEvent } from '../lib/metrics';
 import { localDatePlusDays, localToday, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { computeSeason, seasonEndDate } from '../utils/season';
+import { loadQuoteValidDays, pickedExpiryStart } from '../lib/appSettingDefaults';
 import { downloadQuotePdf, generateQuotePdf } from '../lib/quotePdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { escapeHtml } from '../lib/proofNotification';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import { preferredQuoteNotes } from '../lib/quoteNotes';
 import { adaptQuoteVersionList, orderedQuoteVersionHistory, type QuoteVersionRow, type UnreadableQuoteVersion } from '../lib/quoteVersionAdapter';
-import { resendRequiredMessage, samePrice, sentItemsOf, sentLineState, unsentQuoteChange, type PriceLockLine } from '../lib/quotePriceLock';
+import { resendRequiredMessage, samePrice, sentItemsOf, sentLineState, unsentQuoteChange, type PriceLockLine, type QuotePriceChange } from '../lib/quotePriceLock';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import HelpTip from '../components/ui/HelpTip';
 import TransactionThread from '../components/ui/TransactionThread';
@@ -89,6 +90,7 @@ import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
+import { rateUnitOptionsForProduct } from '../lib/units';
 import { QuoteLineCost } from '../components/quotes/QuoteLineCost';
 import type {
   Quote,
@@ -224,6 +226,23 @@ interface DrawRow {
 }
 
 let keyCounter = 0;
+// The price changes save_quote recorded on this quote's sent lines (quote_price_changes, read-only
+// to admins and reps). null when the read failed.
+async function loadQuotePriceChanges(quoteId: string): Promise<QuotePriceChange[] | null> {
+  // supabaseUntyped: quote_price_changes is not in the generated types yet.
+  const { data, error } = await fetchAllRows<QuotePriceChange>((from, to) => pageWithList(supabaseUntyped
+    .from('quote_price_changes')
+    .select('id, quote_item_id, product_id, new_price_cents, sent_version, grower_confirmed_by', { count: 'exact' })
+    .eq('quote_id', quoteId)
+    .order('id')
+    .range(from, to)));
+  if (error) {
+    Sentry.captureException(error, { tags: { source: 'read', action: 'load_quote_price_changes' } });
+    return null;
+  }
+  return data ?? [];
+}
+
 function nextKey() {
   return `_k${++keyCounter}`;
 }
@@ -459,6 +478,24 @@ export default function QuoteBuilder() {
   // applies it at each send (20261029100000).
   const [chosenExpiryDate, setChosenExpiryDate] = useState<string | null>(null);
   const seasonEnd = seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz())));
+  // Settings "Default Quote Valid Days": where "Pick a date" starts (null = season end).
+  const [quoteValidDays, setQuoteValidDays] = useState<number | null>(null);
+  // Set when "Pick a date" is chosen before the setting arrives, so the start is redone once it does.
+  const pickedBeforeValidDaysRef = useRef(false);
+  const validDaysLoadedRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    void loadQuoteValidDays().then((days) => {
+      if (cancelled) return;
+      validDaysLoadedRef.current = true;
+      setQuoteValidDays(days);
+      if (pickedBeforeValidDaysRef.current) {
+        pickedBeforeValidDaysRef.current = false;
+        setChosenExpiryDate((current) => (current === null ? null : pickedExpiryStart(todayInBusinessTz(), days, seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz()))))));
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
   const [headerNotes, setHeaderNotes] = useState('');
   const [footerNotes, setFooterNotes] = useState('');
   const [commissionSplit, setCommissionSplit] = useState<CommissionSplit>({
@@ -570,6 +607,16 @@ export default function QuoteBuilder() {
   const [rupWarnings, setRupWarnings] = useState<string[]>([]);
   const [quoteVersions, setQuoteVersions] = useState<QuoteVersion[]>([]);
   const [unreadableQuoteVersions, setUnreadableQuoteVersions] = useState<UnreadableQuoteVersion[]>([]);
+  // Tagged with its quote, so a late reply for another quote is never read as this one's. A
+  // quote whose list never loaded has none, and the page asks for a re-send rather than promising
+  // a price the database may refuse; a failed refresh keeps the last list read.
+  const [priceChanges, setPriceChanges] = useState<{ quoteId: string; rows: QuotePriceChange[] } | null>(null);
+  const priceChangesSerialRef = useRef(0);
+  const refreshPriceChanges = useCallback(async (forQuoteId: string) => {
+    const serial = ++priceChangesSerialRef.current;
+    const rows = await loadQuotePriceChanges(forQuoteId);
+    if (rows && serial === priceChangesSerialRef.current) setPriceChanges({ quoteId: forQuoteId, rows });
+  }, []);
   const savedVersionCount = quoteVersions.length + unreadableQuoteVersions.length;
   // A quote with a sent version keeps its prices (save_quote, 20261027040000). The version last
   // sent to the customer is the price authority that Convert, Partial Order and Schedule Job check.
@@ -685,6 +732,7 @@ export default function QuoteBuilder() {
       id: saved && saved.productId === item.product_id ? saved.id : undefined,
       product_id: item.product_id,
       price_per_unit: item.price_per_unit,
+      saved_price_per_unit: saved && saved.productId === item.product_id ? saved.price : undefined,
     };
   }, [savedLineIdByKey]);
   // The database's re-send rule as the page can see it (src/lib/quotePriceLock.ts).
@@ -694,7 +742,8 @@ export default function QuoteBuilder() {
       .reduce((newest, v) => Math.max(newest, v.version_number), 0),
     customerId,
     lines: sections.flatMap((sec) => sec.items.filter((item) => item.product_id).map(priceLockLineOf)),
-  }), [lastSentVersion, quoteVersions, unreadableQuoteVersions, customerId, sections, priceLockLineOf]);
+    priceChanges: priceChanges && priceChanges.quoteId === quoteId ? priceChanges.rows : [],
+  }), [lastSentVersion, quoteVersions, unreadableQuoteVersions, customerId, sections, priceLockLineOf, priceChanges, quoteId]);
   // Lines switched to another product since the last save was sent. A switched
   // line stops being its saved line, even if it is later switched back, so the
   // reply of a save that was in flight must not hand it an id again.
@@ -1362,6 +1411,7 @@ export default function QuoteBuilder() {
       ? "This quote's customer could not be loaded. Refresh the page before saving."
       : null);
     setTier(q.tier);
+    pickedBeforeValidDaysRef.current = false;
     setChosenExpiryDate(q.chosen_expiry_date ?? null);
     setHeaderNotes(q.header_notes || '');
     setFooterNotes(q.footer_notes || '');
@@ -1421,12 +1471,14 @@ export default function QuoteBuilder() {
       setUnreadableQuoteVersions(unreadable);
       reportUntrustworthyQuoteVersions(unreadable, quoteId);
     }
+    await refreshPriceChanges(quoteId);
+    if (mustNotInstall()) return false;
 
     setLoading(false);
     const loadGeneration = ++initialLoadGenerationRef.current;
     setInstalledLoadGeneration(loadGeneration);
     return true;
-  }, [toast, navigate, resetSaveQuoteKeyFor, isAdmin]);
+  }, [toast, navigate, resetSaveQuoteKeyFor, isAdmin, refreshPriceChanges]);
 
   const reloadAfterStaleSave = useCallback(async () => {
     if (!quoteId) return false;
@@ -1934,7 +1986,8 @@ export default function QuoteBuilder() {
               current_cost: product.current_cost || 0,
               suggested_rate: product.suggested_rate || null,
               actual_rate: product.rate_per_acre ?? item.actual_rate ?? null,
-              rate_unit: product.rate_unit || null,
+              rate_unit: product.product_form === 'seed' || product.product_form === 'each'
+                ? product.inventory_unit : product.rate_unit || null,
               unit_size: product.inventory_unit || product.unit_size || null,
               price_unit: product.inventory_unit || null,
             };
@@ -2566,6 +2619,9 @@ export default function QuoteBuilder() {
         }
         savedLineIdsRef.current = savedLineIds;
         setSavedLineIdByKey(new Map(savedLineIds));
+        // The save recorded any changed price; read the record the database will check.
+        await refreshPriceChanges(result.quote_id);
+        if (editingSessionChanged()) return null;
       }
       // The save committed, but conversion and other chained actions must not
       // continue unless this tab can install the exact authoritative token.
@@ -3019,6 +3075,8 @@ export default function QuoteBuilder() {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'revert_quote_status' } });
       if (hasRpcCode(err, RpcErrorCodes.INSUFFICIENT_ROLE)) {
         toast('error', 'Only an admin can reopen a quote.');
+      } else if (hasRpcCode(err, RpcErrorCodes.QUOTE_SEND_REQUIRED)) {
+        toast('error', 'This quote was never sent to the customer, so it cannot be reopened. Create a new quote instead.');
       } else {
         // Server messages here are plain-English and actionable (e.g. "an order
         // has already been created from it") — surface them as-is.
@@ -3350,7 +3408,8 @@ export default function QuoteBuilder() {
     setQuoteVersions(versions);
     setUnreadableQuoteVersions(unreadable);
     reportUntrustworthyQuoteVersions(unreadable, quoteId);
-  }, [quoteId]);
+    void refreshPriceChanges(quoteId);
+  }, [quoteId, refreshPriceChanges]);
 
   const handleRestoreVersion = async (versionId: string, versionNumber?: number) => {
     if (!quoteId || !profile) return;
@@ -4867,7 +4926,11 @@ export default function QuoteBuilder() {
             <select
               id="quote-expires"
               value={chosenExpiryDate ? 'date' : 'season'}
-              onChange={(e) => setChosenExpiryDate(e.target.value === 'date' ? seasonEnd : null)}
+              onChange={(e) => {
+                const pickDate = e.target.value === 'date';
+                pickedBeforeValidDaysRef.current = pickDate && !validDaysLoadedRef.current;
+                setChosenExpiryDate(pickDate ? pickedExpiryStart(todayInBusinessTz(), quoteValidDays, seasonEnd) : null);
+              }}
               className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >
               <option value="season">
@@ -4881,7 +4944,7 @@ export default function QuoteBuilder() {
                 aria-label="Expiry date"
                 value={chosenExpiryDate}
                 min={todayInBusinessTz()}
-                onChange={(e) => setChosenExpiryDate(e.target.value || seasonEnd)}
+                onChange={(e) => { pickedBeforeValidDaysRef.current = false; setChosenExpiryDate(e.target.value || seasonEnd); }}
                 className="mt-2 w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               />
             )}
@@ -5218,6 +5281,14 @@ export default function QuoteBuilder() {
                                   </button>
                                 )}
                               </div>
+                              {/* Early warning only: the database refuses this line on save (QUOTE_PRICE_MISSING) */}
+                              {!customerView && prod && item.price_override == null && !item.price_per_unit
+                                && isTierPriceMissing(prod, tier) && (
+                                <p role="status" className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
+                                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                                  No tier {tier} price. Type one.
+                                </p>
+                              )}
                               {!customerView && priceLocked && (() => {
                                 const raise = priceRaise(savedLineIdByKey.get(item._key), item);
                                 return raise && (
@@ -5270,13 +5341,8 @@ export default function QuoteBuilder() {
                                 aria-label="Price unit"
                                 className="w-20 px-1 py-0.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green mt-0.5"
                               >
-                                <option value="">--</option>
-                                {unitConversions
-                                  .filter((uc) => {
-                                    const form = prod?.product_form;
-                                    if (!form) return true;
-                                    return uc.unit_type === form || uc.unit_type === 'both';
-                                  })
+                                {prod?.product_form !== 'seed' && prod?.product_form !== 'each' && <option value="">--</option>}
+                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit)
                                   .map((uc) => (
                                     <option key={uc.id} value={uc.unit}>
                                       per {uc.unit}
@@ -5329,13 +5395,8 @@ export default function QuoteBuilder() {
                                 aria-label="Rate unit"
                                 className="w-20 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
                               >
-                                <option value="">--</option>
-                                {unitConversions
-                                  .filter((uc) => {
-                                    const form = prod?.product_form;
-                                    if (!form) return true;
-                                    return uc.unit_type === form || uc.unit_type === 'both';
-                                  })
+                                {prod?.product_form !== 'seed' && prod?.product_form !== 'each' && <option value="">--</option>}
+                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit)
                                   .map((uc) => (
                                     <option key={uc.id} value={uc.unit}>
                                       {uc.unit}

@@ -58,6 +58,7 @@
  * React- and jsPDF-free so the projection math is unit-tested in isolation; the PDF
  * layout lives in projectedUseReportPdf.ts.
  */
+import type { ProductForm } from '../types';
 import type { ApplicatorSheetData } from './applicatorSheetData';
 import { fmtNum } from './applicatorSheetData';
 import { toGallonOrLbEquivalent } from './chemCalculator';
@@ -164,7 +165,7 @@ export function buildProjectedUseReportData(
     total: number;
     job_ids: Set<string>;
     /** product_form of the FIRST contributing row; `null` is a REAL value (a no-form row). */
-    form: 'liquid' | 'dry' | null;
+    form: ProductForm | null;
     /** True once any later row carries a DIFFERENT form (null counts as distinct) → gal/lb '—'. */
     form_conflict: boolean;
   }

@@ -313,6 +313,10 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // orphan existing receipts.
   _manual_inventory_add_replay_impl_20261015: ['manual_inventory_add'],
   _complete_job_replay_impl_20261015: ['complete_job'],
+  // Direct EXECUTE is revoked (postgres-only). 20260914100800 renamed the live transfer_job_to_invoice
+  // body to this name behind its public wrapper, so it kept the public literal the wrapper binds.
+  // 20261104190000 re-emits it only to label invoice lines with the job line's unit.
+  _transfer_job_to_invoice_intent_impl_20260908: ['transfer_job_to_invoice'],
   // Direct EXECUTE is revoked. This private split-invoice implementation is
   // the implementation half of create_split_invoices_from_order and must use
   // the public operation namespace for one replay result across both layers.

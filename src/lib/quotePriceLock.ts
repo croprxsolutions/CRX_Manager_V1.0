@@ -18,6 +18,18 @@ export interface PriceLockLine {
   id?: string;
   product_id: string;
   price_per_unit: number;
+  /** The price this line had when it was last loaded or saved; absent for a line added since. */
+  saved_price_per_unit?: number;
+}
+
+/** One quote_price_changes row: a price change save_quote recorded on a sent line. */
+export interface QuotePriceChange {
+  id: number;
+  quote_item_id: string;
+  product_id: string;
+  new_price_cents: number;
+  sent_version: number | null;
+  grower_confirmed_by: string | null;
 }
 
 /** How one line compares with the version last sent: unchanged (null), not sent, or a different price. */
@@ -67,8 +79,10 @@ export function unsentQuoteChange(args: {
   newestVersionNumber: number;
   customerId: string;
   lines: PriceLockLine[];
+  /** This quote's recorded price changes (quote_price_changes). */
+  priceChanges: QuotePriceChange[];
 }): UnsentQuoteChange {
-  const { lastSent, newestVersionNumber, customerId, lines } = args;
+  const { lastSent, newestVersionNumber, customerId, lines, priceChanges } = args;
   if (newestVersionNumber === 0) return null;
   if (!lastSent || lastSent.version_number < newestVersionNumber) return 'unreadable';
   if (customerId && lastSent.snapshot_data.quote.customer_id !== customerId) return 'customer';
@@ -81,11 +95,31 @@ export function unsentQuoteChange(args: {
       return 'prices';
     }
   }
-  // A changed price on a line the customer was sent is recorded when it is saved and needs no
-  // re-send (20261029120000, Mason 2026-10-27). A new line, or a version without line ids, still does.
+  // A changed price on a line the customer was sent needs no re-send when save_quote recorded it
+  // since this version was sent (20261029120000, 20261101100000); a raise also needs the grower's
+  // tick at that price or higher. A new line, or a version without line ids, still does.
   const carriesIds = sentItemsCarryLineIds(sentItems);
   return lines.some((line) => {
     const state = sentLineState(sentItems, line);
-    return state !== null && !(carriesIds && state.kind === 'price');
+    if (state === null) return false;
+    if (!carriesIds || state.kind !== 'price') return true;
+    return !priceChangeRecorded(line, state.sentCents, lastSent.version_number, priceChanges);
   }) ? 'prices' : null;
+}
+
+function priceChangeRecorded(
+  line: PriceLockLine,
+  sentCents: number,
+  sentVersion: number,
+  priceChanges: QuotePriceChange[],
+): boolean {
+  // An unsaved price is recorded by the save that must come first, which refuses a raise
+  // without the grower's tick.
+  if (line.saved_price_per_unit !== undefined && !samePrice(line.saved_price_per_unit, line.price_per_unit)) return true;
+  const cents = toCents(line.price_per_unit);
+  const rows = priceChanges.filter((c) => c.quote_item_id === line.id && c.product_id === line.product_id
+    && c.sent_version === sentVersion);
+  const latest = rows.reduce<QuotePriceChange | null>((a, c) => (a == null || c.id > a.id ? c : a), null);
+  if (!latest || latest.new_price_cents !== cents) return false;
+  return cents <= sentCents || rows.some((c) => c.grower_confirmed_by != null && c.new_price_cents >= cents);
 }

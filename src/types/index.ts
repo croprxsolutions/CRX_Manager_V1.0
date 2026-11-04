@@ -4,7 +4,7 @@ import type { Database, Json } from './supabase';
 export type FinancialAuditLog = Database['public']['Tables']['financial_audit_log']['Row'];
 
 export type UserRole = 'admin' | 'sales_rep' | 'driver' | 'applicator';
-export type ProductForm = 'liquid' | 'dry';
+export type ProductForm = 'liquid' | 'dry' | 'seed' | 'each';
 export type SalesSheetFormat = 'pdf' | 'csv';
 export type ContainerType = 'Jug' | 'Drum' | 'Pallet' | 'Mini-Bulk' | 'Shuttle' | 'Bag' | 'Tote' | 'Ea' | 'Jar';
 export type UnitType = 'liquid' | 'dry' | 'both';
@@ -136,6 +136,13 @@ export type MobileProduct = Pick<
   | 'tier2_price'
   | 'tier3_price'
   | 'is_active'
+  | 'product_form'
+  | 'inventory_unit'
+  | 'container_size'
+  | 'container_unit'
+  | 'signal_word'
+  | 'rei_hours'
+  | 'phi_days'
 >;
 
 // ─── EPA PPLS Lookup ────────────────────────────────────────────────────────
@@ -447,6 +454,24 @@ export interface ProductBrand {
   updated_at: string;
 }
 
+/** One row of get_product_vendors (20261105180000): a vendor linked to a product. */
+export interface ProductVendor {
+  link_id: string;
+  vendor_id: string;
+  vendor_name: string;
+  is_preferred: boolean;
+  /** false = a vendor-only link: the vendor is known, its item name, number, unit and pack are not yet. */
+  item_details_known: boolean;
+  supplier_sku: string | null;
+  supplier_product_name: string | null;
+  supplier_uom: string | null;
+  supplier_pack_description: string | null;
+  /** Admins only (null for everyone else): newest current price per inventory unit, in cents. */
+  last_cost_cents: number | null;
+  last_quoted_package_cost_cents: number | null;
+  last_cost_as_of: string | null;
+}
+
 export interface ProductChangeHistoryEntry {
   id: number;
   product_id: string;
@@ -464,7 +489,8 @@ export interface ProductSupplierLink {
   product_id: string;
   vendor_id: string;
   supplier_sku: string | null;
-  supplier_product_name: string;
+  /** NULL on a vendor-only link: item details not yet known. */
+  supplier_product_name: string | null;
   supplier_uom: string | null;
   supplier_pack_description: string | null;
   inventory_units_per_supplier_unit: number | null;

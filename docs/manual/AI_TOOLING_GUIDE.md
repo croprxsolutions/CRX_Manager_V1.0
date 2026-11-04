@@ -165,8 +165,10 @@ domains or ownership.
 ## Working alongside the agents
 
 - **Use a worktree, never the main checkout.** Mason's PC has many sessions running, each in a
-  worktree under `C:/CRX_Manager/.claude/worktrees/` or `C:/CRX_*`. Create your own
-  (`git worktree add ../CRX_<you>-<topic> -b <you>/<topic> origin/main`) or work on your own clone.
+  worktree under `C:/CRX_Manager/.claude/worktrees/`. Create your own there
+  (`git worktree add .claude/worktrees/<you>-<topic> -b <you>/<topic> origin/main`); the
+  `worktree-cleanup` hook removes it once its PR merges. Folders elsewhere (`C:/CRX_*`, clones)
+  are never auto-removed, only listed by `node .claude/hooks/worktree-cleanup.mjs --report`.
 - **Do not delete, reset or force-push someone else's branch or worktree.** An agent may own it.
   `node scripts/fleet-status.mjs` (or asking an agent for `/fleet`) lists who is working where.
 - **Never stage `.claude/session-state/`, `.codex/session-state/` or `.agents/skills/source-command-*`.**

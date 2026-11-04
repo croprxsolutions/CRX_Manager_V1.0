@@ -28,6 +28,8 @@ const mockDoc = {
   getTextWidth: vi.fn(() => 50),
   setLineDashPattern: vi.fn(),
   addPage: vi.fn(),
+  getNumberOfPages: vi.fn(() => 1),
+  setPage: vi.fn(),
   save: vi.fn(),
   lastAutoTable: { finalY: 300 },
 };
@@ -42,6 +44,13 @@ vi.mock('jspdf-autotable', () => ({
     (doc as typeof mockDoc).lastAutoTable = { finalY: ((opts.startY as number) || 0) + 100 };
   }),
 }));
+
+const companyInfo = vi.hoisted(() => ({ load: vi.fn() }));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
+
+import { DEFAULT_COMPANY_INFO } from './companyInfo';
+
+companyInfo.load.mockResolvedValue(DEFAULT_COMPANY_INFO);
 
 import {
   generateStatementPdf,
@@ -153,6 +162,15 @@ describe('generateStatementPdf', () => {
       expect.any(Number),
       expect.any(Number),
     );
+  });
+
+  it('prints the company details saved in Settings', async () => {
+    companyInfo.load.mockResolvedValueOnce({ name: 'Test Ag Co', phone: '555-0199', email: 'office@testag.test', address: '1 Main St, Town, IL' });
+    await generateStatementPdf(makeStatementData());
+    const printed = mockDoc.text.mock.calls.map((c) => c[0]).flat();
+    expect(printed).toContain('TEST AG CO');
+    expect(printed).toContain('Agricultural Input Solutions  •  1 Main St, Town, IL  •  555-0199');
+    expect(printed).not.toContain('CROP RX SOLUTIONS');
   });
 
   it('renders customer name', async () => {

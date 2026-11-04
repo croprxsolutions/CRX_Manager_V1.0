@@ -5,16 +5,16 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scratchHookEnvironment } from "../.claude/hooks/git-test-env.mjs";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 const VALIDATOR = fileURLToPath(new URL("./validate-sql.sh", import.meta.url));
 let pass = 0;
 
-const root = mkdtempSync(join(tmpdir(), "stamp-collision-"));
+const root = tempDir("stamp-collision-");
 const env = scratchHookEnvironment(root);
 const git = (cwd, ...args) => {
   const r = spawnSync("git", args, { cwd, env, encoding: "utf8" });

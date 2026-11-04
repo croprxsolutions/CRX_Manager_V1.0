@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-03 for the live ledger only (see the WP-PM-7 and pm5-registry-refresh changelog notes); other evidence retains its stated dates.
+**Last verified:** 2026-11-04 for the live ledger only (see the 2026-11-04 retro-split-guard changelog note); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -206,6 +206,19 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
 
 ## Money
 
+
+### KI-99 — Voiding an invoice leaves two money records out of step
+**MED · OPEN · money · found 2026-11-04 (Fix Delivery reviews, PR #1421) · Claude**
+Both are in the live `void_invoice`, so they affect the ordinary Void Invoice button, not only Fix Delivery.
+- **Write-off stays active.** Voiding a posted invoice that has a write-off sets the invoice's write-off amount to
+  zero but leaves its `write_offs` record active (not marked reversed), so the customer statement can still show it.
+  Until fixed, reverse the write-off before voiding. Fix Delivery refuses these invoices.
+- **Credit month read in UTC.** Before reversing an applied credit, `void_invoice` checks that the credit's month
+  is open using the UTC date (`applied_at::date`), not the Chicago business date. A credit applied just after
+  midnight UTC on the 1st belongs to the previous Chicago month, so a closed month can be changed. Fix Delivery
+  checks both dates.
+- **Next step.** A reviewed migration that marks the write-off reversed when its invoice is voided and checks the
+  credit month by the Chicago date (Sol-listed: money).
 ### KI-10 — About 69 live functions replay a saved result matched on the retry key alone
 **HIGH on money paths · PARTIAL · money/inventory/database · unassigned (batch 3 remainder is next)**
 When a user retries an action with a saved "retry key", these functions return the first call's saved answer
@@ -696,7 +709,7 @@ Delete with a grep of every reference first; keep one copy of each helper.
 | KI-63 | Quote-version trust chain has live pins in two files (`quote-versions-rpc-owned.sql`, `quoteVersionWriteBoundary.test.ts`); migration `20260826220000` keeps its apply-time pin copy | Intentional friction; a live-pin change must update both live files, while the applied migration stays unchanged |
 | KI-64 | All agents share Mason's admin GitHub identity; the manual merge override is fenced only by command matching | Mason declined a separate non-admin credential twice (2026-09-01) |
 | KI-65 | The write-time actor-binding guard is bypassable by design limits | Capped by decision 2026-09-01; real controls are Codex review and post-apply sweeps |
-| KI-66 | `review-proof-guard` denies destructive commands that spell out a worktree path | Mason "document, don't fix" 2026-08-20; use relative paths |
+| KI-66 | `review-proof-guard` denies destructive commands that spell out a worktree path | Mason "document, don't fix" 2026-08-20; narrowed 2026-11-03 (P3): only the worktree root, its `.claude`, an unreadable or `..` path, or a path-less wiper aimed at one still deny |
 | KI-67 | `sync-agent-workflows --write` overwrites an unusable manifest; the `.agents/` drift sweep reads disk, not the git index | Mason 2026-09-03 |
 | KI-68 | `adjust_inventory` accepts a retry key with control characters; a suspended second tab can resend a stale batch adjustment | Mason accepted 2026-09-20 / 2026-09-13; no caller can produce it; revisit if duplicate adjustments appear |
 | KI-69 | Return-credit behaviours staff will see (late return credits stay in the current season; a funding invoice can't be deleted until the credit is voided) | Mason policy 2026-08-26 |

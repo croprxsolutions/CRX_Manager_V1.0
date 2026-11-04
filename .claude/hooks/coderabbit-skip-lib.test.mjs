@@ -6,10 +6,10 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   CODERABBIT_SKIP_MAX_AGE_MS, CODERABBIT_SKIP_MAX_BYTES, CODERABBIT_SKIP_PURPOSE, cancelCodeRabbitSkip, coderabbitSkipCommand, coderabbitSkipFileName,
   coderabbitSkipNotice,
@@ -95,7 +95,7 @@ eq(skipPullRequestFor(undefined, 1018), null, "no url, no waiver");
 eq(skipPullRequestFor("https://github.com/masonwells1/CRX_Manager_V1.0/pull/1018", undefined), null, "no number, no waiver");
 
 // ── record, find, cancel ────────────────────────────────────────────────────
-const temp = mkdtempSync(path.join(os.tmpdir(), "crx-cr-skip-"));
+const temp = tempDir("crx-cr-skip-");
 try {
   // A real git checkout with a second worktree: waivers live in the MAIN
   // checkout's state folder whichever worktree records or cancels them.

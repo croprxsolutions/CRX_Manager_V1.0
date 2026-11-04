@@ -57,7 +57,7 @@ import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
-import { billedLine, catalogPricePerAcre, getQuoteTierPrice, isTierPriceMissing, validateCommissionSplits } from '../lib/quoteCalc';
+import { billedLine, catalogPricePerAcre, exactRound2, getQuoteTierPrice, isTierPriceMissing, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
 import {
   buildRowVersionPatch,
@@ -1706,18 +1706,16 @@ export default function QuoteBuilder() {
 
       if (item.calc_mode === 'units_direct') {
         // User entered total_units_needed directly — skip rate×acres computation
-        const billed = billedLine(pricePerUnit, cost, item.total_units_needed || 0);
-        const totalInventoryUnits = billed.units;
-        const totalPrice = billed.totalPrice;
+        const enteredUnits = item.total_units_needed || 0;
+        const billed = billedLine(pricePerUnit, cost, [enteredUnits]);
 
-        // Back-calculate oz/acre and $/acre if acres provided
+        // Back-calculate oz/acre and $/acre if acres provided; save_quote uses the entered units
         const acres = item.acres || 0;
         let ozPerAcre: number | null = item.oz_per_acre;
         let pricePerAcre: number | null = item.price_per_acre;
         if (acres > 0 && inventoryUnitFactorOz > 0) {
-          const totalOz = totalInventoryUnits * inventoryUnitFactorOz;
-          ozPerAcre = Math.round((totalOz / acres) * 100) / 100;
-          pricePerAcre = Math.round((totalPrice / acres) * 100) / 100;
+          ozPerAcre = exactRound2([enteredUnits, inventoryUnitFactorOz], [acres]);
+          pricePerAcre = exactRound2([pricePerUnit, enteredUnits], [acres]);
         }
 
         return {
@@ -1741,15 +1739,13 @@ export default function QuoteBuilder() {
       const rateInOz = actualRate * rateUnitFactorOz;
       const ozPerAcre = rateInOz;
 
-      const totalInventoryUnits = inventoryUnitFactorOz > 0
-        ? (acres * rateInOz) / inventoryUnitFactorOz
-        : 0;
-
       const pricePerAcre = inventoryUnitFactorOz > 0
         ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
         : 0;
       // S09: the quantity, total and profit the database stores and bills (see billedLine).
-      const billed = billedLine(pricePerUnit, cost, totalInventoryUnits);
+      const billed = inventoryUnitFactorOz > 0
+        ? billedLine(pricePerUnit, cost, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+        : billedLine(pricePerUnit, cost, [0]);
 
       return {
         ...item,

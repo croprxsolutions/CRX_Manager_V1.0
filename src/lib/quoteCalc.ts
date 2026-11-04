@@ -101,37 +101,47 @@ function rateUnitOf(rateUnit: string | null | undefined, product: Product): stri
 }
 
 /** Core pricing recalculation — pure function (no React deps) */
-// Exact a × b rounded to the cent, half away from zero, like PostgreSQL's ROUND(numeric, 2).
-// Binary floats cannot do this: 1.005 × 1 rounds to 1.00 in floats and to 1.01 in the database.
-function exactDollars(a: number, b: number): number {
-  const parts = [a, b].map((n) => /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(n)));
-  if (parts.some((m) => !m)) return Math.round(a * b * 100) / 100; // exponent form: tiny or huge, float is the best we have
-  const [ma, mb] = parts as RegExpExecArray[];
-  const scale = (ma[3] ?? '').length + (mb[3] ?? '').length;
-  const product = BigInt(ma[2] + (ma[3] ?? '')) * BigInt(mb[2] + (mb[3] ?? '')) * 100n;
-  const denominator = 10n ** BigInt(scale);
-  const cents = product / denominator + (2n * (product % denominator) >= denominator ? 1n : 0n);
-  return ((ma[1] === '-') !== (mb[1] === '-') ? -1 : 1) * Number(cents) / 100;
+// A number as the exact decimal it prints as (the value typed or stored): [numerator, 10^scale].
+function decimalOf(n: number): [bigint, bigint] {
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(n));
+  if (!m) return [0n, 1n]; // NaN or Infinity: callers pass finite inputs
+  let digits = BigInt(m[2] + (m[3] ?? ''));
+  const scale = (m[3] ?? '').length - Number(m[4] ?? 0);
+  if (scale < 0) digits *= 10n ** BigInt(-scale);
+  return [m[1] ? -digits : digits, 10n ** BigInt(Math.max(scale, 0))];
 }
 
-// A float rounded to 0.01 the way PostgreSQL rounds the exact numeric: 0.145 × 100 is
-// 14.499999999999998 in floats (Math.round gives 0.14) but 0.145 rounds to 0.15 in the database.
-// Twelve significant digits drop the float noise before the exact half-away-from-zero rounding.
-function roundDecimal2(n: number): number {
-  return exactDollars(Number(n.toPrecision(12)), 1);
+/**
+ * The product of `nums` divided by the product of `dens`, rounded to 0.01 half away from zero,
+ * like PostgreSQL's ROUND(numeric, 2) on save_quote's exact numeric arithmetic. Binary floats
+ * cannot do this: 0.145 × 100 is 14.499999999999998, so Math.round gives 0.14 where the
+ * database gives 0.15. The inputs are taken as the decimals they print as, never float results.
+ */
+export function exactRound2(nums: number[], dens: number[] = []): number {
+  let p = 100n;
+  let q = 1n;
+  for (const n of nums) { const [a, b] = decimalOf(n); p *= a; q *= b; }
+  for (const d of dens) { const [a, b] = decimalOf(d); p *= b; q *= a; }
+  if (q === 0n) return 0;
+  const negative = (p < 0n) !== (q < 0n);
+  if (p < 0n) p = -p;
+  if (q < 0n) q = -q;
+  const cents = p / q + (2n * (p % q) >= q ? 1n : 0n);
+  return (negative ? -1 : 1) * Number(cents) / 100;
 }
 
 /**
  * A quote line's quantity and money, figured as save_quote figures them (S09): the quantity is
  * settled to 0.01 first, then price × quantity and cost × quantity are each rounded to the cent.
  * Figuring the total from the unsettled quantity showed $513.32 on screen and on the PDF for a
- * line the database stores and bills at $513.36 (3.68 gal × $139.50).
+ * line the database stores and bills at $513.36 (3.68 gal × $139.50). The quantity is passed as
+ * its factors (`unitNums` / `unitDens`) so it is settled from the exact inputs, as the database does.
  */
-export function billedLine(pricePerUnit: number, cost: number, rawUnits: number) {
-  const units = roundDecimal2(rawUnits);
-  const totalPrice = exactDollars(pricePerUnit, units);
-  const profit = Math.round((totalPrice - exactDollars(cost, units)) * 100) / 100;
-  const netMargin = totalPrice > 0 ? roundDecimal2((profit / totalPrice) * 100) : 0;
+export function billedLine(pricePerUnit: number, cost: number, unitNums: number[], unitDens: number[] = []) {
+  const units = exactRound2(unitNums, unitDens);
+  const totalPrice = exactRound2([pricePerUnit, units]);
+  const profit = Math.round((totalPrice - exactRound2([cost, units])) * 100) / 100;
+  const netMargin = totalPrice > 0 ? exactRound2([profit, 100], [totalPrice]) : 0;
   return { units, totalPrice, profit, netMargin };
 }
 
@@ -148,18 +158,16 @@ export function recalcItem(
 
   if (mode === 'units_direct') {
     // User entered total_units_needed directly — skip rate×acres computation
-    const billed = billedLine(pricePerUnit, product.current_cost || 0, item.total_units_needed || 0);
-    const totalInventoryUnits = billed.units;
-    const totalPrice = billed.totalPrice;
+    const enteredUnits = item.total_units_needed || 0;
+    const billed = billedLine(pricePerUnit, product.current_cost || 0, [enteredUnits]);
 
-    // Back-calculate rate if acres is also set (informational)
+    // Back-calculate rate if acres is also set (informational); save_quote uses the entered units
     const acres = item.acres || 0;
     let ozPerAcre: number | null = item.oz_per_acre;
     let pricePerAcre: number | null = item.price_per_acre;
     if (acres > 0 && inventoryUnitFactorOz > 0) {
-      const totalOz = totalInventoryUnits * inventoryUnitFactorOz;
-      ozPerAcre = Math.round((totalOz / acres) * 100) / 100;
-      pricePerAcre = Math.round((totalPrice / acres) * 100) / 100;
+      ozPerAcre = exactRound2([enteredUnits, inventoryUnitFactorOz], [acres]);
+      pricePerAcre = exactRound2([pricePerUnit, enteredUnits], [acres]);
     }
 
     return {
@@ -183,14 +191,13 @@ export function recalcItem(
   const rateInOz = actualRate * rateUnitFactorOz;
   const ozPerAcre = rateInOz;
 
-  const totalInventoryUnits =
-    inventoryUnitFactorOz > 0 ? (acres * rateInOz) / inventoryUnitFactorOz : 0;
-
   const pricePerAcre =
     inventoryUnitFactorOz > 0
       ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
       : 0;
-  const billed = billedLine(pricePerUnit, product.current_cost || 0, totalInventoryUnits);
+  const billed = inventoryUnitFactorOz > 0
+    ? billedLine(pricePerUnit, product.current_cost || 0, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+    : billedLine(pricePerUnit, product.current_cost || 0, [0]);
 
   return {
     ...item,

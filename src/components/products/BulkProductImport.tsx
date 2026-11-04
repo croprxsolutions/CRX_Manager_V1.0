@@ -67,11 +67,13 @@ function validateImportRow(
       if (!trimmed) return;
       const number = Number(trimmed);
       const valid = !/^0[xob]/i.test(trimmed) && Number.isFinite(number)
-        && (field !== 'container_size' || number > 0) && (field !== 'rate_per_acre' || number >= 0);
+        && (field !== 'container_size' || number > 0)
+        // The database's rate rule, applied to the text it will receive.
+        && (field !== 'rate_per_acre' || /^[0-9]{1,12}(\.[0-9]{1,6})?$/.test(String(number)));
       if (valid) product[field] = number;
       else numberError = field === 'container_size'
         ? 'Container size must be a number greater than 0.'
-        : 'Rate Per Acre must be a number of zero or greater.';
+        : 'Rate Per Acre must be a number of zero or greater, with at most 6 decimals.';
     }
   });
   const error = !product.product_name?.trim() ? 'Missing product name'
@@ -237,7 +239,8 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
     setUploading(true);
 
     // While rates are locked every row with a rate would be refused one by one, leaving half a file
-    // imported, so check once and import nothing.
+    // imported, so check once and import nothing. A lock switched on mid-upload can still leave it
+    // partial; WP-PM-10 replaces this import with the all-or-nothing set_product_rates.
     const rated = validation.valid.filter(importRowSetsRates).length;
     if (rated > 0) {
       let locked: boolean;

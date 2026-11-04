@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for WP-PM-11a-1 (20261105200000): the "Lock rates" switch, the one rate writer
+ * Real-schema proof for WP-PM-11a-1 (20261106120000): the "Lock rates" switch, the one rate writer
  * (set_product_rates) and the locked-state correction (correct_product_rates). Builds the checked-in
  * schema baseline in a network-disabled PostgreSQL container, replays migrations up to the candidate,
  * seeds invented rows, and checks: rates and per-acre prices to the cent, stale rows refused by
@@ -25,7 +25,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261105200000_product_rate_lock.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261106120000_product_rate_lock.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

@@ -394,11 +394,11 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
 ### KI-99 — A CSV import can end partly saved if rates are locked mid-upload
-**MED · product import · LOCAL CANDIDATE `20261105200000` — NOT APPLIED**
+**MED · product import · LOCAL CANDIDATE `20261106120000` — NOT APPLIED**
 The CSV import checks the rate lock once, then saves rows one at a time. If an admin locks rates between two rated rows, the earlier rows stay saved and the later ones are refused (`PRODUCT_RATES_LOCKED`); no locked rate is ever changed. WP-PM-10 replaces the row-by-row save with the all-or-nothing `set_product_rates`. Source: the WP-PM-11a-1 changelog note.
 
 ### KI-100 — An open product page learns of a lock change only on reload or a refused save
-**LOW · product UI · LOCAL CANDIDATE `20261105200000` — NOT APPLIED**
+**LOW · product UI · LOCAL CANDIDATE `20261106120000` — NOT APPLIED**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
 
 ---

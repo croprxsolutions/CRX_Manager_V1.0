@@ -138,7 +138,7 @@ export const RpcErrorCodes = {
   // refusal. Registering the token here lets the caller use the object-aware
   // hasRpcCode() instead.
   SHARE_NOT_100: 'SHARE_NOT_100',
-  // The product rate lock (migration 20261105200000): a rate change while locked, a correction of a
+  // The product rate lock (migration 20261106120000): a rate change while locked, a correction of a
   // product changed since it was loaded, and a correction once rates were unlocked.
   PRODUCT_RATES_LOCKED: 'PRODUCT_RATES_LOCKED',
   PRODUCT_RATES_STALE: 'PRODUCT_RATES_STALE',

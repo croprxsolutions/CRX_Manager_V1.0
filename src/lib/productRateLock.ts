@@ -3,7 +3,7 @@ import { BUSINESS_TIMEZONE } from './dateUtils';
 import type { ProductRateLock, ProductRatePerAcre, ProductRatePreview, ProductRateWriteResult } from '../types';
 import type { Json } from '../types/supabase';
 
-/** The one "Lock rates" record (20261105200000). Every signed-in staff member may read it. */
+/** The one "Lock rates" record (20261106120000). Every signed-in staff member may read it. */
 export async function loadProductRateLock(): Promise<ProductRateLock> {
   const { data, error } = await supabase
     .from('product_rate_lock')

@@ -1506,7 +1506,7 @@ export interface ProductMarginFloorChange {
   created_at: string;
 }
 
-/** The one "Lock rates" record (20261105200000). While locked, product rates change only by correction. */
+/** The one "Lock rates" record (20261106120000). While locked, product rates change only by correction. */
 export interface ProductRateLock {
   is_locked: boolean;
   changed_by_name: string | null;

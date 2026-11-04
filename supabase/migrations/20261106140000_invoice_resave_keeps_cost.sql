@@ -298,13 +298,13 @@ BEGIN
         v_cost_cents := (v_product.current_cost * 100)::bigint;
       END IF;
     END IF;
-    v_kept_line := v_kept -> NULLIF(v_item->>'id', '');
+    v_kept_line := v_kept -> lower(NULLIF(v_item->>'id', ''));
     IF v_kept_line IS NOT NULL THEN
-      v_kept := v_kept - (v_item->>'id');  -- the first entry with a saved line's id uses it up, kept or not
+      v_kept := v_kept - lower(v_item->>'id');  -- the first entry with a saved line's id uses it up, kept or not
     END IF;
     v_order_item_id := NULL;
     IF v_kept_line IS NOT NULL AND NOT v_is_field
-       AND (v_kept_line->>'product_id') IS NOT DISTINCT FROM (v_item->>'product_id')
+       AND (v_kept_line->>'product_id')::uuid IS NOT DISTINCT FROM (v_item->>'product_id')::uuid
        AND (v_kept_line->>'unit_size') IS NOT DISTINCT FROM (v_item->>'unit_size')
        AND v_qty <= (v_kept_line->>'quantity')::numeric
        AND v_unit_price = (v_kept_line->>'unit_price_cents')::bigint THEN
@@ -540,7 +540,9 @@ BEGIN
     -- also have no direct INSERT privilege on invoice_items.
     -- save_invoice rebuilds a draft's lines; an order-linked line it writes back
     -- unchanged is the same descendant and is judged the same way (#13), not
-    -- against today's product cost.
+    -- against today's product cost. A draft line repriced above its order price
+    -- (checked against cost when it was repriced) keeps that higher price: it
+    -- is less exposed below cost than the order decision it descends from.
     IF TG_OP = 'INSERT'
        AND COALESCE(v_operation, '') IN ('', 'save_invoice')
        AND NEW.order_item_id IS NOT NULL
@@ -549,7 +551,9 @@ BEGIN
          FROM public.order_items oi
          WHERE oi.id = NEW.order_item_id
            AND oi.product_id IS NOT DISTINCT FROM NEW.product_id
-           AND round(oi.price_per_unit * 100)::bigint = NEW.unit_price_cents
+           AND (round(oi.price_per_unit * 100)::bigint = NEW.unit_price_cents
+                OR (COALESCE(v_operation, '') = 'save_invoice'
+                    AND NEW.unit_price_cents > round(oi.price_per_unit * 100)::bigint))
            AND round(COALESCE(oi.cost_per_unit, 0) * 100)::bigint = NEW.cost_cents
            AND COALESCE(NEW.quantity, 0) >= 0
            AND COALESCE(NEW.quantity, 0) <= COALESCE(oi.total_units_needed, 0)
@@ -766,7 +770,7 @@ BEGIN
         ('_save_invoice_lineage_unaware_impl_20260827', 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)',
           ARRAY['postgres'], 'v_kept_line', 3),
         ('_enforce_below_cost_line', 'public._enforce_below_cost_line()',
-          ARRAY['postgres', 'service_role'], 'IN ('''', ''save_invoice'')', 2)
+          ARRAY['postgres', 'service_role'], 'save_invoice''', 3)
       ) AS pin(fn, sig, execs, marker, marker_count)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

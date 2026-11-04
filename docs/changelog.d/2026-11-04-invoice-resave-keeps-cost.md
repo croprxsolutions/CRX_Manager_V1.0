@@ -10,6 +10,8 @@
 - CodeRabbit and Codex App fixes: each saved line keeps its cost once and only at its saved price, so
   sending it twice, raising its quantity or changing its price is checked against today's cost
   (smoke cases C, D and E).
+- Sol fix: a draft line repriced above its order price keeps that price and its invoiced cost on a
+  note-only re-save after a later cost rise (smoke case F); repricing it again is still checked.
 - New smoke chain `smoke-invoice-resave-keeps-cost.sql` (spec `invoice_resave_keeps_cost`).
 - `src/lib/rpcContracts.test.ts`: `_enforce_below_cost_line` is listed again as a re-emitted
   trigger-only guard while this candidate is not applied (as for `20261019010000`).

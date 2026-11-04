@@ -211,9 +211,47 @@ BEGIN
     END IF;
   END;
 
+  -- --------------------------------------------------------------------
+  -- F: the line kept at $9.00 (3 gal). P's cost then rises to $10.00, above $9.00. A note-only
+  --    re-save keeps the $9.00 line and its invoiced cost; repricing it to $9.50 is refused.
+  -- --------------------------------------------------------------------
+  v_price_res := preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(
+      jsonb_build_object('product_id', v_p, 'row_version', (SELECT pricing_version FROM products WHERE id = v_p),
+        'pricing_mode', 'margin_driven', 'new_cost', '10.00',
+        'tier1_margin_percent', '20', 'tier2_margin_percent', '25', 'tier3_margin_percent', '30',
+        'change_reason', 'Rollback smoke resave second cost rise')),
+    v_admin, 'smk-rescost-rise2-preview-' || v_suffix);
+  PERFORM apply_product_pricing_change_set((v_price_res->>'change_set_id')::uuid,
+    v_price_res->>'request_fingerprint', v_admin, 'smk-rescost-rise2-apply-' || v_suffix);
+  SELECT jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id, 'description', it.description,
+           'quantity', it.quantity, 'unit_price_cents', it.unit_price_cents, 'sort_order', it.sort_order,
+           'unit_size', it.unit_size)
+    INTO v_line FROM invoice_items it WHERE it.invoice_id = v_inv2 LIMIT 1;
+  IF (v_line->>'unit_price_cents')::bigint IS DISTINCT FROM 900 THEN
+    v_fails := v_fails || ' (F) setup: the line is not at $9.00 after E;';
+  END IF;
+  BEGIN
+    PERFORM save_invoice(v_hdr, jsonb_build_array(v_line), 'smk-rescost-note2-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (F) the note-only re-save of the $9.00 line was refused: ' || left(SQLERRM, 80) || ';';
+  END;
+  IF (SELECT cost_cents FROM invoice_items WHERE invoice_id = v_inv2 LIMIT 1) IS DISTINCT FROM 600
+     OR (SELECT unit_price_cents FROM invoice_items WHERE invoice_id = v_inv2 LIMIT 1) IS DISTINCT FROM 900 THEN
+    v_fails := v_fails || ' (F) the note-only re-save changed the $9.00 line or its invoiced cost;';
+  END IF;
+  BEGIN
+    PERFORM save_invoice(v_hdr, jsonb_build_array(v_line || '{"unit_price_cents": 950}'), 'smk-rescost-950-' || v_suffix);
+    v_fails := v_fails || ' (F) repricing to $9.50 under the $10.00 cost skipped the check;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BELOW_COST%' THEN
+      v_fails := v_fails || ' (F) refused with the wrong error: ' || left(SQLERRM, 80) || ';';
+    END IF;
+  END;
+
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL invoice resave cost:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK invoice resave cost: after a cost rise above price, a note-only re-save kept $6.00 cost and $36.65; a $5.00 price, a line sent twice, a line raised from 3 to 4 gal and a $9.00 line lowered back to $7.33 were each still refused below cost';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK invoice resave cost: after a cost rise above price, a note-only re-save kept $6.00 cost and $36.65; a $5.00 price, a line sent twice, a line raised from 3 to 4 gal and a $9.00 line lowered back to $7.33 were each still refused below cost; after a second rise to $10.00 a note-only re-save kept the $9.00 line, and $9.50 was refused';
 END
 $smoke$;

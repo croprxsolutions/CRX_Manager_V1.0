@@ -284,6 +284,15 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **2026-11-04 04:12 UTC (10:12 PM Central, 2026-11-03; Settings Company Info on emailed purchase order PDFs, PR #1413):**
+  the `send-email` Edge Function was deployed live as v25 (was v24) on Mason's in-chat approval ("Yes, redeploy"),
+  with `supabase functions deploy send-email --use-api` from main `d4fb7ccb5`.
+  - ACTIVE, with JWT checking on. Since v24 only `send-email/index.ts`, `_shared/pdf/companyInfo.ts` and
+    `_shared/pdf/purchaseOrderPdf.ts` changed. All 13 deployed files were downloaded back and match main byte for byte.
+  - Caller path exercised on croprxsolutions.app (Mason approved the test): the PO-2026-0030 "Email PO Copy"
+    went to mason@croprxsolutions.com at 04:14 UTC with `Purchase-Order-PO-2026-0030.pdf` attached; `email_log`
+    status `sent`. That path refuses (503) when the Company Info read fails, so the read succeeded.
+  - The rollback is redeploying v24 (from main `ef922c9bf`'s `send-email` files).
 - **2026-11-04 01:03 UTC (7:03 PM Central, 2026-11-03; Settings Company Info on emailed invoice PDFs, PR #1396):**
   the `send-email` Edge Function was deployed live as v24 (was v23) on Mason's in-chat approval ("Yes, deploy it"),
   with `supabase functions deploy send-email --use-api` from main `ef922c9bf`, after the app half merged as `dbdee35ff`.

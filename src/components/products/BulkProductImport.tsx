@@ -79,6 +79,10 @@ function validateImportRow(
   });
   const error = !product.product_name?.trim() ? 'Missing product name'
     : numberError
+      // The database refuses a rate without a unit, except on seed and each, which take the stock unit.
+      || (product.rate_per_acre !== undefined && !product.rate_unit
+        && !['seed', 'each'].includes(product.product_form?.trim().toLowerCase() ?? '')
+        ? 'A rate per acre needs a rate unit, except on seed and each products.' : null)
       || (product.category && !allowedCategories.has(product.category.trim()) ? 'Choose an active category from the list.' : null)
       || (product.epa_registration && !EPA_REGISTRATION_PATTERN.test(product.epa_registration.trim())
         ? 'EPA number must look like 524-475 or 100-1234-5905. This checks format only.' : null);

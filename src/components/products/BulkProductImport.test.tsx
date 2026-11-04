@@ -226,11 +226,26 @@ describe('BulkProductImport', () => {
     expect(supabase.from).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['product_name,rate_per_acre\nChem,13', true],
+    ['product_name,rate_per_acre,product_form\nChem,13,liquid', true],
+    ['product_name,rate_per_acre,product_form\nCorn,1,seed', false],
+    ['product_name,rate_per_acre,product_form\nTote,1,Each', false],
+  ])('needs a rate unit for a rate except on seed and each: %s', async (csv, refused) => {
+    render(<BulkProductImport {...defaultProps} />);
+    const file = new File([csv], 'products.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    if (refused) expect(await screen.findByText(/Row 2: A rate per acre needs a rate unit/)).toBeInTheDocument();
+    else expect(await screen.findByText('Valid Products')).toBeInTheDocument();
+  });
+
   it('imports nothing while rates are locked when a row sets a rate', async () => {
     vi.mocked(supabase.from).mockImplementation(((table: string) => chainable(table === 'product_rate_lock'
       ? { data: { is_locked: true }, error: null } : { data: [], error: null })) as unknown as typeof supabase.from);
     render(<BulkProductImport {...defaultProps} />);
-    const csv = 'product_name,rate_per_acre\nChem,13';
+    const csv = 'product_name,rate_per_acre,rate_unit\nChem,13,oz';
     const file = new File([csv], 'products.csv', { type: 'text/csv' });
     Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
     fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });

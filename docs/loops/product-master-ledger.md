@@ -1,6 +1,6 @@
 # Product Master loop ledger
 
-> **Stale as of 2026-11-03.** Many packages landed through ordinary sessions after this run, so rows below are behind: PM-3, PM-5, PM-7, PM-8, PM-9, PM-6a, PM-15a and WP-PM-15b step 1 (#1381). Before acting on a row, check live migrations and `git log origin/main`; they win. The Wave 3 start gate is in the mission's §5.
+> **Wave 1 and Wave 2 rows below are history.** Where they ended is in "Wave 2 landed" further down (refreshed 2026-11-03 from `git log origin/main`). Wave 3 starts at "Wave 3". Live migrations and `git log origin/main` still win over any row.
 
 **Run:** Wave 1, attempt 1. **Started:** 2026-11-01 13:20 America/Chicago. **Hard wrap:** 21:20; no new package after 19:20; closeout by 20:35.
 **Coordinator branch:** `loop/product-master-w1-r1-2026-11-01`. **Build worktree:** `C:\CRX_PMBuild`. **Base:** `origin/main` at `2538335c5`.
@@ -116,3 +116,53 @@ PROOF — Ran: real-schema proof, full Vitest, typecheck, build, lint, code-heal
 **WP-PM-3 round 6 (Mason approved, 2026-11-02 ~07:10) → DRAFTED [#1276](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1276).** It added a database guard on new manual holds and refused a void or cancel that raises a turned-off line's remaining from zero. Commit `86d88007f` includes origin/main. PROOF: Ran the real-schema proof, full Vitest, typecheck, build, lint, code-health, check:docs, test:agent-workflows and all 25 browser tests on `86d88007f`. Saw `PRODUCT_ACTIVE_GUARD_PROOF_PASS`, 7,016 tests passed with none failing, and 25 of 25 browser tests passed. **Sol clean on `86d88007f`.** Luna HIGH refuted: an already-positive remaining on a turned-off line may rise, because the rule bars reopening from zero, and only rows that existed before this change can hold one. Luna's MED, both LOWs and the Claude reviewers' findings are named in the PR body. No reviewer found a BLOCKER. The compliance HIGH is a named exception: the confirmation is built on `Modal` because `ConfirmModal` cannot list products. `needs-coderabbit` was added and a full review requested.
 
 **WP-PM-3 after the PR opened (2026-11-02):** CI fix `f72262b5c`: the record's pin now uses the standard `SQL sha256:` form, and the workflow map was refreshed. CodeRabbit raised 10 comments, all answered and resolved in one push. Six were fixed by Codex in `32612c593`. Two were on #1266's files and left alone; #1266 merged at 14:41 UTC. Two were deferred to KNOWN_ISSUES. I then merged main (#1266 landed) as `666267e45`. PROOF: Ran Vitest (7,018 passed, none failed), typecheck, lint, check:docs and the worktree-awareness guard test on `666267e45`; all passed. Codex ran the product-active proof on `32612c593` and saw `PRODUCT_ACTIVE_GUARD_PROOF_PASS`. **Owed:** exact-head Sol on the current head, after the Codex GitHub App review of that push. The Sol on `86d88007f` was clean, but `32612c593` touched the migration.
+
+## Wave 2 landed (refreshed 2026-11-03 from `git log origin/main`)
+
+Most of Wave 2 landed through ordinary sessions after the run. Merge commit on `main` for each:
+
+| Package | PR | On `main` | Migration live |
+|---|---|---|---|
+| WP-PM-12a Change history | #1266 | `04633757c` | `20261102100000` |
+| WP-PM-3 Turning products off | #1315, #1276, #1321 | `f60b7206a`, `ab4358f0d`, `aeeff4880` | `20261103100000` |
+| WP-PM-8a Setup checks | #1272 | `c4b507d8f` | `20261102102000` |
+| WP-PM-8b Incomplete badge, near-match warnings, rate help | #1391 | `e83c9fbb6` | none |
+| WP-PM-9 Forms, units, containers | #1342 | `d89ce9fc2` | `20261104150000` |
+| WP-PM-5 Use Timing | #1316 | `c69209353` | `20261103210000` |
+| WP-PM-7 One cost path, tier order | #1345 | `7a4ddc33f` | `20261104140000` |
+| WP-PM-12b Corrections | #1341 | `82d9bd105` | none |
+| WP-PM-15a Vendor proposals | #1372, #1378 | `508b9ab0b`, `287cae53c` | `20261104180000` |
+| WP-PM-6a Unit audit and approved back-fill | #1374 | `bee894421` | `20261104200000` |
+| DM-0 Data hygiene | no PR: the review list and Mason's decisions are in his private vault | n/a | n/a |
+| WP-PM-6b New-product flow, Duplicate | #1389, OPEN (does not gate Wave 3) | not merged | holds `20261105190000` |
+
+---
+
+# Wave 3
+
+**Run:** not a mission overnight run. Mason said "Yes, start Wave 3" on 2026-11-03, and one session builds the packages in order through `ship.md`. **Started:** 2026-11-03 20:56 America/Chicago. **Base:** `origin/main` at `8c3550768`.
+
+**Deviation from Step 0a:** this session runs with the normal 300K auto-summary, not the 800K deep mode Step 0a asks for. Mason chose to keep going rather than restart (2026-11-03). To cover it, the session commits 11a-1 at each working checkpoint and re-reads live migrations, PR heads and Sol proofs from source after any auto-summary.
+
+## Wave 3 gate (checked read-only on live, 2026-11-03 20:57 America/Chicago)
+
+| Gate item | Result |
+|---|---|
+| Migrations `20261102100000`, `20261102102000`, `20261103210000`, `20261104140000`, `20261104150000`, `20261104180000`, `20261104200000`, `20261105090000` | all 8 in the live migration history |
+| Vendor data step | the DATA-11 data ran as `20261105170000_data11_preferred_vendor_links` (#1385, re-stamped from `20261105100000`), live |
+| 15b enforcement | `20261105180000_preferred_vendor_enforcement` (#1407), live; the live high-water is its ledger row |
+| Active products with exactly one active, confirmed, preferred link to a vendor that is not deleted | 596 of 596 |
+| DM-0 targets: active blank forms, active blank SKUs, duplicate SKUs (all rows, case-insensitive), duplicate active names | 0, 0, 0, 0 |
+| DATA-11 decisions | `docs/manual/DECISION_LOG.md`, 2026-11-03 |
+| Mason's DM-0 sign-off on remaining inactive rows | recorded in his private vault (Product Master review), 2026-11-02 list |
+
+**Gate holds.**
+
+## Wave 3 packages
+
+| Package | Status | Branch | PR | Notes |
+|---|---|---|---|---|
+| WP-PM-15b step 3 Vendors screen 💲 | DONE | `pm/wp-pm-15b-preferred-vendor-enforcement` | [#1400](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1400) | Merged as `7e68ba9d5` (head `44309c911`, clean Sol proof); production deployed 2026-11-03 21:25 America/Chicago. PROOF: production serves bundle `index-E2F88jDy.js`; a real product's page shows the Vendors section with its preferred vendor, Remove and Add a vendor (looked only, saved nothing), 2026-11-03 21:27 America/Chicago |
+| WP-PM-11a-1 Rate writer, rate lock, correction 💲 | DRAFT PR | `pm/wp-pm-11a-1-rate-lock` | [#1425](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1425) | Local candidate `20261105200000_product_rate_lock`, not applied. Real-schema proof `PRODUCT_RATE_LOCK_PROOF_PASS` and smoke pass (head a4ad5f7e2). Luna rounds 1–3 and an independent review fixed (correction preview, unforgeable correction pass, unit and precision rules for every writer, stale rows checked against per-acre inputs). Luna round 4 left no BLOCKER or HIGH standing (one HIGH refuted against live; three MED/LOW deferred in the PR). Sol, the ready-for-review step, still to run. Live apply and any live correction need Mason's go |
+| WP-PM-11a-2 Setup workbook 💲 | NOT STARTED | | | |
+| WP-PM-10 Bulk import 💲 | NOT STARTED | | | Depends on 11a-1 and #1400 |

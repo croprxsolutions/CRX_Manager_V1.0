@@ -5,12 +5,14 @@ import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { sanitizeError } from '../../lib/db';
-import { rateLockSummary, setProductRateLock } from '../../lib/productRateLock';
+import { loadProductRateLock, rateLockSummary, setProductRateLock } from '../../lib/productRateLock';
 import type { ProductRateLock } from '../../types';
 
 /** The "Lock rates" switch: any admin may flip it with a reason; everyone sees its state. */
-export default function ProductRateLockControl({ lock, isAdmin, profileId, onChanged }: {
+export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAdmin, profileId, onChanged }: {
   lock: ProductRateLock | null;
+  loadFailed: boolean;
+  onRetry: () => void;
   isAdmin: boolean;
   profileId: string;
   onChanged: (lock: ProductRateLock) => void;
@@ -21,7 +23,15 @@ export default function ProductRateLockControl({ lock, isAdmin, profileId, onCha
   const [saving, setSaving] = useState(false);
   const target = !lock?.is_locked;
   const { getKey, resetKey } = useIdempotencyKey('set_product_rate_lock', profileId, `${target}:${reason.trim()}`);
-  if (!lock) return null;
+  if (!lock) {
+    if (!loadFailed) return null;
+    return (
+      <span className="inline-flex items-center gap-2 text-sm text-secondary">
+        Couldn&apos;t check the rate lock.
+        <Button size="sm" variant="secondary" onClick={onRetry}>Retry</Button>
+      </span>
+    );
+  }
 
   const save = async () => {
     setSaving(true);
@@ -34,6 +44,8 @@ export default function ProductRateLockControl({ lock, isAdmin, profileId, onCha
       toast('success', next.is_locked ? 'Rates locked' : 'Rates unlocked');
     } catch (error) {
       toast('error', sanitizeError(error));
+      // Another admin may have switched it first; show the current state.
+      loadProductRateLock().then(onChanged).catch(() => undefined);
     } finally {
       setSaving(false);
     }

@@ -222,7 +222,8 @@ function seed() {
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
     ${OTHER_ROLES.map(([u, role]) => `UPDATE public.profiles SET role = '${role}', is_active = true WHERE id = '${u}';`).join(' ')}
     -- Live's factors (read 2026-11-03); the schema baseline carries no unit rows.
-    INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Gal', 128, 'liquid'), ('oz', 1, 'liquid'), ('Pt', 16, 'liquid');
+    INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Gal', 128, 'liquid'), ('oz', 1, 'liquid'), ('Pt', 16, 'liquid'), ('Lb', 16, 'dry');
+    INSERT INTO public.product_form_units (product_form, unit) VALUES ('seed', 'Lb');
     INSERT INTO public.products (id, product_name, sku, inventory_unit, is_active, tier1_price, tier2_price, tier3_price)
     VALUES ('${P.GAL}', '[PROVER] Gal', 'RL-1', 'gal', true, 40.00, 36.00, 32.00),
            ('${P.OTHER}', '[PROVER] Other', 'RL-2', 'gal', true, 40.00, 36.00, 32.00);`);
@@ -290,6 +291,15 @@ function main() {
     row(P.GAL, '20', 'oz', '', [null, null, null])], 'k-stale'), /PRODUCT_RATES_STALE: .*\[PROVER\] Gal/);
   assert.equal(rates(P.OTHER), '');
   refused(ADMIN, setRates([row(P.GAL, '-1', 'oz', '', ['13', 'oz', '13 oz/A'])], 'k-neg'), /PRODUCT_RATE_INVALID: .*\[PROVER\] Gal/);
+  refused(ADMIN, setRates([row(P.GAL, '1.1234567', 'oz', '', ['13', 'oz', '13 oz/A'])], 'k-scale'), /PRODUCT_RATE_INVALID: .*\[PROVER\] Gal/);
+  // An unknown unit would price per acre as one ounce, so it is refused by name.
+  refused(ADMIN, setRates([row(P.GAL, '2', 'gallons', '', ['13', 'oz', '13 oz/A'])], 'k-unit'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Gal/);
+  refused(ADMIN, setRates([{ ...row(P.GAL, '2', 'oz', '', ['13', 'oz', '13 oz/A']), rate_unit: { a: 1 } }], 'k-obj'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
+  // The price workbook cannot change rates: a change row carrying one is refused; a notes row passes the check.
+  const infoRow = (changes) => `INSERT INTO public.product_info_change_set_rows (change_set_id, product_id, expected_version,
+    before_values, after_values, changes, output_fingerprint) VALUES (gen_random_uuid(), '${P.GAL}', 1, '{}', '{}', '${changes}', 'x');`;
+  ownerRefused(infoRow('{"rate_unit":{"before":"oz","after":"Pt"}}'), /PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK/);
+  ownerRefused(infoRow('{"quoting_notes":{"before":null,"after":"n"}}'), /foreign key/);
   refused(ADMIN, setRates([row(P.GAL, '1', 'oz', '', ['13', 'oz', '13 oz/A']), row(P.GAL, '2', 'oz', '', ['13', 'oz', '13 oz/A'])], 'k-dup'),
     /PRODUCT_RATE_DUPLICATE_PRODUCT/);
   refused(REP, setRates([row(P.GAL, '20', 'oz', '', ['13', 'oz', '13 oz/A'])], 'k-rep', REP), /ADMIN_REQUIRED/);
@@ -319,6 +329,15 @@ function main() {
   // Other edits still save: a product with no rate, the label maximum, a name.
   ok(ADMIN, `INSERT INTO public.products (product_name, sku, inventory_unit, is_active) VALUES ('[PROVER] Plain new', 'RL-4', 'gal', true);`);
   ok(ADMIN, `UPDATE public.products SET max_label_rate = 32, max_label_rate_unit = 'oz', product_name = '[PROVER] Gal' WHERE id = '${P.GAL}';`);
+  // Spaces are not a rate (the price workbook saves trimmed text).
+  ok(ADMIN, `UPDATE public.products SET suggested_rate = '13 oz/A  ' WHERE id = '${P.GAL}';`);
+  ok(ADMIN, `UPDATE public.products SET suggested_rate = '13 oz/A' WHERE id = '${P.GAL}';`);
+  // A new seed product with no rates saves: the database copies its stock unit into rate_unit.
+  ok(ADMIN, `INSERT INTO public.products (product_name, sku, product_form, inventory_unit, is_active)
+    VALUES ('[PROVER] Seed new', 'RL-5', 'seed', 'Lb', true);`);
+  assert.equal(scalar(`SELECT rate_unit FROM public.products WHERE sku = 'RL-5';`), 'Lb');
+  refused(ADMIN, `INSERT INTO public.products (product_name, sku, inventory_unit, is_active, rate_per_acre, rate_unit)
+    VALUES ('[PROVER] Rated new 2', 'RL-6', 'gal', true, 5, 'oz');`, /save the new product without rates/);
   console.log('[prover] locked: browser edits, the rate writer, definer functions and rated inserts are refused; other edits save');
 
   // The correction: one product, admin, reason, expected version; logged before and after.
@@ -327,6 +346,8 @@ function main() {
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', Number(v) - 1, 'label fix', 'k-cor-stale'), /PRODUCT_RATES_STALE: \[PROVER\] Gal/);
   refused(ADMIN, correct(P.GAL, 13, 'oz', '13 oz/A', v, 'label fix', 'k-cor-same'), /PRODUCT_RATE_CORRECTION_NO_CHANGE/);
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, ' ', 'k-cor-blank'), /REASON_REQUIRED/);
+  refused(ADMIN, correct(P.GAL, 16, 'gallons', '16 oz/A', v, 'label fix', 'k-cor-unit'), /PRODUCT_RATE_UNIT_INVALID/);
+  refused(ADMIN, correct(P.GAL, 16.1234567, 'oz', '16 oz/A', v, 'label fix', 'k-cor-scale'), /PRODUCT_RATE_INVALID/);
   const fix = correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor');
   const corrected = JSON.parse(ok(ADMIN, fix));
   assert.deepEqual([corrected.before.tier1_price_per_acre, corrected.after.tier1_price_per_acre], [4.06, 5]);

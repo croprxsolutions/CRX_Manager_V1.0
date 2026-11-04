@@ -34,7 +34,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
   const { getKey, resetKey } = useIdempotencyKey('correct_product_rates', profileId,
     JSON.stringify([product.id, product.pricing_version, rate, unit, suggested, reason.trim()]));
 
-  const rateValid = rate.trim() === '' || /^\d+(\.\d+)?$/.test(rate.trim());
+  const rateValid = rate.trim() === '' || /^\d{1,12}(\.\d{1,6})?$/.test(rate.trim());
   const canSave = rateValid && reason.trim() !== '' && !saving && Number.isInteger(product.pricing_version);
 
   const save = async () => {
@@ -55,6 +55,8 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
       toast('success', 'Rates corrected');
     } catch (error) {
       toast('error', sanitizeError(error));
+      // The product changed since this page loaded it: reload it rather than retry a stale version.
+      if (String((error as { message?: unknown } | null)?.message ?? '').startsWith('PRODUCT_RATES_STALE')) onCorrected();
     } finally {
       setSaving(false);
     }
@@ -100,7 +102,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
           </p>
           <Input label="Suggested Rate" value={suggested} onChange={(e) => setSuggested(e.target.value)} />
           <Input label="Rate Per Acre" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)}
-            error={rateValid ? undefined : 'Enter zero or more, or leave blank'} />
+            error={rateValid ? undefined : 'Enter zero or more with at most 6 decimals, or leave blank'} />
           <div>
             <label htmlFor="product-rate-correction-unit" className="block text-sm font-medium text-secondary mb-1">Rate Unit</label>
             <select

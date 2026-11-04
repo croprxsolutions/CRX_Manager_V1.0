@@ -218,10 +218,17 @@ export default function ProductDetail() {
   const isAdmin = role === 'admin';
   const [rateLock, setRateLock] = useState<ProductRateLock | null>(null);
   const [correctingRates, setCorrectingRates] = useState(false);
-  const ratesLocked = rateLock?.is_locked === true;
-  useEffect(() => {
-    loadProductRateLock().then(setRateLock).catch((error: unknown) => Sentry.captureException(error));
+  const [rateLockFailed, setRateLockFailed] = useState(false);
+  // Until the lock is known, rates stay read-only: a save that changed them could be refused.
+  const ratesLocked = rateLock?.is_locked !== false;
+  const loadRateLock = useCallback(() => {
+    setRateLockFailed(false);
+    loadProductRateLock().then(setRateLock).catch((error: unknown) => {
+      Sentry.captureException(error);
+      setRateLockFailed(true);
+    });
   }, []);
+  useEffect(loadRateLock, [loadRateLock]);
 
   const [product, setProduct] = useState<Partial<Product>>({
     product_name: '',
@@ -763,6 +770,7 @@ export default function ProductDetail() {
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_product' } });
       toast('error', sanitizeError(err));
+      if (String((err as { message?: unknown } | null)?.message ?? '').startsWith('PRODUCT_RATES_LOCKED')) loadRateLock();
       revealPhoneSection(pricingChanged(product, persistedProduct, pricingMoneyDrafts) ? 'pricing' : 'information');
     } finally {
       setSaving(false);
@@ -1573,6 +1581,12 @@ export default function ProductDetail() {
             <div className="border-t border-gray-100 pt-4 mt-4">
               <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Application Rates</p>
               <p className="text-xs text-gray-500 mt-0.5 mb-3">Per-acre application information</p>
+              {rateLockFailed && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" role="alert">
+                  <span>Couldn&apos;t check whether rates are locked, so rates are read-only for now.</span>
+                  <Button size="sm" variant="secondary" onClick={loadRateLock}>Retry</Button>
+                </div>
+              )}
               {ratesLocked && rateLock && (
                 <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" data-testid="product-rates-locked">
                   <span>Rates are locked. {rateLockSummary(rateLock)}</span>

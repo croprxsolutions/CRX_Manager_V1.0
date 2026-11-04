@@ -291,11 +291,15 @@ export default function Products() {
     });
   }, [toast]);
 
-  useEffect(() => {
+  const [rateLockFailed, setRateLockFailed] = useState(false);
+  const loadRateLock = useCallback(() => {
+    setRateLockFailed(false);
     loadProductRateLock().then(setRateLock).catch((error: unknown) => {
       Sentry.captureException(error);
+      setRateLockFailed(true);
     });
   }, []);
+  useEffect(loadRateLock, [loadRateLock]);
 
   const retryProducts = () => {
     setLoading(true);
@@ -1228,7 +1232,7 @@ export default function Products() {
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
-          <ProductRateLockControl lock={rateLock} isAdmin={isAdmin} profileId={profile?.id ?? ''} onChanged={setRateLock} />
+          <ProductRateLockControl lock={rateLock} loadFailed={rateLockFailed} onRetry={loadRateLock} isAdmin={isAdmin} profileId={profile?.id ?? ''} onChanged={setRateLock} />
           {/* Download All dropdown. Exports wait while a failed load hides the rows: they would
               export the old catalog as if it were current. */}
           <div className="relative">

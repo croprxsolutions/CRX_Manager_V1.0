@@ -365,11 +365,12 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
   -- Clearing a rate always passes: no rate prices nothing, and the next rate write checks the unit.
   SELECT CASE WHEN p_rate IS NULL THEN true
     WHEN p_new_unit IS NULL THEN COALESCE(p_form IN ('seed', 'each'), false)
-    -- A kept seed or each unit may be unlisted (priced as one ounce on both sides), but never a zero factor.
+    -- A kept seed or each unit may be unlisted (priced as one ounce on both sides), but never a zero
+    -- factor, and rate and stock look it up separately, so every case variant must share one factor.
     WHEN COALESCE(p_form IN ('seed', 'each'), false)
          AND p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') THEN
-      NOT EXISTS (SELECT 1 FROM public.unit_conversions u
-                   WHERE lower(u.unit) = lower(p_new_unit) AND (u.factor_oz IS NULL OR u.factor_oz <= 0))
+      (SELECT count(*) = count(u.factor_oz) AND COALESCE(min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz), true)
+         FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
     ELSE EXISTS (SELECT 1 FROM public.unit_conversions uc
                   WHERE lower(uc.unit) = lower(p_new_unit)
                     AND (p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '')
@@ -378,8 +379,16 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
       AND (SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
              FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
       AND (COALESCE(p_form IN ('seed', 'each'), false)
-           OR COALESCE((SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
-                          FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_stock_unit)), false))
+           OR (COALESCE((SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
+                           FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_stock_unit)), false)
+               -- The stock unit is pricing's divisor, so it must be the same kind: listed for the form,
+               -- or with no form, sharing a kind with the rate unit (Lb against Gal is no price).
+               AND EXISTS (SELECT 1 FROM public.unit_conversions s
+                            WHERE lower(s.unit) = lower(p_stock_unit)
+                              AND (s.unit_type = 'both' OR s.unit_type = p_form
+                                   OR (p_form IS NULL AND EXISTS (
+                                     SELECT 1 FROM public.unit_conversions r WHERE lower(r.unit) = lower(p_new_unit)
+                                        AND (r.unit_type = s.unit_type OR r.unit_type = 'both')))))))
   END;
 $function$;
 ALTER FUNCTION public._product_rate_unit_ok(numeric, text, text, text, text) OWNER TO postgres;

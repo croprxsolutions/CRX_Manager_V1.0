@@ -351,6 +351,15 @@ function main() {
   // A kept seed or each unit may be unlisted, but a zero factor would price nothing per acre.
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(5, 'Zero', 'Zero', 'seed', 'Zero');`), 'f');
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(5, 'Bag', 'Bag', 'seed', 'Bag');`), 't');
+  // A kept seed or each unit whose case variants disagree would price at an arbitrary ratio.
+  asOwner(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Bag', 1, 'dry'), ('BAG', 100, 'dry');`);
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(5, 'Bag', 'Bag', 'seed', 'Bag');`), 'f');
+  asOwner(`DELETE FROM public.unit_conversions WHERE unit IN ('Bag', 'BAG');`);
+  // The stock unit must be the product's kind: a dry rate against a gallon stock unit is no price.
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, 'dry', 'Gal');`), 'f');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, NULL, 'Gal');`), 'f');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'oz', NULL, NULL, 'Gal');`), 't');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, 'dry', 'Lb');`), 't');
   // The stock unit is pricing's divisor: an unknown one prices as one ounce ($100/gal at 13 oz/A would be $1,300/A).
   asOwner(`UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL, inventory_unit = 'Jug' WHERE id = '${P.OTHER}';`);
   refused(ADMIN, setRates([row(P.OTHER, '13', 'oz', '', [null, null, null])], 'k-stock'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);

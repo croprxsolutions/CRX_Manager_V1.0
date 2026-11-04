@@ -28,7 +28,7 @@ BEGIN
     ('public.set_product_rates(jsonb,uuid,text)', '0cce6eb46a6dea8275a230dbed1521ae'),
     ('public.set_product_rate_lock(boolean,text,uuid,text)', '3cbaa55547163537c85c20ca5cef742b'),
     ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '274822598a0c63882ed40373ae8d0405'),
-    ('public._product_rate_unit_ok(numeric,text,text,text,text)', '37ef9d56f2ab80a74931e722da6dffb2'),
+    ('public._product_rate_unit_ok(numeric,text,text,text,text)', 'e77594b0739c78538bc8046ce4215abc'),
     ('public.guard_product_rate_lock()', 'd20a3f77abf53807a43ced181b45c6d4'),
     ('public.guard_unit_conversions_rate_lock()', 'c8731a0228a669d18513a7284a44576f'),
     ('public.share_product_rate_lock()', '72c46aacf55c1862e4babd1cc459b436'),

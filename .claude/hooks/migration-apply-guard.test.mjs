@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { destructiveMigrationCheck, stripCommentsQuoteAware } from "./live-testdata-lib.mjs";
+import { dataRewriteCheck } from "./migration-access-lib.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -83,6 +84,33 @@ ok(
   "comment markers inside dollar-quoted literals cannot hide a DELETE either (Codex R5)"
 );
 eq(destructiveMigrationCheck("").destructive, false, "empty SQL is not destructive");
+
+// TRUNCATE as a trigger's EVENT only blocks a wipe (Mason, 2026-11-04). Lines
+// from PR #1425's 20261106120000_product_rate_lock.sql.
+const rateLockTriggers = `CREATE TRIGGER product_rate_events_no_truncate
+  BEFORE TRUNCATE ON public.product_rate_events
+  FOR EACH STATEMENT EXECUTE FUNCTION public.refuse_product_rate_record_mutation();
+CREATE TRIGGER product_rate_lock_no_truncate
+  BEFORE TRUNCATE ON public.product_rate_lock
+  FOR EACH STATEMENT EXECUTE FUNCTION public.refuse_product_rate_record_mutation();`;
+eq(destructiveMigrationCheck(rateLockTriggers).destructive, false, "PR #1425's BEFORE TRUNCATE triggers are not destructive");
+for (const header of [
+  "CREATE OR REPLACE TRIGGER t1 AFTER INSERT OR UPDATE OR TRUNCATE ON public.t FOR EACH STATEMENT EXECUTE FUNCTION f();",
+  'CREATE CONSTRAINT TRIGGER "Guard" AFTER UPDATE OF a, "b" OR truncate ON t FOR EACH ROW EXECUTE FUNCTION f();',
+  "DO $$ BEGIN EXECUTE 'CREATE TRIGGER t2 BEFORE TRUNCATE ON public.t FOR EACH STATEMENT EXECUTE FUNCTION f()'; END $$;",
+]) eq(destructiveMigrationCheck(header).destructive, false, `trigger event list is not destructive: ${header}`);
+for (const [name, sqlText] of [
+  ["plain TRUNCATE", "TRUNCATE public.product_rate_events;"],
+  ["TRUNCATE TABLE ONLY", "TRUNCATE TABLE ONLY public.t;"],
+  ["TRUNCATE in a DO block", "DO $$ BEGIN TRUNCATE public.product_rate_lock; END $$;"],
+  ["EXECUTE 'TRUNCATE ...'", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE public.customers'; END $$;"],
+  ["a trigger and a real TRUNCATE in one file", `${rateLockTriggers}\nTRUNCATE public.customers;`],
+  ["a real TRUNCATE on the same line as a trigger", "CREATE TRIGGER t3 BEFORE TRUNCATE ON t FOR EACH STATEMENT EXECUTE FUNCTION f(); TRUNCATE customers;"],
+  ["a trigger header split across strings around a TRUNCATE", `SELECT 'create trigger "'; TRUNCATE customers; SELECT '" before truncate on';`],
+]) ok(destructiveMigrationCheck(sqlText).destructive, `${name} stays destructive`);
+// A function the migration RUNS that truncates is caught by the data-rewrite check (bodies never reach the one above).
+ok(dataRewriteCheck(`${rateLockTriggers}\nCREATE FUNCTION public.wipe() RETURNS void LANGUAGE sql AS $$ TRUNCATE public.customers $$;\nSELECT public.wipe();`, { history: [] }).rewrites,
+  "a migration-run function that TRUNCATEs is still sent to Mason");
 
 // ── live hook: proof gate + armed-run destructive carve-out ─────────────────
 const HOOK = path.join(__dirname, "migration-apply-guard.mjs");

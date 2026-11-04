@@ -1636,6 +1636,17 @@ function findWrites(code, { literalsAreData = false } = {}) {
 // to refuse a destructive apply in a hands-free run — a false positive parks
 // the migration for the morning, a false negative would delete data with
 // nobody watching.
+// TRUNCATE as a trigger EVENT (`CREATE TRIGGER x BEFORE INSERT OR TRUNCATE ON t`)
+// only guards a table against a wipe (Mason, 2026-11-04). Only words in the
+// event list are blanked: each is followed by OR/ON, which no real TRUNCATE
+// statement can be, so a header faked across string literals hides nothing.
+const TRIGGER_ID = String.raw`(?:"(?:[^"]|"")+"|[a-z_][\w$]*)`;
+const TRIGGER_EVENT = String.raw`(?:insert|delete|truncate|update(?:\s+of\s+${TRIGGER_ID}(?:\s*,\s*${TRIGGER_ID})*)?)`;
+const TRIGGER_HEADER_RE = new RegExp(String.raw`(\bcreate\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+${TRIGGER_ID}\s+(?:before|after|instead\s+of)\s+)(${TRIGGER_EVENT}(?:\s+or\s+${TRIGGER_EVENT})*)(\s+on\b)`, "gi");
+function withoutTriggerEvents(t) {
+  return t.replace(TRIGGER_HEADER_RE, (_, head, events, on) => head + events.replace(/\btruncate\b/gi, "trigger_event") + on);
+}
+
 export function destructiveMigrationCheck(sql) {
   // Strip ONLY clear function-definition bodies (AS $$...$$) — everything
   // else, including DO blocks however commented, stays visible (default-keep).
@@ -1656,7 +1667,7 @@ export function destructiveMigrationCheck(sql) {
   if (/\balter\s+table\b[^;]*\bdrop\s+(?!constraint\b|not\s+null\b|default\b|identity\b|expression\b)/i.test(t)) {
     return { destructive: true, reason: "ALTER TABLE ... DROP [COLUMN]" };
   }
-  if (/\btruncate\b/i.test(t)) return { destructive: true, reason: "TRUNCATE" };
+  if (/\btruncate\b/i.test(withoutTriggerEvents(t))) return { destructive: true, reason: "TRUNCATE" };
   if (/\bdelete\s+from\b/i.test(t)) return { destructive: true, reason: "top-level DELETE FROM (any table)" };
   // MERGE can delete matched rows (WHEN MATCHED THEN DELETE) — and is rare
   // enough in a migration that ANY top-level MERGE deserves Mason's eyes

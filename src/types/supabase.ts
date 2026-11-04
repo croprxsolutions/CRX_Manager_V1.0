@@ -8181,6 +8181,77 @@ export type Database = {
           },
         ]
       }
+      product_rate_events: {
+        Row: {
+          after_values: Json | null
+          before_values: Json | null
+          changed_at: string
+          changed_by: string
+          changed_by_name: string | null
+          event_type: string
+          id: number
+          product_id: string | null
+          reason: string
+        }
+        Insert: {
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by: string
+          changed_by_name?: string | null
+          event_type: string
+          id?: never
+          product_id?: string | null
+          reason: string
+        }
+        Update: {
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by?: string
+          changed_by_name?: string | null
+          event_type?: string
+          id?: never
+          product_id?: string | null
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_rate_events_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_rate_lock: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          changed_by_name: string | null
+          id: boolean
+          is_locked: boolean
+          reason: string | null
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          changed_by_name?: string | null
+          id?: boolean
+          is_locked?: boolean
+          reason?: string | null
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          changed_by_name?: string | null
+          id?: boolean
+          is_locked?: boolean
+          reason?: string | null
+        }
+        Relationships: []
+      }
       product_supplier_links: {
         Row: {
           comparison_note: string | null
@@ -13236,6 +13307,19 @@ export type Database = {
           converted_value: number
         }[]
       }
+      correct_product_rates: {
+        Args: {
+          p_expected_pricing_version: number
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_product_id: string
+          p_rate_per_acre: number
+          p_rate_unit: string
+          p_reason: string
+          p_suggested_rate: string
+        }
+        Returns: Json
+      }
       correct_supplier_price_observation: {
         Args: {
           p_corrected_cost: string
@@ -15549,6 +15633,23 @@ export type Database = {
           p_product_family_id: string
           p_product_id: string
           p_return_policy: string
+        }
+        Returns: Json
+      }
+      set_product_rate_lock: {
+        Args: {
+          p_idempotency_key?: string
+          p_locked: boolean
+          p_performed_by: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      set_product_rates: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_rows: Json
         }
         Returns: Json
       }

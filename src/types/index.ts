@@ -1488,6 +1488,32 @@ export interface ProductMarginFloorChange {
   created_at: string;
 }
 
+/** The one "Lock rates" record (20261105200000). While locked, product rates change only by correction. */
+export interface ProductRateLock {
+  is_locked: boolean;
+  changed_by_name: string | null;
+  changed_at: string;
+  reason: string | null;
+}
+
+/** A product's rates and per-acre prices (legacy dollars, rounded to the cent by the database). */
+export interface ProductRateValues {
+  rate_per_acre: number | null;
+  rate_unit: string | null;
+  suggested_rate: string | null;
+  tier1_price_per_acre: number | null;
+  tier2_price_per_acre: number | null;
+  tier3_price_per_acre: number | null;
+}
+
+export interface ProductRateWriteResult {
+  product_id: string;
+  product_name: string;
+  pricing_version: number;
+  before: ProductRateValues;
+  after: ProductRateValues;
+}
+
 /** One row of the admin-only, append-only purchase-order cost history (20261021140000). */
 export type PurchaseOrderCostChangeSource = 'entered' | 'edited' | 'catalog_default' | 'set_by_admin' | 'confirmed';
 

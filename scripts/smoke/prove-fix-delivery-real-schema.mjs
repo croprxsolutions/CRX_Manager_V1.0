@@ -194,7 +194,7 @@ function buildContainer() {
 
 const id = (n) => `7e330000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ADMIN=id(1), REP=id(2), CUSTOMER=id(3), PRODUCT=id(4);
-const ORDER=id(10), LINE=id(11), DELIVERY=id(12), INV=id(13), COMM=id(14), ORDER_INV=id(15), RET=id(16), PAYOUT=id(17), LINE2=id(18), CM=id(19);
+const ORDER=id(10), LINE=id(11), DELIVERY=id(12), INV=id(13), COMM=id(14), ORDER_INV=id(15), RET=id(16), PAYOUT=id(17), LINE2=id(18), CM=id(19), ALLOC=id(20);
 function asUser(uid) {
   return `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
     SELECT set_config('request.jwt.claim.sub', '${uid}', true); SET LOCAL ROLE authenticated;`;
@@ -344,6 +344,16 @@ function scenarios() {
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000,2000);
     ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-draft-money')}`, 'an order draft holding prepay refuses the fix', /FIX_DELIVERY_REFUSED: A draft invoice on this order has a payment/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents)
+      VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000);
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ALTER TABLE public.allocation_sets DISABLE TRIGGER USER; ALTER TABLE public.invoice_line_allocations DISABLE TRIGGER USER;
+    INSERT INTO public.allocation_sets (id,entity_type,entity_id,is_active) VALUES ('${ALLOC}','payment',gen_random_uuid(),true);
+    INSERT INTO public.invoice_line_allocations (allocation_set_id,invoice_id,bill_to_customer_id,split_percentage,amount_cents)
+      VALUES ('${ALLOC}','${ORDER_INV}','${CUSTOMER}',100,1000);
+    ALTER TABLE public.allocation_sets ENABLE TRIGGER USER; ALTER TABLE public.invoice_line_allocations ENABLE TRIGGER USER;
+    ${fix('k-draft-alloc')}`, 'an order draft with an active payment allocation refuses the fix', /FIX_DELIVERY_REFUSED: A draft invoice on this order has a payment/);
   refused(`RESET ROLE; INSERT INTO public.idempotency_keys (idempotency_key,operation,result)
       VALUES ('k-pre-used:void_invoice:${INV}','void_invoice','{"success":true}');
     ${fix('k-pre-used')}`,

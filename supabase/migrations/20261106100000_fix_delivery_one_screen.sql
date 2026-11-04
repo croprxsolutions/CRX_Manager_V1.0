@@ -115,7 +115,10 @@ BEGIN
      WHERE i.order_id = v_delivery.order_id AND i.delivery_id IS NULL AND i.status = 'draft'
        AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
        AND (COALESCE(i.paid_amount_cents, 0) <> 0 OR COALESCE(i.prepay_applied_cents, 0) <> 0
-            OR COALESCE(i.write_off_cents, 0) <> 0 OR COALESCE(i.credit_applied_cents, 0) <> 0)
+            OR COALESCE(i.write_off_cents, 0) <> 0 OR COALESCE(i.credit_applied_cents, 0) <> 0
+            OR EXISTS (SELECT 1 FROM invoice_line_allocations ila
+                         JOIN allocation_sets aset ON aset.id = ila.allocation_set_id
+                        WHERE ila.invoice_id = i.id AND aset.entity_type = 'payment' AND aset.is_active))
   ) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'DRAFT_HAS_MONEY',
       'message', 'A draft invoice on this order has a payment, prepay, credit or write-off recorded. Reverse it from the invoice page first.');
@@ -331,6 +334,7 @@ BEGIN
 
   -- This key has no receipt yet, and the inner receipts commit only with it, so an inner key
   -- already used means another request took it; void_invoice's receipt would replay that one.
+  -- Any operation counts: idempotency_key is unique on its own.
   IF EXISTS (SELECT 1 FROM idempotency_keys k, jsonb_array_elements(v_plan -> 'invoices') e
               WHERE k.idempotency_key = p_idempotency_key || ':void_invoice:' || (e ->> 'id')) THEN
     RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH';

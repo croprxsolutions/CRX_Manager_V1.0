@@ -299,6 +299,9 @@ BEGIN
       END IF;
     END IF;
     v_kept_line := v_kept -> NULLIF(v_item->>'id', '');
+    IF v_kept_line IS NOT NULL THEN
+      v_kept := v_kept - (v_item->>'id');  -- the first entry with a saved line's id uses it up, kept or not
+    END IF;
     v_order_item_id := NULL;
     IF v_kept_line IS NOT NULL AND NOT v_is_field
        AND (v_kept_line->>'product_id') IS NOT DISTINCT FROM (v_item->>'product_id')
@@ -307,7 +310,6 @@ BEGIN
        AND v_unit_price = (v_kept_line->>'unit_price_cents')::bigint THEN
       v_cost_cents := (v_kept_line->>'cost_cents')::bigint;
       v_order_item_id := (v_kept_line->>'order_item_id')::uuid;
-      v_kept := v_kept - (v_item->>'id');
     END IF;
     -- A charge line carries no cost (Mason, 2026-10-15); the shape CHECK refuses anything else.
     v_charge_type := NULLIF(btrim(v_item->>'charge_type'), '');

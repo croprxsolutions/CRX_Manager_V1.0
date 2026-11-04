@@ -1598,7 +1598,14 @@ function collisionPromptSkipsWork(prompt) {
     }), /changed its signature, not just its hash/);
     refused("a changed predicate", () => rewriteAllowlist((list) => { list.entries[0].predicate = "anon-exec-secdef"; }), /changed beyond its key/);
     refused("a rewritten justification", () => rewriteAllowlist((list) => { list.entries[1].justification = "Re-keyed."; }), /justification was rewritten/);
-    refused("a bad date", () => rewriteAllowlist((list) => { list.entries[0].dated = "soon"; }), /date is not YYYY-MM-DD/);
+    refused("a bad date", () => rewriteAllowlist((list) => { list.entries[0].dated = "soon"; }), /date is not a real YYYY-MM-DD date/);
+    refused("an impossible date", () => rewriteAllowlist((list) => { list.entries[0].dated = "2026-02-30"; }), /date is not a real YYYY-MM-DD date/);
+    refused("an appended note with no re-key", () => rewriteAllowlist((list) => {
+      list.entries[0].violation_key = reviewedEntries[0].violation_key;
+    }), /changed without a new hash/);
+    refused("a re-key with no appended wording", () => rewriteAllowlist((list) => {
+      list.entries[1].justification = reviewedEntries[1].justification;
+    }), /justification was rewritten/);
     refused("an allowlist header change", () => rewriteAllowlist((list) => { list._README = "anything goes"; }), /changed outside its entries/);
     refused("a broken allowlist", () => { paperwork(); write(ALLOWLIST, "{ not json"); }, /not valid JSON/);
     refused("a stale review", paperwork, /older than 24 hours/, { sourceTimestamp: new Date(Date.now() - CARRY_SOURCE_MAX_AGE_MS - 60_000).toISOString() });

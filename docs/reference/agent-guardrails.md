@@ -95,8 +95,8 @@
 > regular non-executable file among: `docs/reference/migrations.d/*.md` and `docs/changelog.d/*.md` (edited or
 > added), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), and
 > `scripts/db-invariant-sweeps/allowlist.json`, where every changed entry keeps its position, predicate and other
-> fields, keeps the signature before `#` with a new 12-hex hash, only appends to its justification, and may get a
-> new `dated`; no entry is added or removed and nothing outside `entries` changes. Anything else refuses, and the
+> fields, keeps the signature before `#` with a NEW 12-hex hash, appends to its justification, and has a real
+> `YYYY-MM-DD` `dated`; no entry is added or removed and nothing outside `entries` changes. Anything else refuses, and the
 > full review runs. `carriedSolProof()` accepts `post_apply` only with an unchanged base, so every gate that
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >

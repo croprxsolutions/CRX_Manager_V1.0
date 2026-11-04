@@ -64,7 +64,9 @@ check replaces the soft rule.
 **What this forbids/implies:** this loosens the merge gate for that one kind of commit. Any
 other file, an added, removed or re-signatured allowlist entry, an executable or symlink, a
 merge commit, or a stale or unclean review refuses, and the full review runs. Code fixes after
-the apply still need Sol. Every other apply and merge check is unchanged.
+the apply still need Sol. Every other apply and merge check is unchanged. Accepted risk: the carry
+checks which files changed and the allowlist's shape, not that the registry or the new hashes match
+live; the live sweeps and registry-freshness checks still do that.
 
 ## 2026-11-04 — A byte-identical migration restamp keeps its Sol and reviewer proofs
 

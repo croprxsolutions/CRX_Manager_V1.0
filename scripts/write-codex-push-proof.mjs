@@ -2276,17 +2276,21 @@ export function allowlistRekeyProblem(before, after) {
     if (!same(Object.keys(was).sort(), Object.keys(now).sort()) || !same(oldRest, newRest)) {
       return `${label} changed beyond its key, justification and date`;
     }
-    if (newKey !== oldKey) {
-      const o = REKEYED_KEY_RE.exec(String(oldKey));
-      const n = REKEYED_KEY_RE.exec(String(newKey));
-      if (typeof oldKey !== "string" || typeof newKey !== "string" || !o || !n || o[1] !== n[1]) {
-        return `${label} changed its signature, not just its hash`;
-      }
+    // A changed entry is a re-key: new hash, wording appended, a real date (Luna MED/LOW).
+    const o = REKEYED_KEY_RE.exec(String(oldKey));
+    const n = REKEYED_KEY_RE.exec(String(newKey));
+    if (typeof oldKey !== "string" || typeof newKey !== "string" || !o || !n || o[1] !== n[1]) {
+      return `${label} changed its signature, not just its hash`;
     }
-    if (typeof oldWhy !== "string" || typeof newWhy !== "string" || !newWhy.startsWith(oldWhy)) {
+    if (o[2] === n[2]) return `${label} changed without a new hash`;
+    if (typeof oldWhy !== "string" || typeof newWhy !== "string" || !newWhy.startsWith(oldWhy) || newWhy === oldWhy) {
       return `${label}'s justification was rewritten, not appended to`;
     }
-    if (newDated !== oldDated && !ISO_DATE_RE.test(String(newDated))) return `${label}'s date is not YYYY-MM-DD`;
+    const day = String(newDated);
+    const ms = Date.parse(`${day}T00:00:00Z`);
+    if (!ISO_DATE_RE.test(day) || !Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== day) {
+      return `${label}'s date is not a real YYYY-MM-DD date`;
+    }
   }
   return null;
 }

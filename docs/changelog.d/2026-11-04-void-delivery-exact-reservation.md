@@ -1,6 +1,6 @@
 ## 2026-11-04 — Voiding a delivery puts back only the reserved stock its completion took (KI-94)
 
-- New migration `20261106230000_void_delivery_restores_exact_reservation.sql` (not applied; record in
+- New migration `20261106230000_void_delivery_restores_exact_reservation.sql` (applied live 2026-11-04, ledger `20261104202037`; record in
   `docs/reference/migrations.d/`). Completing a delivery takes reserved stock only up to what is reserved; voiding
   it put back the whole delivered quantity, so with 3 reserved and 10 delivered a void left 10 reserved and
   available stock read 7 too low. Completion now records on each delivery line what it took

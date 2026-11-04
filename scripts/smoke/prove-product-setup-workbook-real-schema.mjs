@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for WP-PM-11a-2 (20261106160000): the setup workbook's database half. Builds the
+ * Real-schema proof for WP-PM-11a-2 (20261107020000): the setup workbook's database half. Builds the
  * checked-in schema baseline in a network-disabled PostgreSQL container, replays migrations up to the
  * candidate (including WP-PM-11a-1's rate lock), seeds invented rows, and checks: the download, rate
  * preview and setup save are admin-only; with the lock off a Rates-tab upload changes 20 rates after
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261106160000_product_setup_workbook.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261107020000_product_setup_workbook.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -332,7 +332,7 @@ function main() {
   const installed = apply('cand.sql');
   assert.equal(installed.status, 0, installed.output);
   ledger(path.basename(CANDIDATE, '.sql'));
-  console.log('[prover] installs on top of the rate lock (20261106155000)');
+  console.log('[prover] installs on top of the rate lock (20261107010000)');
 
   // The download: admins only.
   const exp = exportRows();
@@ -387,6 +387,13 @@ function main() {
   const seedOk = previewRates([rateRow(seedRow, '2', 'Lb', '')]);
   assert.equal(seedOk.rows[0].status, 'change');
   assert.equal(seedOk.rows[0].after.rate_unit, 'Lb');
+  // A blank seed unit becomes the stock unit before the rate-lock trigger judges it, so the preview judges that too:
+  // with its spellings disagreeing, the preview names it and the save is refused.
+  psql(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('LB', 15, 'dry');`);
+  assert.equal(previewRates([rateRow(seedRow, '2', '', '')]).rows[0].status, 'invalid_unit');
+  refused(ADMIN, setRates(saveFromPreview([rateRow(seedRow, '2', '', '')], seedOk), 'k-seed-blank'), /PRODUCT_RATE_UNIT_INVALID/);
+  psql(`DELETE FROM public.unit_conversions WHERE unit = 'LB';`);
+  assert.equal(previewRates([rateRow(seedRow, '2', '', '')]).rows[0].status, 'change');
   ok(ADMIN, setRates(saveFromPreview([rateRow(seedRow, '2', 'Lb', '')], seedOk), 'k-seed-rate'));
   assert.equal(field(SEED, 'rate_per_acre'), '2');
   refused(ADMIN, `SELECT public.preview_product_rates('${JSON.stringify([rateRow(f1, '1', 'oz', ''), rateRow(f1, '2', 'oz', '')])}'::jsonb);`, /PRODUCT_RATE_DUPLICATE_PRODUCT/);
@@ -428,6 +435,7 @@ function main() {
   assert.equal(field(k.product_id, 'manufacturer'), '', 'all or nothing');
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { category: 'Nope' } }], 'k-setup-cat'), /PRODUCT_SETUP_ROW_REFUSED: \[PROVER\] Batch 5/);
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { use_timings: ['no_such_code'] } }], 'k-setup-ut'), /PRODUCT_SETUP_ROW_REFUSED/);
+  refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { use_timings: 'bad' } }], 'k-setup-ut-scalar'), /PRODUCT_SETUP_INVALID/);
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { container_size: '0' } }], 'k-setup-cs'), /PRODUCT_SETUP_INVALID: .*Batch 5/);
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { rei_hours: 'twelve' } }], 'k-setup-rei'), /PRODUCT_SETUP_INVALID/);
   // Fields the Setup tab never writes: vendor, rates, prices, cost, active, form, stock unit, pack size.

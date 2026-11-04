@@ -79,11 +79,14 @@ export async function loadCompanyInfo(db: SupabaseClient): Promise<CompanyInfo> 
 export const companyTaglineHeader = (c: CompanyInfo) => `${COMPANY_TAGLINE}  •  ${c.address}  •  ${c.phone}`;
 export const COMPANY_TAGLINE_HEADER = companyTaglineHeader(DEFAULT_COMPANY_INFO);
 // Letterhead tagline WITHOUT phone (quote, report headers — preserve prior format).
-export const COMPANY_TAGLINE_HEADER_NO_PHONE = `${COMPANY_TAGLINE}  •  ${COMPANY_CITY}`;
+export const companyTaglineNoPhone = (c: CompanyInfo) => `${COMPANY_TAGLINE}  •  ${c.address}`;
+export const COMPANY_TAGLINE_HEADER_NO_PHONE = companyTaglineNoPhone(DEFAULT_COMPANY_INFO);
 // Centered footer on receipts / ops docs.
-export const COMPANY_FOOTER_THANKS = `${COMPANY_NAME}  •  ${COMPANY_CITY}  •  Thank you for your business!`;
+export const companyFooterThanks = (c: CompanyInfo) => `${c.name}  •  ${c.address}  •  Thank you for your business!`;
+export const COMPANY_FOOTER_THANKS = companyFooterThanks(DEFAULT_COMPANY_INFO);
 // Internal-only pick list footer.
-export const COMPANY_FOOTER_INTERNAL = `${COMPANY_NAME}  •  ${COMPANY_CITY}  •  Internal Use Only`;
+export const companyFooterInternal = (c: CompanyInfo) => `${c.name}  •  ${c.address}  •  Internal Use Only`;
+export const COMPANY_FOOTER_INTERNAL = companyFooterInternal(DEFAULT_COMPANY_INFO);
 
 /**
  * Remit-to mailing block for statements — the address customers physically MAIL

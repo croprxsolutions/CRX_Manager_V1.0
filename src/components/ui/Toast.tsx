@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -36,6 +36,14 @@ const bgClasses: Record<ToastType, string> = {
 
 let nextId = 0;
 
+// The mounted provider's toast, for library code that runs outside React (PDF generators).
+let providerToast: ToastContextValue['toast'] | null = null;
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function toastOutsideReact(type: ToastType, message: string) {
+  providerToast?.(type, message);
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -58,6 +66,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // load-fail→toast→reload infinite loop; Toast.loopguard.test.tsx pins the
   // real-provider behavior.
   const contextValue = useMemo(() => ({ toast: addToast }), [addToast]);
+
+  useEffect(() => {
+    providerToast = addToast;
+    return () => { if (providerToast === addToast) providerToast = null; };
+  }, [addToast]);
 
   return (
     <ToastContext.Provider value={contextValue}>

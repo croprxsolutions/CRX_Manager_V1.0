@@ -244,8 +244,8 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
     setUploading(true);
 
     // While rates are locked every row with a rate would be refused one by one, leaving half a file
-    // imported, so check once and import nothing. A lock switched on mid-upload can still leave it
-    // partial; WP-PM-10 replaces this import with the all-or-nothing set_product_rates.
+    // imported, so check once and import nothing. A file that sets rates then saves in one insert, so
+    // a lock switched on mid-upload refuses the whole file instead of leaving it partial.
     const rated = validation.valid.filter(importRowSetsRates).length;
     if (rated > 0) {
       let locked: boolean;
@@ -260,6 +260,24 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         setUploading(false);
         return;
       }
+      // Every row has the same keys; defaultToNull: false leaves an omitted value on its column default, as a one-row insert does.
+      const result = await supabase.from('products')
+        .insert(validation.valid.map(buildProductInsert), { defaultToNull: false }).select('id');
+      try {
+        checkMutationResult(result, 'Insert products');
+      } catch (e) {
+        Sentry.captureException(e instanceof Error ? e : new Error(String(e)), { extra: { context: 'Failed to insert rated product file' } });
+        const error = `Nothing was imported: ${sanitizeError(e)}`;
+        setUploadResults({ success: 0, failed: validation.valid.length, errors: [error] });
+        toast('error', error);
+        setUploading(false);
+        return;
+      }
+      setUploadResults({ success: validation.valid.length, failed: 0, errors: [] });
+      setUploading(false);
+      toast('success', `Successfully imported ${validation.valid.length} product(s)`);
+      onSuccess();
+      return;
     }
 
     let success = 0;

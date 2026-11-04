@@ -1,8 +1,13 @@
 # Inventory Costing Phase 1: Stock Age and Holding Cost Reports (Build Plan)
 
-> **STATUS 2026-11-04: PLAN ONLY, NOT APPROVED TO BUILD.** This is the detailed build plan for Phase 1 of
-> `docs/plans/2026-07-16-inventory-costing-plan.md` (section 3). Building it needs Mason's separate go-ahead
-> (decision D1, still open). Mason's decisions D2-D11 are in that plan's section 12.
+> **STATUS 2026-11-04: PARKED AS A ROADMAP IDEA (Mason, decision D12). Not to be built now.** After a harsh
+> Sol review, Mason chose to hold costing work for later. If the trigger in the master plan's section 0.2 is
+> ever met, start from a much smaller version: drop the holding-cost numbers, the supplier-price exposure and
+> the starting-date history (master plan section 0.3), and re-check this design against the code first. The
+> pre-season list (master plan section 0.1) replaces it for now. Kept below as the design record.
+>
+> Earlier status: plan only, for Phase 1 of `docs/plans/2026-07-16-inventory-costing-plan.md` (section 3);
+> decisions D1-D12 are in that plan's section 12.
 >
 > **Revised three times on 2026-11-04 by Sol (gpt-6-sol, high) reviews:** the whole plan (44 findings), the
 > plan against the real code (33 findings, one refuted), and a re-check of the revision (28 findings). The

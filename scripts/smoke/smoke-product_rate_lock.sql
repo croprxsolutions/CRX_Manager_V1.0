@@ -27,9 +27,10 @@ BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
     ('public.set_product_rates(jsonb,uuid,text)', '0cce6eb46a6dea8275a230dbed1521ae'),
     ('public.set_product_rate_lock(boolean,text,uuid,text)', '46b19757c668c9e3fc7611aa0e545f27'),
-    ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', 'b95fd9ce80a94afd20f284751ad5fca9'),
-    ('public._product_rate_unit_ok(numeric,text,text,text,text)', '42a6879b02f8a23ca0f511947dd76982'),
-    ('public.guard_product_rate_lock()', 'cba2f1e79cda0c863d998dc110121831'),
+    ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '274822598a0c63882ed40373ae8d0405'),
+    ('public._product_rate_unit_ok(numeric,text,text,text,text)', '37ef9d56f2ab80a74931e722da6dffb2'),
+    ('public.guard_product_rate_lock()', 'd20a3f77abf53807a43ced181b45c6d4'),
+    ('public.guard_unit_conversions_rate_lock()', '5f4ca03dbbb27600bff5f281b271824f'),
     ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
     ('public.preview_product_rate_correction(uuid,numeric,text)', '04f0a1b3b08b123db35b7e3ebeb3fd75')) AS pins(sig, body_md5) LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM v_md5 THEN

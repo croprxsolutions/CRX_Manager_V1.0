@@ -10,6 +10,26 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-04 — A byte-identical migration restamp keeps its Sol and reviewer proofs
+
+**Source:** Mason, 2026-11-04, in the retro of the WP-PM-11a-1 session (PR #1425, product rate lock), choosing that byte-identical restamps keep their Sol and reviewer proofs, then "spin up item 1".
+
+**Decision.** When a reviewed migration must take a new timestamp because a newer one went live,
+and the SQL is byte-identical (LF-normalized), the existing proofs carry to the new stamp instead
+of a full re-review: the Sol proof (`write-codex-push-proof.mjs --carry-restamp`) and both
+migration-reviewer proofs (`write-apply-proofs.mjs --restamp-from <old> <new>`). The carry needs
+one commit on top of the reviewed head that only renames that migration and swaps the old stamp
+for the new one elsewhere, and every proof still inside its original 24 hours. Anything else
+refuses and the full review runs.
+
+**Why.** On 2026-11-04 `20261105200000_product_rate_lock` was approved, then refused at apply
+because another session had applied `20261106110000` meanwhile. Restamping it to `20261106120000`
+with identical SQL cost a new Sol run (about 15-40 minutes), re-minted reviewer proofs and a
+second owner approval. It was the third such collision.
+
+**What this forbids/implies:** Mason's owner approval (`owner-approve-migration.mjs`, his
+`I approve`) never carries; a parked migration is re-approved for the new stamp. Destructive-
+migration approval is never carried. Every other apply and merge check is unchanged.
 ## 2026-11-04 — Inventory costing: plan settled before any build
 
 **Source:** Mason, 2026-11-04, a planning session on the research report (PR #1428): "I want to plan and
@@ -26,6 +46,8 @@ brainstorm our entire plan before we build anything", then answers to each open 
 - Purchases go back through CRX POs and receiving (since June they were made by phone and email).
 - Phase 2 starts fresh from a stock count with confirmed starting costs before busy season, with no back-entry.
 - Chemical totes are stocked already filled. Bulk storage exists only for fertilizer.
+- Stock CRX cannot date because of the June gap shows "age unknown"; admins can bulk-enter an estimated
+  received date for it, shown as an owner estimate (D10, `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`).
 
 **Rule.** Nothing in the plan is built until Mason gives a separate go-ahead for that phase (D1 is still open).
 Each phase gets its own plan, Luna review and Sol review.

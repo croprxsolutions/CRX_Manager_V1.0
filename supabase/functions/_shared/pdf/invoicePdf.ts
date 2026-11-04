@@ -17,7 +17,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { computeTotalDiluentGallons, formatGallons } from "./fieldAppDiluent.ts";
-import { COMPANY_TAGLINE_HEADER, COMPANY_LEGAL_NAME } from "./companyInfo.ts";
+import { COMPANY_LEGAL_NAME, companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo, fitCompanyNameFont } from "./companyInfo.ts";
 import {
   ALT_ROW_BG,
   CHARCOAL,
@@ -251,6 +251,9 @@ export interface InvoicePdfData {
 
   // Print options
   options?: InvoicePrintOptions;
+
+  // Letterhead details from Settings; absent = the companyInfo.ts defaults.
+  company?: CompanyInfo;
 }
 
 // ── Shared row → InvoicePdfData builder ───────────────────────────────────
@@ -581,7 +584,14 @@ export async function loadInvoicePdfData(db: SupabaseClient, invoiceId: string):
     }
   }
 
-  return buildInvoicePdfDataFromRow(db, {
+  let company: CompanyInfo;
+  try {
+    company = await loadCompanyInfo(db);
+  } catch {
+    throw new InvoiceDetailsUnavailableError();
+  }
+
+  const pdfData = await buildInvoicePdfDataFromRow(db, {
     id: row.id,
     invoice_number: row.invoice_number || 'DRAFT',
     invoice_date: row.invoice_date,
@@ -602,6 +612,7 @@ export async function loadInvoicePdfData(db: SupabaseClient, invoiceId: string):
     write_off_cents: row.write_off_cents,
     balance_cents: row.balance_cents,
   });
+  return { ...pdfData, company };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -641,6 +652,7 @@ export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfDat
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 40;
   const opts = data.options ?? { show_shares: true, show_price_per_acre: true, show_epa_registration: true };
+  const company = data.company ?? DEFAULT_COMPANY_INFO;
 
   let y = 0;
 
@@ -653,7 +665,7 @@ export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfDat
       doc.setFontSize(7);
       doc.setTextColor(160, 160, 160);
       doc.text(
-        `${COMPANY_LEGAL_NAME}  •  Generated ${generatedDateLabel()}`,
+        [COMPANY_LEGAL_NAME, company.email, `Generated ${generatedDateLabel()}`].filter(Boolean).join('  •  '),
         pageW / 2,
         footerY,
         { align: 'center' },
@@ -668,12 +680,13 @@ export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfDat
   doc.setFillColor(...CRX_GREEN);
   doc.rect(0, 0, pageW, 70, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
-  doc.text('CROP RX SOLUTIONS', margin, 35);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 110, 22);
+  doc.text(company.name.toUpperCase(), margin, 35);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(COMPANY_TAGLINE_HEADER, margin, 53);
+  // A long Settings address wraps instead of running under the invoice number and status.
+  doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 90), margin, 53);
 
   // Invoice badge (right)
   doc.setFontSize(14);

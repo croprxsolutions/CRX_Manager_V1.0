@@ -7,9 +7,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
-import os from "node:os";
+import { writeFileSync, rmSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   checkDangerousCommand,
   checkCommandDeep,
@@ -38,6 +38,18 @@ ok(checkDangerousCommand("rm -rf src"), "rm -rf src blocked");
 ok(checkDangerousCommand("rm -rf supabase"), "rm -rf supabase blocked");
 ok(checkDangerousCommand("git add file.txt .env"), "staging .env blocked");
 ok(checkDangerousCommand("npx supabase db push"), "supabase db push blocked");
+// An Area/City zone with `date` prints UTC silently in Git Bash; POSIX zones and searches stay allowed.
+ok(checkDangerousCommand("TZ=America/Chicago date '+%H:%M %Z'"), "TZ=Area/City date blocked");
+ok(checkDangerousCommand("git push && TZ='America/Chicago' date"), "quoted zone after && blocked");
+ok(checkDangerousCommand("echo $(TZ=America/Chicago date +%H)"), "zone date in substitution blocked");
+ok(checkDangerousCommand("env TZ=America/Chicago date"), "env TZ= date blocked");
+ok(checkDangerousCommand("export TZ=America/Chicago; date"), "export then date blocked");
+ok(checkDangerousCommand("FOO=1 TZ=America/Chicago date"), "TZ after another assignment blocked");
+eq(checkDangerousCommand("export TZ=America/Chicago; git log -1"), null, "export without date allowed");
+eq(checkDangerousCommand("TZ=CST6CDT date '+%H:%M %Z'"), null, "POSIX zone date allowed");
+eq(checkDangerousCommand("date -u"), null, "plain date allowed");
+eq(checkDangerousCommand("TZ=America/Chicago git log -1"), null, "zone on a non-date command allowed");
+eq(checkDangerousCommand("grep -n 'TZ=America/Chicago date' notes.md"), null, "quoted search text allowed");
 ok(checkDangerousCommand("supabase db push"), "bare (non-npx) supabase db push blocked — 2026-07-16 review B1");
 ok(checkDangerousCommand("cd repo && supabase db push --linked"), "supabase db push blocked mid-compound-command");
 ok(checkDangerousCommand("supabase migration up"), "bare supabase migration up blocked — sibling live-apply spelling");
@@ -59,6 +71,69 @@ ok(checkDangerousCommand('docker exec db sh -c "TRUNCATE customers"'), "unknown 
 ok(!checkDangerousCommand('grep -c "TRUNCATE" supabase/migrations/x.sql'), "grep -c for TRUNCATE allowed");
 ok(!checkDangerousCommand('git log --grep "drop table" -- supabase'), "git log naming DROP TABLE without a -c/-f flag allowed");
 ok(checkDangerousCommand(`git -c "alias.wipe=!$P --command 'TRUNCATE customers'" wipe`), "a git alias beside TRUNCATE stays refused (Sol, PR #1193)");
+// A client name inside a search pattern is not a client call (retro on PR #1333).
+ok(!checkDangerousCommand('grep -l -i "DROP SCHEMA\\|docker exec psql" *.md'), "grep pattern naming psql and DROP SCHEMA allowed");
+ok(!checkDangerousCommand('grep -E "DROP SCHEMA|psql" notes.md'), "a pipe inside the quoted pattern does not split the command");
+ok(!checkDangerousCommand("rg -n 'psql.*DROP SCHEMA' docs"), "rg pattern naming psql and DROP SCHEMA allowed");
+ok(!checkDangerousCommand('grep -n "DROP SCHEMA" notes.md # psql docs'), "a comment naming psql after a reader is not a client call");
+ok(checkDangerousCommand('psql -c "DROP SCHEMA x"'), "psql DROP SCHEMA still blocked");
+ok(checkDangerousCommand('docker exec c psql -c "TRUNCATE t"'), "docker exec psql TRUNCATE still blocked");
+ok(checkDangerousCommand("cat <<'SQL' | psql\nDROP TABLE customers;\nSQL"), "cat piped into psql with DROP TABLE still blocked");
+ok(checkDangerousCommand('grep -l "DROP TABLE" f | xargs cat | psql'), "readers feeding psql still blocked");
+ok(checkDangerousCommand(`grep "$(psql -c 'DROP SCHEMA x')" f`), "a client run from a reader's command substitution still blocked");
+ok(checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git stays a non-reader");
+// 2026-11-03: a git grep/log exemption (P4) was tried and dropped — a pager set
+// in git's config can run a program the command text never names. These pin
+// that every real SQL route stays refused.
+ok(checkDangerousCommand('git commit -q -m "stop refusing psql -c TRUNCATE in a search"'), "a commit message stays as main treats it (no text skipping)");
+ok(checkDangerousCommand('git -c alias.x="!psql" x "DROP SCHEMA"'), "git with a global option before the subcommand stays a non-reader");
+ok(checkDangerousCommand('git -C . grep "psql" "DROP SCHEMA"'), "git with -C before grep stays a non-reader");
+ok(checkDangerousCommand('git log --ext-diff -p "psql" "DROP SCHEMA"'), "git log running an external diff program stays refused");
+ok(checkDangerousCommand('git grep -O"psql -c" "DROP SCHEMA"'), "git grep opening a pager program stays refused");
+ok(checkDangerousCommand('git commit -m "$(psql -c \'DROP TABLE x\')"'), "a client in a commit message's command substitution stays refused");
+ok(checkDangerousCommand("cat <<'EOF' | psql\nDROP TABLE customers;\nEOF"), "a here-document piped to psql stays refused");
+ok(checkDangerousCommand("psql <<'EOF'\nDROP TABLE customers;\nEOF"), "a here-document fed to psql stays refused");
+ok(checkDangerousCommand("python - <<'EOF'\nimport os; os.system('psql -c \"DROP TABLE x\"')\nEOF"), "an interpreter here-document naming psql stays refused");
+ok(checkDangerousCommand('echo "DROP TABLE x;" | psql'), "echo piped into psql stays refused");
+ok(checkDangerousCommand('supabase sql "DROP SCHEMA public"'), "supabase sql DROP SCHEMA stays refused");
+// Real SQL routes stay refused (Sol on the P4 proposal, 2026-11-03).
+for (const [command, label] of [
+  ['git grep x; npx psql "$DB" -c "DROP TABLE x"', "npx psql after a git grep"],
+  ["git log -1 && bash -c 'psql -c \"DROP TABLE x\"'", "bash -c psql after a git log"],
+  ["git grep x\nsh <<'EOF'\npsql -c 'TRUNCATE x'\nEOF", "heredoc fed to sh"],
+  ["cat wipe.sql | psql \"$DB\" # DROP TABLE", "file piped into psql"],
+  ["cat > wipe.sql <<'EOF'\nDROP TABLE customers;\nEOF\npsql -f wipe.sql", "a written SQL file run by psql"],
+  ["cat(){ bash; }; cat <<'EOF'\npsql -c 'DROP TABLE customers'\nEOF", "a function named cat running bash"],
+  ['git grep "$(psql -c \'DROP TABLE x\')"', "a client in a git grep's command substitution"],
+]) ok(checkDangerousCommand(command), `SQL route stays refused: ${label}`);
+ok(checkDangerousCommand('rg --pre psql "DROP SCHEMA" db.sql'), "rg --pre running a client stays refused (Codex App, PR #1337)");
+ok(checkDangerousCommand(`rg --p''re=psql "DROP SCHEMA" db.sql`), "a quote-split --pre= spelling stays refused");
+// A reader spanning a line break is never exempt (Codex App, PR #1337).
+ok(checkDangerousCommand(`grep "DROP TABLE" f # it's\npsql < wipe.sql`), "a quote in a comment cannot hide the next line's client");
+ok(checkDangerousCommand(`grep "DROP TABLE" \\\n# it's\npsql < wipe.sql`), "a line continuation before the comment cannot hide it either");
+ok(checkDangerousCommand(`grep "DROP TABLE" f # it's\rpsql < wipe.sql`), "a carriage return counts as a line break for the exemption");
+ok(checkDangerousCommand('grep foo\\ #; psql --command="DROP TABLE customers"'), "an escaped space cannot fake a comment that hides psql (Luna, PR #1337)");
+ok(checkDangerousCommand('grep foo\u00a0#; psql --command="DROP TABLE customers"'), "a no-break space cannot fake a comment that hides psql");
+ok(checkDangerousCommand(`grep $'it\\'s' f; psql < wipe.sql # DROP TABLE x`), "ANSI-C quoting cannot hide a client in a reader segment (Codex App, PR #1337)");
+ok(checkDangerousCommand('Select-String "DROP TABLE" "C:\\logs\\"; psql < wipe.sql; echo "x"'), "a PowerShell path ending in a backslash cannot hide a client (Codex App, PR #1337)");
+ok(checkDangerousCommand('grep "DROP TABLE" "C:\\logs\\"; psql < wipe.sql; echo "x"'), "the same quoting after grep stays refused");
+ok(checkDangerousCommand('grep "DROP TABLE" C:\\logs\\; psql < wipe.sql'), "an unquoted backslash before a separator cannot hide a client (Codex App, PR #1337)");
+ok(checkDangerousCommand('rg "DROP TABLE" x\\| psql < wipe.sql'), "an unquoted backslash before a pipe cannot hide a client either");
+ok(checkDangerousCommand(`grep "DROP TABLE" f <# ' #>; psql < wipe.sql; echo '`), "a PowerShell block comment cannot hide a client (Codex App, PR #1337)");
+ok(checkDangerousCommand('grep "DROP TABLE" f --% "; psql < wipe.sql'), "PowerShell's stop-parsing token cannot hide a client");
+ok(checkDangerousCommand(`rg 'DROP TABLE' psql.log @opts`), "PowerShell splatting can hide --pre, so it is not a plain reader (Luna, PR #1337)");
+ok(checkDangerousCommand('./grep "DROP TABLE" psql -c "DROP TABLE customers"'), "a path-qualified reader name may be any program (Luna, PR #1337)");
+ok(checkDangerousCommand(`grep() { psql -c 'DROP TABLE customers'; }; grep x f`), "a function shadowing a reader in the same command stays refused");
+ok(checkDangerousCommand(`rg 'DROP TABLE' psql.log *`), "an unquoted glob can expand into rg --pre, so rg loses the exemption (Codex App, PR #1337)");
+ok(!checkDangerousCommand(`rg "DROP TABLE|psql" '*.sql'`), "a quoted glob is passed to rg as text and stays allowed");
+ok(checkDangerousCommand(`rg 'DROP TABLE' f ' & psql < wipe.sql & echo '`), "cmd.exe does not quote with ', so a single-quoted & cannot hide a client (Codex App, PR #1337)");
+ok(checkDangerousCommand(`grep "DROP TABLE %X%" psql.log`), "cmd.exe expands %VAR% inside double quotes, so it is not plain");
+ok(checkDangerousCommand(`grep "DROP TABLE ”; psql < wipe.sql; echo “" f`), "a PowerShell smart quote cannot hide a client (Codex App, PR #1337)");
+ok(checkDangerousCommand(`rg --hostname-bin psql 'DROP TABLE' notes.md`), "rg --hostname-bin runs a program, so it stays refused (Codex App, PR #1337)");
+ok(checkDangerousCommand(`rg --search-zip 'DROP TABLE|psql' notes.md`), "rg --search-zip runs a decompressor, so it is not exempt");
+ok(checkDangerousCommand(`rg -nz 'DROP TABLE|psql' notes.md`), "rg's short -z bundle is --search-zip");
+ok(!checkDangerousCommand(`rg -n "DROP TABLE|psql" notes.md`), "an ordinary rg flag stays allowed");
+ok(!checkDangerousCommand(`grep -n 'psql $(x) DROP TABLE' notes.md`), "a single-quoted $( in a reader pattern runs nothing and stays allowed");
 ok(!checkDangerousCommand("npm run build"), "npm run build allowed");
 ok(!checkDangerousCommand("git status"), "git status allowed");
 ok(!checkDangerousCommand("git push origin feature/x"), "ordinary feature push allowed");
@@ -483,7 +558,7 @@ ok(!checkDangerousCommand("cat .env.example"), "reading .env.example is not a wr
 
 // ── migration-modify check (unchanged) ─────────────────────────────────────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bash-safety-migtest-"));
+  const tmp = tempDir("bash-safety-migtest-");
   try {
     const migDir = path.join(tmp, "supabase", "migrations");
     mkdirSync(migDir, { recursive: true });
@@ -505,7 +580,7 @@ ok(!checkDangerousCommand("cat .env.example"), "reading .env.example is not a wr
 
 // ── FIX 2: npm-script indirection ──────────────────────────────────────────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bash-safety-npmtest-"));
+  const tmp = tempDir("bash-safety-npmtest-");
   try {
     const pkg = {
       scripts: {
@@ -650,7 +725,7 @@ eq(extractNpmRunNames("npm --loglevel=silent run dangerous")[0], "dangerous", "n
   ok(chain.includes("git push --force origin main"), "prebuild lifecycle script is resolved with npm run build");
 }
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bashsafety-lifecycle-"));
+  const tmp = tempDir("bashsafety-lifecycle-");
   try {
     writeFileSync(path.join(tmp, "package.json"), JSON.stringify({
       scripts: { build: "echo building", postbuild: "git reset --hard HEAD~1" },
@@ -676,7 +751,7 @@ eq(checkDangerousCommand("dotenv -e .env.test -- npm run test"), null, "mentioni
 // ── Codex P1 2026-07-13: npm-resolved script bodies must also hit the
 //    migration-immutability check, not just the dangerous-command table ──────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bashsafety-npm-mig-"));
+  const tmp = tempDir("bashsafety-npm-mig-");
   try {
     mkdirSync(path.join(tmp, "supabase", "migrations"), { recursive: true });
     writeFileSync(path.join(tmp, "supabase", "migrations", "20260101000000_existing.sql"), "select 1;\n");

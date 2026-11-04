@@ -11,6 +11,7 @@ import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
+import { asProductForm } from '../lib/units';
 import { assertInvoiceLifecycleSendable, assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
@@ -1394,7 +1395,7 @@ export default function FieldApplicationInvoice() {
           // #25: per-line Warehouse / Vendor and the product form (for the gl/lb display).
           warehouse: (it.warehouse as string | null) ?? null,
           vendor: (it.vendor as string | null) ?? null,
-          product_form: (it.product_form as 'liquid' | 'dry' | null) ?? null,
+          product_form: asProductForm(it.product_form as string | null),
           epa_registration: (it.epa_registration as string | null) || undefined,
           // U4 (Codex R4): rehydrate manual pricing — a persisted manual price
           // (price_source='manual') or ANY product-less line (no tier fallback

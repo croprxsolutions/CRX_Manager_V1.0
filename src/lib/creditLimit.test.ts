@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockNotifyCreditLimitExceeded, mockRpc } = vi.hoisted(() => ({
+const { mockCaptureException, mockNotifyCreditLimitExceeded, mockRpc } = vi.hoisted(() => ({
+  mockCaptureException: vi.fn(),
   mockNotifyCreditLimitExceeded: vi.fn(),
   mockRpc: vi.fn(),
+}));
+
+vi.mock('./sentry', () => ({
+  Sentry: { captureException: mockCaptureException },
 }));
 
 vi.mock('./db', () => ({
@@ -54,6 +59,8 @@ describe('warnIfOverCreditLimit', () => {
       100000,
       'customer-1'
     );
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(mockCaptureException).not.toHaveBeenCalled();
   });
 
   it('stays silent when the credit limit is not exceeded', async () => {
@@ -72,12 +79,30 @@ describe('warnIfOverCreditLimit', () => {
 
     expect(toast).not.toHaveBeenCalled();
     expect(mockNotifyCreditLimitExceeded).not.toHaveBeenCalled();
+    expect(mockCaptureException).not.toHaveBeenCalled();
   });
 
-  it('swallows an RPC error without throwing', async () => {
-    mockRpc.mockRejectedValueOnce(new Error('RPC unavailable'));
+  it('warns that it could not check when the RPC returns an error', async () => {
+    const rpcError = { message: 'permission denied', code: '42501' };
+    mockRpc.mockResolvedValueOnce({ data: null, error: rpcError });
+    const toast = vi.fn();
 
-    await expect(warnIfOverCreditLimit('customer-1', vi.fn())).resolves.toBeUndefined();
+    await expect(warnIfOverCreditLimit('customer-1', toast)).resolves.toBeUndefined();
+
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith('warning', expect.stringContaining("Couldn't check"));
+    expect(mockCaptureException).toHaveBeenCalledWith(rpcError, expect.anything());
+    expect(mockNotifyCreditLimitExceeded).not.toHaveBeenCalled();
+  });
+
+  it('warns that it could not check when the RPC call rejects, without throwing', async () => {
+    mockRpc.mockRejectedValueOnce(new Error('RPC unavailable'));
+    const toast = vi.fn();
+
+    await expect(warnIfOverCreditLimit('customer-1', toast)).resolves.toBeUndefined();
+
+    expect(toast).toHaveBeenCalledWith('warning', expect.stringContaining("Couldn't check"));
+    expect(mockCaptureException).toHaveBeenCalledTimes(1);
     expect(mockNotifyCreditLimitExceeded).not.toHaveBeenCalled();
   });
 

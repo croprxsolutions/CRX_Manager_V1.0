@@ -803,6 +803,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
                 <UnitSelect
                   unitConversions={unitConversions}
                   form={productForm}
+                  inventoryUnit={catalog?.inventory_unit}
                   value={product.unit}
                   onChange={(value) => updateProduct(product.tempId, 'unit', value)}
                   disabled={saving || attemptUncertain}
@@ -825,6 +826,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
                 <UnitSelect
                   unitConversions={unitConversions}
                   form={productForm}
+                  inventoryUnit={catalog?.inventory_unit}
                   value={product.rate_per_acre_unit}
                   onChange={(value) => updateProduct(product.tempId, 'rate_per_acre_unit', value)}
                   disabled={saving || attemptUncertain}

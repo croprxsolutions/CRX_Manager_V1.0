@@ -11,6 +11,7 @@ import path from "node:path";
 import {
   ENFORCEMENT_SURFACE_PATH_RE,
   extractPatchDestinations,
+  folderVariableValue,
   nativePatchEnvelope,
   reviewProofPathMentioned,
   reviewStateDirectoryMentioned,
@@ -294,6 +295,13 @@ function segmentsHitStateDir(value) {
 // dev-server config no guard reads.) Reads and the regenerate scripts (which write
 // the file themselves) are untouched.
 const SCHEMA_REGISTRY_RE = /(?:^|[\s"'=:/\\({,])\.claude[/\\]+(?:schema-registry|caller-graph|active-areas)\.json(?![\w.-])/i;
+// A path below an agent worktree that the guard cannot read for certain: an
+// expansion (`$X`, `%X%`, `!X!`, backtick), a cmd caret, a glob, or a `.`/`..`
+// segment can each BE the worktree root or its `.claude/session-state`. These
+// are the eight exploit spellings pinned in review-proof-guard.test.mjs.
+const WORKTREE_DEEP_UNSURE_RE = /\.claude[/\\]+worktrees[/\\][^\s;&|<>]*?(?:[$`%!^*?[\]{}]|(?:^|[/\\])\.{1,2}(?=[/\\]|$|[\s"';&|<>,}]))/i;
+// A worktree root written plainly (`…/.claude/worktrees/<name>`), nothing below it.
+const WORKTREE_ROOT_RE = /^(?:[A-Za-z]:|\/[A-Za-z])?[^\s"';&|<>$`%!^*?[\]{}]*[/\\]\.claude[/\\]+worktrees[/\\]+[^/\\\s"';&|<>$`%!^*?[\]{}]+[/\\]*$|^\.claude[/\\]+worktrees[/\\]+[^/\\\s"';&|<>$`%!^*?[\]{}]+[/\\]*$/i;
 
 function redirectTargetsStateDir(value) {
   const norm = String(value || "").replace(/\\/g, "/");
@@ -308,7 +316,9 @@ function redirectTargetsStateDir(value) {
         /(?:^|\/)\.claude\/+[^/]*[*?[\]{}]/i.test(target) ||
         /(?:^|\/)\.claude\/+(?:[^/]+\/+)*\.{1,2}(?:\/|$)/i.test(target) ||
         /(?:^|\/)\.claude\/+[^\s]*[$`%]/i.test(target) ||
-        /(?:^|\/)\.claude\/+worktrees(?:\/|$)/i.test(target) ||
+        // The worktrees folder or a whole worktree; a file deeper in one is ordinary
+        // work unless the guard cannot read it for certain (narrowed 2026-11-03).
+        /(?:^|\/)\.claude\/+worktrees(?:\/+[^/]*)?\/*$/i.test(target) || WORKTREE_DEEP_UNSURE_RE.test(target) ||
         SCHEMA_REGISTRY_RE.test(target) ||
         /(?:^|\/)\.claude\/*$/i.test(target)) return true;
   }
@@ -497,7 +507,20 @@ if (shellTool) {
   // home folder (Luna, PR #956 round 1).
   // `{` and `,` delimit a whole target too: Bash brace expansion `rm -rf {.claude,}`
   // and a PowerShell array `Remove-Item .claude,x` (CodeRabbit, PR #956).
-  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:({,]|(?<!(?:(?:^|[\s"'=({,])(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%)|(?:^|[\s"'=({,]|[A-Za-z]:)[/\\](?:Users|home)[/\\][^/\\\s"']+))[/\\])\.claude(?:[/\\]*(?=$|[\s"';&|)<>,}])|[/\\]+worktrees(?![\w-]))/i;
+  //
+  // NARROWED again 2026-11-03 (Mason, "Yes, P1–P4"): `.claude/worktrees` counts as
+  // the worktrees folder or ONE whole worktree, not every file inside one — about
+  // three quarters of 44 refusals in three days were `git mv`, `rm -f` or a script
+  // run inside a worktree. A deeper path the guard cannot read for certain still
+  // counts (WORKTREE_DEEP_UNSURE_RE), and so does a worktree's own `.claude`.
+  const STATE_DIR_ANCESTOR_RE = /(?:^|[\s"'=:({,]|(?<!(?:(?:^|[\s"'=({,])(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%)|(?:^|[\s"'=({,]|[A-Za-z]:)[/\\](?:Users|home)[/\\][^/\\\s"']+))[/\\])\.claude(?:[/\\]*(?=$|[\s"';&|)<>,}])|[/\\]+worktrees(?:[/\\]+[^/\\\s"';&|<>,}]+)?[/\\]*(?=$|[\s"';&|)<>,}]))/i;
+  // A worktree root named as the folder a command RUNS in (`cd <root> && …`,
+  // `git -C <root> …`) is not what it deletes, so it is dropped before the name
+  // test. Command position only: in `mv cd <root> /tmp` the root is an operand.
+  const withoutWorktreeFolders = (v) => v.replace(
+    /(^\s*|[;&|\r\n(]\s*)((?:cd|pushd|chdir|set-location|sl)(?:\s+\/d)?|git(?:\.exe)?\s+-C)\s+("[^"]*"|'[^']*'|[^\s;&|()<>]+)/gi,
+    (whole, lead, verb, target) => (WORKTREE_ROOT_RE.test(target.replace(/^["']|["']$/g, "")) ? `${lead}${verb} ` : whole),
+  );
   // The same narrowing for a component split: a `.claude` segment alone no longer
   // counts (that is the ancestor rule's job); `session-state` and a glob that
   // could expand to a protected name still do.
@@ -538,10 +561,30 @@ if (shellTool) {
   // needed): a `>`/`>>` write into the state dir overwrites a wrapper-owned file
   // even when its basename is globbed.
   const namesStateDir = (v) =>
-    reviewStateDirectoryMentioned(v) || STATE_DIR_ANCESTOR_RE.test(v) || segmentsHitStateDirNarrow(v) ||
-    SCHEMA_REGISTRY_RE.test(v.replace(/\\/g, "/"));
-  if (destructiveViews.some((v) => (hitsDestructiveVerb(v) && namesStateDir(v)) || redirectTargetsStateDir(v))) {
-    deny("REVIEW PROOF GUARD: destructive or overwriting shell commands touching the .claude review state directory (or its parent) are blocked — it holds wrapper-owned proofs and the applied-source ledger. Stale ledger entries are removed with node scripts/remove-applied-ledger-entry.mjs after verifying the live migration ledger.");
+    reviewStateDirectoryMentioned(v) || STATE_DIR_ANCESTOR_RE.test(v) || segmentsHitStateDirNarrow(v);
+  // The registry files count only beside a destructive verb in the SAME command
+  // (2026-11-03: `git add .claude/schema-registry.json && git commit -m "…move…"`
+  // was refused). A `cd .claude` first is caught by the cd rule below.
+  const deletesRegistry = (v) => v.split(/&&|\|\||[;|\r\n]/).some((part) =>
+    hitsDestructiveVerb(part) && SCHEMA_REGISTRY_RE.test(part.replace(/\\/g, "/")));
+  // `W=<worktree root>; … "$W" …` reads as the literal root, when
+  // folderVariableValue proves W is set once and only read after.
+  const withWorktreeVariables = (v) => {
+    const head = v.match(/^\s*([A-Za-z_]\w*)=(?:"([^"$`\\]*)"|'([^']*)'|([^\s"'$`\\;&|<>()~*?[\]{}#]+))[^\S\r\n]*(?:;(?!;)|&&|\r?\n)/);
+    const value = head && (head[2] ?? head[3] ?? head[4]);
+    if (!value || !WORKTREE_ROOT_RE.test(value) || folderVariableValue(v, head[1]) !== value) return v;
+    return v.slice(head[0].length).replace(new RegExp(`\\$\\{${head[1]}\\}|\\$${head[1]}(?![\\w])`, "g"), () => value);
+  };
+  // The path-less wipers (`find -delete`, `git clean`, `rsync --delete`) aimed at
+  // any worktree keep the old breadth: run from a worktree root they erase its
+  // `.claude/session-state` without naming it.
+  const worktreeWiper = destructiveViews.some((v) =>
+    (FIND_TRAVERSAL_DELETE_RE.test(v) || GIT_CLEAN_RE.test(v) || /\bgit\s+-C\s+\S+\s+clean(?![\w-])/i.test(v) || RSYNC_DELETE_RE.test(v)) &&
+    /\.claude[/\\]+worktrees(?![\w-])/i.test(v));
+  if (worktreeWiper || destructiveViews.map(withWorktreeVariables).some((v) =>
+    (hitsDestructiveVerb(v) && (namesStateDir(withoutWorktreeFolders(v)) || WORKTREE_DEEP_UNSURE_RE.test(v))) ||
+    deletesRegistry(v) || redirectTargetsStateDir(v))) {
+    deny("REVIEW PROOF GUARD: destructive or overwriting shell commands touching the .claude review state directory (or its parent) are blocked — it holds wrapper-owned proofs and the applied-source ledger. Stale ledger entries are removed with node scripts/remove-applied-ledger-entry.mjs after verifying the live migration ledger. The folder name anywhere in the command counts, even in a read-only search or filter such as `grep -v session-state`: run the move or delete and the search as separate commands.");
   }
   // A destructive verb anywhere in a command that cds into the repo's `.claude`
   // (or below it: hooks, commands, agents, skills, workflows, the state dir) keeps
@@ -550,6 +593,10 @@ if (shellTool) {
   // `~/.claude` (agent memory) stays out, matching STATE_DIR_ANCESTOR_RE.
   const namesRepoClaude = (t) => {
     const p = String(t).replace(/["']/g, "").replace(/\\/g, "/");
+    // A worktree's own files are a checkout, not the repo's `.claude` (2026-11-03);
+    // its `.claude`, a `.`/`..` step or an unreadable part still counts.
+    const tree = p.match(/(?:^|\/)\.claude\/+worktrees\/+[^/]+(\/.*)?$/i);
+    if (tree && !/(?:^|\/)(?:\.claude|\.{1,2})(?:\/|$)/i.test(tree[1] || "") && !/[$%`*?[\]{}!^]/.test(p)) return false;
     return /(?:^|\/)\.claude(?:\/|$)/i.test(p) && (/(?:^|\/)\.\.(?:\/|$)/.test(p) ||
       !/^(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|(?:[A-Za-z]:|\/[A-Za-z])?\/(?:Users|home)\/[^/]+)\/+\.claude(?:\/|$)/i.test(p));
   };
@@ -561,7 +608,21 @@ if (shellTool) {
     destructiveViews.some((v) => v.split(/[\s;&|()<>=,{}]+/).some(namesRepoClaude));
   const cdEntersRepoClaude = cdTargetsSeen.some(namesRepoClaude) ||
     (cdTargetsSeen.some((t) => /[$%`*?[\]{}]/.test(t)) && commandNamesRepoClaude());
-  if (cdEntersRepoClaude && destructiveViews.some(hitsDestructiveVerb)) {
+  // From inside a worktree, `..` steps up toward `.claude/worktrees` and the
+  // repo's own `.claude` (pinned exploit rounds 2 and 4).
+  // `git -C <worktree> rm -rf .` runs there too (Luna round 2).
+  const cdEntersWorktree = cdTargetsSeen.some((t) => /(?:^|[/\\])\.claude[/\\]+worktrees(?:[/\\]|$)/i.test(t)) ||
+    destructiveViews.some((v) => /\bgit(?:\.exe)?\s+-C\s+["']?[^\s"';&|]*\.claude[/\\]+worktrees(?![\w-])/i.test(v)) ||
+    (cdTargetsSeen.some((t) => /[$%`*?[\]{}]/.test(t)) && destructiveViews.some((v) => /\.claude[/\\]+worktrees(?![\w-])/i.test(v)));
+  // …and a target that is the worktree root itself or can glob onto its `.claude`
+  // (`.`, `./`, `*`, `.*`, `.[!.]*`, `.?*`) erases its state (Luna, 2026-11-03).
+  const climbsOut = (v) => /(?:^|[\s"'=:/\\({,])\.\.(?=[/\\]|$|[\s"';&|)<>,}])/.test(v) ||
+    /(?:^|[\s"'=({,])(?:\.[/\\]*|\.?\*|\.[[?][^\s"';&|)<>,}]*)(?=$|[\s"';&|)<>,}])/.test(v) ||
+    // …or a delete/move whose own target the guard cannot read (`rm -rf "$TARGET"`,
+    // `%X%`, `!X!`, a cmd `^` escape, a backtick) could be its `.claude`.
+    v.split(/&&|\|\||[;|\r\n]/).some((part) => hitsDestructiveVerb(part) && /[$%`!^]/.test(part));
+  if ((cdEntersRepoClaude && destructiveViews.some(hitsDestructiveVerb)) ||
+      (cdEntersWorktree && destructiveViews.some((v) => hitsDestructiveVerb(v) && climbsOut(v)))) {
     deny("REVIEW PROOF GUARD: a delete or move after cd into the repo's .claude folder is blocked — that folder holds the guard hooks, workflow sources and wrapper-owned review state. Run the command from the repo root with the full path so the guard can see what it touches.");
   }
 

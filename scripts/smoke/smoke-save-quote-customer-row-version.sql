@@ -133,9 +133,32 @@ BEGIN
   v_quote_after := v_quote_after_second;
   v_quote_stale_draft := v_quote_after;
 
+  -- Since 20261105160000 a draft becomes sent only through the send, which records
+  -- its version first: a draft -> sent save is refused and nothing lands.
+  BEGIN
+    PERFORM public.save_quote(v_quote, jsonb_build_object(
+      'quote_number', '[SMOKE] RVQ-' || v_suffix, 'customer_id', v_customer, 'status', 'sent', 'tier', 1,
+      'header_notes', 'UNSENT-MUST-NOT-LAND', 'row_version_expected', v_quote_after),
+      v_sections, v_admin, 'rv-quote-unsent-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: save_quote marked a draft sent with no version';
+  EXCEPTION WHEN OTHERS THEN
+    v_error := SQLERRM;
+    IF v_error LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_error NOT LIKE 'QUOTE_SEND_REQUIRED:%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: draft -> sent save raised % instead of QUOTE_SEND_REQUIRED', v_error;
+    END IF;
+  END;
+  IF (SELECT row_version FROM quotes WHERE id = v_quote) <> v_quote_after
+     OR (SELECT status FROM quotes WHERE id = v_quote) <> 'draft'
+     OR (SELECT header_notes FROM quotes WHERE id = v_quote) <> 'fresh-second' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the refused draft -> sent save changed the quote';
+  END IF;
+  PERFORM public.create_quote_version(v_quote, v_admin, 'presented', 'rv-quote-send-' || v_suffix, v_quote_after);
+  SELECT row_version INTO v_quote_after FROM quotes WHERE id = v_quote;
+
   -- Exercise the canonical lifecycle assignments that were moved into the
-  -- single consolidated UPDATE. A valid draft -> sent save must bump exactly
-  -- once, stamp sent_at once, and persist the supplied money-routing
+  -- single consolidated UPDATE. A save of the sent quote must bump exactly
+  -- once, keep the send's sent_at, and persist the supplied money-routing
   -- split. Saving sent again must preserve both the timestamp and split.
   v_q := public.save_quote(v_quote, jsonb_build_object(
     'quote_number', '[SMOKE] RVQ-' || v_suffix,
@@ -159,7 +182,7 @@ BEGIN
      OR v_q->'commission_split' IS DISTINCT FROM v_split_after
      OR v_split_after#>>'{splits,0,recipient_user_id}' IS DISTINCT FROM v_admin::text
      OR (v_split_after#>>'{splits,0,percentage}')::numeric IS DISTINCT FROM 100::numeric THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: draft-to-sent save lost status, sent_at, commission split, or exact N+1 token';
+    RAISE EXCEPTION 'SMOKE_FAIL: sent save lost status, sent_at, commission split, or exact N+1 token';
   END IF;
   v_quote_after := v_quote_after_second;
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { scratchHookEnvironment } from "./git-test-env.mjs";
-import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded } from "./codex-push-lib.mjs";
+import { claudeProofValid, contentIsRisky, readHookInputBounded, createHardGateBudget, commandFedToInterpreter, expandNestedCommands, hardGateBudgetDenial, hookDeadlineMs, nestedTooDeepDenial, shellArgvWord, splitShellArgv, ghApiMutates, splitCommandSegments, ghMergeRequest, ghApiMergeRequest, describeRiskyContent, riskyContentMatches, sanitizeForMessage, unquoteGitPath, gitPushCwd, mainPushIsForced, mainPushSource, pushIsForced, isGitPush, executableTransportSettings, urlUsesUnknownTransport, environmentSelectsDifferentRepo, pushContextIsAmbiguous, pushTargetsCurrentHead, pushUsesBulkMode, reviewProofPathMentioned, reviewStateDirectoryMentioned, extractPatchDestinations, proofValid, SOL_PROOF_MAX_AGE_MS, CLAUDE_PROOF_MAX_AGE_MS, repoIsGuardedApp, urlIsGuardedApp, environmentCarriesTransportOverride, pushDestinationToken, destinationLooksLikeUrl, shellSegments, riskyFiles, pushParseCostExceeded, nativeFolder } from "./codex-push-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const now = Date.parse("2026-07-13T18:00:00.000Z");
 const sha = "a".repeat(40);
@@ -97,8 +97,31 @@ assert.equal(pushUsesBulkMode("git push origin --branches"), true);
 assert.equal(pushUsesBulkMode("git push origin --mirror"), true);
 assert.equal(pushUsesBulkMode("git push origin --prune"), true);
 assert.equal(pushUsesBulkMode("git push origin feature"), false);
-assert.equal(pushContextIsAmbiguous("cd C:/other && git push origin main"), true);
+// A push beside any directory change stays refused, as on main (P2's cd binding
+// was dropped, Mason "ship safe parts" 2026-11-03); a bare `cd` now counts too.
+assert.equal(pushContextIsAmbiguous("cd C:/other && git commit -m x"), false);
+for (const command of [
+  "cd C:/other && git push origin main",
+  "cd /c/other; git add a && git push origin main",
+  'W="C:/other"; cd "$W" && git push origin main',
+  "cd C:/a && git -C C:/b push origin x; cd C:/c",
+  "git -C C:/b push origin x; cd C:/c",
+  "(cd C:/a && git push origin main)",
+  "git push origin main; cd C:/c",
+  // Luna final review, 2026-11-03: a bare cd/popd.
+  "cd && git push origin main",
+  "cd - && git push origin feature",
+  "cd; git push origin main",
+  "git push origin main; popd",
+  "cd C:/a && GIT_DIR=C:/b/.git git push origin main",
+]) assert.equal(pushContextIsAmbiguous(command), true, command);
 assert.equal(pushContextIsAmbiguous("Set-Location C:/other; git.exe push origin main"), true);
+// P1 (2026-11-03): Git Bash `/c/...` paths name the real drive on Windows.
+assert.equal(nativeFolder("/c/CRX_Manager/x", "win32"), "C:/CRX_Manager/x");
+assert.equal(nativeFolder("/d", "win32"), "D:/");
+assert.equal(nativeFolder("/d/", "win32"), "D:/");
+assert.equal(nativeFolder("/cx/y", "win32"), "/cx/y");
+assert.equal(nativeFolder("/c/x", "linux"), "/c/x");
 assert.equal(pushContextIsAmbiguous("$env:GIT_DIR='C:/other/.git'; git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("GIT_WORK_TREE=/tmp/other git push origin main"), true);
 assert.equal(pushContextIsAmbiguous("git -C C:/other push origin main"), false);
@@ -1188,7 +1211,7 @@ assert.equal(pushDestinationToken("git push"), null);
 // through. Exercising the HOOK is the only thing that proves the gate closed.
 {
   const HOOK = path.join(path.dirname(fileURLToPath(import.meta.url)), "codex-push-guard.mjs");
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "codex-push-guard-env-"));
+  const tmp = tempDir("codex-push-guard-env-");
   const work = path.join(tmp, "work");
   const dest = path.join(tmp, "dest.git");
   const git = (args, cwd) => spawnSync("git", args, { cwd, encoding: "utf8", env: scratchHookEnvironment(cwd, process.env) });
@@ -2417,7 +2440,7 @@ assert.equal(pushDestinationToken("git push"), null);
 // `pwsh -enc <base64 of a force-push to main>` passed this guard untouched.
 {
   const HOOK = path.join(path.dirname(fileURLToPath(import.meta.url)), "codex-push-guard.mjs");
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "codex-push-guard-nested-"));
+  const tmp = tempDir("codex-push-guard-nested-");
   const encode = (text) => Buffer.from(text, "utf16le").toString("base64");
   const runHook = (command) => {
     const res = spawnSync(process.execPath, [HOOK], {
@@ -2519,7 +2542,7 @@ assert.equal(pushDestinationToken("git push"), null);
 
   // The real hooks, end to end.
   const hooksDir = path.dirname(fileURLToPath(import.meta.url));
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "push-parse-time-"));
+  const tmp = tempDir("push-parse-time-");
   const hooks = [
     ["Claude push guard", path.join(hooksDir, "codex-push-guard.mjs"), (command) => ({ tool_name: "Bash", cwd: tmp, tool_input: { command } })],
     ["Codex production guard", path.join(hooksDir, "..", "..", ".codex", "hooks", "production-action-guard.mjs"),

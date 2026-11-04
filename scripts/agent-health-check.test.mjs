@@ -2,8 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,6 +29,8 @@ import {
   checkCodexRuntimeHooks,
   checkFilesPresent,
   checkGitHooksInstalled,
+  HAND_OFF_HOOKS,
+  hookHandOff,
   compareCodexHooks,
   compareSyncedFiles,
   probeCodexHooks,
@@ -38,6 +39,7 @@ import {
 } from "./agent-health-check.mjs";
 import { clearWorktreeOverride } from "./install-git-hooks.mjs";
 import { gitLocalEnvironmentNames } from "../.claude/hooks/git-test-env.mjs";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 // Git exports GIT_DIR (and friends) to hook child processes. This file builds
 // throwaway repositories and calls checkGitHooksInstalled() IN-PROCESS, so an
@@ -59,7 +61,7 @@ for (const name of Object.keys(process.env)) {
   if (/^GIT_CONFIG_(?:KEY|VALUE)_\d+$/.test(name)) delete process.env[name];
 }
 
-const root = mkdtempSync(path.join(os.tmpdir(), "crx-agent-health-"));
+const root = tempDir("crx-agent-health-");
 
 try {
   for (const dir of [
@@ -219,7 +221,7 @@ try {
   // resolves to a directory that is not there. Each FAIL branch is asserted, not
   // just the happy path: on 2026-08-31 fourteen live worktrees were in one of
   // these states, all reporting perfectly normal `git commit` output.
-  const hooksRepo = mkdtempSync(path.join(os.tmpdir(), "crx-hooks-"));
+  const hooksRepo = tempDir("crx-hooks-");
   try {
     const git = (...args) =>
       execFileSync("git", ["-C", hooksRepo, ...args], {
@@ -278,7 +280,7 @@ try {
     // different branch. Six live worktrees pointed at an abandoned Codex checkout.
     git("config", "core.hooksPath", path.join(hooksRepo, ".husky"));
     assert.equal(checkGitHooksInstalled(hooksRepo).status, "PASS", "own worktree by absolute path is still this worktree");
-    const foreign = mkdtempSync(path.join(os.tmpdir(), "crx-foreign-hooks-"));
+    const foreign = tempDir("crx-foreign-hooks-");
     try {
       mkdirSync(path.join(foreign, ".husky"), { recursive: true });
       writeHook(path.join(foreign, ".husky"), "pre-commit");
@@ -287,6 +289,34 @@ try {
       const outside = checkGitHooksInstalled(hooksRepo);
       assert.equal(outside.status, "FAIL");
       assert.match(outside.note, /tracked \.husky/);
+
+      // The desktop app writes the main checkout's .husky; hooks that START with the
+      // exact hand-off to this worktree's own copy make that safe.
+      writeHook(path.join(hooksRepo, ".husky"), "commit-msg");
+      for (const name of HAND_OFF_HOOKS) {
+        writeFileSync(path.join(foreign, ".husky", name), "#!/usr/bin/env sh\n# CRX_OWN_HOOK hand-off\n");
+      }
+      assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "a marker without the hand-off code is not a hand-off");
+      for (const name of HAND_OFF_HOOKS) {
+        writeFileSync(path.join(foreign, ".husky", name), `${hookHandOff(name)}exit 1\n`);
+        chmodSync(path.join(foreign, ".husky", name), 0o755);
+      }
+      const handsOff = checkGitHooksInstalled(hooksRepo);
+      assert.equal(handsOff.status, "PASS", "hooks that hand off to this worktree's copy are safe");
+      assert.match(handsOff.note, /hands off/);
+      if (process.platform !== "win32") {
+        // git runs the configured copy first; a 0644 one is skipped before it can hand off.
+        chmodSync(path.join(foreign, ".husky/pre-push"), 0o644);
+        assert.match(checkGitHooksInstalled(hooksRepo, "linux").note, /non-executable pre-push/);
+      }
+      for (const name of HAND_OFF_HOOKS) chmodSync(path.join(foreign, ".husky", name), 0o755);
+      rmSync(path.join(foreign, ".husky/commit-msg"));
+      assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "every hook, commit-msg included, must hand off");
+      writeFileSync(path.join(foreign, ".husky/commit-msg"), hookHandOff("commit-msg"));
+      chmodSync(path.join(foreign, ".husky/commit-msg"), 0o755);
+      rmSync(path.join(hooksRepo, ".husky/pre-push"));
+      assert.equal(checkGitHooksInstalled(hooksRepo).status, "FAIL", "hand-off needs this worktree's own hooks");
+      writeHook(path.join(hooksRepo, ".husky"), "pre-push");
 
       // Any other in-worktree directory holding two executable hooks would pass a
       // containment test while git bypassed the tracked .husky entirely.
@@ -303,7 +333,7 @@ try {
       // the expected path keeps `.husky` literal, the configured one is resolved.
       // Junctions need no privilege on Windows; if the link cannot be made, skip
       // rather than assert a false pass.
-      const linkedRepo = mkdtempSync(path.join(os.tmpdir(), "crx-linked-husky-"));
+      const linkedRepo = tempDir("crx-linked-husky-");
       try {
         const linkedEnv = scratchHookEnvironment(linkedRepo);
         execFileSync("git", ["-C", linkedRepo, "init"], { stdio: "ignore", env: linkedEnv });
@@ -355,14 +385,19 @@ try {
   for (const line of trackedLines) {
     assert.match(line, /^100755 /, `tracked hook is not executable in the index — git skips it on POSIX: ${line}`);
   }
+  // Pins the real hooks to the hand-off agent-health accepts (and keeps the three in step).
+  for (const hook of HAND_OFF_HOOKS) {
+    const text = normalizeEol(readFileSync(path.join(repoRoot, ".husky", hook), "utf8"));
+    assert.ok(text.startsWith(hookHandOff(hook)), `.husky/${hook} must start with hookHandOff("${hook}")`);
+  }
 
   // scripts/install-git-hooks.mjs — the `prepare` script. A per-worktree
   // core.hooksPath OUTRANKS the shared local value, so writing the shared value
   // alone leaves a stale foreign override effective and `npm install` reports
   // success while repairing nothing. Exercised against a real repository with a
   // real linked worktree, because that precedence is the whole point.
-  const installRepo = mkdtempSync(path.join(os.tmpdir(), "crx-install-hooks-"));
-  const installWorktree = mkdtempSync(path.join(os.tmpdir(), "crx-install-wt-"));
+  const installRepo = tempDir("crx-install-hooks-");
+  const installWorktree = tempDir("crx-install-wt-");
   try {
     // Scrubbed per-call, keyed to the directory being acted on: this block spans two
     // fixture repositories, and the `git config user.email/user.name` calls just below

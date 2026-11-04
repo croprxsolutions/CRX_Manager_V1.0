@@ -78,6 +78,13 @@ export function chicagoCalendarStamp(now = new Date()) {
   return `${value('year')}${value('month')}${value('day')}`;
 }
 
+// A stale stamp fails only the change that can fix it: one adding a migration or
+// touching the two live-state docs. Everyone else gets a warning (2026-11-03 retro).
+export function freshnessEnforcedFor(changedFiles) {
+  return changedFiles.some((file) => file.startsWith('supabase/migrations/')
+    || file === 'docs/manual/CURRENT_STATE.md' || file === 'docs/manual/KNOWN_ISSUES.md');
+}
+
 export function manualFreshnessBoundary(newestMigrationDate, todayChicago) {
   if (!newestMigrationDate) return undefined;
   return newestMigrationDate > todayChicago ? todayChicago : newestMigrationDate;

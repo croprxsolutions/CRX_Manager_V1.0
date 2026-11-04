@@ -1,0 +1,3 @@
+## 2026-11-03 - Clarify migration handoff and permission-change approval
+
+Clarify the existing Codex-to-Claude migration handoff, the apply script's dry run, and the difference between applying a migration live and merging its PR. Say plainly that a migration that changes permissions, routine grants included, still needs Mason's explicit approval in the current conversation even when the apply gate's classifier treats it as eligible; this matches the existing AGENTS.md rule for permission changes. The Codex production guard's refusal message now says the same. No guard logic, classifier or production authority changes. Written 2026-10-31 in `C:\CRX_Apply_guidance` and never committed; found by the 2026-11-03 folder cleanup audit and ported onto current main.

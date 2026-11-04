@@ -10,6 +10,149 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-04 — A byte-identical migration restamp keeps its Sol and reviewer proofs
+
+**Source:** Mason, 2026-11-04, in the retro of the WP-PM-11a-1 session (PR #1425, product rate lock), choosing that byte-identical restamps keep their Sol and reviewer proofs, then "spin up item 1".
+
+**Decision.** When a reviewed migration must take a new timestamp because a newer one went live,
+and the SQL is byte-identical (LF-normalized), the existing proofs carry to the new stamp instead
+of a full re-review: the Sol proof (`write-codex-push-proof.mjs --carry-restamp`) and both
+migration-reviewer proofs (`write-apply-proofs.mjs --restamp-from <old> <new>`). The carry needs
+one commit on top of the reviewed head that only renames that migration and swaps the old stamp
+for the new one elsewhere, and every proof still inside its original 24 hours. Anything else
+refuses and the full review runs.
+
+**Why.** On 2026-11-04 `20261105200000_product_rate_lock` was approved, then refused at apply
+because another session had applied `20261106110000` meanwhile. Restamping it to `20261106120000`
+with identical SQL cost a new Sol run (about 15-40 minutes), re-minted reviewer proofs and a
+second owner approval. It was the third such collision.
+
+**What this forbids/implies:** Mason's owner approval (`owner-approve-migration.mjs`, his
+`I approve`) never carries; a parked migration is re-approved for the new stamp. Destructive-
+migration approval is never carried. Every other apply and merge check is unchanged.
+## 2026-11-04 — Inventory costing: plan settled before any build
+
+**Source:** Mason, 2026-11-04, a planning session on the research report (PR #1428): "I want to plan and
+brainstorm our entire plan before we build anything", then answers to each open question.
+
+**Decision.** For the inventory-costing plan (`docs/plans/2026-07-16-inventory-costing-plan.md`, section 12):
+- Only admins see the new cost numbers.
+- The holding-cost rate is a flat 10% a year, as an admin setting he can change later.
+- Stock is flagged at 270 days.
+- No lot tracking; estimated age is enough.
+- No freight or rebates for now, so Phase 3 is dropped.
+- Special orders show both the booked and the corrected margin.
+- The build order is Phase 1 → 2 → 4 → 5.
+- Purchases go back through CRX POs and receiving (since June they were made by phone and email).
+- Phase 2 starts fresh from a stock count with confirmed starting costs before busy season, with no back-entry.
+- Chemical totes are stocked already filled. Bulk storage exists only for fertilizer.
+
+**Rule.** Nothing in the plan is built until Mason gives a separate go-ahead for that phase (D1 is still open).
+Each phase gets its own plan, Luna review and Sol review.
+
+## 2026-11-04 — A trigger's TRUNCATE event no longer counts as deleting data
+
+**Source:** Mason, 2026-11-04, in the retro of the WP-PM-11a-1 session (PR #1425): "spin up item 2".
+
+**Decision.** `destructiveMigrationCheck` (`.claude/hooks/live-testdata-lib.mjs`) ignores `TRUNCATE`
+only where it is an event in a `CREATE [OR REPLACE] [CONSTRAINT] TRIGGER … BEFORE|AFTER|INSTEAD OF … ON`
+event list. Such a trigger blocks a table wipe; it cannot perform one. Every real `TRUNCATE`
+statement stays destructive: at top level, in a DO block, in an `EXECUTE` string, or beside a
+trigger in the same file. A function the migration runs that truncates is still parked by the
+data-rewrite check. The destructive-migration approval gate is otherwise unchanged.
+
+**Why.** PR #1425's append-only audit tables use `BEFORE TRUNCATE` triggers, and the owner-approval
+screen told Mason that migration "Deletes data: TRUNCATE", which was false.
+
+## 2026-11-03 — A migration's apply accepts a carried-forward Sol proof
+
+**Source:** Mason, about 11 PM Central on 2026-11-03 (session 0beec9c6, after the PR #1389 landing): "Yes, update the rule".
+
+**Decision.** A migration's live apply needs a Sol proof bound to its exact head, which may be
+a full Sol review or `node scripts/write-codex-push-proof.mjs --carry-forward` of one after a
+conflict-free merge of main. This supersedes "a migration always needs Sol of its exact head"
+(ship.md Step 8). No gate code changes: the apply gate's `proofValid` already accepted carried
+proofs. A carry with no model call needs every new main change to be plain documentation, since
+the PR's own migration is not; any code, database or shared-file change from main gets the
+focused Sol collision check.
+
+**Why.** PR #1389 (2026-11-03) waited out five main moves. Each cost a full Sol run plus the
+15-minute wait for the Codex GitHub App, about 20 minutes per round, for merges that changed
+nothing in the migration.
+
+**What this forbids/implies:** the carry is run before the apply, on the head that will merge.
+A conflict, a hand edit in the merge or any doubt refuses the carry, and the full review runs.
+
+## 2026-11-03 — Live smoke chains run byte-exact with Mason's Supabase token
+
+**Source:** Mason, about 7:30 PM Central on 2026-11-03 (session d0657249, retro proposal 1): "Do 1 (approve token)".
+
+**Decision.** `npm run smoke:live` (`scripts/smoke/run-smoke.mjs --live`) may use the Supabase
+Management token in Credential Manager to run post-apply smoke chains on live. This extends the
+2026-11-02 read-only sweep approval (`docs/manual/SERVICES_AND_ACCOUNTS.md`). It sends only chain
+files named in `scripts/smoke/smoke-specs.json`, unchanged, and refuses any file without
+`SMOKE_PASS_ROLLBACK`. The requests are not `read_only`, because each chain writes test rows and
+then rolls them back with its final error. Agents no longer retype chains into MCP `execute_sql`.
+
+**Why.** On 2026-11-03 (PR #1398) one 15KB chain was retyped by hand. That is the failure that cut
+off sweeps and led to `db-sweeps:live`, and a retyped chain can't prove the file itself ran. A
+33KB chain also ran from a throwaway script, using the token before Mason had approved it.
+
+## 2026-11-03 — Product Master Wave 3 plan fixes (vendor steps, rate lock split, gates)
+
+**Source:** Mason's in-chat "ok fix all issues" on 2026-11-03, after an independent read-only review
+of the Wave 3 plan. The review found the plan behind the built vendor work, two unstated facts, and
+start gates that could not be checked.
+
+**Decision.**
+- WP-PM-15b is three steps: vendor-only links (#1381, live), the DATA-11 data step (PR #1385), and enforcement.
+- An app-only change that makes Vendor read-only on saved products deploys before enforcement applies, so no ordinary write is refused in the gap.
+- WP-PM-11a splits into 11a-1 (a new `set_product_rates` writer, the rate lock, the correction operation) and 11a-2 (the setup workbook, without a Vendors tab).
+- The lock covers `rate_per_acre`, `rate_unit` and `suggested_rate`, not the label facts.
+- WP-PM-10 depends on 11a-1 only.
+- The Wave 3 gate is a list of named migrations, the verified vendor data step and a DM-0 gate query, as in mission §5.
+
+**Why.**
+- Rate writes reprice customer-facing per-acre prices through `recalc_product_price_per_acre`, so they need previews and approval like price changes.
+- No rate writer existed for 11a and 10 to share.
+
+## 2026-11-03 — DATA-11: the minimum vendor link and who gets a preferred vendor
+
+**Source:** Mason's DATA-11 decisions 1–4 on 2026-11-03, as recorded in the headers of migrations
+`20261105090000_vendor_only_product_links` (#1381) and `20261105100000_data11_preferred_vendor_links`
+(PR #1385). The row list is in his private vault, not here.
+
+**Decision.**
+1. A vendor link may name only the vendor. The vendor's item name, number, unit and pack stay blank until known, and are never invented. Such a link is never used for price imports or cost comparisons.
+2. Each active product with no link gets a preferred link to the one vendor its vendor text already names.
+3. Two products with blank vendor text were assigned a vendor by hand.
+4. A product's single existing link becomes its preferred one.
+
+**Why.** Nearly every product lacked the SKU, unit and pack that the existing link writer required, so a full-detail link could not be made without invented values.
+
+## 2026-11-03 — Each `.husky` hook hands off to the worktree's own copy
+
+**Source:** Mason's in-chat "ok do it" on 2026-11-03, after an investigation found 12 desktop-app
+worktrees running the main checkout's 132-commit-stale hooks.
+
+**Decision.** `.husky/pre-commit`, `pre-push` and `commit-msg` start by re-running the current
+worktree's own `.husky/<hook>` when `test -ef` says git launched a different file (the re-run is
+that file, so it hands off at most once; no environment flag can switch it off).
+`checkGitHooksInstalled` passes a `core.hooksPath` pointing elsewhere only when those hooks start
+with the exact `hookHandOff` lines, are executable, and this worktree's own hooks live in its own `.husky`.
+Amends the 2026-08-31 entry below; the shared value is still the relative `.husky`.
+
+**Why.** The Claude desktop app writes `core.hooksPath = C:\CRX_Manager\.husky` into a worktree's
+`config.worktree` each time it hands the worktree to a new session, so clearing it never stuck.
+Takes effect in an affected worktree once the main checkout's `.husky` has these lines.
+
+## 2026-11-02 — Draft invoice lines keep the EPA number they copied
+
+**Decision (Mason, in chat):** "I’m not worried about it the original epa line can carry". An invoice line keeps the EPA registration number copied when it was made, even while the invoice is still unposted. Only open jobs offer to update after a product label correction (WP-PM-12b).
+
+**Why.** Asked whether unposted invoices should also offer an EPA update after a product correction, Mason chose to leave invoice lines as copied.
+
+**What this forbids/implies:** no "update EPA" offer is built for draft or unposted invoices. Posted invoices never change (2026-10-28). Record map: `docs/reference/product-corrections-record-map.md`.
 ## 2026-11-02 — Invoice emails ship with server-written text; server-built PDFs are a later project
 
 **Decision (Mason, in chat):** "option A but make sure and note this everywhere so we don't forget it and document well to follow up in separate session with bigger work". KI-97 ships with the email service writing the invoice email's text and Amount Due from the saved invoice and checking the app's summary of its PDF. It does not wait for the server to draw the PDF itself.

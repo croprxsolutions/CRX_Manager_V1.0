@@ -39,7 +39,7 @@ export interface SupplierWorkspaceLink {
   vendor_id: string;
   vendor_name: string;
   supplier_sku: string | null;
-  supplier_product_name: string;
+  supplier_product_name: string | null;
   supplier_uom: string | null;
   supplier_pack_description: string | null;
   inventory_units_per_supplier_unit: number | null;

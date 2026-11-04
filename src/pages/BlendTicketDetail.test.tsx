@@ -328,6 +328,36 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     expect(rateUnit).toHaveValue('oz');
   });
 
+  it('offers a seed/each row the stock unit from the current catalog, not the joined row', async () => {
+    // A row added or switched in the editor has no joined product (or a stale one).
+    const savedProduct = {
+      ...baseProduct,
+      product_id: 'p1',
+      product_name: 'Corn Seed',
+      unit: '',
+      rate_per_acre_unit: '',
+      product: { id: 'p1', product_form: 'liquid', is_active: true },
+    };
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
+      if (table === 'blend_ticket_products') return buildChain({ data: [savedProduct], error: null });
+      if (table === 'products') {
+        return buildChain({
+          data: [{ id: 'p1', product_name: 'Corn Seed', product_form: 'each', inventory_unit: 'Ea', rate_unit: 'Ea', is_active: true }],
+          error: null,
+        });
+      }
+      if (table === 'unit_conversions') return buildChain({ data: unitConversions, error: null });
+      return buildChain({ data: [], error: null });
+    });
+
+    renderTicket();
+    const quantityUnit = await screen.findByRole('combobox', { name: 'Quantity unit for Corn Seed' }) as HTMLSelectElement;
+    const rateUnit = screen.getByRole('combobox', { name: 'Rate unit per acre for Corn Seed' }) as HTMLSelectElement;
+    expect(Array.from(quantityUnit.options, (option) => option.value)).toEqual(['', 'Ea']);
+    expect(Array.from(rateUnit.options, (option) => option.value)).toEqual(['', 'Ea']);
+  });
+
   // Switching the unit fields from free text to a picker made a failed unit load
   // unrecoverable: the list is empty, so the only option is the disabled '--' and
   // the operator cannot type a unit the way they used to. The failure has to be

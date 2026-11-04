@@ -39,7 +39,7 @@ Use Codex for building ("I have a lot of codex usage left").
   - If a package proves too big to review in one pass, split it into labelled sub-packages (e.g. PM-8a / PM-8b) — never half-land one.
 - **Worktree:** this loop uses two worktrees, and never edits any other.
   - **Coordinator:** this session's own worktree, on a branch `loop/product-master-w<wave>-r<attempt>-<YYYY-MM-DD>` named for the run and cut from `origin/main` at Step 0. It holds the ledger `docs/loops/product-master-ledger.md` and the morning report. This mission file itself lives on `main` at `docs/plans/2026-10-28-product-master-loop-MISSION.md`.
-  - **Build:** `C:\CRX_PMBuild`, created at Step 0, where each package branch is cut and built.
+  - **Build:** `C:\CRX_Manager\.claude\worktrees\pm-build`, created at Step 0, where each package branch is cut and built.
   - `git worktree list` is the source of truth; check it at Step 0.
 - **Definition of done:** the loop ends at whichever comes first:
   - every queue package in this run's wave (§5) has one final status, with the ledger complete and the morning report written. The statuses are DRAFTED, PARKED, REFUTED and NOT ATTEMPTED, and they must add up to the wave's total. *REFUTED* means already done or wrong against current code, with the evidence. *NOT ATTEMPTED* means the run ended first, with the reason; optional PM-12a counts here. *DRAFTED* means Codex-built, Claude-reviewed, checks green, committed, branch pushed and draft PR open; each acceptance item is marked proven or owed. It is not complete or merge-ready while any required observed behavior is owed. *PARKED* means a plain-English reason and the next step are written down.
@@ -83,7 +83,7 @@ Use Codex for building ("I have a lot of codex usage left").
 
 - **Invoke Codex only through the wrapper:** `node scripts/codex-build.mjs <specFile> --timeout 1800 [--model gpt-6-sol] [--effort xhigh]`.
   - It strips Codex's live-database, deploy and GitHub plugins (`--ignore-user-config`). That is not a sealed sandbox: Codex's shell can still run local commands and reach the network, as the wrapper's own notes say. So every spec also says: no production access, no GitHub writes, no deploys, no reading secrets or `.env`, and work only in the build worktree.
-  - Run it **in the build worktree**: `C:\CRX_PMBuild` is the working directory for the call.
+  - Run it **in the build worktree**: `C:\CRX_Manager\.claude\worktrees\pm-build` is the working directory for the call.
   - Run it in the foreground.
 - **What a spec contains.** Every spec is fully self-contained, because Codex remembers nothing between calls:
   - the exact files, and the exact behaviour from the build sheet's Approach and Sol notes;
@@ -111,7 +111,7 @@ Use Codex for building ("I have a lot of codex usage left").
   - **Real data stays private.** This repository is public. Row-level lists from live data (DM-0, PM-6a, PM-8, DATA-11) go only to `C:\Users\mason\Documents\Obsidian Vault\Products\Product Master review\`, following that vault's `CLAUDE.md`. The ledger, PRs and morning report carry counts, status and that folder's name, never the rows. If the vault is absent, PARK that output.
   - No live smoke chains tonight.
 - **Migrations:**
-  - new files under `supabase/migrations/`, with timestamps from `npm run next-migration-stamp -- --live <live max version>` (above the live high-water, `origin/main`, every local worktree and every open PR);
+  - new files under `supabase/migrations/`, with timestamps from `npm run next-migration-stamp -- --live <live high-water>` (above the live high-water, `origin/main`, every local worktree and every open PR);
   - each package uses its own distinct timestamp;
   - each comes with a rollback note;
   - CHECK changes are supersets;
@@ -133,9 +133,9 @@ Use Codex for building ("I have a lot of codex usage left").
 0. **Published plan.** `git fetch origin` and confirm `origin/main`'s copy of this file contains section 4a and the wave table. If not, the reviewed plan has not landed: end with `NEEDS MASON - ACTION REQUIRED` and change nothing.
 0a. **Context size.** A wave run needs auto-summarize at 800K; Mason's normal setting is 300K. Read `autoCompactWindow` from `~/.claude/settings.json`. If it is below `800000`, or a `modelSettings` entry overrides it, switch it with the `deep-mode` skill. That reaches only new sessions, so do no package work: end with `NEEDS MASON - ACTION REQUIRED: open a new session and paste the same prompt`. On Mason's PC only; where the file is absent, note it and continue.
 **Reuse, never recreate.** Check the ledger first. If who owns a branch or worktree is unclear, stop and ask (`run-loop.md` Step 2).
-- **The same run continuing** (a marathon handoff): reuse its loop branch, `C:\CRX_PMBuild` and ledger. Keep its start time, attempt number and handoff count. Skip items 1, 2 and 6 below.
+- **The same run continuing** (a marathon handoff): reuse its loop branch, `C:\CRX_Manager\.claude\worktrees\pm-build` and ledger. Keep its start time, attempt number and handoff count. Skip items 1, 2 and 6 below.
 - **Packages, in every run.** Before building, reconcile the ledger against branches and PRs. DRAFTED packages stay as they are. A PARKED package resumes on its existing branch and PR, after checking they are clean and current. Create a branch only when none exists, and never open a second PR for a package.
-- **A new run** (the next wave, or the rest of an unfinished wave after Mason's new go): item 1 makes a new loop branch with the next attempt number. Copy the ledger forward and record the new start time; a new run has its own 8 hours. If `C:\CRX_PMBuild` exists, confirm it is clean and unowned, run `git switch --detach origin/main` there, and skip `git worktree add`.
+- **A new run** (the next wave, or the rest of an unfinished wave after Mason's new go): item 1 makes a new loop branch with the next attempt number. Copy the ledger forward and record the new start time; a new run has its own 8 hours. If `C:\CRX_Manager\.claude\worktrees\pm-build` exists, confirm it is clean and unowned, run `git switch --detach origin/main` there, and skip `git worktree add`.
 
 1. **Coordinator.**
    - `git fetch origin`.
@@ -144,12 +144,12 @@ Use Codex for building ("I have a lot of codex usage left").
    - Confirm that the build sheet `docs/plans/2026-10-28-product-master-BUILD-SHEET.md` and this mission file are present on `origin/main`. If either is missing, PARK the whole run and report.
    - **Staleness check.** List every commit on `origin/main` since 2026-10-29 that touched `src/pages/Products.tsx`, `src/pages/ProductDetail.tsx`, `src/components/ui/Combobox.tsx`, `src/components/products/` or a `products` migration. Note in the ledger any package those commits already did or changed. A package already done on `main` becomes `REFUTED`.
 2. **Build worktree.**
-   - `git worktree add C:\CRX_PMBuild origin/main --detach`, then `npm install` inside it.
+   - `git worktree add --lock --reason "product-master build" C:\CRX_Manager\.claude\worktrees\pm-build origin/main --detach`, then `npm install` inside it. The lock stops the session-start cleanup from removing it between runs; when the loop is finished for good, run `git worktree unlock` on it so the cleanup can.
    - Run the baseline once: `npm run typecheck && npm run build && npm run lint && npm run test`. Record the result. A red baseline is not yours: note it and keep going.
 3. **Docker.** `docker info` must answer, and `docker pull postgres:17` must succeed. If Docker is down, database packages PARK, and screen-only packages continue.
 4. **Wrapper self-test.**
    - `codex --version`.
-   - A throwaway spec asking Codex to write `scripts/.codex-build-selftest.txt` with a token: run `node scripts/codex-build.mjs <spec> --timeout 300` in `C:\CRX_PMBuild`.
+   - A throwaway spec asking Codex to write `scripts/.codex-build-selftest.txt` with a token: run `node scripts/codex-build.mjs <spec> --timeout 300` in `C:\CRX_Manager\.claude\worktrees\pm-build`.
    - Confirm the file appeared with the token, then delete it. If it fails, STOP the queue and write the report.
 5. **Keep awake.** Ask the app to keep the PC awake for the run (`request_keep_awake`), if available.
 6. **Ledger.** Create `docs/loops/product-master-ledger.md` with the start time in America/Chicago and a row per queue package in this wave (status ⬜). On a later wave, continue the existing ledger from the previous loop branch. Commit it on the loop branch and push.
@@ -213,7 +213,15 @@ The order was revised by `docs/plans/2026-10-29-product-GRAND-PLAN.md` section 5
 | **0** | PM-0 alone, in a normal session through `ship.md`, not a mission run | Mason asks for it |
 | **1** | PM-1, PM-14, PM-16, PM-2, PM-4, PM-13, PM-11b; then PM-12a if at least 3 hours remain | PM-0 has landed, or Mason says to go without it |
 | **2** | PM-12a if not done, PM-3, PM-8, PM-9, DM-0, PM-5, PM-6a, PM-6b, PM-7, PM-15a, PM-12b | Wave 1 work Mason chose has landed |
-| **3** | PM-15b, PM-11a, PM-10 | Wave 2's migrations are live, PM-15a has landed, and the DATA-11 review, the approved vendor data step and DM-0's data step are done and verified |
+| **3** | PM-15b (step 3 only), PM-11a-1, PM-11a-2, PM-10 | Every condition in "Wave 3 gate" below holds, checked live and recorded in the ledger |
+
+**Wave 3 gate (revised 2026-11-03 after an independent plan review).** Each item is checked read-only at Step 0 and recorded with its date:
+- **Migrations live:** `20261102100000`, `20261102102000`, `20261103210000`, `20261104140000`, `20261104150000`, `20261104180000`, `20261104200000` and `20261105090000`. PM-6b and PM-12b do not gate Wave 3.
+- **DATA-11 decisions** are in `docs/manual/DECISION_LOG.md` (entry 2026-11-03).
+- **The vendor data step** (`20261105100000`, PR #1385) is applied with Mason's explicit go at apply time, and verified: the number of active products with exactly one active, confirmed, preferred link to a live vendor equals the number of active products.
+- **DM-0's gate query** (build sheet §2a, DM-0) returns its targets, and Mason has signed off the remaining inactive rows.
+
+**Landing order for the pending migrations:** `20261105100000` (DATA-11), then `20261105110000` (15b enforcement), then `20261105120000` (PM-6b). If PM-6b must land first, re-stamp the vendor migrations above it rather than apply an earlier stamp after a later one.
 
 Landing between waves follows `ship.md` in a normal session after Mason's word. Stages 2 to 9 are not waves: each needs its own build sheet and review first. A wave that needs more than one run resumes from the ledger.
 
@@ -235,9 +243,10 @@ Landing between waves follows `ship.md` in a normal session after Mason's word. 
 | 13 | WP-PM-6b New-product flow + basic Duplicate 💲 | sol | PM-6a | Build only the parts that don't need the back-fill: opening the new product, missing-price refusals, basic Duplicate (no chemistry copy; after PAR-1, shared values live on the parent record). Otherwise PARK |
 | 14 | WP-PM-7 One cost path + tier-order warning 💲 | sol | PM-2, PM-12a | Full: the cost-writer map first, then changes; integrate and prove both prerequisites |
 | 15a | WP-PM-15 Vendor proposals and compatible writers 💲 | sol | PM-7 | Draft the proposal/review tool and compatible writers; preserve existing behavior. Missing supplier name, SKU, unit or pack remains an unresolved proposal, never a fabricated confirmed link. No live data step tonight. |
-| 15b | WP-PM-15 Vendor enforcement 💲 | sol | PM-7, PM-15a | Draft only with all prerequisites proven; enforcement cannot apply until DATA-11 is reviewed, the live data step is separately approved and verified, and old/new app compatibility is proven. |
-| 16 | WP-PM-11a Setup workbook + rate lock 💲 | sol | PM-8, PM-12a, PM-15a, PM-15b, DM-0 | Draft only when every prerequisite is present in the branch; otherwise PARK. Setup, Rates and Vendors tabs and rate lock as in overlap 11. Not mergeable until DM-0's data step is done. |
-| 17 | WP-PM-10 Bulk import 💲 | sol | PM-5, PM-8, PM-11a (rate lock), DM-0 | Draft only when every prerequisite is present; otherwise PARK. Rates use the shared writer and lock. Not mergeable until DM-0's data step is done. |
+| 15b | WP-PM-15 Vendor enforcement 💲 | sol | PM-7, PM-15a | **Three steps; only step 3 is run work.** **Step 1** (vendor-only links and `link_product_vendor`, `20261105090000`): landed in #1381, live 2026-11-03. **Step 2** (DATA-11 data, `20261105100000`): PR #1385. It writes live data, so it needs Mason's explicit go at apply. **Step 3** (enforcement, `20261105110000`, branch `pm/wp-pm-15b-preferred-vendor-enforcement`): reuse this branch; never open a second enforcement migration. Step 3's database change refuses direct edits of `products.vendor`. The app's existing Vendor edit on saved products must therefore be removed first: deploy an app-only PR that makes Vendor read-only on existing products and drops it from list editing, then apply step 3. Otherwise PARK. **Rollback, in this order:** drop step 3's triggers and functions; deactivate step 2's links (created by its approver at apply time); clear the two vendor texts step 2 filled. None of the steps changes a price or a cost a customer sees. |
+| 16 | WP-PM-11a-1 Rate writer, rate lock, correction 💲 | sol | PM-8, PM-12a, 15b step 3 | The one rate-writing function `set_product_rates`, the "Lock rates" switch and its database check, the locked-state correction operation, and read-only rate columns in the price workbook, as in build sheet §2a WP-PM-11a. Rates reprice customer-facing per-acre prices: prove them to the cent. |
+| 16b | WP-PM-11a-2 Setup workbook 💲 | sol | PM-11a-1, DM-0 gate | Setup and Rates tabs as in build sheet §2a WP-PM-11a; no Vendors tab; the Setup tab never includes `vendor`. Not mergeable until the DM-0 gate holds. |
+| 17 | WP-PM-10 Bulk import 💲 | sol | PM-5, PM-8, PM-11a-1, DM-0 gate | Inserts through the 11a-2 Setup RPC in insert mode if it has landed, otherwise through an insert RPC that 11a-2 then reuses; rates through `set_product_rates`. Re-ground the item list first (build sheet WP-PM-10). Not mergeable until the DM-0 gate holds. |
 | 18 | WP-PM-11b List editing + phone layout | luna | PM-1 | Full |
 | 19 | WP-PM-12b Corrections to existing records | sol | PM-12a | The record map first. Build the "open jobs offer to update" path; posted invoices never change (Mason, 2026-10-28) |
 | 20 | WP-PM-13 Reorder display | luna | — | Full |

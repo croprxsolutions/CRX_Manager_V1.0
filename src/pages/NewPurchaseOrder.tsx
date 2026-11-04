@@ -25,6 +25,7 @@ import { Sentry } from '../lib/sentry';
 import { ProductOptionDetails, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
+import { costForVendor, fetchPreferredVendorCost, type CostSuggestion } from '../lib/poVendorSuggestion';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
@@ -38,6 +39,10 @@ interface POItemDraft {
   /** True once unit_cost came from an admin's costed catalog or an admin's typing. A rep's line holds a
    * placeholder 0 that must never be sent as an admin's cost if the session is promoted (Codex). */
   costFromAdmin?: boolean;
+  /** The user typed this line's unit cost, so no suggestion replaces it. */
+  costEdited?: boolean;
+  // The preferred vendor's last cost, applied while the PO is for that vendor.
+  suggestion?: CostSuggestion;
 }
 
 let keyCounter = 0;
@@ -55,6 +60,9 @@ export default function NewPurchaseOrder() {
   const isAdmin = profile?.role === 'admin';
 
   const [vendor, setVendor] = useState('');
+  // Read when an async cost lookup returns, so it checks the vendor on the form then.
+  const vendorRef = useRef(vendor);
+  useEffect(() => { vendorRef.current = vendor; }, [vendor]);
   const [expectedDate, setExpectedDate] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<POItemDraft[]>([
@@ -72,8 +80,10 @@ export default function NewPurchaseOrder() {
   const [productsLoadFailed, setProductsLoadFailed] = useState(false);
 
   // Track dirty state for unsaved changes warning
+  // Set by the user's own edits. The catalog load, a ?product= pre-fill and cost suggestions
+  // rewrite the lines too: unsaved work only once a draft exists, since submit re-saves on isDirty.
   const [isDirty, setIsDirty] = useState(false);
-  const initialLoadDone = useRef(false);
+  const savedPoIdRef = useRef<string | null>(null);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
   const skipUnsavedPromptRef = useRef(false);
   const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
@@ -138,6 +148,7 @@ export default function NewPurchaseOrder() {
         const prod = i.product_id && !i.costFromAdmin ? byId.get(i.product_id) : undefined;
         return prod ? { ...i, unit_cost: prod.current_cost || 0, costFromAdmin: true } : i;
       }));
+      if (savedPoIdRef.current) setIsDirty(true);
     }
     const uniqueVendors = [...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[];
     setVendors(uniqueVendors.sort());
@@ -147,50 +158,60 @@ export default function NewPurchaseOrder() {
   }, [isAdmin]);
 
   useEffect(() => {
-    if (!initialLoadDone.current) return;
-    setIsDirty(true);
-  }, [vendor, expectedDate, notes, items]);
-
-  useEffect(() => {
     fetchProducts();
-    setTimeout(() => { initialLoadDone.current = true; }, 0);
   }, [fetchProducts]);
+
+  // An admin's line starts at the preferred vendor's newest cost while the PO is for that vendor.
+  // Skipped once the line changed product or cost meanwhile.
+  const suggestPreferredVendorCost = useCallback(async (itemKey: string, product: Product) => {
+    const catalog = product.current_cost || 0;
+    const suggestion = await fetchPreferredVendorCost(product.id);
+    if (!suggestion) return;
+    const unitCost = costForVendor(suggestion, vendorRef.current, catalog); // the vendor on the form now, not at selection
+    setItems((prev) => prev.map((i) => (i.key === itemKey && i.product_id === product.id && !i.costEdited && i.unit_cost === catalog
+      ? { ...i, suggestion, unit_cost: unitCost, ...(unitCost !== catalog ? { costFromAdmin: true } : {}) } : i)));
+    if (savedPoIdRef.current) setIsDirty(true);
+  }, []);
 
   // Reorder deep-link: pre-fill the first line from ?product=<id> once products load.
   const preselectProductId = searchParams.get('product') || '';
   const preselectApplied = useRef(false);
+  const firstItemKey = items[0]?.key ?? '';
   useEffect(() => {
     if (preselectApplied.current || !preselectProductId || products.length === 0) return;
     const prod = products.find((p) => p.id === preselectProductId);
     if (!prod) return;
     preselectApplied.current = true;
     setItems((prev) => prev.map((i, idx) => (idx === 0
-      ? { ...i, product_id: prod.id, unit_cost: prod.current_cost || 0, unit_size: prod.unit_size || '', costFromAdmin: isAdmin }
-      : i)));
-    if (prod.vendor) setVendor((v) => v || prod.vendor || '');
-  }, [products, preselectProductId, isAdmin]);
+      ? { ...i, product_id: prod.id, unit_cost: prod.current_cost || 0, unit_size: prod.unit_size || '', costFromAdmin: isAdmin } : i)));
+    if (prod.vendor && !vendorRef.current) setVendor(vendorRef.current = prod.vendor);
+    if (isAdmin) void suggestPreferredVendorCost(firstItemKey, prod);
+  }, [products, preselectProductId, isAdmin, firstItemKey, suggestPreferredVendorCost]);
+
+  // A user edit to the lines: unsaved work.
+  const editItems: typeof setItems = (update) => { setIsDirty(true); setItems(update); };
 
   const addItem = () => {
-    setItems((prev) => [
+    editItems((prev) => [
       ...prev,
       { key: nextKey(), product_id: '', quantity_ordered: 0, unit_cost: 0, unit_size: '' },
     ]);
   };
 
   const removeItem = (key: string) => {
-    setItems((prev) => prev.filter((i) => i.key !== key));
+    editItems((prev) => prev.filter((i) => i.key !== key));
   };
 
   const updateItem = (key: string, field: keyof POItemDraft, value: string | number) => {
-    setItems((prev) =>
+    editItems((prev) =>
       prev.map((i) => (i.key === key
-        ? { ...i, [field]: value, ...(field === 'unit_cost' ? { costFromAdmin: isAdmin } : {}) }
+        ? { ...i, [field]: value, ...(field === 'unit_cost' ? { costFromAdmin: isAdmin, costEdited: true } : {}) }
         : i))
     );
   };
 
   const assignProduct = (itemKey: string, product: Product) => {
-    setItems((prev) =>
+    editItems((prev) =>
       prev.map((i) =>
         i.key === itemKey
           ? {
@@ -199,12 +220,22 @@ export default function NewPurchaseOrder() {
               unit_cost: product.current_cost || 0,
               unit_size: product.unit_size || '',
               costFromAdmin: isAdmin,
+              costEdited: false, suggestion: undefined,
             }
           : i
       )
     );
+    // The product's vendor is its preferred vendor (WP-PM-15b): suggest it when none is entered yet.
+    if (product.vendor && !vendorRef.current) setVendor(vendorRef.current = product.vendor);
     setProductSearchOpen(null);
     setProductQuery('');
+    if (isAdmin) void suggestPreferredVendorCost(itemKey, product);
+  };
+
+  const changeVendor = (next: string) => {
+    setVendor(next);
+    editItems((prev) => prev.map((i) => (i.suggestion && !i.costEdited ? { ...i,
+      unit_cost: costForVendor(i.suggestion, next, products.find((p) => p.id === i.product_id)?.current_cost || 0) } : i)));
   };
 
   const totalCostCents = items.reduce(
@@ -316,7 +347,7 @@ export default function NewPurchaseOrder() {
           saveIdem.resetKey();
 
           if (isFirstSave) {
-            setSavedPoId(poId);
+            setSavedPoId(savedPoIdRef.current = poId);
             setSavedPoNumber(result.po_number);
           }
 
@@ -396,7 +427,7 @@ export default function NewPurchaseOrder() {
               <input
                 type="text"
                 value={vendor}
-                onChange={(e) => setVendor(e.target.value)}
+                onChange={(e) => changeVendor(e.target.value)}
                 list="vendor-list"
                 placeholder="Enter or select vendor..."
                 className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -412,14 +443,14 @@ export default function NewPurchaseOrder() {
             label="Expected Delivery Date"
             type="date"
             value={expectedDate}
-            onChange={(e) => setExpectedDate(e.target.value)}
+            onChange={(e) => { setIsDirty(true); setExpectedDate(e.target.value); }}
           />
         </div>
         <div className="mt-4">
           <Input
             label="Notes (optional)"
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            onChange={(e) => { setIsDirty(true); setNotes(e.target.value); }}
             placeholder="Internal notes about this PO..."
           />
         </div>

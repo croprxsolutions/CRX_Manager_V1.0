@@ -20,6 +20,12 @@
         ],
         "createdAt": "2026-11-03T04:34:01.109Z",
         "reason": "Claude: server copy of the existing email frame buildEmailHtml (src/lib/emailService.ts); email-safe font for mail clients"
+      },
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-11-04T02:24:55.080Z",
+        "reason": "Mason confirmed 2026-11-03: Inter is the font DESIGN.md calls for"
       }
     ]
   }

@@ -465,9 +465,30 @@
 - **DM-0 · Data hygiene**, moved here from the weight work (grand plan overlap 9). Every product gets a form. Blank SKUs (Mason types them, no placeholders, D-R), the duplicate `9768NR` SKU (re-SKU, don't merge), three duplicate-name groups and the test row are resolved without hard deletes. The code builds review lists; the data step is Mason's.
   **Duplicate decisions (Mason, 2026-10-30):** straightforward exact duplicates may merge after his review. Defer complicated cases with unfinished orders, bookings, reservations, jobs or returns, or use a separately reviewed and proven procedure. Historical records and future returns/reversals must remain correct even after current transactions finish. Follow the grand plan's DATA-10 policy; preserve all cleanup prerequisites for import and workbook delivery.
   *Done when:* zero blank forms; every SKU identifies one sellable; every old reference still resolves (read-only check before and after). WP-PM-10 and WP-PM-11a land only after this data step.
+  *Gate check (added 2026-11-03; read-only, recorded with its date).* DM-0 was never run as a package, and most of its data work is already true live. The Wave 3 gate is therefore these targets, not a before/after comparison of work already done:
+  - active products with a blank `product_form`: 0;
+  - active products with a blank SKU: 0;
+  - duplicate SKUs (case-insensitive, all rows): 0;
+  - duplicate names among active products: 0;
+  - Mason signs off each remaining inactive row as keep or deactivate. These are the blank SKUs, the duplicate-name group and the "test"-named rows; the list goes to his private vault, never the repo.
+
+  "Before and after" applies to any DM-0 change made from now on.
 
 - **WP-PM-15 · 💲 Vendors on the product page** (grand plan overlap 12; Mason, 2026-10-29: one product, many vendors). Built on the existing `product_supplier_links` (one preferred link per product is already enforced) and `supplier_price_observations`. The product page lists every vendor the product is bought from, with item name, item number, pack and last cost (cost admin-only), and one preferred. `products.vendor` becomes a read-only copy of the preferred vendor's name, kept in step by the database on preferred change, rename and unlink; a product with links always has exactly one preferred. A new PO suggests the preferred vendor and its last cost converted to the PO's unit (none if it can't be converted), and allows any linked vendor; an unlinked vendor offers to link. Need Reordering groups by preferred vendor and shows the others' last cost. Cost stays admin-only in the database. Old POs, receipts and invoices keep their vendor. Full rules: grand plan overlap 12.
   **Cutover prerequisite:** split WP-PM-15 into reviewed steps: first ship the legacy-vendor proposal/review tool and compatible writers with existing vendor behavior intact; then, after DATA-11 review and the separately approved live data step, enable the copy rule in a later PR. The enforcement PR is not mergeable earlier. Because migrations apply before their app deploy, prove current and stale app writers remain safe during that interval; otherwise park enforcement until a separately reviewed compatible activation exists. This does not depend on the later workbook. Preserve unresolved legacy text and current edit routes until reviewed. Inventory and adapt every vendor writer, including the product page, new-product flow, list and bulk import; prove no data is silently lost and no supported route breaks.
+  **15a writer inventory (2026-11-03).** Every route that writes `products.vendor` today is a direct table write; no database function writes it, and a vendor rename (`update_vendor`) does not touch it.
+  - Product Detail edit: `ProductDetail.tsx`, an update guarded by `pricing_version`. Since 15a it sends `vendor` only when it was changed on the page.
+  - Product Detail new product: an insert.
+  - Products list inline edit: `Products.tsx`, which sends only the fields that changed.
+  - CSV import: `BulkProductImport.tsx`, insert only.
+
+  15b must keep inserts working, refuse or route an *edit* of the text with an actionable message, and sync on preferred change, rename and unlink. 15a's report is `get_vendor_link_proposals()`. The DATA-11 list (live, 2026-11-03) is in Mason's private vault, and it found the existing link writer's required SKU, unit and pack fields missing for nearly every product, so the minimum link shape is a decision for Mason before 15b. **Decided 2026-11-03:** a vendor-only link; see `docs/manual/DECISION_LOG.md`.
+  **15b is three steps (2026-11-03):**
+  1. Vendor-only links and `link_product_vendor` (`20261105090000`, #1381), live.
+  2. The DATA-11 data step (`20261105100000`, PR #1385). It writes live data, so it needs Mason's go at apply.
+  3. Enforcement (`20261105110000`, branch `pm/wp-pm-15b-preferred-vendor-enforcement`): the copy rule, refusals, the Vendors section and the PO suggestion.
+
+  Step 3 refuses any direct edit of `products.vendor`. To keep the "never reject ordinary existing writes in the gap" rule, deploy an app-only change first that makes Vendor read-only on saved products and removes it from list editing. Apply step 3 after that, and apply the migrations in stamp order. Rollback runs in reverse: drop step 3's triggers and functions, then deactivate step 2's links, then clear the two vendor texts step 2 filled. DATA-11 covers active products only; an inactive product keeps its text and no link until it is reactivated and linked.
   *Done when:* a product linked to two vendors shows both, with one preferred; changing the preferred vendor updates the product's vendor everywhere it is shown; a new PO suggests the preferred vendor and its last cost and accepts the other; a second preferred link is refused; a non-admin sees no cost. Prove writes in the harness and observe the real app against an isolated database; otherwise mark app proof owed. Never save against production for this proof without Mason's explicit current-session approval.
 
 - **WP-PM-16 · "Search EPA labels" link** (becomes "View label" once REG-1 saves the label PDF) (grand plan overlap 15; Mason, 2026-10-29). Every product with an EPA number gets a "View label" button on the product page, and each brand row one for its own EPA number, opening EPA's public label search for that number (address format confirmed at build time). No EPA number shows "Add an EPA number to see the label". Screen only; Stage 2's REG-1 later saves the label PDF link.
@@ -479,8 +500,42 @@
 - **WP-PM-6b:** basic Duplicate only. After PAR-1 (Stage 2), Duplicate becomes "Add a size" or "New product" (grand plan overlap 13). DM-5 is dropped. **Missing prices (Sol, 2026-10-29):** because new products stay active, the package proves in the harness that a product with no price is refused, by name, on a quote line, a job line, an order line, a blend ticket, the field app and the price sheet export, and that a real $0.00 price is told apart from a missing one.
 - **WP-PM-8:** the rate help text is worded so it stays true after the rate rebuild. Categories become a pick list with "Seed" (grand plan overlap 16). **Each new `NOT VALID` check lists the existing rows it would catch** (a later edit to such a row must fix that field too), with a correction path, before it is applied.
 - **WP-PM-9:** no unit aliases. Each new spelling gets its exact conversion row, allowed form and container rule, added and tested before any product uses it (`validate_product_units` matches exactly).
-- **WP-PM-10:** rates are written through one function.
+- **WP-PM-10:** rates are written through one function, `set_product_rates`, which WP-PM-11a-1 creates.
+  **Re-grounded 2026-11-03.** Already done on main by PM-8: container size above 0, the category list check and the EPA format check (`BulkProductImport.tsx`). Still to do:
+  - the `unit` alias maps to `unit_size`, so `rate_unit` is never set from it;
+  - the `type` alias maps to category;
+  - quoted line breaks split rows, because the parser splits on newlines;
+  - rows insert one at a time, with no all-or-nothing result;
+  - imported timings must reach `use_timings`.
+
+  Inserts go through the 11a-2 Setup RPC in insert mode, or an insert RPC that 11a-2 reuses: one product-setup write path, not two.
+
+  The preview shows, per row:
+  - after WP-PM-15b, the vendor result: "links to X", or "not recognised, stays as text" (the `vendor`, `supplier` and `distributor` columns);
+  - where rates are given, the resulting tier 1–3 per-acre prices.
+
+  It depends on 11a-1, not on the whole workbook.
 - **WP-PM-11a · the setup workbook** (grand plan overlaps 5 and 11; Mason, 2026-10-29): one file, separate from the price workbook, with Setup, Rates and Vendors tabs (Stage 2 adds Ingredients and Weights; Stage 6 adds Crop Uses). Each tab has its own repeat-safe RPC and a preview; nothing saves until confirmed. Rates are editable here during setup, through the one rate-writing function, and the price workbook's rate columns become read-only. A **"Lock rates"** switch locks the live rates in the database, whatever route writes them (drafts from the later rate rebuild stay editable); switching it is logged with a reason, and any admin may switch it, with a reason (Mason, 2026-10-29). The one exception while locked is a dedicated one-product admin correction with a reason, expected version and retry key. Confirmation is per tab; a stale row is refused by name. Full rules: grand plan overlap 11. *Added to Done when:* with the lock off, a Rates-tab upload changes 20 rates after the preview; with it on, the same upload, an import and a list edit are each refused; an admin's single-product edit with a reason still works and is logged.
+  **Revised 2026-11-03 (independent plan review):**
+  - **Split in two.**
+    - **11a-1:** the rate writer, the lock, the correction operation, and read-only rate columns in the price workbook (`productPricingWorkbook.ts` still lists them as editable).
+    - **11a-2:** the setup workbook, with Setup and Rates tabs.
+  - **The rate writer.** No rate-writing function exists yet, so 11a-1 creates `set_product_rates`. It:
+    - checks admin before the replay lookup;
+    - requires `p_idempotency_key`;
+    - is `SECURITY DEFINER` with `search_path = public, pg_temp`;
+    - locks the product row;
+    - checks the rate lock.
+
+    The Rates tab, WP-PM-10 and the correction operation all call it; RT-4 later audits writers against this one function.
+  - **Locked columns:** `rate_per_acre`, `rate_unit` and `suggested_rate`. The label facts `max_label_rate` and `max_label_rate_unit` stay editable, so label clean-up (DATA-6) is not blocked. `unit_size` and `inventory_unit` also move per-acre prices; `trg_keep_product_unit` already guards them. The correction exception is recognised only inside the correction function (a transaction-local flag it sets), never by anything a client can send. The proof includes a direct update that is refused while locked.
+  - **Rates reprice what customers see.** The live trigger `recalc_product_price_per_acre` recalculates `tier1/2/3_price_per_acre` on every rate write, and quotes and invoice PDFs read those columns. So:
+    - every Rates preview, import preview and correction preview shows old and new tier 1–3 per-acre prices;
+    - the "20 rates" Done-when checks those prices to the cent against a hand calculation;
+    - the per-acre columns are legacy dollar `numeric`, so state their rounding under the legacy exception in `SAFE_DEVELOPMENT_RULES.md`;
+    - a live Rates upload or correction needs Mason's go at that time.
+  - **Stale rows.** `pricing_version` changes only with price or cost, and `products` has no `updated_at` trigger. A stale row is therefore detected by a per-row fingerprint of the exported values, compared at confirm time, as the price workbook's `identity_fingerprint` does.
+  - **No Vendors tab.** After WP-PM-15b the product page's Vendors section and `get_vendor_link_proposals()` cover vendor links, and the Setup tab never includes `vendor`, because 15b refuses direct edits of it.
 
 ---
 
@@ -533,9 +588,10 @@ Sol's recommended order is adopted. The change-history foundation and the databa
 | 13 | WP-PM-6b New-product flow + basic Duplicate | PM-6a | maybe | 💲 |
 | 14 | WP-PM-7 One cost path + tier-order warning in the RPC | PM-2, PM-12a | yes (preview RPC) | 💲 |
 | 15a | WP-PM-15 Vendor proposals and compatible writers | PM-7 | as needed for the proposal tool; existing behavior preserved | 💲 |
-| 15b | WP-PM-15 Vendor enforcement | PM-7, PM-15a; DATA-11 review, approved data step and compatibility proof | yes (sync trigger, preferred rule, read policies) | 💲 |
-| 16 | WP-PM-11a Setup workbook + rate lock | PM-8, PM-12a, PM-15a, PM-15b; lands after DM-0's data step | yes (RPCs, lock setting, rate-column guard) | 💲 |
-| 17 | WP-PM-10 Bulk import | PM-5, PM-8, PM-11a (rate lock); lands after DM-0's data step | probably (import RPC) | 💲 |
+| 15b | WP-PM-15 Vendor enforcement (three steps, §2a) | PM-7, PM-15a; DATA-11 decisions, approved data step, app-only read-only Vendor deployed first | yes (sync trigger, preferred rule, read policies) | 💲 |
+| 16 | WP-PM-11a-1 Rate writer, rate lock, correction | PM-8, PM-12a, PM-15b | yes (rate RPC, lock setting, rate-column guard) | 💲 |
+| 16b | WP-PM-11a-2 Setup workbook (Setup, Rates tabs) | PM-11a-1; lands after the DM-0 gate | yes (tab RPCs) | 💲 |
+| 17 | WP-PM-10 Bulk import | PM-5, PM-8, PM-11a-1; lands after the DM-0 gate | yes (shares the setup insert RPC) | 💲 |
 | 18 | WP-PM-11b List editing + phone layout | PM-1 | no | |
 | 19 | WP-PM-12b Corrections to existing records | PM-12a | likely | |
 | 20 | WP-PM-13 Reorder display | none | no | |

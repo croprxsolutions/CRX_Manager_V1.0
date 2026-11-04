@@ -43,6 +43,13 @@ vi.mock('jspdf-autotable', () => ({
   }),
 }));
 
+const companyInfo = vi.hoisted(() => ({ load: vi.fn() }));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
+
+import { DEFAULT_COMPANY_INFO } from './companyInfo';
+
+companyInfo.load.mockResolvedValue(DEFAULT_COMPANY_INFO);
+
 import autoTable from 'jspdf-autotable';
 
 import {
@@ -163,6 +170,15 @@ describe('generateYearEndSummaryPdf', () => {
       expect.any(Number),
       expect.any(Number),
     );
+  });
+
+  it('prints the company details saved in Settings', async () => {
+    companyInfo.load.mockResolvedValueOnce({ name: 'Test Ag Co', phone: '555-0199', email: 'office@testag.test', address: '1 Main St, Town, IL' });
+    await generateYearEndSummaryPdf(makeSummaryData());
+    const printed = mockDoc.text.mock.calls.map((c) => c[0]).flat();
+    expect(printed).toContain('TEST AG CO');
+    expect(printed).toContain('Agricultural Input Solutions  •  1 Main St, Town, IL  •  555-0199');
+    expect(printed).not.toContain('CROP RX SOLUTIONS');
   });
 
   it('never prints the price tier on the customer summary', async () => {

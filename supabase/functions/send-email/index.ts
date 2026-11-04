@@ -21,6 +21,7 @@ import {
   type InvoiceEmailSnapshot,
 } from "../_shared/invoiceEmailGate.ts";
 import { drawInvoicePdf, loadInvoicePdfData } from "../_shared/pdf/invoicePdf.ts";
+import { loadCompanyInfo } from "../_shared/pdf/companyInfo.ts";
 import {
   buildPurchaseOrderPdfData,
   drawPurchaseOrderPdf,
@@ -332,9 +333,17 @@ Deno.serve(async (req: Request) => {
       } catch (err) {
         return jsonResponse({ error: `Purchase order vendor lookup failed: ${(err as Error).message}` }, 503);
       }
+      // The Settings company details print on the PO; a failed read refuses rather than guess.
+      let company;
+      try {
+        company = await loadCompanyInfo(adminClient);
+      } catch (err) {
+        return jsonResponse({ error: `Company details lookup failed: ${(err as Error).message}` }, 503);
+      }
       const poPdf = drawPurchaseOrderPdf(
         { jsPDF, autoTable },
         buildPurchaseOrderPdfData(poGate.order, vendor, poGate.lines),
+        company,
       );
       attachments = [{ filename: purchaseOrderPdfFilename(poGate.order.po_number), content: pdfBase64(poPdf) }];
     } else {

@@ -9,10 +9,11 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs";
-import os from "node:os";
+import { writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { destructiveMigrationCheck, stripCommentsQuoteAware } from "./live-testdata-lib.mjs";
+import { dataRewriteCheck } from "./migration-access-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -83,6 +84,39 @@ ok(
   "comment markers inside dollar-quoted literals cannot hide a DELETE either (Codex R5)"
 );
 eq(destructiveMigrationCheck("").destructive, false, "empty SQL is not destructive");
+
+// TRUNCATE as a trigger's EVENT only blocks a wipe (Mason, 2026-11-04). Lines
+// from PR #1425's 20261106120000_product_rate_lock.sql.
+const rateLockTriggers = `CREATE TRIGGER product_rate_events_no_truncate
+  BEFORE TRUNCATE ON public.product_rate_events
+  FOR EACH STATEMENT EXECUTE FUNCTION public.refuse_product_rate_record_mutation();
+CREATE TRIGGER product_rate_lock_no_truncate
+  BEFORE TRUNCATE ON public.product_rate_lock
+  FOR EACH STATEMENT EXECUTE FUNCTION public.refuse_product_rate_record_mutation();`;
+eq(destructiveMigrationCheck(rateLockTriggers).destructive, false, "PR #1425's BEFORE TRUNCATE triggers are not destructive");
+for (const header of [
+  "CREATE OR REPLACE TRIGGER t1 AFTER INSERT OR UPDATE OR TRUNCATE ON public.t FOR EACH STATEMENT EXECUTE FUNCTION f();",
+  'CREATE CONSTRAINT TRIGGER "Guard" AFTER UPDATE OF a, "b" OR truncate ON t FOR EACH ROW EXECUTE FUNCTION f();',
+  "DO $$ BEGIN EXECUTE 'CREATE TRIGGER t2 BEFORE TRUNCATE ON public.t FOR EACH STATEMENT EXECUTE FUNCTION f()'; END $$;",
+  "CREATE TRIGGER t5 BEFORE /* audit */ TRUNCATE -- guard\n ON t FOR EACH STATEMENT EXECUTE FUNCTION f();",
+  "CREATE TRIGGER före_ändring BEFORE TRUNCATE ON t FOR EACH STATEMENT EXECUTE FUNCTION f();",
+]) eq(destructiveMigrationCheck(header).destructive, false, `trigger event list is not destructive: ${header}`);
+for (const [name, sqlText] of [
+  ["plain TRUNCATE", "TRUNCATE public.product_rate_events;"],
+  ["TRUNCATE TABLE ONLY", "TRUNCATE TABLE ONLY public.t;"],
+  ["TRUNCATE in a DO block", "DO $$ BEGIN TRUNCATE public.product_rate_lock; END $$;"],
+  ["EXECUTE 'TRUNCATE ...'", "DO $$ BEGIN EXECUTE 'TRUNCATE TABLE public.customers'; END $$;"],
+  ["a trigger and a real TRUNCATE in one file", `${rateLockTriggers}\nTRUNCATE public.customers;`],
+  ["a real TRUNCATE on the same line as a trigger", "CREATE TRIGGER t3 BEFORE TRUNCATE ON t FOR EACH STATEMENT EXECUTE FUNCTION f(); TRUNCATE customers;"],
+  ["a trigger header split across strings around a TRUNCATE", `SELECT 'create trigger "'; TRUNCATE customers; SELECT '" before truncate on';`],
+  // Codex App P1 (PR #1433): a quoted UPDATE OF column spanning two strings.
+  ["a quoted UPDATE OF column spanning a TRUNCATE", `SELECT 'create trigger x before update of "'; TRUNCATE customers; SELECT '" or truncate on';`],
+  ["a quoted UPDATE OF column spanning a TRUNCATE, no event", `SELECT 'create trigger x before update of "'; TRUNCATE customers; SELECT '" on';`],
+  ["a quoted UPDATE OF column spanning a dollar-quoted TRUNCATE", `SELECT $q$create trigger x before update of "$q$; DO $d$ BEGIN TRUNCATE customers; END $d$; SELECT $q$" on$q$;`],
+]) ok(destructiveMigrationCheck(sqlText).destructive, `${name} stays destructive`);
+// A function the migration RUNS that truncates is caught by the data-rewrite check (bodies never reach the one above).
+ok(dataRewriteCheck(`${rateLockTriggers}\nCREATE FUNCTION public.wipe() RETURNS void LANGUAGE sql AS $$ TRUNCATE public.customers $$;\nSELECT public.wipe();`, { history: [] }).rewrites,
+  "a migration-run function that TRUNCATEs is still sent to Mason");
 
 // ── live hook: proof gate + armed-run destructive carve-out ─────────────────
 const HOOK = path.join(__dirname, "migration-apply-guard.mjs");
@@ -239,7 +273,7 @@ function armAutopilot(stateDir, hoursFromNow) {
 }
 
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mig-apply-guard-"));
+  const tmp = tempDir("mig-apply-guard-");
   const stateDir = path.join(tmp, ".claude", "session-state");
   mkdirSync(stateDir, { recursive: true });
   // Both: the pending-set inputs (baseline manifest + origin/main + FETCH_HEAD) and
@@ -536,7 +570,7 @@ function armAutopilot(stateDir, hoursFromNow) {
 // server name is ever added to settings.json, it is covered automatically and
 // this case is what proves the mechanism still holds.
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mig-apply-guard-aliases-"));
+  const tmp = tempDir("mig-apply-guard-aliases-");
   const stateDir = path.join(tmp, ".claude", "session-state");
   mkdirSync(stateDir, { recursive: true });
   try {
@@ -598,7 +632,7 @@ function armAutopilot(stateDir, hoursFromNow) {
 // lookup follows the session's reported cwd instead. Both halves are asserted:
 // the session's OWN worktree counts, a SIBLING's does not.
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mig-apply-guard-wt-"));
+  const tmp = tempDir("mig-apply-guard-wt-");
   const primary = path.join(tmp, "primary");
   const linked = path.join(tmp, "linked");
   const git = (args, cwd) => spawnSync("git", args, { cwd, encoding: "utf8", env: hermeticEnv() });
@@ -756,7 +790,7 @@ function armAutopilot(stateDir, hoursFromNow) {
 // the fixture genuinely IS out of order), and the renamed one must be denied
 // too (so the fix is what is doing the work).
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mig-apply-guard-rename-"));
+  const tmp = tempDir("mig-apply-guard-rename-");
   const stateDir = path.join(tmp, ".claude", "session-state");
   mkdirSync(stateDir, { recursive: true });
   try {

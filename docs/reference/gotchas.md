@@ -14,6 +14,7 @@ Project-specific quirks that aren't obvious from reading the code, but have caus
 | JSX truthy with unknown values | `{maybeNumber && <X/>}` (renders `0`) | `{maybeNumber ? <X/> : null}` |
 | What renders depends on a ref (React 19 batching) | `allowX={someRef.current}`, hoping another `setState` re-renders; or `ref.current = value` in the render body | keep a `useState` mirror for rendering (the ref stays for async handlers); for a latest-value/callback ref read by listeners or handlers use `useLatestRef` (`src/hooks/useLatestRef.ts`), which writes on commit. `react-hooks/refs` is enforced and flags both wrong patterns |
 | Test types into a field that an effect fills or clears after it renders (React 19) | `await findBy…(heading)` then `fireEvent.change` at once — the effect (prefill load acres, clear a dialog's reason on open) can still be queued and land after the keystroke, wiping it; about 1 in 100–200 runs under local CPU load, seen intermittently in CI (2026-10-15) | first wait for a visible sign the effect ran: the field holds its prefilled value (an empty `type="number"` input reads as `null` in `toHaveValue`, so `not.toHaveValue('')` never waits), or focus has moved inside the opened dialog |
+| A user choice inside a page tab (JobDetail and other tabbed pages mount only the active tab: `activeTab === 'chemicals' && …`) | `useState` inside the tab's component for something the user decided, like a dismissed notice; switching tabs unmounts it and the choice is lost (PR #1341: "Keep job values" came back after a tab switch; five reviewers missed it) | hold it in the page component and pass it down as a prop with a setter; test by unmounting and remounting the child |
 
 ---
 
@@ -412,6 +413,12 @@ Cross-check the SHA against Vercel's own `list_deployments` for project
 ---
 
 ## Never name the worktree path in a destructive shell command — CLAUDE worktrees (2026-08-20)
+
+> **Narrowed 2026-11-03:** a file inside a worktree, or a worktree root used as the folder a command
+> runs in (`cd <root> && rm x`, `git -C <root> mv a b`), no longer trips `review-proof-guard`. The
+> worktree root itself, its `.claude`, an unreadable or `..` path, and `find -delete`/`git clean`/
+> `rsync --delete` aimed at a worktree still do. Details: "Guard false-alarm narrowing (2026-11-03)"
+> in `agent-guardrails.md`. The two ❌ rows below now run; the rest of this page still applies.
 
 **Scope: Claude-managed worktrees only.** Claude creates them at `<repo>/.claude/worktrees/<name>/`;
 Codex worktrees live outside the repo (`~/.codex/worktrees/…`) and have **no such collision** — see

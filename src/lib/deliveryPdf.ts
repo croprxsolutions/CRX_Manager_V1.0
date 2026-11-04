@@ -8,7 +8,8 @@
 import { CRX_GREEN, CHARCOAL, GRAY, AMBER, type JsPDFWithAutoTable } from './pdfTheme';
 import type { autoTable as autoTableFn } from 'jspdf-autotable';
 import type { CellHookData } from 'jspdf-autotable';
-import { COMPANY_FOOTER_THANKS } from './companyInfo';
+import { companyFooterThanks, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 
 
 
@@ -44,6 +45,7 @@ const fmt = (n: number) => n.toLocaleString();
 
 function renderDeliveryPage(
   doc: JsPDFWithAutoTable,
+  company: CompanyInfo,
   data: PdfDeliveryData,
   autoTable: typeof autoTableFn
 ) {
@@ -57,7 +59,8 @@ function renderDeliveryPage(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(20);
   doc.setTextColor(255, 255, 255);
-  doc.text('CROP RX SOLUTIONS', margin, 32);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 200, 20);
+  doc.text(company.name.toUpperCase(), margin, 32);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text('DELIVERY RECEIPT', margin, 50);
@@ -239,15 +242,21 @@ function renderDeliveryPage(
   doc.line(margin, footerY - 10, pageW - margin, footerY - 10);
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
-  doc.text(COMPANY_FOOTER_THANKS, pageW / 2, footerY, { align: 'center' });
+  doc.text(
+    doc.splitTextToSize(companyFooterThanks(company), pageW - margin * 2).slice(0, 2),
+    pageW / 2,
+    footerY,
+    { align: 'center' },
+  );
 }
 
 export async function generateDeliveryPdf(data: PdfDeliveryData) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
-  renderDeliveryPage(doc, data, autoTable);
+  renderDeliveryPage(doc, company, data, autoTable);
   return doc;
 }
 
@@ -267,11 +276,12 @@ export async function generateBatchDeliveryPdf(dataList: PdfDeliveryData[]) {
 
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   // For a single delivery, just download directly
   if (dataList.length === 1) {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
-    renderDeliveryPage(doc, dataList[0], autoTable);
+    renderDeliveryPage(doc, company, dataList[0], autoTable);
     doc.save(`${dataList[0].delivery_number}_receipt.pdf`);
     return;
   }
@@ -281,7 +291,7 @@ export async function generateBatchDeliveryPdf(dataList: PdfDeliveryData[]) {
 
   for (let i = 0; i < dataList.length; i++) {
     if (i > 0) doc.addPage();
-    renderDeliveryPage(doc, dataList[i], autoTable);
+    renderDeliveryPage(doc, company, dataList[i], autoTable);
   }
 
   doc.save(`delivery_receipts_batch_${dataList.length}.pdf`);

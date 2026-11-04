@@ -438,6 +438,8 @@ jobs:
         run: deno test --no-prompt --node-modules-dir=none supabase/functions
 
       - name: Documentation consistency
+        env:
+          DOCS_FRESHNESS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: npm run check:docs
 
       - name: Workflow map freshness (ignore generated date stamp)
@@ -647,7 +649,8 @@ jobs:
 
       - name: Agent workflow truth-state and sync tests
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}
-        run: npm run test:agent-workflows
+        # Same chain as `npm run test:agent-workflows`, one suite at a time, failing any suite that leaves temp folders behind.
+        run: node scripts/run-correction-guards.mjs test:agent-workflows
 
       - name: RPC contract and idempotency inventory tests
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}

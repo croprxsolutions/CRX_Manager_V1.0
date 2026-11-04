@@ -4,15 +4,15 @@
 // dependency check BEFORE any other step; other commits must not run it at all.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { chmodSync, copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { scratchHookEnvironment } from "../.claude/hooks/git-test-env.mjs";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const scratch = mkdtempSync(path.join(os.tmpdir(), "crx-precommit-deps-"));
+const scratch = tempDir("crx-precommit-deps-");
 const env = scratchHookEnvironment(scratch);
 
 function git(...args) {

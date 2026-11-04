@@ -44,7 +44,8 @@ Folders end in `/`. The match ignores case, from the repository root.
 
 ## What stays separate
 
-A migration still needs an exact-head Sol proof before it applies; the apply gate
+A migration still needs a Sol proof bound to its exact head before it applies (a full
+review, or a carry-forward of one after a clean merge of main, since 2026-11-03); the apply gate
 checks that on its own. To change this list, change the module and this page in one pull
 request. Since 2026-11-01 that pull request is off the list itself, so it lands on green
 checks; widening or narrowing the list stays Mason's decision.

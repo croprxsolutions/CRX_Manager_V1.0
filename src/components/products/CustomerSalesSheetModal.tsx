@@ -87,7 +87,9 @@ export default function CustomerSalesSheetModal({ format, products, onClose }: P
   const [downloading, setDownloading] = useState(false);
 
   const tier = customer && [1, 2, 3].includes(customer.assigned_tier) ? customer.assigned_tier : null;
-  const unpriced = tier == null ? 0 : products.filter((product) => customerSheetPrice(product, tier) == null).length;
+  const unpriced = tier == null ? [] : products.filter((product) => customerSheetPrice(product, tier) == null).map((product) => product.product_name);
+  // Name a few so a missing price is found before the sheet goes out (WP-PM-6b); a real $0 prints as $0.00.
+  const unpricedNames = unpriced.length > 3 ? `${unpriced.slice(0, 3).join(', ')} and ${unpriced.length - 3} more` : unpriced.join(', ');
 
   const handleDownload = async () => {
     if (!customer || tier == null) return;
@@ -136,7 +138,7 @@ export default function CustomerSalesSheetModal({ format, products, onClose }: P
         ) : (
           <p className="text-sm text-secondary">
             {products.length} active product{products.length === 1 ? '' : 's'}, shown at this customer&apos;s price only.
-            {unpriced > 0 && ` ${unpriced} ${unpriced === 1 ? 'has' : 'have'} no price and will show blank.`}
+            {unpriced.length > 0 && ` No price, so shown blank: ${unpricedNames}.`}
           </p>
         )}
       </div>

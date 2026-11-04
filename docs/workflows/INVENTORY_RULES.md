@@ -4,6 +4,10 @@ Complete reference for inventory management, calculations, and transaction handl
 
 ---
 
+Product forms: liquid and dry retain their existing unit-type rules. Seed inventory and container units are exactly Lb or Unit; Each / unit uses exactly Ea or Unit. Seed and Each have no gallon or pound equivalent. A seed/each product needs a stock unit; its rate unit is that stock unit, and a blank product rate unit is filled from stock before pricing. Every quote line's rate and price units must equal that same stock unit; a different quote unit is refused and a blank one is filled from the stock unit (a quote created from a template leaves its price unit blank). Change a seed/each product's rate unit on its product page: the price workbook unit check knows only liquid/dry/both and cannot make that change.
+
+Every seed/each job-chemical line's unit and rate unit must equal the stock unit (per-acre suffixes such as `lb/ac` are allowed); a different unit is refused by the database and a blank one is filled from the stock unit, so job completion always deducts the exact amount. A product with no form cannot become seed/each while any of its quote or job lines uses another or a blank unit. The job and field-app pickers offer only the stock unit.
+
 ## Core Tables
 
 | Table | Purpose |
@@ -289,6 +293,26 @@ Receiving does **not** touch product cost, tier prices, or `cost_history` — th
 the ledger, receiving records and PO rows only. Product cost and tier prices change only through the
 pricing edit paths, and each change writes a `cost_history` row whose `change_source` is one of
 `pricing_worksheet`, `product_page`, `products_inline` (or `legacy_frontend` for old rows).
+
+### Cost-writer map (WP-PM-7 local candidate)
+
+The Product page's **Update cost** action, its cost-basis panel (supplier candidate,
+received purchase candidate, or manual replacement cost), Products-list inline edit,
+phone quick price change, and price workbook all use
+`preview_product_cost_basis_changes` → `approve_pricing_change_set` →
+`apply_product_cost_basis_change_set`. The database trigger refuses direct writes to
+`products.current_cost` and the other governed pricing fields. The Product page displays
+saved Current Cost as read-only; Update cost asks for a new cost and pricing mode, then
+the shared Source + Reason step asks for the reason once. Warning acknowledgements are
+separate approval reasons for warned products.
+
+Receiving and PO cost corrections change PO and inventory records, not
+`products.current_cost`. Bulk product import cannot set cost. The source picker offers
+Vendor price list, Rebate program, Market adjustment, PO cost, and Other. Optional detail
+is appended to a named choice; Other stores its required detail alone. Existing text
+sources remain untouched. The local candidate `20261104140000` adds `TIER_ORDER`, which compares
+the actual final cent price of each adjacent tier, including a stated $0, and requires
+acknowledgement when Tier 2 falls below Tier 1 or Tier 3 falls below Tier 2.
 
 ### Table: `cost_history`
 - `product_id`, `old_cost` / `new_cost`, `old_tierN_price` / `new_tierN_price` and `old_tierN_margin` / `new_tierN_margin` (N = 1–3), `change_source`, `change_reason`, `change_note`, `change_set_id`, `old_pricing_version` / `new_pricing_version`, `changed_by`, `changed_at`

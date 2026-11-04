@@ -702,11 +702,11 @@ ok(isDeny(r), "a NESTED comment in the header position is blanked to the right d
 // file via edit-splice-lib (LF-normalizing both sides, because on a Windows
 // worktree with core.autocrlf the disk is CRLF while the harness hands the
 // hook LF fragments, and an exact-match splice silently no-ops).
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const CRLF = (s) => s.replace(/\n/g, "\r\n");
-const tmp = mkdtempSync(path.join(os.tmpdir(), "crx-idem-crlf-"));
+const tmp = tempDir("crx-idem-crlf-");
 mkdirSync(path.join(tmp, "supabase", "migrations"), { recursive: true });
 const migPath = path.join(tmp, "supabase", "migrations", "20260826000000_test.sql");
 

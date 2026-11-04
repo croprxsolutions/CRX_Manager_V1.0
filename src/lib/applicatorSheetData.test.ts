@@ -73,6 +73,15 @@ describe('buildApplicatorSheetData — route order', () => {
 });
 
 describe('buildApplicatorSheetData — totals + conversion', () => {
+  it('carries seed and each forms without a weight or volume equivalent', () => {
+    const data = buildApplicatorSheetData(baseInput({ products: [
+      product({ product_name: 'Seed', unit: 'Lb', total_quantity: 50, product_form: 'seed' }),
+      product({ product_name: 'Each', unit: 'Ea', total_quantity: 2, product_form: 'each' }),
+    ] }));
+    expect(data.products.map((row) => [row.product_form, row.total_gl_lb])).toEqual([
+      ['seed', null], ['each', null],
+    ]);
+  });
   it('totals acres across the route', () => {
     const data = buildApplicatorSheetData(baseInput({
       fields: [field({ acres: 40, sort_order: 0 }), field({ acres: 80, sort_order: 1 })],

@@ -1,3 +1,6 @@
+---
+description: Walk Mason through undoing a bad production change (frontend deploy, live migration, or Edge Function). Use when he says "roll back", "undo the deploy", "revert the site", or production broke after a change.
+---
 Walk Mason through undoing a bad production change — a frontend deploy, a live migration, or an edge function. Triggered when he says "roll back", "undo the deploy", "revert the site", or anything similar. This command drives the decision tree in `docs/runbooks/incident-rollback.md`; read that file first and follow it. Mason has no coding experience — explain every step in plain English, and EVERY irreversible step waits for his explicit OK in this conversation.
 
 ## Step 1: Read the runbook

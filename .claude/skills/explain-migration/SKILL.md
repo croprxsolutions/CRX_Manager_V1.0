@@ -118,7 +118,7 @@ RECOMMENDED NEXT STEPS
 
 ## Step 6: Wait for Mason's Decision
 
-Do NOT auto-apply. Do NOT auto-commit. Mason reads the explanation, asks follow-up questions, and decides what to do. (In a pre-authorized armed hands-free run, the apply decision instead flows through migration-apply-guard's proof + Codex gate per the settled 2026-07-13 policy — but /explain-migration itself is an interactive, explain-to-Mason skill, so within this skill you always wait.)
+Do NOT auto-apply. Do NOT auto-commit. Mason reads the explanation, asks follow-up questions, and decides what to do. (Outside this skill, a NON-destructive migration with no permission change applies under the `AGENTS.md` autonomous-landing rule through the full proof gate in `.claude/commands/ship.md` Step 5; a destructive, data-overwriting or permission-changing one needs Mason's `I approve` for that exact file. This skill only explains, so within it you always wait.)
 
 If Mason asks "should I apply this?", give an honest answer based on the safety check, NOT a default yes.
 

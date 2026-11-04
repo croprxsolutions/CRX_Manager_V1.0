@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-04 for the live ledger only (see the WP-PM-11a-1 changelog note); other evidence retains its stated dates.
+**Last verified:** 2026-11-04 for the live ledger only (see the 2026-11-04 retro-split-guard changelog note); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -40,7 +40,6 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
-| WP-PM-11a-1 rate lock deferrals (KI-99, KI-100; not applied) | 2 |
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
@@ -207,6 +206,19 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
 
 ## Money
 
+
+### KI-99 — Voiding an invoice leaves two money records out of step
+**MED · OPEN · money · found 2026-11-04 (Fix Delivery reviews, PR #1421) · Claude**
+Both are in the live `void_invoice`, so they affect the ordinary Void Invoice button, not only Fix Delivery.
+- **Write-off stays active.** Voiding a posted invoice that has a write-off sets the invoice's write-off amount to
+  zero but leaves its `write_offs` record active (not marked reversed), so the customer statement can still show it.
+  Until fixed, reverse the write-off before voiding. Fix Delivery refuses these invoices.
+- **Credit month read in UTC.** Before reversing an applied credit, `void_invoice` checks that the credit's month
+  is open using the UTC date (`applied_at::date`), not the Chicago business date. A credit applied just after
+  midnight UTC on the 1st belongs to the previous Chicago month, so a closed month can be changed. Fix Delivery
+  checks both dates.
+- **Next step.** A reviewed migration that marks the write-off reversed when its invoice is voided and checks the
+  credit month by the Chicago date (Sol-listed: money).
 ### KI-10 — About 69 live functions replay a saved result matched on the retry key alone
 **HIGH on money paths · PARTIAL · money/inventory/database · unassigned (batch 3 remainder is next)**
 When a user retries an action with a saved "retry key", these functions return the first call's saved answer
@@ -244,6 +256,14 @@ key is scoped depends on whether the server binds the key to its request (KI-10)
   its below-cost approval is remembered per key, and a shared key could carry an approval to a different order.
 - Saving an existing job keeps one key per exact edit: re-applying an edit to the same job is harmless, while a
   new job keeps one key and opens the committed job when an edited retry is refused.
+**Partial Order across a reload (S14, 2026-11-03):** a reload forgets the in-memory key, so a rep whose
+reply was lost and who reloaded made a second order with a fresh key. QuoteBuilder now keeps an unconfirmed
+draw (its key and exact request) in the tab's sessionStorage (`src/lib/pendingRetry.ts`, kept no longer than
+the server's 24-hour receipt) and the Partial Order dialog offers **Finish it**, which re-sends that request
+with that key: the server returns the order it made, or makes it once. A typed draw also uses the kept key,
+so a changed draw after a committed one is refused with that order. Cleared on success or a binding refusal.
+Proof: three screen tests in `QuoteBuilder.test.tsx`; on the local test copy, a draw whose reply was dropped,
+a reload and Finish it left one order and 100 gal drawn. Other screens still keep keys in memory only.
 **Remaining risk:** for the unbound functions, a create retried with different details after a lost reply opens
 the record already created without the later edits, and an edited retry of an existing record applies the new edit
 after the old one. Neither makes a second record or moves money twice; a clear refusal needs server-side binding
@@ -262,7 +282,7 @@ QuoteBuilder used to save the quote as Accepted (releasing its inventory holds) 
 failed second step left an accepted quote with no order. It now calls `convert_quote_to_order` on the sent or
 revised quote, which marks it accepted in the same transaction as the order; a failure leaves the quote as it was
 (proof: `scripts/smoke/smoke-convert-sent-quote-in-one-step.sql`). A direct `quotes.status` update by an owning
-rep can still flip a quote to accepted without an order (the column is writable); that path is not in the app. Candidate fix: `20261029090000` (PR #1200, not applied) refuses it at commit (`QUOTE_ACCEPTED_WITHOUT_ORDER`).
+rep could flip a quote to accepted without an order (the column is writable); that path is not in the app. Fix: `20261029090000` (PR #1200) refuses it at commit (`QUOTE_ACCEPTED_WITHOUT_ORDER`); it is in the live ledger (version `20261031103934`, re-read 2026-11-04), the live refusal was not re-tested.
 Q-2026-2059 (accepted, no order, no draws; seen 2026-10-25) predates the fix and is untouched.
 **The December pre-booking flow had the same gap** (raised by Maksym, checked in the code 2026-10-26): a
 Planned Program quote reserves its stock with holds (`create_planned_holds`), and the trigger
@@ -357,7 +377,7 @@ orders and job lines. Two later paths read `quote_items.price_per_unit` live ins
 `_blend_quote_pick_valid_20261020`, or the first line of the job's quote section) and the field-application
 invoice (`_save_field_app_invoice_impl_20260714`, `resolve_field_app_chemical_price`, which take the first quote
 line on the field with no status, customer or deleted filter). After a revision that changed a price and was not
-re-sent, either can bill the unsent price (with the candidate `20261029120000`, PR #1203, a price change recorded by `save_quote` is the agreed price and needs no re-send); the field-application lookup can also take a draft, declined or deleted
+re-sent, either can bill the unsent price (with `20261029120000`, PR #1203, in the live ledger as version `20261031130629`, a price change recorded by `save_quote` is the agreed price and needs no re-send); the field-application lookup can also take a draft, declined or deleted
 quote's price. Fix: read the price from the version last sent (or refuse like the lock), with a real-schema proof.
 
 ### KI-82 — The open quote screen can show a stale cost for a line it just saved
@@ -392,14 +412,6 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 **Payment half — fixed by `20261103220000_period_check_takes_month_lock`:** `allocate_payment` refuses a
 `p_payment_date` after today in Central time (`PAYMENT_DATE_IN_FUTURE`), so a payment can no longer make a customer
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
-
-### KI-99 — A CSV import can end partly saved if rates are locked mid-upload
-**MED · product import · LOCAL CANDIDATE `20261106120000` — NOT APPLIED**
-The CSV import checks the rate lock once, then saves rows one at a time. If an admin locks rates between two rated rows, the earlier rows stay saved and the later ones are refused (`PRODUCT_RATES_LOCKED`); no locked rate is ever changed. WP-PM-10 replaces the row-by-row save with the all-or-nothing `set_product_rates`. Source: the WP-PM-11a-1 changelog note.
-
-### KI-100 — An open product page learns of a lock change only on reload or a refused save
-**LOW · product UI · LOCAL CANDIDATE `20261106120000` — NOT APPLIED**
-If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
 
 ---
 

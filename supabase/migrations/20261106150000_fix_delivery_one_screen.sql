@@ -324,6 +324,10 @@ GRANT EXECUTE ON FUNCTION public.preview_fix_delivery(uuid) TO authenticated, se
 ALTER TABLE public.commissions ADD COLUMN replaces_commission_id uuid;
 COMMENT ON COLUMN public.commissions.replaces_commission_id IS
   'Set only by fix_delivery: the cancelled commission this row re-creates. Reports skip a cancelled commission that a row replaces.';
+-- Readable like its sibling columns (per-column grants since 20261022101000); no INSERT or UPDATE grant.
+GRANT SELECT (replaces_commission_id) ON public.commissions TO authenticated;
+GRANT REFERENCES (replaces_commission_id) ON public.commissions TO authenticated;
+GRANT SELECT (replaces_commission_id) ON public.commissions TO anon;
 
 -- The reports trust the link, so nothing but fix_delivery (crx.fix_delivery_restore='on', running as its
 -- owner, who also owns this guard; the postflight checks that) may set or change it: a service_role

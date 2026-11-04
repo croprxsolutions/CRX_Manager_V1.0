@@ -10,6 +10,38 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-03 — Product Master Wave 3 plan fixes (vendor steps, rate lock split, gates)
+
+**Source:** Mason's in-chat "ok fix all issues" on 2026-11-03, after an independent read-only review
+of the Wave 3 plan. The review found the plan behind the built vendor work, two unstated facts, and
+start gates that could not be checked.
+
+**Decision.**
+- WP-PM-15b is three steps: vendor-only links (#1381, live), the DATA-11 data step (PR #1385), and enforcement.
+- An app-only change that makes Vendor read-only on saved products deploys before enforcement applies, so no ordinary write is refused in the gap.
+- WP-PM-11a splits into 11a-1 (a new `set_product_rates` writer, the rate lock, the correction operation) and 11a-2 (the setup workbook, without a Vendors tab).
+- The lock covers `rate_per_acre`, `rate_unit` and `suggested_rate`, not the label facts.
+- WP-PM-10 depends on 11a-1 only.
+- The Wave 3 gate is a list of named migrations, the verified vendor data step and a DM-0 gate query, as in mission §5.
+
+**Why.**
+- Rate writes reprice customer-facing per-acre prices through `recalc_product_price_per_acre`, so they need previews and approval like price changes.
+- No rate writer existed for 11a and 10 to share.
+
+## 2026-11-03 — DATA-11: the minimum vendor link and who gets a preferred vendor
+
+**Source:** Mason's DATA-11 decisions 1–4 on 2026-11-03, as recorded in the headers of migrations
+`20261105090000_vendor_only_product_links` (#1381) and `20261105100000_data11_preferred_vendor_links`
+(PR #1385). The row list is in his private vault, not here.
+
+**Decision.**
+1. A vendor link may name only the vendor. The vendor's item name, number, unit and pack stay blank until known, and are never invented. Such a link is never used for price imports or cost comparisons.
+2. Each active product with no link gets a preferred link to the one vendor its vendor text already names.
+3. Two products with blank vendor text were assigned a vendor by hand.
+4. A product's single existing link becomes its preferred one.
+
+**Why.** Nearly every product lacked the SKU, unit and pack that the existing link writer required, so a full-detail link could not be made without invented values.
+
 ## 2026-11-03 — Each `.husky` hook hands off to the worktree's own copy
 
 **Source:** Mason's in-chat "ok do it" on 2026-11-03, after an investigation found 12 desktop-app

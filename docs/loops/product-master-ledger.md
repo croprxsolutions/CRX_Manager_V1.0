@@ -1,5 +1,7 @@
 # Product Master loop ledger
 
+> **Stale as of 2026-11-03.** Many packages landed through ordinary sessions after this run, so rows below are behind: PM-3, PM-5, PM-7, PM-8, PM-9, PM-6a, PM-15a and WP-PM-15b step 1 (#1381). Before acting on a row, check live migrations and `git log origin/main`; they win. The Wave 3 start gate is in the mission's §5.
+
 **Run:** Wave 1, attempt 1. **Started:** 2026-11-01 13:20 America/Chicago. **Hard wrap:** 21:20; no new package after 19:20; closeout by 20:35.
 **Coordinator branch:** `loop/product-master-w1-r1-2026-11-01`. **Build worktree:** `C:\CRX_PMBuild`. **Base:** `origin/main` at `2538335c5`.
 

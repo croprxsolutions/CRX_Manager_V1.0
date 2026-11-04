@@ -81,7 +81,7 @@ import { escapeHtml } from '../lib/proofNotification';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import { preferredQuoteNotes } from '../lib/quoteNotes';
 import { adaptQuoteVersionList, orderedQuoteVersionHistory, type QuoteVersionRow, type UnreadableQuoteVersion } from '../lib/quoteVersionAdapter';
-import { resendRequiredMessage, samePrice, sentItemsOf, sentLineState, unsentQuoteChange, type PriceLockLine } from '../lib/quotePriceLock';
+import { resendRequiredMessage, samePrice, sentItemsOf, sentLineState, unsentQuoteChange, type PriceLockLine, type QuotePriceChange } from '../lib/quotePriceLock';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import HelpTip from '../components/ui/HelpTip';
 import TransactionThread from '../components/ui/TransactionThread';
@@ -226,6 +226,23 @@ interface DrawRow {
 }
 
 let keyCounter = 0;
+// The price changes save_quote recorded on this quote's sent lines (quote_price_changes, read-only
+// to admins and reps). null when the read failed.
+async function loadQuotePriceChanges(quoteId: string): Promise<QuotePriceChange[] | null> {
+  // supabaseUntyped: quote_price_changes is not in the generated types yet.
+  const { data, error } = await fetchAllRows<QuotePriceChange>((from, to) => pageWithList(supabaseUntyped
+    .from('quote_price_changes')
+    .select('id, quote_item_id, product_id, new_price_cents, sent_version, grower_confirmed_by', { count: 'exact' })
+    .eq('quote_id', quoteId)
+    .order('id')
+    .range(from, to)));
+  if (error) {
+    Sentry.captureException(error, { tags: { source: 'read', action: 'load_quote_price_changes' } });
+    return null;
+  }
+  return data ?? [];
+}
+
 function nextKey() {
   return `_k${++keyCounter}`;
 }
@@ -590,6 +607,16 @@ export default function QuoteBuilder() {
   const [rupWarnings, setRupWarnings] = useState<string[]>([]);
   const [quoteVersions, setQuoteVersions] = useState<QuoteVersion[]>([]);
   const [unreadableQuoteVersions, setUnreadableQuoteVersions] = useState<UnreadableQuoteVersion[]>([]);
+  // Tagged with its quote, so a late reply for another quote is never read as this one's. A
+  // quote whose list never loaded has none, and the page asks for a re-send rather than promising
+  // a price the database may refuse; a failed refresh keeps the last list read.
+  const [priceChanges, setPriceChanges] = useState<{ quoteId: string; rows: QuotePriceChange[] } | null>(null);
+  const priceChangesSerialRef = useRef(0);
+  const refreshPriceChanges = useCallback(async (forQuoteId: string) => {
+    const serial = ++priceChangesSerialRef.current;
+    const rows = await loadQuotePriceChanges(forQuoteId);
+    if (rows && serial === priceChangesSerialRef.current) setPriceChanges({ quoteId: forQuoteId, rows });
+  }, []);
   const savedVersionCount = quoteVersions.length + unreadableQuoteVersions.length;
   // A quote with a sent version keeps its prices (save_quote, 20261027040000). The version last
   // sent to the customer is the price authority that Convert, Partial Order and Schedule Job check.
@@ -705,6 +732,7 @@ export default function QuoteBuilder() {
       id: saved && saved.productId === item.product_id ? saved.id : undefined,
       product_id: item.product_id,
       price_per_unit: item.price_per_unit,
+      saved_price_per_unit: saved && saved.productId === item.product_id ? saved.price : undefined,
     };
   }, [savedLineIdByKey]);
   // The database's re-send rule as the page can see it (src/lib/quotePriceLock.ts).
@@ -714,7 +742,8 @@ export default function QuoteBuilder() {
       .reduce((newest, v) => Math.max(newest, v.version_number), 0),
     customerId,
     lines: sections.flatMap((sec) => sec.items.filter((item) => item.product_id).map(priceLockLineOf)),
-  }), [lastSentVersion, quoteVersions, unreadableQuoteVersions, customerId, sections, priceLockLineOf]);
+    priceChanges: priceChanges && priceChanges.quoteId === quoteId ? priceChanges.rows : [],
+  }), [lastSentVersion, quoteVersions, unreadableQuoteVersions, customerId, sections, priceLockLineOf, priceChanges, quoteId]);
   // Lines switched to another product since the last save was sent. A switched
   // line stops being its saved line, even if it is later switched back, so the
   // reply of a save that was in flight must not hand it an id again.
@@ -1442,12 +1471,14 @@ export default function QuoteBuilder() {
       setUnreadableQuoteVersions(unreadable);
       reportUntrustworthyQuoteVersions(unreadable, quoteId);
     }
+    await refreshPriceChanges(quoteId);
+    if (mustNotInstall()) return false;
 
     setLoading(false);
     const loadGeneration = ++initialLoadGenerationRef.current;
     setInstalledLoadGeneration(loadGeneration);
     return true;
-  }, [toast, navigate, resetSaveQuoteKeyFor, isAdmin]);
+  }, [toast, navigate, resetSaveQuoteKeyFor, isAdmin, refreshPriceChanges]);
 
   const reloadAfterStaleSave = useCallback(async () => {
     if (!quoteId) return false;
@@ -2590,6 +2621,9 @@ export default function QuoteBuilder() {
         }
         savedLineIdsRef.current = savedLineIds;
         setSavedLineIdByKey(new Map(savedLineIds));
+        // The save recorded any changed price; read the record the database will check.
+        await refreshPriceChanges(result.quote_id);
+        if (editingSessionChanged()) return null;
       }
       // The save committed, but conversion and other chained actions must not
       // continue unless this tab can install the exact authoritative token.
@@ -3043,6 +3077,8 @@ export default function QuoteBuilder() {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'revert_quote_status' } });
       if (hasRpcCode(err, RpcErrorCodes.INSUFFICIENT_ROLE)) {
         toast('error', 'Only an admin can reopen a quote.');
+      } else if (hasRpcCode(err, RpcErrorCodes.QUOTE_SEND_REQUIRED)) {
+        toast('error', 'This quote was never sent to the customer, so it cannot be reopened. Create a new quote instead.');
       } else {
         // Server messages here are plain-English and actionable (e.g. "an order
         // has already been created from it") — surface them as-is.
@@ -3374,7 +3410,8 @@ export default function QuoteBuilder() {
     setQuoteVersions(versions);
     setUnreadableQuoteVersions(unreadable);
     reportUntrustworthyQuoteVersions(unreadable, quoteId);
-  }, [quoteId]);
+    void refreshPriceChanges(quoteId);
+  }, [quoteId, refreshPriceChanges]);
 
   const handleRestoreVersion = async (versionId: string, versionNumber?: number) => {
     if (!quoteId || !profile) return;

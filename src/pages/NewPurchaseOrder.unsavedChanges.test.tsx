@@ -119,4 +119,40 @@ describe('NewPurchaseOrder unsaved changes', () => {
     await new Promise((r) => setTimeout(r, 400));
     expect(dirty.values).not.toContain(true);
   });
+
+  it('a cost suggestion landing after the draft saved is re-saved before the submit retry', async () => {
+    let resolveSuggestion: (value: unknown) => void = () => {};
+    let submitAttempts = 0;
+    const calls: string[] = [];
+    mockRpc.mockImplementation((name: string) => {
+      calls.push(name);
+      if (name === 'get_product_vendors') return new Promise((resolve) => { resolveSuggestion = resolve; });
+      if (name === 'save_purchase_order') return Promise.resolve({ data: { po_id: 'po-1', po_number: 'PO-TEST-1' }, error: null });
+      if (name === 'submit_purchase_order') {
+        submitAttempts += 1;
+        return Promise.resolve(submitAttempts === 1
+          ? { data: null, error: new Error('Submit failed') }
+          : { data: { po_id: 'po-1', status: 'submitted' }, error: null });
+      }
+      throw new Error(`Unexpected RPC ${name}`);
+    });
+    render(<NewPurchaseOrder />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select Product' }));
+    fireEvent.click(screen.getByRole('button', { name: /Test Herbicide/ }));
+    fireEvent.change(screen.getByPlaceholderText('Enter or select vendor...'), { target: { value: 'Test Vendor' } });
+    fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '5' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit PO' }));
+    await waitFor(() => expect(submitAttempts).toBe(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit PO' })).toBeEnabled());
+
+    resolveSuggestion({ data: [{ vendor_name: 'Test Vendor', is_preferred: true, last_cost_cents: 980 }], error: null });
+    await waitFor(() => expect(screen.getByDisplayValue('9.8')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Submit PO' }));
+
+    await waitFor(() => expect(submitAttempts).toBe(2));
+    expect(calls.filter((name) => name !== 'get_product_vendors')).toEqual([
+      'save_purchase_order', 'submit_purchase_order', 'save_purchase_order', 'submit_purchase_order',
+    ]);
+  });
 });

@@ -80,9 +80,10 @@ export default function NewPurchaseOrder() {
   const [productsLoadFailed, setProductsLoadFailed] = useState(false);
 
   // Track dirty state for unsaved changes warning
-  // Set only by the user's own edits: the catalog load, a ?product= pre-fill and cost
-  // suggestions rewrite the lines too, and none of them is unsaved work.
+  // Set by the user's own edits. The catalog load, a ?product= pre-fill and cost suggestions
+  // rewrite the lines too: unsaved work only once a draft exists, since submit re-saves on isDirty.
   const [isDirty, setIsDirty] = useState(false);
+  const savedPoIdRef = useRef<string | null>(null);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
   const skipUnsavedPromptRef = useRef(false);
   const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
@@ -147,6 +148,7 @@ export default function NewPurchaseOrder() {
         const prod = i.product_id && !i.costFromAdmin ? byId.get(i.product_id) : undefined;
         return prod ? { ...i, unit_cost: prod.current_cost || 0, costFromAdmin: true } : i;
       }));
+      if (savedPoIdRef.current) setIsDirty(true);
     }
     const uniqueVendors = [...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[];
     setVendors(uniqueVendors.sort());
@@ -168,6 +170,7 @@ export default function NewPurchaseOrder() {
     const unitCost = costForVendor(suggestion, vendorRef.current, catalog); // the vendor on the form now, not at selection
     setItems((prev) => prev.map((i) => (i.key === itemKey && i.product_id === product.id && !i.costEdited && i.unit_cost === catalog
       ? { ...i, suggestion, unit_cost: unitCost, ...(unitCost !== catalog ? { costFromAdmin: true } : {}) } : i)));
+    if (savedPoIdRef.current) setIsDirty(true);
   }, []);
 
   // Reorder deep-link: pre-fill the first line from ?product=<id> once products load.
@@ -346,7 +349,7 @@ export default function NewPurchaseOrder() {
           saveIdem.resetKey();
 
           if (isFirstSave) {
-            setSavedPoId(poId);
+            setSavedPoId(savedPoIdRef.current = poId);
             setSavedPoNumber(result.po_number);
           }
 

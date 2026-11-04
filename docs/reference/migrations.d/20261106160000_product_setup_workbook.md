@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied.** `20261106160000_product_setup_workbook.sql` (LF SQL sha256: `d161d350e4fae79fd316859a5d4ceb43d5bd1a5e12b5d6bcb144fe02b1c7c5bc`). WP-PM-11a-2. REQUIRES `20261106155000_product_rate_lock` (its preflight checks `set_product_rates`, `preview_product_rate_correction`, the rate value and unit helpers and `product_rate_lock`); without them the one-transaction apply changes nothing.
+**LOCAL CANDIDATE, not applied.** `20261106160000_product_setup_workbook.sql` (LF SQL sha256: `f7f711843ffc965135cc85f968953a0f9e4c447d268b95e059718f829577595a`). WP-PM-11a-2. REQUIRES `20261106155000_product_rate_lock` (its preflight checks `set_product_rates`, `preview_product_rate_correction`, the rate value and unit helpers and `product_rate_lock`); without them the one-transaction apply changes nothing.
 
 What it does:
 - New `get_product_setup_workbook()`: admin only, read-only. Every product's setup fields, rates (as exact text), pricing version, pack size, stock unit, form and tier 1–3 per-acre prices, plus a per-row `setup_fingerprint` and whether rates are locked. Never vendor or cost.

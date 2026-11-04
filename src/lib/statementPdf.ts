@@ -112,7 +112,8 @@ export async function generateStatementPdf(
     doc.text(company.name.toUpperCase(), margin, 35);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 170), margin, 53);
+    // Two lines fill the 70pt green bar; more would spill into the page body.
+    doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 170).slice(0, 2), margin, 53);
 
     // Statement label (right)
     doc.setFontSize(14);

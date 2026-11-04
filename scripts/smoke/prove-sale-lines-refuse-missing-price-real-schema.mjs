@@ -30,11 +30,13 @@ const PARKED = new Set([
   '20261015230000_staff_photo_storage_access.sql',
   '20261016030000_staff_photo_buckets_private.sql',
 ]);
-// PR #889's data migrations rewrite live rows this disposable database does not have; they are
-// recorded in the ledger (as live has them) instead of replayed.
+// PR #889's data migrations and DATA-11 rewrite live rows this disposable database does not have
+// (DATA-11 also needs a live admin approver); they are recorded in the ledger (as live has them)
+// instead of replayed.
 const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
+  '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 const TOUCHED = /(_sale_line_price_required|trigger_[bc]_\w*price_required)/i;

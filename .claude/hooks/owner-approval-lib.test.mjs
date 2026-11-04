@@ -11,10 +11,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   OWNER_APPROVAL_MAX_AGE_MS,
   OWNER_APPROVAL_VIA,
@@ -274,7 +274,7 @@ refuses(check(approve({ nonce: "../x" })), "no usable one-time code", "a nonce t
 // that built the requests (SID) unless a case says otherwise.
 const MARK = { transcript: "transcript.jsonl", from: 0, written: false, words: "approve" };
 const rec = (args) => recordReplyApproval({ sessionId: SID, readMark: () => MARK, ...args });
-const tmp = mkdtempSync(path.join(os.tmpdir(), "crx-owner-approval-"));
+const tmp = tempDir("crx-owner-approval-");
 try {
   const dir = path.join(tmp, "a", ".claude", "session-state");
   const other = path.join(tmp, "b", ".claude", "session-state");
@@ -446,7 +446,7 @@ const toolGave = (content) => T("user", [{ type: "tool_result", tool_use_id: "t"
 const masonSaid = (text) => T("user", text);
 const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Reference ${base.code}. You don't need to type it.)`;
 {
-  const tdir = mkdtempSync(path.join(os.tmpdir(), "crx-owner-transcript-"));
+  const tdir = tempDir("crx-owner-transcript-");
   try {
     let n = 0;
     const last = (lines, opts) => {
@@ -801,7 +801,7 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
 
 // ── The reply hook as a real process, alone and through prompt-router.mjs.
 {
-  const root = mkdtempSync(path.join(os.tmpdir(), "crx-owner-reply-"));
+  const root = tempDir("crx-owner-reply-");
   try {
     const dir = path.join(root, ".claude", "session-state");
     const env = { ...process.env, CLAUDE_PROJECT_DIR: root };
@@ -934,7 +934,7 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
 // hooks, so Mason's "i approve" (twice) reached nothing and nobody was told. The reply
 // hook marks every message it sees; the request script refuses without that mark.
 {
-  const root = mkdtempSync(path.join(os.tmpdir(), "crx-owner-hookless-"));
+  const root = tempDir("crx-owner-hookless-");
   try {
     const dir = path.join(root, ".claude", "session-state");
     mkdirSync(path.join(root, ".claude"));
@@ -958,7 +958,7 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
 
   // As real processes: the hook (alone and routed) leaves the marker on an ordinary
   // message, and the script refuses before it and builds the request after.
-  const proj = mkdtempSync(path.join(os.tmpdir(), "crx-owner-hookless-run-"));
+  const proj = tempDir("crx-owner-hookless-run-");
   try {
     const dir = path.join(proj, ".claude", "session-state");
     mkdirSync(path.join(proj, ".claude"));

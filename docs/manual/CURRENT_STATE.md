@@ -1,6 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-11-03 (America/Chicago), for the live ledger only (see the pm5-registry-refresh changelog note); quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
+**Last verified:** 2026-11-04 (America/Chicago), for the live ledger only (see the 2026-11-04 retro-split-guard changelog note); quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
 Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 Every other section keeps its own date; nothing below was re-certified by that read.
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature
@@ -283,6 +283,26 @@ LOCAL CANDIDATES, not applied, carried by the open field-season delivery PR (bra
 APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Mason, 2026-09-28): these four land after 2026-10-01. `20260914101000` is classified access-change, which the apply tool refuses for every session until Mason approves that exact file with Windows Hello (owner-approval route, PR #845). **Order changed by Mason on 2026-09-30:** the delivery PR merges FIRST (its app changes are backward-compatible: a client-side filed-season date guard and plain-English error mapping, using only existing columns). The four migrations then apply from the owner-approval PR's checkout once main is merged into it. The landing gate needs the migration committed at the HEAD of an open, Sol-cleared PR with green checks (CodeRabbit approval was also required until 2026-10-19), not the PR that introduced it; `20260914100900` was applied the same way. After this PR merges, no PR adding a new migration may merge or apply before `20260914101300` is live.
 
 ## Recent production deployments
+
+- **2026-11-04 04:12 UTC (10:12 PM Central, 2026-11-03; Settings Company Info on emailed purchase order PDFs, PR #1413):**
+  the `send-email` Edge Function was deployed live as v25 (was v24) on Mason's in-chat approval ("Yes, redeploy"),
+  with `supabase functions deploy send-email --use-api` from main `d4fb7ccb5`.
+  - ACTIVE, with JWT checking on. Since v24 only `send-email/index.ts`, `_shared/pdf/companyInfo.ts` and
+    `_shared/pdf/purchaseOrderPdf.ts` changed. All 13 deployed files were downloaded back and match main byte for byte.
+  - Caller path exercised on croprxsolutions.app (Mason approved the test): the PO-2026-0030 "Email PO Copy"
+    went to mason@croprxsolutions.com at 04:14 UTC with `Purchase-Order-PO-2026-0030.pdf` attached; `email_log`
+    status `sent`. That path refuses (503) when the Company Info read fails, so the read succeeded.
+  - The rollback is redeploying v24 (from main `ef922c9bf`'s `send-email` files).
+- **2026-11-04 01:03 UTC (7:03 PM Central, 2026-11-03; Settings Company Info on emailed invoice PDFs, PR #1396):**
+  the `send-email` Edge Function was deployed live as v24 (was v23) on Mason's in-chat approval ("Yes, deploy it"),
+  with `supabase functions deploy send-email --use-api` from main `ef922c9bf`, after the app half merged as `dbdee35ff`.
+  - ACTIVE, with JWT checking on. Since v23 only `_shared/pdf/companyInfo.ts` and `_shared/pdf/invoicePdf.ts` changed.
+  - All 13 deployed files were downloaded back and match main byte for byte.
+  - Caller path exercised on croprxsolutions.app (Mason approved the test): test invoice INV-2026-1528
+    ([E2E] Farm Alpha, one $1.00 misc charge) was posted and emailed. `send-email` returned 200 and its `email_log`
+    row is `sent`. The invoice was then voided.
+  - The rollback is redeploying v23 (from main `e53fa1440`'s `send-email` files). v23 ignores the Settings and
+    prints the built-in company details, which is safe on its own.
 
 - **2026-11-03 12:55 UTC (6:55 AM Central; invoice and PO email PDFs drawn by the server, KI-98, PR #1346):**
   the `send-email` Edge Function was deployed live as v23 (was v22) on Mason's in-chat approval ("Yes deploy"),

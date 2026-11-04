@@ -17,6 +17,7 @@
  * numbered "Stop N" = sort_order + 1. Callers MUST NOT rely on PostgREST embed
  * order — `buildApplicatorSheetData` re-sorts defensively.
  */
+import type { ProductForm } from '../types';
 import { toGallonOrLbEquivalent } from './chemCalculator';
 import type { JobMapImages } from './jobMapImages';
 
@@ -145,12 +146,12 @@ export interface ApplicatorSheetProduct {
   /** "12.5 gal" / "40 lb" gallon-or-pound equivalent of total_applied; null if not convertible. */
   total_gl_lb: string | null;
   /**
-   * 'liquid' | 'dry' (or null when unknown) — carried THROUGH from the raw input so a
+   * Product form (or null when unknown) — carried THROUGH from the raw input so a
    * cross-job aggregator (#12 Chemical Summary) can RE-DERIVE the gal/lb equivalent of a
    * SUMMED quantity with the same product_form the server convert_to_gl_lb uses, instead
    * of string-adding per-job gal/lb displays. Display-only consumers (#9/#11) ignore it.
    */
-  product_form: 'liquid' | 'dry' | null;
+  product_form: ProductForm | null;
   rei_hours: number | null;
   phi_days: number | null;
   epa_registration: string | null;
@@ -231,8 +232,8 @@ export interface RawSheetProduct {
   unit: string | null;
   /** Optional hand-entered total; when null we derive rate × total acres. */
   total_quantity: number | null;
-  /** 'liquid' | 'dry' so the gal/lb conversion matches the server convert_to_gl_lb. */
-  product_form: 'liquid' | 'dry' | null;
+  /** Product form so the gal/lb conversion matches the server convert_to_gl_lb. */
+  product_form: ProductForm | null;
   rei_hours: number | null;
   phi_days: number | null;
   epa_registration: string | null;

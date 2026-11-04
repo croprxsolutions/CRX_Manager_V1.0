@@ -7,9 +7,9 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -48,7 +48,7 @@ function scaffold(dir, registry, migrationFiles) {
 const REGISTRY_RELEVANT_SQL = "CREATE TABLE widgets (id int);";
 const NON_RELEVANT_SQL = "-- data-only migration\nUPDATE widgets SET x = 1;";
 
-const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "session-staleness-test-"));
+const tmpRoot = tempDir("session-staleness-test-");
 
 try {
   // ── FIX 1 (a): applied name present -> NOT flagged, even though the disk

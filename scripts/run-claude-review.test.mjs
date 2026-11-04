@@ -168,6 +168,12 @@ assert.match(prompt, /package\.json/);
 assert.match(prompt, /BEGIN UNTRUSTED SCOPED DIFF/);
 assert.match(prompt, /diff --git a\/package\.json b\/package\.json/);
 assert.match(prompt, /Use only Read, Grep, and Glob; do not call Bash/i);
+// Blind by default: no comparison asked for unless the other agent's position is supplied.
+assert.doesNotMatch(prompt, /agree or disagree/i);
+assert.match(
+  buildClaudeReviewPrompt({ repo: "r", scope: "uncommitted", extraContext: "Codex says X." }),
+  /after writing your own findings, say where you agree or disagree/,
+);
 
 const commandArgs = buildClaudeCommandArgs();
 assert.deepEqual(commandArgs, [

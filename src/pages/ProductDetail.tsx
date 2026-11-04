@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, DollarSign, ExternalLink, Search, Save } from 'lucide-react';
+import { useLocation, useParams, useNavigate } from 'react-router-dom';
+import { AlertTriangle, ArrowLeft, Copy, DollarSign, ExternalLink, Search, Save } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
+import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Combobox from '../components/ui/Combobox';
 import Input from '../components/ui/Input';
@@ -14,6 +15,7 @@ import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductSellPriceHistory from '../components/products/ProductSellPriceHistory';
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
+import ProductVendorsSection from '../components/products/ProductVendorsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
 import ProductStockCard from '../components/products/ProductStockCard';
@@ -23,9 +25,10 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, assertRpcResult, checkMutationResult, supabase, supabaseUntyped } from '../lib/db';
 import { localToday } from '../lib/dateUtils';
+import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
 import { Sentry } from '../lib/sentry';
-import { unitOptionsForForm, isKnownUnit } from '../lib/units';
+import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, PRODUCT_FORM_OPTIONS } from '../lib/units';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { usePhoneSections } from '../hooks/usePhoneSections';
@@ -56,7 +59,10 @@ import {
   type SupplierCostBasisCandidate,
 } from '../lib/productCostBasis';
 import { PRODUCT_COLUMNS, withAdminCost } from '../lib/costFields';
-import { listProductCategories, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories } from '../lib/productSetup';
+import {
+  duplicateProductDraft, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
+  productSetupValidationMessage, visibleProductCategories, type DuplicateProductSource,
+} from '../lib/productSetup';
 import { listProductUseTimingOptions, visibleProductUseTimingOptions } from '../lib/productUseTimings';
 import type { ProductCategory, UseTimingOption } from '../types';
 
@@ -69,21 +75,34 @@ const PRODUCT_NONPRICING_FIELDS = [
   'rei_hours', 'phi_days', 'max_label_rate', 'max_label_rate_unit', 'use_timings',
 ] as const satisfies ReadonlyArray<keyof Product>;
 
+// Other screens write these (commit_label_draft writes the six label fields).
+const PRODUCT_FIELDS_WRITTEN_ELSEWHERE = [
+  'vendor', 'signal_word', 'rei_hours', 'phi_days', 'epa_registration', 'max_label_rate', 'max_label_rate_unit',
+] as const satisfies ReadonlyArray<(typeof PRODUCT_NONPRICING_FIELDS)[number]>;
+
 const PRODUCT_PRICING_FIELDS = [
   'current_cost', 'tier1_margin', 'tier2_margin', 'tier3_margin',
   'tier1_price', 'tier2_price', 'tier3_price',
 ] as const satisfies ReadonlyArray<keyof Product>;
 
-type ProductPricingMoneyField = 'current_cost' | 'tier1_price' | 'tier2_price' | 'tier3_price';
+type ProductPricingMoneyField = 'tier1_price' | 'tier2_price' | 'tier3_price';
 type ProductPricingMoneyDrafts = Partial<Record<ProductPricingMoneyField, string>>;
 type ProductPricingMarginField = 'tier1_margin' | 'tier2_margin' | 'tier3_margin';
 type ProductPricingMarginDrafts = Partial<Record<ProductPricingMarginField, string>>;
 
-function nonpricingProductPayload(product: Partial<Product>): Record<string, unknown> {
-  return Object.fromEntries([
+function nonpricingProductPayload(product: Partial<Product>, persisted?: Product): Record<string, unknown> {
+  const payload: Record<string, unknown> = Object.fromEntries([
     ...PRODUCT_NONPRICING_FIELDS.map((field) => [field, product[field]] as const),
     ['updated_at', new Date().toISOString()],
   ]);
+  // Send these only when edited here, so a page left open never re-saves an old value over one
+  // changed elsewhere: the vendor by WP-PM-15 (preferred vendor's copy), the rest by Label Review's commit.
+  if (persisted) {
+    for (const field of PRODUCT_FIELDS_WRITTEN_ELSEWHERE) {
+      if (payload[field] === (persisted[field] ?? null)) delete payload[field];
+    }
+  }
+  return payload;
 }
 
 function pricingMoneyInput(
@@ -123,7 +142,7 @@ function pricingPreviewRow(
   if (!Number.isInteger(persisted.pricing_version) || (persisted.pricing_version ?? 0) < 1) {
     throw new Error('This Product does not have a pricing version yet. Refresh after the Phase 1a database migration is available.');
   }
-  const cost = costOverride ?? pricingMoneyInput(product, moneyDrafts, 'current_cost');
+  const cost = costOverride ?? (product.current_cost == null ? '' : String(product.current_cost));
   if (cost === null || cost === '') throw new Error('Enter the Product cost before reviewing pricing.');
   const row: PricingPreviewInputRow = {
     product_id: persisted.id,
@@ -197,8 +216,12 @@ export default function ProductDetail() {
   const { role, profile } = useAuth();
   const isNew = id === 'new';
   const isAdmin = role === 'admin';
+  // WP-PM-6b: a Duplicate arrives with its source's copied fields; a fresh create arrives flagged to prompt for prices.
+  const routeState = useLocation().state as { duplicateFrom?: DuplicateProductSource; justCreated?: boolean } | null;
+  const duplicateSource = isNew ? routeState?.duplicateFrom : undefined;
+  const justCreated = !isNew && routeState?.justCreated === true;
 
-  const [product, setProduct] = useState<Partial<Product>>({
+  const [product, setProduct] = useState<Partial<Product>>(() => ({
     product_name: '',
     sku: '',
     category: '',
@@ -226,7 +249,9 @@ export default function ProductDetail() {
     notes: '',
     quoting_notes: '',
     is_active: true,
-  });
+    // ProductDetailRoute remounts this page per id, so Duplicate's /products/new runs this initializer afresh.
+    ...(duplicateSource ? duplicateProductDraft(duplicateSource) : {}),
+  }));
   const [costHistory, setCostHistory] = useState<CostHistory[]>([]);
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>([]);
@@ -243,7 +268,6 @@ export default function ProductDetail() {
   const [saving, setSaving] = useState(false);
   const [costModal, setCostModal] = useState(false);
   const [newCost, setNewCost] = useState('');
-  const [costNote, setCostNote] = useState('');
   const [persistedProduct, setPersistedProduct] = useState<Product | null>(null);
   const [pricingMode, setPricingMode] = useState<PricingMode | ''>('');
   const [pricingMoneyDrafts, setPricingMoneyDrafts] = useState<ProductPricingMoneyDrafts>({});
@@ -252,7 +276,7 @@ export default function ProductDetail() {
   const [pricingPreviewTitle, setPricingPreviewTitle] = useState('Review Product Pricing');
   // A pricing change waiting for its source and reason before the preview.
   const [pendingPricingReview, setPendingPricingReview] = useState<
-    { costOverride?: string; initialReason: string } | null
+    { costOverride?: string } | null
   >(null);
   const [previewingPricing, setPreviewingPricing] = useState(false);
   const [applyingPricing, setApplyingPricing] = useState(false);
@@ -296,7 +320,7 @@ export default function ProductDetail() {
   } = useIdempotencyKey('apply_product_pricing_change_set', profile?.id ?? '');
 
   // Track dirty state for unsaved changes warning
-  const [isDirty, setIsDirty] = useState(false);
+  const [isDirty, setIsDirty] = useState(Boolean(duplicateSource));
   // The margin floor card saves on its own, so its unsaved edit is tracked apart from the form.
   const [marginFloorDirty, setMarginFloorDirty] = useState(false);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
@@ -457,7 +481,7 @@ export default function ProductDetail() {
     }
     const result = await supabaseUntyped
       .from('products')
-      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct)))
+      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct))
       .eq('id', id!)
       .eq('pricing_version', persistedProduct.pricing_version)
       .select('id');
@@ -487,9 +511,9 @@ export default function ProductDetail() {
   };
 
   // Check everything but the source and reason before asking for them, so nobody types them for nothing.
-  const openPricingReview = (costOverride?: string, initialReason = '') => {
+  const openPricingReview = (costOverride?: string) => {
     buildPricingReviewRow({ source: '', reason: '' }, costOverride);
-    setPendingPricingReview({ costOverride, initialReason });
+    setPendingPricingReview({ costOverride });
   };
 
   const requestPricingReview = async ({
@@ -639,7 +663,6 @@ export default function ProductDetail() {
       return;
     }
     for (const [field, label] of [
-      ['current_cost', 'Cost'],
       ['tier1_price', 'Tier 1 price'],
       ['tier2_price', 'Tier 2 price'],
       ['tier3_price', 'Tier 3 price'],
@@ -653,7 +676,7 @@ export default function ProductDetail() {
     }
 
     // Warn (but allow) if price < cost. The server preview remains authoritative.
-    const costCents = pricingDollarInputToCents(pricingMoneyInput(product, pricingMoneyDrafts, 'current_cost')) ?? 0n;
+    const costCents = pricingDollarInputToCents(String(product.current_cost ?? 0)) ?? 0n;
     const priceCents = (['tier1_price', 'tier2_price', 'tier3_price'] as const)
       .map((field) => pricingDollarInputToCents(pricingMoneyInput(product, pricingMoneyDrafts, field)))
       .filter((value): value is bigint => value !== null && value > 0n);
@@ -723,11 +746,18 @@ export default function ProductDetail() {
           .select('id');
         if (productInsertResult.error) throw productInsertResult.error;
         checkMutationResult(productInsertResult, 'Insert product');
+        const newProductId = (productInsertResult.data as { id: string }[] | null)?.[0]?.id;
         setIsDirty(false);
-        toast('success', 'Product created');
-        logActivity({ event: 'product_created', description: `Product ${product.product_name} created`, performedBy: profile!.id, entityType: 'product' });
+        logActivity({ event: 'product_created', description: `Product ${product.product_name} created`, performedBy: profile!.id, entityType: 'product', entityId: newProductId });
         skipUnsavedPromptRef.current = true;
-        navigate('/products');
+        if (!newProductId) {
+          // Saved, but the id did not come back: the list still shows the new product.
+          toast('success', 'Product created');
+          navigate('/products');
+          return;
+        }
+        toast('success', isAdmin ? 'Product created. Now set its prices.' : 'Product created');
+        navigate(`/products/${newProductId}`, { state: { justCreated: true } });
         return;
       }
 
@@ -761,7 +791,7 @@ export default function ProductDetail() {
       return;
     }
     try {
-      openPricingReview(newCost, costNote);
+      openPricingReview(newCost);
       setCostModal(false);
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
@@ -819,7 +849,6 @@ export default function ProductDetail() {
       setIsDirty(true);
       setPricingPreview(null);
       setNewCost('');
-      setCostNote('');
       setCostBasisReason('');
       setManualBasisCost('');
       setCostBasisPricingBehavior('keep_sell_prices');
@@ -1063,7 +1092,7 @@ export default function ProductDetail() {
         }));
       }
     } else if (mode === 'margin_driven') {
-      setPricingMoneyDrafts(({ current_cost }) => current_cost === undefined ? {} : { current_cost });
+      setPricingMoneyDrafts({});
     }
     setPricingMode(mode);
   };
@@ -1101,6 +1130,8 @@ export default function ProductDetail() {
     ? persistedLabelFields.epaRegistration.trim()
     : null;
 
+  const missingSetup = missingProductSetup(product);
+
   return (
     <div className={`phone-touch space-y-4 ${isAdmin ? 'max-md:pb-10' : ''}`}>
       <div className="flex items-center gap-3">
@@ -1110,7 +1141,34 @@ export default function ProductDetail() {
         <h2 className="text-lg font-semibold font-heading text-nav-dark">
           {isNew ? 'New Product' : product.product_name}
         </h2>
+        {missingSetup.length > 0 && <Badge variant="warning">Incomplete setup</Badge>}
+        {isAdmin && !isNew && persistedProduct?.id === id && (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="ml-auto"
+            icon={<Copy className="w-4 h-4" />}
+            showChevron={false}
+            disabled={pricingReloadRequired}
+            onClick={() => navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!) } })}
+          >
+            Duplicate
+          </Button>
+        )}
       </div>
+      {missingSetup.length > 0 && (
+        <p className="text-sm text-secondary" data-testid="product-setup-missing">
+          Still needed for complete setup: {missingSetup.join(', ')}.{isAdmin ? ' You can still save and price this product.' : ''}
+        </p>
+      )}
+
+      {duplicateSource && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900" role="status">
+          <p className="font-medium">Copy of {duplicateSource.product_name}. Nothing is saved until you create it.</p>
+          <p className="mt-1">Copied: category, vendor, manufacturer, product form and inventory unit.</p>
+          <p className="mt-1">Not copied, enter them for this product: SKU, container size, EPA number and label details (RUP, signal word, REI, PHI), rates, use timings, notes, brands, cost and prices.</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
@@ -1177,8 +1235,14 @@ export default function ProductDetail() {
                   </div>
                 </fieldset>
               )}
-              <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin} placeholder="Type or select..." />
-              <Combobox label="Manufacturer" value={product.manufacturer || ''} onChange={(v) => update('manufacturer', v)} options={manufacturerOptions} disabled={!isAdmin} placeholder="Type or select..." />
+              <div>
+                <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin || !isNew} placeholder="Type or select..." />
+                {isAdmin && isNew && <NearMatchWarning kind="vendor" matches={nearMatchNames(product.vendor, vendorOptions)} onPick={(name) => update('vendor', name)} />}
+              </div>
+              <div>
+                <Combobox label="Manufacturer" value={product.manufacturer || ''} onChange={(v) => update('manufacturer', v)} options={manufacturerOptions} disabled={!isAdmin} placeholder="Type or select..." />
+                {isAdmin && <NearMatchWarning kind="manufacturer" matches={nearMatchNames(product.manufacturer, manufacturerOptions)} onPick={(name) => update('manufacturer', name)} />}
+              </div>
               <div>
                 <div className="flex items-end gap-2">
                   <Input
@@ -1223,8 +1287,9 @@ export default function ProductDetail() {
                 </label>
               </div>
               <div>
-                <label className="block text-sm font-medium text-secondary mb-1">Signal Word</label>
+                <label htmlFor="product-signal-word" className="block text-sm font-medium text-secondary mb-1">Signal Word</label>
                 <select
+                  id="product-signal-word"
                   value={product.signal_word || ''}
                   onChange={(e) => update('signal_word', e.target.value || null)}
                   disabled={!isAdmin}
@@ -1410,7 +1475,7 @@ export default function ProductDetail() {
             {/* Product Form */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label htmlFor="product-form" className="block text-xs font-semibold text-secondary uppercase tracking-wide">Product Form</label>
-              <p className="text-xs text-gray-400 mt-0.5 mb-3">Determines which units are available below</p>
+              <p className="text-xs text-gray-500 mt-0.5 mb-3">Determines which units are available below</p>
               <div className="max-w-xs">
                 <select
                   id="product-form"
@@ -1418,20 +1483,28 @@ export default function ProductDetail() {
                   onChange={(e) => {
                     const form = (e.target.value || null) as Product['product_form'];
                     if (pricingReloadRequired) return;
-                    setProduct((current) => ({
-                      ...current,
-                      product_form: form,
-                      container_unit: current.container_unit === persistedProduct?.container_unit || isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
-                      inventory_unit: current.inventory_unit === persistedProduct?.inventory_unit || isKnownUnit(unitConversions, form, current.inventory_unit) ? current.inventory_unit : null,
-                    }));
+                    setProduct((current) => {
+                      const inventoryUnit = current.inventory_unit === persistedProduct?.inventory_unit || isKnownUnit(unitConversions, form, current.inventory_unit)
+                        ? current.inventory_unit : null;
+                      return {
+                        ...current,
+                        product_form: form,
+                        container_unit: current.container_unit === persistedProduct?.container_unit || isKnownUnit(unitConversions, form, current.container_unit) ? current.container_unit : null,
+                        inventory_unit: inventoryUnit,
+                        rate_unit: (form === 'seed' || form === 'each') && current.rate_unit?.trim()
+                          && current.rate_unit.trim().toLowerCase() !== inventoryUnit?.trim().toLowerCase()
+                          ? '' : current.rate_unit,
+                      };
+                    });
                     setIsDirty(true);
                   }}
                   disabled={!isAdmin || Boolean(persistedProduct?.product_form)}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
                   <option value="">-- Select --</option>
-                  <option value="liquid">Liquid</option>
-                  <option value="dry">Dry</option>
+                  {PRODUCT_FORM_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
                 </select>
                 {persistedProduct?.product_form && (
                   <p className="mt-1 text-xs text-secondary">This can't change on a saved product yet; it waits for the reviewed unit change.</p>
@@ -1442,7 +1515,7 @@ export default function ProductDetail() {
             {/* Container — grouped as one row */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Container</p>
-              <p className="text-xs text-gray-400 mt-0.5 mb-3">Size, unit, and type (e.g. 2.5 Gal Jug)</p>
+              <p className="text-xs text-gray-500 mt-0.5 mb-3">Size, unit, and type (e.g. 2.5 Gal Jug)</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Input label="Size" type="number" value={product.container_size ?? ''} onChange={(e) => update('container_size', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin} placeholder="e.g. 2.5" />
                 <div>
@@ -1458,20 +1531,16 @@ export default function ProductDetail() {
                     {product.container_unit && !isKnownUnit(unitConversions, product.product_form, product.container_unit) && (
                       <option value={product.container_unit}>{product.container_unit} (existing)</option>
                     )}
-                    {unitConversions
-                      .filter((uc) => {
-                        const form = product.product_form;
-                        if (!form) return true;
-                        return uc.unit_type === form || uc.unit_type === 'both';
-                      })
+                    {unitOptionsForForm(unitConversions, product.product_form)
                       .map((uc) => (
                         <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                       ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-secondary mb-1">Type</label>
+                  <label htmlFor="product-container-type" className="block text-sm font-medium text-secondary mb-1">Type</label>
                   <select
+                    id="product-container-type"
                     value={product.container_type || ''}
                     onChange={(e) => update('container_type', e.target.value || null)}
                     disabled={!isAdmin}
@@ -1494,12 +1563,25 @@ export default function ProductDetail() {
 
             {/* Inventory Unit */}
             <div className="border-t border-gray-100 pt-4 mt-4">
-              <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Inventory Unit</p>
-              <p className="text-xs text-gray-400 mt-0.5 mb-3">Unit used for tracking inventory quantities (e.g. Gal, Lb)</p>
+              <label htmlFor="product-inventory-unit" className="block text-xs font-semibold text-secondary uppercase tracking-wide">Inventory Unit</label>
+              <p className="text-xs text-gray-500 mt-0.5 mb-3">Unit used for tracking inventory quantities (e.g. Gal, Lb)</p>
               <div className="max-w-xs">
                 <select
+                  id="product-inventory-unit"
                   value={product.inventory_unit || ''}
-                  onChange={(e) => update('inventory_unit', e.target.value || null)}
+                  onChange={(e) => {
+                    const inventoryUnit = e.target.value || null;
+                    if (pricingReloadRequired) return;
+                    setProduct((current) => ({
+                      ...current,
+                      inventory_unit: inventoryUnit,
+                      rate_unit: (current.product_form === 'seed' || current.product_form === 'each')
+                        && current.rate_unit?.trim()
+                        && current.rate_unit.trim().toLowerCase() !== inventoryUnit?.trim().toLowerCase()
+                        ? '' : current.rate_unit,
+                    }));
+                    setIsDirty(true);
+                  }}
                   disabled={!isAdmin || Boolean(persistedProduct?.inventory_unit)}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
@@ -1518,13 +1600,20 @@ export default function ProductDetail() {
             {/* Application Rates */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Application Rates</p>
-              <p className="text-xs text-gray-400 mt-0.5 mb-3">Per-acre application information</p>
+              <p className="text-xs text-gray-500 mt-0.5 mb-3">Per-acre application information</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin} />
-                <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin} />
                 <div>
-                  <label className="block text-sm font-medium text-secondary mb-1">Rate Unit</label>
+                  <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin} />
+                  <p className="mt-1 text-xs text-secondary">Free text shown on quote lines and the quote PDF, such as a rate range. Not used in any calculation.</p>
+                </div>
+                <div>
+                  <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin} />
+                  <p className="mt-1 text-xs text-secondary">The product's default rate, in the Rate Unit. Zero or more.</p>
+                </div>
+                <div>
+                  <label htmlFor="product-rate-unit" className="block text-sm font-medium text-secondary mb-1">Rate Unit</label>
                   <select
+                    id="product-rate-unit"
                     value={product.rate_unit || ''}
                     onChange={(e) => update('rate_unit', e.target.value)}
                     disabled={!isAdmin}
@@ -1532,21 +1621,34 @@ export default function ProductDetail() {
                   >
                     <option value="">-- Select --</option>
                     {/* WaveB: grandfather a legacy value the form filter would otherwise hide, so a save can't blank it */}
-                    {!isKnownUnit(unitConversions, product.product_form, product.rate_unit) && (
+                    {product.rate_unit && !rateUnitOptionsForProduct(unitConversions, product.product_form, product.inventory_unit)
+                      .some((uc) => uc.unit === product.rate_unit) && (
                       <option value={product.rate_unit || ''}>{product.rate_unit} (existing)</option>
                     )}
-                    {unitOptionsForForm(unitConversions, product.product_form).map((uc) => (
+                    {rateUnitOptionsForProduct(unitConversions, product.product_form, product.inventory_unit).map((uc) => (
                       <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                     ))}
                   </select>
                 </div>
+              </div>
+              <div className="mt-3">
+                <dl>
+                  <dt id="product-max-label-rate-label" className="text-sm font-medium text-secondary">Max Label Rate</dt>
+                  <dd className="text-sm text-nav-dark" data-testid="product-max-label-rate" aria-labelledby="product-max-label-rate-label">
+                    {product.max_label_rate != null ? `${product.max_label_rate} ${product.max_label_rate_unit ?? ''}`.trim() : 'Not recorded'}
+                  </dd>
+                </dl>
+                <p className="mt-1 text-xs text-secondary">
+                  The highest rate the label allows, read only here. Update it through{' '}
+                  {isAdmin ? <button type="button" onClick={() => navigate('/label-review')} className="text-crx-green underline hover:text-crx-green-dark">Label Review</button> : 'Label Review'}.
+                </p>
               </div>
             </div>
 
             {/* Grower Description (existing notes field) */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label htmlFor="grower-description" className="block text-sm font-medium text-secondary mb-1">Grower Description</label>
-              <p className="text-xs text-gray-400 mb-1">Shown to growers on quotes and PDFs. Describe what the product does, application tips, etc.</p>
+              <p className="text-xs text-gray-500 mb-1">Shown to growers on quotes and PDFs. Describe what the product does, application tips, etc.</p>
               <textarea
                 id="grower-description"
                 value={product.notes || ''}
@@ -1560,7 +1662,7 @@ export default function ProductDetail() {
             {/* Internal Notes */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label htmlFor="internal-notes" className="block text-sm font-medium text-secondary mb-1">Internal Notes</label>
-              <p className="text-xs text-gray-400 mb-1">Internal only — never shown to growers.</p>
+              <p className="text-xs text-gray-500 mb-1">Internal only — never shown to growers.</p>
               <textarea
                 id="internal-notes"
                 value={product.internal_notes || ''}
@@ -1574,7 +1676,7 @@ export default function ProductDetail() {
             {/* Quoting Notes */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label htmlFor="quoting-notes" className="block text-sm font-medium text-secondary mb-1">Quoting Notes</label>
-              <p className="text-xs text-gray-400 mb-1">Customer-facing guidance automatically added to the quote line and shown on the quote PDF.</p>
+              <p className="text-xs text-gray-500 mb-1">Customer-facing guidance automatically added to the quote line and shown on the quote PDF.</p>
               <textarea
                 id="quoting-notes"
                 value={product.quoting_notes || ''}
@@ -1586,6 +1688,23 @@ export default function ProductDetail() {
             </div>
           </Card>
           </PhoneSection>
+
+          {!isNew && id && persistedProduct?.id === id && (isAdmin || role === 'sales_rep') && (
+            <PhoneSection title="Vendors" {...sectionProps('vendors', pricingReloadRequired)}>
+              <ProductVendorsSection
+                key={id}
+                productId={id}
+                productName={persistedProduct.product_name}
+                isAdmin={isAdmin}
+                userId={profile?.id ?? null}
+                // The database copied the name onto the product; mirror it so a later save does not resend the old one.
+                onPreferredChanged={(vendorName) => {
+                  setProduct((p) => ({ ...p, vendor: vendorName }));
+                  setPersistedProduct((p) => (p ? { ...p, vendor: vendorName } : p));
+                }}
+              />
+            </PhoneSection>
+          )}
 
           {!isNew && id && persistedProduct?.id === id && (
             <PhoneSection title="Brands" {...sectionProps('brands', pricingReloadRequired)}>
@@ -1605,6 +1724,11 @@ export default function ProductDetail() {
             <PhoneSection title="Pricing & Margins" {...sectionProps('pricing', pricingReloadRequired)}>
             <Card>
               <CardHeader title="Pricing" accent="& Margins" />
+              {justCreated && persistedProduct?.tier1_price == null && persistedProduct?.tier2_price == null && persistedProduct?.tier3_price == null && (
+                <div className="p-3 mb-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-900" role="status">
+                  Product created. Now set its prices: choose a pricing mode, enter them, and Apply. Until then it has no price, and quotes, jobs and orders refuse it.
+                </div>
+              )}
               {isNew ? (
                 <div className="p-3 mb-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
                   Create the Product details first. Pricing is added afterward through a reviewed change so a new Product can never bypass approval.
@@ -1638,9 +1762,14 @@ export default function ProductDetail() {
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-secondary">Cost</h4>
                   <div className="flex items-center gap-2">
-                    <Input id="product-current-cost" label="Current Cost" type="number" value={pricingMoneyInput(product, pricingMoneyDrafts, 'current_cost')} onChange={(e) => updatePricingMoney('current_cost', e.target.value)} disabled={isNew} />
+                    <div className="w-full">
+                      <label htmlFor="product-current-cost" className="block text-sm font-medium text-secondary mb-1">Current Cost</label>
+                      <output id="product-current-cost" aria-live="off" className="block rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-nav-dark">
+                        {product.current_cost == null ? 'N/A' : formatExactUSD(product.current_cost)}
+                      </output>
+                    </div>
                     {!isNew && (
-                      <Button variant="secondary" size="sm" icon={<DollarSign className="w-3 h-3" />} showChevron={false} onClick={() => setCostModal(true)} className="mt-5">
+                      <Button variant="secondary" size="sm" icon={<DollarSign className="w-3 h-3" />} showChevron={false} onClick={() => setCostModal(true)} aria-label="Update cost" className="mt-5">
                         Update
                       </Button>
                     )}
@@ -1862,7 +1991,7 @@ export default function ProductDetail() {
                           <span className="text-crx-green font-medium">${ch.new_cost?.toFixed(2)}</span>
                         </div>
                         {ch.change_note && <p className="text-xs text-secondary mt-1">{ch.change_note}</p>}
-                        <p className="text-xs text-gray-400 mt-1">{new Date(ch.changed_at).toLocaleDateString()}</p>
+                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString()}</p>
                       </div>
                     ))}
                   </div>
@@ -1915,7 +2044,7 @@ export default function ProductDetail() {
       <Modal open={costModal} onClose={() => setCostModal(false)} title="Update" accent="Cost">
         <div className="space-y-4">
           <p className="text-sm text-secondary">
-            Current cost: <strong>${product.current_cost?.toFixed(2) ?? 'N/A'}</strong>
+            Current cost: <strong>{product.current_cost == null ? 'N/A' : formatExactUSD(product.current_cost)}</strong>
           </p>
           <Input label="New Cost" type="number" value={newCost} onChange={(e) => setNewCost(e.target.value)} placeholder="0.00" disabled={pricingReloadRequired} />
           <div>
@@ -1932,7 +2061,6 @@ export default function ProductDetail() {
               <option value="price_driven">Keep entered prices; reconcile margins</option>
             </select>
           </div>
-          <Input label="Change Note (optional)" value={costNote} onChange={(e) => setCostNote(e.target.value)} placeholder="e.g. Supplier price increase" disabled={pricingReloadRequired} />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" showChevron={false} onClick={() => setCostModal(false)}>Cancel</Button>
             <Button onClick={handleCostUpdate} disabled={pricingReloadRequired}>Review Cost Change</Button>
@@ -1957,7 +2085,6 @@ export default function ProductDetail() {
         open={pendingPricingReview !== null}
         busy={previewingPricing}
         productCount={1}
-        initialReason={pendingPricingReview?.initialReason}
         onCancel={() => setPendingPricingReview(null)}
         onSubmit={(value) => void submitPricingReview(value)}
       />
@@ -1981,5 +2108,21 @@ export default function ProductDetail() {
         }}
       />
     </div>
+  );
+}
+
+function NearMatchWarning({ kind, matches, onPick }: { kind: 'vendor' | 'manufacturer'; matches: string[]; onPick: (name: string) => void }) {
+  if (matches.length === 0) return null;
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-amber-800" role="status">
+      <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+      This creates a new {kind}. Did you mean
+      {matches.map((name, index) => (
+        <span key={name}>
+          <button type="button" onClick={() => onPick(name)} className="font-semibold underline hover:text-amber-900">{name}</button>
+          {index < matches.length - 1 ? ',' : '?'}
+        </span>
+      ))}
+    </p>
   );
 }

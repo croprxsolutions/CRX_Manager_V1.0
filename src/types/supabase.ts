@@ -8200,7 +8200,7 @@ export type Database = {
           match_confidence: number | null
           product_id: string
           supplier_pack_description: string | null
-          supplier_product_name: string
+          supplier_product_name: string | null
           supplier_sku: string | null
           supplier_uom: string | null
           updated_at: string
@@ -8224,7 +8224,7 @@ export type Database = {
           match_confidence?: number | null
           product_id: string
           supplier_pack_description?: string | null
-          supplier_product_name: string
+          supplier_product_name?: string | null
           supplier_sku?: string | null
           supplier_uom?: string | null
           updated_at?: string
@@ -8248,7 +8248,7 @@ export type Database = {
           match_confidence?: number | null
           product_id?: string
           supplier_pack_description?: string | null
-          supplier_product_name?: string
+          supplier_product_name?: string | null
           supplier_sku?: string | null
           supplier_uom?: string | null
           updated_at?: string
@@ -14234,6 +14234,7 @@ export type Database = {
         Args: { p_product_id: string }
         Returns: Json
       }
+      get_product_vendors: { Args: { p_product_id: string }; Returns: Json }
       get_profitability_report: {
         Args: { p_end_date?: string; p_group_by: string; p_start_date?: string }
         Returns: {
@@ -14504,6 +14505,16 @@ export type Database = {
           p_performed_by?: string
         }
         Returns: undefined
+      }
+      link_product_vendor: {
+        Args: {
+          p_idempotency_key?: string
+          p_make_preferred: boolean
+          p_performed_by: string
+          p_product_id: string
+          p_vendor_id: string
+        }
+        Returns: Json
       }
       list_commission_recipients: {
         Args: never
@@ -15708,6 +15719,14 @@ export type Database = {
           p_performed_by?: string
         }
         Returns: undefined
+      }
+      unlink_product_vendor: {
+        Args: {
+          p_idempotency_key?: string
+          p_link_id: string
+          p_performed_by: string
+        }
+        Returns: Json
       }
       unpost_invoice: {
         Args: {

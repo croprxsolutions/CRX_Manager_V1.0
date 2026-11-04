@@ -60,6 +60,8 @@ const productY = {
   quoting_notes: 'Y quote guidance',
 };
 
+// The Vendors section has its own tests; these page tests do not mock its reads.
+vi.mock('./products/ProductVendorsSection', () => ({ default: () => null }));
 vi.mock('../lib/db', () => {
   const from = (_table: string) => {
     let selectedId = '';

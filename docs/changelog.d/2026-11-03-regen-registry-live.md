@@ -1,0 +1,4 @@
+## 2026-11-03 - Schema registry: one-command live refresh
+
+- `scripts/regenerate-schema-registry.mjs --live` runs the six introspection queries itself through the Supabase Management API with `read_only: true` (Mason's token from Windows Credential Manager, approved 2026-11-03) and refuses to write on any failed or empty result. It replaces six one-at-a-time MCP calls plus a hand-assembled JSON file; `--from-introspection` stays as the fallback. Importing the script no longer runs a mode. Test: `scripts/regenerate-schema-registry.test.mjs`, in `test:correction-guards`.
+- `regen-schema-registry` skill: Step 1 runs `--live`; the "Mason commits, never auto-commit" step is gone (registry refreshes land like any other change per `ship.md`); a new final step runs `src/lib/rpcContracts.test.ts` and `test:supplier-pricing-phase3c-packet`, the two checks a post-apply refresh broke on #1373.

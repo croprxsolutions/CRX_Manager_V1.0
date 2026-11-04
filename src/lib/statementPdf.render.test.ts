@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DetailedStatementData } from '../types';
+import { DEFAULT_COMPANY_INFO } from './companyInfo';
 import { generateStatementPdf } from './statementPdf';
+
+const companyInfo = vi.hoisted(() => ({ load: vi.fn() }));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
+companyInfo.load.mockResolvedValue(DEFAULT_COMPANY_INFO);
 
 const renderedStatement: DetailedStatementData = {
   customer: {
@@ -85,6 +90,20 @@ describe('statement PDF real renderer', () => {
     expect(pageCommands).toContain('CUT HERE');
     expect(pageCommands).toContain('Page 1');
     expect(pageCommands).not.toContain('Page 2');
+  });
+
+  it('prints the Settings address in the letterhead only; the remit-to block keeps its own address', async () => {
+    companyInfo.load.mockResolvedValueOnce({
+      name: 'Test Ag Co', phone: '555-0199', email: '', address: '4400 Example Rd, Settingstown, IL 62999',
+    });
+    const doc = await generateStatementPdf(renderedStatement);
+    const pageCommands = doc.internal.pages.flat().join('\n');
+
+    expect(pageCommands).toContain('TEST AG CO');
+    expect(pageCommands).toContain('4400 Example Rd');
+    expect(pageCommands).toContain('PLEASE MAIL WITH PAYMENT TO:');
+    expect(pageCommands).toContain('9100 E 2000th Ave');
+    expect(pageCommands).not.toContain('CROP RX SOLUTIONS');
   });
 
   it('renders every wrapped account-name line without covering remittance totals', async () => {
@@ -175,6 +194,56 @@ describe('statement PDF real renderer', () => {
     expect(finalPageCommands).toContain('Page 2');
   });
 
+  it('keeps Finance Charges and Net Due above the footer when a product table ends near the page bottom', async () => {
+    const statement: DetailedStatementData = {
+      ...renderedStatement,
+      mode: 'detailed',
+      transactions: [{
+        ...renderedStatement.transactions[0],
+        // 29 lines end the product table about 42pt above the page bottom.
+        items: Array.from({ length: 29 }, (_, index) => ({
+          product_name: `Chemical ${index + 1}`,
+          epa_registration: null,
+          rate_per_acre: null,
+          rate_unit: null,
+          total_applied: null,
+          total_applied_unit: null,
+          total_applied_gl_lb: null,
+          gl_lb_unit: null,
+          unit_price_cents: 1_000,
+          total_cost_cents: 1_000,
+          is_application_fee: false,
+          quantity: 1,
+          unit_size: 'gal',
+          product_form: 'liquid',
+        })),
+        finance_charge_cents: 500,
+        net_due_cents: 10_500,
+      }],
+    };
+
+    const doc = await generateStatementPdf(statement);
+    const pages = doc.internal.pages as unknown as string[][];
+    // jsPDF text position is "x y Td" with y measured up from the page bottom (pt).
+    const baselineAboveBottom = (label: string) => {
+      for (let page = 1; page < pages.length; page++) {
+        const match = pages[page].join('\n').match(new RegExp(`(-?[\\d.]+) Td\\n\\(${label}`));
+        if (match) return { page, y: Number(match[1]) };
+      }
+      throw new Error(`${label} not drawn`);
+    };
+    const finance = baselineAboveBottom('Finance Charges');
+    const netDue = baselineAboveBottom('Net Due');
+
+    // The footer rule sits 26pt and its text 20pt above the bottom; 32pt is the safe edge.
+    expect(netDue.y).toBeGreaterThanOrEqual(32);
+    expect(finance.y).toBeGreaterThanOrEqual(32);
+    expect(netDue.page).toBe(finance.page);
+    expect(finance.page).toBe(2); // the scenario must force the page break
+    // The page that was left keeps its footer (drawn by the product table).
+    expect(pages[1].join('\n')).toMatch(/Statement generated .*? Page 1\)/);
+  });
+
   it('replaces remittance instructions when credits cover the gross invoices', async () => {
     const creditCoveredStatement = {
       ...renderedStatement,
@@ -211,5 +280,55 @@ describe('statement PDF real renderer', () => {
     expect(pageCommands).toContain('CONTACT CROP RX BEFORE PAYMENT:');
     expect(pageCommands).toContain('Phone: 618-843-0413');
     expect(pageCommands).toContain('Website: www.croprxsolutions.com');
+  });
+
+  it('draws exactly one footer on every page', async () => {
+    const chemicalItem = {
+      product_name: 'Chemical',
+      epa_registration: null,
+      rate_per_acre: null,
+      rate_unit: null,
+      total_applied: null,
+      total_applied_unit: null,
+      total_applied_gl_lb: null,
+      gl_lb_unit: null,
+      unit_price_cents: 1_000,
+      total_cost_cents: 1_000,
+      is_application_fee: false,
+      quantity: 1,
+      unit_size: 'gal',
+      product_form: 'liquid',
+    };
+    const manyInvoices = (count: number, items: typeof chemicalItem[]) =>
+      Array.from({ length: count }, (_, index) => ({
+        ...renderedStatement.transactions[0],
+        invoice_number: `INV-FOOTER-${index + 1}`,
+        items,
+      }));
+    const cases: Array<[string, DetailedStatementData, number]> = [
+      ['summary, one page', renderedStatement, 1],
+      ['summary, no transactions', { ...renderedStatement, transactions: [] }, 1],
+      ['summary, stub pushed to new page', { ...renderedStatement, transactions: manyInvoices(16, []) }, 2],
+      ['summary, account position pushed to new page', { ...renderedStatement, transactions: manyInvoices(21, []) }, 2],
+      ['summary, multi-page', { ...renderedStatement, transactions: manyInvoices(60, []) }, 3],
+      ['detailed, one page', { ...renderedStatement, mode: 'detailed' }, 1],
+      ['detailed, no transactions', { ...renderedStatement, mode: 'detailed', transactions: [] }, 1],
+      [
+        'detailed, multi-page',
+        { ...renderedStatement, mode: 'detailed', transactions: manyInvoices(12, Array(8).fill(chemicalItem)) },
+        3,
+      ],
+    ];
+
+    for (const [label, statement, minPages] of cases) {
+      const doc = await generateStatementPdf(statement);
+      const pageCount = doc.getNumberOfPages();
+      expect(pageCount, label).toBeGreaterThanOrEqual(minPages);
+      const pages = doc.internal.pages as unknown as string[][];
+      for (let page = 1; page <= pageCount; page++) {
+        const footers = pages[page].join('\n').match(/Statement generated .*? Page \d+/g) ?? [];
+        expect(footers, `${label} page ${page}`).toEqual([expect.stringMatching(new RegExp(`Page ${page}$`))]);
+      }
+    }
   });
 });

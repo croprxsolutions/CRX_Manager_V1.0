@@ -1,6 +1,8 @@
 # Product Master work: START HERE
 
-**Status: PLANNED AND READY, NOT STARTED.** On 2026-10-28 Mason planned the Product Master (product setup) improvements and the weight-per-gallon and active-ingredient work. He had a Sol review settle the game plan, then set up an overnight build. He decided not to start it yet ("let's not actually start the build yet") and asked for everything to be saved so the work can be picked up later. Nothing is built.
+**Status (2026-11-03): IN PROGRESS.** Waves 0 to 2 have mostly landed, many packages through ordinary sessions rather than the loop, so the loop ledger is behind. Vendor work WP-PM-15b has three steps: vendor-only links (#1381, live), the vendor data step DATA-11 (PR #1385, waiting for Mason's go to apply), and enforcement (built on its branch, not landed). Wave 3 starts only when every condition in the mission's "Wave 3 gate" holds. **Trust live migrations and git over the ledger** when they disagree.
+
+*Original status, 2026-10-28:* planned and ready, not started.
 
 **To start the work:** do Mason's checklist in section 3. Wave 0 comes first; then open a new Code session in the CRX Manager project (new worktree) and paste the prompt in section 4.
 
@@ -97,7 +99,7 @@ Never: merge a PR, mark a PR ready, push to main, apply a migration live, write 
 - **Wave 0:** the private test copy of the app (`scripts/local-app/`), built and landed in a normal session.
 - **Wave 1:** dropdowns, RUP "known incomplete" notice, "Search EPA labels" link, pricing page, sales sheet and list, reorder display, list editing, then change history if time remains.
 - **Wave 2:** turning products off safely, setup checks in the database, forms, units and containers, data clean-up review lists, Use Timing, the Unit audit, new-product flow and basic Duplicate, one cost path and the tier-order warning, the vendor proposal tool, corrections to existing records.
-- **Wave 3:** vendor enforcement, setup workbook and the "Lock rates" switch, bulk import. It starts only after the vendor data step and your data clean-up.
+- **Wave 3:** vendor enforcement (15b step 3, after an app-only change makes Vendor read-only on saved products), the rate writer and "Lock rates" switch (11a-1), the setup workbook (11a-2, no Vendors tab), bulk import (10). It starts only when the mission's "Wave 3 gate" holds: the named migrations live, the vendor data step applied and checked, and the DM-0 gate query clean with your sign-off.
 - **Size:** 22 queue entries in all: the test copy plus the build sheet's 21.
 - **Pace:** an 8-hour run will probably finish 6–10 packages properly. Stage 1 will take several runs, with your data steps between them. Stages 2 to 9 each need a build sheet and review before they can run.
 - **Parked for Mason:**

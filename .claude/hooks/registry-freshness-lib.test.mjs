@@ -6,8 +6,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   resolveMainCheckoutRoot,
@@ -17,6 +16,7 @@ import {
   clearStaleFlag,
 } from "./registry-freshness-lib.mjs";
 import { scratchHookEnvironment } from "./git-test-env.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 let pass = 0;
 function ok(c, m) { assert.ok(c, m); pass++; }
@@ -31,7 +31,7 @@ function git(args, cwd) {
   }).trim();
 }
 
-const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "registry-freshness-lib-test-"));
+const tmpRoot = tempDir("registry-freshness-lib-test-");
 
 try {
   // ── non-git directory: git resolution fails cleanly, no throw ───────────

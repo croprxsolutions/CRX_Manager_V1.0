@@ -60,6 +60,34 @@ export function mergedLabelFromStatus(status, hasOriginMain = true) {
   return "merge-state unknown";
 }
 
+// A squash merge lands a NEW commit, so a branch head is never an ancestor of
+// origin/main and ancestry alone calls it UNMERGED (2026-11-03: ~48 worktrees
+// were exactly a merged PR's head). The SessionStart hook caches GitHub's
+// merged-PR heads; these two helpers read that cache and correct the label.
+// The cache lives in the shared git common dir; /fleet reads the same file.
+export const MERGED_PR_CACHE_FILE = "crx-merged-pr-heads.json";
+export const MERGED_PR_CACHE_MAX_AGE_MS = 10 * 60_000;
+// Cache text → Map(lowercase head sha → PR number), or null when unreadable.
+export function mergedPrHeadsFromCache(text) {
+  let data;
+  try { data = JSON.parse(String(text || "")); } catch { return null; }
+  if (!data || !Array.isArray(data.prs)) return null;
+  const heads = new Map();
+  for (const pr of data.prs) {
+    if (pr && typeof pr.headRefOid === "string" && pr.headRefOid && Number.isInteger(pr.number) && pr.number > 0) heads.set(pr.headRefOid.toLowerCase(), pr.number);
+  }
+  return heads;
+}
+
+// Only an UNMERGED verdict is re-checked: a head that IS a merged PR's head is
+// landed; with no cached list the verdict stays UNMERGED but says it is unsure.
+export function withMergedPrLabel(label, sha, heads) {
+  if (!/^UNMERGED /.test(String(label || ""))) return label;
+  if (!heads) return "UNMERGED (not in origin/main; landed? unknown — merged-PR list not cached yet)";
+  const pr = heads.get(String(sha || "").toLowerCase());
+  return pr === undefined ? label : `LANDED via merged PR #${pr}`;
+}
+
 // Is this filename a loop LEDGER doc (docs/loops/*ledger*.md)?
 export function isLedgerDoc(name) {
   const n = String(name || "");
@@ -1021,7 +1049,7 @@ export function formatSiblingReport(siblings) {
   for (const s of siblings || []) {
     // Only a label that POSITIVELY says origin/main contains the commit folds;
     // UNMERGED, unknown, a bare "detached", or anything unexpected stays detailed.
-    const notFinished = !/^MERGED into origin\/main$/.test(String(s.mergedLabel || ""));
+    const notFinished = !/^(MERGED into origin\/main|LANDED via merged PR #\d+)$/.test(String(s.mergedLabel || ""));
     const realDirt = !s.dirt || s.dirt.real > 0;
     if (notFinished || realDirt) {
       detailed.push(`  • ${s.path}\n      branch: ${s.branchLabel} — ${s.mergedLabel} — ${describeDirt(s.dirt)}`);
@@ -1034,7 +1062,7 @@ export function formatSiblingReport(siblings) {
     const importerOnly = folded.filter((s) => s.dirt.importer > 0).length;
     const names = folded.map((s) => shortWorktreeName(s.path)).join(", ");
     const note = importerOnly > 0 ? `; ${importerOnly} carry only Codex-import skill dirs` : "";
-    lines.push(`  • ${folded.length} finished worktree${folded.length === 1 ? "" : "s"} (in origin/main, no real changes${note}): ${names}`);
+    lines.push(`  • ${folded.length} finished worktree${folded.length === 1 ? "" : "s"} (in origin/main or a merged PR, no real changes${note}): ${names}`);
   }
   return lines;
 }

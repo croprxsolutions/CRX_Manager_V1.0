@@ -278,7 +278,7 @@ The RUP count is known wrong ("there are a lot more").
 Mason: "allow rates and everything to be adjusted from spreadsheet to help our initial setup ... i can edit that sheet to lock those rates once we get done." This replaces his earlier answer to question 2 (section 10).
 
 **One setup workbook (WP-PM-11a)**, separate from the price workbook:
-- **Tabs:** Setup fields, Rates, and Vendors. DM-1b (Stage 2) adds Ingredients and Weights; USE-1 (Stage 6) adds Crop Uses, when its storage exists.
+- **Tabs:** Setup fields, Rates, and Vendors. DM-1b (Stage 2) adds Ingredients and Weights; USE-1 (Stage 6) adds Crop Uses, when its storage exists. *Revised 2026-11-03:* the Vendors tab is dropped, and WP-PM-11a is split into 11a-1 (rate writer, lock, correction) and 11a-2 (workbook); see build sheet §2a WP-PM-11a. Rate writes reprice customer-facing per-acre prices.
 - **Uploading:** every upload shows a preview of each change, and nothing saves until it's confirmed.
 - **Confirming:** confirmation is **per tab**. The result screen shows exactly which rows saved.
 - **Stale rows:** a row changed by someone else since the download is refused with its name, so an old spreadsheet can't overwrite newer work.

@@ -273,12 +273,14 @@ describe('Products governed inline pricing flow', () => {
     });
   });
 
-  it('trims an inline name and saves blank vendor and category as NULL', async () => {
+  it('trims an inline name, saves a blank category as NULL and never sends the vendor', async () => {
     render(<Products />);
     fireEvent.click(await screen.findByRole('button', { name: 'Test detail normalization' }));
     await waitFor(() => expect(mockProductUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      product_name: 'Trimmed Name', vendor: null, category: null,
+      product_name: 'Trimmed Name', category: null,
     })));
+    // The vendor is a copy of the preferred vendor (WP-PM-15b); it changes only on the product page.
+    expect(mockProductUpdate.mock.calls[0][0]).not.toHaveProperty('vendor');
   });
 
   it('refuses an inline blank name before an update', async () => {
@@ -307,7 +309,8 @@ describe('Products governed inline pricing flow', () => {
       expect(screen.getByLabelText(`Tier ${tier} price for ${product.product_name}`)).toBeEnabled();
     }
     fireEvent.click(screen.getByRole('button', { name: 'Test default pricing save' }));
-    fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: 'Supplier list' } });
+    fireEvent.change(await screen.findByLabelText('Source'), { target: { value: 'Other' } });
+    fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: 'Supplier list' } });
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Review saved prices' } });
     fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
     await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledWith(expect.objectContaining({
@@ -327,7 +330,7 @@ describe('Products governed inline pricing flow', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error', `Enter each net margin for ${product.product_name} as a plain number below 100.`,
     ));
-    expect(screen.queryByLabelText('Source (supplier, document, date)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Source')).not.toBeInTheDocument();
     expect(mockPreviewPricing).not.toHaveBeenCalled();
   });
 
@@ -375,7 +378,8 @@ describe('Products governed inline pricing flow', () => {
     const preview = await screen.findByRole('button', { name: 'Preview changes' });
     expect(screen.queryByRole('button', { name: 'Review Price Change' })).not.toBeInTheDocument();
     expect(mockPreviewPricing).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Source (supplier, document, date)'), { target: { value: 'Helena list' } });
+    fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'Other' } });
+    fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: 'Helena list' } });
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Matching a bid' } });
     fireEvent.click(preview);
 
@@ -429,7 +433,8 @@ describe('Products governed inline pricing flow', () => {
     const preview = await screen.findByRole('button', { name: 'Preview changes' });
     expect(preview).toBeDisabled();
     expect(mockPreviewPricing).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Source (supplier, document, date)'), { target: { value: 'Helena list Oct 2026' } });
+    fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'Other' } });
+    fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: 'Helena list Oct 2026' } });
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Supplier raised cost' } });
     fireEvent.click(preview);
 
@@ -490,7 +495,8 @@ describe('Products governed inline pricing flow', () => {
     });
     render(<Products />);
     fireEvent.click(await screen.findByRole('button', { name: 'Test inline pricing save' }));
-    fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: 'Helena list' } });
+    fireEvent.change(await screen.findByLabelText('Source'), { target: { value: 'Other' } });
+    fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: 'Helena list' } });
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Cost up' } });
     fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
 
@@ -518,7 +524,8 @@ describe('Products governed inline pricing flow', () => {
     mockPreviewPricing.mockRejectedValueOnce(new Error('network timeout')).mockRejectedValueOnce(new Error('network timeout'));
     render(<Products />);
     fireEvent.click(await screen.findByRole('button', { name: 'Test inline pricing save' }));
-    fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: 'Helena list' } });
+    fireEvent.change(await screen.findByLabelText('Source'), { target: { value: 'Other' } });
+    fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: 'Helena list' } });
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Cost up' } });
     fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
     await waitFor(() => expect(mockPreviewPricing).toHaveBeenCalledTimes(1));
@@ -540,7 +547,8 @@ describe('Products governed inline pricing flow', () => {
     mockApplyPricing.mockRejectedValueOnce(new Error('network timeout'));
     render(<Products />);
     fireEvent.click(await screen.findByRole('button', { name: 'Test inline pricing save' }));
-    fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: 'Helena list' } });
+    fireEvent.change(await screen.findByLabelText('Source'), { target: { value: 'Other' } });
+    fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: 'Helena list' } });
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Cost up' } });
     fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
     const apply = await screen.findByRole('button', { name: 'Apply approved changes' });
@@ -561,7 +569,8 @@ describe('Products governed inline pricing flow', () => {
     mockApprovePricing.mockRejectedValue(new Error('PRICING_WARNINGS_CHANGED: preview it again'));
     render(<Products />);
     fireEvent.click(await screen.findByRole('button', { name: 'Test inline pricing save' }));
-    fireEvent.change(await screen.findByLabelText('Source (supplier, document, date)'), { target: { value: 'Helena list' } });
+    fireEvent.change(await screen.findByLabelText('Source'), { target: { value: 'Other' } });
+    fireEvent.change(screen.getByLabelText(/Source detail/), { target: { value: 'Helena list' } });
     fireEvent.change(screen.getByLabelText('Reason for the change'), { target: { value: 'Cost up' } });
     fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Apply approved changes' }));

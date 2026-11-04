@@ -16,15 +16,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
 import path from "node:path";
 import { evaluateMigrationApply, normalizeMigName, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
 import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   OWNER_APPROVAL_MAX_AGE_MS,
   OWNER_APPROVAL_VIA,
@@ -62,7 +62,6 @@ const iso = (msFromNow) => new Date(Date.now() + msFromNow).toISOString();
 // fixture directory and never touches the real repo.
 const noWorktrees = () => "";
 
-const roots = [];
 // The pull-request half of the landing rule (migration-landing-gate-lib.mjs) needs
 // a real PR on GitHub, so these rule-book cases stand it in as "the PR is ready";
 // the gate itself is exercised in its own block at the end of this file, and a
@@ -98,8 +97,7 @@ function fixture({
   // pass null to test the missing-manifest refusal.
   baseline = { format_version: 3, migrations_high_water: "20260727174805" },
 } = {}) {
-  const root = mkdtempSync(path.join(os.tmpdir(), "crx-applylib-"));
-  roots.push(root);
+  const root = tempDir("crx-applylib-");
   const stateDir = path.join(root, ".claude", "session-state");
   mkdirSync(stateDir, { recursive: true });
   if (migrationFile !== null) {
@@ -186,6 +184,31 @@ const evaluate = (root, over = {}) => evaluateMigrationApply({ landingGate: land
 
 // ── BASELINE: the fixture must ALLOW, or every deny below proves nothing ─────
 allows(evaluate(fixture()), "known-good UNARMED fixture (both reviewers + fresh Sol proof) is allowed — no per-migration ask since 2026-09-26");
+
+// Restamp carry (Mason, 2026-11-04): the reviewed migration got a new timestamp
+// with byte-identical SQL. Its proofs name the old stamp, so the guard refuses
+// until `write-apply-proofs.mjs --restamp-from` carries them; then it allows.
+{
+  const RESTAMPED = "20260816130000_add_widgets";
+  const root = fixture({ migrationName: RESTAMPED });
+  const applyRestamped = () => evaluate(root, {
+    name: RESTAMPED,
+    gitTrackedMigrations: () => `supabase/migrations/${RESTAMPED}.sql\n`,
+  });
+  denies(applyRestamped(), MIG, "a restamped migration is refused while its proofs name the old stamp");
+  const { carryRestampedApplyProofs } = await import("../../scripts/write-apply-proofs-lib.mjs");
+  const carried = carryRestampedApplyProofs({
+    stateDir: path.join(root, ".claude", "session-state"),
+    migrationsDir: path.join(root, "supabase", "migrations"),
+    fromName: MIG,
+    toName: RESTAMPED,
+    model: "gpt-6-sol",
+    effort: "high",
+  });
+  ok(!carried.problem, `the restamp carry succeeds (${carried.problem})`);
+  allows(applyRestamped(), "the guard accepts the carried proofs for the restamped name");
+  rmSync(root, { recursive: true, force: true });
+}
 
 // Mason's "skip coderabbit" waiver counts only in the applying session, so the
 // apply must hand the landing gate THIS session's id (Luna round 1).
@@ -436,8 +459,7 @@ denies(
 // null, which fails closed — safe, but it would refuse every apply from a
 // worktree, and Mason runs dozens of them.
 {
-  const root = mkdtempSync(path.join(os.tmpdir(), "crx-fetchage-"));
-  roots.push(root);
+  const root = tempDir("crx-fetchage-");
 
   // Plain checkout: .git is a directory.
   const plain = path.join(root, "plain");
@@ -825,8 +847,7 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timest
     const alias = `99999999999999_alias_${legacy}`;
     const legacySql = "ALTER TABLE public.t ENABLE ROW LEVEL SECURITY;\n";
     const legacyHash = createHash("sha256").update(legacySql).digest("hex");
-    const root = mkdtempSync(path.join(os.tmpdir(), "crx-alias8-"));
-    roots.push(root);
+    const root = tempDir("crx-alias8-");
     const stateDir = path.join(root, ".claude", "session-state");
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(path.join(stateDir, "applied-migrations.json"),
@@ -924,8 +945,7 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timest
     // origin/main and a FETCH_HEAD in the fixture. Without it the mirror assertion
     // below fails for that reason instead of the identity rule it is testing.
     makeOriginMain(okRoot2);
-    const outside = mkdtempSync(path.join(os.tmpdir(), "crx-copy-"));
-    roots.push(outside);
+    const outside = tempDir("crx-copy-");
     const copy = path.join(outside, `${MIG}.sql`);
     writeFileSync(copy, SQL, "utf8");
     const res = spawnSync(process.execPath, [scriptPath, copy, "--confirm"], {
@@ -1108,8 +1128,7 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timest
   // session's reviewed work, and Mason runs dozens of worktrees at once.
   {
     const mine = fixture({ migrationFile: null });
-    const sibling = mkdtempSync(path.join(os.tmpdir(), "crx-sibling-"));
-    roots.push(sibling);
+    const sibling = tempDir("crx-sibling-");
     mkdirSync(path.join(sibling, "supabase", "migrations"), { recursive: true });
     writeFileSync(path.join(sibling, "supabase", "migrations", `${MIG}.sql`), SQL, "utf8");
     denies(
@@ -1127,8 +1146,7 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timest
   // deny case here and quietly break the way migrations are actually built.
   {
     const primary = fixture({ migrationFile: null });
-    const linked = mkdtempSync(path.join(os.tmpdir(), "crx-linked-"));
-    roots.push(linked);
+    const linked = tempDir("crx-linked-");
     mkdirSync(path.join(linked, "supabase", "migrations"), { recursive: true });
     writeFileSync(path.join(linked, "supabase", "migrations", `${MIG}.sql`), SQL, "utf8");
     // The pending scan reads its floor from the QUEUE root, which for this case is
@@ -1207,8 +1225,7 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timest
   // case above this one really executes on this machine.
   {
     const root = fixture({ migrationFile: null });
-    const outside = mkdtempSync(path.join(os.tmpdir(), "crx-outside-"));
-    roots.push(outside);
+    const outside = tempDir("crx-outside-");
     writeFileSync(path.join(outside, `${MIG}.sql`), SQL, "utf8");
     mkdirSync(path.join(root, "supabase"), { recursive: true });
     const dirLink = path.join(root, "supabase", "migrations");
@@ -1240,8 +1257,7 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timest
     const primary = fixture({ migrationFile: SQL });
     const second = fixture({ migrationFile: null });
     mkdirSync(path.join(second, "supabase", "migrations"), { recursive: true });
-    const outside = mkdtempSync(path.join(os.tmpdir(), "crx-ext-"));
-    roots.push(outside);
+    const outside = tempDir("crx-ext-");
     const external = path.join(outside, `${MIG}.sql`);
     writeFileSync(external, SQL, "utf8"); // IDENTICAL content — content binding cannot catch this
     const escapePath = path.join(second, "supabase", "migrations", `${MIG}.sql`);
@@ -1305,8 +1321,7 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timest
   // the deny above while breaking the layout this machine actually uses.
   {
     const real = fixture({ migrationFile: SQL });
-    const viaJunction = path.join(mkdtempSync(path.join(os.tmpdir(), "crx-jctparent-")), "checkout");
-    roots.push(path.dirname(viaJunction));
+    const viaJunction = path.join(tempDir("crx-jctparent-"), "checkout");
     let linked = false;
     try { symlinkSync(real, viaJunction, "junction"); linked = true; } catch { linked = false; }
     if (linked) {
@@ -1610,8 +1625,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
 {
   const HEAD_SHA = "a".repeat(40);
   const BASE_SHA = "b".repeat(40);
-  const gateDir = mkdtempSync(path.join(os.tmpdir(), "crx-landing-gate-"));
-  roots.push(gateDir);
+  const gateDir = tempDir("crx-landing-gate-");
   mkdirSync(path.join(gateDir, ".claude", "session-state"), { recursive: true });
   const goodProof = { codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
     head_sha: HEAD_SHA, base_sha: BASE_SHA, timestamp: new Date().toISOString() };
@@ -1774,7 +1788,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     // Codex App P2 and the final Sol review on #1035: waivers live in the MAIN
     // checkout's state folder (found through git's shared folder), so an apply
     // from a subfolder or another worktree finds the same one.
-    const mainDir = mkdtempSync(path.join(os.tmpdir(), "crx-skip-main-"));
+    const mainDir = tempDir("crx-skip-main-");
     const COMMON = "rev-parse --path-format=absolute --git-common-dir";
     try {
       mkdirSync(path.join(mainDir, ".claude"), { recursive: true });
@@ -1838,8 +1852,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "changes-access": "GRANT SELECT ON public.customers TO anon;\n",
   };
   // His reply as Claude Code writes it, just after the reply hook marked where it lands.
-  const replyDir = mkdtempSync(path.join(os.tmpdir(), "crx-apply-reply-"));
-  roots.push(replyDir);
+  const replyDir = tempDir("crx-apply-reply-");
   let replies = 0;
   const markFor = (content) => {
     const f = path.join(replyDir, `t${replies++}.jsonl`);
@@ -1951,5 +1964,4 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "a routine migration through the apply script's door never runs the owner-approval check");
 }
 
-for (const r of roots) { try { rmSync(r, { recursive: true, force: true }); } catch { /* best effort */ } }
 console.log(`migration-apply-lib: ${pass} assertions passed`);

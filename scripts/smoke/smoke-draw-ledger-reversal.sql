@@ -167,6 +167,10 @@ BEGIN
   INSERT INTO quote_items (quote_id, section_id, product_id,
     price_per_unit, current_cost, total_units_needed, unit_size)
   VALUES (v_q1, v_sec, v_product, 10, v_cost, 500, 'gal');
+  -- A sent quote has the version the customer was sent (20261105160000); a void that reopens
+  -- the accepted booking (S2) moves it back to sent only with one.
+  PERFORM create_quote_version(v_q1, v_admin, 'presented', 'smk-dlr-send-' || v_q1::text,
+    (SELECT (to_jsonb(q)->>'row_version')::bigint FROM quotes q WHERE q.id = v_q1));
 
   -- REAL planned hold backing the booking (built by the production RPC, not a
   -- synthetic row). 500 units held while drawn = 0. The draws below move the

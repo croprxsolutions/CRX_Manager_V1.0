@@ -1,7 +1,7 @@
 ## 2026-11-03 — Any rep can change the booked prices on another rep's booking
 
 - Mason, 2026-10-30: "any rep may change booked prices on any booking".
-- New migration `20261104130000_any_rep_changes_booked_prices.sql` (NOT APPLIED; record in
+- New migration `20261104130000_any_rep_changes_booked_prices.sql` (applied live 2026-11-03; record in
   `docs/reference/migrations.d/`). On a sent or revised booking, an active sales rep who is not the
   booking's rep may click Revise Quote and change the price of existing lines. The rules are the same
   as for the booking's rep: a higher price needs "Grower agreed" on that line, each change is recorded

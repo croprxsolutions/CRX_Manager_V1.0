@@ -233,7 +233,7 @@ export function parseNamedPathOptions(argumentsList, optionNames) {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PRODUCT_KEYS = ['id', 'sku', 'product_name', 'product_form', 'container_size', 'container_type', 'container_unit', 'unit_size', 'inventory_unit', 'is_active', 'pricing_version', 'updated_at', 'product_family_id', 'return_policy', 'packaging_variant', 'is_full_tote_only', 'active_return_statuses'];
 const V2_KEYS = ['capture_timestamp_utc', 'expected_old_phase3_defaults', 'format', 'migration_high_water', 'product_families_count', 'products', 'snapshot_sha256', 'stage_a_migration_version', 'stage_a_ledger_present', 'supplier_cost_basis_enabled'];
-export const PRODUCT_FORM_ALLOWLIST = Object.freeze(['liquid', 'dry']);
+export const PRODUCT_FORM_ALLOWLIST = Object.freeze(['liquid', 'dry', 'seed', 'each']);
 export const CONTAINER_TYPE_ALLOWLIST = Object.freeze(['Jug', 'Drum', 'Pallet', 'Mini-Bulk', 'Shuttle', 'Bag', 'Tote', 'Ea', 'Jar']);
 const CONTAINER_TYPES = new Set(CONTAINER_TYPE_ALLOWLIST);
 function exactKeys(value, keys, label) { assert(value && typeof value === 'object' && !Array.isArray(value), `${label} is invalid`); assert(Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)), `${label} key set is invalid`); }

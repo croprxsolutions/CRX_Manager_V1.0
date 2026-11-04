@@ -430,7 +430,7 @@ export function buildClaudeReviewPrompt({
     "You are running an independent Claude review for CRX Manager.",
     "",
     "Purpose:",
-    reason || "Review the requested CRX Manager work and challenge Codex's assumptions.",
+    reason || "Review the requested CRX Manager work independently: assume it is broken and find how.",
     "",
     "Repo:",
     repo,
@@ -462,7 +462,7 @@ export function buildClaudeReviewPrompt({
     "",
     "Review focus:",
     "- CRX hard rules from AGENTS.md and docs/workflows/SAFE_DEVELOPMENT_RULES.md.",
-    "- Agent workflow drift between .claude, .agents, and .codex.",
+    "- When the change touches .claude, .agents, or .codex: workflow drift between them.",
     "- Missing tests or checks for the changed workflow.",
     "- Any production, database, money, RLS, migration, Edge Function, or destructive-action risk.",
     "- Report every finding you notice; put style, formatting, and defensive-coding suggestions in the NIT section rather than omitting them.",
@@ -474,7 +474,9 @@ export function buildClaudeReviewPrompt({
     "- use FINAL_VERDICT: NEEDS-WORK when any actionable BLOCKER, HIGH, MED, or LOW finding remains",
     "- NIT items may accompany FINAL_VERDICT: SHIP only when they are optional polish, not required follow-up work",
     "- each finding must cite file:line evidence",
-    "- explicitly say where you agree or disagree with Codex's position",
+    ...(extraContext
+      ? ["- after writing your own findings, say where you agree or disagree with the position in Extra context"]
+      : []),
     "- exact next step for Mason in plain English",
     "- do not emit any other VERDICT or OPUS5_VERDICT label",
     "- end with exactly one final line: FINAL_VERDICT: SHIP or FINAL_VERDICT: NEEDS-WORK",

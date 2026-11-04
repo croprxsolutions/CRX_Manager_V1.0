@@ -19,7 +19,8 @@
 import type jsPDF from 'jspdf';
 import type { CellHookData } from 'jspdf-autotable';
 import { CRX_GREEN, CHARCOAL, GRAY, LIGHT_BG, RED, TABLE_HEADER_BG, ALT_ROW_BG, type JsPDFWithAutoTable } from './pdfTheme';
-import { COMPANY_TAGLINE_HEADER, COMPANY_LEGAL_NAME } from './companyInfo';
+import { COMPANY_LEGAL_NAME, companyTaglineHeader, fitCompanyNameFont } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatCents as fmt } from './money';
 import { localToday } from './dateUtils';
 import type { CustomerInvoiceSummary, SummaryInvoiceRow, SummaryTotals } from './customerInvoiceSummary';
@@ -81,6 +82,7 @@ const SECTION_COL_STYLES = {
 export async function generateCustomerInvoiceSummaryPdf(data: CustomerInvoiceSummaryPdfData) {
   const { default: JsPDFCtor } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new JsPDFCtor({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
   const pageW = doc.internal.pageSize.getWidth();
@@ -112,10 +114,11 @@ export async function generateCustomerInvoiceSummaryPdf(data: CustomerInvoiceSum
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
-  doc.text('CROP RX SOLUTIONS', margin, 35);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 200, 22);
+  doc.text(company.name.toUpperCase(), margin, 35);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(COMPANY_TAGLINE_HEADER, margin, 53);
+  doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 170).slice(0, 2), margin, 53);
 
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');

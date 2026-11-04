@@ -3,9 +3,8 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +14,7 @@ import {
   denyInsideCheckout,
 } from './target.mjs';
 import { isFileLoadingAllowed, resolveConfig } from 'vite';
+import { tempDir } from "../lib/test-temp-dir.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.join(HERE, 'app.mjs');
@@ -231,7 +231,7 @@ describe('every command refuses before it changes anything', () => {
   };
 
   function refused(command, { state = goodState(), env = {} }) {
-    const dir = mkdtempSync(path.join(tmpdir(), 'crx-local-app-test-'));
+    const dir = tempDir('crx-local-app-test-');
     try {
       writeFileSync(path.join(dir, 'local.env'), `${Object.entries(state).map(([k, v]) => `${k}=${v}`).join('\n')}\n`);
       const before = containers();
@@ -269,7 +269,7 @@ describe('every command refuses before it changes anything', () => {
     try {
       for (const command of COMMANDS) {
         await new Promise((resolve) => setImmediate(resolve));
-        const dir = mkdtempSync(path.join(tmpdir(), 'crx-local-app-test-'));
+        const dir = tempDir('crx-local-app-test-');
         try {
           writeFileSync(path.join(dir, 'local.env'), `${Object.entries(goodState()).map(([k, v]) => `${k}=${v}`).join('\n')}\n`);
           const before = containers();

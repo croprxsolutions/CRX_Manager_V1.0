@@ -11,6 +11,12 @@ const UNIT_CONVERSIONS: UnitConversion[] = [
 ];
 
 describe('UnitSelect', () => {
+  it('offers only the seed product stock unit', () => {
+    render(<UnitSelect unitConversions={UNIT_CONVERSIONS} form="seed" inventoryUnit="Lb"
+      value="Lb" onChange={vi.fn()} ariaLabel="Seed unit" />);
+    expect(Array.from((screen.getByRole('combobox', { name: 'Seed unit' }) as HTMLSelectElement).options,
+      (option) => option.value)).toEqual(['', 'Lb']);
+  });
   it('offers only units for the product form plus both-type units', () => {
     render(
       <UnitSelect

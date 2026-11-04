@@ -36,6 +36,15 @@ describe('sanitizeError', () => {
       .toBe(`Nothing was saved. ${sentence}`);
   });
 
+  // The RAISE texts of 20261105190000_sale_lines_refuse_missing_price.sql with the product filled in.
+  it.each([
+    ['QUOTE_PRICE_MISSING', "Atrazine 4L has no price for this quote's tier, so its line would show $0. Type a price on the line, or set the product's prices first (give it a $0 price if you give it away)."],
+    ['ORDER_PRICE_MISSING', "Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter a price for the line, or set the product's prices first (give it a $0 price if you give it away)."],
+    ['INVOICE_PRICE_MISSING', "Atrazine 4L has no price for this customer's tier, so its line would bill $0. Enter a price for the line, or set the product's prices first (give it a $0 price if you give it away)."],
+  ])('explains a %s refusal by product name without the raw token', (code, sentence) => {
+    expect(sanitizeError({ code: 'P0001', message: `${code}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
+  });
+
   it.each(['IN_PROGRESS', 'ISOLATION', 'STALE_CALL'])('explains exhausted %s cutover refusals without raw database tokens', (token) => {
     expect(sanitizeError({ code: '40001', message: `GENERIC_FIELD_CUTOVER_${token}: diagnostic detail` }))
       .toBe('No invoice was changed. An invoice update is finishing; wait a moment, then try Save again');

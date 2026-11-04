@@ -151,7 +151,7 @@ describe('PricingChangePreviewModal warnings (To-Do 0.1)', () => {
         onApprove={vi.fn()}
       />,
     );
-    expect(screen.getByText('Say where the new number came from (supplier, document, date).')).toBeTruthy();
+    expect(screen.getByText('Choose a source for the new price or cost.')).toBeTruthy();
   });
 });
 

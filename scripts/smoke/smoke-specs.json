@@ -897,6 +897,20 @@
         "security"
       ]
     },
+    "quote_sent_requires_version": {
+      "chain": "smoke-quote-sent-requires-version.sql",
+      "description": "Migration 20261105160000: a quote becomes sent or revised only with a sent version on record. save_quote cannot move a draft to sent; the owning rep's direct update to sent or revised is refused while a permitted column still saves; a signed-in insert at sent, revised or accepted is refused while a draft insert works; the admin override cannot move a draft to sent, nor reopen a never-sent cancelled quote to sent; a privileged insert at sent or accepted with no version is refused at commit (forced early with SET CONSTRAINTS). The send, a revision, a re-send, a rewind, a convert and the reopen of an accepted booking still work. Terminal rollback.",
+      "covers": [
+        "save_quote",
+        "create_quote_version",
+        "restore_quote_version",
+        "convert_quote_to_order"
+      ],
+      "area": [
+        "lifecycle",
+        "security"
+      ]
+    },
     "any_rep_changes_booked_prices": {
       "chain": "smoke-any-rep-booked-prices.sql",
       "description": "Migration 20261104130000 (Mason, 2026-10-30): another active sales rep revises a sent booking and lowers a price; it saves, the booking keeps its rep, the trail row names the rep who saved, and that rep's draw bills the new price with no re-send. A raise by that rep needs the Grower agreed tick like the owner's. A quantity, quantity and price, note, commission split or decline from that rep is refused QUOTE_PRICE_ONLY_FOR_OTHER_REPS and changes nothing; another rep's draft stays NOT_QUOTE_OWNER even with the price-only setting already set in the session; the booking's own rep still changes the quantity. Terminal rollback.",
@@ -1721,6 +1735,40 @@
       ],
       "area": [
         "pricing",
+        "security"
+      ]
+    },
+    "get_vendor_link_proposals": {
+      "chain": "smoke-vendor_link_proposals_admin_only.sql",
+      "container_prover": "prove-vendor-link-proposals-real-schema.mjs",
+      "description": "REQUIRES 20261104180000. The vendor link proposal report (WP-PM-15a, DATA-11) is admin-only and read-only: its body is pinned, anon cannot execute it, an active admin gets one row per active product with a known status, a summary that adds up and no cost key, while an active sales rep, driver, applicator, commission-recipient profile and an id with no active profile are refused ADMIN_REQUIRED, and a signed-out visitor is refused EXECUTE.",
+      "covers": [
+        "get_vendor_link_proposals"
+      ],
+      "area": [
+        "security"
+      ]
+    },
+    "link_product_vendor": {
+      "chain": "smoke-link_product_vendor_vendor_only.sql",
+      "container_prover": "prove-preferred-vendor-enforcement-real-schema.mjs",
+      "description": "REQUIRES 20261105180000. Vendor-only product links (WP-PM-15b): the body is pinned and anon cannot execute it; on an invented product an admin's first link is recorded with no item facts and not reusable, is preferred even when not asked, replays under the same key, and switching to a second vendor leaves exactly one preferred, whose name the product's vendor follows; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED and a signed-out visitor is refused EXECUTE.",
+      "covers": [
+        "link_product_vendor"
+      ],
+      "area": [
+        "security"
+      ]
+    },
+    "unlink_product_vendor": {
+      "chain": "smoke-preferred_vendor_enforcement.sql",
+      "container_prover": "prove-preferred-vendor-enforcement-real-schema.mjs",
+      "description": "REQUIRES 20261105180000. Preferred vendor enforcement (WP-PM-15b): unlink_product_vendor and get_product_vendors bodies are pinned and anon cannot execute either; on an invented product the vendor name follows the preferred vendor as an admin links and switches it; the list shows the preferred vendor first, with cost keys for an admin and null cost for a sales rep; removing the preferred vendor is refused PREFERRED_VENDOR_REQUIRED, a direct vendor-name edit is refused PRODUCT_VENDOR_FOLLOWS_PREFERRED_VENDOR, removing the other vendor works and replays; a sales rep is refused ADMIN_REQUIRED and a signed-out visitor is refused EXECUTE.",
+      "covers": [
+        "unlink_product_vendor",
+        "get_product_vendors"
+      ],
+      "area": [
         "security"
       ]
     }

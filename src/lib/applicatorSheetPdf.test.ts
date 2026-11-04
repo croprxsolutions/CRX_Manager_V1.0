@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Settings company details (Company Info) the PDF letterhead and footer print.
+const companyInfo = vi.hoisted(() => ({
+  load: vi.fn(async () => ({ name: 'Prairie Ag Co', phone: '555-0100', email: '', address: '12 Main St Annapolis, IL 62413' })),
+}));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
 import type { ApplicatorSheetData } from './applicatorSheetData';
 
 let pageCount = 1;
@@ -14,6 +20,7 @@ const mockDoc = {
   setDrawColor: vi.fn(),
   line: vi.fn(),
   splitTextToSize: vi.fn((text: string) => [text]),
+  getTextWidth: vi.fn(() => 50),
   getImageProperties: vi.fn(() => ({ width: 1000, height: 700 })),
   addImage: vi.fn(),
   addPage: vi.fn(() => { pageCount += 1; }),
@@ -127,6 +134,16 @@ describe('generateApplicatorSheetPdf map pages', () => {
     expect(mockDoc.addImage.mock.calls[0][3]).toBe(98.5);
     expect(mockDoc.text.mock.calls.some((call) => Array.isArray(call[0])
       && call[0][2] === 'Lat: 39.150000, Lng: -89.050000…')).toBe(true);
+  });
+
+  it('falls back to the Settings company details when Custom leaves them blank', async () => {
+    await generateApplicatorSheetPdf(makeSheetData(), 'custom', null);
+    const renderedText = mockDoc.text.mock.calls.flat(Infinity).filter((value: unknown): value is string => typeof value === 'string');
+    expect(renderedText).toEqual(expect.arrayContaining([
+      'Prairie Ag Co',
+      '12 Main St Annapolis, IL 62413',
+      'Prairie Ag Co  •  12 Main St Annapolis, IL 62413  •  Internal Use Only',
+    ]));
   });
 
   it('renders enabled billing, history, and extra hand-fill sections', async () => {

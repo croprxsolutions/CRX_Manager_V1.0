@@ -384,11 +384,11 @@ assert.equal(run({ tool_name: "Edit", tool_input: { file_path: "C:\\repo\\.claud
 assert.equal(run({ tool_name: "mcp__filesystem__write_file", tool_input: { path: ".claude/session-state/stop-wrap-ack.json" } }).stdout, "");
 
 // ── Worktree-path denials: a tripwire for any future carve-out ──────────────
-// Agent worktrees live at <repo>/.claude/worktrees/<name>/, so every file in one
-// carries a `.claude` component and the guard denies destructive shell commands
-// that NAME a worktree path. That is a known, documented limitation with a
-// zero-risk workaround (use relative paths — the agent's shell already starts in
-// the worktree); see docs/reference/gotchas.md and docs/manual/KNOWN_ISSUES.md.
+// Agent worktrees live at <repo>/.claude/worktrees/<name>/. Since 2026-11-03 an
+// ordinary file in one no longer counts (P3, see agent-guardrails.md); the root,
+// its `.claude`, and every spelling below still deny. That narrowing does NOT
+// strip the prefix out of the text — it matches whole targets and refuses any
+// path below a worktree it cannot read for certain.
 //
 // A "carve-out" that strips the worktree prefix out of the command text before
 // the protection checks run was attempted on 2026-08-19/20 and ABANDONED: five
@@ -1001,6 +1001,20 @@ for (const command of [
   'git commit -m "docs: rm stale note in .claude/commands"',
   "cat .claude/hooks/a.mjs | grep -c rd",
   "cat > /tmp/note.txt <<'EOF'\nsee .claude/launch.json and rm the old one\nEOF",
+  // P3 (2026-11-03): real refusals from 11/1–11/3. Work INSIDE a worktree, the
+  // Temp scratchpad and ~/.claude/projects are not the review state.
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && git mv supabase/migrations/a.sql supabase/migrations/b.sql",
+  "cd /c/CRX_Manager/.claude/worktrees/wt-a; git add .claude/schema-registry.json src/x.ts",
+  "git -C C:/CRX_Manager/.claude/worktrees/wt-a mv docs/a.md docs/b.md",
+  "rm -rf .claude/worktrees/wt-a/src",
+  "rm -f C:/CRX_Manager/.claude/worktrees/wt-a/node_modules/.cache/x",
+  "cd \"C:/CRX_Manager/.claude/worktrees/wt-a\" && python - <<'EOF'\nimport os\nos.remove('tmp.txt')\nEOF",
+  "S=/c/Users/mason/AppData/Local/Temp/claude/C--CRX-Manager--claude-worktrees-wt-a/1/scratchpad/proof; rm -rf $S; mkdir -p $S",
+  "rm -f C:/Users/mason/AppData/Local/Temp/claude/C--CRX-Manager--claude-worktrees-wt-a/1/scratchpad/a.json",
+  "rm -f ~/.claude/projects/C--CRX-Manager/x/workflow.js && mv a.md ~/.claude/projects/C--CRX-Manager/memory/a.md",
+  "echo x > C:/CRX_Manager/.claude/worktrees/wt-a/src/log.txt",
+  "git add .claude/schema-registry.json src/a.ts && git commit -q -m \"move the rows; rm the stub\"",
+  "W=C:/CRX_Manager/.claude/worktrees/wt-a; git -C \"$W\" mv a.md b.md && git -C \"$W\" commit -m \"Move a to b\"",
 ]) {
   assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `narrowed rule allows: ${command}`);
 }
@@ -1023,7 +1037,42 @@ for (const command of [
   "rm -rf {x,.claude/x/..}",
   "rm -rf .claude/session-state",
   "echo x > .claude/session-state/anything.json",
-  "rm -rf .claude/worktrees/wt-a/src",
+  // P3 (2026-11-03): a worktree's own `.claude`, an unreadable or climbing path in
+  // one, and a path-less wiper aimed at one still deny.
+  "rm -rf .claude/worktrees/wt-a/.claude",
+  "rm -rf C:/CRX_Manager/.claude/worktrees/wt-a/",
+  "rm -rf C:/CRX_Manager/.claude/worktrees/*",
+  "rm -rf .claude/worktrees/wt-*/src",
+  "rm -rf .claude/worktrees/wt-a/src/$X",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf ../wt-b",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .claude",
+  // Luna, 2026-11-03: the worktree root itself, or a glob that reaches its `.claude`.
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf ./",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf *",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .*",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf .[!.]*",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && mv . /tmp/x",
+  "git -C C:/CRX_Manager/.claude/worktrees/wt-a rm -rf .",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$TARGET\"",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf `echo x`",
+  // Codex App on PR #1375: cmd.exe delayed expansion and caret escapes.
+  "cd C:\\CRX_Manager\\.claude\\worktrees\\wt-a && rmdir /s /q !TARGET!",
+  "cd C:\\CRX_Manager\\.claude\\worktrees\\wt-a && rmdir /s /q .^claude",
+  "cd C:\\CRX_Manager\\.claude\\worktrees\\wt-a && del /s /q .cl^aude\\session-state",
+  "git -C C:/CRX_Manager/.claude/worktrees/wt-a rm -r ../wt-b",
+  "cd C:/CRX_Manager/.claude/worktrees && rm -rf wt-a",
+  "git -C C:/CRX_Manager/.claude/worktrees/wt-a clean -fdx",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && find . -delete",
+  "git -C C:/CRX_Manager/.claude/worktrees/wt-a rm -r --cached x && rm -rf C:/CRX_Manager/.claude/worktrees/wt-a",
+  "echo x > C:/CRX_Manager/.claude/worktrees/wt-a/.claude/session-state/a.json",
+  "echo x > .claude/worktrees/wt-a/src/$X",
+  "W=C:/CRX_Manager/.claude/worktrees/wt-a; rm -rf \"$W\"",
+  "W=C:/CRX_Manager/.claude/worktrees/wt-a; rm -rf $W/.claude",
+  "W=C:/CRX_Manager/.claude/worktrees/wt-a; cd \"$W\" && rm -rf ../wt-b",
+  "W=C:/CRX_Manager/.claude/worktrees/wt-a; W=/tmp; git -C \"$W\" rm -r x",
+  "git add a && mv /tmp/x .claude/schema-registry.json",
+  "rm -f .claude/caller-graph.json",
   // The home exclusion is anchored to a real home folder (Luna, PR #956 round 1).
   "rm -rf /tmp/Users/alice/.claude",
   "rm -rf C:/CRX/home/x/.claude",

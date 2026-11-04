@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearPendingRetry, loadPendingRetry, savePendingRetry } from './pendingRetry';
+import { clearPendingRetry, loadPendingRetry, markPendingRetryForCheck, savePendingRetry } from './pendingRetry';
 
 describe('pendingRetry', () => {
   afterEach(() => {
@@ -55,5 +55,15 @@ describe('pendingRetry', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
     expect(() => savePendingRetry('draw', 'key-1', [])).not.toThrow();
     expect(loadPendingRetry('draw')).toBeNull();
+  });
+
+  it('reports a failed save and keeps a flagged entry for a hand check', () => {
+    expect(savePendingRetry('draw', 'key-1', [])).toBe(true);
+    markPendingRetryForCheck('draw');
+    expect(loadPendingRetry('draw')).toMatchObject({ key: 'key-1', expired: true, needsCheck: true });
+    markPendingRetryForCheck('other');
+    expect(loadPendingRetry('other')).toBeNull();
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    expect(savePendingRetry('draw', 'key-2', [])).toBe(false);
   });
 });

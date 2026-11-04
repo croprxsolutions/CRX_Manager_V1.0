@@ -15,8 +15,10 @@ export interface PendingRetry<T> {
   key: string;
   request: T;
   sentAt: number;
-  /** Past the receipt's lifetime: it can no longer be finished safely, only checked by hand. */
+  /** Past the receipt's lifetime, or its receipt was refused: it can no longer be finished safely, only checked by hand. */
   expired?: boolean;
+  /** Set when the server refused this key's receipt: the send may have made an order. */
+  needsCheck?: boolean;
 }
 
 const storageKey = (name: string) => `crx:pending-retry:${name}`;
@@ -38,20 +40,37 @@ export function loadPendingRetry<T>(
     // An expired entry is kept, so the screen can warn before another send instead of forgetting it.
     // A send time in the future (the clock moved back) leaves its age unknown: treat it as expired.
     const age = Date.now() - pending.sentAt;
-    return { ...pending, expired: age < 0 || age > RECEIPT_LIFETIME_MS };
+    return { ...pending, expired: pending.needsCheck === true || age < 0 || age > RECEIPT_LIFETIME_MS };
   } catch {
     return null;
   }
 }
 
-export function savePendingRetry<T>(name: string, key: string, request: T): void {
+/** False when the note could not be stored: the caller must not send, or a lost reply could not be finished after a reload. */
+export function savePendingRetry<T>(name: string, key: string, request: T): boolean {
   try {
     // A retry of the same key keeps the first send time: the server's receipt expires from then.
     const kept = loadPendingRetry<T>(name);
     const sentAt = kept?.key === key ? kept.sentAt : Date.now();
     sessionStorage.setItem(storageKey(name), JSON.stringify({ key, request, sentAt }));
+    return true;
   } catch {
-    // No storage: the in-memory key still covers retries until a reload.
+    return false;
+  }
+}
+
+/**
+ * Flags the kept entry for a hand check, keeping it; a no-op when nothing is kept. Best effort: if the
+ * write fails, the unflagged entry still re-sends only its own key, and draw_down_quote answers a key
+ * with a receipt from that receipt (replaying it, or refusing it again as IDEMPOTENCY_RESULT_INVALID)
+ * while IDEMPOTENCY_RECEIPT_MISSING rolls back its own draw, so finishing it cannot make a second order.
+ */
+export function markPendingRetryForCheck(name: string): void {
+  try {
+    const raw = sessionStorage.getItem(storageKey(name));
+    if (raw) sessionStorage.setItem(storageKey(name), JSON.stringify({ ...JSON.parse(raw), needsCheck: true }));
+  } catch {
+    // Nothing kept, or no storage.
   }
 }
 

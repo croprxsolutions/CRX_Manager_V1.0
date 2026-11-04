@@ -51,7 +51,8 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
       // show the current state, and close the window once it is already where it was going.
       loadProductRateLock().then((current) => {
         onChanged(current);
-        if (current.is_locked === target) { setOpen(false); setReason(''); }
+        // Retire the key too, or a later switch with the same reason would replay this receipt.
+        if (current.is_locked === target) { resetKey(); setOpen(false); setReason(''); }
       }).catch(() => undefined);
     } finally {
       setSaving(false);

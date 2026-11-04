@@ -2602,6 +2602,7 @@ export default function QuoteBuilder() {
         setSavedLineIdByKey(new Map(savedLineIds));
         // The save recorded any changed price; read the record the database will check.
         await refreshPriceChanges(result.quote_id);
+        if (editingSessionChanged()) return null;
       }
       // The save committed, but conversion and other chained actions must not
       // continue unless this tab can install the exact authoritative token.

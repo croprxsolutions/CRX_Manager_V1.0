@@ -367,10 +367,11 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
   -- Clearing a rate always passes: no rate prices nothing, and the next rate write checks the unit.
   SELECT CASE WHEN p_rate IS NULL THEN true
     WHEN p_new_unit IS NULL THEN COALESCE(p_form IN ('seed', 'each'), false)
-    -- A kept seed or each unit may be unlisted (priced as one ounce on both sides), but never a zero
+    -- A kept seed or each unit, or one equal to the stock unit (as validate_product_units fills it), cancels
+    -- out against the stock unit, so it may be unlisted or of any kind (seed in Lb), but never a zero
     -- factor, and rate and stock look it up separately, so every case variant must share one factor.
     WHEN COALESCE(p_form IN ('seed', 'each'), false)
-         AND p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') THEN
+         AND (p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') OR lower(p_new_unit) = lower(p_stock_unit)) THEN
       (SELECT count(*) = count(u.factor_oz) AND COALESCE(min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz), true)
          FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
     ELSE EXISTS (SELECT 1 FROM public.unit_conversions uc
@@ -611,11 +612,14 @@ BEGIN
   -- unlocked factor change reprices nothing until a product's next save. Same formula as
   -- recalc_product_price_per_acre; the FOR UPDATE above holds off saves and factor changes meanwhile.
   IF p_locked THEN
-    -- A zero or missing factor prices a rate at $0 (or nothing), which the check below would accept.
+    -- A zero or missing factor prices a rate at $0 (or nothing), and spellings alike but for case with
+    -- different factors let pricing take either; the check below would accept both, so refuse them first.
     SELECT string_agg(u.unit, ', ' ORDER BY u.unit) INTO v_stale FROM public.unit_conversions u
-     WHERE u.factor_oz IS NULL OR u.factor_oz <= 0;
+     WHERE u.factor_oz IS NULL OR u.factor_oz <= 0
+        OR EXISTS (SELECT 1 FROM public.unit_conversions o
+                    WHERE lower(o.unit) = lower(u.unit) AND o.factor_oz IS DISTINCT FROM u.factor_oz);
     IF v_stale IS NOT NULL THEN
-      RAISE EXCEPTION 'PRODUCT_RATES_STALE: unit conversions % have no factor above zero; fix them, then lock', v_stale;
+      RAISE EXCEPTION 'PRODUCT_RATES_STALE: unit conversions % have no factor above zero or disagree with another spelling; fix them, then lock', v_stale;
     END IF;
     SELECT string_agg(s.product_name, ', ' ORDER BY s.product_name) INTO v_stale FROM (
       SELECT p.product_name FROM public.products p

@@ -362,6 +362,9 @@ function main() {
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, NULL, 'Gal');`), 'f');
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'oz', NULL, NULL, 'Gal');`), 't');
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, 'dry', 'Lb');`), 't');
+  // A new seed rate filled from its Lb stock unit cancels out, so a dry-kind unit is fine there.
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(2, 'Lb', NULL, 'seed', 'Lb');`), 't');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(2, 'Lb', NULL, 'seed', 'Gal');`), 'f');
   // The stock unit is pricing's divisor: an unknown one prices as one ounce ($100/gal at 13 oz/A would be $1,300/A).
   asOwner(`UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL, inventory_unit = 'Jug' WHERE id = '${P.OTHER}';`);
   refused(ADMIN, setRates([row(P.OTHER, '13', 'oz', '', [null, null, null])], 'k-stock'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
@@ -595,6 +598,10 @@ function main() {
   asOwner("UPDATE public.unit_conversions SET factor_oz = 0 WHERE unit = 'Pt';");
   refused(ADMIN, lock(true, 'zero factor', 'k-lock-zero'), /PRODUCT_RATES_STALE: unit conversions Pt have no factor above zero/);
   asOwner("UPDATE public.unit_conversions SET factor_oz = 16 WHERE unit = 'Pt';");
+  // Two spellings with different factors let pricing take either, so locking is refused too.
+  asOwner("INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('OZ', 128, 'liquid');");
+  refused(ADMIN, lock(true, 'two spellings', 'k-lock-spell'), /PRODUCT_RATES_STALE: unit conversions (OZ, oz|oz, OZ) have no factor above zero or disagree/);
+  asOwner("DELETE FROM public.unit_conversions WHERE unit = 'OZ';");
   ok(ADMIN, lock(true, 'prices current', 'k-lock-fresh'));
   ok(ADMIN, lock(false, 'open for the smoke', 'k-unlock3'));
   assert.equal(events(), 'locked,corrected,unlocked,locked,unlocked,locked,unlocked');

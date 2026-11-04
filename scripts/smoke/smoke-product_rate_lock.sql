@@ -26,9 +26,9 @@ DECLARE
 BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
     ('public.set_product_rates(jsonb,uuid,text)', '6e95a6d54d96e7e1421dee56f60b8a74'),
-    ('public.set_product_rate_lock(boolean,text,uuid,text)', 'b96410112828936e768835212c143ebd'),
+    ('public.set_product_rate_lock(boolean,text,uuid,text)', 'bece3db6000ad9aa47041eff312c511a'),
     ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '1ceb27840aa8e17a632d30f09339c2e9'),
-    ('public._product_rate_unit_ok(numeric,text,text,text,text)', 'e77594b0739c78538bc8046ce4215abc'),
+    ('public._product_rate_unit_ok(numeric,text,text,text,text)', '24d4231ec2d7cd8fb76379d103873382'),
     ('public.guard_product_rate_lock()', 'd20a3f77abf53807a43ced181b45c6d4'),
     ('public.guard_unit_conversions_rate_lock()', 'c8731a0228a669d18513a7284a44576f'),
     ('public.share_product_rate_lock()', '72c46aacf55c1862e4babd1cc459b436'),

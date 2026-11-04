@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied.** `20261106160000_product_setup_workbook.sql` (LF SQL sha256: `f59b615d1da00262304b6acb18da3209a67ac45b15159eb82c9dfeee461863d6`). WP-PM-11a-2. REQUIRES `20261106120000_product_rate_lock` (its preflight checks `set_product_rates`, `preview_product_rate_correction`, the rate value and unit helpers and `product_rate_lock`); without them the one-transaction apply changes nothing.
+**LOCAL CANDIDATE, not applied.** `20261106160000_product_setup_workbook.sql` (LF SQL sha256: `f7f711843ffc965135cc85f968953a0f9e4c447d268b95e059718f829577595a`). WP-PM-11a-2. REQUIRES `20261106155000_product_rate_lock` (its preflight checks `set_product_rates`, `preview_product_rate_correction`, the rate value and unit helpers and `product_rate_lock`); without them the one-transaction apply changes nothing.
 
 What it does:
 - New `get_product_setup_workbook()`: admin only, read-only. Every product's setup fields, rates (as exact text), pricing version, pack size, stock unit, form and tier 1–3 per-acre prices, plus a per-row `setup_fingerprint` and whether rates are locked. Never vendor or cost.
@@ -12,4 +12,4 @@ Rollback: drop the four functions. Nothing else to undo; setup changes saved thr
 
 Proof: `node scripts/smoke/prove-product-setup-workbook-real-schema.mjs` prints `PRODUCT_SETUP_WORKBOOK_PROOF_PASS`.
 
-Live ledger preflight, read 2026-11-04 (`list_migrations`): high-water `20261106130000_invoice_resave_keeps_line_cents`; `20261106120000_product_rate_lock` is not applied and sorts below that live stamp, so WP-PM-11a-1 is restamped (or applied) before this file. Read the ledger again at apply time.
+Live ledger preflight, read 2026-11-04 (`list_migrations`): high-water `20261106130000_invoice_resave_keeps_line_cents`; WP-PM-11a-1 is restamped to `20261106155000_product_rate_lock` (PR #1442) and applies before this file. Read the ledger again at apply time.

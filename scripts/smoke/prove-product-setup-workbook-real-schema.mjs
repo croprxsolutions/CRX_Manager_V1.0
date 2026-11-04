@@ -287,6 +287,8 @@ const BATCH = Array.from({ length: 20 }, (_, i) => ({
 }));
 const SEED = id('e1');
 const cents = (c) => (c / 100).toFixed(2);
+// The amount exactly as returned, refused unless whole cents (a fractional cent must not round its way to a pass).
+const exactCents = (v) => { assert.match(String(v), /^[0-9]+([.][0-9]{1,2})?$/, `${v} is not whole cents`); return Number(v).toFixed(2); };
 // Hand calculation, in whole cents: price per gallon x (rate oz / 128 oz), half away from zero.
 const perAcre = (priceCents, rate10) => {
   const num = priceCents * rate10; const den = 1280;
@@ -330,7 +332,7 @@ function main() {
   const installed = apply('cand.sql');
   assert.equal(installed.status, 0, installed.output);
   ledger(path.basename(CANDIDATE, '.sql'));
-  console.log('[prover] installs on top of the rate lock (20261106120000)');
+  console.log('[prover] installs on top of the rate lock (20261106155000)');
 
   // The download: admins only.
   const exp = exportRows();
@@ -352,9 +354,9 @@ function main() {
   for (const b of BATCH) {
     const p = preview.rows.find((r) => r.product_id === b.id);
     assert.equal(p.before.tier1_price_per_acre, null);
-    assert.equal(Math.round(p.after.tier1_price_per_acre * 100), perAcre(b.t1, b.rate10), `tier 1 preview for ${b.id}`);
-    assert.equal(Math.round(p.after.tier2_price_per_acre * 100), perAcre(b.t2, b.rate10), `tier 2 preview for ${b.id}`);
-    assert.equal(Math.round(p.after.tier3_price_per_acre * 100), perAcre(b.t3, b.rate10), `tier 3 preview for ${b.id}`);
+    assert.equal(exactCents(p.after.tier1_price_per_acre), cents(perAcre(b.t1, b.rate10)), `tier 1 preview for ${b.id}`);
+    assert.equal(exactCents(p.after.tier2_price_per_acre), cents(perAcre(b.t2, b.rate10)), `tier 2 preview for ${b.id}`);
+    assert.equal(exactCents(p.after.tier3_price_per_acre), cents(perAcre(b.t3, b.rate10)), `tier 3 preview for ${b.id}`);
   }
   assert.equal(scalar(`SELECT count(*) FROM public.products WHERE rate_per_acre IS NOT NULL AND id IN (${BATCH.map((b) => `'${b.id}'`).join(',')});`), '0', 'a preview saves nothing');
   const saved = JSON.parse(ok(ADMIN, setRates(saveFromPreview(rows, preview), 'k-rates-20')));
@@ -433,6 +435,7 @@ function main() {
     refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { [forbidden]: 'x' } }], `k-forbid-${forbidden}`), /PRODUCT_SETUP_ROW_SHAPE_INVALID/);
   }
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: {} }], 'k-empty'), /PRODUCT_SETUP_ROW_SHAPE_INVALID/);
+  refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: 'bad' }], 'k-scalar'), /PRODUCT_SETUP_ROW_SHAPE_INVALID/);
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { sku: 'A' } }], 'k-actor', REP), /ACTOR_MISMATCH|ADMIN_REQUIRED/);
   refused(ADMIN, `SELECT public.apply_product_setup('[{"product_id":"${m.product_id}","setup_fingerprint":"${m.setup_fingerprint}","changes":{"sku":"A"}}]'::jsonb, '${ADMIN}', NULL);`, /IDEMPOTENCY_KEY_REQUIRED/);
   console.log('[prover] Setup tab refuses stale rows and bad values by product name, all-or-nothing, and never writes vendor, rates, prices, cost, active, form or units');

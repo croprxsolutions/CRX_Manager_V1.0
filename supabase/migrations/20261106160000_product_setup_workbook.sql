@@ -36,7 +36,7 @@ BEGIN
      OR to_regprocedure('public.preview_product_rate_correction(uuid,numeric,text)') IS NULL
      OR to_regprocedure('public._product_rate_value_ok(jsonb)') IS NULL
      OR to_regprocedure('public._product_rate_value(jsonb)') IS NULL
-     OR to_regprocedure('public._product_rate_unit_ok(numeric,text,text,text)') IS NULL
+     OR to_regprocedure('public._product_rate_unit_ok(numeric,text,text,text,text)') IS NULL
      OR to_regclass('public.product_rate_lock') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_SETUP_WORKBOOK_DEPENDENCY_MISSING';
   END IF;
@@ -148,7 +148,8 @@ BEGIN
       v_status := 'invalid_rate';
     ELSE
       v_rate := public._product_rate_value(v_row->'rate_per_acre');
-      IF NOT public._product_rate_unit_ok(v_rate, v_unit, v_product.rate_unit, v_product.product_form)
+      IF NOT public._product_rate_unit_ok(v_rate, v_unit, v_product.rate_unit, v_product.product_form,
+                                          COALESCE(NULLIF(v_product.inventory_unit, ''), v_product.unit_size))
          -- validate_product_units refuses a seed or each rate unit other than the stock unit (unnamed);
          -- set_product_rates' own check lets an 'Ea'/'Unit' through, so name it here instead.
          OR (v_product.product_form IN ('seed', 'each') AND v_unit IS NOT NULL
@@ -246,9 +247,11 @@ BEGIN
        OR NOT (r ? 'product_id' AND r ? 'setup_fingerprint' AND r ? 'changes')
        OR (r->>'product_id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
        OR jsonb_typeof(r->'setup_fingerprint') <> 'string'
-       OR jsonb_typeof(r->'changes') <> 'object'
-       OR NOT EXISTS (SELECT 1 FROM jsonb_object_keys(r->'changes'))
-       OR EXISTS (SELECT 1 FROM jsonb_object_keys(r->'changes') k WHERE k <> ALL(c_fields))
+       -- CASE, so jsonb_object_keys never sees a non-object (OR does not fix evaluation order).
+       OR CASE WHEN jsonb_typeof(r->'changes') = 'object'
+               THEN NOT EXISTS (SELECT 1 FROM jsonb_object_keys(r->'changes'))
+                    OR EXISTS (SELECT 1 FROM jsonb_object_keys(r->'changes') k WHERE k <> ALL(c_fields))
+               ELSE true END
   ) THEN
     RAISE EXCEPTION 'PRODUCT_SETUP_ROW_SHAPE_INVALID: each row needs product_id, setup_fingerprint and at least one change to a setup field';
   END IF;

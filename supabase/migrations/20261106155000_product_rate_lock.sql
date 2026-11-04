@@ -13,6 +13,7 @@
 --     columns while locked, whatever wrote it: a browser update or insert, a price workbook apply, an
 --     import, any SECURITY DEFINER function. It takes the lock row FOR SHARE, so a switch and a rate
 --     write take turns and an upload that started before a switch cannot save after it.
+--   * While locked, unit_conversions cannot change either: pricing converts every rate through it.
 --   * set_product_rates(rows): the bulk rate writer the CSV import (WP-PM-10) and the setup workbook
 --     (WP-PM-11a-2) will call (admin, retry key, all-or-nothing). Each row carries the rate values it
 --     expects to replace and the per-acre prices its preview showed; a row changed since, or whose
@@ -143,18 +144,24 @@ CREATE TRIGGER product_rate_lock_no_truncate
 -- compared untrimmed, because product_price_per_acre reads it untrimmed. On INSERT of a seed or each
 -- product validate_product_units copies the stock unit into rate_unit, so that copy is not a rate; on
 -- UPDATE it is compared like any other unit, so a form or stock-unit change cannot move a locked rate.
+-- Pricing converts a rate into the stock unit (inventory_unit, else unit_size) by form, so on a rated
+-- product a stock-unit or form change moves the per-acre price and counts as a rate change.
 CREATE FUNCTION public.guard_product_rate_lock() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
   v_locked boolean;
   v_new_unit text := NULLIF(NEW.rate_unit, '');
+  v_basis_changed boolean := TG_OP = 'UPDATE'
+    AND (COALESCE(NULLIF(OLD.inventory_unit, ''), OLD.unit_size) IS DISTINCT FROM COALESCE(NULLIF(NEW.inventory_unit, ''), NEW.unit_size)
+         OR OLD.product_form IS DISTINCT FROM NEW.product_form);
   v_derived boolean := TG_OP = 'INSERT' AND COALESCE(NEW.product_form IN ('seed', 'each'), false)
                        AND NEW.rate_unit IS NOT DISTINCT FROM NEW.inventory_unit;
 BEGIN
   IF TG_OP = 'UPDATE'
      AND OLD.rate_per_acre IS NOT DISTINCT FROM NEW.rate_per_acre
      AND NULLIF(OLD.rate_unit, '') IS NOT DISTINCT FROM v_new_unit
-     AND NULLIF(btrim(OLD.suggested_rate), '') IS NOT DISTINCT FROM NULLIF(btrim(NEW.suggested_rate), '') THEN
+     AND NULLIF(btrim(OLD.suggested_rate), '') IS NOT DISTINCT FROM NULLIF(btrim(NEW.suggested_rate), '')
+     AND (NEW.rate_per_acre IS NULL OR NOT v_basis_changed) THEN
     RETURN NEW;
   END IF;
   -- Likewise on UPDATE of an unrated product that is or becomes seed or each: the stock unit
@@ -192,9 +199,10 @@ BEGIN
   END IF;
   IF NOT COALESCE(NEW.product_form IN ('seed', 'each'), false)
      AND (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
-          OR NULLIF(OLD.rate_unit, '') IS DISTINCT FROM v_new_unit)
+          OR NULLIF(OLD.rate_unit, '') IS DISTINCT FROM v_new_unit OR v_basis_changed)
      AND NOT public._product_rate_unit_ok(NEW.rate_per_acre, v_new_unit,
-                                          CASE WHEN TG_OP = 'UPDATE' THEN OLD.rate_unit END, NEW.product_form) THEN
+                                          CASE WHEN TG_OP = 'UPDATE' THEN OLD.rate_unit END, NEW.product_form,
+                                          COALESCE(NULLIF(NEW.inventory_unit, ''), NEW.unit_size)) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form'
       USING ERRCODE = 'check_violation';
   END IF;
@@ -207,6 +215,31 @@ REVOKE ALL ON FUNCTION public.guard_product_rate_lock() FROM PUBLIC, anon, authe
 CREATE TRIGGER trigger_zzz_guard_product_rate_lock
   BEFORE INSERT OR UPDATE ON public.products
   FOR EACH ROW EXECUTE FUNCTION public.guard_product_rate_lock();
+
+-- Pricing converts every rate through unit_conversions, so a changed factor reprices locked products at
+-- their next save without any rate write: while locked, the table cannot change (unlock, with a reason, first).
+CREATE FUNCTION public.guard_unit_conversions_rate_lock() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_locked boolean;
+BEGIN
+  SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR SHARE;
+  IF COALESCE(v_locked, true) THEN  -- a missing lock row counts as locked
+    RAISE EXCEPTION 'PRODUCT_RATES_LOCKED: rates are locked; unit conversions price every rate, so unlock rates with a reason before changing one'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;  -- ignored for TRUNCATE
+END;
+$function$;
+ALTER FUNCTION public.guard_unit_conversions_rate_lock() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_unit_conversions_rate_lock() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER unit_conversions_rate_lock
+  BEFORE INSERT OR UPDATE OR DELETE ON public.unit_conversions
+  FOR EACH ROW EXECUTE FUNCTION public.guard_unit_conversions_rate_lock();
+CREATE TRIGGER unit_conversions_rate_lock_no_truncate
+  BEFORE TRUNCATE ON public.unit_conversions
+  FOR EACH STATEMENT EXECUTE FUNCTION public.guard_unit_conversions_rate_lock();
 
 ALTER TABLE public.products
   ADD CONSTRAINT products_tier1_price_per_acre_whole_cents_chk CHECK (tier1_price_per_acre >= 0 AND tier1_price_per_acre < 'Infinity'::numeric AND tier1_price_per_acre = round(tier1_price_per_acre, 2)),
@@ -301,13 +334,19 @@ REVOKE ALL ON FUNCTION public._product_rate_value(jsonb) FROM PUBLIC, anon, auth
 -- since per-acre pricing prices an unknown unit as one ounce, a zero factor as $0, and takes any one
 -- of those rows. A rate needs a unit, except on seed and each products, where
 -- validate_product_units fills it from the stock unit (their unchanged unit is kept as it is).
-CREATE FUNCTION public._product_rate_unit_ok(p_rate numeric, p_new_unit text, p_old_unit text, p_form text) RETURNS boolean
+-- The stock unit (inventory_unit, else unit_size, as pricing reads it) is held to the same factor rule,
+-- since pricing divides by it; on seed and each products the two units are the same and cancel out.
+CREATE FUNCTION public._product_rate_unit_ok(p_rate numeric, p_new_unit text, p_old_unit text, p_form text,
+                                             p_stock_unit text) RETURNS boolean
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
   -- Clearing a rate always passes: no rate prices nothing, and the next rate write checks the unit.
   SELECT CASE WHEN p_rate IS NULL THEN true
     WHEN p_new_unit IS NULL THEN COALESCE(p_form IN ('seed', 'each'), false)
+    -- A kept seed or each unit may be unlisted (priced as one ounce on both sides), but never a zero factor.
     WHEN COALESCE(p_form IN ('seed', 'each'), false)
-         AND p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') THEN true
+         AND p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') THEN
+      NOT EXISTS (SELECT 1 FROM public.unit_conversions u
+                   WHERE lower(u.unit) = lower(p_new_unit) AND (u.factor_oz IS NULL OR u.factor_oz <= 0))
     ELSE EXISTS (SELECT 1 FROM public.unit_conversions uc
                   WHERE lower(uc.unit) = lower(p_new_unit)
                     AND (p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '')
@@ -315,10 +354,13 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
       -- Pricing takes any one row matching regardless of case, so every such row must agree.
       AND (SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
              FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
+      AND (COALESCE(p_form IN ('seed', 'each'), false)
+           OR COALESCE((SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
+                          FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_stock_unit)), false))
   END;
 $function$;
-ALTER FUNCTION public._product_rate_unit_ok(numeric, text, text, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._product_rate_unit_ok(numeric, text, text, text) FROM PUBLIC, anon, authenticated, service_role;
+ALTER FUNCTION public._product_rate_unit_ok(numeric, text, text, text, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._product_rate_unit_ok(numeric, text, text, text, text) FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE FUNCTION public.set_product_rates(
   p_rows jsonb,
@@ -418,7 +460,8 @@ BEGIN
     IF NOT public._product_rate_value_ok(v_row->'rate_per_acre') THEN
       v_invalid := v_invalid || v_product.product_name;
     ELSIF NOT public._product_rate_unit_ok(public._product_rate_value(v_row->'rate_per_acre'),
-                                            NULLIF(btrim(v_row->>'rate_unit'), ''), v_product.rate_unit, v_product.product_form) THEN
+                                            NULLIF(btrim(v_row->>'rate_unit'), ''), v_product.rate_unit, v_product.product_form,
+                                            COALESCE(NULLIF(v_product.inventory_unit, ''), v_product.unit_size)) THEN
       v_bad_unit := v_bad_unit || v_product.product_name;
     -- Stale = anything the preview's per-acre prices were computed from has moved: pricing_version
     -- covers tier prices and the rates; pack size, stock unit and form are compared directly.
@@ -616,8 +659,8 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND'; END IF;
   -- Seed and each rates use the stock unit, as the preview does.
   IF v_product.product_form IN ('seed', 'each') THEN v_unit := v_product.inventory_unit; END IF;
-  -- pricing_version moves only with prices, so the rates the admin started from are compared too:
-  -- a suggested-rate-only correction by another admin leaves the version where it was.
+  -- Any rate change, a suggested-rate-only one included, moves pricing_version
+  -- (guard_and_version_product_pricing); the rates the admin started from are compared too, belt and braces.
   IF v_product.pricing_version IS DISTINCT FROM p_expected_pricing_version
      -- Compared as a plain number: an older stored rate that breaks the 6-decimal rule can still be corrected.
      OR (p_expected->>'rate_per_acre')::numeric IS DISTINCT FROM v_product.rate_per_acre
@@ -632,7 +675,8 @@ BEGIN
      AND v_suggested IS NOT DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '') THEN
     RAISE EXCEPTION 'PRODUCT_RATE_CORRECTION_NO_CHANGE: the new rates match the current ones';
   END IF;
-  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form) THEN
+  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form,
+                                      COALESCE(NULLIF(v_product.inventory_unit, ''), v_product.unit_size)) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form';
   END IF;
 
@@ -690,7 +734,8 @@ BEGIN
   -- validate_product_units stores a seed or each product's stock unit as its rate unit; the unit is
   -- checked after that swap, as correct_product_rates checks it.
   IF v_product.product_form IN ('seed', 'each') THEN v_unit := v_product.inventory_unit; END IF;
-  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form) THEN
+  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form,
+                                      COALESCE(NULLIF(v_product.inventory_unit, ''), v_product.unit_size)) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form';
   END IF;
   v_t1 := COALESCE(v_product.tier1_price, 0);

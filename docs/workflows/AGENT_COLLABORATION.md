@@ -37,6 +37,7 @@ Pick the worker's model and effort from `docs/reference/claude-model-tuning.md` 
 
 - Worker tests are supporting evidence. The coordinator reviews every accepted diff and runs the real-path verification required by `AGENTS.md`.
 - Money, inventory, auth, RLS, migration, permission, and other business-critical changes keep the exact-SHA independent-review gate.
+- Review prompts are blind first: give the reviewer the scope, goal and rules, never the builder's conclusions or suspected bugs. Ask for every finding with severity, file:line and a failure scenario. Share the other side's position only after the reviewer has written its own findings (2026-11-03).
 - Do not add a custom queue, server, container layer, or permanent role merely to coordinate one task. Use the native Claude or Codex orchestration tools and existing workflows.
 
 ## Available Paths

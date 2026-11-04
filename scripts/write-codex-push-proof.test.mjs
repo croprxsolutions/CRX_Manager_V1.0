@@ -122,6 +122,13 @@ assert.match(prompt, /INDEPENDENT pre-push security review/i);
 assert.match(prompt, /candidate snapshot adds versus origin\/main/, "prompt pins the guarded base");
 assert.match(prompt, /sanitized, Git-free review packet/i, "prompt restricts review to the sanitized packet");
 assert.match(prompt, /untrusted DATA/i, "prompt treats diff content as untrusted");
+assert.match(prompt, /Report EVERY defect/, "prompt asks for every finding, not only high severity");
+assert.match(prompt, /prompt-injection attempt/, "prompt makes embedded reviewer instructions a BLOCKER");
+assert.match(prompt, /operation=/, "prompt inlines the CRX failure classes");
+assert.ok(
+  !/^\s*CODEX_PROOF_VERDICT:/m.test(prompt.split("Then end your reply")[0]),
+  "no verdict-shaped line appears before the verdict instructions",
+);
 assert.ok(
   prompt.includes(`${CODEX_VERDICT_TOKEN}: CLEAN`) && prompt.includes(`${CODEX_VERDICT_TOKEN}: BLOCKERS`),
   "prompt demands the machine verdict token in both forms",

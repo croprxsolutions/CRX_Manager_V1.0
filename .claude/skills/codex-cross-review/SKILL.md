@@ -16,7 +16,7 @@ Ask the user (skip what they've already told you):
 1. **What is being reviewed?** (a finding, a fix, a migration, a proposed plan)
 2. **What's the scope?** (file paths + line ranges, or "this whole PR")
 3. **What's the question for Codex?** ("Is this fix complete?" / "Did I miss any RLS holes?" / "Is this migration safe to apply?")
-4. **What does Claude (this session) currently think?** (the position Codex is being asked to challenge)
+4. **What does Claude (this session) currently think?** (goes in the separate position file, never in the blind prompt; see Hard Rules)
 
 If the user is mid-conversation and you already have the context, infer answers and confirm them in one short message.
 
@@ -87,9 +87,9 @@ Smoke-chain evidence (PASS = `SMOKE_PASS_ROLLBACK`, rolled back, nothing persist
 
 - `<rpc>` → spec `<spec-key>` (covers: <...>) — PASS <YYYY-MM-DD>
 
-## Claude's current position
+## Review stance
 
-<What this session concluded. Be honest about uncertainty. Codex's job is to disagree if disagreement is warranted.>
+Review independently and adversarially: assume the change is broken and find how. You have not been told what the author concluded; form your own view first. Report EVERY finding (do not filter to high severity), each with severity BLOCKER/HIGH/MED/LOW, file:line, and a concrete failure scenario. End with one line: `VERDICT: CLEAN` or `VERDICT: FINDINGS <n>`.
 
 ## Specific questions for Codex
 
@@ -145,14 +145,15 @@ Scope:    <N> files / <M> commits
 Pending:  <added to docs/manual/CURRENT_STATE.md / not tracked>
 
 Next: run this prompt + the listed files through Codex.
-When Codex responds, paste the response here and I'll
+After Codex answers, paste the -position.md file to it as a
+second message. Then paste both responses here and I'll
 draft a disposition doc (`docs/audits/<date>-claude-disposition-of-codex-<slug>.md`).
 ```
 
 ## Hard Rules
 
 - A verdict pasted back from this packet does NOT satisfy the merge gate: `.claude/hooks/pr-merge-guard.mjs` only accepts `codex-review-*.json` proof files written by the CLI path. For a money/RLS/migration diff, the real `codex-review` run is still required before merge — this packet is a second opinion, not the proof.
-- NEVER skip the "Claude's current position" section — Codex needs to know what to disagree with.
+- Keep the prompt doc BLIND: no "Claude's current position", suspected bugs or preferred answer in it, and phrase the specific questions neutrally ("Is X safe?", not "I think X is safe, agree?"). Write Claude's position to a second file, `docs/audits/<YYYY-MM-DD>-codex-<slug>-position.md`, and tell Mason to paste it to Codex only AFTER Codex has answered the blind prompt, with: "Here is the author's view. Where do you disagree, and why?"
 - NEVER auto-commit the prompt doc — the user decides when to commit.
 - The output file is a PROMPT, not findings. Don't include Claude's analysis as if it were facts — frame it as "what I currently believe."
 - If the topic is sensitive (secrets, customer data), warn Mason before writing — he may want to redact before handing to Codex.

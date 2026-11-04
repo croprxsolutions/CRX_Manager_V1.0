@@ -312,6 +312,12 @@ function scenarios() {
     UPDATE public.delivery_items SET order_item_id='${LINE2}' WHERE delivery_id='${DELIVERY}';
     ALTER TABLE public.delivery_items ENABLE TRIGGER USER;
     ${fix('k-moved-line')}`, 'a delivery line moved to another order line after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; INSERT INTO public.orders (id,order_number,customer_id,salesman_id,status,order_date) VALUES
+      (gen_random_uuid(),'PROVER-FIX-ORDER-B','${CUSTOMER}','${REP}','confirmed',CURRENT_DATE);
+    ALTER TABLE public.deliveries DISABLE TRIGGER USER;
+    UPDATE public.deliveries SET order_id=(SELECT id FROM public.orders WHERE order_number='PROVER-FIX-ORDER-B') WHERE id='${DELIVERY}';
+    ALTER TABLE public.deliveries ENABLE TRIGGER USER;
+    ${fix('k-moved-order')}`, 'a delivery moved to another order after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
 
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET paid_amount_cents=100 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-paid')}`, 'a payment on the invoice refuses the fix', /FIX_DELIVERY_REFUSED: A payment is applied/);

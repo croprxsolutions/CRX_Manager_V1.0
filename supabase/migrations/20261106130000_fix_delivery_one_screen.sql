@@ -258,8 +258,9 @@ BEGIN
     'invoices', v_invoices,
     'other_draft_invoices', v_order_drafts,
     'items', v_items,
-    -- What the preview showed; fix_delivery refuses when it no longer matches.
-    'plan_token', md5(jsonb_build_object('invoices', v_invoices, 'other_draft_invoices', v_order_drafts, 'items', v_items)::text)
+    -- What the preview showed (including the delivery's order and customer); fix_delivery refuses when it no longer matches.
+    'plan_token', md5(jsonb_build_object('order_id', v_delivery.order_id, 'customer_id', v_delivery.customer_id,
+                                         'invoices', v_invoices, 'other_draft_invoices', v_order_drafts, 'items', v_items)::text)
   );
 END;
 $function$;

@@ -46,6 +46,8 @@ brainstorm our entire plan before we build anything", then answers to each open 
 - Purchases go back through CRX POs and receiving (since June they were made by phone and email).
 - Phase 2 starts fresh from a stock count with confirmed starting costs before busy season, with no back-entry.
 - Chemical totes are stocked already filled. Bulk storage exists only for fertilizer.
+- Stock CRX cannot date because of the June gap shows "age unknown"; admins can bulk-enter an estimated
+  received date for it, shown as an owner estimate (D10, `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`).
 
 **Rule.** Nothing in the plan is built until Mason gives a separate go-ahead for that phase (D1 is still open).
 Each phase gets its own plan, Luna review and Sol review.

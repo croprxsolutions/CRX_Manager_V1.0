@@ -274,7 +274,7 @@ function scenarios() {
   refused(`${asUser(REP)} SELECT public.fix_delivery('${DELIVERY}','x','x','k-rep');`, 'a sales rep cannot fix a delivery', /Admin access required/);
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','x','x',NULL);`, 'a key is required', /IDEMPOTENCY_KEY_REQUIRED/);
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','  ','x','k-blank');`, 'a reason is required', /Reason is required/);
-  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}',E'\t\n','x','k-blank-ws');`, 'a tab-and-newline reason counts as blank', /Reason is required/);
+  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}',E'\\r\\n\\t','x','k-blank-ws');`, 'a carriage-return, newline and tab reason counts as blank', /Reason is required/);
   refused(`${asUser(ADMIN)} SELECT public._fix_delivery_plan('${DELIVERY}');`, 'the plan helper is not callable by app roles', /permission denied/);
 
   const before = Number(scalar(`SELECT ${stock};`));

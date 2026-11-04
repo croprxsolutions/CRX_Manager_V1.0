@@ -259,8 +259,8 @@ BEGIN
     'invoices', v_invoices,
     'other_draft_invoices', v_order_drafts,
     'items', v_items,
-    -- What the preview showed (including the delivery's order and customer); fix_delivery refuses when it no longer matches.
-    'plan_token', md5(jsonb_build_object('order_id', v_delivery.order_id, 'customer_id', v_delivery.customer_id,
+    -- What the preview showed (including the delivery, its order and customer); fix_delivery refuses when it no longer matches.
+    'plan_token', md5(jsonb_build_object('delivery_id', v_delivery.id, 'order_id', v_delivery.order_id, 'customer_id', v_delivery.customer_id,
                                          'invoices', v_invoices, 'other_draft_invoices', v_order_drafts, 'items', v_items)::text)
   );
 END;
@@ -302,8 +302,7 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := auth.uid();
-  v_reason text := btrim(COALESCE(p_reason, ''), E' 	
-');
+  v_reason text := btrim(COALESCE(p_reason, ''), E' \t\r\n');
   v_fingerprint text;
   v_replay jsonb;
   v_plan jsonb;

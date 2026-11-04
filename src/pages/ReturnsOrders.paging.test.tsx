@@ -170,4 +170,29 @@ describe('Return product from a delivery', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(H.toast).not.toHaveBeenCalledWith('error', expect.stringContaining('inactive'));
   });
+
+  it("an older form's late customer read leaves a newer form's customer list alone", async () => {
+    let release = () => {};
+    H.held.customers = new Promise<void>((r) => { release = r; });
+    render(<MemoryRouter initialEntries={['/returns?customer=customer-1&order=order-0003']}><Returns /></MemoryRouter>);
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'New Return / RMA' })).getByRole('button', { name: 'Cancel' }));
+    H.held = {};
+    H.tables.customers = [...H.tables.customers, { id: 'customer-2', farm_name: 'Other Farm', assigned_tier: null, is_active: true }];
+    fireEvent.click(screen.getAllByRole('button', { name: 'New Return' })[0]);
+    const customer = within(await screen.findByRole('dialog', { name: 'New Return / RMA' })).getByLabelText('Customer');
+    await waitFor(() => expect(customer.querySelectorAll('option')).toHaveLength(3));
+    release();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(customer.querySelectorAll('option')).toHaveLength(3);
+  });
+
+  it('keeps a pre-filled return unsubmittable until the active-customer check settles', async () => {
+    let release = () => {};
+    H.held.customers = new Promise<void>((r) => { release = r; });
+    render(<MemoryRouter initialEntries={['/returns?customer=customer-1&order=order-0003']}><Returns /></MemoryRouter>);
+    const create = within(await screen.findByRole('dialog', { name: 'New Return / RMA' })).getByRole('button', { name: 'Create Return' });
+    expect(create).toBeDisabled();
+    release();
+    await waitFor(() => expect(create).toBeEnabled());
+  });
 });

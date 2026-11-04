@@ -181,7 +181,8 @@ Once Step 4 is clean and Step 2/2.5 are green, present the branch, commit, verif
 When one session (the captain) lands PRs that child sessions get green (Mason, 2026-11-04):
 - The first brief names each PR's owner: the session that fixes it, and the author whose work it is. #1442 and #1345 stalled when nobody owned them.
 - A child reports `#N READY head=<full 40-character sha>, Sol=<proof path|n/a>, migration=<none|applied>`, or `#N BLOCKED` with its options. The captain settles technical forks itself and checks with `npm run pr-readiness -- <n> ...` (read-only) before it merges as in item 6.
-- A moved main costs a finished PR nothing (item 4), so children do not merge main in just because it moved; #1437 lost about four review rounds that way. A child whose migration PR is about to push its last fix sends `#N WINDOW`; the captain then lands no other migration PR until #N lands, so #N needs no restamp.
+- A moved main costs a PR without a migration nothing (item 4), so its session does not merge main in just because main moved.
+- A migration PR is different: Sol's pre-flight refuses a migration branch that lacks origin/main, and the apply gate wants the head and the Sol proof bound to GitHub's current base. Any merge to main before its apply costs it another main merge, push and Codex App round (#1437 lost about four that way). So its session sends `#N WINDOW` just before its last push, and the captain merges nothing into main until #N is applied and merged.
 - Don't push to a branch whose author pushed in the last 30 minutes (Mason, 2026-11-04); leave a PR comment instead.
 - A child that goes idle right after `/compact` gets a one-line "carry on" message.
 

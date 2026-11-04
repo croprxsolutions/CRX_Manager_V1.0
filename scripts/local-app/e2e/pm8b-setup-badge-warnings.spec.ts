@@ -13,7 +13,7 @@ test('incomplete setup badge, setup filter, near-match warning and rate help', a
 
   // Products are an allowed admin insert. An invented maker gives the near-match warning something to match.
   const stamp = Date.now();
-  const [makerId, productId, productError] = await page.evaluate(async ({ name, maker }) => {
+  const { makerId, productId, productError } = await page.evaluate(async ({ name, maker }) => {
     const { supabase } = await import(/* @vite-ignore */ '/src/lib/db.ts');
     const { data: makerRow, error: makerError } = await supabase.from('products')
       .insert({ product_name: `${name} maker`, manufacturer: maker }).select('id').single();
@@ -21,7 +21,7 @@ test('incomplete setup badge, setup filter, near-match warning and rate help', a
     const { data, error } = await supabase.from('products')
       .insert({ product_name: name, category: 'Herbicide' }).select('id').single();
     // The maker row already exists, so hand its id back for cleanup instead of throwing here.
-    return [makerRow.id, data?.id ?? null, error?.message ?? null];
+    return { makerId: makerRow.id as string, productId: data?.id ?? null, productError: error?.message ?? null };
   }, { name: `Setup8b ${stamp} (invented)`, maker: `Zentrova${stamp}` });
   created.push(makerId);
   if (!productId) throw new Error(productError ?? 'Local product insert failed');

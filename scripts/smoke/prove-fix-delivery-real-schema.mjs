@@ -273,6 +273,7 @@ function scenarios() {
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','x','x',NULL);`, 'a key is required', /IDEMPOTENCY_KEY_REQUIRED/);
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','  ','x','k-blank');`, 'a reason is required', /Reason is required/);
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}',E'\\r\\n\\t','x','k-blank-ws');`, 'a carriage-return, newline and tab reason counts as blank', /Reason is required/);
+  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}',E'\u00a0\u200b','x','k-blank-nbsp');`, 'a no-break-space reason counts as blank', /Reason is required/);
   refused(`${asUser(ADMIN)} SELECT public._fix_delivery_plan('${DELIVERY}');`, 'the plan helper is not callable by app roles', /permission denied/);
 
   // An ordinary void cancels a commission with no replacement: past months keep counting it, even next to
@@ -288,6 +289,12 @@ function scenarios() {
   refused(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET status='cancelled' WHERE id='${COMM}';
     ALTER TABLE public.commissions ENABLE TRIGGER USER; ${fix('k-comm-gone')}`,
     'an order whose commission an earlier void cancelled refuses the fix', /FIX_DELIVERY_REFUSED: This order's commission was cancelled/);
+  // Another rep's paid split does not hide the cancelled rep's commission.
+  refused(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET status='cancelled' WHERE id='${COMM}';
+    INSERT INTO public.commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage, commission_amount, order_profit, order_date, season, order_number, customer_name, status)
+      SELECT order_id, customer_id, '[PROVER] other rep', '${ADMIN}', split_percentage, 10, order_profit, order_date, season, order_number, customer_name, 'paid' FROM public.commissions WHERE id='${COMM}';
+    ALTER TABLE public.commissions ENABLE TRIGGER USER; ${fix('k-comm-split')}`,
+    "another rep's paid split does not hide a commission an earlier void cancelled", /FIX_DELIVERY_REFUSED: This order's commission was cancelled/);
   const before = Number(scalar(`SELECT ${stock};`));
   allowed(`${fix('k-ok')}
     ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='voided'`, 'invoice voided')}

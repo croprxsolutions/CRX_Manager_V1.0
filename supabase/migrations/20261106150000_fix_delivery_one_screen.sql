@@ -30,8 +30,8 @@
 --   * a delivery completed in a closed accounting period;
 --   * a posted/paid/overdue invoice dated in a closed accounting period;
 --   * a pending order commission already in an active payout batch;
---   * the order's commission was already cancelled (an earlier invoice void) with no live commission
---     left: a fix restores only the pending commissions it cancels itself, so it would finish with none.
+--   * a rep's commission on the order was already cancelled (an earlier invoice void) and that rep has
+--     no live commission left on it: a fix restores only the pending commissions it cancels itself.
 --
 -- 3. COMMISSIONS: void_invoice cancels the order's PENDING commissions when no other active invoice
 --   remains on the order (20260718221505), and a cancelled commission can never be reopened
@@ -230,13 +230,16 @@ BEGIN
       'message', 'This order''s commission is in a payout batch. Void that commission payment first.');
   END IF;
 
-  -- An earlier ordinary void already cancelled the order's commission: the fix would restore nothing.
+  -- An earlier ordinary void already cancelled a rep's commission: the fix would not restore it. Checked
+  -- per rep, so another rep's paid or pending split cannot hide it.
   IF v_delivery.order_id IS NOT NULL
      AND EXISTS (SELECT 1 FROM commissions c
                   WHERE c.order_id = v_delivery.order_id AND c.status = 'cancelled' AND c.deleted_at IS NULL
-                    AND NOT EXISTS (SELECT 1 FROM commissions r WHERE r.replaces_commission_id = c.id))
-     AND NOT EXISTS (SELECT 1 FROM commissions c
-                      WHERE c.order_id = v_delivery.order_id AND c.status <> 'cancelled' AND c.deleted_at IS NULL) THEN
+                    AND NOT EXISTS (SELECT 1 FROM commissions r WHERE r.replaces_commission_id = c.id)
+                    AND NOT EXISTS (SELECT 1 FROM commissions l
+                                     WHERE l.order_id = c.order_id AND l.status <> 'cancelled' AND l.deleted_at IS NULL
+                                       AND l.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id
+                                       AND l.recipient IS NOT DISTINCT FROM c.recipient)) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'COMMISSION_ALREADY_CANCELLED',
       'message', 'This order''s commission was cancelled when its invoice was voided earlier, and Fix delivery cannot bring it back. Restore the rep''s commission before fixing this delivery.');
   END IF;
@@ -381,7 +384,10 @@ BEGIN
   END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF NOT is_admin() THEN RAISE EXCEPTION 'Admin access required to fix a delivery'; END IF;
-  IF v_reason = '' THEN RAISE EXCEPTION 'Reason is required to fix a delivery'; END IF;
+  -- Only blanks of any kind (no-break and other Unicode spaces too) is no reason.
+  IF v_reason ~ '^[[:space:][:cntrl:]\u00a0\u1680\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]*$' THEN
+    RAISE EXCEPTION 'Reason is required to fix a delivery';
+  END IF;
 
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,

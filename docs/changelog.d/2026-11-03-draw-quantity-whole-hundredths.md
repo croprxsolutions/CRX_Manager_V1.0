@@ -1,6 +1,6 @@
 ## 2026-11-03 — A Partial Order quantity is in whole hundredths, so a booking always closes (S02)
 
-- New migration `20261104160000_draw_quantity_whole_hundredths.sql` (NOT APPLIED; record in
+- New migration `20261106110000_draw_quantity_whole_hundredths.sql` (NOT APPLIED; record in
   `docs/reference/migrations.d/`). Booked quantities are saved to 0.01, but a Partial Order
   quantity had no step: three draws of 333.333 gal from a 1,000 gal booking left 0.001 gal that no
   draw could take, so the booking never closed and the orders billed $12,369.99. `draw_down_quote`

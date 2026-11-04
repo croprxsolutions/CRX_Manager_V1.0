@@ -1,5 +1,5 @@
 -- Written 2026-11-03. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261104160000_draw_quantity_whole_hundredths.md.
+-- docs/reference/migrations.d/20261106110000_draw_quantity_whole_hundredths.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (S02, money fix; Mason's order, 2 Nov): a booking drawn as 333.333 gal three times leaves
@@ -218,7 +218,7 @@ BEGIN
   END IF;
   -- >>>DRAW_DOWN_INTENT_REPLAY
 
-  -- DRAW_DOWN_QUANTITY_STEP<<< (20261104160000, S02)
+  -- DRAW_DOWN_QUANTITY_STEP<<< (20261106110000, S02)
   -- A booking's quantities are saved to 0.01 (save_quote rounds them), so a draw must be in whole
   -- hundredths too. Otherwise three draws of 333.333 from 1,000 leave 0.001 that no draw can
   -- take, and the booking never closes. Checked after the replay above, so a retry of a draw

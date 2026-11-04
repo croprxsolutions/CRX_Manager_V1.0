@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a Partial Order quantity is in whole hundredths, so a booking always closes (S02)
 -- ----------------------------------------------------------------------------
--- Migration 20261104160000_draw_quantity_whole_hundredths. A rep books product P (cost 6.00,
+-- Migration 20261106110000_draw_quantity_whole_hundredths. A rep books product P (cost 6.00,
 -- tier 1 7.50) for 10 gal and sends it.
 --   A  A draw of 3.333 gal is refused BOOKING_QUANTITY_PRECISION and writes no order or draw
 --   B  Draws of 3.33 + 3.33 + 3.34 close the booking: nothing left, booking accepted, and the

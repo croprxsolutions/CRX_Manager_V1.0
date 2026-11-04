@@ -926,7 +926,7 @@
     },
     "draw_quantity_step": {
       "chain": "smoke-draw-quantity-step.sql",
-      "description": "Migration 20261104160000 (S02): a Partial Order quantity with more than 2 decimal places (3.333 gal) is refused BOOKING_QUANTITY_PRECISION and writes no order or draw; 3.33 + 3.33 + 3.34 gal closes a 10 gal booking with nothing left, the booking accepted, and the orders adding up to the booking total exactly. Terminal rollback.",
+      "description": "Migration 20261106110000 (S02): a Partial Order quantity with more than 2 decimal places (3.333 gal) is refused BOOKING_QUANTITY_PRECISION and writes no order or draw; 3.33 + 3.33 + 3.34 gal closes a 10 gal booking with nothing left, the booking accepted, and the orders adding up to the booking total exactly. Terminal rollback.",
       "covers": [
         "draw_down_quote"
       ],

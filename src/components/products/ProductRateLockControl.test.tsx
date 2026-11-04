@@ -29,7 +29,8 @@ describe('rate lock switch failure paths', () => {
     render(<ProductRateLockControl lock={open} loadFailed={false} onRetry={vi.fn()} isAdmin profileId="u1" onChanged={onChanged} />);
     fireEvent.click(screen.getByRole('button', { name: 'Lock rates' }));
     fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'season' } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Lock rates' }).at(-1)!);
+    const buttons = screen.getAllByRole('button', { name: 'Lock rates' });
+    fireEvent.click(buttons[buttons.length - 1]);
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(locked));
   });
 });

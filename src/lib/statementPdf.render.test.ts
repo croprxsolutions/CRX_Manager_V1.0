@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DetailedStatementData } from '../types';
+import { DEFAULT_COMPANY_INFO } from './companyInfo';
 import { generateStatementPdf } from './statementPdf';
+
+const companyInfo = vi.hoisted(() => ({ load: vi.fn() }));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
+companyInfo.load.mockResolvedValue(DEFAULT_COMPANY_INFO);
 
 const renderedStatement: DetailedStatementData = {
   customer: {
@@ -85,6 +90,20 @@ describe('statement PDF real renderer', () => {
     expect(pageCommands).toContain('CUT HERE');
     expect(pageCommands).toContain('Page 1');
     expect(pageCommands).not.toContain('Page 2');
+  });
+
+  it('prints the Settings address in the letterhead only; the remit-to block keeps its own address', async () => {
+    companyInfo.load.mockResolvedValueOnce({
+      name: 'Test Ag Co', phone: '555-0199', email: '', address: '4400 Example Rd, Settingstown, IL 62999',
+    });
+    const doc = await generateStatementPdf(renderedStatement);
+    const pageCommands = doc.internal.pages.flat().join('\n');
+
+    expect(pageCommands).toContain('TEST AG CO');
+    expect(pageCommands).toContain('4400 Example Rd');
+    expect(pageCommands).toContain('PLEASE MAIL WITH PAYMENT TO:');
+    expect(pageCommands).toContain('9100 E 2000th Ave');
+    expect(pageCommands).not.toContain('CROP RX SOLUTIONS');
   });
 
   it('renders every wrapped account-name line without covering remittance totals', async () => {

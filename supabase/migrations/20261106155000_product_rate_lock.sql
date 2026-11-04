@@ -13,6 +13,7 @@
 --     columns while locked, whatever wrote it: a browser update or insert, a price workbook apply, an
 --     import, any SECURITY DEFINER function. It takes the lock row FOR SHARE, so a switch and a rate
 --     write take turns and an upload that started before a switch cannot save after it.
+--   * While locked, unit_conversions cannot change either: pricing converts every rate through it.
 --   * set_product_rates(rows): the bulk rate writer the CSV import (WP-PM-10) and the setup workbook
 --     (WP-PM-11a-2) will call (admin, retry key, all-or-nothing). Each row carries the rate values it
 --     expects to replace and the per-acre prices its preview showed; a row changed since, or whose
@@ -214,6 +215,31 @@ REVOKE ALL ON FUNCTION public.guard_product_rate_lock() FROM PUBLIC, anon, authe
 CREATE TRIGGER trigger_zzz_guard_product_rate_lock
   BEFORE INSERT OR UPDATE ON public.products
   FOR EACH ROW EXECUTE FUNCTION public.guard_product_rate_lock();
+
+-- Pricing converts every rate through unit_conversions, so a changed factor reprices locked products at
+-- their next save without any rate write: while locked, the table cannot change (unlock, with a reason, first).
+CREATE FUNCTION public.guard_unit_conversions_rate_lock() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_locked boolean;
+BEGIN
+  SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR SHARE;
+  IF COALESCE(v_locked, true) THEN  -- a missing lock row counts as locked
+    RAISE EXCEPTION 'PRODUCT_RATES_LOCKED: rates are locked; unit conversions price every rate, so unlock rates with a reason before changing one'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;  -- ignored for TRUNCATE
+END;
+$function$;
+ALTER FUNCTION public.guard_unit_conversions_rate_lock() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_unit_conversions_rate_lock() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER unit_conversions_rate_lock
+  BEFORE INSERT OR UPDATE OR DELETE ON public.unit_conversions
+  FOR EACH ROW EXECUTE FUNCTION public.guard_unit_conversions_rate_lock();
+CREATE TRIGGER unit_conversions_rate_lock_no_truncate
+  BEFORE TRUNCATE ON public.unit_conversions
+  FOR EACH STATEMENT EXECUTE FUNCTION public.guard_unit_conversions_rate_lock();
 
 ALTER TABLE public.products
   ADD CONSTRAINT products_tier1_price_per_acre_whole_cents_chk CHECK (tier1_price_per_acre >= 0 AND tier1_price_per_acre < 'Infinity'::numeric AND tier1_price_per_acre = round(tier1_price_per_acre, 2)),

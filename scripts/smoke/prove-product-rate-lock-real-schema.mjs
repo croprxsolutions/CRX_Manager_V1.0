@@ -398,6 +398,14 @@ function main() {
   refused(ADMIN, lock(true, 'again', 'k-lock-2'), /PRODUCT_RATE_LOCK_UNCHANGED/);
   assert.equal(events(), 'locked');
   console.log('[prover] an admin locks rates with a reason; it is logged with who and why');
+  // Pricing converts every rate through unit_conversions, so while locked it cannot change either.
+  refused(ADMIN, "UPDATE public.unit_conversions SET factor_oz = 128 WHERE unit = 'oz';", /PRODUCT_RATES_LOCKED/);
+  refused(ADMIN, "INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Qt', 32, 'liquid');", /PRODUCT_RATES_LOCKED/);
+  ownerRefused("UPDATE public.unit_conversions SET factor_oz = 128 WHERE unit = 'oz';", /PRODUCT_RATES_LOCKED/);
+  ownerRefused("DELETE FROM public.unit_conversions WHERE unit = 'oz';", /PRODUCT_RATES_LOCKED/);
+  ownerRefused('TRUNCATE public.unit_conversions CASCADE;', /PRODUCT_RATES_LOCKED/);  // plain TRUNCATE is already refused by its foreign keys
+  assert.equal(scalar("SELECT count(*) || '|' || bool_and(factor_oz = 1) FILTER (WHERE unit = 'oz') FROM public.unit_conversions;"), '4|true');
+  console.log('[prover] locked: unit conversions cannot be changed, added, deleted or emptied');
 
   // Locked: every route that would change a rate is refused, whoever runs it.
   refused(ADMIN, `UPDATE public.products SET rate_per_acre = 20 WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
@@ -508,6 +516,7 @@ function main() {
 
   // A switch and a rate write take turns: a lock waits for an upload already saving, then holds.
   ok(ADMIN, lock(false, 'reopen', 'k-unlock'));
+  ok(ADMIN, "UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");  // open again once unlocked
   const writer = spawn('docker', ['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-c',
     `BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
      SET LOCAL ROLE authenticated; ${setRates([row(P.OTHER, '8', 'oz', '8 oz/A', [null, null, null])], 'k-race')} SELECT pg_sleep(4); COMMIT;`],

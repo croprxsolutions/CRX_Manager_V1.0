@@ -39,19 +39,34 @@ node scripts/smoke/run-smoke.mjs --spec receive_return   # matches keys OR cover
 node scripts/smoke/run-smoke.mjs --all
 ```
 
-Two modes:
+Three modes:
 
-1. **Claude-first (default).** Without `SUPABASE_DB_URL`, the runner prints
-   each selected chain with banners and instructions. Claude executes the SQL
-   as **one statement** via Supabase MCP `execute_sql` (project
-   `rhyzpcqhnizqbxphqdkr`) and interprets the result.
-2. **psql.** With `SUPABASE_DB_URL` set, the runner executes each chain via
+1. **Live (`npm run smoke:live -- --spec <rpc>`).** Use this for every
+   post-apply live run. The runner sends each chain file unchanged, as one
+   statement, to project `rhyzpcqhnizqbxphqdkr` through the Supabase
+   Management API, and reports PASS/SKIP/FAIL itself with the same exit
+   codes as psql mode. It reads Mason's token in memory from Windows
+   Credential Manager and never prints or saves it (approved 2026-11-03,
+   `docs/manual/SERVICES_AND_ACCOUNTS.md`). It sends only `.sql` files named
+   in `smoke-specs.json`, from this folder, and refuses one with no
+   `RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK…`. Each request ends with one fixed
+   statement that always raises, so a chain that somehow finishes without
+   raising is rolled back and graded FAIL. It never sends container-only or
+   psql-only chains.
+   Never retype a chain into MCP `execute_sql`.
+2. **Claude-first (fallback).** Without `--live` or `SUPABASE_DB_URL`, the
+   runner prints each selected chain with banners and instructions. Use it
+   only where `--live` cannot run (no Credential Manager token): execute the
+   SQL as **one statement** via Supabase MCP `execute_sql` and interpret the
+   result.
+3. **psql.** With `SUPABASE_DB_URL` set, the runner executes each chain via
    `psql -1 -f` and reports PASS/FAIL itself.
 
-**Result contract (both modes):** the chain ALWAYS errors.
+**Result contract (all modes):** the chain ALWAYS errors.
 
 - Error text contains `SMOKE_PASS_ROLLBACK` → **PASS** (and proves the
-  rollback fired — nothing persisted).
+  rollback fired — nothing persisted, except that ID sequence numbers a
+  fixture used stay used, which only leaves gaps in IDs).
 - Any other error, or no error at all → **FAIL**; report the message verbatim.
 
 The full-gauntlet chain also proves the versioned `save_blend_ticket` contract:
@@ -214,12 +229,12 @@ This slice deliberately does not edit `package.json`, hooks, or
   (usage: `npm run smoke -- --spec <rpc>`).
 - **/ship step (after `apply_migration` + B7 rename, before commit):** for
   every RPC named in the migration, run
-  `node scripts/smoke/run-smoke.mjs --spec <rpc>`.
+  `npm run smoke:live -- --spec <rpc>`.
   - Runner exits 2 with "no spec covers" → write/extend a chain first
     (step list above) — this is a gate, not a suggestion.
-  - Claude executes the printed chain(s) via MCP `execute_sql` and applies
-    the PASS contract; any non-`SMOKE_PASS_ROLLBACK` error blocks the ship
-    until fixed (then re-run the FULL chain — not just the failing step).
+  - Any result but PASS blocks the ship until fixed (then re-run the FULL
+    chain — not just the failing step). Without a Credential Manager token,
+    fall back to executing the printed chain(s) via MCP `execute_sql`.
 - **Codex handoff packets:** include the chain results (spec key + PASS) so
   round 1 starts from executed evidence instead of isolated-probe claims.
 - Optional later hardening: a Stop/PreToolUse hook that refuses "fixed"

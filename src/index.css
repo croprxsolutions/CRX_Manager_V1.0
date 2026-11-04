@@ -296,13 +296,16 @@
   }
 }
 
-/* Product editing on phones: 44px tap targets, and 16px field text so an iPhone does not zoom in
-   on a field. Unlayered on purpose, so it outranks the sizing utilities, and only below the
-   width where the bottom navigation shows, so desktop keeps its sizes. */
+/* Phones: 16px field text everywhere, so an iPhone does not jump-zoom on a field now that pinch
+   zoom is allowed (index.html). Product editing also gets 44px tap targets. Unlayered on purpose,
+   so it outranks the sizing utilities, and only below the width where the bottom navigation
+   shows, so desktop keeps its sizes. */
 @media (width < 48rem) {
+  :is(input:not([type='checkbox'], [type='radio'], [type='hidden'], [type='file'], [type='submit'], [type='reset'], [type='button'], [type='image'], [type='range'], [type='color']), select, textarea) {
+    font-size: 1rem;
+  }
   .phone-touch :is(input:not([type='checkbox'], [type='radio'], [type='hidden'], [type='file']), select, textarea) {
     min-height: 2.75rem;
-    font-size: 1rem;
   }
   .phone-touch :is(button, [role='button'], a[href], label:has(> input[type='checkbox'])) {
     min-height: 2.75rem;

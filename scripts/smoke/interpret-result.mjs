@@ -12,12 +12,12 @@ export function interpretResult(outputText) {
   // $-extended form (CodeRabbit — identifiers may contain $), and excluding $
   // too still accepted non-ASCII identifier letters like é and λ (Sol,
   // reproduced read-only). Every real pass raise is either the bare token or
-  // the token followed by a space or an open parenthesis — accept exactly
-  // those shapes and nothing else.
+  // the token followed by a space, an open parenthesis or a colon (four chains,
+  // e.g. smoke-quote-sent-requires-version.sql) — accept exactly those shapes
+  // and nothing else.
   const isPassToken = (message) =>
     message === PASS_TOKEN ||
-    message?.startsWith(PASS_TOKEN + ' ') ||
-    message?.startsWith(PASS_TOKEN + '(');
+    [' ', '(', ':'].some((delimiter) => message?.startsWith(PASS_TOKEN + delimiter));
   if (lines.map(postgresErrorMessage).some(isPassToken)) {
     return { pass: true };
   }

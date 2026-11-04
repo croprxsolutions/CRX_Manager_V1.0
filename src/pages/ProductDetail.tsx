@@ -1251,8 +1251,9 @@ export default function ProductDetail() {
                 </label>
               </div>
               <div>
-                <label className="block text-sm font-medium text-secondary mb-1">Signal Word</label>
+                <label htmlFor="product-signal-word" className="block text-sm font-medium text-secondary mb-1">Signal Word</label>
                 <select
+                  id="product-signal-word"
                   value={product.signal_word || ''}
                   onChange={(e) => update('signal_word', e.target.value || null)}
                   disabled={!isAdmin}
@@ -1438,7 +1439,7 @@ export default function ProductDetail() {
             {/* Product Form */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label htmlFor="product-form" className="block text-xs font-semibold text-secondary uppercase tracking-wide">Product Form</label>
-              <p className="text-xs text-gray-400 mt-0.5 mb-3">Determines which units are available below</p>
+              <p className="text-xs text-gray-500 mt-0.5 mb-3">Determines which units are available below</p>
               <div className="max-w-xs">
                 <select
                   id="product-form"
@@ -1478,7 +1479,7 @@ export default function ProductDetail() {
             {/* Container — grouped as one row */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Container</p>
-              <p className="text-xs text-gray-400 mt-0.5 mb-3">Size, unit, and type (e.g. 2.5 Gal Jug)</p>
+              <p className="text-xs text-gray-500 mt-0.5 mb-3">Size, unit, and type (e.g. 2.5 Gal Jug)</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Input label="Size" type="number" value={product.container_size ?? ''} onChange={(e) => update('container_size', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin} placeholder="e.g. 2.5" />
                 <div>
@@ -1501,8 +1502,9 @@ export default function ProductDetail() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-secondary mb-1">Type</label>
+                  <label htmlFor="product-container-type" className="block text-sm font-medium text-secondary mb-1">Type</label>
                   <select
+                    id="product-container-type"
                     value={product.container_type || ''}
                     onChange={(e) => update('container_type', e.target.value || null)}
                     disabled={!isAdmin}
@@ -1525,10 +1527,11 @@ export default function ProductDetail() {
 
             {/* Inventory Unit */}
             <div className="border-t border-gray-100 pt-4 mt-4">
-              <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Inventory Unit</p>
-              <p className="text-xs text-gray-400 mt-0.5 mb-3">Unit used for tracking inventory quantities (e.g. Gal, Lb)</p>
+              <label htmlFor="product-inventory-unit" className="block text-xs font-semibold text-secondary uppercase tracking-wide">Inventory Unit</label>
+              <p className="text-xs text-gray-500 mt-0.5 mb-3">Unit used for tracking inventory quantities (e.g. Gal, Lb)</p>
               <div className="max-w-xs">
                 <select
+                  id="product-inventory-unit"
                   value={product.inventory_unit || ''}
                   onChange={(e) => {
                     const inventoryUnit = e.target.value || null;
@@ -1561,7 +1564,7 @@ export default function ProductDetail() {
             {/* Application Rates */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Application Rates</p>
-              <p className="text-xs text-gray-400 mt-0.5 mb-3">Per-acre application information</p>
+              <p className="text-xs text-gray-500 mt-0.5 mb-3">Per-acre application information</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin} />
@@ -1572,8 +1575,9 @@ export default function ProductDetail() {
                   <p className="mt-1 text-xs text-secondary">The product's default rate, in the Rate Unit. Zero or more.</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-secondary mb-1">Rate Unit</label>
+                  <label htmlFor="product-rate-unit" className="block text-sm font-medium text-secondary mb-1">Rate Unit</label>
                   <select
+                    id="product-rate-unit"
                     value={product.rate_unit || ''}
                     onChange={(e) => update('rate_unit', e.target.value)}
                     disabled={!isAdmin}
@@ -1606,7 +1610,7 @@ export default function ProductDetail() {
             {/* Grower Description (existing notes field) */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label htmlFor="grower-description" className="block text-sm font-medium text-secondary mb-1">Grower Description</label>
-              <p className="text-xs text-gray-400 mb-1">Shown to growers on quotes and PDFs. Describe what the product does, application tips, etc.</p>
+              <p className="text-xs text-gray-500 mb-1">Shown to growers on quotes and PDFs. Describe what the product does, application tips, etc.</p>
               <textarea
                 id="grower-description"
                 value={product.notes || ''}
@@ -1620,7 +1624,7 @@ export default function ProductDetail() {
             {/* Internal Notes */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label htmlFor="internal-notes" className="block text-sm font-medium text-secondary mb-1">Internal Notes</label>
-              <p className="text-xs text-gray-400 mb-1">Internal only — never shown to growers.</p>
+              <p className="text-xs text-gray-500 mb-1">Internal only — never shown to growers.</p>
               <textarea
                 id="internal-notes"
                 value={product.internal_notes || ''}
@@ -1634,7 +1638,7 @@ export default function ProductDetail() {
             {/* Quoting Notes */}
             <div className="border-t border-gray-100 pt-4 mt-4">
               <label htmlFor="quoting-notes" className="block text-sm font-medium text-secondary mb-1">Quoting Notes</label>
-              <p className="text-xs text-gray-400 mb-1">Customer-facing guidance automatically added to the quote line and shown on the quote PDF.</p>
+              <p className="text-xs text-gray-500 mb-1">Customer-facing guidance automatically added to the quote line and shown on the quote PDF.</p>
               <textarea
                 id="quoting-notes"
                 value={product.quoting_notes || ''}
@@ -1927,7 +1931,7 @@ export default function ProductDetail() {
                           <span className="text-crx-green font-medium">${ch.new_cost?.toFixed(2)}</span>
                         </div>
                         {ch.change_note && <p className="text-xs text-secondary mt-1">{ch.change_note}</p>}
-                        <p className="text-xs text-gray-400 mt-1">{new Date(ch.changed_at).toLocaleDateString()}</p>
+                        <p className="text-xs text-gray-500 mt-1">{new Date(ch.changed_at).toLocaleDateString()}</p>
                       </div>
                     ))}
                   </div>

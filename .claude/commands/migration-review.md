@@ -40,10 +40,8 @@ The workflow runs `rls-security-reviewer` + `migration-drift-reviewer` + `typesc
 2. Show Mason each real blocker in plain English: what it is, where (`location`), why it matters, and the recommended fix.
 3. Offer to fix them. After fixing, re-run this command — the workflow re-verifies, and only a clean pass produces a proof.
 
-### 4. Apply (only after a clean proof exists, and only with Mason's authorization)
-The proof unblocks `apply_migration`; it does not authorize it. Two authorization paths (settled 2026-07-13 policy):
-- **Interactive session (default):** explain the migration (offer `/explain-migration`) and wait for Mason's in-chat approval before the apply call.
-- **Pre-authorized hands-free run** (Mason explicitly asked for the run AND autopilot is armed): no per-migration ask, but the Codex gate is mandatory — run `node scripts/write-apply-proofs.mjs <mig-name>`, which runs the trusted Codex CLI itself and mints the content-bound proof pair only on a CLEAN machine verdict (hand-writing the proof is blocked by review-proof-guard, by design). The apply-guard refuses hands-free applies without it, and refuses DESTRUCTIVE migrations (data deletes, schema/table/column/type drops, MERGE) outright — park those for Mason.
+### 4. Apply (only after a clean proof exists, and only under the authorization below)
+The proof unblocks the apply; it does not authorize it on its own. Authorization follows `AGENTS.md` autonomous landing and `.claude/commands/ship.md` Step 5: a NON-destructive migration with no permission change applies without a per-migration ask, but only through `scripts/apply-migration-file.mjs` and the full migration-apply-guard proof gate (both reviewer proofs plus a content-bound Sol proof, each under 24 hours, on the open PR's green, Sol-cleared head). A destructive, data-overwriting or permission-changing migration needs Mason's `I approve` for that exact file. Mint the proofs with `node scripts/write-apply-proofs.mjs <mig-name>` (it runs the Codex gate itself; hand-writing a proof is blocked by design).
 
 ### 5. After the apply
 An applied migration is not finished until the post-apply work in `/ship` Steps 5.4–5.7 runs:

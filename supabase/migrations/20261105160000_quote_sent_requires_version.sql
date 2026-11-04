@@ -21,8 +21,9 @@
 --
 -- NOT CHANGED: every other status transition, the admin override for them, grants, RLS, the send,
 --   the rewind, save_quote, _assert_quote_prices_as_sent. No data is written. Live 2026-11-03: 0
---   sent or revised quotes without a version, and every accepted quote has one (the preflight
---   re-checks sent and revised).
+--   sent or revised quotes without a version, and every accepted quote has one. The preflight and
+--   postflight re-check all three: an order void reopens an accepted booking to sent, and that
+--   reopen needs the booking's version.
 --
 -- ROLLBACK (its own reviewed migration): DROP TRIGGER enforce_quote_insert_status and
 --   enforce_quote_insert_version ON public.quotes;
@@ -58,9 +59,9 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT: a quote insert trigger already exists; re-read live first';
   END IF;
   IF EXISTS (SELECT 1 FROM public.quotes q
-              WHERE q.status IN ('sent', 'revised')
+              WHERE q.status IN ('sent', 'revised', 'accepted')
                 AND NOT EXISTS (SELECT 1 FROM public.quote_versions v WHERE v.quote_id = q.id)) THEN
-    RAISE EXCEPTION 'PREFLIGHT: a sent or revised quote has no version; resolve it before applying';
+    RAISE EXCEPTION 'PREFLIGHT: a sent, revised or accepted quote has no version; resolve it before applying';
   END IF;
 END
 $preflight$;
@@ -191,9 +192,9 @@ BEGIN
   -- Again under CREATE TRIGGER's table lock: a status change committed after the preflight read is
   -- visible now, and any later one waits for this transaction and then meets the new rule.
   IF EXISTS (SELECT 1 FROM public.quotes q
-              WHERE q.status IN ('sent', 'revised')
+              WHERE q.status IN ('sent', 'revised', 'accepted')
                 AND NOT EXISTS (SELECT 1 FROM public.quote_versions v WHERE v.quote_id = q.id)) THEN
-    RAISE EXCEPTION 'POSTFLIGHT: a sent or revised quote has no version; resolve it before applying';
+    RAISE EXCEPTION 'POSTFLIGHT: a sent, revised or accepted quote has no version; resolve it before applying';
   END IF;
 END
 $postflight$;

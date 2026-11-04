@@ -393,7 +393,17 @@ try {
   }
   assert.equal(scalar(NOT_APPLIED), '0', 'a mutation run committed');
 
-  // 3. The candidate applies; a second apply is refused by its own preflight.
+  // 3. An accepted booking with no version (an order void would reopen it to sent) stops the apply.
+  stageText('legacy.sql', `INSERT INTO public.quotes (quote_number, customer_id, created_by, tier, status)
+    SELECT '[PROVER] legacy accepted', id, '${USERS.ADMIN}', 1, 'accepted' FROM public.customers
+     WHERE farm_name = '[PROVER] Sent Version Farm';\n${candidate}`);
+  const legacy = apply('legacy.sql');
+  assert.notEqual(legacy.status, 0, 'the candidate applied over an accepted quote with no version');
+  assert.match(legacy.output, /PREFLIGHT: a sent, revised or accepted quote has no version/, `the legacy apply failed elsewhere:\n${legacy.output}`);
+  assert.equal(scalar(NOT_APPLIED), '0', 'the refused legacy apply committed');
+  console.log('[prover] PREFLIGHT: an accepted quote with no version stops the apply');
+
+  // The candidate applies; a second apply is refused by its own preflight.
   stageText('candidate.sql', candidate);
   const applied = apply('candidate.sql');
   assert.equal(applied.status, 0, `the candidate failed to apply:\n${applied.output}`);

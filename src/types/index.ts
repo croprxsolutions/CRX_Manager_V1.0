@@ -1595,6 +1595,8 @@ export interface Commission {
   deleted_at: string | null;
   cancelled_at: string | null;
   cancelled_amount_cents: number | null;
+  /** The cancelled commission this row re-creates (set only by fix_delivery). */
+  replaces_commission_id?: string | null;
   created_at: string;
 }
 

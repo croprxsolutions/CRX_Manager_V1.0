@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { hasWindowsShellVariable, findWindowsShellVariableHooks } from "./windows-hook-command.mjs";
+import { hasWindowsShellVariable, findWindowsShellVariableHooks, hasNonPortableProjectDir } from "./windows-hook-command.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 let pass = 0;
@@ -39,5 +39,18 @@ ok(findWindowsShellVariableHooks(allHooks).length === 0, `all ${allHooks.length}
 // The detector must actually be able to fail — feed it a poisoned copy.
 const poisoned = allHooks.map((hook, i) => (i === 0 ? { ...hook, commandWindows: `node (Join-Path \${root} 'x.mjs')` } : hook));
 ok(findWindowsShellVariableHooks(poisoned).length === 1, "detector catches a single reintroduced ${root} among real hooks");
+
+// ── Claude manifest, as Cursor runs it under PowerShell ─────────────────────
+ok(hasNonPortableProjectDir('node "$CLAUDE_PROJECT_DIR/.claude/hooks/sql-safety.mjs"'), "rejects the pre-2026-11-04 Claude form");
+ok(hasNonPortableProjectDir('node "${CLAUDE_PROJECT_DIR}/.claude/hooks/sql-safety.mjs"'), "rejects braced ${CLAUDE_PROJECT_DIR}");
+ok(!hasNonPortableProjectDir('node "$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/sql-safety.mjs"'), "accepts the portable prefix");
+const claudeHooks = Object.values(JSON.parse(readFileSync(path.join(ROOT, ".claude", "settings.json"), "utf8")).hooks || {})
+  .flatMap((entries) => entries)
+  .flatMap((entry) => entry.hooks || [])
+  .filter((hook) => hook.type === "command");
+ok(claudeHooks.length > 0, "real Claude manifest has command hooks to check");
+const broken = claudeHooks.filter((hook) => hasNonPortableProjectDir(hook.command));
+ok(broken.length === 0, `every Claude hook command runs under Cursor's PowerShell; broken: ${broken.map((hook) => hook.command).join(" | ")}`);
+ok(hasNonPortableProjectDir('node "$HOME/x.mjs"'), "rejects any other shell variable, which PowerShell would also empty");
 
 console.log(`PASS - windows-hook-command (${pass} assertions)`);

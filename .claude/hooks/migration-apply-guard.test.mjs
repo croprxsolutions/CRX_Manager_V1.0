@@ -98,6 +98,8 @@ for (const header of [
   "CREATE OR REPLACE TRIGGER t1 AFTER INSERT OR UPDATE OR TRUNCATE ON public.t FOR EACH STATEMENT EXECUTE FUNCTION f();",
   'CREATE CONSTRAINT TRIGGER "Guard" AFTER UPDATE OF a, "b" OR truncate ON t FOR EACH ROW EXECUTE FUNCTION f();',
   "DO $$ BEGIN EXECUTE 'CREATE TRIGGER t2 BEFORE TRUNCATE ON public.t FOR EACH STATEMENT EXECUTE FUNCTION f()'; END $$;",
+  "CREATE TRIGGER t5 BEFORE /* audit */ TRUNCATE -- guard\n ON t FOR EACH STATEMENT EXECUTE FUNCTION f();",
+  "CREATE TRIGGER före_ändring BEFORE TRUNCATE ON t FOR EACH STATEMENT EXECUTE FUNCTION f();",
 ]) eq(destructiveMigrationCheck(header).destructive, false, `trigger event list is not destructive: ${header}`);
 for (const [name, sqlText] of [
   ["plain TRUNCATE", "TRUNCATE public.product_rate_events;"],

@@ -1640,9 +1640,9 @@ function findWrites(code, { literalsAreData = false } = {}) {
 // only guards a table against a wipe (Mason, 2026-11-04). Only words in the
 // event list are blanked: each is followed by OR/ON, which no real TRUNCATE
 // statement can be, so a header faked across string literals hides nothing.
-const TRIGGER_ID = String.raw`(?:"(?:[^"]|"")+"|[a-z_][\w$]*)`;
+const TRIGGER_ID = String.raw`(?:"(?:[^"]|"")+"|[\p{L}_][\p{L}\p{N}_$]*)`;
 const TRIGGER_EVENT = String.raw`(?:insert|delete|truncate|update(?:\s+of\s+${TRIGGER_ID}(?:\s*,\s*${TRIGGER_ID})*)?)`;
-const TRIGGER_HEADER_RE = new RegExp(String.raw`(\bcreate\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+${TRIGGER_ID}\s+(?:before|after|instead\s+of)\s+)(${TRIGGER_EVENT}(?:\s+or\s+${TRIGGER_EVENT})*)(\s+on\b)`, "gi");
+const TRIGGER_HEADER_RE = new RegExp(String.raw`(\bcreate\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+${TRIGGER_ID}\s+(?:before|after|instead\s+of)\s+)(${TRIGGER_EVENT}(?:\s+or\s+${TRIGGER_EVENT})*)(\s+on\b)`, "giu");
 function withoutTriggerEvents(t) {
   return t.replace(TRIGGER_HEADER_RE, (_, head, events, on) => head + events.replace(/\btruncate\b/gi, "trigger_event") + on);
 }

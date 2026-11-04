@@ -194,7 +194,7 @@ function buildContainer() {
 
 const id = (n) => `7e330000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ADMIN=id(1), REP=id(2), CUSTOMER=id(3), PRODUCT=id(4);
-const ORDER=id(10), LINE=id(11), DELIVERY=id(12), INV=id(13), COMM=id(14), ORDER_INV=id(15);
+const ORDER=id(10), LINE=id(11), DELIVERY=id(12), INV=id(13), COMM=id(14), ORDER_INV=id(15), RET=id(16), PAYOUT=id(17);
 function asUser(uid) {
   return `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
     SELECT set_config('request.jwt.claim.sub', '${uid}', true); SET LOCAL ROLE authenticated;`;
@@ -262,6 +262,12 @@ function scenarios() {
   allowed(`${asUser(ADMIN)} CREATE TEMP TABLE pv ON COMMIT DROP AS SELECT public.preview_fix_delivery('${DELIVERY}') p;
     ${check(`(SELECT (p->>'can_fix')::boolean AND jsonb_array_length(p->'invoices')=1 AND p->'invoices'->0->>'action'='void' FROM pv)`, 'preview plans one invoice void')}`,
     'admin preview shows one invoice to void and no refusals');
+  allowed(`RESET ROLE; ALTER TABLE public.delivery_items DISABLE TRIGGER USER;
+    UPDATE public.delivery_items SET quantity=100 WHERE delivery_id='${DELIVERY}';
+    ALTER TABLE public.delivery_items ENABLE TRIGGER USER;
+    ${asUser(ADMIN)} CREATE TEMP TABLE pq ON COMMIT DROP AS SELECT public.preview_fix_delivery('${DELIVERY}') p;
+    ${check(`(SELECT (p->'items'->0->>'quantity')::numeric=10 FROM pq)`, 'preview shows the delivered quantity')}`,
+    'the preview shows the quantity that goes back into stock, not the planned one');
   refused(`${asUser(REP)} SELECT public.preview_fix_delivery('${DELIVERY}');`, 'a sales rep cannot preview a fix', /Admin access required/);
   refused(`${asUser(REP)} SELECT public.fix_delivery('${DELIVERY}','x',ARRAY['${INV}']::uuid[],'k-rep');`, 'a sales rep cannot fix a delivery', /Admin access required/);
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','x',ARRAY['${INV}']::uuid[],NULL);`, 'a key is required', /IDEMPOTENCY_KEY_REQUIRED/);
@@ -304,6 +310,18 @@ function scenarios() {
     INSERT INTO public.delivery_external_billings (delivery_id,reason) VALUES ('${DELIVERY}','[PROVER] billed in Chem Man');
     ALTER TABLE public.delivery_external_billings ENABLE TRIGGER USER;
     ${fix('k-external')}`, 'a delivery billed outside CRX refuses the fix', /FIX_DELIVERY_REFUSED: This delivery was billed outside CRX/);
+  refused(`RESET ROLE; ALTER TABLE public.returns DISABLE TRIGGER USER; ALTER TABLE public.return_items DISABLE TRIGGER USER;
+    INSERT INTO public.returns (id,return_number,customer_id,order_id,status,requested_by) VALUES ('${RET}','PROVER-FIX-RET','${CUSTOMER}','${ORDER}','requested','${ADMIN}');
+    INSERT INTO public.return_items (return_id,product_id,order_item_id,quantity) VALUES ('${RET}','${PRODUCT}','${LINE}',1);
+    ALTER TABLE public.returns ENABLE TRIGGER USER; ALTER TABLE public.return_items ENABLE TRIGGER USER;
+    ${fix('k-return')}`, 'an open return on the delivery refuses the fix', /FIX_DELIVERY_REFUSED: A return is open or done on this delivery/);
+  refused(`RESET ROLE; ALTER TABLE public.commission_payments DISABLE TRIGGER USER; ALTER TABLE public.commission_payment_items DISABLE TRIGGER USER;
+    INSERT INTO public.commission_payments (id,payment_number,recipient_id,total_amount) VALUES ('${PAYOUT}','PROVER-FIX-PAY','${REP}',40);
+    INSERT INTO public.commission_payment_items (commission_payment_id,commission_id,amount) VALUES ('${PAYOUT}','${COMM}',40);
+    ALTER TABLE public.commission_payments ENABLE TRIGGER USER; ALTER TABLE public.commission_payment_items ENABLE TRIGGER USER;
+    ${fix('k-payout')}`, 'a commission already in a payout batch refuses the fix', /FIX_DELIVERY_REFUSED: This order's commission is in a payout batch/);
+  refused(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET recipient_user_id=NULL WHERE id='${COMM}'; ALTER TABLE public.commissions ENABLE TRIGGER USER;
+    ${fix('k-norep')}`, 'a commission with no linked rep user refuses the fix', /FIX_DELIVERY_REFUSED: This order's commission has no sales rep user linked/);
 
   // All or nothing: if the delivery step fails after the invoice void, the invoice void is undone too.
   allowed(`RESET ROLE; CREATE FUNCTION public.prover_boom() RETURNS trigger LANGUAGE plpgsql AS $b$ BEGIN RAISE EXCEPTION 'PROVER_BOOM'; END $b$;

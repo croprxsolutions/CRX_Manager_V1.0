@@ -1,5 +1,5 @@
 -- Written 2026-11-03. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migration-history.md.
+-- docs/reference/migrations.d/20261106100000_fix_delivery_one_screen.md.
 --
 -- WHAT: "Fix delivery" — one admin action that undoes a completed delivery AND its invoice together,
 --   so the delivery can be re-entered with the right amount or product (Mason, 2026-11-03: "I want
@@ -132,7 +132,12 @@ BEGIN
 
   IF EXISTS (SELECT 1 FROM invoices i
               WHERE i.delivery_id = p_delivery_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
-                AND i.status NOT IN ('voided', 'cancelled') AND COALESCE(i.paid_amount_cents, 0) > 0) THEN
+                AND i.status NOT IN ('voided', 'cancelled')
+                AND (COALESCE(i.paid_amount_cents, 0) > 0 OR EXISTS (
+                      -- void_invoice's own payment check (20260718221505)
+                      SELECT 1 FROM invoice_line_allocations ila
+                        JOIN allocation_sets aset ON aset.id = ila.allocation_set_id
+                       WHERE ila.invoice_id = i.id AND aset.entity_type = 'payment' AND aset.is_active))) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'PAYMENT_APPLIED',
       'message', 'A payment is applied to this invoice. Unapply it first (the money stays on the customer''s account as credit).');
   END IF;
@@ -156,6 +161,16 @@ BEGIN
       'message', 'This order''s commission is in a payout batch. Void that commission payment first.');
   END IF;
 
+  -- The restored copy must name a user (trg_commissions_recipient_resolved, 20260722134252).
+  IF v_delivery.order_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM commissions c
+     WHERE c.order_id = v_delivery.order_id AND c.status = 'pending' AND c.deleted_at IS NULL
+       AND c.recipient_user_id IS NULL
+  ) THEN
+    v_refusals := v_refusals || jsonb_build_object('code', 'COMMISSION_RECIPIENT_MISSING',
+      'message', 'This order''s commission has no sales rep user linked. Fix the commission recipient first.');
+  END IF;
+
   -- void_delivery also cancels the order's draft invoices that have no delivery; show them so
   -- nothing is a surprise (same scope as its auto-cancel).
   SELECT COALESCE(jsonb_agg(jsonb_build_object('id', i.id, 'invoice_number', i.invoice_number) ORDER BY i.invoice_number), '[]'::jsonb)
@@ -166,13 +181,14 @@ BEGIN
 
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'product_name', p.product_name,
-           'quantity', di.quantity,
+           'quantity', di.quantity_delivered,
            'unit', COALESCE(di.unit_size, p.unit_size)
          ) ORDER BY p.product_name), '[]'::jsonb)
     INTO v_items
     FROM delivery_items di
     LEFT JOIN products p ON p.id = di.product_id
-   WHERE di.delivery_id = p_delivery_id;
+   -- What void_delivery actually puts back (20260827041300): the delivered quantity, not the planned one.
+   WHERE di.delivery_id = p_delivery_id AND COALESCE(di.quantity_delivered, 0) > 0;
 
   RETURN jsonb_build_object(
     'delivery_id', v_delivery.id,
@@ -268,9 +284,18 @@ BEGIN
       PERFORM 1 FROM orders WHERE id = v_order_id FOR UPDATE NOWAIT;
     END IF;
     PERFORM 1 FROM invoices WHERE delivery_id = p_delivery_id FOR UPDATE NOWAIT;
+    -- The order drafts void_delivery will cancel, so they cannot deadlock it later.
+    PERFORM 1 FROM invoices WHERE order_id = v_order_id AND delivery_id IS NULL
+                              AND status IN ('draft', 'unposted') AND deleted_at IS NULL FOR UPDATE NOWAIT;
   EXCEPTION WHEN lock_not_available THEN
     RAISE EXCEPTION 'DELIVERY_ORDER_BUSY_RETRY';
   END;
+  -- Lock the order's pending commissions so a payout batch created meanwhile is seen by the plan
+  -- below (create_commission_payment locks these same rows).
+  SELECT COALESCE(array_agg(id), '{}') INTO v_pending_commission_ids
+    FROM (SELECT id FROM commissions
+           WHERE order_id = v_order_id AND status = 'pending' AND deleted_at IS NULL
+           FOR UPDATE) c;
 
   v_plan := public._fix_delivery_plan(p_delivery_id);
   IF NOT (v_plan ->> 'can_fix')::boolean THEN
@@ -282,10 +307,6 @@ BEGIN
   IF v_actual IS DISTINCT FROM v_expected THEN
     RAISE EXCEPTION 'FIX_DELIVERY_PREVIEW_STALE: the invoices on this delivery changed; reopen Fix delivery to see the new plan';
   END IF;
-
-  SELECT COALESCE(array_agg(id), '{}') INTO v_pending_commission_ids
-    FROM commissions
-   WHERE order_id = v_order_id AND status = 'pending' AND deleted_at IS NULL;
 
   FOR v_invoice IN SELECT e FROM jsonb_array_elements(v_plan -> 'invoices') e LOOP
     PERFORM public.void_invoice(
@@ -330,3 +351,16 @@ END;
 $function$;
 REVOKE ALL ON FUNCTION public.fix_delivery(uuid, text, uuid[], text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.fix_delivery(uuid, text, uuid[], text) TO authenticated, service_role;
+
+-- Postflight: the grants above are what landed.
+DO $postflight$
+BEGIN
+  IF has_function_privilege('anon', 'public.fix_delivery(uuid, text, uuid[], text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.preview_fix_delivery(uuid)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._fix_delivery_plan(uuid)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._fix_delivery_plan(uuid)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.fix_delivery(uuid, text, uuid[], text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FIX_DELIVERY_GRANTS_DRIFT';
+  END IF;
+END
+$postflight$;

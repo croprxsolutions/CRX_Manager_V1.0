@@ -288,7 +288,9 @@ export default function Returns() {
       Sentry.captureException(custRes.error, { tags: { source: 'fetch', action: 'load_return_customers' } });
       toast('error', 'Failed to load customers. Close the form and try again.');
     }
-    setCustomers((custRes.data || []) as unknown as Customer[]);
+    const list = (custRes.data || []) as unknown as Customer[];
+    setCustomers(list);
+    return list;
   };
 
   const loadOrderItems = async (orderId: string, customerId: string, preserveDraftItems = false) => {
@@ -394,7 +396,7 @@ export default function Returns() {
   const openCreate = (prefill?: { customer_id: string; order_id: string }) => {
     customerOrdersRequestRef.current += 1;
     orderItemsRequestRef.current += 1;
-    loadCreateData();
+    const customersLoaded = loadCreateData();
     if (unresolvedCreateIntent) {
       setNewForm({ ...unresolvedCreateIntent.form });
       setNewItems(unresolvedCreateIntent.items.map((item) => ({ ...item })));
@@ -412,6 +414,16 @@ export default function Returns() {
     if (prefill) {
       void loadCustomerOrders(prefill.customer_id);
       void loadOrderItems(prefill.order_id, prefill.customer_id);
+      // The picker lists active customers only; never keep a hidden customer selected.
+      void customersLoaded.then((list) => {
+        if (list.length === 0 || list.some((c) => c.id === prefill.customer_id)) return;
+        customerOrdersRequestRef.current += 1;
+        orderItemsRequestRef.current += 1;
+        setNewForm((f) => (f.customer_id === prefill.customer_id ? { ...f, customer_id: '', order_id: '' } : f));
+        setCustomerOrders([]);
+        setOrderItems([]);
+        toast('error', 'This customer is inactive, so a return cannot be started for them here.');
+      });
     }
     setShowCreate(true);
   };

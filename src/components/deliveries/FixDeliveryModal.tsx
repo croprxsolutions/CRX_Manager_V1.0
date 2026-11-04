@@ -3,8 +3,8 @@
  * together (fix_delivery, 20261106100000), then open New Delivery for the same order to re-enter it.
  * The preview comes from the server; the server re-checks everything and refuses if it changed.
  */
-import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Wrench } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -34,17 +34,22 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
   const [reason, setReason] = useState('');
   const [typed, setTyped] = useState('');
   const [saving, setSaving] = useState(false);
+  // A fix whose reply was lost: the delivery is already undone, so offer the re-entry link.
+  const [submittedScope, setSubmittedScope] = useState<string | null>(null);
+  const planRequestRef = useRef(0);
 
   const loadPlan = useCallback(async () => {
+    const seq = ++planRequestRef.current;
     setPlan(null);
     setLoadError(null);
     try {
       const { data, error } = await supabaseUntyped.rpc('preview_fix_delivery', { p_delivery_id: deliveryId });
       if (error) throw error;
-      setPlan(assertRpcResult<FixDeliveryPlan>(data, 'preview_fix_delivery'));
+      const next = assertRpcResult<FixDeliveryPlan>(data, 'preview_fix_delivery');
+      if (seq === planRequestRef.current) setPlan(next);
     } catch (err) {
       Sentry.captureException(err, { tags: { source: 'fetch', action: 'preview_fix_delivery' } });
-      setLoadError(sanitizeError(err));
+      if (seq === planRequestRef.current) setLoadError(sanitizeError(err));
     }
   }, [deliveryId]);
 
@@ -59,10 +64,11 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
   const ready = !!plan?.can_fix && reason.trim() !== '' && typed.trim() === confirmText && !saving;
 
   const handleFix = async () => {
-    if (!plan || !ready) return;
+    if (!profile || !plan || !ready) return;
     const invoiceIds = plan.invoices.map((i) => i.id).sort();
     const scope = JSON.stringify([deliveryId, reason.trim(), invoiceIds]);
     setSaving(true);
+    setSubmittedScope(scope);
     try {
       const { data, error } = await supabaseUntyped.rpc('fix_delivery', {
         p_delivery_id: deliveryId,
@@ -73,15 +79,17 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
       if (error) throw error;
       const result = assertRpcResult<FixDeliveryResult>(data, 'fix_delivery');
       fixIdem.resetKeyFor(scope);
-      toast('success', `Delivery ${deliveryNumber} undone${result.invoices.length ? ' with its invoice' : ''}. Enter the corrected delivery now.`);
+      setSubmittedScope(null);
+      const billed = result.invoices.length === 0 ? '' : result.invoices.length === 1 ? ' with its invoice' : ' with its invoices';
+      toast('success', `Delivery ${deliveryNumber} undone${billed}. Enter the corrected delivery now.`);
       onClose();
-      navigate(`/deliveries/new?order=${encodeURIComponent(result.order_id)}&customer_id=${encodeURIComponent(result.customer_id)}`);
+      navigate(`/deliveries/new?order=${encodeURIComponent(result.order_id)}`);
     } catch (err) {
-      // A refused binding means this key is spent; reload the plan so the screen shows what is true now.
-      if (getIdempotencyBindingRejection(err)) {
-        fixIdem.resetKeyFor(scope);
-        void loadPlan();
-      }
+      // Retire the key only when the server says it belongs to another request; a lost reply keeps it.
+      const binding = getIdempotencyBindingRejection(err);
+      if (binding === 'intent' || binding === 'actor') fixIdem.resetKeyFor(scope);
+      // Reload so the screen shows what is true now (refusal reasons, a changed plan, or already undone).
+      void loadPlan();
       Sentry.captureException(err, { tags: { source: 'rpc', action: 'fix_delivery' } });
       toast('error', sanitizeError(err));
     } finally {
@@ -98,11 +106,18 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
           the same order so you can enter it correctly and bill it again.
         </p>
 
-        {loadError && <p className="p-3 rounded-lg bg-red-50 text-red-800">{loadError}</p>}
+        {loadError && <p role="alert" className="p-3 rounded-lg bg-red-50 text-red-800">{loadError}</p>}
         {!plan && !loadError && <p className="text-secondary">Checking this delivery…</p>}
 
+        {plan && submittedScope && fixIdem.hasKeyFor(submittedScope) && plan.order_id && plan.refusals.some((r) => r.code === 'NOT_COMPLETED') && (
+          <p role="status" className="p-3 rounded-lg bg-green-50 text-green-900">
+            This delivery was already undone.{' '}
+            <Link className="font-semibold underline" to={`/deliveries/new?order=${encodeURIComponent(plan.order_id)}`} onClick={onClose}>Enter the corrected delivery</Link>
+          </p>
+        )}
+
         {plan && plan.refusals.length > 0 && (
-          <div className="p-3 rounded-lg bg-amber-50 text-amber-900 space-y-1">
+          <div role="alert" className="p-3 rounded-lg bg-amber-50 text-amber-900 space-y-1">
             <p className="flex items-center gap-2 font-semibold"><AlertTriangle className="w-4 h-4" /> This delivery cannot be fixed here yet:</p>
             <ul className="list-disc list-inside">{plan.refusals.map((r) => <li key={r.code}>{r.message}</li>)}</ul>
           </div>
@@ -120,7 +135,7 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
               ))}
               {plan.invoices.length === 0 && <li>No invoice is linked to this delivery.</li>}
               {plan.other_draft_invoices.map((i) => <li key={i.id}>Draft invoice {i.invoice_number} on this order will be cancelled</li>)}
-              {plan.items.map((it, n) => <li key={n}>{it.quantity} {it.unit ?? ''} of {it.product_name ?? 'a product'} go back into stock</li>)}
+              {plan.items.map((it, n) => <li key={`${it.product_name ?? ''}-${n}`}>{it.quantity} {it.unit ?? ''} of {it.product_name ?? 'a product'} go back into stock</li>)}
               <li>Order {plan.order_number ?? ''} reopens for these lines; the sales rep keeps the commission</li>
             </ul>
           </div>
@@ -129,9 +144,10 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
         {plan?.can_fix && (
           <>
             <div>
-              <label htmlFor="fix-delivery-reason" className="block font-medium text-nav-dark mb-1">What was wrong? <span className="text-red-500">*</span></label>
+              <label htmlFor="fix-delivery-reason" className="block font-medium text-nav-dark mb-1">What was wrong? <span aria-hidden="true" className="text-red-500">*</span></label>
               <textarea
                 id="fix-delivery-reason"
+                aria-required="true"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 rows={2}

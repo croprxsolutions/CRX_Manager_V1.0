@@ -60,4 +60,29 @@ describe('FixDeliveryModal', () => {
     expect(screen.queryByLabelText(/to confirm/)).toBeNull();
     await waitFor(() => expect(screen.getByRole('button', { name: /Fix Delivery/ })).toBeDisabled());
   });
+  it('keeps the retry key after a lost reply and retires it only when the server says it is another request', async () => {
+    let fixCalls = 0;
+    H.rpc.mockImplementation(async (name: string) => {
+      if (name === 'preview_fix_delivery') return { data: plan(), error: null };
+      fixCalls += 1;
+      return { data: null, error: { message: fixCalls === 2 ? 'IDEMPOTENCY_INTENT_MISMATCH' : 'Failed to fetch' } };
+    });
+    renderModal();
+    await screen.findByText(/Invoice INV-2/);
+    const submit = async () => {
+      fireEvent.change(await screen.findByLabelText(/What was wrong/), { target: { value: 'Entered 100, delivered 10' } });
+      fireEvent.change(screen.getByLabelText(/to confirm/), { target: { value: 'FIX DEL-7' } });
+      fireEvent.click(screen.getByRole('button', { name: /Fix Delivery/ }));
+      await waitFor(() => expect(screen.getByRole('button', { name: /Fix Delivery/ })).toBeDisabled());
+      await screen.findByText(/Invoice INV-2/);
+    };
+    const keys = () => H.rpc.mock.calls.filter(([n]) => n === 'fix_delivery').map(([, a]) => (a as { p_idempotency_key: string }).p_idempotency_key);
+    await submit();
+    await submit();
+    await submit();
+    expect(keys()).toHaveLength(3);
+    const [first, second, third] = keys();
+    expect(second).toBe(first);
+    expect(third).not.toBe(first);
+  });
 });

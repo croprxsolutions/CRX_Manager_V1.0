@@ -3039,7 +3039,7 @@ export default function DeliveryDetail() {
                 <li>Delete delivery remainders from this delivery</li>
                 <li>Cancel any draft invoices for this delivery or its order</li>
               </ul>
-              <span className="block mt-2 font-semibold text-red-900">This action cannot be undone. If a posted invoice exists, the void is refused: use Fix Delivery to undo both together.</span>
+              <span className="block mt-2 font-semibold text-red-900">This action cannot be undone. If a posted invoice exists, the void is refused: try Fix Delivery, which undoes both together or tells you why it can't.</span>
             </p>
           </div>
           <div>

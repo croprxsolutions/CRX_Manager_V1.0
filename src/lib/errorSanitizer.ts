@@ -133,9 +133,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery. For a completed delivery, an admin can use Fix Delivery to do both at once'],
   // fix_delivery (20261106100000): the server re-checks the preview and refuses if anything changed.
   [/^FIX_DELIVERY_REFUSED\b/,
-   'Nothing was changed. Something on this delivery now blocks a fix. Close and reopen Fix Delivery to see why'],
+   'Nothing was changed. Something on this delivery now blocks a fix. The reasons are shown on the Fix Delivery screen'],
   [/^FIX_DELIVERY_PREVIEW_STALE\b/,
-   'Nothing was changed. The invoices on this delivery changed while you were looking. Close and reopen Fix Delivery to see the new plan'],
+   'Nothing was changed. The invoices on this delivery changed while you were looking. Check the updated plan and try again'],
   [/^DELIVERY_ORDER_BUSY_RETRY\b/,
    'Nothing was changed. This order is being updated elsewhere. Wait a moment and retry'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer

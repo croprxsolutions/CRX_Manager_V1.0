@@ -89,10 +89,10 @@ const INLINE_PRICING_FIELDS = new Set([
   'tier3_price',
 ]);
 
+// The vendor is a copy of the preferred vendor (WP-PM-15b); it changes on the product page's Vendors section.
 const INLINE_NONPRICING_FIELDS = new Set([
   'product_name',
   'category',
-  'vendor',
 ]);
 
 type ActiveReviewEntry = { product_id: string; product_name: string; kind: string; number: string | null; message: string };
@@ -575,7 +575,6 @@ export default function Products() {
   ];
 
   const filterCategoryNames = [...new Set([...categories, ...categoryChoices.filter((choice) => choice.is_active).map((choice) => choice.name)])].sort();
-  const vendorOptions = vendors.map((v) => ({ value: v, label: v }));
 
   /** Render the one input family selected for this row. The server computes every effect. */
   const createTierEditRender = (tierNum: 1 | 2 | 3) => {
@@ -787,9 +786,7 @@ export default function Products() {
           if (!name) throw new Error('Enter a product name before saving.');
           nonpricingFields.product_name = name;
         }
-        for (const field of ['vendor', 'category'] as const) {
-          if (nonpricingFields[field] === '') nonpricingFields[field] = null;
-        }
+        if (nonpricingFields.category === '') nonpricingFields.category = null;
         const updateResult = await supabase
           .from('products')
           .update({ ...nonpricingFields, updated_at: new Date().toISOString() })
@@ -1004,9 +1001,6 @@ export default function Products() {
       key: 'vendor',
       header: 'Vendor',
       sortable: true,
-      editable: isAdmin,
-      editType: 'select',
-      editOptions: vendorOptions,
     },
     ...(isAdmin && showSensitive
       ? [

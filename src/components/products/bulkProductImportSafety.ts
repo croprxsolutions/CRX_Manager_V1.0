@@ -74,7 +74,7 @@ export function isRetiredPricingColumn(header: string): boolean {
 
 /** Explicit allowlist: no future ParsedProduct property can be spread into products. */
 /**
- * Whether a row sets a rate, which the database refuses while rates are locked (20261106120000).
+ * Whether a row sets a rate, which the database refuses while rates are locked (20261106155000).
  * A seed or each product's rate unit is copied from its stock unit, so it is not a rate.
  */
 export function importRowSetsRates(product: ParsedProduct): boolean {

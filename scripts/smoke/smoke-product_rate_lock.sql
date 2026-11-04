@@ -1,8 +1,8 @@
--- Smoke chain: the product rate lock (REQUIRES 20261106120000).
+-- Smoke chain: the product rate lock (REQUIRES 20261106155000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so every rate, switch and log row it writes is
 -- rolled back. Proves, as a real signed-in browser session (role authenticated with each live
 -- profile's claims) and as a signed-out visitor (role anon), on an invented product:
---   * the installed bodies are exactly 20261106120000's and anon cannot execute the three functions;
+--   * the installed bodies are exactly 20261106155000's and anon cannot execute the three functions;
 --   * unlocked, an admin's set_product_rates saves the rates and a same-key replay answers the same;
 --   * an admin locks rates with a reason; a direct browser rate edit and set_product_rates are then
 --     refused PRODUCT_RATES_LOCKED; an admin's one-product correction saves and is logged;
@@ -33,7 +33,7 @@ BEGIN
     ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
     ('public.preview_product_rate_correction(uuid,numeric,text)', '04f0a1b3b08b123db35b7e3ebeb3fd75')) AS pins(sig, body_md5) LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM v_md5 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: % is not the body of 20261106120000', v_sig;
+      RAISE EXCEPTION 'SMOKE_FAIL: % is not the body of 20261106155000', v_sig;
     END IF;
     IF v_sig <> 'public.guard_product_rate_lock()' AND has_function_privilege('anon', v_sig, 'EXECUTE') THEN
       RAISE EXCEPTION 'SMOKE_FAIL: anon can execute %', v_sig;

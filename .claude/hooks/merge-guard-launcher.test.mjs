@@ -378,8 +378,11 @@ ok(mergeWiring[0]?.timeout === HARNESS_TIMEOUT_S, `the hook entry's timeout is $
 ok(/Bash/.test(mergeWiring[0]?.matcher || "") && /mcp__/.test(mergeWiring[0]?.matcher || ""),
   "the launcher sees shell and MCP calls, like the guard did");
 // If node cannot start the launcher, the shell fallback denies (Luna, 2026-09-28).
-const fallback = (mergeWiring[0]?.command || "").match(/\|\|\s*printf '%s' '([^']+)'\s*$/);
-ok(fallback, "the hook entry ends with a shell fallback that prints a verdict");
+// The fallback must work in Git Bash (Claude Code) and PowerShell 7 (Cursor on Windows). `echo` is a
+// PowerShell cmdlet, so it leaves node's failed exit code in place, and Cursor ignores the output of a
+// hook that exits non-zero (it fails open). The trailing `exit 0` makes Cursor read the denial (2026-11-04).
+const fallback = (mergeWiring[0]?.command || "").match(/\|\|\s*echo '([^']+)'; exit 0$/);
+ok(fallback, "the hook entry ends with a shell fallback that prints a verdict and exits 0");
 ok(isVerdict(fallback?.[1] || "") && decisionOf(fallback?.[1] || "")?.permissionDecision === "deny",
   "the fallback's verdict is a real PreToolUse denial");
 const bashProbe = spawnSync("bash", ["-c", "echo ok"], { encoding: "utf8" });
@@ -397,6 +400,22 @@ if (bashProbe.status === 0 && bashProbe.stdout.trim() === "ok") {
   ok(withNode.status === 0 && withNode.stdout === "", "the wired command with node allows an ordinary call and never reaches the fallback");
 } else {
   console.log("merge-guard-launcher: bash unavailable, wired-command fallback run skipped");
+}
+// Cursor on Windows runs the same command in PowerShell 7 from the project root, wrapped as below;
+// `$CLAUDE_PROJECT_DIR` is then an empty PowerShell variable, so the path must fall back to relative.
+const pwshProbe = spawnSync("pwsh", ["-NoProfile", "-Command", "'ok'"], { encoding: "utf8" });
+if (pwshProbe.status === 0 && pwshProbe.stdout.trim() === "ok") {
+  const cursorRun = (prefix, input) => spawnSync("pwsh", ["-NoProfile", "-Command",
+    `${prefix}$input | & { $input | ${mergeWiring[0].command} }`], { cwd: ROOT, input, encoding: "utf8", timeout: 60_000 });
+  const noNode = cursorRun("$env:PATH = ''; ", PLAIN);
+  ok(noNode.status === 0 && decisionOf(noNode.stdout)?.permissionDecision === "deny",
+    "under PowerShell, the wired command with no node on PATH denies and exits 0");
+  const withNode = cursorRun("", PLAIN);
+  ok(withNode.status === 0 && withNode.stdout.trim() === "", "under PowerShell, the wired command allows an ordinary call");
+  const merge = cursorRun("", payload("gh pr merge 812 --squash"));
+  ok(merge.status === 0 && decisionOf(merge.stdout)?.permissionDecision === "deny", "under PowerShell, the wired command still runs the real guard");
+} else {
+  console.log("merge-guard-launcher: pwsh unavailable, PowerShell wired-command run skipped");
 }
 ok(mayMerge(JSON.stringify({ tool_name: "Bash", command: "gh pr merge 812" })),
   "a call with no tool_input object is judged on its whole text");

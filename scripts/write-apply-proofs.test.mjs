@@ -179,6 +179,84 @@ try {
   rmSync(sourceRoot, { recursive: true, force: true });
 }
 
+// Restamp carry (Mason, 2026-11-04): both apply proofs follow a migration that only
+// got a new timestamp, through the real CLI, and nothing else carries.
+{
+  const root = tempDir('crx-restamp-apply-proofs-');
+  const OLD = '20261105200000_product_rate_lock';
+  const NEW = '20261106120000_product_rate_lock';
+  const sql = 'CREATE TABLE rate_lock (id bigint);\r\n';
+  const migrationsDir = path.join(root, 'supabase', 'migrations');
+  const stateDir = path.join(root, '.claude', 'session-state');
+  mkdirSync(migrationsDir, { recursive: true });
+  mkdirSync(stateDir, { recursive: true });
+  const { queryHash } = snapshotMigrationSql('reviewed.sql', () => sql);
+  const reviewedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const seedOldProofs = (overrides = {}) => {
+    const paths = applyProofPaths(stateDir, OLD);
+    writeFileSync(paths.reviewerFile, JSON.stringify({
+      migration: OLD, timestamp: reviewedAt, reviewers: ['rls-security-reviewer', 'migration-drift-reviewer'],
+      findings: 'clean', queryHash, ...overrides.reviewer,
+    }));
+    writeFileSync(paths.codexFile, JSON.stringify({
+      queryHash, verdict: 'clean', model: 'gpt-6-sol', reasoning_effort: 'high', timestamp: reviewedAt, ...overrides.codex,
+    }));
+  };
+  const cli = (...args) => spawnSync(process.execPath, [
+    fileURLToPath(new URL('./write-apply-proofs.mjs', import.meta.url)), '--restamp-from', ...args,
+  ], { cwd: root, encoding: 'utf8', timeout: 60_000 });
+  const newProofs = applyProofPaths(stateDir, NEW);
+  // Loaded lazily so the CLI checks fail on behaviour, not on a missing export.
+  const carry = async (opts = {}) => (await import('./write-apply-proofs-lib.mjs')).carryRestampedApplyProofs({
+    stateDir, migrationsDir, fromName: OLD, toName: NEW, model: 'gpt-6-sol', effort: 'high', ...opts,
+  });
+  try {
+    writeFileSync(path.join(migrationsDir, `${NEW}.sql`), sql.replace(/\r\n/g, '\n'));
+    seedOldProofs();
+    const ok = cli(OLD, NEW);
+    assert.equal(ok.status, 0, `restamp: a byte-identical restamp carries (${ok.stderr})`);
+    const reviewer = JSON.parse(readFileSync(newProofs.reviewerFile, 'utf8'));
+    const codex = JSON.parse(readFileSync(newProofs.codexFile, 'utf8'));
+    assert.equal(reviewer.migration, NEW, 'restamp: the reviewer proof names the new stamp');
+    assert.equal(reviewer.restamped_from, OLD, 'restamp: and says where it came from');
+    assert.equal(reviewer.timestamp, reviewedAt, 'restamp: the original 24-hour clock keeps running');
+    assert.equal(codex.queryHash, queryHash, 'restamp: still bound to the reviewed SQL');
+    assert.equal(codex.timestamp, reviewedAt, 'restamp: the Codex proof keeps its original time');
+    assert.equal(existsSync(path.join(stateDir, `owner-approval-${NEW}.json`)), false, 'restamp: no owner approval is ever written');
+
+    // Negative: one changed SQL byte refuses, and clears the carried proofs.
+    writeFileSync(path.join(migrationsDir, `${NEW}.sql`), 'CREATE TABLE rate_lock (id integer);\n');
+    const changed = cli(OLD, NEW);
+    assert.equal(changed.status, 1, 'restamp: one changed SQL byte is refused');
+    assert.match(changed.stderr, /not byte-identical/, 'restamp: says the SQL changed');
+    assert.equal(existsSync(newProofs.reviewerFile) || existsSync(newProofs.codexFile), false, 'restamp: a refusal leaves no proof for the new name');
+    writeFileSync(path.join(migrationsDir, `${NEW}.sql`), sql);
+
+    assert.match((await carry({ toName: '20261106120000_other_name' })).problem, /only a new timestamp/, 'restamp: a renamed migration is refused');
+    assert.match((await carry({ toName: OLD })).problem, /only a new timestamp/, 'restamp: the same stamp is refused');
+    writeFileSync(path.join(migrationsDir, `${OLD}.sql`), sql);
+    assert.match((await carry()).problem, /still on disk/, 'restamp: a copy that keeps the old file is refused');
+    rmSync(path.join(migrationsDir, `${OLD}.sql`));
+    seedOldProofs({ reviewer: { timestamp: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() } });
+    assert.match((await carry()).problem, /older than 24 hours/, 'restamp: a stale reviewer proof is refused');
+    seedOldProofs({ codex: { timestamp: new Date(Date.now() + 60 * 60 * 1000).toISOString() } });
+    assert.match((await carry()).problem, /older than 24 hours/, 'restamp: a future-dated proof is refused');
+    seedOldProofs({ reviewer: { reviewers: ['rls-security-reviewer'] } });
+    assert.match((await carry()).problem, /both reviewers/, 'restamp: a proof missing a reviewer is refused');
+    seedOldProofs({ reviewer: { findings: 'blockers-fixed' } });
+    assert.match((await carry()).problem, /both reviewers/, 'restamp: only a clean review carries');
+    seedOldProofs({ codex: { model: 'gpt-6-luna' } });
+    assert.match((await carry()).problem, /gpt-6-sol\/high/, 'restamp: a Luna proof is refused');
+    seedOldProofs({ reviewer: { migration: '20261101000000_product_rate_lock' } });
+    assert.match((await carry()).problem, /both reviewers/, 'restamp: a proof naming another migration is refused');
+    rmSync(applyProofPaths(stateDir, OLD).codexFile);
+    assert.match((await carry()).problem, /must exist/, 'restamp: a missing proof is refused');
+    assert.equal(cli(OLD).status, 1, 'restamp: the CLI needs both names');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 // The CLI entry point runs on import, so link it in a child process: a renamed
 // export from write-codex-push-proof.mjs must fail here, not at migration time.
 {

@@ -52,12 +52,13 @@ import {
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
+import { getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection } from '../lib/idempotency';
+import { clearPendingRetry, loadPendingRetry, markPendingRetryForCheck, savePendingRetry, type PendingRetry } from '../lib/pendingRetry';
 import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
-import { catalogPricePerAcre, getQuoteTierPrice, isTierPriceMissing, validateCommissionSplits } from '../lib/quoteCalc';
+import { billedLine, catalogPricePerAcre, exactRound2, getQuoteTierPrice, isTierPriceMissing, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
 import {
   buildRowVersionPatch,
@@ -225,6 +226,11 @@ interface DrawRow {
   extraPrice: 'today' | 'booked';
 }
 
+type DrawRequestLine = { product_id: string; quantity: number; extra_price?: 'today' | 'booked' };
+const isDrawRequest = (request: unknown): request is DrawRequestLine[] => Array.isArray(request)
+  && request.every((line) => typeof line?.product_id === 'string' && Number.isFinite(line.quantity) && line.quantity > 0
+    && (line.extra_price === undefined || line.extra_price === 'today' || line.extra_price === 'booked'));
+
 let keyCounter = 0;
 // The price changes save_quote recorded on this quote's sent lines (quote_price_changes, read-only
 // to admins and reps). null when the read failed.
@@ -374,6 +380,9 @@ export default function QuoteBuilder() {
   const [drawRows, setDrawRows] = useState<DrawRow[]>([]);
   const [drawLoading, setDrawLoading] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  // S14: a draw whose reply never came, kept in this tab across a reload (see pendingRetry).
+  const [pendingDraw, setPendingDraw] = useState<PendingRetry<DrawRequestLine[]> | null>(null);
+  const drawPendingName = JSON.stringify(['draw_down_quote', profile?.id || '', id || '']);
   // Booking settlement (roadmap #6c): read-only booked/drawn/remaining + prepay
   // position for an open booking (sent/revised quote), via get_booking_settlement.
   const [bookingSettlement, setBookingSettlement] = useState<BookingSettlement | null>(null);
@@ -1706,19 +1715,16 @@ export default function QuoteBuilder() {
 
       if (item.calc_mode === 'units_direct') {
         // User entered total_units_needed directly — skip rate×acres computation
-        const totalInventoryUnits = item.total_units_needed || 0;
-        const totalPrice = pricePerUnit * totalInventoryUnits;
-        const profit = (pricePerUnit - cost) * totalInventoryUnits;
-        const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+        const enteredUnits = item.total_units_needed || 0;
+        const billed = billedLine(pricePerUnit, cost, [enteredUnits]);
 
-        // Back-calculate oz/acre and $/acre if acres provided
+        // Back-calculate oz/acre and $/acre if acres provided; save_quote uses the entered units
         const acres = item.acres || 0;
         let ozPerAcre: number | null = item.oz_per_acre;
         let pricePerAcre: number | null = item.price_per_acre;
         if (acres > 0 && inventoryUnitFactorOz > 0) {
-          const totalOz = totalInventoryUnits * inventoryUnitFactorOz;
-          ozPerAcre = Math.round((totalOz / acres) * 100) / 100;
-          pricePerAcre = Math.round((totalPrice / acres) * 100) / 100;
+          ozPerAcre = exactRound2([enteredUnits, inventoryUnitFactorOz], [acres]);
+          pricePerAcre = exactRound2([pricePerUnit, enteredUnits], [acres]);
         }
 
         return {
@@ -1727,10 +1733,10 @@ export default function QuoteBuilder() {
           current_cost: cost,
           oz_per_acre: ozPerAcre,
           price_per_acre: pricePerAcre,
-          total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-          total_price: Math.round(totalPrice * 100) / 100,
-          profit: Math.round(profit * 100) / 100,
-          net_margin: Math.round(netMargin * 100 * 100) / 100,
+          total_units_needed: billed.units,
+          total_price: billed.totalPrice,
+          profit: billed.profit,
+          net_margin: billed.netMargin,
         };
       }
 
@@ -1739,30 +1745,23 @@ export default function QuoteBuilder() {
       const acres = item.acres || 0;
 
       const rateUnitFactorOz = getConversionFactor(item.rate_unit);
-      const rateInOz = actualRate * rateUnitFactorOz;
-      const ozPerAcre = rateInOz;
-
-      const totalInventoryUnits = inventoryUnitFactorOz > 0
-        ? (acres * rateInOz) / inventoryUnitFactorOz
-        : 0;
-
-      const pricePerAcre = inventoryUnitFactorOz > 0
-        ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
-        : 0;
-      const totalPrice = pricePerUnit * totalInventoryUnits;
-      const profit = (pricePerUnit - cost) * totalInventoryUnits;
-      const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+      // S09: the quantity, total and profit the database stores and bills (see billedLine).
+      const billed = inventoryUnitFactorOz > 0
+        ? billedLine(pricePerUnit, cost, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+        : billedLine(pricePerUnit, cost, [0]);
 
       return {
         ...item,
         price_per_unit: pricePerUnit,
         current_cost: cost,
-        oz_per_acre: Math.round(ozPerAcre * 100) / 100,
-        price_per_acre: Math.round(pricePerAcre * 100) / 100,
-        total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-        total_price: Math.round(totalPrice * 100) / 100,
-        profit: Math.round(profit * 100) / 100,
-        net_margin: Math.round(netMargin * 100 * 100) / 100,
+        oz_per_acre: exactRound2([actualRate, rateUnitFactorOz]),
+        price_per_acre: inventoryUnitFactorOz > 0
+          ? exactRound2([pricePerUnit, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+          : 0,
+        total_units_needed: billed.units,
+        total_price: billed.totalPrice,
+        profit: billed.profit,
+        net_margin: billed.netMargin,
       };
     },
     [products, getTierPrice, getConversionFactor, lineBasisFor]
@@ -3547,6 +3546,7 @@ export default function QuoteBuilder() {
       return false;
     }
     let loaded = false;
+    setPendingDraw(loadPendingRetry(drawPendingName, isDrawRequest));
     setDrawLoading(true);
     setShowDrawModal(true);
     try {
@@ -3605,40 +3605,68 @@ export default function QuoteBuilder() {
     return loaded;
   };
 
-  const handleDrawDown = async () => {
+  // `resume` re-sends a draw whose reply never came, exactly as it was sent and with its key, so the
+  // server returns the order it already made or makes it once (S14).
+  const handleDrawDown = async (resume?: PendingRetry<DrawRequestLine[]>) => {
     if (!id) return;
-    const draws = drawRows
-      .map((r) => ({ ...r, quantity: parseFloat(r.qty) || 0 }))
-      .filter((d) => d.quantity > 0);
-    if (draws.length === 0) {
-      toast('warning', 'Enter a quantity for at least one product');
-      return;
-    }
-    const closed = draws.find((d) => d.remaining <= 0);
-    if (closed) {
-      toast('error', `${closed.product_name}: nothing left on this booking`);
-      return;
+    let drawPayload: DrawRequestLine[];
+    if (resume) {
+      drawPayload = resume.request;
+    } else {
+      const draws = drawRows
+        .map((r) => ({ ...r, quantity: parseFloat(r.qty) || 0 }))
+        .filter((d) => d.quantity > 0);
+      if (draws.length === 0) {
+        toast('warning', 'Enter a quantity for at least one product');
+        return;
+      }
+      const closed = draws.find((d) => d.remaining <= 0);
+      if (closed) {
+        toast('error', `${closed.product_name}: nothing left on this booking`);
+        return;
+      }
+      // The price choice is sent only for a quantity over what is left, so every other draw
+      // is the same request as before.
+      drawPayload = draws.map((d) => ({
+        product_id: d.product_id,
+        quantity: d.quantity,
+        ...(d.quantity > d.remaining ? { extra_price: d.extraPrice } : {}),
+      }));
     }
     setDrawing(true);
-    // The price choice is sent only for a quantity over what is left, so every other draw
-    // is the same request as before.
-    const drawPayload = draws.map((d) => ({
-      product_id: d.product_id,
-      quantity: d.quantity,
-      ...(d.quantity > d.remaining ? { extra_price: d.extraPrice } : {}),
-    }));
     // One key per quote: the server binds this key to its request, so edited details after a lost reply are refused with the committed result (a re-entered quantity can newly exceed what is left).
+    // A key kept from before a reload wins over a fresh one, for the same reason (S14).
     const drawScope = id ?? '';
+    const kept = loadPendingRetry(drawPendingName, isDrawRequest);
+    // Past the receipt's lifetime (or with its receipt refused) the server can no longer tell whether
+    // that draw was made, so any send could make a second order: refuse until the rep has checked.
+    if (kept?.expired || (resume && kept?.key !== resume.key)) {
+      setPendingDraw(kept);
+      setDrawing(false);
+      toast('error', 'An earlier Partial Order here did not finish, may have gone through, and can no longer be finished safely. Check the orders on this booking first.');
+      return;
+    }
+    const drawKey = resume?.key ?? kept?.key ?? drawDownIdem.getKeyFor(drawScope);
+    // An earlier send with this key got no reply, so it may have made the order.
+    const earlierUnresolved = kept?.key === drawKey;
+    // Without the note, a lost reply could not be finished after a reload, and a fresh key could draw twice.
+    if (!savePendingRetry(drawPendingName, drawKey, drawPayload)) {
+      setDrawing(false);
+      toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
+      return;
+    }
     try {
       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('draw_down_quote', withBelowCostReason('draw_down_quote', {
         p_quote_id: id,
         p_draws: drawPayload,
         p_performed_by: profile!.id,
-        p_idempotency_key: drawDownIdem.getKeyFor(drawScope),
+        p_idempotency_key: drawKey,
       }, reason)));
       if (error) throw error;
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
       drawDownIdem.resetKeyFor(drawScope);
+      clearPendingRetry(drawPendingName);
+      setPendingDraw(null);
       toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? ' — booking fully drawn' : ' — booking stays open'}`
         + (result.extra_order_number ? `. The amount over the booking is order ${result.extra_order_number}.` : ''));
       if (result.warnings && result.warnings.length > 0) {
@@ -3655,6 +3683,14 @@ export default function QuoteBuilder() {
       skipUnsavedPromptRef.current = true;
       navigate(`/orders/${result.order_id}`);
     } catch (error: unknown) {
+      // The server answered and wrote nothing (or the rep cancelled the below-cost approval), so
+      // there is no lost reply to finish: forget the kept draw. Only a missing reply keeps it, and
+      // so does an earlier lost reply: some refusals (cutover, sign-in) come before the receipt
+      // check, so refusing this send says nothing about whether that earlier one made the order.
+      if ((isBelowCostApprovalHandledError(error) || isDefinitiveRpcRejection(error)) && !earlierUnresolved) {
+        clearPendingRetry(drawPendingName);
+        setPendingDraw(null);
+      }
       if (isBelowCostApprovalHandledError(error)) {
         setDrawing(false);
         return;
@@ -3668,6 +3704,18 @@ export default function QuoteBuilder() {
       const bindingRejection = getIdempotencyBindingRejection(error);
       if (bindingRejection) {
         drawDownIdem.resetKeyFor(drawScope);
+        // A receipt under this key (refused as damaged, missing or for other quantities) means an
+        // earlier send may have made an order: keep the note, flagged for a hand check, which blocks
+        // new draws until the rep confirms. Another user's key says nothing was made here.
+        if (bindingRejection === 'actor') {
+          clearPendingRetry(drawPendingName);
+        } else {
+          markPendingRetryForCheck(drawPendingName);
+        }
+        // Flagged here too, so a failed storage write cannot bring back "Finish it" on this screen;
+        // after a reload, finishing re-sends the same key and the server refuses it again.
+        const keptAfter = loadPendingRetry(drawPendingName, isDrawRequest);
+        setPendingDraw(keptAfter && bindingRejection !== 'actor' ? { ...keptAfter, expired: true } : keptAfter);
         const committedResult = bindingRejection === 'intent'
           ? getIdempotencyMismatchResult(error, 'draw_down_quote')
           : null;
@@ -3677,6 +3725,8 @@ export default function QuoteBuilder() {
           : null;
 
         if (committedOrderId) {
+          clearPendingRetry(drawPendingName);
+          setPendingDraw(null);
           setShowDrawModal(false);
           toast('warning', 'An earlier attempt with this retry already created an order. No new draw was made — opening that order now.');
           navigate(`/orders/${committedOrderId}`);
@@ -5837,6 +5887,38 @@ export default function QuoteBuilder() {
               remaining balance and stays open until it is fully drawn. You can send more than
               is left: the extra goes on its own order at the price you choose.
             </p>
+            {pendingDraw?.expired && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm flex items-start justify-between gap-3">
+                <p>
+                  Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}) did not finish
+                  and may have gone through, but it can no longer be finished safely. Check the orders on this booking before drawing again.
+                </p>
+                <button
+                  onClick={() => {
+                    clearPendingRetry(drawPendingName);
+                    setPendingDraw(null);
+                  }}
+                  className="shrink-0 px-3 py-1.5 bg-crx-green text-white rounded-lg"
+                >
+                  I checked
+                </button>
+              </div>
+            )}
+            {pendingDraw && !pendingDraw.expired && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm flex items-start justify-between gap-3">
+                <p>
+                  Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}) got no reply,
+                  so it may already have gone through. Finish it to get that order: it is made once, never twice.
+                </p>
+                <button
+                  onClick={() => handleDrawDown(pendingDraw)}
+                  disabled={drawing}
+                  className="shrink-0 px-3 py-1.5 bg-crx-green text-white rounded-lg disabled:opacity-50"
+                >
+                  Finish it
+                </button>
+              </div>
+            )}
             {drawLoading ? (
               <p className="text-sm text-secondary">Loading booking balance…</p>
             ) : (
@@ -5921,7 +6003,7 @@ export default function QuoteBuilder() {
                 Cancel
               </button>
               <button
-                onClick={handleDrawDown}
+                onClick={() => handleDrawDown()}
                 disabled={drawing || drawLoading || !drawRows.some((r) => (parseFloat(r.qty) || 0) > 0)}
                 className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg disabled:opacity-50"
               >

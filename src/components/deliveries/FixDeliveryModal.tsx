@@ -1,6 +1,6 @@
 /**
  * FixDeliveryModal — admin-only, one screen: undo a wrong completed delivery and its unpaid invoice
- * together (fix_delivery, 20261106100000), then open New Delivery for the same order to re-enter it.
+ * together (fix_delivery, 20261106150000), then open New Delivery for the same order to re-enter it.
  * The preview comes from the server; the server re-checks everything and refuses if it changed.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';

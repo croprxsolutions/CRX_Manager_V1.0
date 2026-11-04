@@ -1213,7 +1213,7 @@ export interface ReceiptRecipient {
   contactName: string | null;
   farmName: string | null;
 }
-/** preview_fix_delivery's plan (20261106100000): what Fix delivery will undo, or why it refuses. */
+/** preview_fix_delivery's plan (20261106150000): what Fix delivery will undo, or why it refuses. */
 export interface FixDeliveryPlan {
   delivery_id: string;
   delivery_number: string;
@@ -1620,6 +1620,8 @@ export interface Commission {
   deleted_at: string | null;
   cancelled_at: string | null;
   cancelled_amount_cents: number | null;
+  /** The cancelled commission this row re-creates (set only by fix_delivery). */
+  replaces_commission_id?: string | null;
   created_at: string;
 }
 

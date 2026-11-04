@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Disposable, network-disabled real-schema proof for Fix delivery (20261106100000).
+// Disposable, network-disabled real-schema proof for Fix delivery (20261106150000).
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,16 +8,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const reuseIndex = process.argv.indexOf('--reuse');
-const reusedContainer = reuseIndex >= 0 ? process.argv[reuseIndex + 1] : process.env.CRX_PROVER_REUSE_CONTAINER;
-const NAME = reusedContainer || `crx-fix-delivery-${process.pid}-${Date.now().toString(36)}`;
-const REUSE = Boolean(reusedContainer);
-const KEEP = process.argv.includes('--keep') || process.env.CRX_PROVER_KEEP_CONTAINER === '1' || REUSE;
+// Always a fresh throwaway container: no option points the seed (which commits rows) at an existing database.
+const NAME = `crx-fix-delivery-${process.pid}-${Date.now().toString(36)}`;
+const KEEP = process.argv.includes('--keep') || process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const VERBOSE = process.env.CRX_PROVER_VERBOSE === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261106100000_fix_delivery_one_screen.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261106150000_fix_delivery_one_screen.sql');
 // Storage/photo files the container cannot replay; none touches billing (asserted in plan()).
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -274,8 +272,29 @@ function scenarios() {
   refused(`${asUser(REP)} SELECT public.fix_delivery('${DELIVERY}','x','x','k-rep');`, 'a sales rep cannot fix a delivery', /Admin access required/);
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','x','x',NULL);`, 'a key is required', /IDEMPOTENCY_KEY_REQUIRED/);
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','  ','x','k-blank');`, 'a reason is required', /Reason is required/);
+  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}',E'\\r\\n\\t','x','k-blank-ws');`, 'a carriage-return, newline and tab reason counts as blank', /Reason is required/);
+  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}',E'\u00a0\u200b','x','k-blank-nbsp');`, 'a no-break-space reason counts as blank', /Reason is required/);
   refused(`${asUser(ADMIN)} SELECT public._fix_delivery_plan('${DELIVERY}');`, 'the plan helper is not callable by app roles', /permission denied/);
 
+  // An ordinary void cancels a commission with no replacement: past months keep counting it, even next to
+  // a different live commission for the same rep (a separate $10 is not a copy of the $40). Rolled back.
+  allowed(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET status='cancelled' WHERE id='${COMM}';
+    INSERT INTO public.commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage, commission_amount, order_profit, order_date, season, order_number, customer_name, status)
+      SELECT order_id, customer_id, recipient, recipient_user_id, split_percentage, 10, order_profit, order_date, season, order_number, customer_name, 'paid' FROM public.commissions WHERE id='${COMM}';
+    ALTER TABLE public.commissions ENABLE TRIGGER USER;
+    ${check(`(SELECT amount FROM public._get_bottom_line_pnl_cost_impl_20261019(CURRENT_DATE, CURRENT_DATE) WHERE line_item='Commissions')=50`, 'P&L keeps a cancelled commission nothing replaced')}
+    ${asUser(ADMIN)} DO $m$ BEGIN IF (public.get_monthly_summary(CURRENT_DATE, CURRENT_DATE)->'commissions'->>'earned_cents')::bigint <> 5000 THEN RAISE EXCEPTION 'PROOF_FAIL: month-end dropped a cancelled commission nothing replaced'; END IF; END $m$;`,
+    'a cancelled commission with no live copy still counts in past months, next to a different live one');
+  // An earlier ordinary invoice void already cancelled the commission: the fix would restore none, so it refuses.
+  refused(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET status='cancelled' WHERE id='${COMM}';
+    ALTER TABLE public.commissions ENABLE TRIGGER USER; ${fix('k-comm-gone')}`,
+    'an order whose commission an earlier void cancelled refuses the fix', /FIX_DELIVERY_REFUSED: This order's commission was cancelled/);
+  // Another rep's paid split does not hide the cancelled rep's commission.
+  refused(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET status='cancelled' WHERE id='${COMM}';
+    INSERT INTO public.commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage, commission_amount, order_profit, order_date, season, order_number, customer_name, status)
+      SELECT order_id, customer_id, '[PROVER] other rep', '${ADMIN}', split_percentage, 10, order_profit, order_date, season, order_number, customer_name, 'paid' FROM public.commissions WHERE id='${COMM}';
+    ALTER TABLE public.commissions ENABLE TRIGGER USER; ${fix('k-comm-split')}`,
+    "another rep's paid split does not hide a commission an earlier void cancelled", /FIX_DELIVERY_REFUSED: This order's commission was cancelled/);
   const before = Number(scalar(`SELECT ${stock};`));
   allowed(`${fix('k-ok')}
     ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='voided'`, 'invoice voided')}
@@ -303,6 +322,10 @@ function scenarios() {
     ${fix('k-new-draft')}`, 'an order draft added after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET total_amount_cents=20000 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-amount')}`, 'an invoice amount changed after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET invoice_date=invoice_date - 1 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${fix('k-new-date')}`, 'an invoice re-dated after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; ALTER TABLE public.deliveries DISABLE TRIGGER USER; UPDATE public.deliveries SET completed_at=completed_at - interval '1 hour' WHERE id='${DELIVERY}'; ALTER TABLE public.deliveries ENABLE TRIGGER USER;
+    ${fix('k-new-completed')}`, 'a delivery completion time changed after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET credit_applied_cents=500 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-credit')}`, 'a credit applied after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; SELECT set_config('app.crx_below_cost_operation','create_direct_order',true);
@@ -312,7 +335,18 @@ function scenarios() {
     UPDATE public.delivery_items SET order_item_id='${LINE2}' WHERE delivery_id='${DELIVERY}';
     ALTER TABLE public.delivery_items ENABLE TRIGGER USER;
     ${fix('k-moved-line')}`, 'a delivery line moved to another order line after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; INSERT INTO public.orders (id,order_number,customer_id,salesman_id,status,order_date) VALUES
+      (gen_random_uuid(),'PROVER-FIX-ORDER-B','${CUSTOMER}','${REP}','confirmed',CURRENT_DATE);
+    ALTER TABLE public.deliveries DISABLE TRIGGER USER;
+    UPDATE public.deliveries SET order_id=(SELECT id FROM public.orders WHERE order_number='PROVER-FIX-ORDER-B') WHERE id='${DELIVERY}';
+    ALTER TABLE public.deliveries ENABLE TRIGGER USER;
+    ${fix('k-moved-order')}`, 'a delivery moved to another order after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
 
+  refused(`RESET ROLE; ALTER TABLE public.orders DISABLE TRIGGER USER; UPDATE public.orders SET status='voided' WHERE id='${ORDER}'; ALTER TABLE public.orders ENABLE TRIGGER USER;
+    ${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','[PROVER] wrong amount',(SELECT public.preview_fix_delivery('${DELIVERY}')->>'plan_token'),'k-order-voided');`,
+    'a voided order refuses the fix', /FIX_DELIVERY_REFUSED: This delivery's order is voided/);
+  refused(`RESET ROLE; ALTER TABLE public.orders DISABLE TRIGGER USER; UPDATE public.orders SET status='fulfilled' WHERE id='${ORDER}'; ALTER TABLE public.orders ENABLE TRIGGER USER;
+    ${fix('k-order-status')}`, 'an order status change after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET paid_amount_cents=100 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-paid')}`, 'a payment on the invoice refuses the fix', /FIX_DELIVERY_REFUSED: A payment is applied/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET write_off_cents=500 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
@@ -336,7 +370,21 @@ function scenarios() {
     ALTER TABLE public.accounting_periods ENABLE TRIGGER USER;
     ${fix('k-closed-chicago')}`, 'a 02:00 UTC completion on the 1st counts as the prior Chicago day, in a closed month', /FIX_DELIVERY_REFUSED: This delivery was completed in a closed month/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET invoice_group_id=gen_random_uuid() WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
-    ${fix('k-split')}`, 'a split-group invoice refuses the fix', /FIX_DELIVERY_REFUSED: This delivery is billed on a split invoice/);
+    ${fix('k-split')}`, 'a split-group invoice refuses the fix', /FIX_DELIVERY_REFUSED: This delivery or its order has a split invoice/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,invoice_group_id)
+      VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-SPLIT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',gen_random_uuid());
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','[PROVER] wrong amount',(SELECT public.preview_fix_delivery('${DELIVERY}')->>'plan_token'),'k-order-split');`,
+    'an order-level split draft refuses the fix', /FIX_DELIVERY_REFUSED: This delivery or its order has a split invoice/);
+  allowed(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id)
+      VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT2','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}');
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','[PROVER] wrong amount',(SELECT public.preview_fix_delivery('${DELIVERY}')->>'plan_token'),'k-order-draft-count');
+    ${check(`(SELECT status FROM public.invoices WHERE id='${ORDER_INV}')='cancelled'`, 'order draft cancelled')}
+    ${check(`EXISTS (SELECT 1 FROM public.activity_feed WHERE event_type='delivery_fixed' AND related_entity_id='${DELIVERY}' AND description LIKE '%and cancelled 1 order draft invoice(s)%')`, 'activity counts the order draft')}`,
+    'the activity entry counts the order draft the fix cancels');
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
     INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,posted_at)
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-INV','${ORDER}','${CUSTOMER}','chemical_sale','posted',CURRENT_DATE,'${ADMIN}','${REP}',now());
@@ -385,6 +433,14 @@ function scenarios() {
     INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents)
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000);
     ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ALTER TABLE public.write_offs DISABLE TRIGGER USER;
+    INSERT INTO public.write_offs (invoice_id,customer_id,amount_cents,reason,approved_by,created_by) VALUES ('${ORDER_INV}','${CUSTOMER}',500,'[PROVER]','${ADMIN}','${ADMIN}');
+    ALTER TABLE public.write_offs ENABLE TRIGGER USER;
+    ${fix('k-draft-write-off-row')}`, 'an order draft with an active write-off row refuses the fix', /FIX_DELIVERY_REFUSED: A draft or unposted invoice on this delivery or order has a payment/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents)
+      VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000);
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ALTER TABLE public.allocation_sets DISABLE TRIGGER USER; ALTER TABLE public.invoice_line_allocations DISABLE TRIGGER USER;
     INSERT INTO public.allocation_sets (id,entity_type,entity_id,is_active) VALUES ('${ALLOC}','payment',gen_random_uuid(),true);
     INSERT INTO public.invoice_line_allocations (allocation_set_id,invoice_id,bill_to_customer_id,split_percentage,amount_cents)
@@ -397,6 +453,10 @@ function scenarios() {
       VALUES ('k-pre-used:void_invoice:${INV}','void_invoice','{"success":true}');
     ${fix('k-pre-used')}`,
     'an inner invoice key already used by another request refuses the fix', /IDEMPOTENCY_INTENT_MISMATCH/);
+  refused(`RESET ROLE; INSERT INTO public.idempotency_keys (idempotency_key,operation,result)
+      VALUES ('k-pre-used-del:void_delivery','void_delivery','{"success":true}');
+    ${fix('k-pre-used-del')}`,
+    'an inner delivery key already used by another request refuses the fix', /IDEMPOTENCY_INTENT_MISMATCH/);
   refused(`RESET ROLE; ALTER TABLE public.delivery_external_billings DISABLE TRIGGER USER;
     INSERT INTO public.delivery_external_billings (delivery_id,reason) VALUES ('${DELIVERY}','[PROVER] billed in Chem Man');
     ALTER TABLE public.delivery_external_billings ENABLE TRIGGER USER;
@@ -424,16 +484,52 @@ function scenarios() {
     ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='posted'`, 'invoice stayed posted after the failed fix')}
     ${check(`(SELECT status FROM public.commissions WHERE id='${COMM}')='pending'`, 'commission untouched after the failed fix')}`,
     'a failure in the delivery step rolls back the invoice void (all or nothing)');
+
+  // Lost response: the fix commits, then the browser retries the same key in a new transaction. Last,
+  // because it keeps the fixed state.
+  const committedBefore = Number(scalar(`SELECT ${stock};`));
+  psql(`BEGIN; ${fix('k-committed')} COMMIT;`);
+  allowed(`${fix('k-committed')}
+    ${check(`(SELECT count(*) FROM public.commissions WHERE order_id='${ORDER}' AND status='pending')=1`, 'committed retry did not add a second commission')}
+    ${check(`${stock}=${committedBefore + 10}`, 'committed retry did not restore stock twice')}
+    ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='voided'`, 'invoice stays voided')}`,
+    'a retry after the fix committed replays the stored result and changes nothing more');
+  // The re-entered delivery's invoice is voided later too, cancelling the copy: still counted once.
+  allowed(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET status='cancelled' WHERE order_id='${ORDER}';
+    ALTER TABLE public.commissions ENABLE TRIGGER USER;
+    ${check(`(SELECT count(*) FROM public.commissions WHERE order_id='${ORDER}' AND status='cancelled')=2`, 'original and copy both cancelled')}
+    ${check(`(SELECT amount FROM public._get_bottom_line_pnl_cost_impl_20261019(CURRENT_DATE, CURRENT_DATE) WHERE line_item='Commissions')=40`, 'P&L counts a cancelled original and cancelled copy once')}
+    ${asUser(ADMIN)} DO $m$ BEGIN IF (public.get_monthly_summary(CURRENT_DATE, CURRENT_DATE)->'commissions'->>'earned_cents')::bigint <> 4000 THEN RAISE EXCEPTION 'PROOF_FAIL: month-end counts a cancelled original and copy twice'; END IF; END $m$;`,
+    'when the copy is cancelled later too, the commission still counts once');
+  // Editing the reopened order recalculates the pending copy's amount: the original stays replaced.
+  allowed(`RESET ROLE;
+    ${check(`(SELECT count(*) FROM public.commissions WHERE order_id='${ORDER}' AND replaces_commission_id='${COMM}' AND status='pending')=1`, 'the copy names the original it replaces')}
+    ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET commission_amount=30 WHERE replaces_commission_id='${COMM}';
+    ALTER TABLE public.commissions ENABLE TRIGGER USER;
+    ${check(`(SELECT amount FROM public._get_bottom_line_pnl_cost_impl_20261019(CURRENT_DATE, CURRENT_DATE) WHERE line_item='Commissions')=30`, 'P&L counts only the edited copy')}
+    ${asUser(ADMIN)} DO $m$ BEGIN IF (public.get_monthly_summary(CURRENT_DATE, CURRENT_DATE)->'commissions'->>'earned_cents')::bigint <> 3000 THEN RAISE EXCEPTION 'PROOF_FAIL: month-end counts the original again after an order edit'; END IF; END $m$;`,
+    'an order edit that changes the copy\'s amount does not make the original count again');
+  // Only fix_delivery may write the link the reports trust. Browser roles have no write grant on
+  // commissions at all; the trigger also refuses the table owner (any other database function).
+  refused(`RESET ROLE; UPDATE public.commissions SET replaces_commission_id=NULL WHERE replaces_commission_id='${COMM}';`,
+    'nothing but Fix Delivery can unlink a re-created commission', /COMMISSION_REPLACES_LINK_LOCKED/);
+  refused(`RESET ROLE; INSERT INTO public.commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage, commission_amount, order_profit, order_date, season, order_number, customer_name, status, replaces_commission_id)
+      SELECT order_id, customer_id, recipient, recipient_user_id, split_percentage, 0, order_profit, order_date, season, order_number, customer_name, 'pending', id FROM public.commissions WHERE id='${COMM}';`,
+    'nothing but Fix Delivery can insert a row that hides a cancelled commission', /COMMISSION_REPLACES_LINK_LOCKED/);
+  refused(`${asUser(ADMIN)} UPDATE public.commissions SET replaces_commission_id=NULL WHERE replaces_commission_id='${COMM}';`,
+    'an admin in the browser cannot write commissions directly', /permission denied for table commissions/);
+  refused(`RESET ROLE; SET LOCAL ROLE service_role; SELECT set_config('crx.fix_delivery_restore','on',true);
+    INSERT INTO public.commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage, commission_amount, order_profit, order_date, season, order_number, customer_name, status, replaces_commission_id)
+      SELECT order_id, customer_id, recipient, recipient_user_id, split_percentage, 0, order_profit, order_date, season, order_number, customer_name, 'pending', id FROM public.commissions WHERE id='${COMM}';`,
+    'a service-role session that sets the Fix Delivery flag still cannot set the link', /COMMISSION_REPLACES_LINK_LOCKED/);
 }
 
 try {
-  if (!REUSE) buildContainer();
-  if (!REUSE || scalar("SELECT count(*) FROM pg_proc WHERE proname='fix_delivery';") === '0') {
-    stageText('candidate.sql', lf(CANDIDATE)); const r = apply('candidate.sql');
-    if (r.status !== 0) throw new Error(`candidate apply failed:\n${r.output}`);
-    console.log('[prover] candidate applied');
-  }
-  if (scalar(`SELECT count(*) FROM public.deliveries WHERE id='${DELIVERY}';`) === '0') seed();
+  buildContainer();
+  stageText('candidate.sql', lf(CANDIDATE)); const r = apply('candidate.sql');
+  if (r.status !== 0) throw new Error(`candidate apply failed:\n${r.output}`);
+  console.log('[prover] candidate applied');
+  seed();
   TOKEN = scalar(`SELECT public._fix_delivery_plan('${DELIVERY}')->>'plan_token';`);
   assert.match(TOKEN, /^[0-9a-f]{32}$/, 'the preview carries a plan token');
   scenarios();

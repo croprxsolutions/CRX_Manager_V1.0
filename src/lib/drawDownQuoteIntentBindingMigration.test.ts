@@ -250,14 +250,14 @@ describe('draw_down_quote actor and intent binding migration', () => {
   });
 
   it('retires rejected draw keys and gives the operator a safe recovery path', () => {
-    const drawStart = quoteBuilder.indexOf('const handleDrawDown = async () => {');
+    const drawStart = quoteBuilder.indexOf('const handleDrawDown = async (resume?: PendingRetry<DrawRequestLine[]>) => {');
     const drawEnd = quoteBuilder.indexOf('const handleConvertToOrder = async () => {', drawStart);
     const drawHandler = quoteBuilder.slice(drawStart, drawEnd);
 
     expect(drawStart).toBeGreaterThan(-1);
     expect(drawEnd).toBeGreaterThan(drawStart);
     expect(quoteBuilder).toContain(
-      "import { getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';",
+      "import { getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection } from '../lib/idempotency';",
     );
     expect(drawHandler).toContain('const bindingRejection = getIdempotencyBindingRejection(error);');
     const rejectionHandler = drawHandler.slice(drawHandler.indexOf('if (bindingRejection) {'));

@@ -1,9 +1,9 @@
 -- Written 2026-11-03. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261106100000_fix_delivery_one_screen.md.
+-- docs/reference/migrations.d/20261106150000_fix_delivery_one_screen.md.
 --
 -- WHAT: "Fix delivery" — one admin action that undoes a completed delivery AND its invoice together,
---   so the delivery can be re-entered with the right amount or product (Mason, 2026-11-03: "I want
---   easy, not going to multiple screens"). Business Central's "Correct" on an unpaid invoice is the
+--   so the delivery can be re-entered with the right amount or product, from one screen (Mason,
+--   2026-11-03). Business Central's "Correct" on an unpaid invoice is the
 --   model. Product that really came back still goes through Returns, not this.
 --
 --   preview_fix_delivery(delivery)  read-only plan: the invoices that will be voided or cancelled,
@@ -29,13 +29,16 @@
 --   * an active write-off (void_invoice leaves the write_offs row active);
 --   * a delivery completed in a closed accounting period;
 --   * a posted/paid/overdue invoice dated in a closed accounting period;
---   * a pending order commission already in an active payout batch.
+--   * a pending order commission already in an active payout batch;
+--   * a rep's commission on the order was already cancelled (an earlier invoice void) and that rep has
+--     no live commission left on it: a fix restores only the pending commissions it cancels itself.
 --
 -- 3. COMMISSIONS: void_invoice cancels the order's PENDING commissions when no other active invoice
 --   remains on the order (20260718221505), and a cancelled commission can never be reopened
 --   (stamp_commission_cancellation_history). A fixed delivery does not undo the order, so the rep must
 --   keep the commission: every pending order commission this call cancelled is re-inserted as a new
---   pending row with the same recipient, split and amount. The cancelled row stays as history.
+--   pending row with the same recipient, split and amount. The cancelled row stays as history, and the
+--   copy names it in the new commissions.replaces_commission_id column (see 4 below).
 --
 -- IDEMPOTENCY: p_idempotency_key is required. The intent fingerprint binds actor, delivery, reason
 --   and the confirmed invoice set. Inner calls use keys derived from it, so a retry after a lost
@@ -61,7 +64,7 @@ DECLARE
   v_order_drafts jsonb;
   v_items jsonb;
 BEGIN
-  SELECT d.id, d.delivery_number, d.status, d.order_id, d.customer_id, d.deleted_at, o.order_number
+  SELECT d.id, d.delivery_number, d.status, d.order_id, d.customer_id, d.deleted_at, d.completed_at, d.scheduled_date, o.order_number, o.status AS order_status
     INTO v_delivery
     FROM deliveries d
     LEFT JOIN orders o ON o.id = d.order_id
@@ -77,6 +80,12 @@ BEGIN
   IF v_delivery.order_id IS NULL THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'NO_ORDER',
       'message', 'This delivery has no order, so it cannot be re-entered from one.');
+  END IF;
+
+  -- void_order already put the stock back and cancelled the commission; a fix would do both again.
+  IF v_delivery.order_status IN ('cancelled', 'voided') THEN
+    v_refusals := v_refusals || jsonb_build_object('code', 'ORDER_CLOSED',
+      'message', 'This delivery''s order is ' || v_delivery.order_status || ', so there is nothing to re-enter. Fix its invoice from the invoice page.');
   END IF;
 
   IF EXISTS (SELECT 1 FROM delivery_external_billings b WHERE b.delivery_id = p_delivery_id) THEN
@@ -120,6 +129,8 @@ BEGIN
        AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
        AND (COALESCE(i.paid_amount_cents, 0) <> 0 OR COALESCE(i.prepay_applied_cents, 0) <> 0
             OR COALESCE(i.write_off_cents, 0) <> 0 OR COALESCE(i.credit_applied_cents, 0) <> 0
+            OR EXISTS (SELECT 1 FROM write_offs w WHERE w.invoice_id = i.id AND w.reversed_at IS NULL)
+            OR EXISTS (SELECT 1 FROM prepay_applications pa WHERE pa.invoice_id = i.id)
             OR EXISTS (SELECT 1 FROM invoice_line_allocations ila
                          JOIN allocation_sets aset ON aset.id = ila.allocation_set_id
                         WHERE ila.invoice_id = i.id AND aset.entity_type = 'payment' AND aset.is_active))
@@ -132,6 +143,8 @@ BEGIN
            'id', i.id,
            'invoice_number', i.invoice_number,
            'status', i.status,
+           -- The month it is voided in; a re-dated invoice makes the preview stale.
+           'invoice_date', i.invoice_date,
            'total_cents', i.total_amount_cents,
            'paid_cents', COALESCE(i.paid_amount_cents, 0),
            'prepay_applied_cents', COALESCE(i.prepay_applied_cents, 0),
@@ -146,11 +159,14 @@ BEGIN
      AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
      AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue');
 
+  -- void_delivery would also cancel the order's split drafts (no delivery), losing the other payers' bills.
   IF EXISTS (SELECT 1 FROM invoices i
-              WHERE i.delivery_id = p_delivery_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
+              WHERE (i.delivery_id = p_delivery_id
+                     OR (i.order_id = v_delivery.order_id AND i.delivery_id IS NULL AND i.status = 'draft'))
+                AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
                 AND i.status NOT IN ('voided', 'cancelled') AND i.invoice_group_id IS NOT NULL) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'SPLIT_INVOICE',
-      'message', 'This delivery is billed on a split invoice. Void the split group from the invoice page first.');
+      'message', 'This delivery or its order has a split invoice. Void the split group from the invoice page first.');
   END IF;
 
   IF EXISTS (SELECT 1 FROM invoices i
@@ -214,6 +230,20 @@ BEGIN
       'message', 'This order''s commission is in a payout batch. Void that commission payment first.');
   END IF;
 
+  -- An earlier ordinary void already cancelled a rep's commission: the fix would not restore it. Checked
+  -- per rep, so another rep's paid or pending split cannot hide it.
+  IF v_delivery.order_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM commissions c
+                  WHERE c.order_id = v_delivery.order_id AND c.status = 'cancelled' AND c.deleted_at IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM commissions r WHERE r.replaces_commission_id = c.id)
+                    AND NOT EXISTS (SELECT 1 FROM commissions l
+                                     WHERE l.order_id = c.order_id AND l.status <> 'cancelled' AND l.deleted_at IS NULL
+                                       AND l.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id
+                                       AND l.recipient IS NOT DISTINCT FROM c.recipient)) THEN
+    v_refusals := v_refusals || jsonb_build_object('code', 'COMMISSION_ALREADY_CANCELLED',
+      'message', 'This order''s commission was cancelled when its invoice was voided earlier, and Fix delivery cannot bring it back. Restore the rep''s commission before fixing this delivery.');
+  END IF;
+
   -- The restored copy must name a user (trg_commissions_recipient_resolved, 20260722134252).
   IF v_delivery.order_id IS NOT NULL AND EXISTS (
     SELECT 1 FROM commissions c
@@ -258,8 +288,13 @@ BEGIN
     'invoices', v_invoices,
     'other_draft_invoices', v_order_drafts,
     'items', v_items,
-    -- What the preview showed; fix_delivery refuses when it no longer matches.
-    'plan_token', md5(jsonb_build_object('invoices', v_invoices, 'other_draft_invoices', v_order_drafts, 'items', v_items)::text)
+    -- What the preview showed (including the delivery, its numbers, completion date, order and customer);
+    -- fix_delivery refuses when it no longer matches.
+    'plan_token', md5(jsonb_build_object('delivery_id', v_delivery.id, 'delivery_number', v_delivery.delivery_number,
+                                         'completed_at', v_delivery.completed_at, 'scheduled_date', v_delivery.scheduled_date,
+                                         'order_id', v_delivery.order_id, 'order_number', v_delivery.order_number,
+                                         'order_status', v_delivery.order_status, 'customer_id', v_delivery.customer_id,
+                                         'invoices', v_invoices, 'other_draft_invoices', v_order_drafts, 'items', v_items)::text)
   );
 END;
 $function$;
@@ -287,6 +322,40 @@ GRANT EXECUTE ON FUNCTION public.preview_fix_delivery(uuid) TO authenticated, se
 -- ---------------------------------------------------------------------------------------------
 -- 3. Execute.
 -- ---------------------------------------------------------------------------------------------
+-- The cancelled commission a Fix Delivery copy replaces. No foreign key: an admin may still delete the
+-- original, and a link to a deleted row hides nothing.
+ALTER TABLE public.commissions ADD COLUMN replaces_commission_id uuid;
+COMMENT ON COLUMN public.commissions.replaces_commission_id IS
+  'Set only by fix_delivery: the cancelled commission this row re-creates. Reports skip a cancelled commission that a row replaces.';
+-- Readable like its sibling columns (per-column grants since 20261022101000); no INSERT or UPDATE grant.
+GRANT SELECT (replaces_commission_id) ON public.commissions TO authenticated;
+GRANT REFERENCES (replaces_commission_id) ON public.commissions TO authenticated;
+GRANT SELECT (replaces_commission_id) ON public.commissions TO anon;
+
+-- The reports trust the link, so nothing but fix_delivery (crx.fix_delivery_restore='on', running as its
+-- owner, who also owns this guard; the postflight checks that) may set or change it: a service_role
+-- session can set the flag but is not the owner.
+CREATE OR REPLACE FUNCTION public.guard_commission_replaces_link()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $fn$
+BEGIN
+  IF NEW.replaces_commission_id IS DISTINCT FROM (CASE WHEN TG_OP = 'UPDATE' THEN OLD.replaces_commission_id END)
+     AND (COALESCE(current_setting('crx.fix_delivery_restore', true), 'off') <> 'on'
+          OR current_user <> (SELECT pg_get_userbyid(p.proowner) FROM pg_proc p
+                               WHERE p.oid = 'public.guard_commission_replaces_link'::regproc)) THEN
+    RAISE EXCEPTION 'COMMISSION_REPLACES_LINK_LOCKED: only Fix Delivery sets replaces_commission_id'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+REVOKE ALL ON FUNCTION public.guard_commission_replaces_link() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER trg_commissions_replaces_link_guard
+  BEFORE INSERT OR UPDATE OF replaces_commission_id ON public.commissions
+  FOR EACH ROW EXECUTE FUNCTION public.guard_commission_replaces_link();
+
 CREATE OR REPLACE FUNCTION public.fix_delivery(
   p_delivery_id uuid,
   p_reason text,
@@ -300,7 +369,7 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := auth.uid();
-  v_reason text := btrim(COALESCE(p_reason, ''));
+  v_reason text := btrim(COALESCE(p_reason, ''), E' \t\r\n');
   v_fingerprint text;
   v_replay jsonb;
   v_plan jsonb;
@@ -315,7 +384,10 @@ BEGIN
   END IF;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF NOT is_admin() THEN RAISE EXCEPTION 'Admin access required to fix a delivery'; END IF;
-  IF v_reason = '' THEN RAISE EXCEPTION 'Reason is required to fix a delivery'; END IF;
+  -- Only blanks of any kind (no-break and other Unicode spaces too) is no reason.
+  IF v_reason ~ '^[[:space:][:cntrl:]\u00a0\u1680\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]*$' THEN
+    RAISE EXCEPTION 'Reason is required to fix a delivery';
+  END IF;
 
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor,
@@ -376,9 +448,13 @@ BEGIN
 
   -- This key has no receipt yet, and the inner receipts commit only with it, so an inner key
   -- already used means another request took it; void_invoice's receipt would replay that one.
-  -- Any operation counts: idempotency_key is unique on its own.
-  IF EXISTS (SELECT 1 FROM idempotency_keys k, jsonb_array_elements(v_plan -> 'invoices') e
-              WHERE k.idempotency_key = p_idempotency_key || ':void_invoice:' || (e ->> 'id')) THEN
+  -- Any operation counts: idempotency_key is unique on its own. An expired receipt does not count:
+  -- the inner function's idempotency helper clears it.
+  IF EXISTS (SELECT 1 FROM idempotency_keys k
+              WHERE (k.expires_at IS NULL OR k.expires_at > now())
+                AND (k.idempotency_key = p_idempotency_key || ':void_delivery'
+                     OR k.idempotency_key IN (SELECT p_idempotency_key || ':void_invoice:' || (e ->> 'id')
+                                                FROM jsonb_array_elements(v_plan -> 'invoices') e))) THEN
     RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH';
   END IF;
 
@@ -390,17 +466,23 @@ BEGIN
   END LOOP;
 
   PERFORM public.void_delivery(p_delivery_id, v_reason, v_actor, p_idempotency_key || ':void_delivery');
+  -- Never report success, or restore the commission, unless the delivery really is voided now.
+  IF NOT EXISTS (SELECT 1 FROM deliveries WHERE id = p_delivery_id AND status = 'voided') THEN
+    RAISE EXCEPTION 'FIX_DELIVERY_NOT_VOIDED';
+  END IF;
 
   -- The order stands, so the rep keeps the commission void_invoice just cancelled.
+  PERFORM set_config('crx.fix_delivery_restore', 'on', true);
   INSERT INTO commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage,
                            commission_amount, order_profit, order_date, season, order_number, customer_name,
-                           status)
+                           status, replaces_commission_id)
   SELECT c.order_id, c.customer_id, c.recipient, c.recipient_user_id, c.split_percentage,
          c.commission_amount, c.order_profit, c.order_date, c.season, c.order_number, c.customer_name,
-         'pending'
+         'pending', c.id
     FROM commissions c
    WHERE c.id = ANY (v_pending_commission_ids) AND c.status = 'cancelled';
   GET DIAGNOSTICS v_commissions_restored = ROW_COUNT;
+  PERFORM set_config('crx.fix_delivery_restore', 'off', true);
 
   v_result := jsonb_build_object(
     'success', true,
@@ -409,13 +491,17 @@ BEGIN
     'order_id', v_order_id,
     'customer_id', v_plan -> 'customer_id',
     'invoices', v_plan -> 'invoices',
+    'other_draft_invoices', v_plan -> 'other_draft_invoices',
     'commissions_restored', v_commissions_restored
   );
 
   INSERT INTO activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id, customer_id)
   VALUES ('delivery_fixed',
           'Fixed delivery ' || (v_plan ->> 'delivery_number') || ': undid it and ' ||
-            jsonb_array_length(v_plan -> 'invoices') || ' invoice(s) for re-entry. Reason: ' || v_reason,
+            jsonb_array_length(v_plan -> 'invoices') || ' invoice(s) for re-entry' ||
+            CASE WHEN jsonb_array_length(v_plan -> 'other_draft_invoices') > 0
+                 THEN ', and cancelled ' || jsonb_array_length(v_plan -> 'other_draft_invoices') || ' order draft invoice(s)'
+                 ELSE '' END || '. Reason: ' || v_reason,
           v_actor, 'delivery', p_delivery_id, (v_plan ->> 'customer_id')::uuid);
 
   PERFORM public.save_idempotency(p_idempotency_key, 'fix_delivery', v_result);
@@ -433,16 +519,24 @@ BEGIN
      OR has_function_privilege('anon', 'public.preview_fix_delivery(uuid)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._fix_delivery_plan(uuid)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public._fix_delivery_plan(uuid)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.fix_delivery(uuid, text, text, text)', 'EXECUTE') THEN
+     OR NOT has_function_privilege('authenticated', 'public.fix_delivery(uuid, text, text, text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.guard_commission_replaces_link()', 'EXECUTE')
+     OR (SELECT proowner FROM pg_proc WHERE oid = 'public.guard_commission_replaces_link'::regproc)
+        IS DISTINCT FROM (SELECT proowner FROM pg_proc WHERE oid = 'public.fix_delivery(uuid, text, text, text)'::regprocedure)
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.commissions'::regclass
+                     AND tgname = 'trg_commissions_replaces_link_guard' AND tgenabled = 'O') THEN
     RAISE EXCEPTION 'FIX_DELIVERY_GRANTS_DRIFT';
   END IF;
 END
 $postflight$;
 
 -- ---------------------------------------------------------------------------------------------
--- 4. Reports skip cancelled commissions. A fix leaves the cancelled original next to its pending
---    copy (cancelled rows keep their amount and cannot reopen), so summing every status counted
---    it twice; this also stops any other voided invoice's cancelled commission from counting.
+-- 4. Reports skip a cancelled commission only when a row replaced it (replaces_commission_id, set by
+--    Fix Delivery). The link holds whatever later happens to the copy: an order edit changes its amount,
+--    or a later void cancels it, and the commission still counts once. A fix leaves the
+--    cancelled original next to its pending copy (cancelled rows keep their amount and cannot
+--    reopen), so summing every status counted it twice. A commission an ordinary void cancelled has
+--    no copy and still counts, so no past month's total moves.
 --    Each body below is the live one (pinned by hash) with only its commission line changed.
 -- ---------------------------------------------------------------------------------------------
 DO $reports_preflight$
@@ -485,7 +579,7 @@ BEGIN
     'orders', jsonb_build_object('count', (SELECT count(*) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 'total_cents', COALESCE((SELECT sum((total_price * 100)::bigint) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 0)),
     'deliveries', jsonb_build_object('count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status NOT IN ('cancelled', 'voided') AND deleted_at IS NULL), 'completed_count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status = 'completed' AND deleted_at IS NULL)),
     'applications', jsonb_build_object('count', (SELECT count(*) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 'total_acres', COALESCE((SELECT sum(total_acres) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 0)),
-    'commissions', jsonb_build_object('earned_cents', COALESCE((SELECT sum((commission_amount * 100)::bigint) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status <> 'cancelled'), 0), 'paid_count', (SELECT count(*) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status = 'paid')),
+    'commissions', jsonb_build_object('earned_cents', COALESCE((SELECT sum((c.commission_amount * 100)::bigint) FROM public.commissions c WHERE c.order_date BETWEEN p_period_start AND p_period_end AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.replaces_commission_id = c.id))), 0), 'paid_count', (SELECT count(*) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status = 'paid')),
     'ar_balance_cents', COALESCE((SELECT sum(balance_cents) FROM public.invoices WHERE status IN ('posted', 'overdue') AND balance_cents > 0 AND deleted_at IS NULL), 0)
   ) INTO v_result;
   RETURN v_result;
@@ -522,9 +616,12 @@ BEGIN
     AND i.deleted_at IS NULL;
 
   v_gross_profit := v_revenue - v_cogs;
-  SELECT COALESCE(SUM(commission_amount), 0) INTO v_commissions
-  FROM public.commissions
-  WHERE order_date >= p_start_date AND order_date <= p_end_date AND status <> 'cancelled';
+  -- A cancelled commission still counts unless a row replaced it (Fix Delivery re-creates the
+  -- order's commission), so an ordinary invoice void does not change a past month's total.
+  SELECT COALESCE(SUM(c.commission_amount), 0) INTO v_commissions
+  FROM public.commissions c
+  WHERE c.order_date >= p_start_date AND c.order_date <= p_end_date
+    AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.replaces_commission_id = c.id));
   v_net_profit := v_gross_profit - v_commissions;
 
   RETURN QUERY VALUES
@@ -542,9 +639,9 @@ DECLARE
   v_monthly text := (SELECT prosrc FROM pg_proc WHERE oid = 'public.get_monthly_summary(date,date)'::regprocedure);
   v_pnl text := (SELECT prosrc FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure);
 BEGIN
-  IF position('AND status <> ''cancelled''), 0)' IN v_monthly) = 0
+  IF position('r.replaces_commission_id = c.id' IN v_monthly) = 0
      OR position('PERFORM require_admin();' IN v_monthly) = 0
-     OR position('AND status <> ''cancelled'';' IN v_pnl) = 0
+     OR position('r.replaces_commission_id = c.id' IN v_pnl) = 0
      OR NOT (SELECT prosecdef AND pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.get_monthly_summary(date,date)'::regprocedure)
      OR (SELECT prosecdef FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure)
      OR has_function_privilege('anon', 'public.get_monthly_summary(date,date)', 'EXECUTE')

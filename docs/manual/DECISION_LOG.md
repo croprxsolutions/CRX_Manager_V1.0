@@ -10,6 +10,99 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-04 — Claude hooks run the same in Cursor; no Cursor-only hook file
+
+**Source:** Mason, 2026-11-04, asking to set up Cursor to work on CRX alongside Claude and Codex, with the rule
+that no guard is weakened to make Cursor work.
+
+**Decision.** Cursor uses the existing `.claude/settings.json` hooks (it imports them) rather than a separate
+`.cursor/hooks.json`, so one manifest keeps every guard for Claude Code and Cursor. Hook commands must run in both
+Git Bash and PowerShell 7: paths start `$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}`, and the merge guard's
+fallback is `|| echo '<denial>'; exit 0`. Detail and the measured Cursor behavior:
+`docs/reference/agent-guardrails.md` ("Cursor runs these hooks too").
+
+**What this forbids/implies:** no other shell variable in a `.claude/settings.json` hook command
+(`scripts/windows-hook-command.test.mjs` fails on one). A fallback that must deny exits 0, because Cursor ignores
+the output of a hook that exits non-zero. Cursor's Supabase and Vercel plugins stay signed out until this lands.
+
+## 2026-11-04 — Inventory costing parked as roadmap; short pre-season list instead
+
+**Source:** Mason, 2026-11-04, after a harsh Sol (gpt-6-sol, high) review of the whole inventory proposal:
+"i dont want this to be hard to manage or it wil be a overbuilt system that no one uses ... i am thinking of
+holding alot of this work for later since i have more important features i need to focus on", then "Yes,
+record it".
+
+**Decision (D12).** Every inventory-costing phase (stock age and holding cost, cost of stock on hand, vendor-bill
+matching and special-order margin, quote warnings) is parked as a roadmap idea with a stated trigger. Before
+next season only a short list is in scope: fix KI-93 and KI-94, review the 14 March orders holding stock, run
+the physical count as a controlled process, verify units for stocked products only, set reorder points for a
+short list, return to POs and receiving in CRX, and relabel the pricing-basis value. Details:
+`docs/plans/2026-07-16-inventory-costing-plan.md` section 0.
+
+**What this forbids/implies:** no costing feature is built without a new go-ahead after its trigger is met.
+The holding-cost numbers, supplier-price exposure, starting-date history, the Option B cost engine, freight,
+rebates, lots and GMROI are cut. Each pre-season item is still built only on Mason's go-ahead, through its own
+PR and reviews. The count comes before any estimated dates or costs are entered.
+
+## 2026-11-04 — A byte-identical migration restamp keeps its Sol and reviewer proofs
+
+**Source:** Mason, 2026-11-04, in the retro of the WP-PM-11a-1 session (PR #1425, product rate lock), choosing that byte-identical restamps keep their Sol and reviewer proofs, then "spin up item 1".
+
+**Decision.** When a reviewed migration must take a new timestamp because a newer one went live,
+and the SQL is byte-identical (LF-normalized), the existing proofs carry to the new stamp instead
+of a full re-review: the Sol proof (`write-codex-push-proof.mjs --carry-restamp`) and both
+migration-reviewer proofs (`write-apply-proofs.mjs --restamp-from <old> <new>`). The carry needs
+one commit on top of the reviewed head that only renames that migration and swaps the old stamp
+for the new one elsewhere, and every proof still inside its original 24 hours. Anything else
+refuses and the full review runs.
+
+**Why.** On 2026-11-04 `20261105200000_product_rate_lock` was approved, then refused at apply
+because another session had applied `20261106110000` meanwhile. Restamping it to `20261106120000`
+with identical SQL cost a new Sol run (about 15-40 minutes), re-minted reviewer proofs and a
+second owner approval. It was the third such collision.
+
+**What this forbids/implies:** Mason's owner approval (`owner-approve-migration.mjs`, his
+`I approve`) never carries; a parked migration is re-approved for the new stamp. Destructive-
+migration approval is never carried. Every other apply and merge check is unchanged.
+## 2026-11-04 — Inventory costing: plan settled before any build
+
+**Source:** Mason, 2026-11-04, a planning session on the research report (PR #1428): "I want to plan and
+brainstorm our entire plan before we build anything", then answers to each open question.
+
+**Decision.** For the inventory-costing plan (`docs/plans/2026-07-16-inventory-costing-plan.md`, section 12):
+- Only admins see the new cost numbers.
+- The holding-cost rate is a flat 10% a year, as an admin setting he can change later.
+- Stock is flagged at 270 days.
+- No lot tracking; estimated age is enough.
+- No freight or rebates for now, so Phase 3 is dropped.
+- Special orders show both the booked and the corrected margin.
+- The build order is Phase 1 → 2 → 4 → 5.
+- Purchases go back through CRX POs and receiving (since June they were made by phone and email).
+- Phase 2 starts fresh from a stock count with confirmed starting costs before busy season, with no back-entry.
+- Chemical totes are stocked already filled. Bulk storage exists only for fertilizer.
+- Stock CRX cannot date because of the June gap shows "age unknown"; admins can bulk-enter an estimated
+  received date for it, shown as an owner estimate; after the code check this is each product's starting
+  date, with CRX receipts after it added on top (D10, `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`).
+- After a Sol review of the whole plan: vendor-bill matching moves into Phase 4 (D11), without freight or
+  rebates, and every phase stays "simple but practical; this is not a major feature".
+
+**Rule.** Nothing in the plan is built until Mason gives a separate go-ahead for that phase (D1 is still open).
+Each phase gets its own plan, Luna review and Sol review.
+
+## 2026-11-04 — A trigger's TRUNCATE event no longer counts as deleting data
+
+**Source:** Mason, 2026-11-04, in the retro of the WP-PM-11a-1 session (PR #1425): "spin up item 2".
+
+**Decision.** `destructiveMigrationCheck` (`.claude/hooks/live-testdata-lib.mjs`) ignores `TRUNCATE`
+only where it is an event in a `CREATE [OR REPLACE] [CONSTRAINT] TRIGGER … BEFORE|AFTER|INSTEAD OF … ON`
+event list. Such a trigger blocks a table wipe; it cannot perform one. Every real `TRUNCATE`
+statement stays destructive: at top level, in a DO block, in an `EXECUTE` string, or beside a
+trigger in the same file. A function the migration runs that truncates is still parked by the
+data-rewrite check. The destructive-migration approval gate is otherwise unchanged.
+
+**Why.** PR #1425's append-only audit tables use `BEFORE TRUNCATE` triggers, and the owner-approval
+screen told Mason that migration "Deletes data: TRUNCATE", which was false.
+
 ## 2026-11-03 — A migration's apply accepts a carried-forward Sol proof
 
 **Source:** Mason, about 11 PM Central on 2026-11-03 (session 0beec9c6, after the PR #1389 landing): "Yes, update the rule".

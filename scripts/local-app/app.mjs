@@ -193,7 +193,13 @@ function migrationBytes(file) {
 // Live held this one body with CRLF when 20260817120000 pinned it, so install that text
 // first, the same way the real-schema proofs under scripts/smoke/ do.
 function withLiveLineEndings(file, sql) {
-  if (path.basename(file) !== '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') return sql;
+  // Live also holds validate_product_units with CRLF, which 20261104150000 pins by md5.
+  if (path.basename(file) === '20261104150000_product_forms_seed_each.sql') {
+    return `DO $live_crlf_validate$ BEGIN
+  EXECUTE replace(pg_get_functiondef('public.validate_product_units()'::regprocedure), E'\\n', E'\\r\\n');
+END $live_crlf_validate$;\n${sql}`;
+  }
+  if (path.basename(file) !=='20260817120000_carry_allocated_line_cents_through_lifecycle.sql') return sql;
   const source = readFileSync(path.join(ROOT, 'supabase/migrations/20260721014858_20260721010000_govern_invoice_order_money_lifecycle.sql'), 'utf8').replaceAll('\r\n', '\n');
   const start = source.indexOf('CREATE FUNCTION public._close_undelivered_order_remainder_20260718(');
   const tag = /\$([A-Za-z_]*)\$/.exec(source.slice(start));

@@ -131,7 +131,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // enforce_delivery_void_needs_invoice_void: a delivery with an active posted invoice cannot be voided or cancelled
   [/^DELIVERY_HAS_POSTED_INVOICE\b/,
    'Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery. For a completed delivery, an admin can use Fix Delivery to do both at once'],
-  // fix_delivery (20261106100000): the server re-checks the preview and refuses if anything changed.
+  // fix_delivery (20261106150000): the server re-checks the preview and refuses if anything changed.
   [/^FIX_DELIVERY_REFUSED\b/,
    'Nothing was changed. Something on this delivery now blocks a fix. The reasons are shown on the Fix Delivery screen'],
   [/^FIX_DELIVERY_PREVIEW_STALE\b/,

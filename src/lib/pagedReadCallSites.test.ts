@@ -36,8 +36,11 @@ const COMPONENT_FILES = [
   'integrity/IntegrityCleanupPanel.tsx',
   'inventory/TransactionLedgerModal.tsx',
   'invoices/FinanceChargePreviewModal.tsx',
+  'orders/BulkOrderImport.tsx',
   'prepay/PrepaymentManagerPanel.tsx',
   'prepay/PrepayWorkspacePanel.tsx',
+  'purchase-orders/BulkPOImport.tsx',
+  'quotes/BulkQuoteImport.tsx',
   'receiving/QuickReceivePanel.tsx',
   'reports/LogbookReport.tsx',
 ];

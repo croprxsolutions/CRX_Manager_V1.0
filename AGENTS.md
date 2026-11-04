@@ -38,6 +38,7 @@ Current code, migrations, tests, grants, and live read-only evidence outrank his
 | Choosing a Codex model or effort | `docs/reference/codex-model-tuning.md` |
 | Push, PR finalization, merge, or release | `.claude/commands/ship.md` |
 | Settled decisions, known problems, or current status | `docs/manual/DECISION_LOG.md`, `docs/manual/KNOWN_ISSUES.md`, or `docs/manual/CURRENT_STATE.md` |
+| Research, how other ag software works, or past app context | `docs/research/` first, then the shared CRX Notes Obsidian vault (`croprxsolutions/crx-notes`; Mason's copy: `C:\Users\mason\Documents\CRX Notes`), before starting new research |
 | Mason asks how the system or agent process works | `docs/manual/OWNER_PLAYBOOK.md` |
 
 ## Engineering Principles

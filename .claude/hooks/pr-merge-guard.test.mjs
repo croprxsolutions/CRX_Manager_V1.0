@@ -710,31 +710,31 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   const older = ["1", "2", "3", "4", "5", "6"].map((c) => proof(c.repeat(40)));
   const prCommits = new Set([...older.map((p) => p.head_sha), H]);
   // The gate's accept test against a fake GitHub: each call costs 1s of the real 27s budget.
-  const scan = (proofs, find) => {
+  // laterRisky: the commits after each earlier proof touch the Sol list, so each is refused only at the last call.
+  const scan = (proofs, find, laterRisky = true) => {
     let t = 0;
     let calls = 0;
     const budget = createHardGateBudget({ deadlineMs: 27_000, callTimeoutMs: 0, clock: () => t });
     const call = () => { if (!budget.admit()) throw new Error("budget spent"); calls++; t += 1000; };
     const isAncestor = (a, b) => { call(); return b === H || a === B; };  // older commits are not in main
-    const solRisky = () => { call(); call(); return false; };
+    const solRisky = () => { call(); call(); return laterRisky; };
     const accept = (data, exactHead) =>
       proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B, isAncestor, prCommits })
         && (exactHead || !solRisky());
     try { return { accepted: find(proofs, accept), calls }; } catch { return { spent: true, calls }; }
   };
   const readdirOrder = [...older, proof(H)];
-  ok(scan(readdirOrder, (ps, accept) => {
-    // Every older proof refused late (e.g. its later commits touch the Sol list).
-    for (const d of ps) if (accept(d, d.head_sha === H) && d.head_sha === H) return d;
-    return null;
-  }).spent, "checking the earlier proofs first spends the whole budget (the PR #1389 refusal)");
+  const oldGate = (ps, accept) => ps.find((d) => accept(d, d.head_sha === H)) ?? null;
+  ok(scan(readdirOrder, oldGate).spent, "the old readdir-order scan spends the whole budget (the PR #1389 refusal)");
   const fast = scan(readdirOrder, (ps, accept) => firstAcceptedProof(ps, H, accept));
   eq(fast.accepted?.head_sha, H, "the exact-head proof is accepted though it is read last");
   ok(fast.calls <= 2, `...after ${fast.calls} GitHub calls, well inside the budget`);
-  eq(scan(older, (ps, accept) => firstAcceptedProof(ps, H, accept)).accepted?.head_sha, older[0].head_sha,
-    "with no exact-head proof an earlier one still counts");
+  eq(scan(older, (ps, accept) => firstAcceptedProof(ps, H, accept)).accepted, null,
+    "earlier proofs whose later commits touch the Sol list are still refused");
+  eq(scan(older, (ps, accept) => firstAcceptedProof(ps, H, accept), false).accepted?.head_sha, older[0].head_sha,
+    "with no exact-head proof an earlier low-risk one still counts");
   const stale = proof(H, { timestamp: new Date(now - 25 * 3600_000).toISOString() });
-  eq(scan([stale, ...older], (ps, accept) => firstAcceptedProof(ps, H, accept)).accepted?.head_sha, older[0].head_sha,
+  eq(scan([stale, ...older], (ps, accept) => firstAcceptedProof(ps, H, accept), false).accepted?.head_sha, older[0].head_sha,
     "a stale exact-head proof never counts; the scan moves on");
   eq(scan([proof(H, { verdict: "blocked" })], (ps, accept) => firstAcceptedProof(ps, H, accept)).accepted, null,
     "a blocked exact-head proof is refused");

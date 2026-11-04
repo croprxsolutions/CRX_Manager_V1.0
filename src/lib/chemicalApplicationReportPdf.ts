@@ -23,7 +23,8 @@
  * No aerial content, no pricing/billing — a compliance record, not an invoice.
  */
 import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from './pdfTheme';
-import { COMPANY_NAME, COMPANY_CITY, COMPANY_FOOTER_THANKS } from './companyInfo';
+import { companyFooterThanks, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { fmtNum } from './applicatorSheetData';
 import {
   buildChemicalApplicationReportData,
@@ -40,10 +41,10 @@ function fmtDate(d: string): string {
 /**
  * Footer rule + company line on every page. This report is CUSTOMER/REGULATOR-
  * facing (handed out as proof of application), so it uses the customer-safe
- * COMPANY_FOOTER_THANKS — NOT the "Internal Use Only" footer the internal crew
+ * companyFooterThanks — NOT the "Internal Use Only" footer the internal crew
  * documents (applicator field sheet / loader worksheet) carry (Codex P2).
  */
-function drawFooter(doc: JsPDFWithAutoTable, margin: number): void {
+function drawFooter(doc: JsPDFWithAutoTable, margin: number, company: CompanyInfo): void {
   const pageW = doc.internal.pageSize.getWidth();
   const footerY = doc.internal.pageSize.getHeight() - 30;
   doc.setDrawColor(200, 200, 200);
@@ -51,7 +52,7 @@ function drawFooter(doc: JsPDFWithAutoTable, margin: number): void {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
-  doc.text(COMPANY_FOOTER_THANKS, pageW / 2, footerY + 12, { align: 'center' });
+  doc.text(doc.splitTextToSize(companyFooterThanks(company), pageW - margin * 2).slice(0, 2), pageW / 2, footerY + 12, { align: 'center' });
 }
 
 /** Page-break guard: add a page when the next block won't fit. Returns new y. */
@@ -68,6 +69,7 @@ function drawReport(
   doc: JsPDFWithAutoTable,
   autoTable: typeof import('jspdf-autotable').default,
   data: ChemicalApplicationReportData,
+  company: CompanyInfo,
 ): void {
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 40;
@@ -82,8 +84,10 @@ function drawReport(
   doc.text('Chemical Application Report', margin, 26);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(COMPANY_NAME, margin, 40);
-  doc.text(COMPANY_CITY, margin, 50);
+  fitCompanyNameFont(doc, company.name, pageW / 2 - margin, 9);
+  doc.text(company.name, margin, 40);
+  fitCompanyNameFont(doc, company.address, pageW / 2 - margin, 9);
+  doc.text(company.address, margin, 50);
   doc.setFontSize(9);
   doc.text(`Job ${data.job_number}`, pageW - margin, 26, { align: 'right' });
   doc.text(
@@ -220,16 +224,17 @@ export async function generateChemicalApplicationReportPdf(
 
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
 
-  drawReport(doc, autoTable, data);
+  drawReport(doc, autoTable, data, company);
 
   // Footer on every page (drawn last so the page count is final).
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    drawFooter(doc, 40);
+    drawFooter(doc, 40, company);
   }
 
   doc.save(filename || `chemical-application-report-${data.job_number}.pdf`);

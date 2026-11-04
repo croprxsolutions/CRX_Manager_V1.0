@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Settings company details (Company Info) the PDF letterhead and footer print.
+const companyInfo = vi.hoisted(() => ({
+  load: vi.fn(async () => ({ name: 'Prairie Ag Co', phone: '555-0100', email: '', address: '12 Main St Annapolis, IL 62413' })),
+}));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
 import type { ChemicalApplicationReportData } from './chemicalApplicationReportData';
 
 const mockDoc = {
@@ -12,6 +18,7 @@ const mockDoc = {
   setDrawColor: vi.fn(),
   line: vi.fn(),
   splitTextToSize: vi.fn((text: string) => [text]),
+  getTextWidth: vi.fn(() => 50),
   addPage: vi.fn(),
   setPage: vi.fn(),
   getNumberOfPages: vi.fn(() => 2),
@@ -105,6 +112,15 @@ describe('generateChemicalApplicationReportPdf', () => {
       'Corn',
       'Waterhemp',
       '120',
+    ]));
+  });
+
+  it('prints the Settings company name and address in the header and footer', async () => {
+    await generateChemicalApplicationReportPdf(makeReport());
+    expect(renderedText()).toEqual(expect.arrayContaining([
+      'Prairie Ag Co',
+      '12 Main St Annapolis, IL 62413',
+      'Prairie Ag Co  •  12 Main St Annapolis, IL 62413  •  Thank you for your business!',
     ]));
   });
 

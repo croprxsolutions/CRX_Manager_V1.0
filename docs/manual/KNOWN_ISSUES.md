@@ -525,12 +525,16 @@ Neither checks for the other, and same-operation retry protection does not cover
 path refuses when the ticket already went down the other one, inside PostgreSQL.
 
 ### KI-94 — Voiding a delivery can put back more reserved stock than completion took
-**LOW-MED · OPEN (found 2026-11-02, Ponytail audit #16, confirmed by Sol) · database/inventory · unassigned**
+**LOW-MED · FIXED 2026-11-04 (migration `20261106230000` applied live, ledger `20261104202037`; residual below) · database/inventory · Claude**
 Completion (`supabase/migrations/20261014210000_order_invoices_rep_own_name.sql` ~L612) lowers
 `quantity_prebooked` by `LEAST(delivered, prebooked)`, but `void_delivery` adds back the full delivered quantity.
 Prebooked 3, delivered 10, voided: prebooked becomes 10, so available stock reads low. Fully reserved deliveries are
-unaffected. Cancelling a completed delivery is refused since PR #1284, so only void remains. Fix needs a decision
-first (Sol): put back exactly what completion took (store it), or rebuild the order's outstanding reservation.
+unaffected. Cancelling a completed delivery is refused since PR #1284, so only void remains. Fix (Option A): completion
+records per delivery line what it took (`delivery_items.quantity_prebooked_released`) and void puts back exactly that.
+Residual: a line completed before the migration has no record and still restores the delivered quantity; since
+`20261106233000` (applied live 2026-11-04, ledger `20261104220928`; Mason chose "flag them for review") that void's ledger row is marked
+`requires_review` with a note to check reserved stock. Live
+read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20); nothing is corrected.
 
 ### KI-100 — A spray job could leave a booking with a remainder no Partial Order can take
 **MED · FIX WRITTEN, NOT YET LIVE: migration `20261106170000`, to be applied before its PR merges · database · found 2026-11-04 (PR #1362 review)**

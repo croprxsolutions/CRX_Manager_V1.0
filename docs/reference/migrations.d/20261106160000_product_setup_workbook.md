@@ -1,0 +1,15 @@
+**LOCAL CANDIDATE, not applied.** `20261106160000_product_setup_workbook.sql` (LF SQL sha256: `c193bb2a5807c5b47b66b9d2ed7c6adf223871d5cee20d83082946d8995a607a`). WP-PM-11a-2. REQUIRES `20261106120000_product_rate_lock` (its preflight checks `set_product_rates`, `preview_product_rate_correction`, the rate value and unit helpers and `product_rate_lock`); without them the one-transaction apply changes nothing.
+
+What it does:
+- New `get_product_setup_workbook()`: admin only, read-only. Every product's setup fields, rates (as exact text), pricing version, pack size, stock unit, form and tier 1–3 per-acre prices, plus a per-row `setup_fingerprint` and whether rates are locked. Never vendor or cost.
+- New `preview_product_rates(rows)`: admin only, read-only. Takes Rates-tab rows in `set_product_rates`' shape without the previewed prices, and reports each row as `change`, `unchanged`, `stale`, `invalid_rate`, `invalid_unit` or `not_found`, using the same checks in the same order as `set_product_rates`. A change carries its rates and tier 1–3 per-acre prices before and after; the after prices come from `preview_product_rate_correction`, which `set_product_rates` then holds the save to.
+- New `apply_product_setup(rows, performed_by, idempotency_key)`: admin only, actor-bound, idempotent, 1–2000 rows of `{product_id, setup_fingerprint, changes}`, all or nothing. `changes` may name only the Setup fields (`product_name, sku, category, manufacturer, container_size, container_type, epa_registration, is_rup, signal_word, rei_hours, phi_days, max_label_rate, max_label_rate_unit, use_timings, notes, internal_notes, quoting_notes`); anything else is refused (`PRODUCT_SETUP_ROW_SHAPE_INVALID`). A row whose fingerprint no longer matches is refused by product name (`PRODUCT_SETUP_STALE`), a wrong-typed value likewise (`PRODUCT_SETUP_INVALID`), and a value a `products` check refuses names the product (`PRODUCT_SETUP_ROW_REFUSED: <name>: <check>`). The existing products triggers (category, name, SKU, EPA format, REI, PHI, use timings, container type, signal word, rate lock) run on every write, and `product_change_history` records each change.
+- Private helper `_product_setup_fingerprint(products)` (no API-role EXECUTE).
+
+Grants: every function is revoked from PUBLIC, anon, authenticated and service_role; EXECUTE goes to `authenticated` on the three public functions only. All three are SECURITY DEFINER with `search_path = public, pg_temp` and refuse non-admins in the body. No table, column or existing row changes.
+
+Rollback: drop the four functions. Nothing else to undo; setup changes saved through it stay as saved, each recorded in `product_change_history`.
+
+Proof: `node scripts/smoke/prove-product-setup-workbook-real-schema.mjs` prints `PRODUCT_SETUP_WORKBOOK_PROOF_PASS`.
+
+Live ledger preflight, read 2026-11-04 (`list_migrations`): high-water `20261106130000_invoice_resave_keeps_line_cents`; `20261106120000_product_rate_lock` is not applied and sorts below that live stamp, so WP-PM-11a-1 is restamped (or applied) before this file. Read the ledger again at apply time.

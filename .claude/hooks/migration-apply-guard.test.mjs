@@ -109,6 +109,10 @@ for (const [name, sqlText] of [
   ["a trigger and a real TRUNCATE in one file", `${rateLockTriggers}\nTRUNCATE public.customers;`],
   ["a real TRUNCATE on the same line as a trigger", "CREATE TRIGGER t3 BEFORE TRUNCATE ON t FOR EACH STATEMENT EXECUTE FUNCTION f(); TRUNCATE customers;"],
   ["a trigger header split across strings around a TRUNCATE", `SELECT 'create trigger "'; TRUNCATE customers; SELECT '" before truncate on';`],
+  // Codex App P1 (PR #1433): a quoted UPDATE OF column spanning two strings.
+  ["a quoted UPDATE OF column spanning a TRUNCATE", `SELECT 'create trigger x before update of "'; TRUNCATE customers; SELECT '" or truncate on';`],
+  ["a quoted UPDATE OF column spanning a TRUNCATE, no event", `SELECT 'create trigger x before update of "'; TRUNCATE customers; SELECT '" on';`],
+  ["a quoted UPDATE OF column spanning a dollar-quoted TRUNCATE", `SELECT $q$create trigger x before update of "$q$; DO $d$ BEGIN TRUNCATE customers; END $d$; SELECT $q$" on$q$;`],
 ]) ok(destructiveMigrationCheck(sqlText).destructive, `${name} stays destructive`);
 // A function the migration RUNS that truncates is caught by the data-rewrite check (bodies never reach the one above).
 ok(dataRewriteCheck(`${rateLockTriggers}\nCREATE FUNCTION public.wipe() RETURNS void LANGUAGE sql AS $$ TRUNCATE public.customers $$;\nSELECT public.wipe();`, { history: [] }).rewrites,

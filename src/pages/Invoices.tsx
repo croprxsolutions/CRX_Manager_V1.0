@@ -921,7 +921,7 @@ export default function Invoices() {
             loadError={loadError}
             onRetry={() => { void fetchInvoices(); }}
             filters={
-              <div className="flex gap-2 items-center">
+              <div className="flex flex-wrap gap-2 items-center">
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as InvoiceStatusFilter)}

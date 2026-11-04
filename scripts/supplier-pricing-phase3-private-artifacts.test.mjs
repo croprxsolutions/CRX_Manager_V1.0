@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { chmodSync, closeSync, copyFileSync, existsSync, ftruncateSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { chmodSync, closeSync, copyFileSync, existsSync, ftruncateSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { assertHarmlessSupabaseStderr, buildPostStageASnapshot, CAPTURE_SQL, capturePostStageASnapshot, parseSupabaseJson, POST_STAGE_A_SNAPSHOT_FORMAT } from './capture-supplier-pricing-phase3-post-stage-a-snapshot.mjs';
@@ -11,8 +10,9 @@ import { verifyManifest } from './verify-supplier-pricing-phase3-classification-
 import { verifyOwnerDecisionSheet } from './verify-supplier-pricing-phase3-owner-decision-sheet.mjs';
 import { checkCommitMessagePrivateArtifactContainment, checkGitHubEventPrivateArtifactContainment, checkPrePushPrivateArtifactContainment, checkPrivateArtifactContainment, forbiddenArtifactReason, GITHUB_EVENT_HANDOFF_PROTOCOL, GIT_OUTPUT_MAX_BUFFER, gitOutput, hermeticGitEnvironment, ignoredLargeCandidateHasPrivateSignal, isStructuralSignatureExempt, MAX_HISTORY_COMMITS, MAX_STRUCTURAL_SCAN_BYTES, MAX_STRUCTURAL_SCAN_CANDIDATES, MAX_TOTAL_STRUCTURAL_SCAN_BYTES, ownWorktreeMarker, parseCli, readWorktreeCandidate, ScanBudget, structuralPrivateArtifactReason, structuralPrivateArtifactStreamReason, STRUCTURAL_SIGNATURE_EXEMPTIONS, STRUCTURAL_SIGNATURE_HISTORY_EXEMPTIONS, STRUCTURAL_SIGNATURE_REASON, validateStructuralSignatureExemptions, validateStructuralSignatureHistoryExemptions } from './check-supplier-pricing-phase3-private-artifacts.mjs';
 import { assertExternalArtifactPath, assertExternalPrivateDirectory, CONTAINER_TYPE_ALLOWLIST, loadValidatedSnapshot, MAX_PRIVATE_ARTIFACT_BYTES, OWNER_DECISION_HEADERS, OWNER_DECISION_SHEET_NAME, POST_STAGE_A_MANIFEST_NAME, POST_STAGE_A_SNAPSHOT_NAME, PRE_STAGE_A_SNAPSHOT_NAME, PRODUCT_FORM_ALLOWLIST, readValidatedPrivateArtifact, REPO_ROOT, validatePostStageASnapshot, without, writePrivateArtifactAtomic } from './supplier-pricing-phase3-private-artifacts.mjs';
+import { tempDir } from './lib/test-temp-dir.mjs';
 
-const temp = mkdtempSync(path.join(os.tmpdir(), 'crx-phase3c-synthetic-'));
+const temp = tempDir('crx-phase3c-synthetic-');
 const external = path.join(temp, 'external'); mkdirSync(external);
 const fakeRepo = path.join(temp, 'fake-repository'); mkdirSync(fakeRepo);
 const id1 = '11111111-1111-4111-8111-111111111111';
@@ -1473,8 +1473,9 @@ git() { return 0; }
     'CI must run the packet suite explicitly in the trusted full-CI route',
   );
   if (fixtureBash()) {
-    const hookPath = path.join(REPO_ROOT, '.husky', 'pre-push');
-    const runPrePushHook = (functions, args = [], input = '') => spawnSync(fixtureBash(), ['-c', `${functions}\nHOOK=$1; shift; source "$HOOK"`, 'synthetic-pre-push', hookPath, ...args], { cwd: REPO_ROOT, encoding: 'utf8', input, env: sanitizedFixtureGitEnv() });
+    const hookPath = '.husky/pre-push'; // relative to cwd REPO_ROOT, so no absolute path reaches the shell
+    // $0 is the hook's own path, so the sourced hook and its stubs do not hand off to a fresh shell.
+    const runPrePushHook = (functions, args = [], input = '') => spawnSync(fixtureBash(), ['-c', `${functions}\nHOOK=$1; shift; source "$HOOK"`, hookPath, hookPath, ...args], { cwd: REPO_ROOT, encoding: 'utf8', input, env: sanitizedFixtureGitEnv() });
     for (const [name, functions] of [
       ['containment', 'node() { return 42; }; npm() { return 0; };'],
       ['typecheck', 'node() { return 0; }; npm() { if [ "$2" = "typecheck" ]; then return 42; fi; return 0; };'],
@@ -1488,7 +1489,7 @@ git() { return 0; }
     assert(!prePush.includes('graphify'), 'pre-push must not refresh Graphify; it is on demand (npm run graph:refresh)');
     const preCommitPath = '.husky/pre-commit'; // relative to cwd REPO_ROOT, so no absolute path reaches the shell
     // git(): `diff --cached` lists the staged paths; `diff --quiet` reports unstaged edits via $unstaged; `ls-files` lists $untracked.
-    const runPreCommitHook = (staged, npx, unstaged = 0, untracked = '') => spawnSync(fixtureBash(), ['-c', `git() { [ "$2" = "--quiet" ] && return ${unstaged}; [ "$1" = "ls-files" ] && { printf '%s' '${untracked}'; return 0; }; printf '%s\\n' ${staged}; }; node() { return 0; }; bash() { return 0; }; ${npx}\nHOOK=$1; shift; source "$HOOK"`, 'synthetic-pre-commit', preCommitPath], { cwd: REPO_ROOT, encoding: 'utf8', env: sanitizedFixtureGitEnv() });
+    const runPreCommitHook = (staged, npx, unstaged = 0, untracked = '') => spawnSync(fixtureBash(), ['-c', `git() { [ "$2" = "--quiet" ] && return ${unstaged}; [ "$1" = "ls-files" ] && { printf '%s' '${untracked}'; return 0; }; printf '%s\\n' ${staged}; }; node() { return 0; }; bash() { return 0; }; ${npx}\nHOOK=$1; shift; source "$HOOK"`, preCommitPath, preCommitPath], { cwd: REPO_ROOT, encoding: 'utf8', env: sanitizedFixtureGitEnv() });
     const registryFails = 'npx() { [ "$2" = "run" ] && return 42; return 0; };';
     const registryPasses = 'npx() { [ "$*" = "vitest run src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts" ] && return 0; return 42; };';
     assert.equal(runPreCommitHook('supabase/migrations/20990101000000_x.sql', registryFails).status, 1, 'a staged migration must block the commit when the RPC registry tests fail');

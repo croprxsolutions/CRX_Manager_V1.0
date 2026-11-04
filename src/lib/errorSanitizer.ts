@@ -347,6 +347,9 @@ export function sanitizeError(error: unknown): string {
   // The server sentence names the product and says what to do, so it is kept.
   const chemPriceRequired = message.match(/^CHEM_PRICE_REQUIRED:\s*(.+)$/s);
   if (chemPriceRequired) return `Nothing was saved. ${chemPriceRequired[1].trim()}`;
+  // Sale-line triggers (20261105190000, WP-PM-6b): the same rule on quote, order and tier-priced invoice lines.
+  const salePriceMissing = message.match(/^(?:QUOTE|ORDER|INVOICE)_PRICE_MISSING:\s*(.+)$/s);
+  if (salePriceMissing) return `Nothing was saved. ${salePriceMissing[1].trim()}`;
   if (/^INVOICE_POSTED_LOCKED(?::|$)/.test(message)) {
     return 'This invoice was posted, so its lines, billing shares and field locations cannot change. Unpost it first, then edit.';
   }

@@ -177,7 +177,7 @@ function restoreBaseline() {
       psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
     }
     const sql = name.endsWith('.br')
-      ? run(process.execPath, ['scripts/decompress-schema-baseline.mjs']).stdout
+      ? run(process.execPath, ['scripts/decompress-schema-baseline.mjs', '--with-live-rows']).stdout
       : readFileSync(path.join(BASELINE, name));
     psql(sql, { user: name.includes('platform_overlay') ? 'supabase_admin' : 'postgres' });
   }

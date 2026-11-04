@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Usage: npm run next-migration-stamp -- [--live <14-digit version>] [--gap-minutes <n>]
+//        node scripts/next-migration-stamp.mjs --later-than <14-digit stamp>   (lists stamps above it)
 // Prints a migration version stamp (YYYYMMDDHHMMSS, UTC) above every stamp in
 // origin/main, every local worktree and every open PR, plus the live high-water when
 // passed. A run on 2026-11-02 re-stamped five times because picked stamps collided with
 // these; each re-stamp after Sol cost a new Sol review. Live access stays with the caller:
-//   SELECT max(version) FROM supabase_migrations.schema_migrations;
+//   select greatest(max(version), (select max(m[1]) from supabase_migrations.schema_migrations s2, regexp_matches(s2.name, '([0-9]{14})', 'g') m)) from supabase_migrations.schema_migrations;
+// (a row's name stamp can sit above every version; see migration-ordering-lib.mjs)
 // Two sessions picking in the same minute get the same stamp; the pre-commit check
 // (check-migration-stamp-collision.mjs) refuses the second once the first file exists, before any Sol.
 import { spawnSync } from "node:child_process";
@@ -32,6 +34,20 @@ export function nextStamp(seen, { gapMinutes = 60, now = new Date() } = {}) {
   // Out-of-range digits (e.g. minute 99) roll over in Date.UTC; never return a stamp at or below the max.
   if (stamp <= top.stamp) throw new Error(`computed ${stamp} is not above ${top.stamp}`);
   return { stamp, top };
+}
+
+// Stamps above `stamp`, lowest first, one line each: origin/main and open PRs first, then a worktree.
+export function laterStamps(seen, stamp) {
+  const by = new Map();
+  for (const s of seen) if (s.stamp > stamp) by.set(s.stamp, new Set([...(by.get(s.stamp) ?? []), s.source]));
+  const rank = (src) => (src === "origin/main" ? 0 : src.startsWith("open PR") ? 1 : 2);
+  return [...by].sort(([a], [b]) => a.localeCompare(b)).map(([s, set]) => {
+    const src = [...set].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    const shown = src.filter((x) => rank(x) < 2);
+    if (!shown.length) shown.push(src[0]);
+    const more = src.length - shown.length;
+    return `${s} (${shown.join(", ")}${more ? `, +${more} more` : ""})`;
+  });
 }
 
 function run(cmd, args) {
@@ -68,6 +84,19 @@ function collect() {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   // Every argument must be a known flag followed by its value, so a typo like --lve is refused, not ignored.
   const args = process.argv.slice(2);
+  if (args[0] === "--later-than") {
+    if (args.length !== 2 || !/^\d{14}$/.test(args[1])) {
+      console.error("usage: node scripts/next-migration-stamp.mjs --later-than <14-digit stamp>");
+      process.exit(2);
+    }
+    try {
+      for (const line of laterStamps(collect().seen, args[1])) console.log(line);
+    } catch (error) {
+      console.error(`NO LIST: ${error.message}`);
+      process.exit(1);
+    }
+    process.exit(0);
+  }
   const flags = Object.create(null);
   for (let i = 0; i < args.length; i += 2) flags[args[i]] = args[i + 1] ?? "";
   const live = flags["--live"];

@@ -242,7 +242,15 @@ export type PricingWarningCode =
   | 'PRICE_MOVE_OVER_10_PERCENT'
   | 'PRICE_BELOW_COST'
   | 'MARGIN_UNDER_FLOOR'
-  | 'OPEN_SENT_QUOTE';
+  | 'OPEN_SENT_QUOTE'
+  | 'TIER_ORDER';
+
+export interface PricingTierOrderPair {
+  lower_tier: 1 | 2;
+  higher_tier: 2 | 3;
+  lower_cents: bigint;
+  higher_cents: bigint;
+}
 
 export interface PricingWarningTier {
   tier: 1 | 2 | 3;
@@ -262,6 +270,7 @@ export interface PricingWarning {
     tiers: PricingWarningTier[];
     open_quote_count: number;
     open_quote_numbers: string[];
+    tier_order?: PricingTierOrderPair[];
   };
 }
 
@@ -366,10 +375,11 @@ type PricingEffectWire = PricingSnapshotWire
   & { before?: PricingSnapshotWire };
 
 type PricingWarningWire = Omit<PricingWarning, 'details'> & {
-  details: Omit<PricingWarning['details'], 'cost_before_cents' | 'cost_after_cents' | 'tiers'> & {
+  details: Omit<PricingWarning['details'], 'cost_before_cents' | 'cost_after_cents' | 'tiers' | 'tier_order'> & {
     cost_before_cents: unknown;
     cost_after_cents: unknown;
     tiers: Array<Omit<PricingWarningTier, 'before_cents' | 'after_cents'> & { before_cents: unknown; after_cents: unknown }>;
+    tier_order?: Array<Omit<PricingTierOrderPair, 'lower_cents' | 'higher_cents'> & { lower_cents: unknown; higher_cents: unknown }>;
   };
 };
 
@@ -436,10 +446,11 @@ function normalizePricingEffect(effect: PricingEffectWire): PricingEffect {
 
 function normalizePricingWarning(warning: PricingWarningWire): PricingWarning {
   const { details } = warning;
+  const { tier_order, ...baseDetails } = details;
   return {
     ...warning,
     details: {
-      ...details,
+      ...baseDetails,
       cost_before_cents: exactIntegerCents(details.cost_before_cents, 'warning cost before cents'),
       cost_after_cents: exactIntegerCents(details.cost_after_cents, 'warning cost after cents'),
       margin_floor: details.margin_floor == null ? null : Number(details.margin_floor),
@@ -449,6 +460,11 @@ function normalizePricingWarning(warning: PricingWarningWire): PricingWarning {
         after_cents: exactIntegerCents(tier.after_cents, `warning tier ${tier.tier} after cents`),
         margin: tier.margin == null ? null : Number(tier.margin),
       })),
+      ...(tier_order ? { tier_order: tier_order.map((pair) => ({
+        ...pair,
+        lower_cents: requiredExactIntegerCents(pair.lower_cents, 'warning lower tier cents'),
+        higher_cents: requiredExactIntegerCents(pair.higher_cents, 'warning higher tier cents'),
+      })) } : {}),
     },
   };
 }
@@ -536,6 +552,7 @@ export const PRICING_WARNING_LABELS: Record<PricingWarningCode, string> = {
   PRICE_BELOW_COST: 'A price is below cost',
   MARGIN_UNDER_FLOOR: 'A margin is under the product\'s floor',
   OPEN_SENT_QUOTE: 'An open sent quote will re-price on its next save',
+  TIER_ORDER: 'Tier prices out of order: a higher tier is priced below a lower one',
 };
 
 /** The database's limit on an acknowledgement reason (approve_pricing_change_set). */

@@ -27,7 +27,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   PRICING_REASON_REQUIRED:
     'Give a reason for this price or cost change.',
   PRICING_SOURCE_REQUIRED:
-    'Say where the new number came from (supplier, document, date).',
+    'Choose a source for the new price or cost.',
   PRICING_REASON_TOO_LONG:
     'The reason is longer than 500 characters. Shorten it and try again.',
   PRICING_SOURCE_TOO_LONG:

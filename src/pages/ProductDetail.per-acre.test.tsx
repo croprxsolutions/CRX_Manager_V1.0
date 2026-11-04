@@ -6,8 +6,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-const mockSavedForm = vi.hoisted(() => ({ value: 'liquid' as 'liquid' | 'dry' | null }));
+const mockSavedForm = vi.hoisted(() => ({ value: 'liquid' as 'liquid' | 'dry' | 'seed' | 'each' | null }));
+const mockStockUnit = vi.hoisted(() => ({ value: 'gal' as string | null }));
 
+// The Vendors section has its own tests; these page tests do not mock its reads.
+vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
 vi.mock('../lib/db', () => {
   const mockProduct = {
     id: 'test-product-id',
@@ -55,7 +58,12 @@ vi.mock('../lib/db', () => {
     ];
     for (const m of methods) builder[m] = vi.fn(self);
     builder.maybeSingle = vi.fn(() => {
-      _resolve = { data: { ...mockProduct, product_form: mockSavedForm.value }, error: null };
+      _resolve = { data: {
+        ...mockProduct,
+        product_form: mockSavedForm.value,
+        inventory_unit: mockStockUnit.value,
+        rate_unit: mockSavedForm.value === 'seed' ? 'Lb' : mockProduct.rate_unit,
+      }, error: null };
       return builder;
     });
     builder.then = vi.fn((resolve: (v: unknown) => void) => {
@@ -70,6 +78,14 @@ vi.mock('../lib/db', () => {
       from: vi.fn((table: string) => {
         if (table === 'products') {
           return chainable({ data: [mockProduct], error: null });
+        }
+        if (table === 'unit_conversions') {
+          return chainable({ data: [
+            { id: '1', unit: 'Gal', factor_oz: 128, unit_type: 'liquid' },
+            { id: '2', unit: 'Lb', factor_oz: 16, unit_type: 'dry' },
+            { id: '3', unit: 'Ea', factor_oz: 1, unit_type: 'both' },
+            { id: '4', unit: 'Unit', factor_oz: 1, unit_type: 'both' },
+          ], error: null });
         }
         return chainable({ data: [], error: null });
       }),
@@ -125,6 +141,7 @@ describe('ProductDetail — per-acre price display', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSavedForm.value = 'liquid';
+    mockStockUnit.value = 'gal';
   });
 
   it('shows the corrected per-acre price under each tier', async () => {
@@ -160,5 +177,39 @@ describe('ProductDetail — per-acre price display', () => {
     expect(container).toHaveValue('jug');
     expect(inventory).toHaveValue('gal');
     expect(rate).toHaveValue('oz');
+  });
+
+  it('offers four forms and only Lb and Unit for Seed', async () => {
+    mockSavedForm.value = null;
+    render(<ProductDetail />);
+    const form = await screen.findByLabelText('Product Form');
+    expect([...form.querySelectorAll('option')].map((option) => option.value)).toEqual(['', 'liquid', 'dry', 'seed', 'each']);
+    fireEvent.change(form, { target: { value: 'seed' } });
+    const inventory = screen.getByText('Inventory Unit').parentElement!.querySelector('select')!;
+    expect([...inventory.querySelectorAll('option')].filter((option) => option.value && !option.textContent?.includes('(existing)')).map((option) => option.value)).toEqual(['Lb', 'Unit']);
+  });
+
+  it('offers only Lb as the rate unit for Seed stocked in Lb', async () => {
+    mockSavedForm.value = 'seed';
+    mockStockUnit.value = 'Lb';
+    render(<ProductDetail />);
+    const rate = await screen.findByText('Rate Unit');
+    const picker = rate.parentElement!.querySelector('select')!;
+    expect([...picker.querySelectorAll('option')].map((option) => option.value)).toEqual(['', 'Lb']);
+  });
+
+  it('clears a Seed rate unit when its stock unit changes', async () => {
+    mockSavedForm.value = null;
+    mockStockUnit.value = null;
+    render(<ProductDetail />);
+    await screen.findByText('Rate Unit');
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'seed' } });
+    const inventory = screen.getByText('Inventory Unit').parentElement!.querySelector('select')!;
+    const rate = screen.getByText('Rate Unit').parentElement!.querySelector('select')!;
+    fireEvent.change(inventory, { target: { value: 'Lb' } });
+    fireEvent.change(rate, { target: { value: 'Lb' } });
+    fireEvent.change(inventory, { target: { value: 'Unit' } });
+    expect(rate).toHaveValue('');
+    expect([...rate.querySelectorAll('option')].map((option) => option.value)).toEqual(['', 'Unit']);
   });
 });

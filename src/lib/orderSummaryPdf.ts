@@ -8,7 +8,8 @@
  */
 import { CRX_GREEN, CHARCOAL, GRAY, type JsPDFWithAutoTable } from './pdfTheme';
 import type { autoTable as autoTableFn } from 'jspdf-autotable';
-import { COMPANY_FOOTER_THANKS } from './companyInfo';
+import { companyFooterThanks, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatUSD as fmtMoney } from './money';
 import { stripBelowCostApprovalNote } from './belowCostApproval';
 
@@ -41,6 +42,7 @@ const fmtQty = (n: number) => n.toLocaleString();
 
 function renderOrderSummaryPage(
   doc: JsPDFWithAutoTable,
+  company: CompanyInfo,
   data: OrderSummaryData,
   autoTable: typeof autoTableFn
 ) {
@@ -54,7 +56,8 @@ function renderOrderSummaryPage(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(20);
   doc.setTextColor(255, 255, 255);
-  doc.text('CROP RX SOLUTIONS', margin, 32);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 200, 20);
+  doc.text(company.name.toUpperCase(), margin, 32);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text('ORDER SUMMARY', margin, 50);
@@ -171,7 +174,7 @@ function renderOrderSummaryPage(
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
   doc.text(
-    COMPANY_FOOTER_THANKS,
+    doc.splitTextToSize(companyFooterThanks(company), pageW - margin * 2).slice(0, 2),
     pageW / 2,
     footerY,
     { align: 'center' },
@@ -181,9 +184,10 @@ function renderOrderSummaryPage(
 export async function generateOrderSummaryPdf(data: OrderSummaryData) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
-  renderOrderSummaryPage(doc, data, autoTable);
+  renderOrderSummaryPage(doc, company, data, autoTable);
   return doc;
 }
 
@@ -199,10 +203,11 @@ export async function downloadBatchOrderSummaryPdf(dataList: OrderSummaryData[])
 
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   if (dataList.length === 1) {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
-    renderOrderSummaryPage(doc, dataList[0], autoTable);
+    renderOrderSummaryPage(doc, company, dataList[0], autoTable);
     doc.save(`${dataList[0].order_number}_summary.pdf`);
     return;
   }
@@ -210,7 +215,7 @@ export async function downloadBatchOrderSummaryPdf(dataList: OrderSummaryData[])
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
   for (let i = 0; i < dataList.length; i++) {
     if (i > 0) doc.addPage();
-    renderOrderSummaryPage(doc, dataList[i], autoTable);
+    renderOrderSummaryPage(doc, company, dataList[i], autoTable);
   }
   doc.save(`order_summaries_batch_${dataList.length}.pdf`);
 }

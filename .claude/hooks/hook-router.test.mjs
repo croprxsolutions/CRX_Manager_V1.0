@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promptModulesFor } from "./prompt-router.mjs";
 import { postToolModulesFor } from "./posttool-router.mjs";
 import { dedupeContextBlocks } from "./hook-router-runtime.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const PROMPT = path.join(ROOT, ".claude", "hooks", "prompt-router.mjs");
@@ -33,7 +33,7 @@ function run(script, payload, { surface = "claude", projectDir } = {}) {
 
 // The ship reminder is gone (Mason, 2026-10-29): an ordinary build request adds no context.
 {
-  const output = run(PROMPT, { prompt: "implement this fix" }, { projectDir: mkdtempSync(path.join(os.tmpdir(), "crx-router-ship-")) });
+  const output = run(PROMPT, { prompt: "implement this fix" }, { projectDir: tempDir("crx-router-ship-") });
   ok(!output?.hookSpecificOutput?.additionalContext?.includes("Ship-It reminder"), "prompt router no longer adds the Ship-It reminder");
 }
 // Unwired 2026-10-02 (Mason): these prompts no longer inject their reminders.
@@ -51,7 +51,7 @@ for (const [prompt, marker] of [
 // reminder, removed 2026-10-29, and AGENTS.md (loaded every session) states it.
 // The dedupe helper stays for any future module that embeds it.
 {
-  const shipOnly = run(PROMPT, { prompt: "implement this fix" }, { projectDir: mkdtempSync(path.join(os.tmpdir(), "crx-router-policy-")) });
+  const shipOnly = run(PROMPT, { prompt: "implement this fix" }, { projectDir: tempDir("crx-router-policy-") });
   ok(!String(shipOnly?.hookSpecificOutput?.additionalContext || "").includes("LANDING POLICY"), "an ordinary prompt no longer carries the landing policy");
   // Pure helper, mutation-pinned: only an exact whole-block repeat is replaced.
   eq(dedupeContextBlocks(["A\n\nPOLICY\n\nB", "C\n\nPOLICY"], [{ text: "POLICY", replacement: "P2" }]), ["A\n\nPOLICY\n\nB", "C\n\nP2"], "second occurrence replaced, first kept");
@@ -69,7 +69,7 @@ for (const [prompt, marker] of [
   eq(dedupeContextBlocks(["POLICY", `${untouched}POLICY\n\n\n`], [{ text: "POLICY", replacement: "P2" }]), ["POLICY", "lead\n\nmiddle\n\ntrail  \nP2"], "the replaced context is trimmed and its blank-line runs collapsed");
 }
 
-const temp = mkdtempSync(path.join(os.tmpdir(), "crx-hook-router-"));
+const temp = tempDir("crx-hook-router-");
 try {
   // The stop-word hold latch was removed (Mason, 2026-10-29: "if i want to stop i
   // just hit the stop button"): a typed stop adds no context and writes no latch.

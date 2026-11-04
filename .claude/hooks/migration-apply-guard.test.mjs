@@ -9,10 +9,10 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs";
-import os from "node:os";
+import { writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { destructiveMigrationCheck, stripCommentsQuoteAware } from "./live-testdata-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -239,7 +239,7 @@ function armAutopilot(stateDir, hoursFromNow) {
 }
 
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mig-apply-guard-"));
+  const tmp = tempDir("mig-apply-guard-");
   const stateDir = path.join(tmp, ".claude", "session-state");
   mkdirSync(stateDir, { recursive: true });
   // Both: the pending-set inputs (baseline manifest + origin/main + FETCH_HEAD) and
@@ -536,7 +536,7 @@ function armAutopilot(stateDir, hoursFromNow) {
 // server name is ever added to settings.json, it is covered automatically and
 // this case is what proves the mechanism still holds.
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mig-apply-guard-aliases-"));
+  const tmp = tempDir("mig-apply-guard-aliases-");
   const stateDir = path.join(tmp, ".claude", "session-state");
   mkdirSync(stateDir, { recursive: true });
   try {
@@ -598,7 +598,7 @@ function armAutopilot(stateDir, hoursFromNow) {
 // lookup follows the session's reported cwd instead. Both halves are asserted:
 // the session's OWN worktree counts, a SIBLING's does not.
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mig-apply-guard-wt-"));
+  const tmp = tempDir("mig-apply-guard-wt-");
   const primary = path.join(tmp, "primary");
   const linked = path.join(tmp, "linked");
   const git = (args, cwd) => spawnSync("git", args, { cwd, encoding: "utf8", env: hermeticEnv() });
@@ -756,7 +756,7 @@ function armAutopilot(stateDir, hoursFromNow) {
 // the fixture genuinely IS out of order), and the renamed one must be denied
 // too (so the fix is what is doing the work).
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "mig-apply-guard-rename-"));
+  const tmp = tempDir("mig-apply-guard-rename-");
   const stateDir = path.join(tmp, ".claude", "session-state");
   mkdirSync(stateDir, { recursive: true });
   try {

@@ -64,6 +64,12 @@ const job = (
 });
 
 describe('buildMasterMixSummaryData — combined per-product mix (criterion 2 + 5)', () => {
+  it('keeps a seed quantity without a gallon or pound display', () => {
+    const out = buildMasterMixSummaryData([job('j1', { products: [
+      product({ product_name: 'Seed', unit: 'Lb', total_quantity: 50, product_form: 'seed' }),
+    ] })]);
+    expect(out.rows[0]).toMatchObject({ total_quantity: 50, gl_lb_display: '—' });
+  });
   it('a single job produces that job’s mix totals verbatim', () => {
     // 2 pt/ac × 100 ac = 200 pt; 200 pt → 25 gal (8 pt per gal).
     const j = job('j1', {

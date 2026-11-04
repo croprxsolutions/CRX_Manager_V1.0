@@ -10,7 +10,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -22,6 +21,7 @@ import {
   renderSweepQuery,
 } from "../../.claude/hooks/live-testdata-lib.mjs";
 import { buildSweepQuery } from "./allowlist-match.mjs";
+import { tempDir } from "../lib/test-temp-dir.mjs";
 import {
   GUARD_PATH,
   PREDICATE_DIR,
@@ -386,7 +386,7 @@ eq(normalizePredicateSql, guardNormalizePredicateSql, "the generator uses the gu
   // the copied generator on it. A write reached by any route — including one
   // the tripwire above cannot see — changes the scratch guard and fails here
   // (Codex, PR #648 round 7). The real checkout is never touched.
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "crx-predicate-fingerprints-"));
+  const scratch = tempDir("crx-predicate-fingerprints-");
   try {
     const scratchSweeps = path.join(scratch, "scripts", "db-invariant-sweeps");
     const scratchPredicates = path.join(scratchSweeps, "predicates");

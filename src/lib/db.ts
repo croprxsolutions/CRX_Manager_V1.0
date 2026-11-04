@@ -124,6 +124,8 @@ export const RpcErrorCodes = {
   // accepted save refuse a quote whose prices, lines or customer differ from the version last
   // sent. The detail after the token is a plain-English instruction (re-send, or rewind).
   QUOTE_RESEND_REQUIRED: 'QUOTE_RESEND_REQUIRED',
+  // A quote becomes sent or revised only once a version was sent (migration 20261105160000).
+  QUOTE_SEND_REQUIRED: 'QUOTE_SEND_REQUIRED',
   // draw_down_quote per-tier order lines (migration 20260816120000). A booked
   // line with no unit price cannot be billed, and the split lines must add back
   // up to the quantity requested.
@@ -403,6 +405,7 @@ export const RpcErrorCodes = {
   IDEMPOTENCY_KEY_REQUIRED: 'IDEMPOTENCY_KEY_REQUIRED',
   IDEMPOTENCY_ACTOR_MISMATCH: 'IDEMPOTENCY_ACTOR_MISMATCH',
   IDEMPOTENCY_INTENT_MISMATCH: 'IDEMPOTENCY_INTENT_MISMATCH',
+  IDEMPOTENCY_PAYLOAD_MISMATCH: 'IDEMPOTENCY_PAYLOAD_MISMATCH',
   // Raised by soft_delete_customer_document when the shared idempotency helper
   // answers 22023 with anything other than an intent mismatch: an internal
   // fault, raised BEFORE any mutation, so it must not be shown as an
@@ -456,6 +459,13 @@ export const RpcErrorCodes = {
   MARGIN_FLOOR_ITEMS_TOO_MANY: 'MARGIN_FLOOR_ITEMS_TOO_MANY',
   MARGIN_FLOOR_REASON_TOO_LONG: 'MARGIN_FLOOR_REASON_TOO_LONG',
   MARGIN_FLOOR_HISTORY_APPEND_ONLY: 'MARGIN_FLOOR_HISTORY_APPEND_ONLY',
+  // Preferred vendor enforcement (20261105180000, WP-PM-15b).
+  ADMIN_REQUIRED: 'ADMIN_REQUIRED',
+  PREFERRED_VENDOR_REQUIRED: 'PREFERRED_VENDOR_REQUIRED',
+  PRODUCT_VENDOR_FOLLOWS_PREFERRED_VENDOR: 'PRODUCT_VENDOR_FOLLOWS_PREFERRED_VENDOR',
+  VENDOR_IS_PREFERRED: 'VENDOR_IS_PREFERRED',
+  SUPPLIER_LINK_NOT_FOUND: 'SUPPLIER_LINK_NOT_FOUND',
+  VENDOR_NOT_FOUND: 'VENDOR_NOT_FOUND',
 } as const;
 
 export type RpcErrorCode = (typeof RpcErrorCodes)[keyof typeof RpcErrorCodes];

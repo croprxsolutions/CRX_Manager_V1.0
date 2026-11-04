@@ -2,11 +2,11 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { scratchHookEnvironment } from "./git-test-env.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const hookPath = fileURLToPath(new URL("./session-context-reminder.mjs", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -60,7 +60,7 @@ assert.match(compact, /Mason cannot read code or safely review a diff/);
 assert.equal(runRaw("{"), "");
 
 // Guards loaded from another folder: warn only when that folder's guards differ from origin/main.
-const scratch = mkdtempSync(path.join(tmpdir(), "session-reminder-"));
+const scratch = tempDir("session-reminder-");
 try {
   const guardsRepo = path.join(scratch, "old-checkout");
   const sessionRepo = path.join(scratch, "worktree");

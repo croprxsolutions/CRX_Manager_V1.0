@@ -3,11 +3,14 @@
 // Machine-checkable reference-doc claims vs repository reality.
 // Always-loaded AGENTS.md and CLAUDE.md intentionally contain no volatile counts.
 
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   chicagoCalendarStamp,
+  freshnessEnforcedFor,
   frozenHistoryProblems,
   manualFreshnessBoundary,
   manualStampProblems,
@@ -20,6 +23,7 @@ import {
   migrationRecordNames,
   readCombinedMigrationHistory,
 } from "../.claude/hooks/migration-records-lib.mjs";
+import { validateParkedMigrationCrossReferences } from "../.claude/hooks/worktree-awareness-lib.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const rows = [];
@@ -53,6 +57,14 @@ row("migration records match migration files by name", 0, recordFiles.orphans.le
   [recordFiles.orphans.length ? `no matching .sql: ${recordFiles.orphans.join(", ")}` : "",
     recordFiles.unrecorded.length ? `no record file: ${recordFiles.unrecorded.join(", ")}` : ""]
     .filter(Boolean).join("; "));
+
+// The CI guard-regression suite's check, run on disk before a push. A Windows checkout holds
+// CRLF copies, so hash the LF text git stores; a CRLF hash pin otherwise fails only in CI.
+const lfSha256 = (text) => createHash("sha256").update(text.replace(/\r\n/g, "\n"), "utf8").digest("hex");
+const pins = validateParkedMigrationCrossReferences(
+  migrations.map((name) => `supabase/migrations/${name}`), history, read, lfSha256);
+row("candidate records' SQL sha256 pins match the LF migration files", "known", pins.state,
+  pins.state === "known" ? "PASS" : "FAIL", pins.reason);
 
 const missingMigrations = migrations.filter((filename) => {
   const base = filename.replace(/\.sql$/, "");
@@ -165,6 +177,15 @@ const newestMigDate = migrations
   .at(-1); // YYYYMMDD of the newest migration
 const todayChicago = chicagoCalendarStamp();
 const freshnessDate = manualFreshnessBoundary(newestMigDate, todayChicago);
+// Files changed since the base (CI passes the PR base or push-before sha). An
+// unreadable base enforces, so a broken diff can never silence the gate.
+const freshnessBase = process.env.DOCS_FRESHNESS_BASE || "origin/main";
+let staleStatus = "FAIL";
+try {
+  const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
+  const changed = git("diff", "--name-only", "--no-renames", git("merge-base", freshnessBase, "HEAD"), "HEAD").split(/\r?\n/).filter(Boolean);
+  if (!freshnessEnforcedFor(changed)) staleStatus = "WARN";
+} catch { /* keep FAIL */ }
 for (const doc of ["CURRENT_STATE.md", "KNOWN_ISSUES.md"]) {
   const rel = `docs/manual/${doc}`;
   if (!existsSync(path.join(ROOT, rel))) continue; // the "stamp present" check above already failed this
@@ -173,8 +194,8 @@ for (const doc of ["CURRENT_STATE.md", "KNOWN_ISSUES.md"]) {
   const stampDate = `${m[1]}${m[2]}${m[3]}`; // YYYYMMDD
   const fresh = !freshnessDate || stampDate >= freshnessDate;
   row(`manual freshness ${doc}`, `stamp >= freshness boundary (${freshnessDate ?? "none"})`, `stamp ${stampDate}`,
-    fresh ? "PASS" : "FAIL",
-    fresh ? "" : `migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.`);
+    fresh ? "PASS" : staleStatus,
+    fresh ? "" : `migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.${staleStatus === "WARN" ? " (warning only: this change adds no migration and leaves both docs alone)" : ""}`);
 }
 
 console.log("check-doc-drift");

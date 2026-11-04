@@ -204,7 +204,9 @@ start together, alongside `sql-validation`, once containment and `ci-scope` have
 both passed. Since 2026-11-01 Vitest runs as three shards: `unit-tests` merges them and enforces the coverage
 ratchet on the total. A failed shard skips `unit-tests`, and that skip turns the required check red. The
 guard suite runs its scripts side by side through `scripts/run-correction-guards.mjs`,
-which reads the `test:correction-guards` list in `package.json`. The two Windows suites likewise run as two parallel jobs
+which reads the `test:correction-guards` list in `package.json`; the agent-workflow chain runs through it too, one suite at a time.
+Each suite gets a private temp folder and fails if it leaves anything there; tests make temp folders with
+`tempDir()` from `scripts/lib/test-temp-dir.mjs`, which removes them on exit without following junctions. The two Windows suites likewise run as two parallel jobs
 (`phase3c-containment-windows`, `guard-hooks-windows`). The required check
 **Lint, Type Check, Test, Build** (`lint-typecheck-test`) runs last; it is red
 unless containment, routing, SQL validation, all three Ubuntu parts, and both

@@ -38,6 +38,7 @@
  * React- and jsPDF-free so the aggregation is unit-tested in isolation; the PDF
  * layout lives in chemicalSummaryReportPdf.ts.
  */
+import type { ProductForm } from '../types';
 import type { ApplicatorSheetData } from './applicatorSheetData';
 import { fmtNum } from './applicatorSheetData';
 import { toGallonOrLbEquivalent } from './chemCalculator';
@@ -119,7 +120,7 @@ export function buildChemicalSummaryReportData(
      * the line's canonical form. `null` is a REAL value here (a no-form row), NOT
      * "unset" — so null-vs-'liquid' is treated as a conflict (see form_conflict).
      */
-    form: 'liquid' | 'dry' | null;
+    form: ProductForm | null;
     /**
      * True once any later contributing row carries a DIFFERENT product_form than the
      * first one — treating `null` as distinct from a known form. So null-vs-'liquid'

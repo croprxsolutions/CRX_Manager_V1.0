@@ -315,6 +315,11 @@ export const DANGEROUS_CMD_CHECKS = [
   // Tracked non-secret templates (.env.example/.template/.sample) stay allowed,
   // matching env-guard.mjs's exemptions (Codex P2 round 4).
   [/(?:>>?\s*|\btee\b\s+)['"]?[^\s'";|&]*\.env(?!(?:\.[\w-]+)*\.(?:example|template|sample)\b)(?:\.[\w-]+)?\b/, "Blocked shell-redirect write to .env*. Secrets must never be written this way."],
+  // Git Bash on Mason's PC has no zone database: `TZ=America/Chicago date` prints
+  // UTC with no error, and wrong "Central" times reached Mason twice (2026-10-21,
+  // 2026-11-03) despite a memory rule. POSIX spellings (`TZ=CST6CDT`) do work.
+  // `export TZ=…; date` is the same mistake one statement apart (Luna, PR on this rule).
+  [/(?:^|[;&|(`\r\n]|\benv\s+)\s*(?:[A-Za-z_]\w*=\S+\s+)*TZ=['"]?[A-Za-z_]+\/[^\s;&|'"]+['"]?\s+(?:[A-Za-z_]\w*=\S+\s+)*date\b|(?:^|[;&|(`\r\n])\s*export\s+TZ=['"]?[A-Za-z_]+\/[^\s;&|'"]+[\s\S]*?(?:^|[;&|(`\r\n])\s*date\b/,"Blocked `TZ=<Area/City> date`: Git Bash here has no zone database and silently prints UTC. Use node -e \"console.log(new Date().toLocaleString('en-US',{timeZone:'America/Chicago'}))\" instead."],
 ];
 
 // Production-deploy spellings that must PROMPT (permissionDecision "ask"), not
@@ -355,13 +360,43 @@ function sqlSegmentProgram(segment) {
   const word = (String(segment).trim().split(/\s+/)[0] || "").replace(/["'`^\\]/g, "");
   return word.replace(/^.*[/\\]/, "").replace(/\.exe$/i, "").toLowerCase();
 }
+// Allowlist, not a blocklist: every escape, expansion, comment or quoting quirk
+// bash and PowerShell read differently (`$'…'`, `\"`, `\;`, `<#…#>`, backtick,
+// `$(`, a line break, PowerShell `@args` splatting) was a way to hide a client
+// or `--pre` in a reader (Codex App and Luna, PR #1337).
+// Outside quotes only plain word characters remain; a quoted span may not hold
+// `$` or a backtick (both shells expand them in double quotes) or end in `\`.
+function plainReaderSegment(segment) {
+  // A path-qualified head (`./grep`) may be any program, not the real reader (Luna).
+  // PowerShell also treats smart quotes (U+2018-U+201F) as quotes (Codex App).
+  if (/[\r\n‘-‟]|\\["']/.test(segment) || /^\s*\S*[/\\]/.test(segment)) return false;
+  // cmd.exe (Desktop Commander) does not quote with `'` and expands `%`/`!`
+  // inside `"`, so those spans must hold no cmd.exe metacharacter (Codex App),
+  // as read-only-search-lib requires.
+  const outside = segment.replace(/'[^'|&<>^%"!]*'|"[^"$`%!]*"/g, "");
+  // A glob can expand to a file named `--pre=…`, and only rg has an option that
+  // runs a program, so an unquoted `*`/`?` costs rg its exemption (Codex App).
+  if (/[*?]/.test(outside) && sqlSegmentProgram(segment) === "rg") return false;
+  return /^[\w\s./\\:*=,+#?-]*$/.test(outside);
+}
 export function checkDestructiveSql(cmd) {
   const text = String(cmd || "");
   if (!DESTRUCTIVE_SQL_RE.test(text)) return null;
-  const unquoted = text.replace(/["'`^\\]/g, "");
   const flagOutsideReader = /(?:^|\s)--?[cf]\s/.test(text) &&
     text.split(/(?:\|\||&&|[;\r\n|&])+/).some((segment) => segment.trim() && !SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)));
-  if (SQL_CLIENT_RE.test(text) || SQL_CLIENT_RE.test(unquoted) || flagOutsideReader) {
+  // A client name counts only outside a known reader, so a `grep "…\|psql"`
+  // pattern is a search, not a call (retro on PR #1333). The split follows bash
+  // quoting, so the exemption holds only for a plain reader segment that bash
+  // and PowerShell both split the same way; `rg --pre` runs a program on each
+  // file and is never exempt (Codex App on PR #1337).
+  const clientOutsideReader = splitShellSegments(text).some((segment) => {
+    const unquoted = segment.replace(/["'`^\\]/g, "");
+    return (SQL_CLIENT_RE.test(segment) || SQL_CLIENT_RE.test(unquoted)) &&
+      (!SQL_SAFE_READ_HEADS.has(sqlSegmentProgram(segment)) || !plainReaderSegment(segment) || /(?:^|\s)--pre\b/.test(unquoted) ||
+        // rg options that run a program, as read-only-search-lib's rgOptionRunsProgram lists them.
+        (sqlSegmentProgram(segment) === "rg" && /(?:^|\s)(?:--(?:hostname-bin|search-zip)\b|-[^-\s]*z)/i.test(unquoted)));
+  });
+  if (clientOutsideReader || flagOutsideReader) {
     return "Blocked destructive SQL via psql/supabase. Add a migration instead.";
   }
   return null;

@@ -48,7 +48,8 @@ import { localToday, parseLocalDate } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
 import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
-import { unitOptionsForForm, isKnownUnit } from '../lib/units';
+import { rateUnitOptionsForProduct, asProductForm } from '../lib/units';
+import type { ProductForm } from '../types';
 import {
   LABEL_RATE_GUARDRAIL_MODE_KEY,
   DEFAULT_GUARDRAIL_MODE,
@@ -88,6 +89,7 @@ import type { JobStatus, Customer, Product, Field, Vehicle, Profile, BlendRecipe
 import type { Json } from '../types/supabase';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductPicker';
+import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
 import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
 import { JOB_CHEMICAL_COLUMNS, JOB_COLUMNS, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import { sendEmail } from '../lib/emailService';
@@ -1029,7 +1031,7 @@ export default function JobDetail() {
     // since-deactivated ones (allProducts is is_active=true only) — mirrors the
     // WPS-notice label fetch so a retired product still prints its compliance data.
     const pids = chemRows.filter((c) => c.product_id).map((c) => c.product_id);
-    const labelById = new Map<string, { rei_hours: number | null; phi_days: number | null; epa_registration: string | null; product_form: 'liquid' | 'dry' | null }>();
+    const labelById = new Map<string, { rei_hours: number | null; phi_days: number | null; epa_registration: string | null; product_form: ProductForm | null }>();
     if (pids.length > 0) {
       const { data: lp, error: lpErr } = await supabase
         .from('products')
@@ -1037,7 +1039,7 @@ export default function JobDetail() {
         .in('id', pids);
       if (lpErr || !lp) return null;
       (lp as Array<{ id: string; rei_hours: number | null; phi_days: number | null; epa_registration: string | null; product_form: string | null }>).forEach((p) => {
-        const form = p.product_form === 'liquid' || p.product_form === 'dry' ? p.product_form : null;
+        const form = asProductForm(p.product_form);
         labelById.set(p.id, { rei_hours: p.rei_hours, phi_days: p.phi_days, epa_registration: p.epa_registration, product_form: form });
       });
       // A short array (RLS-hidden / deleted product) returns NO error, but a missing
@@ -1333,6 +1335,7 @@ export default function JobDetail() {
   // the applicator route order (null when no drag is in progress).
   const [dragFieldIndex, setDragFieldIndex] = useState<number | null>(null);
   const [chemRows, setChemRows] = useState<ChemRow[]>([]);
+  const [labelDismissal, setLabelDismissal] = useState<string | null>(null);
   // §5 (Label-Rate Guardrails): policy mode (warn default, never blocks) + earliest
   // planned harvest across the job's fields (for the PHI-vs-harvest warning) + the
   // block-mode admin-override modal state.
@@ -1367,7 +1370,7 @@ export default function JobDetail() {
   // carried line (1 oz/ac × 100 ac stored as 6.25 lb) into one that cannot be proven safe —
   // and chemLineBillingHazard fails closed, so the whole job becomes unsaveable. Resolving
   // the form by id, inactive included, is what keeps the guard from firing on good rows.
-  const [jobProductLabels, setJobProductLabels] = useState<Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; product_form: 'liquid' | 'dry' | null }>>(new Map());
+  const [jobProductLabels, setJobProductLabels] = useState<Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; product_form: ProductForm | null }>>(new Map());
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
 
   useEffect(() => {
@@ -1489,12 +1492,12 @@ export default function JobDetail() {
         .in('id', ids);
       if (cancelled) return;
       if (error) { setJobProductLabels(new Map()); setJobLabelsLoadedKey(chemProductIdKey); return; }
-      const m = new Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; product_form: 'liquid' | 'dry' | null }>();
+      const m = new Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; product_form: ProductForm | null }>();
       for (const p of (data as unknown as Array<{ id: string; max_label_rate: number | null; max_label_rate_unit: string | null; product_form: string | null }> | null) ?? []) {
         m.set(p.id, {
           max_label_rate: p.max_label_rate,
           max_label_rate_unit: p.max_label_rate_unit,
-          product_form: p.product_form === 'liquid' || p.product_form === 'dry' ? p.product_form : null,
+          product_form: asProductForm(p.product_form),
         });
       }
       setJobProductLabels(m);
@@ -1511,14 +1514,14 @@ export default function JobDetail() {
     return { max_label_rate: lp?.max_label_rate ?? null, max_label_rate_unit: lp?.max_label_rate_unit ?? null };
   }, [jobProductLabels, allProducts]);
 
-  // Resolve a line's liquid/dry form the same inactive-safe way: the by-id fetch wins, then
+  // Resolve a line's product form the same inactive-safe way: the by-id fetch wins, then
   // allProducts. Every caller that feeds a UNIT CONVERSION must come through here — reading
   // allProducts directly is what mis-classified discontinued products (Codex P2, 2026-08-23).
-  const productFormFor = useCallback((productId: string): 'liquid' | 'dry' | null => {
+  const productFormFor = useCallback((productId: string): ProductForm | null => {
     const fromJob = jobProductLabels.get(productId);
     if (fromJob) return fromJob.product_form;
     const form = allProducts.find((p) => p.id === productId)?.product_form ?? null;
-    return form === 'liquid' || form === 'dry' ? form : null;
+    return asProductForm(form);
   }, [jobProductLabels, allProducts]);
 
   // §5: aggregate guardrail state from chemRows + allProducts (the live label max). Drives
@@ -3819,7 +3822,8 @@ export default function JobDetail() {
           updated[i].rate_per_acre = p.rate_per_acre.toString();
           updated[i].driver = 'rate';
         }
-        if (p.rate_unit && !updated[i].rate_unit) updated[i].rate_unit = p.rate_unit;
+        if (p.product_form === 'seed' || p.product_form === 'each') updated[i].rate_unit = p.inventory_unit || '';
+        else if (p.rate_unit && !updated[i].rate_unit) updated[i].rate_unit = p.rate_unit;
         // P1 MONEY fix: quantity = rate × acres comes out in the RATE's base unit
         // (e.g. pt), but the STOCK unit (unit_size, e.g. GAL) and per-unit cost/price
         // are per stock unit. Reconcile them into ONE measure (the rate's base unit)
@@ -3841,6 +3845,7 @@ export default function JobDetail() {
           p.product_form,
         );
         updated[i].unit = reconciled.unit;
+        if (p.product_form === 'seed' || p.product_form === 'each') updated[i].unit = p.inventory_unit || '';
         updated[i].cost_per_unit_cents = reconciled.costPerUnitCents.toString();
         // A product that states no price, or one whose price is not whole cents in the line's
         // unit, blanks the line's price rather than keeping the previous product's (or a rounded
@@ -4512,6 +4517,13 @@ export default function JobDetail() {
               )}
             </div>
           </div>
+          <JobLabelCorrectionsNotice
+            rows={chemRows}
+            canEdit={canEdit && !isNew}
+            onApply={setChemRows}
+            dismissedSignature={labelDismissal}
+            onDismiss={setLabelDismissal}
+          />
           {chemRows.length === 0 ? (
             <p className="text-sm text-secondary text-center py-4">No chemicals added.</p>
           ) : (
@@ -4527,6 +4539,7 @@ export default function JobDetail() {
                 // Inactive-safe (Codex P2, 2026-08-23): a discontinued product read straight
                 // out of allProducts has no form, which silently takes the liquid branch.
                 const previewForm = productFormFor(c.product_id);
+                const previewStockUnit = allProducts.find((p) => p.id === c.product_id)?.inventory_unit;
                 const conv = toGallonOrLbEquivalent(totalApplied, c.unit, previewForm);
                 const hazard = chemBillingHazards.get(i);
                 const rowDefect = chemRowDefects.get(i);
@@ -4587,12 +4600,12 @@ export default function JobDetail() {
                         <label className="block text-xs font-medium text-secondary mb-1">Rate Unit</label>
                         <select value={c.rate_unit} onChange={(e) => updateChemRow(i, 'rate_unit', e.target.value)}
                           disabled={!canEdit} className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50">
-                          <option value="">-- unit --</option>
+                          <option value="" disabled={previewForm === 'seed' || previewForm === 'each'}>-- unit --</option>
                           {/* WaveB: canonical bare units filtered by product form (Codex P2); grandfather a legacy/mismatched value */}
-                          {c.rate_unit && !isKnownUnit(unitConversions, previewForm, c.rate_unit) && (
+                          {c.rate_unit && !rateUnitOptionsForProduct(unitConversions, previewForm, previewStockUnit).some((uc) => uc.unit === c.rate_unit) && (
                             <option value={c.rate_unit}>{c.rate_unit} (existing)</option>
                           )}
-                          {unitOptionsForForm(unitConversions, previewForm).map((uc) => (
+                          {rateUnitOptionsForProduct(unitConversions, previewForm, previewStockUnit).map((uc) => (
                             <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                           ))}
                         </select>
@@ -4618,12 +4631,12 @@ export default function JobDetail() {
                         <label className="block text-xs font-medium text-secondary mb-1">Unit</label>
                         <select value={c.unit} onChange={(e) => updateChemRow(i, 'unit', e.target.value)}
                           disabled={!canEdit} className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50">
-                          <option value="">-- unit --</option>
+                          <option value="" disabled={previewForm === 'seed' || previewForm === 'each'}>-- unit --</option>
                           {/* WaveB: canonical bare units filtered by product form (Codex P2); grandfather a legacy/mismatched value */}
-                          {c.unit && !isKnownUnit(unitConversions, previewForm, c.unit) && (
+                          {c.unit && !rateUnitOptionsForProduct(unitConversions, previewForm, previewStockUnit).some((uc) => uc.unit === c.unit) && (
                             <option value={c.unit}>{c.unit} (existing)</option>
                           )}
-                          {unitOptionsForForm(unitConversions, previewForm).map((uc) => (
+                          {rateUnitOptionsForProduct(unitConversions, previewForm, previewStockUnit).map((uc) => (
                             <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                           ))}
                         </select>

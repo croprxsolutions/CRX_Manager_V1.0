@@ -16,6 +16,14 @@ ON CONFLICT (unit) DO UPDATE SET
   unit_type = EXCLUDED.unit_type,
   notes = EXCLUDED.notes;
 
+INSERT INTO public.unit_conversions (unit, factor_oz, unit_type, notes)
+VALUES ('Unit', 1, 'both', 'Each / unit (alias for Ea)')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.product_form_units (product_form, unit)
+VALUES ('seed', 'Lb'), ('seed', 'Unit'), ('each', 'Ea'), ('each', 'Unit')
+ON CONFLICT DO NOTHING;
+
 INSERT INTO public.products (id, product_name, product_form, container_type, container_size)
 VALUES ('c0ca1000-0000-4000-8000-000000000002', 'Test Herbicide (invented)', 'liquid', 'Jug', 2.5)
 ON CONFLICT (id) DO UPDATE SET

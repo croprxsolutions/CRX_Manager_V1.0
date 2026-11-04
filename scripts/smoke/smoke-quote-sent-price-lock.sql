@@ -6,10 +6,12 @@
 --   A  quantity-only revision keeps 7.50 and the expiry (the save reply reports the stored price);
 --      Convert bills 7.50 (no re-send)
 --   K  a same-status save of a sent quote (Mark Presented again) keeps 7.50; V2 records 7.50
---   B  "use today's price" on the line -> 8.75; Convert, Partial Order and an accepted save are
---      refused QUOTE_RESEND_REQUIRED; after the re-send (V2, new expiry) Convert bills 8.75
---   C  a manual price 9.00 is refused; rewind to V1 restores the same line id at 7.50 and
---      Convert bills 7.50
+--   B  "use today's price" on the line -> 8.75 is refused without the grower's tick and saved
+--      with it (recorded once). A raise no recorded change vouches for: Convert, Partial Order
+--      and an accepted save are refused QUOTE_RESEND_REQUIRED; after the re-send (V2, new
+--      expiry) Convert bills 8.75
+--   C  a manual price 9.00 is refused without the tick; saved with it but unrecorded, Convert
+--      is refused; rewind to V1 restores the same line id at 7.50 and Convert bills 7.50
 --   D  a line added in the revision, E a changed customer: Convert refused; rewinding E to V1
 --      restores its customer and it converts at 7.50
 --   N  a line saved without its id takes today's price (cost kept) and Convert is refused
@@ -21,6 +23,10 @@
 --      quote converts; I the same with a repeated product is refused
 --   J  a last version from before the protected send workflow is refused
 --   L  control: a draft never sent still re-prices to the catalog (8.75) on save
+--
+-- Since 20261029120000 a price change save_quote records needs no re-send (proved by
+-- smoke-quote-price-trail-and-expiry.sql). Here each raise is saved with the grower's tick and
+-- its record removed, so every case still proves the lock on a price nothing vouches for.
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -53,6 +59,8 @@ DECLARE
   v_price numeric;
   v_expiry date;
   v_today date := (now() AT TIME ZONE 'America/Chicago')::date;
+  -- A send sets the expiry to the end of the season it falls in, unless the rep picked a date (#1201).
+  v_season_end date := season_end_date(compute_season((now() AT TIME ZONE 'America/Chicago')::date));
   v_snapshot jsonb;
   v_section_id uuid;
 BEGIN
@@ -121,8 +129,8 @@ BEGIN
      OR NOT (v_snapshot->'sections'->0->'items'->0 ? 'price_override') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (V1) snapshot lacks the line id or manual price: %', v_snapshot->'sections'->0->'items'->0;
   END IF;
-  IF (SELECT expires_at FROM quotes WHERE id = (v_quotes->>'A')::uuid) IS DISTINCT FROM v_today + 15 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (V1) the send did not set expires_at to today + 15: %',
+  IF (SELECT expires_at FROM quotes WHERE id = (v_quotes->>'A')::uuid) IS DISTINCT FROM v_season_end THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (V1) the send did not set expires_at to the season end: %',
       (SELECT expires_at FROM quotes WHERE id = (v_quotes->>'A')::uuid);
   END IF;
 
@@ -189,16 +197,37 @@ BEGIN
   -- --------------------------------------------------------------------
   v_id := (v_quotes->>'B')::uuid;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
+  BEGIN
+    PERFORM save_quote(v_id, jsonb_build_object(
+        'quote_number', '[SMOKE] LOCK-B-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
+        'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv),
+      jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'B')),
+        '{0,items,0,use_todays_price}', 'true'::jsonb),
+      v_admin, 'smk-lock-save-B1-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: (B) a raise without the grower''s tick was saved';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'QUOTE_PRICE_RAISE_NEEDS_GROWER_CONFIRMATION%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (B) unticked save: %', v_err; END IF;
+  END;
+  IF (SELECT price_per_unit FROM quote_items WHERE quote_id = v_id) IS DISTINCT FROM 7.50 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (B) the refused raise changed the price';
+  END IF;
   PERFORM save_quote(v_id, jsonb_build_object(
       'quote_number', '[SMOKE] LOCK-B-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
       'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv),
-    jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'B')),
-      '{0,items,0,use_todays_price}', 'true'::jsonb),
+    jsonb_set(jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'B')),
+      '{0,items,0,use_todays_price}', 'true'::jsonb), '{0,items,0,grower_confirmed}', 'true'::jsonb),
     v_admin, 'smk-lock-save-B2-' || v_suffix);
   SELECT price_per_unit INTO v_price FROM quote_items WHERE quote_id = v_id;
   IF v_price IS DISTINCT FROM 8.75 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (B) use_todays_price did not take 8.75: %', v_price;
   END IF;
+  IF (SELECT count(*) FROM quote_price_changes WHERE quote_id = v_id AND new_price_cents = 875
+        AND sent_version = 1 AND grower_confirmed_by IS NOT NULL) <> 1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (B) the ticked raise was not recorded once';
+  END IF;
+  DELETE FROM quote_price_changes WHERE quote_id = v_id;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
   BEGIN
     PERFORM convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-B1-' || v_suffix, v_rv, NULL);
@@ -232,7 +261,7 @@ BEGIN
   UPDATE quotes SET expires_at = v_today + 3 WHERE id = v_id;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
   v_res := create_quote_version(v_id, v_admin, 'emailed', 'smk-lock-v2-B-' || v_suffix, v_rv);
-  IF (SELECT expires_at FROM quotes WHERE id = v_id) IS DISTINCT FROM v_today + 15 THEN
+  IF (SELECT expires_at FROM quotes WHERE id = v_id) IS DISTINCT FROM v_season_end THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (B) the re-send did not set a new expiry';
   END IF;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
@@ -247,12 +276,26 @@ BEGIN
   -- --------------------------------------------------------------------
   v_id := (v_quotes->>'C')::uuid;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
+  BEGIN
+    PERFORM save_quote(v_id, jsonb_build_object(
+        'quote_number', '[SMOKE] LOCK-C-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
+        'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv),
+      jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'C')),
+        '{0,items,0,price_override}', '9'::jsonb),
+      v_admin, 'smk-lock-save-C1-' || v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: (C) a manual raise without the grower''s tick was saved';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'QUOTE_PRICE_RAISE_NEEDS_GROWER_CONFIRMATION%' THEN RAISE EXCEPTION 'SMOKE_FAIL: (C) unticked save: %', v_err; END IF;
+  END;
   PERFORM save_quote(v_id, jsonb_build_object(
       'quote_number', '[SMOKE] LOCK-C-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
       'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv),
-    jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'C')),
-      '{0,items,0,price_override}', '9'::jsonb),
+    jsonb_set(jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'C')),
+      '{0,items,0,price_override}', '9'::jsonb), '{0,items,0,grower_confirmed}', 'true'::jsonb),
     v_admin, 'smk-lock-save-C2-' || v_suffix);
+  DELETE FROM quote_price_changes WHERE quote_id = v_id;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
   BEGIN
     PERFORM convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-C1-' || v_suffix, v_rv, NULL);
@@ -337,7 +380,8 @@ BEGIN
   PERFORM save_quote(v_id, jsonb_build_object(
       'quote_number', '[SMOKE] LOCK-N-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
       'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv),
-    v_sections, v_admin, 'smk-lock-save-N2-' || v_suffix);
+    jsonb_set(v_sections, '{0,items,0,grower_confirmed}', 'true'::jsonb), v_admin, 'smk-lock-save-N2-' || v_suffix);
+  DELETE FROM quote_price_changes WHERE quote_id = v_id;
   IF (SELECT price_per_unit FROM quote_items WHERE quote_id = v_id) IS DISTINCT FROM 8.75
      OR (SELECT cost_at_quote_cents FROM quote_items WHERE quote_id = v_id) IS DISTINCT FROM 600 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (N) an id-less line did not take today''s price with its kept cost: %',
@@ -371,9 +415,10 @@ BEGIN
   PERFORM save_quote(v_id, jsonb_build_object(
       'quote_number', '[SMOKE] LOCK-O-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
       'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv),
-    jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'O')),
-      '{0,items,0,price_override}', '9'::jsonb),
+    jsonb_set(jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'O')),
+      '{0,items,0,price_override}', '9'::jsonb), '{0,items,0,grower_confirmed}', 'true'::jsonb),
     v_admin, 'smk-lock-save-O2-' || v_suffix);
+  DELETE FROM quote_price_changes WHERE quote_id = v_id;
   SELECT row_version INTO v_rv FROM quotes WHERE id = v_id;
   BEGIN
     PERFORM convert_quote_to_order(v_id, v_admin, 'smk-lock-conv-O2-' || v_suffix, v_rv, NULL);
@@ -405,9 +450,10 @@ BEGIN
   PERFORM save_quote(v_id, jsonb_build_object(
       'quote_number', '[SMOKE] LOCK-G-' || v_suffix, 'customer_id', v_c1, 'status', 'revised', 'tier', 1,
       'commission_split', '{"splits": []}'::jsonb, 'row_version_expected', v_rv, 'is_planned', true),
-    jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'G')),
-      '{0,items,0,use_todays_price}', 'true'::jsonb),
+    jsonb_set(jsonb_set(jsonb_set(v_sections, '{0,items,0,id}', to_jsonb(v_lines->>'G')),
+      '{0,items,0,use_todays_price}', 'true'::jsonb), '{0,items,0,grower_confirmed}', 'true'::jsonb),
     v_admin, 'smk-lock-save-G2-' || v_suffix);
+  DELETE FROM quote_price_changes WHERE quote_id = v_id;
   SELECT id INTO v_section_id FROM quote_sections WHERE quote_id = v_id;
   BEGIN
     PERFORM create_job_from_quote_section(v_id, v_section_id, v_admin, 'smk-lock-job-G-' || v_suffix);

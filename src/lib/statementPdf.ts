@@ -19,12 +19,14 @@ import type {
 import { CRX_GREEN, CHARCOAL, GRAY, LIGHT_BG, RED, TABLE_HEADER_BG, ALT_ROW_BG, type JsPDFWithAutoTable } from './pdfTheme';
 import type { autoTable as autoTableFn } from 'jspdf-autotable';
 import {
-  COMPANY_TAGLINE_HEADER as COMPANY_TAGLINE,
+  companyTaglineHeader,
   COMPANY_REMIT_ADDRESS,
   COMPANY_LEGAL_NAME,
   COMPANY_PHONE,
   COMPANY_WEBSITE,
+  fitCompanyNameFont,
 } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatCents as fmt } from './money';
 import { getStatementAccountPosition } from './statementBalance';
 
@@ -56,9 +58,6 @@ function reserveAccountPositionSpace(
   return margin;
 }
 
-const COMPANY_NAME = 'CROP RX SOLUTIONS';
-// COMPANY_TAGLINE + COMPANY_REMIT_ADDRESS now come from src/lib/companyInfo.ts (single source).
-
 // ── Main Generator ──────────────────────────────────────────────────────
 
 export async function generateStatementPdf(
@@ -67,6 +66,7 @@ export async function generateStatementPdf(
 ) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
   const pageW = doc.internal.pageSize.getWidth();
@@ -87,6 +87,7 @@ export async function generateStatementPdf(
       const footerY = pageH - 20;
       doc.setDrawColor(200, 200, 200);
       doc.line(margin, footerY - 6, pageW - margin, footerY - 6);
+      doc.setFont('helvetica', 'normal');
       doc.setFontSize(7);
       doc.setTextColor(160, 160, 160);
       doc.text(
@@ -106,12 +107,13 @@ export async function generateStatementPdf(
     doc.setFillColor(...CRX_GREEN);
     doc.rect(0, 0, pageW, 70, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
     doc.setTextColor(255, 255, 255);
-    doc.text(COMPANY_NAME, margin, 35);
+    fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 200, 22);
+    doc.text(company.name.toUpperCase(), margin, 35);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(COMPANY_TAGLINE, margin, 53);
+    // Two lines fill the 70pt green bar; more would spill into the page body.
+    doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 170).slice(0, 2), margin, 53);
 
     // Statement label (right)
     doc.setFontSize(14);
@@ -231,16 +233,20 @@ export async function generateStatementPdf(
 
   // ── Transaction Section ────────────────────────────────────────────
   if (mode === 'summary') {
-    y = drawSummaryTransactions(doc, data, y, margin, pageW, pageH, autoTable, drawPageFooter);
+    y = drawSummaryTransactions(doc, data, y, margin, pageW, pageH, autoTable);
   } else {
-    y = drawDetailedTransactions(doc, data, y, margin, pageW, pageH, showShares, autoTable, drawPageFooter);
+    y = drawDetailedTransactions(doc, data, y, margin, pageW, pageH, showShares, autoTable);
   }
 
   // ── Remittance Stub (on last page) ─────────────────────────────────
   drawRemittanceStub(doc, data, margin, pageW, pageH, asOfDate, y);
 
-  // Final page footer
-  drawPageFooter();
+  // One footer per page, drawn once every page exists. Drawing it per table
+  // chunk as well stacked duplicate footers (to-do 9.7).
+  for (let page = 1; page <= doc.getNumberOfPages(); page++) {
+    doc.setPage(page);
+    drawPageFooter();
+  }
 
   return doc;
 }
@@ -255,7 +261,6 @@ function drawSummaryTransactions(
   pageW: number,
   pageH: number,
   autoTable: typeof autoTableFn,
-  drawPageFooter: () => void,
 ): number {
   let y = startY;
 
@@ -298,7 +303,6 @@ function drawSummaryTransactions(
       4: { halign: 'right', fontStyle: 'bold', cellWidth: 80 },
     },
     alternateRowStyles: { fillColor: ALT_ROW_BG },
-    didDrawPage: drawPageFooter,
   });
 
   y = doc.lastAutoTable.finalY + 10;
@@ -343,9 +347,15 @@ function drawDetailedTransactions(
   pageH: number,
   showShares: boolean,
   autoTable: typeof autoTableFn,
-  drawPageFooter: () => void,
 ): number {
   let y = startY;
+  // Lines drawn after a product table can otherwise land on the page footer.
+  const ensureRoomAboveFooter = (height: number) => {
+    if (height > 0 && y + height > pageH - FOOTER_SAFE_BOTTOM_OFFSET) {
+      doc.addPage();
+      y = margin;
+    }
+  };
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
@@ -358,7 +368,6 @@ function drawDetailedTransactions(
 
     // Check page space — need at least ~180pt for a transaction header + small table
     if (y + 180 > pageH - 100) {
-      drawPageFooter();
       doc.addPage();
       y = margin;
     }
@@ -399,16 +408,17 @@ function drawDetailedTransactions(
     // ── Product detail table (based on invoice type) ─────────────
     if (tx.items && tx.items.length > 0) {
       if (tx.invoice_type === 'field_application') {
-        y = drawFieldApplicationItems(doc, tx, y, margin, pageW, autoTable, drawPageFooter);
+        y = drawFieldApplicationItems(doc, tx, y, margin, pageW, autoTable);
       } else if (tx.invoice_type === 'chemical_sale') {
-        y = drawChemicalSaleItems(doc, tx, y, margin, pageW, autoTable, drawPageFooter);
+        y = drawChemicalSaleItems(doc, tx, y, margin, pageW, autoTable);
       } else {
-        y = drawMiscItems(doc, tx, y, margin, pageW, autoTable, drawPageFooter);
+        y = drawMiscItems(doc, tx, y, margin, pageW, autoTable);
       }
     }
 
     // ── Price per acre ────────────────────────────────────────────
     if (tx.price_per_acre && tx.price_per_acre > 0 && tx.invoice_type === 'field_application') {
+      ensureRoomAboveFooter(12);
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(...GRAY);
@@ -419,7 +429,6 @@ function drawDetailedTransactions(
     // ── Shares table ──────────────────────────────────────────────
     if (showShares && tx.shares && tx.shares.length > 1) {
       if (y + 60 > pageH - 100) {
-        drawPageFooter();
         doc.addPage();
         y = margin;
       }
@@ -467,12 +476,14 @@ function drawDetailedTransactions(
               2: { halign: 'right', cellWidth: 50 },
               3: { halign: 'right', fontStyle: 'bold', cellWidth: 60 },
             },
-        didDrawPage: drawPageFooter,
       });
       y = doc.lastAutoTable.finalY + 4;
     }
 
     // ── Finance charges ───────────────────────────────────────────
+    const showNetDue = tx.net_due_cents > 0 && (tx.finance_charge_cents > 0 || (tx.shares && tx.shares.length > 1));
+    // Keep Finance Charges and Net Due together on one page.
+    ensureRoomAboveFooter((tx.finance_charge_cents > 0 ? 12 : 0) + (showNetDue ? 14 : 0));
     if (tx.finance_charge_cents > 0) {
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
@@ -484,7 +495,7 @@ function drawDetailedTransactions(
     }
 
     // ── Net Due line ──────────────────────────────────────────────
-    if (tx.net_due_cents > 0 && (tx.finance_charge_cents > 0 || (tx.shares && tx.shares.length > 1))) {
+    if (showNetDue) {
       doc.setFontSize(8.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(...CHARCOAL);
@@ -541,7 +552,6 @@ function drawFieldApplicationItems(
   margin: number,
   pageW: number,
   autoTable: typeof autoTableFn,
-  drawPageFooter: () => void,
 ): number {
   const indent = margin + 10;
 
@@ -600,7 +610,6 @@ function drawFieldApplicationItems(
       6: { halign: 'right', fontStyle: 'bold', cellWidth: 55 },
     },
     alternateRowStyles: { fillColor: ALT_ROW_BG },
-    didDrawPage: drawPageFooter,
   });
 
   return doc.lastAutoTable.finalY + 4;
@@ -613,7 +622,6 @@ function drawChemicalSaleItems(
   margin: number,
   pageW: number,
   autoTable: typeof autoTableFn,
-  drawPageFooter: () => void,
 ): number {
   const indent = margin + 10;
 
@@ -653,7 +661,6 @@ function drawChemicalSaleItems(
       4: { halign: 'right', fontStyle: 'bold', cellWidth: 65 },
     },
     alternateRowStyles: { fillColor: ALT_ROW_BG },
-    didDrawPage: drawPageFooter,
   });
 
   return doc.lastAutoTable.finalY + 4;
@@ -666,7 +673,6 @@ function drawMiscItems(
   margin: number,
   pageW: number,
   autoTable: typeof autoTableFn,
-  drawPageFooter: () => void,
 ): number {
   const indent = margin + 10;
 
@@ -685,7 +691,6 @@ function drawMiscItems(
       0: { cellWidth: 'auto' },
       1: { halign: 'right', fontStyle: 'bold', cellWidth: 80 },
     },
-    didDrawPage: drawPageFooter,
   });
 
   return doc.lastAutoTable.finalY + 4;

@@ -385,10 +385,23 @@ export function gitPushCwd(cmd, fallbackCwd, fullCmd = "") {
   while ((match = optionRe.exec(prefix)) !== null) {
     const name = match[1].match(/^(?:"\$(\w+)"|"\$\{(\w+)\}"|\$(\w+)|\$\{(\w+)\})$/)?.slice(1).find(Boolean);
     const literal = name ? folderVariableValue(fullCmd, name) : null;
-    cwd = path.resolve(cwd, literal ?? unquoteShellArg(match[1]));
+    cwd = path.resolve(cwd, nativeFolder(literal ?? unquoteShellArg(match[1])));
   }
   return cwd;
 }
+
+// Git Bash writes `C:\x` as `/c/x`, which Node on Windows resolves to `C:\c\x`.
+// That folder does not exist, and Node reports a missing cwd as `spawnSync git
+// ENOENT` — 24 correct pushes were refused that way on 2026-11-01..03.
+export function nativeFolder(folder, platform = process.platform) {
+  const text = String(folder ?? "");
+  if (platform !== "win32") return text;
+  // `/c` alone is the drive root `C:/`; bare `C:` would mean that drive's current folder.
+  return text.replace(/^\/([A-Za-z])(\/|$)/, (_, drive) => `${drive.toUpperCase()}:/`);
+}
+
+// A bare `cd`/`popd` (no folder; `cd && git push` goes home) counts too (Luna, 2026-11-03).
+const DIRECTORY_CHANGE_RE = /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|pushd|popd|set-location|pop-location)(?:\s+|(?=[;&|)]|$))/i;
 
 // `W="C:/x"; git -C "$W" push` (2026-11-02: five harmless pushes denied with
 // `spawnSync git ENOENT`). Returns W's literal only when the FIRST statement of
@@ -424,7 +437,7 @@ export function folderVariableValue(fullCmd, name) {
 export function pushContextIsAmbiguous(cmd) {
   const text = String(cmd || "");
   if (!isGitPush(text)) return false;
-  return /(?:^|[;&|\r\n()]|\s)(?:cd(?:\s+\/d)?|chdir|pushd|popd|set-location|pop-location)\s+/i.test(text) ||
+  return DIRECTORY_CHANGE_RE.test(text) ||
     // `[^\S\r\n]*`, not `\s*`: `\s*` re-read a whole run of newlines from every
     // newline in it (quadratic). A later newline in the run is itself a separator
     // start, so what matches is unchanged.
@@ -1740,6 +1753,14 @@ export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, 
   } catch {
     return false;
   }
+}
+
+// The first proof `accept(data, exactHead)` takes, trying exact-head proofs first:
+// each earlier-commit proof can cost several GitHub calls, and enough of them
+// spent the merge gate's whole budget before the exact head was read (PR #1389).
+export function firstAcceptedProof(proofs, headSha, accept) {
+  const exact = (d) => String(d?.head_sha).toLowerCase() === String(headSha).toLowerCase();
+  return [...proofs.filter(exact), ...proofs.filter((d) => !exact(d))].find((d) => accept(d, exact(d))) ?? null;
 }
 
 // The full review at the root of a carry chain must name a real head and base,

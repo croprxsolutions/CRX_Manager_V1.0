@@ -11,6 +11,7 @@ import {
   type PdfPurchaseOrderData,
 } from '../../supabase/functions/_shared/pdf/purchaseOrderPdf.ts';
 import type { JsPDFWithAutoTable } from './pdfTheme';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 
 export {
   buildPurchaseOrderPdfRows,
@@ -23,7 +24,7 @@ export {
 export async function generatePurchaseOrderPdf(data: PdfPurchaseOrderData): Promise<JsPDFWithAutoTable> {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
-  return drawPurchaseOrderPdf({ jsPDF, autoTable }, data);
+  return drawPurchaseOrderPdf({ jsPDF, autoTable }, data, await loadCompanyInfoForPdf());
 }
 
 export async function downloadPurchaseOrderPdf(data: PdfPurchaseOrderData): Promise<void> {

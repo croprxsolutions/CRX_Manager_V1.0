@@ -6,12 +6,13 @@ import { ilikeOrPattern } from '../../lib/recordSearch';
 import { Sentry } from '../../lib/sentry';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../../lib/costFields';
 import { useAuth } from '../../contexts/AuthContext';
-import type { Product, UnitConversion } from '../../types';
+import type { Product, ProductForm, UnitConversion } from '../../types';
 import { formatCents as fmt } from '../../lib/money';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCents';
 import { useToast } from '../ui/Toast';
 import { toGallonOrLbEquivalent, fieldAppPricedQuantity } from '../../lib/chemCalculator';
-import { unitOptionsForForm, isKnownUnit } from '../../lib/units';
+import { rateUnitOptionsForProduct } from '../../lib/units';
+import { isTierPriceMissing } from '../../lib/quoteCalc';
 import {
   compareToMaxRate,
   phiHarvestWarning,
@@ -34,6 +35,7 @@ export interface ChemicalLine {
   unit: string;
   unit_price_cents: number;
   price_unit: string;
+  inventory_unit?: string | null;
   extended_cents: number;
   unit_cost_cents: number;
   sort_order: number;
@@ -51,7 +53,7 @@ export interface ChemicalLine {
    * conversion display (liquid -> gal, dry -> lb). Captured on product select; the
    * server is authoritative via convert_to_gl_lb().
    */
-  product_form?: 'liquid' | 'dry' | null;
+  product_form?: ProductForm | null;
   /**
    * Phase 1 (2026-04-29): when true, the unit_price_cents on this line is a
    * deliberate manual override. The server records price_source = 'manual'.
@@ -70,6 +72,9 @@ export interface ChemicalLine {
   max_label_rate_unit?: string | null;
   rei_hours?: number | null;
   phi_days?: number | null;
+  /** UI-only, NOT persisted: the picked product's tier prices, so the missing-price warning follows
+   * the primary customer's current tier. Absent on lines reloaded from a saved invoice. */
+  tier_prices?: Pick<Product, 'tier1_price' | 'tier2_price' | 'tier3_price'>;
   /**
    * #56 (UI-only, NOT persisted): a hand-entered "custom line" with no catalog
    * product. Renders a free-text name input instead of the product search box.
@@ -331,10 +336,14 @@ export default function FieldAppChemicalEntry({
       product_id: product.id,
       product_name: product.product_name,
       rate_per_acre: product.rate_per_acre || null,
-      rate_unit: product.rate_unit || product.inventory_unit || 'oz',
+      rate_unit: product.product_form === 'seed' || product.product_form === 'each'
+        ? product.inventory_unit || '' : product.rate_unit || product.inventory_unit || 'oz',
       unit: product.inventory_unit || 'oz',
-      unit_price_cents: Math.round(tierPrice(product, primaryCustomerTier) * 100),
+      // Exact cents; a price the whole-cent parser refuses previews as $0 (the server prices the line)
+      unit_price_cents: parseDollarsToCents(String(tierPrice(product, primaryCustomerTier))) ?? 0,
+      tier_prices: { tier1_price: product.tier1_price, tier2_price: product.tier2_price, tier3_price: product.tier3_price },
       price_unit: product.inventory_unit || 'oz',
+      inventory_unit: product.inventory_unit,
       unit_cost_cents: Math.round((product.current_cost || 0) * 100),
       epa_registration: product.epa_registration || undefined,
       // #25: default Vendor from the product (editable); capture product_form for the
@@ -566,10 +575,10 @@ export default function FieldAppChemicalEntry({
                         it would zero the preview here while the server falls back to unit_size and
                         still invoices non-zero. Disabled => can't be selected. */}
                     <option value="" disabled>--</option>
-                    {line.rate_unit && !isKnownUnit(unitConversions, line.product_form, line.rate_unit) && (
+                    {line.rate_unit && !rateUnitOptionsForProduct(unitConversions, line.product_form, line.inventory_unit ?? line.price_unit).some((uc) => uc.unit === line.rate_unit) && (
                       <option value={line.rate_unit}>{line.rate_unit}</option>
                     )}
-                    {unitOptionsForForm(unitConversions, line.product_form).map((uc) => (
+                    {rateUnitOptionsForProduct(unitConversions, line.product_form, line.inventory_unit ?? line.price_unit).map((uc) => (
                       <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                     ))}
                   </select>
@@ -614,6 +623,12 @@ export default function FieldAppChemicalEntry({
                       </span>
                     )}
                   </div>
+                  {/* Early warning only: the database refuses this line on save (INVOICE_PRICE_MISSING) */}
+                  {line.tier_prices && isTierPriceMissing(line.tier_prices, primaryCustomerTier) && !line.manual_override && !readOnly && (
+                    <p role="status" className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-800">
+                      <AlertTriangle className="w-3 h-3 shrink-0" /> No tier {primaryCustomerTier} price
+                    </p>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-center text-gray-600">{line.price_unit}</td>
                 <td className="px-3 py-2 text-right font-medium tabular-nums">{fmt(line.extended_cents)}</td>

@@ -7,7 +7,8 @@
 
 import { CRX_GREEN, CHARCOAL, GRAY, type JsPDFWithAutoTable } from './pdfTheme';
 import { localToday } from './dateUtils';
-import { COMPANY_TAGLINE_HEADER_NO_PHONE } from './companyInfo';
+import { companyTaglineNoPhone, fitCompanyNameFont } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatUSD as fmtCurrency } from './money';
 
 
@@ -44,6 +45,7 @@ export interface ReportPdfOptions {
 export async function generateReportPdf(options: ReportPdfOptions) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({
     orientation: options.orientation || 'landscape',
@@ -60,10 +62,11 @@ export async function generateReportPdf(options: ReportPdfOptions) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
   doc.setTextColor(255, 255, 255);
-  doc.text('CROP RX SOLUTIONS', margin, 28);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW / 2 - margin, 18);
+  doc.text(company.name.toUpperCase(), margin, 28);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(COMPANY_TAGLINE_HEADER_NO_PHONE, margin, 44);
+  doc.text(doc.splitTextToSize(companyTaglineNoPhone(company), pageW / 2 - margin).slice(0, 2), margin, 44);
 
   // Report title on right
   doc.setFontSize(12);
@@ -166,7 +169,7 @@ export async function generateReportPdf(options: ReportPdfOptions) {
         doc.setFontSize(7);
         doc.setTextColor(160, 160, 160);
         doc.text(
-          `Crop RX Solutions  •  Generated ${new Date().toLocaleDateString()}`,
+          `${company.name}  •  Generated ${new Date().toLocaleDateString()}`,
           pageW / 2,
           footerY,
           { align: 'center' }

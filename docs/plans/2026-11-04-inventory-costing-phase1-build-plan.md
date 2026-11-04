@@ -70,11 +70,15 @@ is read-only.
 
 For each product and location **with a starting point** (section 4) and stock above zero, the report first
 checks that the history since the starting point is **ordinary and adds up**:
-- every ledger row after it is a `received`, `delivered` or `job_applied` row (no adjustment, return, return
-  cancellation, delivery reversal, cycle-count change or receipt reversal);
+- every **physical** ledger row after it is a `received`, `delivered` or `job_applied` row (no adjustment,
+  return, return cancellation, delivery reversal, cycle-count change or receipt reversal). Reservation-only
+  rows (`booked`, `prebooked`, `released`, `prebook_reconciliation`) change only `quantity_prebooked`, so
+  they are ignored and ordinary order-taking never resets a starting date;
 - every receiving record after it has a unit matching the inventory row and the product's inventory unit;
-- starting quantity + receipts after it − deliveries and jobs after it = today's on-hand (this also catches
-  any stock change made outside the ordinary actions).
+- the on-hand recorded **at the moment the starting point was saved** + receipts after it − deliveries and
+  jobs after it = today's on-hand (this also catches any stock change made outside the ordinary actions). That
+  saved on-hand, not the dated lines' total, is the starting quantity, so a starting point that dates only
+  part of the stock leaves the rest "age unknown" and still passes.
 
 **If the check passes**, on-hand is dated newest first: the receipts after the starting point (by
 `received_at`), then the starting point's lines (newest date first, each capped at its quantity). Anything
@@ -114,8 +118,9 @@ inventory row exists.
 
 **Storage (two small append-only tables):**
 - `inventory_age_baseline_batches`: one row per product-location replacement, with a database sequence
-  number (the highest sequence is the one in use), product, location, as-of time, note, entered by, the
-  request's idempotency key and its fingerprint.
+  number (the highest sequence is the one in use), product, location, as-of time, **the on-hand quantity read
+  under the inventory lock at save time**, note, entered by, the request's idempotency key and its
+  fingerprint.
 - `inventory_age_baseline_lines`: zero or more lines per batch (estimated received date, quantity). Zero lines
   means "removed".
 
@@ -209,7 +214,9 @@ is live.
 1. Run the report against live data (read-only) and record coverage; every row's buckets + unknown equal
    on-hand.
 2. **Cases on a throwaway copy** (a local database or a rolled-back transaction, never live): no starting date;
-   a starting date only; a starting date plus a later receipt, then a sale; a receipt in a different unit
+   a starting date only; a starting date covering part of the stock (rest unknown, check still passes); a
+   booking or quick-delivery reservation after the starting date (must not reset it); a starting date plus a
+   later receipt, then a sale; a receipt in a different unit
    (row must ask for a new starting date); a count correction, a return and its cancellation, a delivery
    reversal and a receipt reversal after the starting date (each must ask for a new starting date); a stock
    change outside the ordinary actions (must fail "adds up"); a split starting point; a replaced and a removed starting

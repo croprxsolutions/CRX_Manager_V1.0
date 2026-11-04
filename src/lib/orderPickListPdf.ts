@@ -9,7 +9,8 @@
 import { CRX_GREEN, CHARCOAL, GRAY, RED, AMBER, type JsPDFWithAutoTable } from './pdfTheme';
 import type { autoTable as autoTableFn } from 'jspdf-autotable';
 import type { CellHookData } from 'jspdf-autotable';
-import { COMPANY_FOOTER_INTERNAL } from './companyInfo';
+import { companyFooterInternal, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 
 
 
@@ -40,6 +41,7 @@ const fmtQty = (n: number) => n.toLocaleString();
 
 function renderPickListPage(
   doc: JsPDFWithAutoTable,
+  company: CompanyInfo,
   data: PickListData,
   autoTable: typeof autoTableFn
 ) {
@@ -53,7 +55,8 @@ function renderPickListPage(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(20);
   doc.setTextColor(255, 255, 255);
-  doc.text('CROP RX SOLUTIONS', margin, 32);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 200, 20);
+  doc.text(company.name.toUpperCase(), margin, 32);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text('PICK LIST', margin, 50);
@@ -233,7 +236,7 @@ function renderPickListPage(
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
   doc.text(
-    COMPANY_FOOTER_INTERNAL,
+    doc.splitTextToSize(companyFooterInternal(company), pageW - margin * 2).slice(0, 2),
     pageW / 2,
     footerY,
     { align: 'center' },
@@ -243,9 +246,10 @@ function renderPickListPage(
 export async function generatePickListPdf(data: PickListData) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
-  renderPickListPage(doc, data, autoTable);
+  renderPickListPage(doc, company, data, autoTable);
   return doc;
 }
 
@@ -261,10 +265,11 @@ export async function downloadBatchPickListPdf(dataList: PickListData[]) {
 
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   if (dataList.length === 1) {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
-    renderPickListPage(doc, dataList[0], autoTable);
+    renderPickListPage(doc, company, dataList[0], autoTable);
     doc.save(`${dataList[0].order_number}_pick_list.pdf`);
     return;
   }
@@ -272,7 +277,7 @@ export async function downloadBatchPickListPdf(dataList: PickListData[]) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
   for (let i = 0; i < dataList.length; i++) {
     if (i > 0) doc.addPage();
-    renderPickListPage(doc, dataList[i], autoTable);
+    renderPickListPage(doc, company, dataList[i], autoTable);
   }
   doc.save(`pick_lists_batch_${dataList.length}.pdf`);
 }

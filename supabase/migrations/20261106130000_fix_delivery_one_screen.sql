@@ -120,6 +120,7 @@ BEGIN
        AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
        AND (COALESCE(i.paid_amount_cents, 0) <> 0 OR COALESCE(i.prepay_applied_cents, 0) <> 0
             OR COALESCE(i.write_off_cents, 0) <> 0 OR COALESCE(i.credit_applied_cents, 0) <> 0
+            OR EXISTS (SELECT 1 FROM write_offs w WHERE w.invoice_id = i.id AND w.reversed_at IS NULL)
             OR EXISTS (SELECT 1 FROM invoice_line_allocations ila
                          JOIN allocation_sets aset ON aset.id = ila.allocation_set_id
                         WHERE ila.invoice_id = i.id AND aset.entity_type = 'payment' AND aset.is_active))
@@ -301,7 +302,8 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := auth.uid();
-  v_reason text := btrim(COALESCE(p_reason, ''));
+  v_reason text := btrim(COALESCE(p_reason, ''), E' 	
+');
   v_fingerprint text;
   v_replay jsonb;
   v_plan jsonb;
@@ -378,8 +380,10 @@ BEGIN
   -- This key has no receipt yet, and the inner receipts commit only with it, so an inner key
   -- already used means another request took it; void_invoice's receipt would replay that one.
   -- Any operation counts: idempotency_key is unique on its own.
-  IF EXISTS (SELECT 1 FROM idempotency_keys k, jsonb_array_elements(v_plan -> 'invoices') e
-              WHERE k.idempotency_key = p_idempotency_key || ':void_invoice:' || (e ->> 'id')) THEN
+  IF EXISTS (SELECT 1 FROM idempotency_keys k
+              WHERE k.idempotency_key = p_idempotency_key || ':void_delivery'
+                 OR k.idempotency_key IN (SELECT p_idempotency_key || ':void_invoice:' || (e ->> 'id')
+                                            FROM jsonb_array_elements(v_plan -> 'invoices') e)) THEN
     RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH';
   END IF;
 
@@ -391,6 +395,10 @@ BEGIN
   END LOOP;
 
   PERFORM public.void_delivery(p_delivery_id, v_reason, v_actor, p_idempotency_key || ':void_delivery');
+  -- Never report success, or restore the commission, unless the delivery really is voided now.
+  IF NOT EXISTS (SELECT 1 FROM deliveries WHERE id = p_delivery_id AND status = 'voided') THEN
+    RAISE EXCEPTION 'FIX_DELIVERY_NOT_VOIDED';
+  END IF;
 
   -- The order stands, so the rep keeps the commission void_invoice just cancelled.
   INSERT INTO commissions (order_id, customer_id, recipient, recipient_user_id, split_percentage,

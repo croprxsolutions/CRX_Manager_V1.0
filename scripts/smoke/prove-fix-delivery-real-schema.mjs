@@ -274,6 +274,7 @@ function scenarios() {
   refused(`${asUser(REP)} SELECT public.fix_delivery('${DELIVERY}','x','x','k-rep');`, 'a sales rep cannot fix a delivery', /Admin access required/);
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','x','x',NULL);`, 'a key is required', /IDEMPOTENCY_KEY_REQUIRED/);
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','  ','x','k-blank');`, 'a reason is required', /Reason is required/);
+  refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}',E'\t\n','x','k-blank-ws');`, 'a tab-and-newline reason counts as blank', /Reason is required/);
   refused(`${asUser(ADMIN)} SELECT public._fix_delivery_plan('${DELIVERY}');`, 'the plan helper is not callable by app roles', /permission denied/);
 
   const before = Number(scalar(`SELECT ${stock};`));
@@ -391,6 +392,14 @@ function scenarios() {
     INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents)
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000);
     ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ALTER TABLE public.write_offs DISABLE TRIGGER USER;
+    INSERT INTO public.write_offs (invoice_id,customer_id,amount_cents,reason,approved_by,created_by) VALUES ('${ORDER_INV}','${CUSTOMER}',500,'[PROVER]','${ADMIN}','${ADMIN}');
+    ALTER TABLE public.write_offs ENABLE TRIGGER USER;
+    ${fix('k-draft-write-off-row')}`, 'an order draft with an active write-off row refuses the fix', /FIX_DELIVERY_REFUSED: A draft or unposted invoice on this delivery or order has a payment/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents)
+      VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000);
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ALTER TABLE public.allocation_sets DISABLE TRIGGER USER; ALTER TABLE public.invoice_line_allocations DISABLE TRIGGER USER;
     INSERT INTO public.allocation_sets (id,entity_type,entity_id,is_active) VALUES ('${ALLOC}','payment',gen_random_uuid(),true);
     INSERT INTO public.invoice_line_allocations (allocation_set_id,invoice_id,bill_to_customer_id,split_percentage,amount_cents)
@@ -403,6 +412,10 @@ function scenarios() {
       VALUES ('k-pre-used:void_invoice:${INV}','void_invoice','{"success":true}');
     ${fix('k-pre-used')}`,
     'an inner invoice key already used by another request refuses the fix', /IDEMPOTENCY_INTENT_MISMATCH/);
+  refused(`RESET ROLE; INSERT INTO public.idempotency_keys (idempotency_key,operation,result)
+      VALUES ('k-pre-used-del:void_delivery','void_delivery','{"success":true}');
+    ${fix('k-pre-used-del')}`,
+    'an inner delivery key already used by another request refuses the fix', /IDEMPOTENCY_INTENT_MISMATCH/);
   refused(`RESET ROLE; ALTER TABLE public.delivery_external_billings DISABLE TRIGGER USER;
     INSERT INTO public.delivery_external_billings (delivery_id,reason) VALUES ('${DELIVERY}','[PROVER] billed in Chem Man');
     ALTER TABLE public.delivery_external_billings ENABLE TRIGGER USER;

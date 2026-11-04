@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   buildCarryForwardProof,
+  codeHealthBeforeSol,
   buildCodexExecArgs,
   buildCollisionCheckPrompt,
   CARRY_SOURCE_MAX_AGE_MS,
@@ -1756,6 +1757,19 @@ function collisionPromptSkipsWork(prompt) {
       rmSync(repo, { recursive: true, force: true });
     }
   }
+}
+
+{
+  // Code health runs before Sol when src/ changed (or the diff is unreadable), and its failure refuses.
+  const ran = [];
+  const spawn = (bin, args) => { ran.push(args.join(" ")); return { status: 1, stdout: "FAIL - src/pages/X.tsx: max-lines", stderr: "" }; };
+  const skipped = codeHealthBeforeSol("root", "base", "head", { git: () => "", spawn });
+  assert.deepEqual([skipped.ok, skipped.ran, ran.length], [true, false, 0], "code health: no src/ change skips the check");
+  const failed = codeHealthBeforeSol("root", "base", "head", { git: () => "src/pages/X.tsx", spawn });
+  assert.deepEqual([failed.ok, ran[0]], [false, "scripts/check-code-health.mjs"], "code health: a failing src/ change refuses Sol");
+  assert.match(failed.output, /max-lines/, "code health: the refusal carries the check's output");
+  const unreadable = codeHealthBeforeSol("root", "base", "head", { git: () => null, spawn: () => ({ status: 0, stdout: "PASS", stderr: "" }) });
+  assert.deepEqual([unreadable.ok, unreadable.ran], [true, true], "code health: an unreadable diff runs the check anyway");
 }
 
 console.log("OK - write-codex-push-proof helpers passed.");

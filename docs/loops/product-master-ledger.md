@@ -142,6 +142,8 @@ Most of Wave 2 landed through ordinary sessions after the run. Merge commit on `
 
 **Run:** not a mission overnight run. Mason said "Yes, start Wave 3" on 2026-11-03, and one session builds the packages in order through `ship.md`. **Started:** 2026-11-03 20:56 America/Chicago. **Base:** `origin/main` at `8c3550768`.
 
+**Deviation from Step 0a:** this session runs with the normal 300K auto-summary, not the 800K deep mode Step 0a asks for. Mason chose to keep going rather than restart (2026-11-03). To cover it, the session commits 11a-1 at each working checkpoint and re-reads live migrations, PR heads and Sol proofs from source after any auto-summary.
+
 ## Wave 3 gate (checked read-only on live, 2026-11-03 20:57 America/Chicago)
 
 | Gate item | Result |
@@ -160,7 +162,7 @@ Most of Wave 2 landed through ordinary sessions after the run. Merge commit on `
 
 | Package | Status | Branch | PR | Notes |
 |---|---|---|---|---|
-| WP-PM-15b step 3 Vendors screen 💲 | IN PROGRESS by another session | `pm/wp-pm-15b-preferred-vendor-enforcement` | [#1400](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1400) | Its database half landed in #1407. The session "Data11 applied live continuation" owns the branch and is carrying it through Sol and merge |
-| WP-PM-11a-1 Rate writer, rate lock, correction 💲 | STARTED | | | |
+| WP-PM-15b step 3 Vendors screen 💲 | DONE | `pm/wp-pm-15b-preferred-vendor-enforcement` | [#1400](https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1400) | Merged as `7e68ba9d5` (head `44309c911`, clean Sol proof); production deployed 2026-11-03 21:25 America/Chicago. PROOF: production serves bundle `index-E2F88jDy.js`; a real product's page shows the Vendors section with its preferred vendor, Remove and Add a vendor (looked only, saved nothing), 2026-11-03 21:27 America/Chicago |
+| WP-PM-11a-1 Rate writer, rate lock, correction 💲 | IN PROGRESS | `pm/wp-pm-11a-1-rate-lock` | | Local candidate `20261105200000_product_rate_lock`. Full real-schema proof and smoke pass; first review round found no security hole and is being fixed (seed/each products while locked, unit checks, workbook refusal in the database) |
 | WP-PM-11a-2 Setup workbook 💲 | NOT STARTED | | | |
 | WP-PM-10 Bulk import 💲 | NOT STARTED | | | Depends on 11a-1 and #1400 |

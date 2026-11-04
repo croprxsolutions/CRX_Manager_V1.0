@@ -148,6 +148,8 @@ Quote sections and quote items are RPC-owned: browser roles may read them but mu
 - **completed**: Delivery finished (`complete_delivery()` RPC). Inventory deducted, order updated.
 - **cancelled**: Delivery was cancelled (`cancel_delivery()` or `batch_cancel_deliveries()`).
 - **voided**: Completed delivery reversed by admin (`void_delivery()` RPC). Inventory restored.
+  - A posted, paid or overdue invoice blocks `void_delivery()`. **Fix Delivery** (`preview_fix_delivery()` then `fix_delivery()`, admin only, one screen with a typed confirmation) voids or cancels the delivery's own unpaid invoice and voids the delivery in one transaction, keeps the order's pending commission (a new pending copy replaces the one the invoice void cancels), then opens New Delivery for the same order. It refuses an applied payment, a split-group or whole-order invoice, a closed month, a return, outside billing, or a commission already in a payout.
+  - **Return Product** on a completed delivery opens Returns with the customer and order already picked (`/returns?customer=&order=`).
 
 ### Two-step delivery flow (CRITICAL)
 1. **`confirm_delivery()`** — transitions scheduled -> in_progress. It does not check stock: the low-stock warning is the shortage badge on the Deliveries page, and `complete_delivery()` warns rather than blocks.

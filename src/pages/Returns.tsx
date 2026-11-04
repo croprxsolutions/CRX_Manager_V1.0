@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, CheckCircle, XCircle, ArrowDownToLine, DollarSign, Download, FileText, Trash2, Ban } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -390,7 +391,7 @@ export default function Returns() {
     setCustomerOrders(orders);
   };
 
-  const openCreate = () => {
+  const openCreate = (prefill?: { customer_id: string; order_id: string }) => {
     customerOrdersRequestRef.current += 1;
     orderItemsRequestRef.current += 1;
     loadCreateData();
@@ -404,12 +405,27 @@ export default function Returns() {
       setShowCreate(true);
       return;
     }
-    setNewForm({ customer_id: '', order_id: '', reason: 'defective', reason_notes: '', notes: '' });
+    setNewForm({ customer_id: prefill?.customer_id ?? '', order_id: prefill?.order_id ?? '', reason: 'defective', reason_notes: '', notes: '' });
     setNewItems([]);
     setCustomerOrders([]);
     setOrderItems([]);
+    if (prefill) {
+      void loadCustomerOrders(prefill.customer_id);
+      void loadOrderItems(prefill.order_id, prefill.customer_id);
+    }
     setShowCreate(true);
   };
+
+  // "Return product" on a delivery opens here with ?customer=&order= to start the return pre-filled.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const customer = searchParams.get('customer');
+    const order = searchParams.get('order');
+    if (!customer || !order) return;
+    setSearchParams({}, { replace: true });
+    openCreate({ customer_id: customer, order_id: order });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const closeCreate = () => {
     if (creating) return;
@@ -872,7 +888,7 @@ export default function Returns() {
         actions={(
           <>
           {canBulkAction && <BulkActionBar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />}
-          <Button icon={<Plus className="w-4 h-4" />} onClick={openCreate}>
+          <Button icon={<Plus className="w-4 h-4" />} onClick={() => openCreate()}>
             New Return
           </Button>
           </>
@@ -891,7 +907,7 @@ export default function Returns() {
             emptyTitle="No returns yet"
             emptyDescription="Create a return when products need to come back"
             emptyAction={
-              <Button icon={<Plus className="w-4 h-4" />} onClick={openCreate}>
+              <Button icon={<Plus className="w-4 h-4" />} onClick={() => openCreate()}>
                 New Return
               </Button>
             }

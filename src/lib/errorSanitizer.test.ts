@@ -112,7 +112,13 @@ describe('sanitizeError', () => {
 
   it('tells the user to void the posted invoice before voiding or cancelling its delivery', () => {
     expect(sanitizeError('DELIVERY_HAS_POSTED_INVOICE: void the posted invoice for delivery D-1 before voiding or cancelling it'))
-      .toBe('Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery');
+      .toBe('Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery. For a completed delivery, an admin can use Fix Delivery to do both at once');
+  });
+
+  it('maps the Fix Delivery refusals to plain English', () => {
+    expect(sanitizeError('FIX_DELIVERY_REFUSED: A payment is applied')).toMatch(/^Nothing was changed\. Something on this delivery now blocks a fix/);
+    expect(sanitizeError('FIX_DELIVERY_PREVIEW_STALE: x')).toMatch(/invoices on this delivery changed/);
+    expect(sanitizeError('DELIVERY_ORDER_BUSY_RETRY')).toMatch(/being updated elsewhere/);
   });
 
   it('tells the user a completed delivery is voided, not cancelled', () => {

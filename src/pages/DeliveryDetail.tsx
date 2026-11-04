@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Phone, MapPin, CheckCircle2, Package, Download, WifiOff,
   Minus, Plus, Pencil, Ban, Camera, UserPlus, AlertTriangle, RefreshCw,
-  PlayCircle, Lock, Zap, FileText, Mail, RotateCcw, MessageSquarePlus,
+  PlayCircle, Lock, Zap, FileText, Mail, RotateCcw, MessageSquarePlus, Wrench, Undo2,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import { LoadFailedState } from '../components/ui/EmptyState';
@@ -31,6 +31,7 @@ import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, fetchReceiptRecipient, fetchRecei
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
+import FixDeliveryModal from '../components/deliveries/FixDeliveryModal';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey, isValidNoProofReason, NO_PROOF_REASON_MAX_CHARS, NO_PROOF_REASON_MIN_CHARS, NO_PROOF_SIGNER, noProofReasonLength } from '../lib/paperTicket';
@@ -298,6 +299,7 @@ export default function DeliveryDetail() {
   // Only scheduled and in-progress deliveries cancel; a completed one is voided (admin-only).
   const canCancel = isAdminOrRep && (delivery?.status === 'scheduled' || delivery?.status === 'in_progress');
   const canVoid = isAdmin && delivery?.status === 'completed';
+  const [fixOpen, setFixOpen] = useState(false);
   const isAssignedDriver = isDriver && profile?.id === delivery?.assigned_driver;
   const canConfirm = (isAdminOrRep || isAssignedDriver) && delivery?.status === 'scheduled';
   const receiptEmail = customer?.email || receiptRecipient?.email || null;
@@ -2204,6 +2206,22 @@ export default function DeliveryDetail() {
                 Void Delivery
               </Button>
             )}
+            {canVoid && delivery.order_id && (
+              <Button variant="danger" size="sm" icon={<Wrench className="w-4 h-4" />} showChevron={false} onClick={() => setFixOpen(true)}>
+                Fix Delivery
+              </Button>
+            )}
+            {isAdminOrRep && delivery.status === 'completed' && delivery.order_id && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Undo2 className="w-4 h-4" />}
+                showChevron={false}
+                onClick={() => navigate(`/returns?customer=${encodeURIComponent(delivery.customer_id)}&order=${encodeURIComponent(delivery.order_id)}`)}
+              >
+                Return Product
+              </Button>
+            )}
             {delivery.priority && delivery.priority !== 'normal' && (
               <Badge variant={PRIORITY_BADGE[delivery.priority] || 'default'} size="md">
                 {PRIORITY_LABELS[delivery.priority]}
@@ -3004,6 +3022,10 @@ export default function DeliveryDetail() {
         loading={confirming}
       />
 
+      {delivery && (
+        <FixDeliveryModal open={fixOpen} onClose={() => setFixOpen(false)} deliveryId={delivery.id} deliveryNumber={delivery.delivery_number} />
+      )}
+
       {/* Void Delivery Modal */}
       <Modal open={voidOpen} onClose={() => setVoidOpen(false)} title="Void Completed Delivery">
         <div className="space-y-4">
@@ -3015,9 +3037,9 @@ export default function DeliveryDetail() {
                 <li>Restore all inventory to the warehouse</li>
                 <li>Reverse order item delivery quantities</li>
                 <li>Delete delivery remainders from this delivery</li>
-                <li>Auto-void any linked draft invoices</li>
+                <li>Cancel any draft invoices for this delivery or its order</li>
               </ul>
-              <span className="block mt-2 font-semibold text-red-900">This action cannot be undone. Posted invoices must be manually reviewed.</span>
+              <span className="block mt-2 font-semibold text-red-900">This action cannot be undone. If a posted invoice exists, the void is refused: use Fix Delivery to undo both together.</span>
             </p>
           </div>
           <div>

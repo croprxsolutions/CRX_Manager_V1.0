@@ -52,6 +52,7 @@ vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/reportPdf', () => ({ downloadReportPdf: vi.fn() }));
 
+import { MemoryRouter } from 'react-router-dom';
 import Returns from './Returns';
 
 const TOTAL = SERVER_ROW_CAP + 5;
@@ -80,7 +81,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 async function pickCustomer() {
-  render(<Returns />);
+  render(<MemoryRouter><Returns /></MemoryRouter>);
   await screen.findByText('No returns yet');
   fireEvent.click(screen.getAllByRole('button', { name: 'New Return' })[0]);
   const dialog = await screen.findByRole('dialog', { name: 'New Return / RMA' });
@@ -105,5 +106,14 @@ describe('new return order picker past the 1,000-row server cap (N10)', () => {
     const picker = await pickCustomer();
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', "This customer's orders could not be loaded. Pick the customer again to retry."));
     expect(picker.querySelectorAll('option')).toHaveLength(1);
+  });
+});
+
+describe('Return product from a delivery', () => {
+  it("opens New Return with the delivery's customer and order already picked", async () => {
+    render(<MemoryRouter initialEntries={['/returns?customer=customer-1&order=order-0003']}><Returns /></MemoryRouter>);
+    const dialog = await screen.findByRole('dialog', { name: 'New Return / RMA' });
+    await waitFor(() => expect(within(dialog).getByLabelText<HTMLSelectElement>('Customer').value).toBe('customer-1'));
+    await waitFor(() => expect(within(dialog).getByLabelText<HTMLSelectElement>('Original Order').value).toBe('order-0003'));
   });
 });

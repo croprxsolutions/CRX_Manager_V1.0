@@ -117,6 +117,7 @@ vi.mock('../lib/criticalAction', () => ({
   }),
 }));
 
+import { MemoryRouter } from 'react-router-dom';
 import Returns from './Returns';
 
 describe('Returns loading and retry behavior', () => {
@@ -175,7 +176,7 @@ describe('Returns loading and retry behavior', () => {
         : { data: { return_id: 'return-1', return_number: 'RMA-1', item_count: 1 }, error: null });
     });
 
-    render(<Returns />);
+    render(<MemoryRouter><Returns /></MemoryRouter>);
     await screen.findByText('No returns yet');
     let dialog = await fillCreateReturn();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create Return' }));
@@ -211,7 +212,7 @@ describe('Returns loading and retry behavior', () => {
         : { data: { return_id: 'return-2', return_number: 'RMA-2', item_count: 1 }, error: null });
     });
 
-    render(<Returns />);
+    render(<MemoryRouter><Returns /></MemoryRouter>);
     await screen.findByText('No returns yet');
     const dialog = await fillCreateReturn();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create Return' }));
@@ -236,7 +237,7 @@ describe('Returns loading and retry behavior', () => {
       ? buildChain({ data: returns, error: null })
       : buildChain({ data: [], error: null }));
 
-    render(<Returns />);
+    render(<MemoryRouter><Returns /></MemoryRouter>);
     expect(await screen.findByText('RMA-PAGED-1500', {}, { timeout: 10000 })).toBeInTheDocument();
     expect(screen.getByText('RMA-PAGED-1')).toBeInTheDocument();
     expect(screen.getByText('RMA-PAGED-1001')).toBeInTheDocument();
@@ -265,7 +266,7 @@ describe('Returns loading and retry behavior', () => {
         : { data: { was_received: false, reversed_count: 0, skipped_count: 0 }, error: null });
     });
 
-    render(<Returns />);
+    render(<MemoryRouter><Returns /></MemoryRouter>);
     await screen.findByText('RMA-CANCEL');
     fireEvent.click(screen.getByRole('button', { name: /RMA-CANCEL/ }));
     await screen.findByRole('heading', { name: 'Return: RMA-CANCEL' });
@@ -299,7 +300,7 @@ describe('Returns loading and retry behavior', () => {
         })
       : Promise.resolve({ data: null, error: null }));
 
-    render(<Returns />);
+    render(<MemoryRouter><Returns /></MemoryRouter>);
     await screen.findByText('No returns yet');
     const dialog = await fillCreateReturn();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create Return' }));
@@ -325,7 +326,7 @@ describe('Returns loading and retry behavior', () => {
       return buildChain({ data: [], error: null });
     });
 
-    render(<Returns />);
+    render(<MemoryRouter><Returns /></MemoryRouter>);
     await screen.findByText('RMA-A');
     fireEvent.click(screen.getByRole('button', { name: /RMA-A/ }));
     await waitFor(() => expect(detailCalls).toBe(1));
@@ -375,7 +376,7 @@ describe('Returns loading and retry behavior', () => {
         : { data: { success: true, return_id: 'return-a-uuid' }, error: null });
     });
 
-    render(<Returns />);
+    render(<MemoryRouter><Returns /></MemoryRouter>);
     await screen.findByText('RMA-A');
     fireEvent.click(screen.getByRole('button', { name: /RMA-A/ }));
     await screen.findByRole('heading', { name: 'Return: RMA-A' });

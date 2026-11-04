@@ -1213,6 +1213,29 @@ export interface ReceiptRecipient {
   contactName: string | null;
   farmName: string | null;
 }
+/** preview_fix_delivery's plan (20261106100000): what Fix delivery will undo, or why it refuses. */
+export interface FixDeliveryPlan {
+  delivery_id: string;
+  delivery_number: string;
+  order_id: string | null;
+  order_number: string | null;
+  customer_id: string;
+  can_fix: boolean;
+  refusals: Array<{ code: string; message: string }>;
+  invoices: Array<{ id: string; invoice_number: string; status: InvoiceStatus; total_cents: number; paid_cents: number; prepay_applied_cents: number; action: 'cancel' | 'void' }>;
+  other_draft_invoices: Array<{ id: string; invoice_number: string }>;
+  items: Array<{ product_name: string | null; quantity: number; unit: string | null }>;
+}
+/** fix_delivery's result: the order and customer to re-enter the corrected delivery for. */
+export interface FixDeliveryResult {
+  success: boolean;
+  delivery_id: string;
+  delivery_number: string;
+  order_id: string;
+  customer_id: string;
+  invoices: FixDeliveryPlan['invoices'];
+  commissions_restored: number;
+}
 export type DeliveryIssueType = 'none' | 'customer_not_home' | 'gate_locked' | 'road_blocked' | 'wrong_address' | 'refused' | 'weather' | 'other';
 
 export interface Delivery {

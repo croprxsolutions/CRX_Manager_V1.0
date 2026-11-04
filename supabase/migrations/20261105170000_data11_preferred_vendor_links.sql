@@ -9,7 +9,7 @@
 --   * "preferred" on each product's single confirmed link where none is preferred yet.
 --   * the vendor text of every planned product that is not already exactly its vendor's name
 --     becomes that name (live: only the two blank hand-assigned products), so every active
---     product's vendor text equals its preferred vendor's name, as 20261105110000 requires.
+--     product's vendor text equals its preferred vendor's name, as 20261105180000 requires.
 -- It changes no other products.vendor text, no other link, no vendor and no price.
 --
 -- Bound to the approved list: the plan below, with each product's current vendor text and the id

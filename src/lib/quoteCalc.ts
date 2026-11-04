@@ -101,6 +101,50 @@ function rateUnitOf(rateUnit: string | null | undefined, product: Product): stri
 }
 
 /** Core pricing recalculation — pure function (no React deps) */
+// A number as the exact decimal it prints as (the value typed or stored): [numerator, 10^scale].
+function decimalOf(n: number): [bigint, bigint] {
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(n));
+  if (!m) return [0n, 1n]; // NaN or Infinity: callers pass finite inputs
+  let digits = BigInt(m[2] + (m[3] ?? ''));
+  const scale = (m[3] ?? '').length - Number(m[4] ?? 0);
+  if (scale < 0) digits *= 10n ** BigInt(-scale);
+  return [m[1] ? -digits : digits, 10n ** BigInt(Math.max(scale, 0))];
+}
+
+/**
+ * The product of `nums` divided by the product of `dens`, rounded to 0.01 half away from zero,
+ * like PostgreSQL's ROUND(numeric, 2) on save_quote's exact numeric arithmetic. Binary floats
+ * cannot do this: 0.145 × 100 is 14.499999999999998, so Math.round gives 0.14 where the
+ * database gives 0.15. The inputs are taken as the decimals they print as, never float results.
+ */
+export function exactRound2(nums: number[], dens: number[] = []): number {
+  let p = 100n;
+  let q = 1n;
+  for (const n of nums) { const [a, b] = decimalOf(n); p *= a; q *= b; }
+  for (const d of dens) { const [a, b] = decimalOf(d); p *= b; q *= a; }
+  if (q === 0n) return 0;
+  const negative = (p < 0n) !== (q < 0n);
+  if (p < 0n) p = -p;
+  if (q < 0n) q = -q;
+  const cents = p / q + (2n * (p % q) >= q ? 1n : 0n);
+  return (negative ? -1 : 1) * Number(cents) / 100;
+}
+
+/**
+ * A quote line's quantity and money, figured as save_quote figures them (S09): the quantity is
+ * settled to 0.01 first, then price × quantity and cost × quantity are each rounded to the cent.
+ * Figuring the total from the unsettled quantity showed $513.32 on screen and on the PDF for a
+ * line the database stores and bills at $513.36 (3.68 gal × $139.50). The quantity is passed as
+ * its factors (`unitNums` / `unitDens`) so it is settled from the exact inputs, as the database does.
+ */
+export function billedLine(pricePerUnit: number, cost: number, unitNums: number[], unitDens: number[] = []) {
+  const units = exactRound2(unitNums, unitDens);
+  const totalPrice = exactRound2([pricePerUnit, units]);
+  const profit = Math.round((totalPrice - exactRound2([cost, units])) * 100) / 100;
+  const netMargin = totalPrice > 0 ? exactRound2([profit, 100], [totalPrice]) : 0;
+  return { units, totalPrice, profit, netMargin };
+}
+
 export function recalcItem(
   item: CalcItem,
   product: Product,
@@ -114,19 +158,16 @@ export function recalcItem(
 
   if (mode === 'units_direct') {
     // User entered total_units_needed directly — skip rate×acres computation
-    const totalInventoryUnits = item.total_units_needed || 0;
-    const totalPrice = pricePerUnit * totalInventoryUnits;
-    const profit = (pricePerUnit - (product.current_cost || 0)) * totalInventoryUnits;
-    const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+    const enteredUnits = item.total_units_needed || 0;
+    const billed = billedLine(pricePerUnit, product.current_cost || 0, [enteredUnits]);
 
-    // Back-calculate rate if acres is also set (informational)
+    // Back-calculate rate if acres is also set (informational); save_quote uses the entered units
     const acres = item.acres || 0;
     let ozPerAcre: number | null = item.oz_per_acre;
     let pricePerAcre: number | null = item.price_per_acre;
     if (acres > 0 && inventoryUnitFactorOz > 0) {
-      const totalOz = totalInventoryUnits * inventoryUnitFactorOz;
-      ozPerAcre = Math.round((totalOz / acres) * 100) / 100;
-      pricePerAcre = Math.round((totalPrice / acres) * 100) / 100;
+      ozPerAcre = exactRound2([enteredUnits, inventoryUnitFactorOz], [acres]);
+      pricePerAcre = exactRound2([pricePerUnit, enteredUnits], [acres]);
     }
 
     return {
@@ -135,10 +176,10 @@ export function recalcItem(
       current_cost: product.current_cost || 0,
       oz_per_acre: ozPerAcre,
       price_per_acre: pricePerAcre,
-      total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-      total_price: Math.round(totalPrice * 100) / 100,
-      profit: Math.round(profit * 100) / 100,
-      net_margin: Math.round(netMargin * 100 * 100) / 100,
+      total_units_needed: billed.units,
+      total_price: billed.totalPrice,
+      profit: billed.profit,
+      net_margin: billed.netMargin,
     };
   }
 
@@ -147,30 +188,22 @@ export function recalcItem(
   const acres = item.acres || 0;
 
   const rateUnitFactorOz = getConversionFactor(rateUnitOf(item.rate_unit, product), conversions);
-  const rateInOz = actualRate * rateUnitFactorOz;
-  const ozPerAcre = rateInOz;
-
-  const totalInventoryUnits =
-    inventoryUnitFactorOz > 0 ? (acres * rateInOz) / inventoryUnitFactorOz : 0;
-
-  const pricePerAcre =
-    inventoryUnitFactorOz > 0
-      ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
-      : 0;
-  const totalPrice = pricePerUnit * totalInventoryUnits;
-  const profit = (pricePerUnit - (product.current_cost || 0)) * totalInventoryUnits;
-  const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+  const billed = inventoryUnitFactorOz > 0
+    ? billedLine(pricePerUnit, product.current_cost || 0, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+    : billedLine(pricePerUnit, product.current_cost || 0, [0]);
 
   return {
     ...item,
     price_per_unit: pricePerUnit,
     current_cost: product.current_cost || 0,
-    oz_per_acre: Math.round(ozPerAcre * 100) / 100,
-    price_per_acre: Math.round(pricePerAcre * 100) / 100,
-    total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-    total_price: Math.round(totalPrice * 100) / 100,
-    profit: Math.round(profit * 100) / 100,
-    net_margin: Math.round(netMargin * 100 * 100) / 100, // stored as percentage
+    oz_per_acre: exactRound2([actualRate, rateUnitFactorOz]),
+    price_per_acre: inventoryUnitFactorOz > 0
+      ? exactRound2([pricePerUnit, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+      : 0,
+    total_units_needed: billed.units,
+    total_price: billed.totalPrice,
+    profit: billed.profit,
+    net_margin: billed.netMargin, // stored as percentage
   };
 }
 

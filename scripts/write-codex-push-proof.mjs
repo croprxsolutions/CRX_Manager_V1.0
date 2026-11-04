@@ -2201,6 +2201,8 @@ function resolveSingleCommitCarry(root, nowMs, problemOf) {
   const problem = problemOf({
     entries,
     readFile: (side, file) => gitBlob(root, side === "old" ? fromHead : headSha, file),
+    source,
+    fromHead,
   });
   if (problem) return { problem };
   return { headSha, fromHead, source, entries };
@@ -2330,9 +2332,19 @@ export function allowlistRekeyProblem(before, after) {
 
 // null when `entries` (gitChangedEntries of reviewed head → HEAD) is only
 // post-apply paperwork, otherwise why not. `readFile` is as in restampProblem.
-export function postApplyProblem({ entries, readFile }) {
+// `prMigrations` lists the `supabase/migrations/*.sql` paths the reviewed PR adds:
+// a record may only be one of theirs, so no other migration's status can be
+// flipped (the parked-migration count reads them; Sol HIGH, round 2).
+export function postApplyProblem({ entries, readFile, prMigrations = [] }) {
   if (entries.length === 0) return "the commit changes nothing";
+  const prRecords = new Set(prMigrations.map((sql) => sql.replace(/^supabase\/migrations\/(.+)\.sql$/, "docs/reference/migrations.d/$1.md")));
   for (const { path: file, oldMode, newMode } of entries) {
+    // README and agent instruction files are rules, never paperwork (Sol MED, round 2).
+    const name = file.slice(file.lastIndexOf("/") + 1).toLowerCase();
+    if (name === "readme.md" || CARRY_HOT_NAMES.includes(name)) return `${file} is an instruction file, not post-apply paperwork`;
+    if (file.startsWith("docs/reference/migrations.d/") && !prRecords.has(file)) {
+      return `${file} is not the record of a migration this PR adds`;
+    }
     const added = oldMode === ABSENT_MODE && newMode === "100644";
     if (!(oldMode === "100644" && newMode === "100644") && !(added && POST_APPLY_ADDABLE_RE.test(file))) {
       return `${file} was ${newMode === ABSENT_MODE ? "deleted" : "added or changed type or mode"}`;
@@ -2355,7 +2367,8 @@ function runCarryPostApply(root, options) {
     process.stderr.write("Post-apply carry requires a clean worktree.\n");
     return 1;
   }
-  const facts = resolveSingleCommitCarry(root, Date.now(), postApplyProblem);
+  const facts = resolveSingleCommitCarry(root, Date.now(), ({ entries, readFile, source, fromHead }) =>
+    postApplyProblem({ entries, readFile, prMigrations: postApplyPrMigrations(root, { source, fromHead }) }));
   if (facts.problem) {
     process.stderr.write(
       `Post-apply carry refused: ${facts.problem}. No proof written — run the full review instead: ` +
@@ -2397,8 +2410,9 @@ export function postApplySolCheckFiles(entries) {
 
 // The migrations the reviewed PR adds, so the check can tie every change to one.
 function postApplyPrMigrations(root, facts) {
-  const listed = runGit(["diff", "--name-only", "--diff-filter=A", facts.source.base_sha, facts.fromHead, "--", "supabase/migrations/"], { cwd: root, fallback: null });
-  return String(listed || "").split(/\r?\n/).filter(Boolean);
+  const listed = runGit(["diff", "--name-only", "--no-renames", "--diff-filter=A", facts.source.base_sha, facts.fromHead, "--", "supabase/migrations/"], { cwd: root, fallback: null });
+  // An unreadable list is empty, so every record refuses.
+  return String(listed || "").split(/\r?\n/).filter((file) => /^supabase\/migrations\/[^/]+\.sql$/.test(file));
 }
 
 export function buildPostApplyCheckPrompt() {

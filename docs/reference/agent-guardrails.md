@@ -92,8 +92,8 @@
 > review. `node scripts/write-codex-push-proof.mjs --carry-post-apply` mints a carried proof (`carry.mode`
 > `post_apply`, same `base_sha` as the source) only when HEAD is ONE ordinary commit on top of a
 > head with a clean Sol proof under 24 hours old (the original full review too), and every file it touches is a
-> regular non-executable file among: `docs/reference/migrations.d/*.md` and `docs/changelog.d/*.md` (edited or
-> added), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), and
+> regular non-executable file among: `docs/reference/migrations.d/<name>.md` for a migration the reviewed PR adds
+> and `docs/changelog.d/*.md` (edited or added; never a `README.md` or agent instruction file), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), and
 > `scripts/db-invariant-sweeps/allowlist.json`, where every changed entry keeps its position, predicate and other
 > fields, keeps the signature before `#` with a NEW 12-hex hash, appends to its justification, and has a real
 > `YYYY-MM-DD` `dated` that never moves back; no entry is added or removed and nothing outside `entries` changes.

@@ -249,7 +249,7 @@ new one), then run `node scripts/write-codex-push-proof.mjs --carry-restamp` and
 beyond that refuses and needs the full review. Mason's owner approval never carries.
 
 **Records updated after a live apply? Carry it (Mason, 2026-11-04).** After the migration is applied
-live, commit the paperwork as ONE commit on top of the reviewed head: `docs/reference/migrations.d/*.md`,
+live, commit the paperwork as ONE commit on top of the reviewed head: the records of the PR's own migrations,
 `docs/changelog.d/*.md`, `docs/manual/KNOWN_ISSUES.md`, `.claude/schema-registry.json`, and
 `scripts/db-invariant-sweeps/allowlist.json` re-keys (same signature, new 12-hex hash, wording appended to
 the justification, new `dated`; no entry added, removed or otherwise changed). Then run

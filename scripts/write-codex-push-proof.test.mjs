@@ -1586,6 +1586,11 @@ function collisionPromptSkipsWork(prompt) {
     refused("a code edit", () => { paperwork(); write("src/a.ts", "export const a = 3;\n"); }, /src\/a\.ts is not post-apply paperwork/);
     refused("a migration edit", () => { paperwork(); write(`supabase/migrations/${MIG}.sql`, "SELECT 2;\n"); }, /supabase\/migrations\/.* is not post-apply paperwork/);
     refused("another docs file", () => { paperwork(); write("docs/manual/DECISION_LOG.md", "x\n"); }, /DECISION_LOG\.md was added/);
+    refused("another migration's record", () => {
+      notes();
+      write("docs/reference/migrations.d/20261101000000_parked.md", "**APPLIED LIVE**\n");
+    }, /not the record of a migration this PR adds/);
+    refused("a records README", () => { notes(); write("docs/reference/migrations.d/README.md", "Rules.\n"); }, /instruction file/);
     refused("an executable record", () => {
       paperwork();
       // On disk too, so a filemode-aware `git add` keeps the bit.
@@ -1668,7 +1673,14 @@ function collisionPromptSkipsWork(prompt) {
     JSON.stringify({ entries: [{ violation_key: "f()#bbbbbbbbbbbb", justification: "a b", dated: "2020-01-01" }] }),
   ), /no usable date/, "post-apply: an unusable old date cannot hide a backwards one");
   const read = () => "{}";
-  const one = (p, oldMode = "100644", newMode = "100644") => postApplyProblem({ entries: [{ path: p, oldMode, newMode }], readFile: read });
+  const one = (p, oldMode = "100644", newMode = "100644") => postApplyProblem({
+    entries: [{ path: p, oldMode, newMode }], readFile: read, prMigrations: ["supabase/migrations/x.sql"],
+  });
+  assert.match(one("docs/reference/migrations.d/y.md"), /not the record of a migration this PR adds/, "post-apply: another migration's record is refused");
+  assert.match(postApplyProblem({ entries: [{ path: "docs/reference/migrations.d/x.md", oldMode: "100644", newMode: "100644" }], readFile: read }), /not the record/, "post-apply: with no PR migrations no record carries");
+  assert.match(one("docs/reference/migrations.d/README.md"), /instruction file/, "post-apply: the records README is a rule file");
+  assert.match(one("docs/changelog.d/readme.md"), /instruction file/, "post-apply: README matches in any case");
+  assert.match(one("docs/changelog.d/AGENTS.md"), /instruction file/, "post-apply: agent instruction files are refused");
   assert.equal(one("docs/changelog.d/x.md", "000000", "100644"), null, "post-apply: a new changelog note is paperwork");
   assert.equal(one("docs/reference/migrations.d/x.md", "000000", "100644"), null, "post-apply: a new migration record is paperwork");
   assert.match(one("docs/changelog.d/x.md", "120000", "120000"), /changed type or mode/, "post-apply: a symlink is refused");

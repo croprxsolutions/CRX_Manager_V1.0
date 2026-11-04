@@ -333,6 +333,30 @@ function main() {
   const kept = scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
   assert.equal(Number(kept), 0.09, `12 completed jobs of 1 fl oz should keep 0.09 gal of draws, not ${kept}`);
   console.log(`[prover] AFTER: 4 more small jobs completed ahead of a cancelled 1 gal sibling keep ${kept} gal for 0.09375 gal applied`);
+
+  // Out of order, three times over: two 0.5 fl oz jobs, the LATER one completes and the earlier one
+  // is cancelled. The later job's step can leave at most 0.01 kept over the rounded real total, and
+  // later syncs draw nothing until the real total catches up, so it never piles up.
+  for (let k = 0; k < 3; k += 1) {
+    const early = id(`5${k}`);
+    const late = id(`6${k}`);
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        VALUES ('${early}', 'KI100-E${k}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '2 days'),
+               ('${late}', 'KI100-L${k}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '3 days');
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        VALUES ('${early}', '${P}', 0.5, 'fl oz', false), ('${late}', '${P}', 0.5, 'fl oz', false);`);
+    sync();
+    psql(`SET session_replication_role = replica;
+      UPDATE public.jobs SET status = 'completed' WHERE id = '${late}';
+      UPDATE public.jobs SET status = 'cancelled' WHERE id = '${early}';`);
+    sync();
+    const keptNow = Number(scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`));
+    const applied = 0.09375 + (k + 1) * 0.00390625;
+    assert.ok(keptNow <= Math.round(applied * 100) / 100 + 0.01 + 1e-9,
+      `out of order round ${k + 1}: kept ${keptNow} gal is more than 0.01 over the rounded ${applied} gal applied`);
+  }
+  console.log(`[prover] AFTER: 3 out-of-order completions with a cancelled earlier sibling keep ${scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}';`)} gal for 0.10546875 gal applied (never more than 0.01 over)`);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

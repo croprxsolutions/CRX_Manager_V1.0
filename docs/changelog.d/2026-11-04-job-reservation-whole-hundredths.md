@@ -6,7 +6,9 @@
   from it: 1 fl oz from a 10 gal booking drew 0.0078125 gal and left 9.9921875 gal, so the booking
   could never close. A booking's job draws are now whole hundredths and together match the real
   total its jobs applied, rounded once (so many small jobs never add up to more), and a job's hold on
-  shed stock is at least its draw. Live had no job draws, so no existing booking changes; the migration
+  shed stock is at least its draw. The jobs status trigger (`_trg_release_job_holds_on_lifecycle`) is
+  re-emitted to mark the one job completing, so its kept draw is worked out on its own, whatever order
+  jobs finish in. Live had no job draws, so no existing booking changes; the migration
   refuses to apply if a finished job has kept an unrounded draw by then.
 - New proof `scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs` (before and after
   in a disposable database).

@@ -13,27 +13,37 @@
 --   balance. No job counts an active sibling's demand, so a sibling cancelled later leaves no
 --   borrowed rounding in a kept draw; and a completed job's shortfall (it outran an older, smaller
 --   booking) is never caught up, by one job or by many small ones each rounding up. Active siblings
---   may briefly over-reserve together; complete_job's status update re-syncs every sibling in the
---   same transaction, so each completion adds exactly its rounding step to the kept draws and many
---   small jobs never drift from what was really applied. A job's inventory hold is at least its draw
+--   may briefly over-reserve together. A job's status update to completed fires the jobs lifecycle
+--   trigger, which (re-emitted here) marks that one job as completing, transaction-local, for its own
+--   sync; that sync rebuilds the completing job's draw as its own standalone step (against the booking
+--   less the order and the other kept draws, never the active siblings' provisional draws) before
+--   keeping it. So each completion, in any order and even several in one statement, adds exactly its
+--   rounding step and many small jobs never drift from what was really applied (Codex, 2026-11-04:
+--   100 x 1 fl oz on a 0.80 gal booking completed last-first kept 0.62 for 0.78 applied before this
+--   rebuild). A job's inventory hold is at least its draw
 --   (a draw rounded up would otherwise leave the shed holding less than the booking gave up). The preflight refuses if any job
 --   already has a draw finer than 0.01 (a kept one is never rebuilt; an active one would wait for
 --   its next sync).
 --
 -- NOT CHANGED: a hold whose demand is above its draw (still the full demand); the FIFO order and
---   the cap at the open booking balance; the kept draws of completed or invoiced jobs; every caller;
+--   the cap at the open booking balance; the kept draws of jobs already completed or invoiced; every caller;
 --   owner, SECURITY DEFINER, search_path and grants. No table, column, grant or row is added,
 --   changed or deleted; a job's draw is rebuilt only when it or its booking next syncs (live had no
 --   job draws on 2026-11-04).
 --
--- KNOWN LIMIT: complete_job finishes one job per call. A direct status write that completes several
---   sibling jobs in one statement (bypassing complete_job) syncs only after all of them, so each
---   keeps its own step and the kept draws can sit up to about 0.005 per such job off the rounded
---   total, either way (two 0.004 gal jobs keep 0 for 0.008 applied). The fix for that path is to stop
---   direct status writes on jobs, not this sync.
+-- ALSO RE-EMITTED: _trg_release_job_holds_on_lifecycle (20260702174000 body). On a scheduled or
+--   in_progress -> completed transition it sets crx.job_completing to that job's id with
+--   set_config(..., true) around its _sync_job_holds call and clears it after; its own SET search_path
+--   clause also restores the value when it returns, so the mark never reaches another row's sync or a
+--   later statement. Only server-side SQL can set the setting (the API cannot); a forged value only
+--   makes the sync re-run the same standalone step for that completed job.
+--
+-- KNOWN LIMIT: the sync cannot tell an active sibling's over-reservation from real demand, so active
+--   siblings may hold up to 0.01 each over their demand until they complete or are cancelled. A
+--   completion with the lifecycle trigger disabled (replication role replica) is not rebuilt.
 --
 -- ROLLBACK (its own reviewed migration): re-emit _sync_quote_job_reservations from its
---   20260710120000 body.
+--   20260710120000 body and _trg_release_job_holds_on_lifecycle from its 20260702174000 body.
 --
 -- ORDERING: apply after every older pending migration.
 
@@ -65,6 +75,27 @@ BEGIN
         IS DISTINCT FROM ARRAY['postgres', 'service_role'] THEN
     RAISE EXCEPTION 'PREFLIGHT_SYNC_QUOTE_JOB_RESERVATIONS_DRIFT: _sync_quote_job_reservations differs from its pinned body, owner, mode, search_path or grants';
   END IF;
+  -- The re-emitted trigger function, pinned to its current body (20260702174000), and its one
+  -- trigger on jobs (AFTER UPDATE OF status, deleted_at, per row, enabled).
+  SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._trg_release_job_holds_on_lifecycle()');
+  IF NOT FOUND
+     OR (SELECT count(*) FROM pg_proc o
+          WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_trg_release_job_holds_on_lifecycle') <> 1
+     OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'fa4998d94017f33d58045e8c4ecb6445'
+     OR (SELECT count(*) FROM pg_trigger t
+          WHERE t.tgfoid = p.oid AND NOT t.tgisinternal) <> 1
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t
+          WHERE t.tgfoid = p.oid AND t.tgrelid = 'public.jobs'::regclass
+            AND t.tgname = 'trg_release_job_holds_on_lifecycle' AND t.tgenabled = 'O'
+            AND t.tgtype = 17) -- AFTER UPDATE, FOR EACH ROW
+     OR p.proowner <> 'postgres'::regrole
+     OR NOT p.prosecdef
+     OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+     OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+        IS DISTINCT FROM ARRAY['postgres', 'service_role'] THEN
+    RAISE EXCEPTION 'PREFLIGHT_JOB_LIFECYCLE_TRIGGER_DRIFT: _trg_release_job_holds_on_lifecycle or its trigger differs from its pinned body, binding, owner, mode, search_path or grants';
+  END IF;
   -- An unrounded draw would still strand its booking: a completed or invoiced job keeps its draw
   -- (the sync never rebuilds it), and an active one waits for its next sync. None existed on
   -- 2026-11-04; refuse rather than guess a fix.
@@ -94,10 +125,16 @@ DECLARE
   v_consumed_drawn numeric;
   v_crop_pool numeric := 0;
   v_completed_demand numeric := 0; -- JOB_DRAW_HUNDREDTHS
+  v_completing uuid; -- JOB_DRAW_HUNDREDTHS
+  v_own_drawn numeric; -- JOB_DRAW_HUNDREDTHS
   v_draw numeric;
   v_hold numeric;
 BEGIN
   v_actor := COALESCE(p_actor, auth.uid());
+  -- JOB_DRAW_HUNDREDTHS<<< The job whose completion fired this sync, if any. Only the jobs lifecycle
+  -- trigger sets it (transaction-local, for that one row, cleared before it returns).
+  v_completing := NULLIF(current_setting('crx.job_completing', true), '')::uuid;
+  -- >>>JOB_DRAW_HUNDREDTHS
 
   -- Lock the parent quote (same rule the per-job engine used: 'accepted' still
   -- counts as open; only declined/expired/cancelled do not). This lock also
@@ -147,6 +184,7 @@ BEGIN
   FOR v_row IN
     SELECT j.id AS job_id, j.customer_id, j.job_number, j.created_by, j.created_at,
            jc.product_id,
+           (j.id IS NOT DISTINCT FROM v_completing) AS completing, -- JOB_DRAW_HUNDREDTHS
            -- D2 (U11 follow-up): normalize FIRST — 'pt/ac'-style units NULL out of the converter; mirrors complete_job.
            SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)) AS demand
     FROM jobs j
@@ -154,7 +192,10 @@ BEGIN
     JOIN products p ON p.id = jc.product_id
     WHERE j.quote_id = p_quote_id
       AND j.deleted_at IS NULL
-      AND j.status IN ('scheduled', 'in_progress')
+      -- JOB_DRAW_HUNDREDTHS<<< plus the job completing now, rebuilt first for its product (below)
+      AND (j.status IN ('scheduled', 'in_progress')
+           OR (j.id IS NOT DISTINCT FROM v_completing AND j.status = 'completed'))
+      -- >>>JOB_DRAW_HUNDREDTHS
       AND jc.product_id IS NOT NULL
       -- U4<<< a grower-supplied line demands nothing from our shed — it must not
       -- draw the booking nor add a 'job' hold. (#102)
@@ -162,7 +203,7 @@ BEGIN
       -- >>>U4
     GROUP BY j.id, j.customer_id, j.job_number, j.created_by, j.created_at, jc.product_id
     HAVING SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)) > 0
-    ORDER BY jc.product_id, j.created_at NULLS LAST, j.id
+    ORDER BY jc.product_id, (j.id IS NOT DISTINCT FROM v_completing) DESC, j.created_at NULLS LAST, j.id
   LOOP
     IF v_row.product_id IS DISTINCT FROM v_prev_product THEN
       -- New product: lock its inventory row (serialize concurrent same-product
@@ -213,6 +254,33 @@ BEGIN
       v_prev_product := v_row.product_id;
     END IF;
 
+    -- JOB_DRAW_HUNDREDTHS<<< The job completing now keeps a draw rebuilt as its own standalone step:
+    -- what it alone adds to the other completed jobs' rounded demand, against the booking less the
+    -- order and the other kept draws. Active siblings' provisional draws (deleted above) never starve
+    -- it, so a later job completing first keeps its real step, not the 0 FIFO left it while active.
+    IF v_row.completing THEN
+      IF v_planned_open THEN
+        SELECT COALESCE(SUM(quantity_drawn), 0) INTO v_own_drawn
+          FROM job_product_draws
+         WHERE job_id = v_row.job_id AND quote_id = p_quote_id AND product_id = v_row.product_id;
+        v_completed_demand := v_completed_demand - v_row.demand;
+        v_consumed_drawn := v_consumed_drawn - v_own_drawn;
+        v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0),
+                        ROUND(CEIL(v_row.demand * 100) / 100, 2),
+                        ROUND(FLOOR(GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0) * 100) / 100, 2));
+        DELETE FROM job_product_draws WHERE job_id = v_row.job_id AND product_id = v_row.product_id;
+        IF v_draw > 0 THEN
+          INSERT INTO job_product_draws (job_id, quote_id, product_id, quantity_drawn)
+          VALUES (v_row.job_id, p_quote_id, v_row.product_id, v_draw);
+        END IF;
+        v_completed_demand := v_completed_demand + v_row.demand;
+        v_consumed_drawn := v_consumed_drawn + v_draw;
+        v_crop_pool := ROUND(FLOOR(GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0) * 100) / 100, 2);
+      END IF;
+      CONTINUE; -- a completed job holds no shed stock
+    END IF;
+    -- >>>JOB_DRAW_HUNDREDTHS
+
     -- Draw from the open booking balance (for billing / no double-bill), FIFO.
     -- JOB_DRAW_HUNDREDTHS<<< Each active job draws the step it alone would add to the booking's rounded
     -- completed demand: ROUND(completed demand + its own demand) less the larger of ROUND(completed
@@ -262,6 +330,30 @@ END;
 $function$
 ;
 
+-- _trg_release_job_holds_on_lifecycle: the 20260702174000 body, marking the job completing now.
+CREATE OR REPLACE FUNCTION public._trg_release_job_holds_on_lifecycle()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF NEW.status IS DISTINCT FROM OLD.status
+     OR NEW.deleted_at IS DISTINCT FROM OLD.deleted_at THEN
+    -- JOB_DRAW_HUNDREDTHS<<< Mark this one job as completing for its own sync, transaction-local,
+    -- so the sync rebuilds its draw as a standalone step before keeping it; cleared right after
+    -- (and restored anyway when this function returns) so it never reaches another row's sync.
+    IF OLD.status IN ('scheduled', 'in_progress') AND NEW.status = 'completed' AND NEW.deleted_at IS NULL THEN
+      PERFORM set_config('crx.job_completing', NEW.id::text, true);
+    END IF;
+    PERFORM _sync_job_holds(NEW.id, auth.uid());
+    PERFORM set_config('crx.job_completing', '', true);
+    -- >>>JOB_DRAW_HUNDREDTHS
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
 DO $postflight$
 DECLARE
   p pg_proc%ROWTYPE;
@@ -273,6 +365,8 @@ BEGIN
      OR position('v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
      OR position('INTO v_completed_demand' IN p.prosrc) = 0
      OR position('v_hold := GREATEST(v_row.demand, v_draw);' IN p.prosrc) = 0
+     OR position('IF v_row.completing THEN' IN p.prosrc) = 0
+     OR position($q$current_setting('crx.job_completing', true)$q$ IN p.prosrc) = 0
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
@@ -280,6 +374,23 @@ BEGIN
                 FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
         IS DISTINCT FROM ARRAY['postgres', 'service_role'] THEN
     RAISE EXCEPTION 'POSTFLIGHT: _sync_quote_job_reservations lost its change, owner, mode, search_path or grants';
+  END IF;
+  SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._trg_release_job_holds_on_lifecycle()');
+  IF NOT FOUND
+     OR (SELECT count(*) FROM pg_proc o
+          WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_trg_release_job_holds_on_lifecycle') <> 1
+     OR position($q$set_config('crx.job_completing', NEW.id::text, true)$q$ IN p.prosrc) = 0
+     OR position($q$set_config('crx.job_completing', '', true)$q$ IN p.prosrc) = 0
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t
+          WHERE t.tgfoid = p.oid AND t.tgrelid = 'public.jobs'::regclass
+            AND t.tgname = 'trg_release_job_holds_on_lifecycle' AND t.tgenabled = 'O' AND t.tgtype = 17)
+     OR p.proowner <> 'postgres'::regrole
+     OR NOT p.prosecdef
+     OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+     OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+        IS DISTINCT FROM ARRAY['postgres', 'service_role'] THEN
+    RAISE EXCEPTION 'POSTFLIGHT: _trg_release_job_holds_on_lifecycle lost its change, trigger, owner, mode, search_path or grants';
   END IF;
 END
 $postflight$;

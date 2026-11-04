@@ -3104,6 +3104,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _sync_job_holds: 'internal convergent hold-sync helper; direct client EXECUTE is revoked',
   _sync_planned_holds: 'internal convergent hold-sync helper called within parent transactions',
   _sync_quote_job_reservations: 'internal convergent reservation-sync helper called by parent RPCs',
+  _trg_release_job_holds_on_lifecycle: 'jobs status trigger that re-runs the convergent hold sync; direct client EXECUTE is revoked',
   auto_expire_quotes: 'service-role maintenance sets only currently-expirable quote statuses',
   bump_cycle_count_item_revision:
     'trigger-only cycle-count revision bump; it is SECURITY DEFINER with all application-role EXECUTE revoked and the item-write transaction owns its atomicity',

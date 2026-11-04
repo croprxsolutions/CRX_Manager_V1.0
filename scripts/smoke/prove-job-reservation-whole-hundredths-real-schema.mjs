@@ -248,6 +248,8 @@ function main() {
   // BEFORE the candidate: the live body strands an unreachable remainder.
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._sync_quote_job_reservations(uuid,uuid)'::regprocedure;`),
     '04ee0476248f3619d20df7a4e5e9a760', 'the replayed sync is not the live body the candidate pins');
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._trg_release_job_holds_on_lifecycle()'::regprocedure;`),
+    'fa4998d94017f33d58045e8c4ecb6445', 'the replayed lifecycle trigger is not the live body the candidate pins');
   sync();
   assert.equal(Number(scalar(DRAWN)), 0.0078125, 'before: 1 fl oz should draw 0.0078125 gal');
   const leftBefore = scalar(LEFT);
@@ -450,6 +452,90 @@ function main() {
   const leftP3 = scalar(`SELECT 20 - sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P3}';`);
   assert.equal(Number(leftP3), 9.84, `the raised booking should have 9.84 gal left, not ${leftP3}`);
   console.log(`[prover] AFTER: after a 15 gal job outran a 10 gal booking raised to 20, 20 jobs of 1 fl oz keep ${smallKept} gal for 0.15625 applied and leave ${leftP3} gal`);
+
+  // Codex: 100 jobs of 1 fl oz (0.78125 gal) on a 0.80 gal booking, the LATER jobs completing first.
+  // While active, the first 80 each round up to 0.01 and use the whole pool, so the last 20 draw 0.
+  // Completing a job one at a time and calling the sync directly (no lifecycle trigger, so no
+  // completing mark: the previous behaviour) freezes those 0s. Through the real lifecycle trigger,
+  // each completing job is rebuilt as its own step, so the kept draws stay within 0.01 of the
+  // rounded completed demand after every completion and end at 0.78.
+  const lastFirst = (P, prefix, viaTrigger) => {
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+        VALUES ('${P}', 'KI-100 Liquid ${prefix}', 'gal', 'gal', 'liquid');
+      INSERT INTO public.inventory (product_id, location) VALUES ('${P}', 'Main Warehouse');
+      INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+        VALUES ('${Q}', '${S}', '${P}', 0.80);
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        SELECT ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid, 'KI100-${prefix}-' || n, '${C}',
+               DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '8 days' + n * interval '1 minute'
+          FROM generate_series(1, 100) n;
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        SELECT ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid, '${P}', 1, 'fl oz', false
+          FROM generate_series(1, 100) n;
+      SELECT public._sync_quote_job_reservations('${Q}', NULL);
+      DO $last_first$
+      DECLARE
+        v_kept numeric;
+        v_applied numeric;
+      BEGIN
+        FOR n IN REVERSE 100..1 LOOP
+          UPDATE public.jobs SET status = 'completed'
+           WHERE id = ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid;
+          IF NOT ${viaTrigger} THEN
+            PERFORM public._sync_quote_job_reservations('${Q}', NULL);
+          ELSIF COALESCE(current_setting('crx.job_completing', true), '') <> '' THEN
+            RAISE EXCEPTION 'the completing mark leaked past its trigger';
+          END IF;
+          SELECT COALESCE(sum(d.quantity_drawn), 0) INTO v_kept
+            FROM public.job_product_draws d JOIN public.jobs j ON j.id = d.job_id
+           WHERE d.quote_id = '${Q}' AND d.product_id = '${P}' AND j.status = 'completed';
+          v_applied := (101 - n) * 0.0078125;
+          IF ${viaTrigger} AND abs(v_kept - round(v_applied, 2)) > 0.01 THEN
+            RAISE EXCEPTION 'after % completions kept % gal, more than 0.01 off the rounded % gal applied', 101 - n, v_kept, v_applied;
+          END IF;
+        END LOOP;
+      END
+      $last_first$;`);
+    return scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
+  };
+  const keptDirect = lastFirst(id('f4'), 'd0', false);
+  assert.ok(Number(keptDirect) < 0.77, `without the completing mark the last-first case should underdraw, kept ${keptDirect}`);
+  console.log(`[prover] Codex last-first, sync called directly (no completing mark, the previous behaviour): kept ${keptDirect} gal for 0.78125 applied`);
+  // From here on the real lifecycle trigger fires on status updates even with replication role replica.
+  psql('ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_release_job_holds_on_lifecycle;');
+  const keptTrigger = lastFirst(id('f5'), 'e0', true);
+  assert.equal(Number(keptTrigger), 0.78, `through the lifecycle trigger the last-first case should keep 0.78 gal, not ${keptTrigger}`);
+  console.log(`[prover] Codex last-first, through the lifecycle trigger: kept ${keptTrigger} gal for 0.78125 applied, within 0.01 after every completion`);
+
+  // Two sibling jobs of 0.004 gal completed in ONE statement: each row's trigger marks only its own
+  // job, so together they keep ROUND(0.008) = 0.01, and the mark is gone once the statement ends.
+  const P6 = id('f6');
+  const [twinA, twinB] = [id('c2'), id('c3')];
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+      VALUES ('${P6}', 'KI-100 Liquid 6', 'gal', 'gal', 'liquid');
+    INSERT INTO public.inventory (product_id, location) VALUES ('${P6}', 'Main Warehouse');
+    INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+      VALUES ('${Q}', '${S}', '${P6}', 10);
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      VALUES ('${twinA}', 'KI100-TA', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '9 days'),
+             ('${twinB}', 'KI100-TB', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '10 days');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${twinA}', '${P6}', 0.004, 'gal', false), ('${twinB}', '${P6}', 0.004, 'gal', false);
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);
+    DO $twins$
+    BEGIN
+      UPDATE public.jobs SET status = 'completed' WHERE id IN ('${twinA}', '${twinB}');
+      IF COALESCE(current_setting('crx.job_completing', true), '') <> '' THEN
+        RAISE EXCEPTION 'the completing mark leaked past the statement';
+      END IF;
+    END
+    $twins$;`);
+  const keptTwins = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P6}';`);
+  assert.equal(Number(keptTwins), 0.01, `two 0.004 gal jobs completed in one statement should keep 0.01 gal, not ${keptTwins}`);
+  assert.equal(scalar(`SELECT COALESCE(current_setting('crx.job_completing', true), '');`), '', 'the completing mark must not outlive its trigger');
+  console.log(`[prover] two 0.004 gal jobs completed in one statement keep ${keptTwins} gal for 0.008 applied; the completing mark does not leak`);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

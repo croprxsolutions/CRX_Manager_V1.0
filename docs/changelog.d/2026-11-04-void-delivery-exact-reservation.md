@@ -11,8 +11,9 @@
 - Seven `cost-exposure-review` chains reach the re-emitted functions; their allowlist keys are re-keyed from a live
   sweep after the apply (no cost field, cost read or reply path added).
 - Live read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20). Nothing corrected.
-- Follow-up migration `20261106233000_void_delivery_flags_legacy_reservation.sql` (not applied; record in
+- Follow-up migration `20261106233000_void_delivery_flags_legacy_reservation.sql` (applied live 2026-11-04, ledger `20261104220928`; record in
   `docs/reference/migrations.d/`), Mason's choice "flag them for review": voiding a line completed before the fix
   (no record) still puts back the whole delivered quantity, but its stock-ledger row is now marked
   `requires_review` with a note that reserved stock may be too high. Quantities are unchanged. The proof above
-  covers it (only the legacy void row is flagged).
+  covers it (only the legacy void row is flagged). Three chains reaching the void (`cancel_delivery`,
+  `batch_cancel_deliveries`, `fix_delivery`) are re-keyed from a live sweep after that apply.

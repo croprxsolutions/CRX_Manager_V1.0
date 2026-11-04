@@ -256,6 +256,14 @@ key is scoped depends on whether the server binds the key to its request (KI-10)
   its below-cost approval is remembered per key, and a shared key could carry an approval to a different order.
 - Saving an existing job keeps one key per exact edit: re-applying an edit to the same job is harmless, while a
   new job keeps one key and opens the committed job when an edited retry is refused.
+**Partial Order across a reload (S14, 2026-11-03):** a reload forgets the in-memory key, so a rep whose
+reply was lost and who reloaded made a second order with a fresh key. QuoteBuilder now keeps an unconfirmed
+draw (its key and exact request) in the tab's sessionStorage (`src/lib/pendingRetry.ts`, kept no longer than
+the server's 24-hour receipt) and the Partial Order dialog offers **Finish it**, which re-sends that request
+with that key: the server returns the order it made, or makes it once. A typed draw also uses the kept key,
+so a changed draw after a committed one is refused with that order. Cleared on success or a binding refusal.
+Proof: three screen tests in `QuoteBuilder.test.tsx`; on the local test copy, a draw whose reply was dropped,
+a reload and Finish it left one order and 100 gal drawn. Other screens still keep keys in memory only.
 **Remaining risk:** for the unbound functions, a create retried with different details after a lost reply opens
 the record already created without the later edits, and an edited retry of an existing record applies the new edit
 after the old one. Neither makes a second record or moves money twice; a clear refusal needs server-side binding

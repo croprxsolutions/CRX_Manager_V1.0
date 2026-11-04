@@ -38,7 +38,14 @@ vi.mock('jspdf-autotable', () => ({
   }),
 }));
 
+// The Settings read: built-in company details unless a test supplies saved ones.
+const companyInfo = vi.hoisted(() => ({ load: vi.fn() }));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
+
+import { DEFAULT_COMPANY_INFO } from './companyInfo';
 import { generateInvoicePdf, downloadInvoicePdf, generateBatchInvoicePdf, groupReturnCreditDisplayItems, mapInvoicePdfItem } from './invoicePdf';
+
+companyInfo.load.mockResolvedValue(DEFAULT_COMPANY_INFO);
 import type { InvoicePdfData, InvoicePdfItem, InvoicePdfShare } from './invoicePdf';
 
 // ── Test Data Factories ─────────────────────────────────────────────────
@@ -485,6 +492,20 @@ describe('generateInvoicePdf — legacy "Old Print" format', () => {
   it('returns a jsPDF document for the legacy field_application layout', async () => {
     const doc = await generateInvoicePdf(makeInvoiceData({ options: legacyOpts }));
     expect(doc).toBe(mockDoc);
+  });
+
+  it('prints the Settings company details on both layouts', async () => {
+    const saved = { name: 'Test Ag Co', phone: '555-0199', email: 'office@testag.test', address: '1 Main St, Town, IL' };
+    for (const options of [undefined, legacyOpts]) {
+      vi.clearAllMocks();
+      companyInfo.load.mockResolvedValueOnce(saved);
+      await generateInvoicePdf(makeInvoiceData({ options }));
+      const printed = mockDoc.text.mock.calls.flat(2);
+      expect(printed).toContain('TEST AG CO');
+      expect(printed).toContain('Agricultural Input Solutions  •  1 Main St, Town, IL  •  555-0199');
+      expect(printed.some((t: unknown) => typeof t === 'string' && t.includes('office@testag.test'))).toBe(true);
+      expect(printed).not.toContain('CROP RX SOLUTIONS');
+    }
   });
 
   it('renders the plain-text "INVOICE" header (no green band)', async () => {

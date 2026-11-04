@@ -1152,7 +1152,7 @@ export default function SettingsPage() {
 
         <SubPart
           title="Reminders and quote defaults"
-          help="Quotes valid for and Default price tier are stored for later; quotes and PDFs do not use them yet."
+          help="Quotes valid for sets where a quote’s “Pick a date” expiry starts (quotes still default to season end). New customers start on the Default price tier."
           dirty={isDirty('defaults')}
           saveButton={<SaveButton label="Save defaults" dirty={isDirty('defaults')} saving={savingDefaults} onClick={saveDefaults} />}
         >
@@ -1378,7 +1378,7 @@ export default function SettingsPage() {
       >
         <div className="border-t border-gray-200 px-4 pt-2">
           <p className="text-[13px] text-secondary">
-            Stored for later; invoices and quotes still print the standard company details.
+            Printed on quote and invoice PDFs, including emailed invoices. A blank field prints the standard detail.
             <UnsavedChip show={isDirty('company')} />
           </p>
         </div>

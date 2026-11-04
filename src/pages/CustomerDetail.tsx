@@ -44,6 +44,7 @@ import {
 } from '../lib/recordVersionConcurrency';
 import { ALLOWED_CROPS, type CropValue } from '../lib/crops';
 import { logActivity } from '../lib/activityLogger';
+import { loadDefaultTier } from '../lib/appSettingDefaults';
 import CustomerSummaryBar from '../components/customers/CustomerSummaryBar';
 import YearEndSummaryDialog from '../components/reports/YearEndSummaryDialog';
 import CustomerContacts, { CustomerInteractionsHistory } from '../components/customers/CustomerContacts';
@@ -209,6 +210,10 @@ export default function CustomerDetail() {
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
   const initialLoadDone = useRef(false);
+  // Set when the user picks a tier, so the Settings default never overwrites their choice.
+  const tierChosenRef = useRef(false);
+  // Set for the one render that applies the Settings default tier, which is not an edit.
+  const applyingDefaultTierRef = useRef(false);
   // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
   const loadedCustomerRef = useRef<typeof customer | null>(null);
   const loadedAddressesRef = useRef<typeof addresses | null>(null);
@@ -351,6 +356,10 @@ export default function CustomerDetail() {
   }, [id, toast]);
 
   useEffect(() => {
+    if (applyingDefaultTierRef.current) {
+      applyingDefaultTierRef.current = false;
+      return;
+    }
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
     if (customer === loadedCustomerRef.current && addresses === loadedAddressesRef.current) return;
@@ -433,6 +442,17 @@ export default function CustomerDetail() {
         if (currentIdRef.current !== id) return;
         initialLoadDone.current = true;
       }, 0);
+      // Then start on the Settings Default Tier, unless the user already picked one.
+      // Applying it is not an edit, so it alone never raises the unsaved-changes prompt.
+      tierChosenRef.current = false;
+      void loadDefaultTier().then((tier) => {
+        if (currentIdRef.current !== id || tierChosenRef.current) return;
+        setCustomer((c) => {
+          if (c.assigned_tier === tier) return c;
+          applyingDefaultTierRef.current = true;
+          return { ...c, assigned_tier: tier };
+        });
+      });
     }
   }, [id, isNew, fetchCustomerSnapshot]);
 
@@ -1232,7 +1252,7 @@ export default function CustomerDetail() {
                 <label className="block text-sm font-medium text-secondary mb-1">Pricing Tier</label>
                 <select
                   value={customer.assigned_tier}
-                  onChange={(e) => update('assigned_tier', parseInt(e.target.value))}
+                  onChange={(e) => { tierChosenRef.current = true; update('assigned_tier', parseInt(e.target.value)); }}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
                   <option value={1}>Tier 1</option>

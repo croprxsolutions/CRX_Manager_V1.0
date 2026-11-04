@@ -6,6 +6,7 @@ import { useToast } from '../ui/Toast';
 import { supabase, checkMutationResult } from '../../lib/db';
 import { processDocumentWithOCR, isCSVFile, isOCRSupported } from '../../lib/documentOCR';
 import { Sentry } from '../../lib/sentry';
+import { loadDefaultTier } from '../../lib/appSettingDefaults';
 
 interface BulkCustomerImportProps {
   open: boolean;
@@ -137,7 +138,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
     return { headers, rows };
   };
 
-  const parseWithVisionOCR = async (file: File): Promise<{ valid: ParsedCustomer[]; invalid: Array<{ row: number; error: string; data: Record<string, string> }> }> => {
+  const parseWithVisionOCR = async (file: File, defaultTier: number): Promise<{ valid: ParsedCustomer[]; invalid: Array<{ row: number; error: string; data: Record<string, string> }> }> => {
     const result = await processDocumentWithOCR(file, 'customer_list');
 
     if (!result.success || !result.parsed_data) {
@@ -175,7 +176,8 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         phone: item.phone,
         email: item.email,
         billing_address: item.address,
-        assigned_tier: item.tier && [1, 2, 3].includes(item.tier) ? item.tier : 1,
+        // process-document never reads a tier from the page (its tier is always a filler 1).
+        assigned_tier: defaultTier,
       });
     });
 
@@ -187,9 +189,11 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
     setParsing(true);
 
     try {
+      // A row without a tier starts on the Settings Default Tier.
+      const defaultTier = await loadDefaultTier();
       // Route: CSV → client-side parser, PDF/Image → Vision OCR
       if (!isCSVFile(file)) {
-        const ocrResult = await parseWithVisionOCR(file);
+        const ocrResult = await parseWithVisionOCR(file, defaultTier);
         setValidation(ocrResult);
         setParsing(false);
         return;
@@ -277,9 +281,8 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
           }
         }
 
-        // Set default tier if not provided
         if (!customer.assigned_tier) {
-          customer.assigned_tier = 1;
+          customer.assigned_tier = defaultTier;
         }
 
         valid.push(customer as ParsedCustomer);
@@ -354,7 +357,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
               total_acres, corn_acres, soybean_acres, other_acres, payment_terms, notes
             </p>
             <p className="text-xs text-green-600 mt-2">
-              💡 <span className="font-medium">Tip:</span> Tier defaults to 1 if not specified. Valid tiers are 1, 2, or 3.
+              💡 <span className="font-medium">Tip:</span> Tier defaults to the Settings Default Tier if not specified. Valid tiers are 1, 2, or 3.
             </p>
           </div>
         </div>

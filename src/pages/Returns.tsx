@@ -416,7 +416,7 @@ export default function Returns() {
       void loadOrderItems(prefill.order_id, prefill.customer_id);
       // The picker lists active customers only; never keep a hidden customer selected.
       void customersLoaded.then((list) => {
-        if (list.length === 0 || list.some((c) => c.id === prefill.customer_id)) return;
+        if (list.some((c) => c.id === prefill.customer_id)) return;
         customerOrdersRequestRef.current += 1;
         orderItemsRequestRef.current += 1;
         setNewForm((f) => (f.customer_id === prefill.customer_id ? { ...f, customer_id: '', order_id: '' } : f));

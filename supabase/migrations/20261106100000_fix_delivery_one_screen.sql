@@ -302,10 +302,13 @@ BEGIN
     RAISE EXCEPTION 'FIX_DELIVERY_REFUSED: %', v_plan -> 'refusals' -> 0 ->> 'message'
       USING DETAIL = (v_plan -> 'refusals')::text;
   END IF;
-  SELECT COALESCE(array_agg((e ->> 'id')::uuid ORDER BY (e ->> 'id')::uuid), '{}')
-    INTO v_actual FROM jsonb_array_elements(v_plan -> 'invoices') e;
+  -- Expected = every invoice the preview showed: the delivery's own and the order drafts void_delivery cancels.
+  SELECT COALESCE(array_agg(x ORDER BY x), '{}') INTO v_actual
+    FROM (SELECT (e ->> 'id')::uuid x FROM jsonb_array_elements(v_plan -> 'invoices') e
+          UNION ALL
+          SELECT (e ->> 'id')::uuid FROM jsonb_array_elements(v_plan -> 'other_draft_invoices') e) ids;
   IF v_actual IS DISTINCT FROM v_expected THEN
-    RAISE EXCEPTION 'FIX_DELIVERY_PREVIEW_STALE: the invoices on this delivery changed; reopen Fix delivery to see the new plan';
+    RAISE EXCEPTION 'FIX_DELIVERY_PREVIEW_STALE: the invoices on this delivery or order changed; reopen Fix delivery to see the new plan';
   END IF;
 
   FOR v_invoice IN SELECT e FROM jsonb_array_elements(v_plan -> 'invoices') e LOOP

@@ -292,6 +292,11 @@ function scenarios() {
     'an exact retry replays the stored result and changes nothing more');
   refused(`${fix('k-intent')} ${fix('k-intent','[PROVER] edited reason')}`, 'reusing a key with an edited reason is refused', /IDEMPOTENCY_INTENT_MISMATCH/);
   refused(fix('k-stale','[PROVER] wrong amount',`ARRAY[]::uuid[]`), 'a stale preview (different invoice set) is refused', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id)
+      VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}');
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${fix('k-new-draft')}`, 'an order draft added after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
 
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET paid_amount_cents=100 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-paid')}`, 'a payment on the invoice refuses the fix', /FIX_DELIVERY_REFUSED: A payment is applied/);

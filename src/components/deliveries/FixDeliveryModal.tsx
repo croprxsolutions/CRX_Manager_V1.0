@@ -65,7 +65,8 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
 
   const handleFix = async () => {
     if (!profile || !plan || !ready) return;
-    const invoiceIds = plan.invoices.map((i) => i.id).sort();
+    // Every invoice the preview showed, so the server refuses if any changed since.
+    const invoiceIds = [...plan.invoices, ...plan.other_draft_invoices].map((i) => i.id).sort();
     const scope = JSON.stringify([deliveryId, reason.trim(), invoiceIds]);
     setSaving(true);
     setSubmittedScope(scope);

@@ -7,7 +7,8 @@
  * `attempt()` for one signed-in, rolled-back probe at a time, so areas never see each other's writes
  * unless they `commit` a fixture of their own.
  *
- * Nothing here talks to a network: the container runs with --network none.
+ * The database itself has no network (--network none); Docker may pull the pinned image once if it is not
+ * cached. Nothing here connects to the live project.
  */
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -127,8 +128,11 @@ function migrations() {
   return r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
 }
 
+// Set only once `docker run` succeeds, so a failed start never removes someone else's same-named container.
+let created = false;
 export function buildContainer() {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  created = true;
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
@@ -169,7 +173,7 @@ export function replay() {
   psql(LIVE_UID, { user: 'supabase_admin' });
   console.log(`[undo-paths] replayed ${replayed} post-baseline migrations into ${NAME}`);
 }
-export function removeContainer() { docker(['rm', '-f', NAME], { allowFailure: true }); }
+export function removeContainer() { if (created) docker(['rm', '-f', NAME], { allowFailure: true }); }
 
 /** Deterministic fixture ids: `id('a1')` → 7c7a0000-…-0000000000a1. */
 export const id = (n) => `7c7a0000-0000-4000-8000-${String(n).padStart(12, '0')}`;

@@ -8,7 +8,7 @@
  * harness.mjs) and runs each area file against it. Each area seeds its own committed fixtures under
  * its own ids and checks every action in rolled-back probes.
  *
- * Run all:   npm run proof:undo-paths            (needs Docker; no network, never touches live)
+ * Run all:   npm run proof:undo-paths            (needs Docker; never touches live)
  * Run some:  node scripts/smoke/undo-paths/run.mjs invoices deliveries
  * Reuse a built database while writing tests: UNDO_PATHS_CONTAINER=<name> UNDO_PATHS_REUSE=1 (it is
  * then left running; remove it yourself by name).

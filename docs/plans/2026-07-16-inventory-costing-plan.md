@@ -19,8 +19,8 @@
 > matching moves into Phase 4 (D11) and Phase 4 is simplified to a report on explicitly linked shipments
 > (section 9); the engine's hard questions are listed in section 4.8; wording fixed throughout. **Then Sol
 > checked the plan against the real code (33 findings, one refuted):** Phase 1's age rule became a starting
-> date per product plus CRX receipts after it (the ledger cannot be replayed reliably); PR 1A closes two unused
-> direct-insert paths; Phase 2 now defaults to a simple advisory average from receipts (section 4.8).
+> date per product plus CRX receipts after it (the ledger cannot be replayed reliably); PR 1A tightens write
+> permissions on receipts and the stock ledger; Phase 2's scope is now the small design (section 4.0).
 >
 > **What changed in the 2026-11-04 refresh** (against current `main`, the live database and the research report
 > `docs/research/2026-11-03-inventory-cost-valuation/README.md`, draft PR #1428, reviewed by Sol in three rounds):
@@ -367,8 +367,8 @@ design, items 9 (units), 10 (PO cost edits: the frozen receipt cost never change
 13. **What the code lacks today (Sol code check, 2026-11-04):** a `received` ledger row has no receiving-record
     or PO-line link; ledger rows written together can share a timestamp (no posting sequence); signs differ by
     writer (`adjusted` and `returned` signed; void reversals use `from_location` in one writer and
-    `to_location` in another); admins can change `inventory` directly. The full engine would need a receipt
-    link, a posting sequence and per-writer sign and location mapping first.
+    `to_location` in another); not every stock change is guaranteed a ledger row. The full engine would need a
+    receipt link, a posting sequence and per-writer sign and location mapping first.
 14. **Guards must cover inventory INSERT and DELETE, not just UPDATE** (manual add, retirement, phantom rows),
     treating a missing row as zero, and be keyed by product **and** location (one location is today's data,
     not a database rule).

@@ -52,10 +52,9 @@ is read-only.
 - **Receiving records are the dated source:** each has `received_at`, quantity, `unit_size` and its PO line;
   a reversed receipt's record is deleted. The last CRX receipt was 2026-06-10; since then product was bought
   by phone and email (D9).
-- **Direct writes:** Row Level Security lets admins and sales reps insert `inventory_transactions` and
-  `receiving_records` rows, lets admins update `receiving_records`, and lets admins insert, update and delete
-  `inventory` rows directly. No screen in `src/` uses the ledger or receiving-record direct writes; every real
-  path goes through `SECURITY DEFINER` functions.
+- **Write paths:** every screen changes receipts and the stock ledger through the receiving and stock
+  functions. The report must still rely only on records those functions write; PR 1A tightens database write
+  permissions to match (details are in private review notes until that change is live).
 - **Units:** receiving adds the entered quantity as-is (no conversion). 30 of the 53 in-stock products with
   receipts have a receipt whose unit text differs from the inventory row or product. Gate 0 is not built.
 - **Supplier prices:** 10 current observations, all `price_kind = quote`, `package_quantity = 1`, in Qt, Gal
@@ -74,8 +73,8 @@ checks that the history since the starting point is **ordinary and adds up**:
 - every ledger row after it is a `received`, `delivered` or `job_applied` row (no adjustment, return, return
   cancellation, delivery reversal, cycle-count change or receipt reversal);
 - every receiving record after it has a unit matching the inventory row and the product's inventory unit;
-- starting quantity + receipts after it − deliveries and jobs after it = today's on-hand (this also catches a
-  direct edit of the inventory row).
+- starting quantity + receipts after it − deliveries and jobs after it = today's on-hand (this also catches
+  any stock change made outside the ordinary actions).
 
 **If the check passes**, on-hand is dated newest first: the receipts after the starting point (by
 `received_at`), then the starting point's lines (newest date first, each capped at its quantity). Anything
@@ -164,12 +163,10 @@ merge gates), so the database PR lands first.
 
 ### PR 1A: database (one migration plus its ledger note)
 
-- **Close unused direct-write paths:** drop the client INSERT policies on `inventory_transactions` and
-  `receiving_records` and the admin UPDATE policy on `receiving_records` (no screen uses them; the receiving
-  and stock functions are `SECURITY DEFINER`). Direct admin edits of `inventory` stay (the Inventory screens
-  may rely on them); section 3's "adds up" check catches them. This changes permissions, so it needs
-  **Mason's explicit OK at build time**, plus `/security-review`, and the build first re-checks that no screen
-  uses these paths.
+- **Tighten write permissions** so receipts and stock-ledger rows change only through the receiving and stock
+  functions (specifics in private review notes until live). This changes permissions, so it needs **Mason's
+  explicit OK at build time**, plus `/security-review`, and the build first re-checks that no screen depends
+  on what is removed.
 - **Setting rows** `inventory_carrying_rate_bps` = `1000` and `inventory_aged_days` = `270`, inserted only if
   missing, plus the validation trigger from section 5.
 - **The two tables in section 4:** Row Level Security on, no client read or write policies, in the same
@@ -214,14 +211,14 @@ is live.
 2. **Cases on a throwaway copy** (a local database or a rolled-back transaction, never live): no starting date;
    a starting date only; a starting date plus a later receipt, then a sale; a receipt in a different unit
    (row must ask for a new starting date); a count correction, a return and its cancellation, a delivery
-   reversal and a receipt reversal after the starting date (each must ask for a new starting date); a direct
-   edit of the inventory row (must fail "adds up"); a split starting point; a replaced and a removed starting
+   reversal and a receipt reversal after the starting date (each must ask for a new starting date); a stock
+   change outside the ordinary actions (must fail "adds up"); a split starting point; a replaced and a removed starting
    point.
 3. Spot-check three live products by hand against their receipts and starting dates.
 4. A sales rep gets "admin required" from both functions and the tab does not appear for them; a signed-out
    caller is refused by database permissions and gets no data; a rep's existing product and inventory API
-   responses are unchanged; after PR 1A a rep's direct insert into `inventory_transactions` or
-   `receiving_records` is refused, and receiving through the app still works.
+   responses are unchanged; after PR 1A the permission tightening is proven by the private test list, and
+   receiving through the app still works.
 5. Bulk save the same request twice with one key: one set of batches. The same key with different rows is
    refused. Two entries for one product, a non-finite quantity, or lines adding up to more than on-hand reject
    the whole save.

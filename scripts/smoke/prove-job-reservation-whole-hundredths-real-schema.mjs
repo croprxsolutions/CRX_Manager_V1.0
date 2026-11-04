@@ -484,7 +484,8 @@ function main() {
            WHERE id = ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid;
           IF NOT ${viaTrigger} THEN
             PERFORM public._sync_quote_job_reservations('${Q}', NULL);
-          ELSIF COALESCE(current_setting('crx.job_completing', true), '') <> '' THEN
+          ELSIF COALESCE(current_setting('crx.job_completing', true), '') <> ''
+             OR COALESCE(current_setting('crx.jobs_completing_pending', true), '') <> '' THEN
             RAISE EXCEPTION 'the completing mark leaked past its trigger';
           END IF;
           SELECT COALESCE(sum(d.quantity_drawn), 0) INTO v_kept
@@ -503,39 +504,48 @@ function main() {
   assert.ok(Number(keptDirect) < 0.77, `without the completing mark the last-first case should underdraw, kept ${keptDirect}`);
   console.log(`[prover] Codex last-first, sync called directly (no completing mark, the previous behaviour): kept ${keptDirect} gal for 0.78125 applied`);
   // From here on the real lifecycle trigger fires on status updates even with replication role replica.
-  psql('ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_release_job_holds_on_lifecycle;');
+  psql('ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_release_job_holds_on_lifecycle; ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_mark_job_completing;');
   const keptTrigger = lastFirst(id('f5'), 'e0', true);
   assert.equal(Number(keptTrigger), 0.78, `through the lifecycle trigger the last-first case should keep 0.78 gal, not ${keptTrigger}`);
   console.log(`[prover] Codex last-first, through the lifecycle trigger: kept ${keptTrigger} gal for 0.78125 applied, within 0.01 after every completion`);
 
-  // Two sibling jobs of 0.004 gal completed in ONE statement: each row's trigger marks only its own
-  // job, so together they keep ROUND(0.008) = 0.01, and the mark is gone once the statement ends.
-  const P6 = id('f6');
-  const [twinA, twinB] = [id('c2'), id('c3')];
-  psql(`SET session_replication_role = replica;
-    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
-      VALUES ('${P6}', 'KI-100 Liquid 6', 'gal', 'gal', 'liquid');
-    INSERT INTO public.inventory (product_id, location) VALUES ('${P6}', 'Main Warehouse');
-    INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
-      VALUES ('${Q}', '${S}', '${P6}', 10);
-    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
-      VALUES ('${twinA}', 'KI100-TA', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '9 days'),
-             ('${twinB}', 'KI100-TB', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '10 days');
-    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
-      VALUES ('${twinA}', '${P6}', 0.004, 'gal', false), ('${twinB}', '${P6}', 0.004, 'gal', false);
-    SELECT public._sync_quote_job_reservations('${Q}', NULL);
-    DO $twins$
-    BEGIN
-      UPDATE public.jobs SET status = 'completed' WHERE id IN ('${twinA}', '${twinB}');
-      IF COALESCE(current_setting('crx.job_completing', true), '') <> '' THEN
-        RAISE EXCEPTION 'the completing mark leaked past the statement';
-      END IF;
-    END
-    $twins$;`);
-  const keptTwins = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P6}';`);
-  assert.equal(Number(keptTwins), 0.01, `two 0.004 gal jobs completed in one statement should keep 0.01 gal, not ${keptTwins}`);
-  assert.equal(scalar(`SELECT COALESCE(current_setting('crx.job_completing', true), '');`), '', 'the completing mark must not outlive its trigger');
-  console.log(`[prover] two 0.004 gal jobs completed in one statement keep ${keptTwins} gal for 0.008 applied; the completing mark does not leak`);
+  // Several sibling jobs completed in ONE statement: every row's BEFORE trigger lists its job as
+  // pending before any AFTER trigger runs, and each completion's rebuild leaves the other pending
+  // jobs out of its base, so the statement keeps what completing them one at a time would; both
+  // marks are gone once the statement ends. Luna: two 0.006 gal jobs (each a provisional 0.01)
+  // otherwise each kept 0 for 0.012 applied.
+  const bulk = (P, prefix, count, qty, expected) => {
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+        VALUES ('${P}', 'KI-100 Liquid ${prefix}', 'gal', 'gal', 'liquid');
+      INSERT INTO public.inventory (product_id, location) VALUES ('${P}', 'Main Warehouse');
+      INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+        VALUES ('${Q}', '${S}', '${P}', 10);
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        SELECT ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid, 'KI100-${prefix}-' || n, '${C}',
+               DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '9 days' + n * interval '1 minute'
+          FROM generate_series(1, ${count}) n;
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        SELECT ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid, '${P}', ${qty}, 'gal', false
+          FROM generate_series(1, ${count}) n;
+      SELECT public._sync_quote_job_reservations('${Q}', NULL);
+      DO $bulk$
+      BEGIN
+        UPDATE public.jobs SET status = 'completed'
+         WHERE quote_id = '${Q}' AND id::text LIKE '6c000000-0000-4000-8000-${prefix}%';
+        IF COALESCE(current_setting('crx.job_completing', true), '') <> ''
+           OR COALESCE(current_setting('crx.jobs_completing_pending', true), '') <> '' THEN
+          RAISE EXCEPTION 'a completing mark leaked past the statement';
+        END IF;
+      END
+      $bulk$;`);
+    const kept = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
+    assert.equal(Number(kept), expected, `${count} jobs of ${qty} gal completed in one statement should keep ${expected} gal, not ${kept}`);
+    console.log(`[prover] ${count} jobs of ${qty} gal completed in one statement keep ${kept} gal for ${(count * qty).toFixed(3)} applied; no mark leaks`);
+  };
+  bulk(id('f6'), 'c2', 2, 0.004, 0.01);
+  bulk(id('f7'), 'c3', 2, 0.006, 0.01);
+  bulk(id('f8'), 'c4', 100, 0.004, 0.4);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

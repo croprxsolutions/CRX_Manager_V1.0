@@ -33,17 +33,25 @@
 --
 -- ALSO RE-EMITTED: _trg_release_job_holds_on_lifecycle (20260702174000 body). On a scheduled or
 --   in_progress -> completed transition it sets crx.job_completing to that job's id with
---   set_config(..., true) around its _sync_job_holds call and clears it after; its own SET search_path
---   clause also restores the value when it returns, so the mark never reaches another row's sync or a
---   later statement. Only server-side SQL can set the setting (the API cannot); a forged value only
---   makes the sync re-run the same standalone step for that completed job.
+--   set_config(..., true) around its _sync_job_holds call, then clears it and takes the job off the
+--   pending list below, so neither reaches another row's sync or a later statement.
+--
+-- NEW: _trg_mark_job_completing and its BEFORE UPDATE OF status row trigger trg_mark_job_completing
+--   on jobs. It lists each job a statement moves to completed on crx.jobs_completing_pending
+--   (transaction-local). Every row's BEFORE trigger runs before any row's AFTER trigger, so when one
+--   statement completes several jobs, each completion's rebuild leaves the others still pending out
+--   of its base and they are rebuilt in turn: the same result as completing them one at a time (Luna,
+--   2026-11-04: two 0.006 gal jobs completed together otherwise each kept 0 for 0.012 applied). Only
+--   server-side SQL can set either setting (the API cannot); a forged value only re-runs the
+--   standalone step for a completed job.
 --
 -- KNOWN LIMIT: the sync cannot tell an active sibling's over-reservation from real demand, so active
 --   siblings may hold up to 0.01 each over their demand until they complete or are cancelled. A
---   completion with the lifecycle trigger disabled (replication role replica) is not rebuilt.
+--   completion with the jobs triggers disabled (replication role replica) is not rebuilt.
 --
--- ROLLBACK (its own reviewed migration): re-emit _sync_quote_job_reservations from its
---   20260710120000 body and _trg_release_job_holds_on_lifecycle from its 20260702174000 body.
+-- ROLLBACK (its own reviewed migration): drop trigger trg_mark_job_completing and function
+--   _trg_mark_job_completing, then re-emit _sync_quote_job_reservations from its 20260710120000 body
+--   and _trg_release_job_holds_on_lifecycle from its 20260702174000 body.
 --
 -- ORDERING: apply after every older pending migration.
 
@@ -87,7 +95,10 @@ BEGIN
      OR NOT EXISTS (SELECT 1 FROM pg_trigger t
           WHERE t.tgfoid = p.oid AND t.tgrelid = 'public.jobs'::regclass
             AND t.tgname = 'trg_release_job_holds_on_lifecycle' AND t.tgenabled = 'O'
-            AND t.tgtype = 17) -- AFTER UPDATE, FOR EACH ROW
+            AND t.tgtype = 17 -- AFTER UPDATE, FOR EACH ROW
+            AND ARRAY(SELECT a.attname::text FROM pg_attribute a
+                      WHERE a.attrelid = 'public.jobs'::regclass AND a.attnum = ANY (t.tgattr::int2[])
+                      ORDER BY 1) = ARRAY['deleted_at', 'status'])
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
@@ -95,6 +106,11 @@ BEGIN
                 FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
         IS DISTINCT FROM ARRAY['postgres', 'service_role'] THEN
     RAISE EXCEPTION 'PREFLIGHT_JOB_LIFECYCLE_TRIGGER_DRIFT: _trg_release_job_holds_on_lifecycle or its trigger differs from its pinned body, binding, owner, mode, search_path or grants';
+  END IF;
+  -- The new same-statement marker must not exist yet.
+  IF to_regprocedure('public._trg_mark_job_completing()') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.jobs'::regclass AND tgname = 'trg_mark_job_completing') THEN
+    RAISE EXCEPTION 'PREFLIGHT_MARK_JOB_COMPLETING_EXISTS: _trg_mark_job_completing or its trigger already exists';
   END IF;
   -- An unrounded draw would still strand its booking: a completed or invoiced job keeps its draw
   -- (the sync never rebuilds it), and an active one waits for its next sync. None existed on
@@ -126,14 +142,19 @@ DECLARE
   v_crop_pool numeric := 0;
   v_completed_demand numeric := 0; -- JOB_DRAW_HUNDREDTHS
   v_completing uuid; -- JOB_DRAW_HUNDREDTHS
+  v_pending uuid[]; -- JOB_DRAW_HUNDREDTHS
   v_own_drawn numeric; -- JOB_DRAW_HUNDREDTHS
+  v_pending_drawn numeric; -- JOB_DRAW_HUNDREDTHS
+  v_pending_demand numeric; -- JOB_DRAW_HUNDREDTHS
   v_draw numeric;
   v_hold numeric;
 BEGIN
   v_actor := COALESCE(p_actor, auth.uid());
-  -- JOB_DRAW_HUNDREDTHS<<< The job whose completion fired this sync, if any. Only the jobs lifecycle
-  -- trigger sets it (transaction-local, for that one row, cleared before it returns).
+  -- JOB_DRAW_HUNDREDTHS<<< The job whose completion fired this sync, if any, and the jobs completed by
+  -- the same statement whose own completion sync has not run yet. Only the jobs triggers set them
+  -- (transaction-local; each completion clears its own entries after its sync).
   v_completing := NULLIF(current_setting('crx.job_completing', true), '')::uuid;
+  v_pending := string_to_array(NULLIF(current_setting('crx.jobs_completing_pending', true), ''), ',')::uuid[];
   -- >>>JOB_DRAW_HUNDREDTHS
 
   -- Lock the parent quote (same rule the per-job engine used: 'accepted' still
@@ -258,13 +279,29 @@ BEGIN
     -- what it alone adds to the other completed jobs' rounded demand, against the booking less the
     -- order and the other kept draws. Active siblings' provisional draws (deleted above) never starve
     -- it, so a later job completing first keeps its real step, not the 0 FIFO left it while active.
+    -- Jobs completed by the same statement and not yet rebuilt are left out of that base (their
+    -- provisional draws too); each is rebuilt by its own row in turn, so one statement completing
+    -- several jobs keeps what completing them one at a time would.
     IF v_row.completing THEN
       IF v_planned_open THEN
-        SELECT COALESCE(SUM(quantity_drawn), 0) INTO v_own_drawn
+        SELECT COALESCE(SUM(quantity_drawn) FILTER (WHERE job_id = v_row.job_id), 0),
+               COALESCE(SUM(quantity_drawn) FILTER (WHERE job_id <> v_row.job_id AND job_id = ANY (COALESCE(v_pending, ARRAY[]::uuid[]))), 0)
+          INTO v_own_drawn, v_pending_drawn
           FROM job_product_draws
-         WHERE job_id = v_row.job_id AND quote_id = p_quote_id AND product_id = v_row.product_id;
-        v_completed_demand := v_completed_demand - v_row.demand;
-        v_consumed_drawn := v_consumed_drawn - v_own_drawn;
+         WHERE quote_id = p_quote_id AND product_id = v_row.product_id;
+        SELECT COALESCE(SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)), 0)
+          INTO v_pending_demand
+          FROM jobs j
+          JOIN job_chemicals jc ON jc.job_id = j.id
+          JOIN products p ON p.id = jc.product_id
+         WHERE j.quote_id = p_quote_id
+           AND jc.product_id = v_row.product_id
+           AND jc.customer_supplied = false
+           AND j.status IN ('completed', 'invoiced')
+           AND j.id <> v_row.job_id
+           AND j.id = ANY (COALESCE(v_pending, ARRAY[]::uuid[]));
+        v_completed_demand := v_completed_demand - v_row.demand - v_pending_demand;
+        v_consumed_drawn := v_consumed_drawn - v_own_drawn - v_pending_drawn;
         v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0),
                         ROUND(CEIL(v_row.demand * 100) / 100, 2),
                         ROUND(FLOOR(GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0) * 100) / 100, 2));
@@ -273,8 +310,8 @@ BEGIN
           INSERT INTO job_product_draws (job_id, quote_id, product_id, quantity_drawn)
           VALUES (v_row.job_id, p_quote_id, v_row.product_id, v_draw);
         END IF;
-        v_completed_demand := v_completed_demand + v_row.demand;
-        v_consumed_drawn := v_consumed_drawn + v_draw;
+        v_completed_demand := v_completed_demand + v_row.demand + v_pending_demand;
+        v_consumed_drawn := v_consumed_drawn + v_draw + v_pending_drawn;
         v_crop_pool := ROUND(FLOOR(GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0) * 100) / 100, 2);
       END IF;
       CONTINUE; -- a completed job holds no shed stock
@@ -341,18 +378,48 @@ BEGIN
   IF NEW.status IS DISTINCT FROM OLD.status
      OR NEW.deleted_at IS DISTINCT FROM OLD.deleted_at THEN
     -- JOB_DRAW_HUNDREDTHS<<< Mark this one job as completing for its own sync, transaction-local,
-    -- so the sync rebuilds its draw as a standalone step before keeping it; cleared right after
-    -- (and restored anyway when this function returns) so it never reaches another row's sync.
+    -- so the sync rebuilds its draw as a standalone step before keeping it. Afterwards clear the
+    -- mark and take this job off the same-statement pending list (trg_mark_job_completing), so
+    -- neither reaches another row's sync or a later statement.
     IF OLD.status IN ('scheduled', 'in_progress') AND NEW.status = 'completed' AND NEW.deleted_at IS NULL THEN
       PERFORM set_config('crx.job_completing', NEW.id::text, true);
     END IF;
     PERFORM _sync_job_holds(NEW.id, auth.uid());
     PERFORM set_config('crx.job_completing', '', true);
+    PERFORM set_config('crx.jobs_completing_pending',
+      COALESCE(array_to_string(array_remove(string_to_array(NULLIF(current_setting('crx.jobs_completing_pending', true), ''), ','), NEW.id::text), ','), ''),
+      true);
     -- >>>JOB_DRAW_HUNDREDTHS
   END IF;
   RETURN NEW;
 END;
 $function$;
+
+-- _trg_mark_job_completing (new): BEFORE each row's status change, list a job going to completed on
+-- crx.jobs_completing_pending (transaction-local). Row BEFORE triggers all run before any row AFTER
+-- trigger, so each completion's sync knows which jobs the same statement completed but has not
+-- rebuilt yet. A SET clause restores only search_path on return, not this setting.
+CREATE OR REPLACE FUNCTION public._trg_mark_job_completing()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  PERFORM set_config('crx.jobs_completing_pending',
+    concat_ws(',', NULLIF(current_setting('crx.jobs_completing_pending', true), ''), NEW.id::text),
+    true);
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._trg_mark_job_completing() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._trg_mark_job_completing() TO service_role;
+
+CREATE TRIGGER trg_mark_job_completing
+  BEFORE UPDATE OF status ON public.jobs
+  FOR EACH ROW
+  WHEN (OLD.status IN ('scheduled', 'in_progress') AND NEW.status = 'completed' AND NEW.deleted_at IS NULL)
+  EXECUTE FUNCTION public._trg_mark_job_completing();
 
 DO $postflight$
 DECLARE
@@ -383,7 +450,11 @@ BEGIN
      OR position($q$set_config('crx.job_completing', '', true)$q$ IN p.prosrc) = 0
      OR NOT EXISTS (SELECT 1 FROM pg_trigger t
           WHERE t.tgfoid = p.oid AND t.tgrelid = 'public.jobs'::regclass
-            AND t.tgname = 'trg_release_job_holds_on_lifecycle' AND t.tgenabled = 'O' AND t.tgtype = 17)
+            AND t.tgname = 'trg_release_job_holds_on_lifecycle' AND t.tgenabled = 'O' AND t.tgtype = 17
+            AND ARRAY(SELECT a.attname::text FROM pg_attribute a
+                      WHERE a.attrelid = 'public.jobs'::regclass AND a.attnum = ANY (t.tgattr::int2[])
+                      ORDER BY 1) = ARRAY['deleted_at', 'status'])
+     OR position($q$'crx.jobs_completing_pending'$q$ IN p.prosrc) = 0
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
@@ -391,6 +462,21 @@ BEGIN
                 FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
         IS DISTINCT FROM ARRAY['postgres', 'service_role'] THEN
     RAISE EXCEPTION 'POSTFLIGHT: _trg_release_job_holds_on_lifecycle lost its change, trigger, owner, mode, search_path or grants';
+  END IF;
+  SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._trg_mark_job_completing()');
+  IF NOT FOUND
+     OR p.prosecdef
+     OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+     OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+        IS DISTINCT FROM ARRAY['postgres', 'service_role']
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t
+          WHERE t.tgfoid = p.oid AND t.tgrelid = 'public.jobs'::regclass
+            AND t.tgname = 'trg_mark_job_completing' AND t.tgenabled = 'O'
+            AND t.tgtype = 19 -- BEFORE UPDATE, FOR EACH ROW
+            AND ARRAY(SELECT a.attname::text FROM pg_attribute a
+                      WHERE a.attrelid = 'public.jobs'::regclass AND a.attnum = ANY (t.tgattr::int2[])) = ARRAY['status']) THEN
+    RAISE EXCEPTION 'POSTFLIGHT: _trg_mark_job_completing or its trigger is missing or wrong';
   END IF;
 END
 $postflight$;

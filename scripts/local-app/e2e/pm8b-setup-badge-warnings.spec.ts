@@ -1,4 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { deleteLocalProducts } from './local-db';
+
+const created: string[] = [];
+test.afterEach(() => deleteLocalProducts(created.splice(0)));
 
 test('incomplete setup badge, setup filter, near-match warning and rate help', async ({ page }) => {
   await page.goto('/login');
@@ -9,16 +13,19 @@ test('incomplete setup badge, setup filter, near-match warning and rate help', a
 
   // Products are an allowed admin insert. An invented maker gives the near-match warning something to match.
   const stamp = Date.now();
-  const productId = await page.evaluate(async ({ name, maker }) => {
+  const [makerId, productId, productError] = await page.evaluate(async ({ name, maker }) => {
     const { supabase } = await import(/* @vite-ignore */ '/src/lib/db.ts');
-    const { error: makerError } = await supabase.from('products')
-      .insert({ product_name: `${name} maker`, manufacturer: maker });
-    if (makerError) throw new Error(makerError.message);
+    const { data: makerRow, error: makerError } = await supabase.from('products')
+      .insert({ product_name: `${name} maker`, manufacturer: maker }).select('id').single();
+    if (makerError || !makerRow) throw new Error(makerError?.message ?? 'Local maker insert failed');
     const { data, error } = await supabase.from('products')
       .insert({ product_name: name, category: 'Herbicide' }).select('id').single();
-    if (error || !data) throw new Error(error?.message ?? 'Local product insert failed');
-    return data.id;
+    // The maker row already exists, so hand its id back for cleanup instead of throwing here.
+    return [makerRow.id, data?.id ?? null, error?.message ?? null];
   }, { name: `Setup8b ${stamp} (invented)`, maker: `Zentrova${stamp}` });
+  created.push(makerId);
+  if (!productId) throw new Error(productError ?? 'Local product insert failed');
+  created.push(productId);
 
   await page.goto(`/products/${productId}`);
   await expect(page.getByText('Incomplete setup')).toBeVisible();

@@ -1,4 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { deleteLocalProducts } from './local-db';
+
+const created: string[] = [];
+test.afterEach(() => deleteLocalProducts(created.splice(0)));
 
 // A product page left open must not save its old label values over a newer Label Review commit.
 test('saving an open product page keeps a newer Label Review commit', async ({ page }) => {
@@ -44,6 +48,7 @@ test('saving an open product page keeps a newer Label Review commit', async ({ p
   }, { fn, arg }) as Promise<T>;
 
   const id = await db<string>('insert', `Label stale ${Date.now()} (invented)`);
+  created.push(id);
   await page.goto(`/products/${id}`);
   await expect(page.getByTestId('product-max-label-rate')).toHaveText('16 fl oz/acre');
 

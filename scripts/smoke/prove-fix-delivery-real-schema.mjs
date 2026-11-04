@@ -327,6 +327,14 @@ function scenarios() {
       (date_trunc('month',(now() - interval '40 days')::date)::date,(date_trunc('month',(now() - interval '40 days')::date)+interval '1 month - 1 day')::date,'closed');
     ALTER TABLE public.accounting_periods ENABLE TRIGGER USER;
     ${fix('k-closed-delivery')}`, 'a delivery completed in a closed month refuses the fix', /FIX_DELIVERY_REFUSED: This delivery was completed in a closed month/);
+  refused(`RESET ROLE; ALTER TABLE public.deliveries DISABLE TRIGGER USER;
+    UPDATE public.deliveries SET completed_at=(date_trunc('month',CURRENT_DATE)::timestamp AT TIME ZONE 'UTC') + interval '2 hours' WHERE id='${DELIVERY}';
+    ALTER TABLE public.deliveries ENABLE TRIGGER USER;
+    ALTER TABLE public.accounting_periods DISABLE TRIGGER USER;
+    INSERT INTO public.accounting_periods (period_start,period_end,status) VALUES
+      ((date_trunc('month',CURRENT_DATE) - interval '1 month')::date,(date_trunc('month',CURRENT_DATE) - interval '1 day')::date,'closed');
+    ALTER TABLE public.accounting_periods ENABLE TRIGGER USER;
+    ${fix('k-closed-chicago')}`, 'a 02:00 UTC completion on the 1st counts as the prior Chicago day, in a closed month', /FIX_DELIVERY_REFUSED: This delivery was completed in a closed month/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET invoice_group_id=gen_random_uuid() WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-split')}`, 'a split-group invoice refuses the fix', /FIX_DELIVERY_REFUSED: This delivery is billed on a split invoice/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;

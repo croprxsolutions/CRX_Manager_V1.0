@@ -179,7 +179,7 @@ BEGIN
   -- in a closed month would change that month's inventory history.
   IF EXISTS (SELECT 1 FROM deliveries d
                JOIN accounting_periods ap ON ap.status = 'closed'
-                AND COALESCE(d.completed_at::date, d.scheduled_date) BETWEEN ap.period_start AND ap.period_end
+                AND COALESCE((d.completed_at AT TIME ZONE 'America/Chicago')::date, d.scheduled_date) BETWEEN ap.period_start AND ap.period_end
               WHERE d.id = p_delivery_id) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'DELIVERY_IN_CLOSED_PERIOD',
       'message', 'This delivery was completed in a closed month. Reopen that month or use a return instead.');
@@ -349,6 +349,10 @@ BEGIN
     FROM (SELECT id FROM commissions
            WHERE order_id = v_order_id AND status = 'pending' AND deleted_at IS NULL
            FOR UPDATE) c;
+  -- Hold the delivery month against close_accounting_period, as check_period_open does, so the
+  -- plan's closed-month check cannot pass just before that month closes.
+  PERFORM public._lock_accounting_months(ARRAY[(SELECT COALESCE((d.completed_at AT TIME ZONE 'America/Chicago')::date, d.scheduled_date)
+                                                  FROM deliveries d WHERE d.id = p_delivery_id)], false);
 
   v_plan := public._fix_delivery_plan(p_delivery_id);
   IF NOT (v_plan ->> 'can_fix')::boolean THEN

@@ -84,6 +84,34 @@ export function normalizedProductSetup(
   };
 }
 
+/**
+ * WP-PM-6b basic Duplicate: the only fields a copy starts with. Everything else starts blank: SKU and
+ * size (they belong to one package), prices and cost (set through the reviewed pricing change), and
+ * every label and chemistry value (EPA number, RUP, signal word, intervals, rates, timings), which
+ * must be entered for the new product rather than inherited unchecked.
+ */
+const DUPLICATE_COPIED_FIELDS = [
+  'category', 'vendor', 'manufacturer', 'product_form', 'inventory_unit',
+] as const satisfies ReadonlyArray<keyof Product>;
+
+export type DuplicateProductSource = Pick<Product, 'id' | 'product_name' | (typeof DUPLICATE_COPIED_FIELDS)[number]>;
+
+export function duplicateProductSource(product: Product): DuplicateProductSource {
+  return {
+    id: product.id,
+    product_name: product.product_name,
+    ...Object.fromEntries(DUPLICATE_COPIED_FIELDS.map((field) => [field, product[field]])),
+  } as DuplicateProductSource;
+}
+
+/** The new product's starting draft for a copy of `source`; a blank source field keeps the form's default. */
+export function duplicateProductDraft(source: DuplicateProductSource): Partial<Product> {
+  return {
+    product_name: `${source.product_name} (copy)`,
+    ...Object.fromEntries(DUPLICATE_COPIED_FIELDS.flatMap((field) => (source[field] == null ? [] : [[field, source[field]]]))),
+  };
+}
+
 export type ProductSetupFields = Pick<Product,
   'category' | 'product_form' | 'inventory_unit' | 'container_size' | 'container_unit'
   | 'epa_registration' | 'signal_word' | 'rei_hours' | 'phi_days'>;

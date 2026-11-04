@@ -10,6 +10,25 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-04 — Inventory costing parked as roadmap; short pre-season list instead
+
+**Source:** Mason, 2026-11-04, after a harsh Sol (gpt-6-sol, high) review of the whole inventory proposal:
+"i dont want this to be hard to manage or it wil be a overbuilt system that no one uses ... i am thinking of
+holding alot of this work for later since i have more important features i need to focus on", then "Yes,
+record it".
+
+**Decision (D12).** Every inventory-costing phase (stock age and holding cost, cost of stock on hand, vendor-bill
+matching and special-order margin, quote warnings) is parked as a roadmap idea with a stated trigger. Before
+next season only a short list is in scope: fix KI-93 and KI-94, review the 14 March orders holding stock, run
+the physical count as a controlled process, verify units for stocked products only, set reorder points for a
+short list, return to POs and receiving in CRX, and relabel the pricing-basis value. Details:
+`docs/plans/2026-07-16-inventory-costing-plan.md` section 0.
+
+**What this forbids/implies:** no costing feature is built without a new go-ahead after its trigger is met.
+The holding-cost numbers, supplier-price exposure, starting-date history, the Option B cost engine, freight,
+rebates, lots and GMROI are cut. Each pre-season item is still built only on Mason's go-ahead, through its own
+PR and reviews. The count comes before any estimated dates or costs are entered.
+
 ## 2026-11-04 — A byte-identical migration restamp keeps its Sol and reviewer proofs
 
 **Source:** Mason, 2026-11-04, in the retro of the WP-PM-11a-1 session (PR #1425, product rate lock), choosing that byte-identical restamps keep their Sol and reviewer proofs, then "spin up item 1".

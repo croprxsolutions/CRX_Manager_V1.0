@@ -30,7 +30,7 @@ BEGIN
     ('public.correct_product_rates(uuid,numeric,text,text,bigint,jsonb,text,uuid,text)', '274822598a0c63882ed40373ae8d0405'),
     ('public._product_rate_unit_ok(numeric,text,text,text,text)', '37ef9d56f2ab80a74931e722da6dffb2'),
     ('public.guard_product_rate_lock()', 'd20a3f77abf53807a43ced181b45c6d4'),
-    ('public.guard_unit_conversions_rate_lock()', '5f4ca03dbbb27600bff5f281b271824f'),
+    ('public.guard_unit_conversions_rate_lock()', 'c8731a0228a669d18513a7284a44576f'),
     ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
     ('public.preview_product_rate_correction(uuid,numeric,text)', '04f0a1b3b08b123db35b7e3ebeb3fd75')) AS pins(sig, body_md5) LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM v_md5 THEN

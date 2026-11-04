@@ -536,6 +536,25 @@ function main() {
   assert.equal(events(), 'locked,corrected,unlocked,locked');
   console.log('[prover] a lock waits for an upload already saving, then refuses the next one');
 
+  // Unlocked, a unit conversion change waits for a rate write in flight, so the write keeps the factor it priced with.
+  ok(ADMIN, lock(false, 'reopen again', 'k-unlock2'));
+  const saver = spawn('docker', ['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-c',
+    `BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+     SET LOCAL ROLE authenticated; ${setRates([row(P.OTHER, '9', 'oz', '9 oz/A', ['8', 'oz', '8 oz/A'])], 'k-conv-race')} SELECT pg_sleep(4); COMMIT;`],
+  { cwd: ROOT, stdio: 'ignore' });
+  const saving = "SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event = 'PgSleep' AND query LIKE '%k-conv-race%';";
+  for (let tries = 0; scalar(saving) !== '1'; tries += 1) {
+    assert.ok(tries < 100, 'the racing upload never reached its sleep inside the transaction');
+    wait(200);
+  }
+  const convStarted = Date.now();
+  ok(ADMIN, "UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
+  assert.ok(Date.now() - convStarted > 1000, 'the conversion change waited on the upload in flight');
+  saver.unref();
+  assert.match(rates(P.OTHER), /^9\|oz\|9 oz\/A\|/);
+  assert.equal(events(), 'locked,corrected,unlocked,locked,unlocked');
+  console.log('[prover] unlocked, a unit conversion change waits for an upload already saving');
+
   // The live smoke chain passes here too, and leaves nothing behind.
   const before = scalar('SELECT count(*) FROM public.product_rate_events;');
   const out = psql(lf(path.join(path.dirname(fileURLToPath(import.meta.url)), 'smoke-product_rate_lock.sql')), { allowFailure: true });

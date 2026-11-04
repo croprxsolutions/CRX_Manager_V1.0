@@ -14,6 +14,8 @@
 --     import, any SECURITY DEFINER function. It takes the lock row FOR SHARE, so a switch and a rate
 --     write take turns and an upload that started before a switch cannot save after it.
 --   * While locked, unit_conversions cannot change either: pricing converts every rate through it.
+--     Unlocked, a change takes the lock row FOR UPDATE, so it waits for a rate write in flight, and a
+--     rate write after it prices with the new factor (a moved preview is refused).
 --   * set_product_rates(rows): the bulk rate writer the CSV import (WP-PM-10) and the setup workbook
 --     (WP-PM-11a-2) will call (admin, retry key, all-or-nothing). Each row carries the rate values it
 --     expects to replace and the per-acre prices its preview showed; a row changed since, or whose
@@ -223,7 +225,8 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function
 DECLARE
   v_locked boolean;
 BEGIN
-  SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR SHARE;
+  -- FOR UPDATE, not SHARE: rate writes hold the row FOR SHARE, so a factor change waits for them.
+  SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR UPDATE;
   IF COALESCE(v_locked, true) THEN  -- a missing lock row counts as locked
     RAISE EXCEPTION 'PRODUCT_RATES_LOCKED: rates are locked; unit conversions price every rate, so unlock rates with a reason before changing one'
       USING ERRCODE = 'check_violation';

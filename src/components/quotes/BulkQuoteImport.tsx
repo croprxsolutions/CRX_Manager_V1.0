@@ -12,6 +12,7 @@ import { processDocumentWithOCR, isCSVFile, isOCRSupported } from '../../lib/doc
 import { generateIdempotencyKey } from '../../lib/idempotency';
 import { Sentry } from '../../lib/sentry';
 import { withAdminCosts } from '../../lib/costFields';
+import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { logActivity } from '../../lib/activityLogger';
 import type { Json } from '../../types/supabase';
 import { resolveExactProductIdentity } from '../../lib/productIdentityResolver';
@@ -448,11 +449,14 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
     let failCount = 0;
 
     try {
-      const [custRes, prodRes, convRes] = await Promise.all([
-        supabase.from('customers').select('id, farm_name'),
-        supabase.from('products').select('id, product_name, sku, inventory_unit, unit_size, is_active').eq('is_active', true),
-        supabase.from('unit_conversions').select('*'),
-      ]);
+      // Customers and products page by page: one read stops at the server's 1,000-row cap, and a
+      // product or customer past it could never be matched (S12b).
+      const custRes = await fetchAllRows((from, to) => pageWithList(supabase.from('customers')
+        .select('id, farm_name', { count: 'exact' }).order('farm_name').order('id').range(from, to)));
+      const prodRes = await fetchAllRows((from, to) => pageWithList(supabase.from('products')
+        .select('id, product_name, sku, inventory_unit, unit_size, is_active', { count: 'exact' })
+        .eq('is_active', true).order('product_name').order('id').range(from, to)));
+      const convRes = await supabase.from('unit_conversions').select('*');
 
       if (custRes.error || prodRes.error || convRes.error) {
         const errMsg = custRes.error?.message || prodRes.error?.message || convRes.error?.message;
@@ -485,9 +489,12 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
         return;
       }
 
-      const customerMap = new Map(
-        customers.map((c) => [c.farm_name.toLowerCase().trim(), c.id])
-      );
+      // A name shared by two customers matches neither, so a quote never goes to the wrong one.
+      const customerIdsByName = new Map<string, string[]>();
+      for (const c of customers) {
+        const key = c.farm_name.toLowerCase().trim();
+        customerIdsByName.set(key, [...(customerIdsByName.get(key) ?? []), c.id]);
+      }
       const productDetailsById = new Map(products.map((p) => [p.id, p]));
 
       const quoteGroups = new Map<string, ParsedQuoteItem[]>();
@@ -502,10 +509,16 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
       for (const [quoteNumber, items] of quoteGroups) {
         try {
           const firstItem = items[0];
-          const customerMatches = items.map((item) => ({
-            name: item.customer_farm_name,
-            id: customerMap.get(item.customer_farm_name.toLowerCase().trim()),
-          }));
+          const customerMatches = items.map((item) => {
+            const ids = customerIdsByName.get(item.customer_farm_name.toLowerCase().trim()) ?? [];
+            return { name: item.customer_farm_name, id: ids.length === 1 ? ids[0] : undefined, shared: ids.length > 1 };
+          });
+          const sharedNames = Array.from(new Set(customerMatches.filter((c) => c.shared).map((c) => c.name)));
+          if (sharedNames.length > 0) {
+            details.push(`Quote ${quoteNumber}: More than one customer is named "${sharedNames.join('", "')}". Give each a different name (for example add the town), then retry.`);
+            failCount++;
+            continue;
+          }
           const missingCustomers = Array.from(new Set(
             customerMatches
               .filter((customer) => !customer.id)

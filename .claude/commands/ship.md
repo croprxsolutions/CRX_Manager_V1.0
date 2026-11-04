@@ -94,6 +94,8 @@ MED/LOW findings: fix the cheap ones; list the rest in the final summary as acce
 
 Only after Step 4 is clean for the migration. Items 1–2 prepare; the live apply (item 3 onward) runs in Step 8, after the checks are green and Sol cleared the final head — re-mint the apply proofs then if they are older than 30 minutes:
 
+**First, carry the cost-exposure re-keys in this PR** if the migration replaces any existing function (CREATE OR REPLACE, or a drop and re-create). A `cost-exposure-review` allowlist key hashes a function and every helper it reaches, so each entry whose chain reaches a replaced function re-flags right after the apply; caught then, it costs an extra commit and CI round (11-02, 11-03 twice). Before the apply, run the predicate (`scripts/db-invariant-sweeps/predicates/cost-exposure-review.sql`) read-only on live with each replaced function's `prosrc` and `proconfig` overridden by the migration's new body (CR stripped) and settings, or run it on the prover's post-apply database. Every allowlisted root whose key changes is in the chain: re-read it, swap in the post-apply key and add a dated note in this PR. A root that newly appears still needs a full review. Precedent: `20261102200000` in `scripts/db-invariant-sweeps/README.md` (those entries showed until the apply, then matched). The post-apply sweep in item 7 confirms the keys.
+
 1. **Stamp the apply-guard proof with the sanctioned wrapper** (never hand-write the JSON — the wrapper computes the guard's slug rule, the timestamp, and the content-binding `queryHash` from the on-disk file):
    ```
    node scripts/write-apply-proofs.mjs <mig-name-without-.sql>

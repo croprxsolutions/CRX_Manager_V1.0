@@ -926,7 +926,7 @@
     },
     "invoice_resave_keeps_line_cents": {
       "chain": "smoke-invoice-resave-keeps-line-cents.sql",
-      "description": "Migration 20261104190000 (S16b): 5 gal at $7.33 drawn from a booking and delivered in two halves bills $18.33 + $18.32; re-saving the second draft invoice with only a note changed keeps $18.32 (the pair still totals $36.65; before the migration it re-rounded to $18.33), and the invoice total equals the sum of its lines; re-saving it at 2 gal re-prices it to $14.66. Terminal rollback.",
+      "description": "Migration 20261106130000 (S16b): 5 gal at $7.33 drawn from a booking and delivered in two halves bills $18.33 + $18.32; re-saving the second draft invoice with only a note changed keeps $18.32 (the pair still totals $36.65; before the migration it re-rounded to $18.33), and the invoice total equals the sum of its lines; re-saving it at 2 gal re-prices it to $14.66. Terminal rollback.",
       "covers": [
         "save_invoice",
         "complete_delivery"

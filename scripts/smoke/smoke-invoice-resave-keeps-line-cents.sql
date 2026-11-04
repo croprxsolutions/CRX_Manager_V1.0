@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: re-saving a draft invoice keeps the cents its line was given (S16b)
 -- ----------------------------------------------------------------------------
--- Migration 20261104190000_invoice_resave_keeps_line_cents. A rep books 5 gal of product P at a
+-- Migration 20261106130000_invoice_resave_keeps_line_cents. A rep books 5 gal of product P at a
 -- manual $7.33 ($36.65) and draws it into an order; an admin delivers it in two halves, so the
 -- two draft invoices are $18.33 + $18.32 (the second carries the remainder).
 --   A  Saving the second draft again with only a note changed keeps $18.32: the two still total

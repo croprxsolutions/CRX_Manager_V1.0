@@ -1,5 +1,5 @@
 -- Written 2026-11-03. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261104190000_invoice_resave_keeps_line_cents.md.
+-- docs/reference/migrations.d/20261106130000_invoice_resave_keeps_line_cents.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (S16b, money fix; Mason's order, 2 Nov): 5 gal at $5.33 ($26.65) delivered in two halves
@@ -77,7 +77,7 @@ DECLARE
   v_lineage jsonb := '[]'::jsonb;
   v_result uuid;
   v_restored integer := 0;
-  -- S16b (20261104190000): a field-application invoice re-splits its own total across growers.
+  -- S16b (20261106130000): a field-application invoice re-splits its own total across growers.
   v_keeps_line_cents boolean;
 BEGIN
   IF p_idempotency_key IS NOT NULL THEN

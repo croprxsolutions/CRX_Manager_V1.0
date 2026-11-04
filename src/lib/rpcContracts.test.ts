@@ -3124,8 +3124,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Pruned 2026-10-19: _enforce_below_cost_line, re-emitted by the cost-admin-only
   //   candidate 20261019010000, which is now in the applied-name snapshot (ledger
   //   20261019182757), so the trigger left the discovered inventory.
-  // Pruned 2026-11-04: _enforce_below_cost_line again, re-emitted by #13's 20261106140000, which is
-  //   now in the applied-name snapshot (ledger 20261104194231; registry regenerated from live in PR #1452).
+  // Pruned 2026-11-04: _enforce_below_cost_line again, re-emitted by #13 candidate
+  //   20261106140000, which is now in the applied-name snapshot (ledger 20261104194231).
   record_commission_earned_state:
     'local commission-label repair candidate re-emits this trigger-only recorder; direct client EXECUTE is revoked and the parent commission write owns the transaction',
   record_commission_settlement_event:

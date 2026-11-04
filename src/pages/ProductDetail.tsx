@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, DollarSign, ExternalLink, Search, Save } from 'lucide-react';
+import { useLocation, useParams, useNavigate } from 'react-router-dom';
+import { AlertTriangle, ArrowLeft, Copy, DollarSign, ExternalLink, Search, Save } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -62,7 +62,8 @@ import {
 } from '../lib/productCostBasis';
 import { PRODUCT_COLUMNS, withAdminCost } from '../lib/costFields';
 import {
-  listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup, productSetupValidationMessage, visibleProductCategories,
+  duplicateProductDraft, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
+  productSetupValidationMessage, visibleProductCategories, type DuplicateProductSource,
 } from '../lib/productSetup';
 import { listProductUseTimingOptions, visibleProductUseTimingOptions } from '../lib/productUseTimings';
 import type { ProductCategory, UseTimingOption } from '../types';
@@ -230,8 +231,12 @@ export default function ProductDetail() {
     });
   }, []);
   useEffect(loadRateLock, [loadRateLock]);
+  // WP-PM-6b: a Duplicate arrives with its source's copied fields; a fresh create arrives flagged to prompt for prices.
+  const routeState = useLocation().state as { duplicateFrom?: DuplicateProductSource; justCreated?: boolean } | null;
+  const duplicateSource = isNew ? routeState?.duplicateFrom : undefined;
+  const justCreated = !isNew && routeState?.justCreated === true;
 
-  const [product, setProduct] = useState<Partial<Product>>({
+  const [product, setProduct] = useState<Partial<Product>>(() => ({
     product_name: '',
     sku: '',
     category: '',
@@ -259,7 +264,9 @@ export default function ProductDetail() {
     notes: '',
     quoting_notes: '',
     is_active: true,
-  });
+    // ProductDetailRoute remounts this page per id, so Duplicate's /products/new runs this initializer afresh.
+    ...(duplicateSource ? duplicateProductDraft(duplicateSource) : {}),
+  }));
   const [costHistory, setCostHistory] = useState<CostHistory[]>([]);
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>([]);
@@ -328,7 +335,7 @@ export default function ProductDetail() {
   } = useIdempotencyKey('apply_product_pricing_change_set', profile?.id ?? '');
 
   // Track dirty state for unsaved changes warning
-  const [isDirty, setIsDirty] = useState(false);
+  const [isDirty, setIsDirty] = useState(Boolean(duplicateSource));
   // The margin floor card saves on its own, so its unsaved edit is tracked apart from the form.
   const [marginFloorDirty, setMarginFloorDirty] = useState(false);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
@@ -754,11 +761,18 @@ export default function ProductDetail() {
           .select('id');
         if (productInsertResult.error) throw productInsertResult.error;
         checkMutationResult(productInsertResult, 'Insert product');
+        const newProductId = (productInsertResult.data as { id: string }[] | null)?.[0]?.id;
         setIsDirty(false);
-        toast('success', 'Product created');
-        logActivity({ event: 'product_created', description: `Product ${product.product_name} created`, performedBy: profile!.id, entityType: 'product' });
+        logActivity({ event: 'product_created', description: `Product ${product.product_name} created`, performedBy: profile!.id, entityType: 'product', entityId: newProductId });
         skipUnsavedPromptRef.current = true;
-        navigate('/products');
+        if (!newProductId) {
+          // Saved, but the id did not come back: the list still shows the new product.
+          toast('success', 'Product created');
+          navigate('/products');
+          return;
+        }
+        toast('success', isAdmin ? 'Product created. Now set its prices.' : 'Product created');
+        navigate(`/products/${newProductId}`, { state: { justCreated: true } });
         return;
       }
 
@@ -1149,11 +1163,32 @@ export default function ProductDetail() {
           {isNew ? 'New Product' : product.product_name}
         </h2>
         {missingSetup.length > 0 && <Badge variant="warning">Incomplete setup</Badge>}
+        {isAdmin && !isNew && persistedProduct?.id === id && (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="ml-auto"
+            icon={<Copy className="w-4 h-4" />}
+            showChevron={false}
+            disabled={pricingReloadRequired}
+            onClick={() => navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!) } })}
+          >
+            Duplicate
+          </Button>
+        )}
       </div>
       {missingSetup.length > 0 && (
         <p className="text-sm text-secondary" data-testid="product-setup-missing">
           Still needed for complete setup: {missingSetup.join(', ')}.{isAdmin ? ' You can still save and price this product.' : ''}
         </p>
+      )}
+
+      {duplicateSource && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900" role="status">
+          <p className="font-medium">Copy of {duplicateSource.product_name}. Nothing is saved until you create it.</p>
+          <p className="mt-1">Copied: category, vendor, manufacturer, product form and inventory unit.</p>
+          <p className="mt-1">Not copied, enter them for this product: SKU, container size, EPA number and label details (RUP, signal word, REI, PHI), rates, use timings, notes, brands, cost and prices.</p>
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1727,6 +1762,11 @@ export default function ProductDetail() {
             <PhoneSection title="Pricing & Margins" {...sectionProps('pricing', pricingReloadRequired)}>
             <Card>
               <CardHeader title="Pricing" accent="& Margins" />
+              {justCreated && persistedProduct?.tier1_price == null && persistedProduct?.tier2_price == null && persistedProduct?.tier3_price == null && (
+                <div className="p-3 mb-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-900" role="status">
+                  Product created. Now set its prices: choose a pricing mode, enter them, and Apply. Until then it has no price, and quotes, jobs and orders refuse it.
+                </div>
+              )}
               {isNew ? (
                 <div className="p-3 mb-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
                   Create the Product details first. Pricing is added afterward through a reviewed change so a new Product can never bypass approval.

@@ -16,6 +16,12 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Settings company details (Company Info) the PDF letterhead and footer print.
+const companyInfo = vi.hoisted(() => ({
+  load: vi.fn(async () => ({ name: 'Prairie Ag Co', phone: '555-0100', email: '', address: '12 Main St Annapolis, IL 62413' })),
+}));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
+
 // ── Mock jsPDF doc instance ─────────────────────────────────────────────
 
 const mockDoc = {

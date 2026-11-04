@@ -328,6 +328,20 @@ describe('Products list and exports', () => {
     expect(selectedColumns.find((column) => column.key === 'tier2_price')?.format?.(selected[0].tier2_price, selected[0])).toBe('$0.00');
   });
 
+  it('names the products a customer has no price for before the sheet downloads (WP-PM-6b)', async () => {
+    mocks.products.splice(0, mocks.products.length,
+      { ...activeProduct, product_name: 'Active Product', tier1_price: null, tier2_price: null },
+      ...['Alpha', 'Bravo', 'Charlie'].map((name, i) => ({ ...activeProduct, id: `p-missing-${i}`, product_name: name, tier1_price: null, tier2_price: null })),
+      { ...activeProduct, id: 'p-zero', product_name: 'Zero Priced', tier1_price: null, tier2_price: 0 });
+    await loadProducts();
+    openDownload();
+    salesOption('CSV');
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick customer' }));
+    const note = await screen.findByText(/No price, so shown blank:/);
+    expect(note).toHaveTextContent(/No price, so shown blank: Active Product, Alpha, Bravo and 1 more\.$/);
+    expect(note).not.toHaveTextContent('Zero Priced');
+  });
+
   it('leaves missing internal cost blank on both CSV paths', async () => {
     mocks.products.splice(0, mocks.products.length, { ...activeProduct, current_cost: null });
     await loadProducts();

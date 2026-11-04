@@ -26,7 +26,8 @@
  * Follows the dynamic-import + pdfTheme pattern of wpsNoticePdf.ts / reportPdf.ts.
  */
 import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from './pdfTheme';
-import { COMPANY_NAME, COMPANY_CITY, COMPANY_FOOTER_INTERNAL } from './companyInfo';
+import { companyFooterInternal, type CompanyInfo } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import {
   type ApplicatorSheetData,
   type ApplicatorSheetFormat,
@@ -44,17 +45,20 @@ function fmtDate(d: string): string {
 }
 
 /** Footer rule + company / format line on every page, plus optional custom footer. */
-function drawFooter(doc: JsPDFWithAutoTable, margin: number, customFooter: string | null) {
+function drawFooter(doc: JsPDFWithAutoTable, margin: number, customFooter: string | null, company: CompanyInfo) {
   const pageW = doc.internal.pageSize.getWidth();
-  const footerY = doc.internal.pageSize.getHeight() - 30;
-  doc.setDrawColor(200, 200, 200);
-  doc.line(margin, footerY, pageW - margin, footerY);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
-  doc.text(COMPANY_FOOTER_INTERNAL, pageW / 2, footerY + 12, { align: 'center' });
-  if (customFooter && customFooter.trim()) {
-    doc.text(customFooter.trim(), pageW / 2, footerY + 22, { align: 'center' });
+  const companyLines = doc.splitTextToSize(companyFooterInternal(company), pageW - margin * 2).slice(0, 2);
+  const hasCustom = Boolean(customFooter && customFooter.trim());
+  // A wrapped company line plus the custom footer needs one more line of room above the page edge.
+  const footerY = doc.internal.pageSize.getHeight() - 30 - (hasCustom && companyLines.length > 1 ? 10 : 0);
+  doc.setDrawColor(200, 200, 200);
+  doc.line(margin, footerY, pageW - margin, footerY);
+  doc.text(companyLines, pageW / 2, footerY + 12, { align: 'center' });
+  if (customFooter && hasCustom) {
+    doc.text(customFooter.trim(), pageW / 2, footerY + 12 + companyLines.length * 10, { align: 'center' });
   }
 }
 
@@ -345,14 +349,14 @@ function drawSheet(
 }
 
 /** Build the per-format theme. */
-function themeFor(format: ApplicatorSheetFormat, custom: ApplicatorSheetCustomConfig | null): SheetTheme {
+function themeFor(format: ApplicatorSheetFormat, custom: ApplicatorSheetCustomConfig | null, company: CompanyInfo): SheetTheme {
   const title = SHEET_FORMAT_LABELS[format];
   if (format === 'custom') {
     const cfg = custom;
     return {
       title,
-      companyName: (cfg?.company_name?.trim()) || COMPANY_NAME,
-      companyAddress: (cfg?.company_address?.trim()) || COMPANY_CITY,
+      companyName: (cfg?.company_name?.trim()) || company.name,
+      companyAddress: (cfg?.company_address?.trim()) || company.address,
       logoDataUrl: (cfg?.logo_data_url?.trim()) || null,
       footerText: (cfg?.footer_text?.trim()) || null,
       columns: cfg?.columns || { ...DEFAULT_SHEET_COLUMNS },
@@ -362,8 +366,8 @@ function themeFor(format: ApplicatorSheetFormat, custom: ApplicatorSheetCustomCo
   }
   return {
     title,
-    companyName: COMPANY_NAME,
-    companyAddress: COMPANY_CITY,
+    companyName: company.name,
+    companyAddress: company.address,
     logoDataUrl: null,
     footerText: null,
     columns: { ...DEFAULT_SHEET_COLUMNS },
@@ -481,9 +485,10 @@ export async function generateApplicatorSheetPdf(
 ): Promise<void> {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
-  const theme = { ...themeFor(format, custom), showBanner: options.showBanner !== false };
+  const theme = { ...themeFor(format, custom, company), showBanner: options.showBanner !== false };
   const resolvedOptions: Required<ApplicatorSheetPdfOptions> = {
     includeBillingSplits: options.includeBillingSplits !== false,
     blankSections: options.blankSections ?? 0,
@@ -498,7 +503,7 @@ export async function generateApplicatorSheetPdf(
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    drawFooter(doc, 40, theme.footerText);
+    drawFooter(doc, 40, theme.footerText, company);
   }
 
   doc.save(filename || `applicator-sheet-${format}-${data.job_number}.pdf`);

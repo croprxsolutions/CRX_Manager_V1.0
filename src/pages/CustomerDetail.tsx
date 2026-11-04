@@ -501,8 +501,14 @@ export default function CustomerDetail() {
     // customer genuinely has nothing to fetch. The reset goes back to the create
     // defaults rather than `{}` — on /customers/new they ARE the form, and an
     // existing customer overwrites them wholesale when its snapshot lands.
-    setCustomer(makeBlankCustomer(salesRepIdRef.current));
-    setAddresses([]);
+    // The blank form is also the baseline the dirty check compares against, so this
+    // reset never counts as an edit even when initialLoadDone's timer beats its render.
+    const blank = makeBlankCustomer(salesRepIdRef.current);
+    const noAddresses: Partial<CustomerAddress>[] = [];
+    loadedCustomerRef.current = blank;
+    loadedAddressesRef.current = noAddresses;
+    setCustomer(blank);
+    setAddresses(noAddresses);
     setCrops([]);
     setParentName('');
     customerRowVersionRef.current = null;

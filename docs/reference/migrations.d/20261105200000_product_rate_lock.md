@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied.** `20261105200000_product_rate_lock.sql` (LF SQL sha256: `df56b8d16a54c4dd7279df226b59ceb6c57871fc80a6566e4f778e24619df1e5`). WP-PM-11a-1. REQUIRES the price workbook tables (`product_info_change_set_rows`) and `unit_conversions`; its preflight refuses, changing nothing, when they are missing.
+**LOCAL CANDIDATE, not applied.** `20261105200000_product_rate_lock.sql` (LF SQL sha256: `ea28f730b4039e04f04461f14fd01fcc9778c378858cc37aca879dad95c4cac7`). WP-PM-11a-1. REQUIRES the price workbook tables (`product_info_change_set_rows`) and `unit_conversions`; its preflight refuses, changing nothing, when they are missing.
 
 What it does:
 - New one-row `product_rate_lock` (starts unlocked) and append-only `product_rate_events`. Every signed-in user can read both; nobody writes them directly, and updates, deletes and truncates are refused.

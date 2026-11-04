@@ -24,10 +24,10 @@ DECLARE
   v_facts jsonb;
 BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
-    ('public.set_product_rates(jsonb,uuid,text)', '4ec72b2bb8ee9cea281aa6195820b4b3'),
-    ('public.set_product_rate_lock(boolean,text,uuid,text)', '3485bd94f99f6968829b7d57ee75eff2'),
-    ('public.correct_product_rates(uuid,numeric,text,text,bigint,text,uuid,text)', '815cb2f2ccb07e6fdc3b1fae6e720e0e'),
-    ('public.guard_product_rate_lock()', '1c4204d0cecdee479054ddcb0ba0324a'),
+    ('public.set_product_rates(jsonb,uuid,text)', 'a596461de673112f6cbffbd52c246842'),
+    ('public.set_product_rate_lock(boolean,text,uuid,text)', '46b19757c668c9e3fc7611aa0e545f27'),
+    ('public.correct_product_rates(uuid,numeric,text,text,bigint,text,uuid,text)', '61dadb05da2fab10920968c22ec28eb8'),
+    ('public.guard_product_rate_lock()', '425cc8453f2928d7588cba656f85a918'),
     ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
     ('public.preview_product_rate_correction(uuid,numeric,text)', '8604511cd222c804da7913992b2f8daa')) AS pins(sig, body_md5) LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM v_md5 THEN

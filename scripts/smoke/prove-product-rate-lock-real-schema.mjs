@@ -357,6 +357,13 @@ function main() {
   asOwner(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Bag', 1, 'dry'), ('BAG', 100, 'dry');`);
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(5, 'Bag', 'Bag', 'seed', 'Bag');`), 'f');
   asOwner(`DELETE FROM public.unit_conversions WHERE unit IN ('Bag', 'BAG');`);
+  // A direct seed save is held to that rule too: its rate unit is its stock unit, looked up twice.
+  asOwner(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('LB', 99, 'dry');`);
+  refused(ADMIN, `INSERT INTO public.products (product_name, sku, product_form, inventory_unit, is_active, rate_per_acre)
+    VALUES ('[PROVER] Seed two spellings', 'RL-8', 'seed', 'Lb', true, 2);`, /PRODUCT_RATE_UNIT_INVALID/);
+  asOwner(`DELETE FROM public.unit_conversions WHERE unit = 'LB';`);
+  ok(ADMIN, `INSERT INTO public.products (product_name, sku, product_form, inventory_unit, is_active, rate_per_acre)
+    VALUES ('[PROVER] Seed rated', 'RL-8', 'seed', 'Lb', true, 2);`);
   // The stock unit must be the product's kind: a dry rate against a gallon stock unit is no price.
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, 'dry', 'Gal');`), 'f');
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, NULL, 'Gal');`), 'f');
@@ -596,11 +603,15 @@ function main() {
   assert.equal(rates(P.OTHER), '8|oz|9 oz/A|2.50|2.25|2.00');
   // A zero factor would price its rates at $0 and still match, so locking needs every factor above zero.
   asOwner("UPDATE public.unit_conversions SET factor_oz = 0 WHERE unit = 'Pt';");
-  refused(ADMIN, lock(true, 'zero factor', 'k-lock-zero'), /PRODUCT_RATES_STALE: unit conversions Pt have no factor above zero/);
+  refused(ADMIN, lock(true, 'zero factor', 'k-lock-zero'), /PRODUCT_RATES_STALE: unit conversions Pt have no finite factor above zero/);
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 'Infinity' WHERE unit = 'Pt';");
+  refused(ADMIN, lock(true, 'infinite factor', 'k-lock-inf'), /PRODUCT_RATES_STALE: unit conversions Pt have no finite factor/);
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Pt', NULL, 'liquid', 'Gal');`), 'f');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'oz', NULL, 'liquid', 'Pt');`), 'f');
   asOwner("UPDATE public.unit_conversions SET factor_oz = 16 WHERE unit = 'Pt';");
   // Two spellings with different factors let pricing take either, so locking is refused too.
   asOwner("INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('OZ', 128, 'liquid');");
-  refused(ADMIN, lock(true, 'two spellings', 'k-lock-spell'), /PRODUCT_RATES_STALE: unit conversions (OZ, oz|oz, OZ) have no factor above zero or disagree/);
+  refused(ADMIN, lock(true, 'two spellings', 'k-lock-spell'), /PRODUCT_RATES_STALE: unit conversions (OZ, oz|oz, OZ) have no finite factor above zero or disagree/);
   asOwner("DELETE FROM public.unit_conversions WHERE unit = 'OZ';");
   ok(ADMIN, lock(true, 'prices current', 'k-lock-fresh'));
   ok(ADMIN, lock(false, 'open for the smoke', 'k-unlock3'));

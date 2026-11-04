@@ -197,15 +197,14 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
   -- Open or not, every writer (product page, import) gets the rate writers' unit rule: per-acre
-  -- pricing prices an unknown unit as one ounce. Seed and each units are held to the stock unit
-  -- by validate_product_units instead.
+  -- pricing prices an unknown unit as one ounce. Seed and each products too: their rate unit is the
+  -- stock unit (validate_product_units), which still needs one finite factor in every spelling.
   IF (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre)
      AND NOT public._product_rate_value_ok(to_jsonb(NEW.rate_per_acre::text)) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a rate per acre must be blank or a number of 0 or more with at most 6 decimals'
       USING ERRCODE = 'check_violation';
   END IF;
-  IF NOT COALESCE(NEW.product_form IN ('seed', 'each'), false)
-     AND (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
+  IF (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
           OR NULLIF(OLD.rate_unit, '') IS DISTINCT FROM v_new_unit OR v_basis_changed)
      AND NOT public._product_rate_unit_ok(NEW.rate_per_acre, v_new_unit,
                                           CASE WHEN TG_OP = 'UPDATE' THEN OLD.rate_unit END, NEW.product_form,
@@ -355,7 +354,7 @@ REVOKE ALL ON FUNCTION public._product_rate_value(jsonb) FROM PUBLIC, anon, auth
 
 -- The price workbook's unit rule (20260722091359), tightened: a new unit must be a unit_conversions key
 -- for the product's form (or type both); an unchanged legacy unit is kept only while it is a key of any
--- form. Either way its factor must be above zero, and the same in every row spelled alike but for case,
+-- form. Either way its factor must be finite and above zero (numeric takes Infinity and NaN), and the same in every row spelled alike but for case,
 -- since per-acre pricing prices an unknown unit as one ounce, a zero factor as $0, and takes any one
 -- of those rows. A rate needs a unit, except on seed and each products, where
 -- validate_product_units fills it from the stock unit (their unchanged unit is kept as it is).
@@ -372,17 +371,17 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
     -- factor, and rate and stock look it up separately, so every case variant must share one factor.
     WHEN COALESCE(p_form IN ('seed', 'each'), false)
          AND (p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') OR lower(p_new_unit) = lower(p_stock_unit)) THEN
-      (SELECT count(*) = count(u.factor_oz) AND COALESCE(min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz), true)
+      (SELECT count(*) = count(u.factor_oz) AND COALESCE(min(u.factor_oz) > 0 AND max(u.factor_oz) < 'Infinity' AND min(u.factor_oz) = max(u.factor_oz), true)
          FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
     ELSE EXISTS (SELECT 1 FROM public.unit_conversions uc
                   WHERE lower(uc.unit) = lower(p_new_unit)
                     AND (p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '')
                          OR p_form IS NULL OR uc.unit_type = p_form OR uc.unit_type = 'both'))
       -- Pricing takes any one row matching regardless of case, so every such row must agree.
-      AND (SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
+      AND (SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND max(u.factor_oz) < 'Infinity' AND min(u.factor_oz) = max(u.factor_oz)
              FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
       AND (COALESCE(p_form IN ('seed', 'each'), false)
-           OR (COALESCE((SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
+           OR (COALESCE((SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND max(u.factor_oz) < 'Infinity' AND min(u.factor_oz) = max(u.factor_oz)
                            FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_stock_unit)), false)
                -- The stock unit is pricing's divisor, so it must be the same kind: listed for the form,
                -- or with no form, sharing a kind with the rate unit (Lb against Gal is no price).
@@ -615,11 +614,11 @@ BEGIN
     -- A zero or missing factor prices a rate at $0 (or nothing), and spellings alike but for case with
     -- different factors let pricing take either; the check below would accept both, so refuse them first.
     SELECT string_agg(u.unit, ', ' ORDER BY u.unit) INTO v_stale FROM public.unit_conversions u
-     WHERE u.factor_oz IS NULL OR u.factor_oz <= 0
+     WHERE u.factor_oz IS NULL OR NOT (u.factor_oz > 0 AND u.factor_oz < 'Infinity')
         OR EXISTS (SELECT 1 FROM public.unit_conversions o
                     WHERE lower(o.unit) = lower(u.unit) AND o.factor_oz IS DISTINCT FROM u.factor_oz);
     IF v_stale IS NOT NULL THEN
-      RAISE EXCEPTION 'PRODUCT_RATES_STALE: unit conversions % have no factor above zero or disagree with another spelling; fix them, then lock', v_stale;
+      RAISE EXCEPTION 'PRODUCT_RATES_STALE: unit conversions % have no finite factor above zero or disagree with another spelling; fix them, then lock', v_stale;
     END IF;
     SELECT string_agg(s.product_name, ', ' ORDER BY s.product_name) INTO v_stale FROM (
       SELECT p.product_name FROM public.products p

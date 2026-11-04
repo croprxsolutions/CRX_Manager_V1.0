@@ -263,6 +263,10 @@ function main() {
   assert.match(refused.output, /PREFLIGHT_KEPT_JOB_DRAW_NOT_HUNDREDTHS/);
   psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'scheduled' WHERE id = '${J}';`);
   console.log('[prover] a completed job keeping an unrounded draw: the candidate refuses to apply');
+  // An active job's unrounded draw is refused too (it would wait for its next sync); reconcile it.
+  assert.match(apply('candidate.sql').output, /PREFLIGHT_KEPT_JOB_DRAW_NOT_HUNDREDTHS/, 'an active unrounded draw must be refused');
+  psql(`SET session_replication_role = replica; DELETE FROM public.job_product_draws WHERE job_id = '${J}';`);
+  console.log('[prover] an active job with an unrounded draw: refused too, until it is reconciled');
 
   // Apply the candidate as one transaction (its preflight checks that).
   const r = apply('candidate.sql');
@@ -283,6 +287,27 @@ function main() {
   assert.equal(scalar(DRAWN), '', 'after: 0.5 fl oz (0.0039 gal) should draw nothing');
   assert.equal(Number(scalar(HOLD)), 0.00390625, 'after: the hold should still be 0.00390625 gal');
   console.log('[prover] AFTER: a demand under 0.005 gal draws nothing; its hold is kept');
+
+  // Many small jobs completed one after another: the booking's draws track the real total applied,
+  // rounded once, instead of adding up one rounding per job (8 x 0.01 = 0.08 for 0.0625 applied).
+  psql(`SET session_replication_role = replica; UPDATE public.job_chemicals SET quantity = 1 WHERE job_id = '${J}';`);
+  for (let n = 1; n <= 8; n += 1) {
+    const jobN = n === 1 ? J : id(`2${n}`);
+    if (n > 1) {
+      psql(`SET session_replication_role = replica;
+        INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by)
+          VALUES ('${jobN}', 'KI100-J${n}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}');
+        INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+          VALUES ('${jobN}', '${P}', 1, 'fl oz', false);`);
+    }
+    sync();
+    const total = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
+    const expected = Math.round(n * 0.0078125 * 100) / 100;
+    assert.equal(Number(total), expected, `after ${n} jobs the booking should have drawn ${expected} gal, not ${total}`);
+    assert.ok(Number(scaleOf(scalar(LEFT))) <= 2, `after ${n} jobs the remainder should be whole hundredths`);
+    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${jobN}';`);
+  }
+  console.log(`[prover] AFTER: 8 jobs of 1 fl oz completed one by one drew ${scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}';`)} gal for 0.0625 gal applied`);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

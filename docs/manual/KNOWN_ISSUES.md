@@ -533,11 +533,11 @@ unaffected. Cancelling a completed delivery is refused since PR #1284, so only v
 first (Sol): put back exactly what completion took (store it), or rebuild the order's outstanding reservation.
 
 ### KI-100 — A spray job could leave a booking with a remainder no Partial Order can take
-**MED · FIX WRITTEN, NOT YET LIVE: migration `20261106170000` (applied before its PR merges) · database · found 2026-11-04 (PR #1362 review)**
+**MED · FIX WRITTEN, NOT YET LIVE: migration `20261106170000`, to be applied before its PR merges · database · found 2026-11-04 (PR #1362 review)**
 Since `20261106110000` (S02) a Partial Order must be in whole hundredths, but `_sync_quote_job_reservations`
 drew a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking left 9.9921875 gal,
-which no draw can take, so the booking never closed. The fix rounds each job draw to 0.01 and holds at least
-that draw in the shed. Live had no job draws on 2026-11-04, so no booking was stranded. Proof:
+which no draw can take, so the booking never closed. The fix keeps a booking's job draws in whole hundredths that
+together match the real total applied, rounded once, and holds at least each draw in the shed. Live had no job draws on 2026-11-04, so no booking was stranded. Proof:
 `scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs`.
 
 ## Database and release process

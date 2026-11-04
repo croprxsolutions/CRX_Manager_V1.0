@@ -52,7 +52,7 @@ import {
 import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
+import { getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection } from '../lib/idempotency';
 import { clearPendingRetry, loadPendingRetry, savePendingRetry, type PendingRetry } from '../lib/pendingRetry';
 import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
@@ -3681,6 +3681,12 @@ export default function QuoteBuilder() {
       skipUnsavedPromptRef.current = true;
       navigate(`/orders/${result.order_id}`);
     } catch (error: unknown) {
+      // The server answered and wrote nothing (or the rep cancelled the below-cost approval), so
+      // there is no lost reply to finish: forget the kept draw. Only a missing reply keeps it.
+      if (isBelowCostApprovalHandledError(error) || isDefinitiveRpcRejection(error)) {
+        clearPendingRetry(drawPendingName);
+        setPendingDraw(null);
+      }
       if (isBelowCostApprovalHandledError(error)) {
         setDrawing(false);
         return;

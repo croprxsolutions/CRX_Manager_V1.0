@@ -52,7 +52,7 @@ export const JOB_CHEMICAL_COLUMNS = 'id, job_id, product_id, quantity, unit, rat
 export const PURCHASE_ORDER_COLUMNS = 'id, po_number, vendor, status, submitted_date, expected_delivery_date, notes, created_by, created_at, updated_at, cancelled_at, cancelled_by, cancel_reason' as const;
 export const PURCHASE_ORDER_ITEM_COLUMNS = 'id, purchase_order_id, product_id, quantity_ordered, quantity_received, unit_size, notes, product_name, product_supplier_link_id, supplier_price_observation_id, inventory_units_per_supplier_unit_snapshot, cost_provenance, cost_snapshot_at, inventory_unit_snapshot, cost_needs_review' as const;
 export const BLEND_TICKET_PRODUCT_COLUMNS = 'id, blend_ticket_id, product_id, product_name, quantity, unit, lot_number, sequence_order, confidence_score, manually_corrected, created_at, rate_per_acre, rate_per_acre_unit, unit_price_cents' as const;
-export const COMMISSION_COLUMNS = 'id, order_id, customer_id, recipient, split_percentage, commission_amount, order_date, status, created_at, paid_date, paid_note, recipient_user_id, season, deleted_at, order_number, customer_name, job_id, invoice_id, cancelled_at, cancelled_amount_cents' as const;
+export const COMMISSION_COLUMNS = 'id, order_id, customer_id, recipient, split_percentage, commission_amount, order_date, status, created_at, paid_date, paid_note, recipient_user_id, season, deleted_at, order_number, customer_name, job_id, invoice_id, cancelled_at, cancelled_amount_cents, replaces_commission_id' as const;
 
 /** The non-cost column list of each cost table, for the drift test. */
 export const SAFE_COLUMNS: Record<CostTable, string> = {

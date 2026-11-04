@@ -204,7 +204,7 @@ async function sidebarLinks(): Promise<string[]> {
   });
   // The desktop rail: group buttons and top-level links, in order.
   lines.push('-- desktop --');
-  container.querySelectorAll('aside[role="navigation"] nav a, aside[role="navigation"] nav button').forEach((el) => {
+  container.querySelectorAll('aside:not(#mobile-navigation-drawer) nav a, aside:not(#mobile-navigation-drawer) nav button').forEach((el) => {
     lines.push(el.tagName === 'A' ? `${el.textContent} -> ${el.getAttribute('href')}` : `button ${el.getAttribute('aria-label')}`);
   });
   cleanup();

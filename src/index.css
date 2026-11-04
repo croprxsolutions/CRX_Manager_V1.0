@@ -223,6 +223,17 @@
 }
 
 @layer base {
+  /* Keyboard focus on elements without their own ring: the browser's default outline varies (orange,
+     about 2.4:1 on white, in some Chromium builds), below the 3:1 WCAG 1.4.11 needs. In the base layer,
+     so any focus:outline-none / focus:ring utility still wins. */
+  :focus-visible {
+    outline: 2px solid var(--color-crx-green);
+    outline-offset: 2px;
+  }
+  :where(.bg-nav-dark, .bg-slate-800, .bg-slate-900, .bg-slate-950, .bg-gray-800, .bg-gray-900) :focus-visible {
+    outline-color: var(--color-crx-green-on-dark);
+  }
+
   html {
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;

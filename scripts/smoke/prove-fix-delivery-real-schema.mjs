@@ -322,6 +322,11 @@ function scenarios() {
     ALTER TABLE public.deliveries ENABLE TRIGGER USER;
     ${fix('k-moved-order')}`, 'a delivery moved to another order after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
 
+  refused(`RESET ROLE; ALTER TABLE public.orders DISABLE TRIGGER USER; UPDATE public.orders SET status='voided' WHERE id='${ORDER}'; ALTER TABLE public.orders ENABLE TRIGGER USER;
+    ${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}','[PROVER] wrong amount',(SELECT public.preview_fix_delivery('${DELIVERY}')->>'plan_token'),'k-order-voided');`,
+    'a voided order refuses the fix', /FIX_DELIVERY_REFUSED: This delivery's order is voided/);
+  refused(`RESET ROLE; ALTER TABLE public.orders DISABLE TRIGGER USER; UPDATE public.orders SET status='fulfilled' WHERE id='${ORDER}'; ALTER TABLE public.orders ENABLE TRIGGER USER;
+    ${fix('k-order-status')}`, 'an order status change after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET paid_amount_cents=100 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-paid')}`, 'a payment on the invoice refuses the fix', /FIX_DELIVERY_REFUSED: A payment is applied/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET write_off_cents=500 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;

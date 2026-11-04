@@ -61,7 +61,7 @@ DECLARE
   v_order_drafts jsonb;
   v_items jsonb;
 BEGIN
-  SELECT d.id, d.delivery_number, d.status, d.order_id, d.customer_id, d.deleted_at, d.completed_at, d.scheduled_date, o.order_number
+  SELECT d.id, d.delivery_number, d.status, d.order_id, d.customer_id, d.deleted_at, d.completed_at, d.scheduled_date, o.order_number, o.status AS order_status
     INTO v_delivery
     FROM deliveries d
     LEFT JOIN orders o ON o.id = d.order_id
@@ -77,6 +77,12 @@ BEGIN
   IF v_delivery.order_id IS NULL THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'NO_ORDER',
       'message', 'This delivery has no order, so it cannot be re-entered from one.');
+  END IF;
+
+  -- void_order already put the stock back and cancelled the commission; a fix would do both again.
+  IF v_delivery.order_status IN ('cancelled', 'voided') THEN
+    v_refusals := v_refusals || jsonb_build_object('code', 'ORDER_CLOSED',
+      'message', 'This delivery''s order is ' || v_delivery.order_status || ', so there is nothing to re-enter. Fix its invoice from the invoice page.');
   END IF;
 
   IF EXISTS (SELECT 1 FROM delivery_external_billings b WHERE b.delivery_id = p_delivery_id) THEN
@@ -269,7 +275,7 @@ BEGIN
     'plan_token', md5(jsonb_build_object('delivery_id', v_delivery.id, 'delivery_number', v_delivery.delivery_number,
                                          'completed_at', v_delivery.completed_at, 'scheduled_date', v_delivery.scheduled_date,
                                          'order_id', v_delivery.order_id, 'order_number', v_delivery.order_number,
-                                         'customer_id', v_delivery.customer_id,
+                                         'order_status', v_delivery.order_status, 'customer_id', v_delivery.customer_id,
                                          'invoices', v_invoices, 'other_draft_invoices', v_order_drafts, 'items', v_items)::text)
   );
 END;

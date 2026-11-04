@@ -2,8 +2,8 @@
 -- docs/reference/migrations.d/20261106150000_fix_delivery_one_screen.md.
 --
 -- WHAT: "Fix delivery" — one admin action that undoes a completed delivery AND its invoice together,
---   so the delivery can be re-entered with the right amount or product (Mason, 2026-11-03: "I want
---   easy, not going to multiple screens"). Business Central's "Correct" on an unpaid invoice is the
+--   so the delivery can be re-entered with the right amount or product, from one screen (Mason,
+--   2026-11-03). Business Central's "Correct" on an unpaid invoice is the
 --   model. Product that really came back still goes through Returns, not this.
 --
 --   preview_fix_delivery(delivery)  read-only plan: the invoices that will be voided or cancelled,
@@ -127,6 +127,7 @@ BEGIN
        AND (COALESCE(i.paid_amount_cents, 0) <> 0 OR COALESCE(i.prepay_applied_cents, 0) <> 0
             OR COALESCE(i.write_off_cents, 0) <> 0 OR COALESCE(i.credit_applied_cents, 0) <> 0
             OR EXISTS (SELECT 1 FROM write_offs w WHERE w.invoice_id = i.id AND w.reversed_at IS NULL)
+            OR EXISTS (SELECT 1 FROM prepay_applications pa WHERE pa.invoice_id = i.id)
             OR EXISTS (SELECT 1 FROM invoice_line_allocations ila
                          JOIN allocation_sets aset ON aset.id = ila.allocation_set_id
                         WHERE ila.invoice_id = i.id AND aset.entity_type = 'payment' AND aset.is_active))
@@ -393,11 +394,13 @@ BEGIN
 
   -- This key has no receipt yet, and the inner receipts commit only with it, so an inner key
   -- already used means another request took it; void_invoice's receipt would replay that one.
-  -- Any operation counts: idempotency_key is unique on its own.
+  -- Any operation counts: idempotency_key is unique on its own. An expired receipt does not count:
+  -- the inner function's idempotency helper clears it.
   IF EXISTS (SELECT 1 FROM idempotency_keys k
-              WHERE k.idempotency_key = p_idempotency_key || ':void_delivery'
-                 OR k.idempotency_key IN (SELECT p_idempotency_key || ':void_invoice:' || (e ->> 'id')
-                                            FROM jsonb_array_elements(v_plan -> 'invoices') e)) THEN
+              WHERE (k.expires_at IS NULL OR k.expires_at > now())
+                AND (k.idempotency_key = p_idempotency_key || ':void_delivery'
+                     OR k.idempotency_key IN (SELECT p_idempotency_key || ':void_invoice:' || (e ->> 'id')
+                                                FROM jsonb_array_elements(v_plan -> 'invoices') e))) THEN
     RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH';
   END IF;
 
@@ -467,9 +470,10 @@ END
 $postflight$;
 
 -- ---------------------------------------------------------------------------------------------
--- 4. Reports skip cancelled commissions. A fix leaves the cancelled original next to its pending
---    copy (cancelled rows keep their amount and cannot reopen), so summing every status counted
---    it twice; this also stops any other voided invoice's cancelled commission from counting.
+-- 4. Reports skip a cancelled commission only when a live copy replaced it. A fix leaves the
+--    cancelled original next to its pending copy (cancelled rows keep their amount and cannot
+--    reopen), so summing every status counted it twice. A commission an ordinary void cancelled has
+--    no copy and still counts, so no past month's total moves.
 --    Each body below is the live one (pinned by hash) with only its commission line changed.
 -- ---------------------------------------------------------------------------------------------
 DO $reports_preflight$
@@ -512,7 +516,7 @@ BEGIN
     'orders', jsonb_build_object('count', (SELECT count(*) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 'total_cents', COALESCE((SELECT sum((total_price * 100)::bigint) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 0)),
     'deliveries', jsonb_build_object('count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status NOT IN ('cancelled', 'voided') AND deleted_at IS NULL), 'completed_count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status = 'completed' AND deleted_at IS NULL)),
     'applications', jsonb_build_object('count', (SELECT count(*) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 'total_acres', COALESCE((SELECT sum(total_acres) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 0)),
-    'commissions', jsonb_build_object('earned_cents', COALESCE((SELECT sum((commission_amount * 100)::bigint) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status <> 'cancelled'), 0), 'paid_count', (SELECT count(*) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status = 'paid')),
+    'commissions', jsonb_build_object('earned_cents', COALESCE((SELECT sum((c.commission_amount * 100)::bigint) FROM public.commissions c WHERE c.order_date BETWEEN p_period_start AND p_period_end AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.order_id = c.order_id AND r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id AND r.status <> 'cancelled'))), 0), 'paid_count', (SELECT count(*) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status = 'paid')),
     'ar_balance_cents', COALESCE((SELECT sum(balance_cents) FROM public.invoices WHERE status IN ('posted', 'overdue') AND balance_cents > 0 AND deleted_at IS NULL), 0)
   ) INTO v_result;
   RETURN v_result;
@@ -549,9 +553,12 @@ BEGIN
     AND i.deleted_at IS NULL;
 
   v_gross_profit := v_revenue - v_cogs;
-  SELECT COALESCE(SUM(commission_amount), 0) INTO v_commissions
-  FROM public.commissions
-  WHERE order_date >= p_start_date AND order_date <= p_end_date AND status <> 'cancelled';
+  -- A cancelled commission still counts unless a live copy replaced it (Fix Delivery re-creates the
+  -- order's commission), so an ordinary invoice void does not change a past month's total.
+  SELECT COALESCE(SUM(c.commission_amount), 0) INTO v_commissions
+  FROM public.commissions c
+  WHERE c.order_date >= p_start_date AND c.order_date <= p_end_date
+    AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.order_id = c.order_id AND r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id AND r.status <> 'cancelled'));
   v_net_profit := v_gross_profit - v_commissions;
 
   RETURN QUERY VALUES
@@ -569,9 +576,9 @@ DECLARE
   v_monthly text := (SELECT prosrc FROM pg_proc WHERE oid = 'public.get_monthly_summary(date,date)'::regprocedure);
   v_pnl text := (SELECT prosrc FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure);
 BEGIN
-  IF position('AND status <> ''cancelled''), 0)' IN v_monthly) = 0
+  IF position('r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id' IN v_monthly) = 0
      OR position('PERFORM require_admin();' IN v_monthly) = 0
-     OR position('AND status <> ''cancelled'';' IN v_pnl) = 0
+     OR position('r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id' IN v_pnl) = 0
      OR NOT (SELECT prosecdef AND pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.get_monthly_summary(date,date)'::regprocedure)
      OR (SELECT prosecdef FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure)
      OR has_function_privilege('anon', 'public.get_monthly_summary(date,date)', 'EXECUTE')

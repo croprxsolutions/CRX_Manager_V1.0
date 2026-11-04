@@ -275,6 +275,11 @@ function scenarios() {
   refused(`${asUser(ADMIN)} SELECT public.fix_delivery('${DELIVERY}',E'\\r\\n\\t','x','k-blank-ws');`, 'a carriage-return, newline and tab reason counts as blank', /Reason is required/);
   refused(`${asUser(ADMIN)} SELECT public._fix_delivery_plan('${DELIVERY}');`, 'the plan helper is not callable by app roles', /permission denied/);
 
+  // An ordinary void cancels a commission with no replacement: past months keep counting it.
+  allowed(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET status='cancelled' WHERE id='${COMM}'; ALTER TABLE public.commissions ENABLE TRIGGER USER;
+    ${check(`(SELECT amount FROM public._get_bottom_line_pnl_cost_impl_20261019(CURRENT_DATE, CURRENT_DATE) WHERE line_item='Commissions')=40`, 'P&L keeps a cancelled commission nothing replaced')}
+    ${asUser(ADMIN)} DO $m$ BEGIN IF (public.get_monthly_summary(CURRENT_DATE, CURRENT_DATE)->'commissions'->>'earned_cents')::bigint <> 4000 THEN RAISE EXCEPTION 'PROOF_FAIL: month-end dropped a cancelled commission nothing replaced'; END IF; END $m$;`,
+    'a cancelled commission with no live copy still counts in past months');
   const before = Number(scalar(`SELECT ${stock};`));
   allowed(`${fix('k-ok')}
     ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='voided'`, 'invoice voided')}

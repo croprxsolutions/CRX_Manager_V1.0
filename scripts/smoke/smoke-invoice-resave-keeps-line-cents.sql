@@ -93,7 +93,7 @@ BEGIN
       SELECT id INTO v_inv2 FROM invoices WHERE delivery_id = v_del AND status <> 'void' ORDER BY created_at DESC LIMIT 1;
     END IF;
   END LOOP;
-  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv1) + (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) <> 3665 THEN
+  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv1) + (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) IS DISTINCT FROM 3665 THEN
     RAISE EXCEPTION 'SMOKE_SETUP: the two half invoices do not total 3665 cents before any re-save';
   END IF;
 
@@ -109,7 +109,7 @@ BEGIN
       'status', i.status, 'season', i.season, 'salesman_id', i.salesman_id, 'invoice_date', i.invoice_date,
       'payment_terms', i.payment_terms, 'header_notes', 'edited note', 'footer_notes', i.footer_notes)
       FROM invoices i WHERE i.id = v_inv2), v_items, 'smk-resave-note-' || v_suffix);
-  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv1) + (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) <> 3665 THEN
+  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv1) + (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) IS DISTINCT FROM 3665 THEN
     v_fails := v_fails || format(' (A) after a note-only re-save the halves total %s cents, not 3665;',
       (SELECT total_amount_cents FROM invoices WHERE id = v_inv1) + (SELECT total_amount_cents FROM invoices WHERE id = v_inv2));
   END IF;
@@ -130,7 +130,7 @@ BEGIN
       'status', i.status, 'season', i.season, 'salesman_id', i.salesman_id, 'invoice_date', i.invoice_date,
       'payment_terms', i.payment_terms, 'header_notes', 'edited note', 'footer_notes', i.footer_notes)
       FROM invoices i WHERE i.id = v_inv2), v_items, 'smk-resave-qty-' || v_suffix);
-  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) <> 1466 THEN
+  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) IS DISTINCT FROM 1466 THEN
     v_fails := v_fails || format(' (B) 2 gal at $7.33 saved as %s cents, not 1466;', (SELECT total_amount_cents FROM invoices WHERE id = v_inv2));
   END IF;
 

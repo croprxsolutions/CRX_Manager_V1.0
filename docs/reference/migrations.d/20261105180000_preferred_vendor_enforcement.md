@@ -15,3 +15,5 @@ Grants: every new function is revoked from PUBLIC, anon, authenticated and servi
 Rollback: drop the seven triggers and eleven functions this file creates (including `unlink_product_vendor` and `get_product_vendors`), and restore `get_vendor_link_proposals` from `20261104180000`. No data is written, so nothing needs restoring.
 
 Proof: `node scripts/smoke/prove-preferred-vendor-enforcement-real-schema.mjs` prints `PREFERRED_VENDOR_ENFORCEMENT_PROOF_PASS`.
+
+Live ledger preflight, read 2026-11-04 01:46 UTC (7:46 PM Central on 11-03) with read-only `execute_sql`: 1113 rows; effective high-water `20261105170000` (row by row, the name stamp else the version), which is `20261105170000_data11_preferred_vendor_links` (ledger version `20261104012254`), so the DATA-11 prerequisite is live; no ledger name contains `preferred_vendor_enforcement`. Read the ledger again at apply time.

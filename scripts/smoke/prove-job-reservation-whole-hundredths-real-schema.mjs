@@ -356,7 +356,25 @@ function main() {
     assert.ok(keptNow <= Math.round(applied * 100) / 100 + 0.01 + 1e-9,
       `out of order round ${k + 1}: kept ${keptNow} gal is more than 0.01 over the rounded ${applied} gal applied`);
   }
-  console.log(`[prover] AFTER: 3 out-of-order completions with a cancelled earlier sibling keep ${scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}';`)} gal for 0.10546875 gal applied (never more than 0.01 over)`);
+  // A completed job whose demand outran its booking, then the booking is raised: a new 1 gal job
+  // draws its own 1.00, not the old job's shortfall.
+  const over = id('71');
+  const fresh = id('72');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by)
+      VALUES ('${over}', 'KI100-OVER', '${C}', DATE '2026-11-04', '${Q}', 'completed', '${U}');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${over}', '${P}', 15, 'gal', false);
+    UPDATE public.quote_items SET total_units_needed = 30 WHERE quote_id = '${Q}';
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by)
+      VALUES ('${fresh}', 'KI100-NEW', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${fresh}', '${P}', 1, 'gal', false);`);
+  sync();
+  const freshDraw = scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${fresh}';`);
+  assert.equal(Number(freshDraw), 1, `a 1 gal job should draw 1.00 gal, not ${freshDraw}`);
+  console.log(`[prover] AFTER: after a completed job outran its booking, a new 1 gal job draws ${freshDraw} gal, not the old shortfall`);
+  console.log(`[prover] AFTER: 3 out-of-order completions with a cancelled earlier sibling keep ${scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND job_id <> '${fresh}';`)} gal for 0.10546875 gal applied (never more than 0.01 over)`);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

@@ -208,7 +208,9 @@ BEGIN
     -- the jobs before any point draw their real demand to within 0.005 (a later sibling cancelled
     -- after they complete leaves no rounding behind).
     v_job_demand := v_job_demand + v_row.demand;
-    v_draw := LEAST(GREATEST(ROUND(v_job_demand, 2) - v_allocated, 0), v_crop_pool);
+    -- Never more than the job's own demand rounded up: a completed job's shortfall against an older,
+    -- smaller booking is not caught up by a later job.
+    v_draw := LEAST(GREATEST(ROUND(v_job_demand, 2) - v_allocated, 0), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);
     v_allocated := v_allocated + v_draw;
     -- >>>JOB_DRAW_HUNDREDTHS
     v_crop_pool := v_crop_pool - v_draw;
@@ -256,7 +258,7 @@ BEGIN
   IF NOT FOUND
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_sync_quote_job_reservations') <> 1
-     OR position('v_draw := LEAST(GREATEST(ROUND(v_job_demand, 2) - v_allocated, 0), v_crop_pool);' IN p.prosrc) = 0
+     OR position('v_draw := LEAST(GREATEST(ROUND(v_job_demand, 2) - v_allocated, 0), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
      OR position('v_allocated := v_consumed_drawn;' IN p.prosrc) = 0
      OR position('v_hold := GREATEST(v_row.demand, v_draw);' IN p.prosrc) = 0
      OR p.proowner <> 'postgres'::regrole

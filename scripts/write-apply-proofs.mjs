@@ -45,11 +45,38 @@ import {
   createReviewerPacket,
   buildReviewerCodexArgs,
   buildReviewerCharterPrompt,
+  carryRestampedApplyProofs,
   normalizeMigrationSql,
+  safeProofName,
   snapshotMigrationSql,
 } from './write-apply-proofs-lib.mjs';
 
 const rawArgs = process.argv.slice(2);
+
+// `--restamp-from <old-name> <new-name>`: carry both proofs to a migration that
+// only got a new timestamp, SQL byte-identical (Mason, 2026-11-04). No Codex run;
+// Mason's owner approval is never carried.
+if (rawArgs[0] === '--restamp-from') {
+  if (rawArgs.length !== 3) {
+    console.error('usage: node scripts/write-apply-proofs.mjs --restamp-from <old-name> <new-name>');
+    process.exit(1);
+  }
+  const [, fromName, toName] = rawArgs;
+  const result = carryRestampedApplyProofs({
+    stateDir: path.join(process.cwd(), '.claude', 'session-state'),
+    migrationsDir: path.join(process.cwd(), 'supabase', 'migrations'),
+    fromName,
+    toName,
+    model: CODEX_REVIEW_MODEL,
+    effort: CODEX_REVIEW_EFFORT,
+  });
+  if (result.problem) {
+    console.error(`Restamp carry refused: ${result.problem}. NO proofs written for "${toName}" — run the full review: node scripts/write-apply-proofs.mjs ${toName}`);
+    process.exit(1);
+  }
+  console.log(`wrote ${result.reviewerFile}\nwrote ${result.codexFile}\n(carried from ${fromName}; the original review's 24-hour clock still applies)`);
+  process.exit(0);
+}
 
 if (rawArgs.includes('--codex-verdict')) {
   console.error(
@@ -154,7 +181,7 @@ function runCodexCharter(codexBin, reviewerName, migRelPath, migrationSql, query
 }
 
 for (const name of names) {
-  const safe = name.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 80);
+  const safe = safeProofName(name);
   const { reviewerFile, codexFile } = clearApplyProofs(stateDir, safe);
   // A failed re-review must never leave an older still-fresh proof usable.
   // Clear both proof halves before any fallible lookup, packet build, or child run.

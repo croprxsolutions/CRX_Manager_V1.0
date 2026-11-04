@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -54,6 +55,66 @@ export function clearApplyProofs(stateDir, safeName, remove = rmSync) {
   remove(proofPaths.reviewerFile, { force: true });
   remove(proofPaths.codexFile, { force: true });
   return proofPaths;
+}
+
+export function safeProofName(name) {
+  return name.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 80);
+}
+
+// The guard's 24 hours; a carried proof keeps the original review's timestamp.
+export const APPLY_PROOF_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const STAMPED_NAME_RE = /^(\d{14})(_[A-Za-z0-9_.-]+)$/;
+const REQUIRED_REVIEWERS = ['rls-security-reviewer', 'migration-drift-reviewer'];
+
+// Restamp carry (Mason, 2026-11-04): copy both apply proofs from `fromName` to
+// `toName` when only the timestamp changed and the SQL is byte-identical (the
+// old proofs' queryHash equals the new file's). Owner approval never carries.
+// Returns { problem } or the written { reviewerFile, codexFile }.
+export function carryRestampedApplyProofs({ stateDir, migrationsDir, fromName, toName, model, effort, nowMs = Date.now() }) {
+  const from = STAMPED_NAME_RE.exec(String(fromName));
+  const to = STAMPED_NAME_RE.exec(String(toName));
+  if (!from || !to || from[2] !== to[2] || from[1] === to[1]) {
+    return { problem: `"${toName}" is not "${fromName}" with only a new timestamp` };
+  }
+  // A refused carry must never leave an older proof for the new name usable.
+  const target = clearApplyProofs(stateDir, safeProofName(toName));
+  if (existsSync(path.join(migrationsDir, `${fromName}.sql`))) return { problem: `${fromName}.sql is still on disk; a restamp renames it` };
+  let queryHash;
+  try {
+    ({ queryHash } = snapshotMigrationSql(path.join(migrationsDir, `${toName}.sql`)));
+  } catch {
+    return { problem: `${toName}.sql not found` };
+  }
+  const source = applyProofPaths(stateDir, safeProofName(fromName));
+  let reviewer;
+  let codex;
+  try {
+    reviewer = JSON.parse(readFileSync(source.reviewerFile, 'utf8'));
+    codex = JSON.parse(readFileSync(source.codexFile, 'utf8'));
+  } catch {
+    return { problem: `both apply proofs for ${fromName} must exist (run write-apply-proofs.mjs on it, or the full review on ${toName})` };
+  }
+  const fresh = (timestamp) => {
+    const age = nowMs - Date.parse(timestamp);
+    return age >= 0 && age <= APPLY_PROOF_MAX_AGE_MS;
+  };
+  if (reviewer.migration !== fromName || reviewer.findings !== 'clean'
+    || !REQUIRED_REVIEWERS.every((name) => Array.isArray(reviewer.reviewers) && reviewer.reviewers.includes(name))) {
+    return { problem: `the reviewer proof for ${fromName} is not a clean review by both reviewers` };
+  }
+  if (codex.verdict !== 'clean' || codex.model !== model || codex.reasoning_effort !== effort) {
+    return { problem: `the Codex proof for ${fromName} is not a clean ${model}/${effort} review` };
+  }
+  if (reviewer.queryHash !== queryHash || codex.queryHash !== queryHash) {
+    return { problem: `${toName}.sql is not byte-identical to the SQL reviewed as ${fromName}` };
+  }
+  if (!fresh(reviewer.timestamp) || !fresh(codex.timestamp)) {
+    return { problem: `the proofs for ${fromName} are older than 24 hours` };
+  }
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(target.reviewerFile, JSON.stringify({ ...reviewer, migration: toName, restamped_from: fromName }, null, 2), 'utf8');
+  writeFileSync(target.codexFile, JSON.stringify({ ...codex, restamped_from: fromName }, null, 2), 'utf8');
+  return target;
 }
 
 export function createReviewerPacket({ sourceRoot, migRelPath, migrationSql, queryHash }) {

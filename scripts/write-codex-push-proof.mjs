@@ -2093,6 +2093,138 @@ function runCarryForward(root, options) {
   return mint();
 }
 
+// ── restamp carry (Mason, 2026-11-04) ───────────────────────────────────────
+// The forward-only ordering guard refuses a migration once a newer one is live,
+// so a reviewed migration gets a new timestamp with byte-identical SQL, and that
+// used to cost a full Sol run. `--carry-restamp` keeps the reviewed head's clean
+// proof when HEAD is ONE commit on top of it that only renames exactly one
+// migration to a new stamp (identical LF-normalized SQL) and replaces the old
+// stamp with the new one in other files. Anything else refuses: full review.
+const RESTAMP_MIGRATION_RE = /^supabase\/migrations\/(\d{14})(_[^/]+\.sql)$/;
+const ABSENT_MODE = "000000";
+const RESTAMP_MODES = new Set(["100644", "100755", ABSENT_MODE]);
+
+// null when `entries` (gitChangedEntries of reviewed head → HEAD) is a pure
+// restamp, otherwise why not. `readFile(side, path)` returns the blob as a
+// latin1 string ("old" = reviewed head, "new" = HEAD), or null.
+export function restampProblem({ entries, readFile }) {
+  const deleted = entries.filter((entry) => entry.newMode === ABSENT_MODE);
+  const added = entries.filter((entry) => entry.oldMode === ABSENT_MODE);
+  const migFrom = deleted.map((entry) => RESTAMP_MIGRATION_RE.exec(entry.path)).filter(Boolean);
+  const migTo = added.map((entry) => RESTAMP_MIGRATION_RE.exec(entry.path)).filter(Boolean);
+  if (migFrom.length !== 1 || migTo.length !== 1) return "the change does not rename exactly one migration";
+  const [fromPath, oldStamp, fromRest] = migFrom[0];
+  const [toPath, newStamp, toRest] = migTo[0];
+  if (fromRest !== toRest || oldStamp === newStamp) return "the migration's name changed beyond its timestamp";
+  const restamp = (text) => text.split(oldStamp).join(newStamp);
+  const paths = new Map(entries.map((entry) => [entry.path, entry]));
+  for (const entry of entries) {
+    const { path: file, oldMode, newMode } = entry;
+    if (!RESTAMP_MODES.has(oldMode) || !RESTAMP_MODES.has(newMode) || (oldMode !== ABSENT_MODE && newMode !== ABSENT_MODE && oldMode !== newMode)) {
+      return `${file} changed type or mode`;
+    }
+    if (file.startsWith("supabase/") && file !== fromPath && file !== toPath) return `${file} is another database file`;
+    if (newMode === ABSENT_MODE) {
+      const target = paths.get(restamp(file));
+      if (target?.oldMode !== ABSENT_MODE) return `${file} was removed, not renamed to the new stamp`;
+      continue;
+    }
+    let source = file;
+    if (oldMode === ABSENT_MODE) {
+      source = file.split(newStamp).join(oldStamp);
+      if (source === file || paths.get(source)?.newMode !== ABSENT_MODE) return `${file} is a new file, not a rename`;
+      if (paths.get(source).oldMode !== newMode) return `${file} changed type or mode`;
+    }
+    const before = readFile("old", source);
+    const after = readFile("new", file);
+    if (before === null || after === null) return `${file} could not be read`;
+    if (file === toPath) {
+      if (after.replace(/\r\n/g, "\n") !== before.replace(/\r\n/g, "\n")) return "the migration's SQL changed";
+    } else if (after !== restamp(before)) {
+      return `${file} changed beyond the timestamp`;
+    }
+  }
+  return null;
+}
+
+function gitBlob(root, sha, file) {
+  const result = runTrustedGit(["cat-file", "blob", `${sha}:${file}`], {
+    cwd: root, encoding: "latin1", timeout: 60_000, stdio: ["ignore", "pipe", "ignore"],
+  });
+  return result.error || result.status !== 0 ? null : String(result.stdout);
+}
+
+function resolveRestamp(root, nowMs) {
+  const headSha = runGit(["rev-parse", "HEAD"], { cwd: root });
+  const parents = runGit(["rev-list", "--parents", "-n", "1", headSha], { cwd: root }).split(/\s+/).slice(1);
+  if (!CARRY_SHA_RE.test(headSha) || parents.length !== 1 || !CARRY_SHA_RE.test(parents[0])) {
+    return { problem: "HEAD is not a single ordinary commit on top of the reviewed head" };
+  }
+  const [fromHead] = parents;
+  let source;
+  try {
+    source = JSON.parse(readFileSync(codexPushProofPath(root, fromHead), "utf8"));
+  } catch {
+    source = null;
+  }
+  const sourceProblem = carrySourceProofProblem(source, { headSha: fromHead, nowMs });
+  if (sourceProblem) return { problem: `${sourceProblem} (${fromHead.slice(0, 12)})` };
+  let entries;
+  try {
+    entries = gitChangedEntries(fromHead, headSha, root);
+  } catch {
+    return { problem: "could not list the changed files" };
+  }
+  const problem = restampProblem({
+    entries,
+    readFile: (side, file) => gitBlob(root, side === "old" ? fromHead : headSha, file),
+  });
+  if (problem) return { problem };
+  return { headSha, fromHead, source, entries };
+}
+
+function runCarryRestamp(root, options) {
+  if (!worktreeIsClean(root)) {
+    process.stderr.write("Restamp carry requires a clean worktree.\n");
+    return 1;
+  }
+  const facts = resolveRestamp(root, Date.now());
+  if (facts.problem) {
+    process.stderr.write(
+      `Restamp carry refused: ${facts.problem}. No proof written — run the full review instead: ` +
+      "node scripts/write-codex-push-proof.mjs\n",
+    );
+    return 1;
+  }
+  process.stdout.write(
+    `Restamp carry: reviewed head ${facts.fromHead.slice(0, 12)} → head ${facts.headSha.slice(0, 12)} ` +
+    `(base ${facts.source.base_sha.slice(0, 12)}); ${facts.entries.length} file(s), only the migration's timestamp changed.\n`,
+  );
+  if (options.dryRun) {
+    process.stdout.write("[dry-run] No proof written.\n");
+    return 0;
+  }
+  let current = null;
+  try {
+    current = JSON.parse(readFileSync(codexPushProofPath(root, facts.fromHead), "utf8"));
+  } catch {
+    current = null;
+  }
+  if (JSON.stringify(current) !== JSON.stringify(facts.source)
+    || runGit(["rev-parse", "HEAD"], { cwd: root }) !== facts.headSha || !worktreeIsClean(root)) {
+    process.stderr.write("HEAD, the worktree or the reviewed head's proof moved during the check. No proof written; re-run.\n");
+    return 1;
+  }
+  const proofPath = codexPushProofPath(root, facts.headSha);
+  mkdirSync(path.dirname(proofPath), { recursive: true });
+  const proof = buildCarryForwardProof({
+    headSha: facts.headSha, baseSha: facts.source.base_sha, source: facts.source, mode: "restamp",
+  });
+  writeFileSync(proofPath, `${JSON.stringify(proof, null, 2)}\n`, "utf8");
+  process.stdout.write(`Carried Sol proof written to ${proofPath} (mode: restamp).\n`);
+  return 0;
+}
+
 // ── arg parsing ────────────────────────────────────────────────────────────
 export const DEFAULT_TIMEOUT_SEC = 1200;
 
@@ -2118,7 +2250,7 @@ export function parseArgs(argv) {
   // dies on the clock is indistinguishable from a run that had nothing to say, so
   // the cap must sit well clear of a normal review, not just above the last one.
   // 1200s is ~2.3x the measured worst case and still leaves a hung run bounded.
-  const parsed = { dryRun: false, help: false, carryForward: false, timeoutSec: DEFAULT_TIMEOUT_SEC };
+  const parsed = { dryRun: false, help: false, carryForward: false, carryRestamp: false, timeoutSec: DEFAULT_TIMEOUT_SEC };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--timeout") {
@@ -2128,6 +2260,8 @@ export function parseArgs(argv) {
       parsed.dryRun = true;
     } else if (arg === "--carry-forward") {
       parsed.carryForward = true;
+    } else if (arg === "--carry-restamp") {
+      parsed.carryRestamp = true;
     } else if (arg === "--help" || arg === "-h") {
       parsed.help = true;
     } else {
@@ -2157,6 +2291,10 @@ function usage() {
     "                   the two sides share no files, otherwise runs a focused Sol collision check.",
     "                   Refuses (use the full review) when anything else changed. With --dry-run,",
     "                   prints the decision only.",
+    "  --carry-restamp  When HEAD is one commit on top of a reviewed head that only gave one",
+    "                   migration a new timestamp (byte-identical SQL, the old stamp replaced by the",
+    "                   new one elsewhere), keep that clean review with no model call. Refuses",
+    "                   (use the full review) when anything else changed.",
   ].join("\n");
 }
 
@@ -2177,7 +2315,9 @@ export function run(argv = process.argv.slice(2)) {
     process.stderr.write("Not inside a git work tree — cannot mint a Codex push proof.\n");
     return 2;
   }
+  if (options.carryForward && options.carryRestamp) throw new Error("Use --carry-forward or --carry-restamp, not both.");
   if (options.carryForward) return runCarryForward(root, options);
+  if (options.carryRestamp) return runCarryRestamp(root, options);
 
   let codexBin;
   try {

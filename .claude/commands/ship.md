@@ -203,6 +203,15 @@ Deferred: <MED/LOW items accepted, if any>
 
 For gated actions, after Mason explicitly approves, perform only the approved action, inspect the result, and report the production evidence. A push approval does not also approve a migration or Edge Function deploy — each gated action needs its own yes.
 
+## Staging (Mason, 2026-11-04, #1363)
+
+A PR may target `staging` instead of `main`. Every step above applies unchanged; both merge guards give a merge into `staging` the same gates as one into `main` (Sol where the list needs it, the pinned head, no `--auto`, every check green).
+- **Sol stays bound to `origin/main`.** A proof covers `origin/main...HEAD`, which includes everything on `staging` not yet released, so it is accepted for a merge into `staging` only when `staging` already contains the `main` it was reviewed against. If it does not, ask Taha or Mason to bring `main` into `staging` first.
+- **Migrations do not go through `staging` yet.** A PR with a file in `supabase/migrations/` targets `main` and follows Step 5 and Step 8 as today. Both merge guards refuse it into `staging`, and the apply gate refuses to apply one from a PR that does not target `main`. This holds until Mason approves the job that applies migrations to the staging database (#crx-approvals).
+- **Bringing `main` into `staging`** is a PR `main → staging`, merged by Taha or Mason, not an agent: after a migration lands on `main`, that PR carries the migration file, and the guards refuse it on purpose.
+- **The release PR `staging → main`** is a merge into `main`: every gate above applies.
+- `staging` deploys to its own Vercel environment and its own Supabase project (test data only), never the live database.
+
 ## Hard Rules
 - NEVER merge work that skipped a required step: every check green, every open Codex App or CodeRabbit comment fixed or refuted, and a clean Sol review when the change is on the Sol list (`docs/reference/sol-required-paths.md`). Merges under Mason's 2026-09-26 autonomous-landing rule are reported explicitly, never silently. Force-pushes always require Mason's explicit approval.
 - NEVER apply a migration without both reviewers clean and the apply proofs written (the guard enforces this; don't try to route around it), and never before the checks are green and Sol cleared the head that carries it. Non-destructive: no in-chat ask under the 2026-09-26 rule. Destructive, data-overwriting or access-changing: Mason's own `I approve` reply, right after you showed the request `scripts/owner-approve-migration.mjs` built, in this conversation, every time (a bare "yes" is not that approval).

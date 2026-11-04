@@ -18,13 +18,11 @@
 import type { YearEndSummaryData, YearEndProductUsage } from '../types';
 import { CRX_GREEN, CHARCOAL, GRAY, LIGHT_BG, RED, TABLE_HEADER_BG, ALT_ROW_BG, BLUE, type JsPDFWithAutoTable } from './pdfTheme';
 import type { CellHookData } from 'jspdf-autotable';
-import { COMPANY_TAGLINE_HEADER as COMPANY_TAGLINE, COMPANY_LEGAL_NAME } from './companyInfo';
+import { COMPANY_LEGAL_NAME, companyTaglineHeader, fitCompanyNameFont } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatCents as fmt } from './money';
 
 
-
-const COMPANY_NAME = 'CROP RX SOLUTIONS';
-// COMPANY_TAGLINE now comes from src/lib/companyInfo.ts (single source).
 
 // ── Options ──────────────────────────────────────────────────────────────
 
@@ -60,6 +58,7 @@ export async function generateYearEndSummaryPdf(
 ) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
   const pageW = doc.internal.pageSize.getWidth();
@@ -106,12 +105,12 @@ export async function generateYearEndSummaryPdf(
   doc.setFillColor(...CRX_GREEN);
   doc.rect(0, 0, pageW, 70, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
-  doc.text(COMPANY_NAME, margin, 35);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 200, 22);
+  doc.text(company.name.toUpperCase(), margin, 35);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(COMPANY_TAGLINE, margin, 53);
+  doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 170), margin, 53);
 
   // Season badge (right)
   doc.setFontSize(14);

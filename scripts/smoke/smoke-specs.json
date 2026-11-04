@@ -924,6 +924,18 @@
         "security"
       ]
     },
+    "invoice_resave_keeps_cost": {
+      "chain": "smoke-invoice-resave-keeps-cost.sql",
+      "description": "Migration 20261106140000 (#13): a $36.65 draft invoice delivered from a booking at a $6.00 cost; after the product's cost rises to $8.00 (above the $7.33 price) through the governed pricing path, re-saving the draft with only a note changed is accepted and keeps the $6.00 invoiced cost and $36.65 total (it was refused below cost); re-saving it with the price lowered to $5.00 is still refused by the below-cost check. Terminal rollback.",
+      "covers": [
+        "save_invoice",
+        "_enforce_below_cost_line"
+      ],
+      "area": [
+        "billing",
+        "regression"
+      ]
+    },
     "quote_commission_split_validation": {
       "chain": "smoke-quote-commission-split-validation.sql",
       "description": "Quote commission money-routing guard: blank or duplicate recipients and missing/JSON-null percentages fail closed on direct INSERT/UPDATE, while an explicit empty no-commission split and a complete named 100% split remain valid. Self-contained fixture and terminal rollback.",

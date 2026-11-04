@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261103172003",
+    "migrations_high_water": "20261103204943",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -487,6 +487,10 @@
       "20261104130000_any_rep_changes_booked_prices",
       "20261104140000_pricing_tier_order_warning",
       "20261104150000_product_forms_seed_each",
+      "20261104180000_vendor_link_proposals",
+      "20261104190000_job_invoice_lines_keep_job_unit",
+      "20261104200000_product_unit_backfill",
+      "20261105090000_vendor_only_product_links",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -4192,6 +4196,12 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "product_supplier_links",
+      "constraint": "product_supplier_links_vendor_only_shape",
+      "def": "CHECK (((supplier_product_name IS NOT NULL) OR ((supplier_sku IS NULL) AND (supplier_uom IS NULL) AND (supplier_pack_description IS NULL) AND (inventory_units_per_supplier_unit IS NULL) AND (conversion_unit IS NULL) AND (comparison_status = 'pending'::text))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "product_use_timing_options",
       "constraint": "product_use_timing_options_code_check",
       "def": "CHECK ((code ~ '^[a-z][a-z0-9_]*$'::text))",
@@ -6134,7 +6144,6 @@
       "no_default": [
         "product_id",
         "vendor_id",
-        "supplier_product_name",
         "created_by"
       ],
       "with_default": [

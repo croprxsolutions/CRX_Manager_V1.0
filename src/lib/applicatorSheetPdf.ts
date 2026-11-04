@@ -47,15 +47,17 @@ function fmtDate(d: string): string {
 /** Footer rule + company / format line on every page, plus optional custom footer. */
 function drawFooter(doc: JsPDFWithAutoTable, margin: number, customFooter: string | null, company: CompanyInfo) {
   const pageW = doc.internal.pageSize.getWidth();
-  const footerY = doc.internal.pageSize.getHeight() - 30;
-  doc.setDrawColor(200, 200, 200);
-  doc.line(margin, footerY, pageW - margin, footerY);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
   const companyLines = doc.splitTextToSize(companyFooterInternal(company), pageW - margin * 2).slice(0, 2);
+  const hasCustom = Boolean(customFooter && customFooter.trim());
+  // A wrapped company line plus the custom footer needs one more line of room above the page edge.
+  const footerY = doc.internal.pageSize.getHeight() - 30 - (hasCustom && companyLines.length > 1 ? 10 : 0);
+  doc.setDrawColor(200, 200, 200);
+  doc.line(margin, footerY, pageW - margin, footerY);
   doc.text(companyLines, pageW / 2, footerY + 12, { align: 'center' });
-  if (customFooter && customFooter.trim()) {
+  if (customFooter && hasCustom) {
     doc.text(customFooter.trim(), pageW / 2, footerY + 12 + companyLines.length * 10, { align: 'center' });
   }
 }

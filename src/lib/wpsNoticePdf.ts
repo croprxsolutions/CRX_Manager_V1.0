@@ -88,8 +88,9 @@ export async function generateWpsNoticePdf(data: WpsNoticeData, filename?: strin
   doc.setFontSize(10);
   doc.setTextColor(...GRAY);
   const dateStr = new Date(data.application_date + 'T00:00:00').toLocaleDateString();
-  doc.text(`From: ${company.name} (commercial applicator)`, margin, y);
-  y += 14;
+  const fromLines = doc.splitTextToSize(`From: ${company.name} (commercial applicator)`, pageW - margin * 2);
+  doc.text(fromLines, margin, y);
+  y += 14 * fromLines.length;
   doc.text(
     `Application date: ${dateStr}${data.scheduled_time ? `   ·   Scheduled time: ${data.scheduled_time}` : ''}${data.applicator_name ? `   ·   Applicator: ${data.applicator_name}` : ''}   ·   Job: ${data.job_number}`,
     margin,

@@ -26,7 +26,9 @@
 --
 -- KNOWN LIMIT: complete_job finishes one job per call. A direct status write that completes several
 --   sibling jobs in one statement (bypassing complete_job) syncs only after all of them, so each
---   keeps its own step and the kept draws can sit up to about 0.005 per such job over the rounded total.
+--   keeps its own step and the kept draws can sit up to about 0.005 per such job off the rounded
+--   total, either way (two 0.004 gal jobs keep 0 for 0.008 applied). The fix for that path is to stop
+--   direct status writes on jobs, not this sync.
 --
 -- ROLLBACK (its own reviewed migration): re-emit _sync_quote_job_reservations from its
 --   20260710120000 body.

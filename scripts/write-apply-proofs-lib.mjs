@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -77,9 +78,7 @@ export function carryRestampedApplyProofs({ stateDir, migrationsDir, fromName, t
   }
   // A refused carry must never leave an older proof for the new name usable.
   const target = clearApplyProofs(stateDir, safeProofName(toName));
-  let exists = true;
-  try { readFileSync(path.join(migrationsDir, `${fromName}.sql`)); } catch { exists = false; }
-  if (exists) return { problem: `${fromName}.sql is still on disk; a restamp renames it` };
+  if (existsSync(path.join(migrationsDir, `${fromName}.sql`))) return { problem: `${fromName}.sql is still on disk; a restamp renames it` };
   let queryHash;
   try {
     ({ queryHash } = snapshotMigrationSql(path.join(migrationsDir, `${toName}.sql`)));

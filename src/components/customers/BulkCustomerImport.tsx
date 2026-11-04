@@ -176,7 +176,8 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         phone: item.phone,
         email: item.email,
         billing_address: item.address,
-        assigned_tier: item.tier && [1, 2, 3].includes(item.tier) ? item.tier : defaultTier,
+        // process-document never reads a tier from the page (its tier is always a filler 1).
+        assigned_tier: defaultTier,
       });
     });
 
@@ -356,7 +357,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
               total_acres, corn_acres, soybean_acres, other_acres, payment_terms, notes
             </p>
             <p className="text-xs text-green-600 mt-2">
-              💡 <span className="font-medium">Tip:</span> Tier defaults to 1 if not specified. Valid tiers are 1, 2, or 3.
+              💡 <span className="font-medium">Tip:</span> Tier defaults to the Settings Default Tier if not specified. Valid tiers are 1, 2, or 3.
             </p>
           </div>
         </div>

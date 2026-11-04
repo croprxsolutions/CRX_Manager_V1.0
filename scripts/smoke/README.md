@@ -65,7 +65,8 @@ Three modes:
 **Result contract (all modes):** the chain ALWAYS errors.
 
 - Error text contains `SMOKE_PASS_ROLLBACK` → **PASS** (and proves the
-  rollback fired — nothing persisted).
+  rollback fired — nothing persisted, except that ID sequence numbers a
+  fixture used stay used, which only leaves gaps in IDs).
 - Any other error, or no error at all → **FAIL**; report the message verbatim.
 
 The full-gauntlet chain also proves the versioned `save_blend_ticket` contract:

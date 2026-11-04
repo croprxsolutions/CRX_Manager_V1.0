@@ -1360,6 +1360,119 @@ function collisionPromptSkipsWork(prompt) {
   }
 }
 
+// ── restamp carry (Mason, 2026-11-04), end to end on a throwaway repository ──
+{
+  const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
+  const repo = tempDir("crx-carry-restamp-");
+  const git = (...args) => execFileSync("git", ["-c", "user.name=Restamp Test", "-c", "user.email=restamp@example.invalid", ...args], {
+    cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  const restampCarry = (...extra) => spawnSync(process.execPath, [scriptPath, "--carry-restamp", ...extra], { cwd: repo, encoding: "utf8" });
+  const OLD = "20261105200000_product_rate_lock";
+  const NEW = "20261106120000_product_rate_lock";
+  const sqlPath = (name) => path.join(repo, "supabase", "migrations", `${name}.sql`);
+  const recordPath = (name) => path.join(repo, "docs", "reference", "migrations.d", `${name}.md`);
+  // The restamp as it is really done: rename both files, swap the stamp in the record.
+  const restamp = () => {
+    git("mv", `supabase/migrations/${OLD}.sql`, `supabase/migrations/${NEW}.sql`);
+    git("mv", `docs/reference/migrations.d/${OLD}.md`, `docs/reference/migrations.d/${NEW}.md`);
+    writeFileSync(recordPath(NEW), readFileSync(recordPath(NEW), "utf8").split("20261105200000").join("20261106120000"));
+  };
+  const commitAll = (message) => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
+  try {
+    git("init", "-q", "-b", "main");
+    git("config", "core.autocrlf", "false");
+    writeFileSync(path.join(repo, ".gitignore"), ".claude/session-state/\n");
+    mkdirSync(path.join(repo, "src"), { recursive: true });
+    writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 1;\n");
+    const base = commitAll("base");
+    git("update-ref", "refs/remotes/origin/main", base);
+    git("switch", "-q", "-c", "feature");
+    mkdirSync(path.dirname(sqlPath(OLD)), { recursive: true });
+    mkdirSync(path.dirname(recordPath(OLD)), { recursive: true });
+    writeFileSync(sqlPath(OLD), "CREATE TABLE rate_lock (id bigint);\n");
+    writeFileSync(recordPath(OLD), `# ${OLD}\n\nCandidate; apply as ${OLD}.\n`);
+    writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 2;\n");
+    const reviewedHead = commitAll("pr change");
+    const proofPath = codexPushProofPath(repo, reviewedHead);
+    mkdirSync(path.dirname(proofPath), { recursive: true });
+    writeFileSync(proofPath, JSON.stringify(buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean" })));
+
+    restamp();
+    const restampedHead = commitAll("restamp");
+    const dry = restampCarry("--dry-run");
+    assert.equal(dry.status, 0, `restamp e2e: dry run succeeds (${dry.stderr})`);
+    assert.equal(existsSync(codexPushProofPath(repo, restampedHead)), false, "restamp e2e: the dry run writes nothing");
+    const ok = restampCarry();
+    assert.equal(ok.status, 0, `restamp e2e: a pure restamp carries (${ok.stderr})`);
+    const minted = JSON.parse(readFileSync(codexPushProofPath(repo, restampedHead), "utf8"));
+    assert.equal(minted.carry.mode, "restamp", "restamp e2e: minted as a restamp carry");
+    assert.equal(minted.codex_ran, false, "restamp e2e: never claims a review ran");
+    assert.equal(minted.carry.from_head, reviewedHead, "restamp e2e: names the reviewed head");
+    assert.equal(proofValid(minted, restampedHead, Date.now(), base), true, "restamp e2e: the apply/merge validator accepts it for the new head and same base");
+    assert.equal(proofValid(minted, reviewedHead, Date.now(), base), false, "restamp e2e: and not for the old head");
+    assert.equal(proofValid({ ...minted, base_sha: "9".repeat(40) }, restampedHead, Date.now(), "9".repeat(40)), false, "restamp e2e: a restamp carry cannot move the base");
+    assert.equal(carrySourceProofProblem(minted, { headSha: restampedHead }), null, "restamp e2e: a later main merge can carry it forward");
+
+    const refused = (label, mutate, why) => {
+      git("reset", "-q", "--hard", reviewedHead);
+      mutate();
+      const head = commitAll(label);
+      const result = restampCarry();
+      assert.equal(result.status, 1, `restamp e2e: ${label} is refused`);
+      assert.match(result.stderr, why, `restamp e2e: ${label} says why`);
+      assert.equal(existsSync(codexPushProofPath(repo, head)), false, `restamp e2e: nothing minted for ${label}`);
+    };
+    refused("one changed SQL byte", () => {
+      restamp();
+      writeFileSync(sqlPath(NEW), "CREATE TABLE rate_lock (id integer);\n");
+    }, /the migration's SQL changed/);
+    refused("an extra code edit", () => {
+      restamp();
+      writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 3;\n");
+    }, /src\/a\.ts changed beyond the timestamp/);
+    refused("a record edit beyond the stamp", () => {
+      restamp();
+      writeFileSync(recordPath(NEW), `# ${NEW}\n\nApplied.\n`);
+    }, /changed beyond the timestamp/);
+    refused("a copy that keeps the old migration", () => {
+      writeFileSync(sqlPath(NEW), readFileSync(sqlPath(OLD)));
+    }, /does not rename exactly one migration/);
+    refused("a renamed migration name", () => {
+      git("mv", `supabase/migrations/${OLD}.sql`, "supabase/migrations/20261106120000_other_name.sql");
+    }, /changed beyond its timestamp/);
+    refused("a second migration", () => {
+      restamp();
+      writeFileSync(path.join(repo, "supabase", "migrations", "20261101000000_older.sql"), "SELECT 1;\n");
+    }, /does not rename exactly one migration/);
+    refused("another database file", () => {
+      restamp();
+      writeFileSync(path.join(repo, "supabase", "config.toml"), "x = 1\n");
+    }, /another database file/);
+    // Only ONE commit on top of the reviewed head carries.
+    git("reset", "-q", "--hard", reviewedHead);
+    restamp();
+    commitAll("restamp");
+    writeFileSync(path.join(repo, "notes.txt"), "x\n");
+    commitAll("later");
+    const twoCommits = restampCarry();
+    assert.equal(twoCommits.status, 1, "restamp e2e: a restamp two commits away is refused");
+    assert.match(twoCommits.stderr, /no readable Sol proof/, "restamp e2e: its parent has no proof");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+{
+  // Loaded here so the end-to-end checks above fail on behaviour, not on a missing export.
+  const { restampProblem } = await import("./write-codex-push-proof.mjs");
+  const entries = [
+    { path: "supabase/migrations/20261105200000_x.sql", oldMode: "100644", newMode: "000000" },
+    { path: "supabase/migrations/20261106120000_x.sql", oldMode: "000000", newMode: "100755" },
+  ];
+  assert.match(restampProblem({ entries, readFile: () => "SELECT 1;\n" }), /changed type or mode/, "restamp: a mode change is refused");
+  assert.equal(restampProblem({ entries: entries.map((e) => ({ ...e, newMode: e.newMode === "100755" ? "100644" : e.newMode })), readFile: (side) => (side === "old" ? "SELECT 1;\r\n" : "SELECT 1;\n") }), null, "restamp: line endings alone are not an SQL change");
+}
+
 // ── Sol pre-flight: Sol runs only on a quiet head (Mason, 2026-10-23) ────────
 {
   const head = "f6adfe82ab17e710da063f2d927a9cb74faac90e";

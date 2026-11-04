@@ -255,8 +255,11 @@ function ownerRefused(sql, pattern) {
 const rates = (p) => scalar(`SELECT concat_ws('|', rate_per_acre, rate_unit, suggested_rate, tier1_price_per_acre,
   tier2_price_per_acre, tier3_price_per_acre) FROM public.products WHERE id = '${p}';`);
 const versionOf = (p) => scalar(`SELECT pricing_version FROM public.products WHERE id = '${p}';`);
+// Like a fresh export: the per-acre inputs other than the rates are read from the product as it is now.
+const facts = (p) => JSON.parse(scalar(`SELECT json_build_object('pricing_version', pricing_version, 'unit_size', unit_size,
+  'inventory_unit', inventory_unit, 'product_form', product_form) FROM public.products WHERE id = '${p}';`));
 const row = (p, rate, unit, suggested, expected) => ({ product_id: p, rate_per_acre: rate, rate_unit: unit,
-  suggested_rate: suggested, expected: { rate_per_acre: expected[0], rate_unit: expected[1], suggested_rate: expected[2] } });
+  suggested_rate: suggested, expected: { rate_per_acre: expected[0], rate_unit: expected[1], suggested_rate: expected[2], ...facts(p) } });
 const setRates = (rows, key, actor = ADMIN) =>
   `SELECT public.set_product_rates('${JSON.stringify(rows)}'::jsonb, '${actor}', '${key}');`;
 const lock = (on, reason, key, actor = ADMIN) =>
@@ -291,6 +294,14 @@ function main() {
   refused(ADMIN, setRates([row(P.OTHER, '8', 'oz', '', [null, null, null]),
     row(P.GAL, '20', 'oz', '', [null, null, null])], 'k-stale'), /PRODUCT_RATES_STALE: .*\[PROVER\] Gal/);
   assert.equal(rates(P.OTHER), '');
+  // Prices, pack size, stock unit or form moved since export: the previewed per-acre prices no longer hold.
+  const fresh = row(P.GAL, '20', 'oz', '', ['13', 'oz', '13 oz/A']);
+  refused(ADMIN, setRates([{ ...fresh, expected: { ...fresh.expected, pricing_version: fresh.expected.pricing_version - 1 } }], 'k-stale-v'),
+    /PRODUCT_RATES_STALE: .*\[PROVER\] Gal/);
+  refused(ADMIN, setRates([{ ...fresh, expected: { ...fresh.expected, inventory_unit: 'qt' } }], 'k-stale-u'),
+    /PRODUCT_RATES_STALE: .*\[PROVER\] Gal/);
+  refused(ADMIN, setRates([{ ...fresh, expected: { ...fresh.expected, unit_size: undefined } }], 'k-shape'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
+  assert.equal(rates(P.GAL), '13|oz|13 oz/A|4.06|3.66|3.25');
   refused(ADMIN, setRates([row(P.GAL, '-1', 'oz', '', ['13', 'oz', '13 oz/A'])], 'k-neg'), /PRODUCT_RATE_INVALID: .*\[PROVER\] Gal/);
   refused(ADMIN, setRates([row(P.GAL, '1.1234567', 'oz', '', ['13', 'oz', '13 oz/A'])], 'k-scale'), /PRODUCT_RATE_INVALID: .*\[PROVER\] Gal/);
   // An unknown unit would price per acre as one ounce, so it is refused by name.
@@ -298,6 +309,10 @@ function main() {
   refused(ADMIN, setRates([{ ...row(P.GAL, '2', 'oz', '', ['13', 'oz', '13 oz/A']), rate_unit: { a: 1 } }], 'k-obj'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
   // A rate with no unit is ambiguous, so it is refused; a correction is only for locked rates.
   refused(ADMIN, setRates([row(P.OTHER, '8', '', '', [null, null, null])], 'k-nounit'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\]/);
+  // Every other writer gets the same unit rule while open: a direct save of an unknown unit is refused.
+  refused(ADMIN, `UPDATE public.products SET rate_per_acre = 8, rate_unit = 'gallons' WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
+  refused(ADMIN, `UPDATE public.products SET rate_per_acre = 8 WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
+  refused(ADMIN, lock(true, '	', 'k-tab-reason'), /REASON_REQUIRED/);
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', versionOf(P.GAL), 'label fix', 'k-cor-open'), /PRODUCT_RATES_NOT_LOCKED/);
   // Per-acre prices are whole cents, 0 or more, and finite (triggers off, so the recalculation cannot hide it).
   for (const bad of ['-1', "'NaN'", '1.001']) {

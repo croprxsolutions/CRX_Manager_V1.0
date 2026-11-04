@@ -21,6 +21,7 @@ DECLARE
   v_fix jsonb;
   v_sig text;
   v_md5 text;
+  v_facts jsonb;
 BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
     ('public.set_product_rates(jsonb,uuid,text)', '4ec72b2bb8ee9cea281aa6195820b4b3'),
@@ -45,6 +46,10 @@ BEGIN
   VALUES ('[SMOKE] rate lock', 'SMOKE-RL-' || md5(clock_timestamp()::text), 'gal', true)
   RETURNING id INTO v_product;
 
+  -- The per-acre inputs a row was exported with, other than the rates.
+  SELECT jsonb_build_object('pricing_version', pricing_version, 'unit_size', unit_size,
+    'inventory_unit', inventory_unit, 'product_form', product_form)
+    INTO v_facts FROM public.products WHERE id = v_product;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
@@ -53,11 +58,11 @@ BEGIN
   END IF;
   v_first := public.set_product_rates(jsonb_build_array(jsonb_build_object('product_id', v_product,
     'rate_per_acre', '13', 'rate_unit', 'oz', 'suggested_rate', '13 oz/A',
-    'expected', jsonb_build_object('rate_per_acre', NULL, 'rate_unit', NULL, 'suggested_rate', NULL))),
+    'expected', jsonb_build_object('rate_per_acre', NULL, 'rate_unit', NULL, 'suggested_rate', NULL) || v_facts)),
     v_admin, 'smoke-rl-set-' || v_product);
   v_again := public.set_product_rates(jsonb_build_array(jsonb_build_object('product_id', v_product,
     'rate_per_acre', '13', 'rate_unit', 'oz', 'suggested_rate', '13 oz/A',
-    'expected', jsonb_build_object('rate_per_acre', NULL, 'rate_unit', NULL, 'suggested_rate', NULL))),
+    'expected', jsonb_build_object('rate_per_acre', NULL, 'rate_unit', NULL, 'suggested_rate', NULL) || v_facts)),
     v_admin, 'smoke-rl-set-' || v_product);
   PERFORM public.set_product_rate_lock(true, 'smoke', v_admin, 'smoke-rl-lock-' || v_product);
   v_refused := false;
@@ -73,7 +78,7 @@ BEGIN
   BEGIN
     PERFORM public.set_product_rates(jsonb_build_array(jsonb_build_object('product_id', v_product,
       'rate_per_acre', '20', 'rate_unit', 'oz', 'suggested_rate', '',
-      'expected', jsonb_build_object('rate_per_acre', '13', 'rate_unit', 'oz', 'suggested_rate', '13 oz/A'))),
+      'expected', jsonb_build_object('rate_per_acre', '13', 'rate_unit', 'oz', 'suggested_rate', '13 oz/A') || v_facts)),
       v_admin, 'smoke-rl-locked-' || v_product);
   EXCEPTION WHEN check_violation THEN
     v_refused := SQLERRM LIKE 'PRODUCT_RATES_LOCKED%';

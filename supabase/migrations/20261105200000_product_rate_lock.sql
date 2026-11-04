@@ -151,6 +151,17 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_RATES_LOCKED: rates are locked; an admin can correct one product''s rates from its product page, with a reason'
       USING ERRCODE = 'check_violation';
   END IF;
+  -- Open or not, every writer (product page, import) gets the rate writers' unit rule: per-acre
+  -- pricing prices an unknown unit as one ounce. Seed and each units are held to the stock unit
+  -- by validate_product_units instead.
+  IF NOT COALESCE(NEW.product_form IN ('seed', 'each'), false)
+     AND (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
+          OR NULLIF(OLD.rate_unit, '') IS DISTINCT FROM v_new_unit)
+     AND NOT public._product_rate_unit_ok(NEW.rate_per_acre, v_new_unit,
+                                          CASE WHEN TG_OP = 'UPDATE' THEN OLD.rate_unit END, NEW.product_form) THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form'
+      USING ERRCODE = 'check_violation';
+  END IF;
   RETURN NEW;
 END;
 $function$;
@@ -182,6 +193,17 @@ REVOKE ALL ON FUNCTION public.refuse_price_workbook_rate_change() FROM PUBLIC, a
 CREATE TRIGGER product_info_change_set_rows_rates_read_only
   BEFORE INSERT OR UPDATE ON public.product_info_change_set_rows
   FOR EACH ROW EXECUTE FUNCTION public.refuse_price_workbook_rate_change();
+-- A workbook preview staged before this trigger could still apply a rate change: refuse to install
+-- while one exists (live had none when this was written). Creating the trigger waited for any upload
+-- in flight, so nothing slips in between.
+DO $staged$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.product_info_change_set_rows
+             WHERE changes ?| ARRAY['rate_per_acre', 'rate_unit', 'suggested_rate']) THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRICE_WORKBOOK_HAS_STAGED_RATE_CHANGES: apply or discard those previews first';
+  END IF;
+END;
+$staged$;
 
 -- The shared write for one product (its row already locked by the caller). Returns the rate and
 -- tier 1-3 per-acre values before and after.
@@ -301,7 +323,13 @@ BEGIN
                AND r ? 'expected')
        OR jsonb_typeof(r->'expected') <> 'object'
        OR NOT (r->'expected' ? 'rate_per_acre' AND r->'expected' ? 'rate_unit'
-               AND r->'expected' ? 'suggested_rate')
+               AND r->'expected' ? 'suggested_rate' AND r->'expected' ? 'pricing_version'
+               AND r->'expected' ? 'unit_size' AND r->'expected' ? 'inventory_unit'
+               AND r->'expected' ? 'product_form')
+       OR jsonb_typeof(r->'expected'->'pricing_version') <> 'number'
+       OR jsonb_typeof(r->'expected'->'unit_size') NOT IN ('string', 'null')
+       OR jsonb_typeof(r->'expected'->'inventory_unit') NOT IN ('string', 'null')
+       OR jsonb_typeof(r->'expected'->'product_form') NOT IN ('string', 'null')
        OR (r->>'product_id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
        OR jsonb_typeof(r->'rate_unit') NOT IN ('string', 'null')
        OR jsonb_typeof(r->'suggested_rate') NOT IN ('string', 'null')
@@ -341,9 +369,15 @@ BEGIN
     ELSIF NOT public._product_rate_unit_ok(public._product_rate_value(v_row->'rate_per_acre'),
                                             NULLIF(btrim(v_row->>'rate_unit'), ''), v_product.rate_unit, v_product.product_form) THEN
       v_bad_unit := v_bad_unit || v_product.product_name;
+    -- Stale = anything the preview's per-acre prices were computed from has moved: pricing_version
+    -- covers tier prices and the rates; pack size, stock unit and form are compared directly.
     ELSIF public._product_rate_value(v_row->'expected'->'rate_per_acre') IS DISTINCT FROM v_product.rate_per_acre
-       OR NULLIF(btrim(v_row->'expected'->>'rate_unit'), '') IS DISTINCT FROM NULLIF(btrim(v_product.rate_unit), '')
-       OR NULLIF(btrim(v_row->'expected'->>'suggested_rate'), '') IS DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '') THEN
+       OR NULLIF(v_row->'expected'->>'rate_unit', '') IS DISTINCT FROM NULLIF(v_product.rate_unit, '')
+       OR NULLIF(btrim(v_row->'expected'->>'suggested_rate'), '') IS DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '')
+       OR (v_row->'expected'->>'pricing_version')::numeric IS DISTINCT FROM v_product.pricing_version
+       OR (v_row->'expected'->>'unit_size') IS DISTINCT FROM v_product.unit_size
+       OR (v_row->'expected'->>'inventory_unit') IS DISTINCT FROM v_product.inventory_unit
+       OR (v_row->'expected'->>'product_form') IS DISTINCT FROM v_product.product_form THEN
       v_stale := v_stale || v_product.product_name;
     END IF;
   END LOOP;
@@ -366,7 +400,9 @@ BEGIN
     v_unit := NULLIF(btrim(v_row->>'rate_unit'), '');
     v_suggested := NULLIF(btrim(v_row->>'suggested_rate'), '');
     IF v_rate IS DISTINCT FROM v_product.rate_per_acre
-       OR v_unit IS DISTINCT FROM NULLIF(btrim(v_product.rate_unit), '')
+       -- seed/each: a blank unit is filled from the stock unit, so that is what it would become.
+       OR COALESCE(v_unit, CASE WHEN v_product.product_form IN ('seed', 'each') THEN v_product.inventory_unit END)
+          IS DISTINCT FROM NULLIF(v_product.rate_unit, '')
        OR v_suggested IS DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '') THEN
       v_write := public._write_product_rates(v_product.id, v_rate, v_unit, v_suggested);
       v_changed := v_changed + 1;
@@ -410,7 +446,7 @@ BEGIN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED';
   END IF;
   IF p_locked IS NULL THEN RAISE EXCEPTION 'PRODUCT_RATE_LOCK_STATE_REQUIRED'; END IF;
-  IF p_reason IS NULL OR btrim(p_reason) = '' THEN RAISE EXCEPTION 'REASON_REQUIRED: say why'; END IF;
+  IF p_reason IS NULL OR p_reason !~ '[^[:space:]]' THEN RAISE EXCEPTION 'REASON_REQUIRED: say why'; END IF;
   IF length(btrim(p_reason)) > 500 THEN RAISE EXCEPTION 'REASON_TOO_LONG: keep the reason to 500 characters'; END IF;
 
   v_request_fp := md5(jsonb_build_object('actor_id', v_actor, 'locked', p_locked, 'reason', btrim(p_reason))::text);
@@ -479,7 +515,7 @@ BEGIN
   IF p_product_id IS NULL OR p_expected_pricing_version IS NULL THEN
     RAISE EXCEPTION 'PRODUCT_AND_EXPECTED_VERSION_REQUIRED';
   END IF;
-  IF p_reason IS NULL OR btrim(p_reason) = '' THEN RAISE EXCEPTION 'REASON_REQUIRED: say why'; END IF;
+  IF p_reason IS NULL OR p_reason !~ '[^[:space:]]' THEN RAISE EXCEPTION 'REASON_REQUIRED: say why'; END IF;
   IF length(btrim(p_reason)) > 500 THEN RAISE EXCEPTION 'REASON_TOO_LONG: keep the reason to 500 characters'; END IF;
   IF NOT public._product_rate_value_ok(to_jsonb(p_rate_per_acre::text)) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a rate per acre must be blank or a number of 0 or more with at most 6 decimals';
@@ -506,11 +542,15 @@ BEGIN
   END IF;
   SELECT * INTO v_product FROM public.products WHERE id = p_product_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND'; END IF;
+  -- Seed and each rates use the stock unit, as the preview does.
+  IF v_product.product_form IN ('seed', 'each') THEN v_unit := v_product.inventory_unit; END IF;
   IF v_product.pricing_version IS DISTINCT FROM p_expected_pricing_version THEN
     RAISE EXCEPTION 'PRODUCT_RATES_STALE: % changed since you opened it; reload and try again', v_product.product_name;
   END IF;
   IF p_rate_per_acre IS NOT DISTINCT FROM v_product.rate_per_acre
-     AND v_unit IS NOT DISTINCT FROM NULLIF(btrim(v_product.rate_unit), '')
+     -- seed/each: a blank unit is filled from the stock unit, so that is what it would become.
+     AND COALESCE(v_unit, CASE WHEN v_product.product_form IN ('seed', 'each') THEN v_product.inventory_unit END)
+         IS NOT DISTINCT FROM NULLIF(v_product.rate_unit, '')
      AND v_suggested IS NOT DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '') THEN
     RAISE EXCEPTION 'PRODUCT_RATE_CORRECTION_NO_CHANGE: the new rates match the current ones';
   END IF;

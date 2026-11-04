@@ -2094,7 +2094,7 @@ export default function ProductDetail() {
           profileId={profile?.id ?? ''}
           unitOptions={rateUnitOptionsForProduct(unitConversions, persistedProduct.product_form, persistedProduct.inventory_unit).map((uc) => uc.unit)}
           onClose={() => setCorrectingRates(false)}
-          onCorrected={() => { setCorrectingRates(false); void fetchProduct(); }}
+          onCorrected={() => { setCorrectingRates(false); void fetchProduct(); loadRateLock(); }}
         />
       )}
       <UnsavedChangesModal

@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261104040517",
+    "migrations_high_water": "20261104195723",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -496,6 +496,10 @@
       "20261105170000_data11_preferred_vendor_links",
       "20261105180000_preferred_vendor_enforcement",
       "20261105190000_sale_lines_refuse_missing_price",
+      "20261106110000_draw_quantity_whole_hundredths",
+      "20261106130000_invoice_resave_keeps_line_cents",
+      "20261106140000_invoice_resave_keeps_cost",
+      "20261106150000_fix_delivery_one_screen",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -7179,7 +7183,8 @@
       "job_id",
       "invoice_id",
       "cancelled_at",
-      "cancelled_amount_cents"
+      "cancelled_amount_cents",
+      "replaces_commission_id"
     ],
     "cost_history": [
       "id",

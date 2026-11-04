@@ -43,6 +43,8 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
       const next = await setProductRateLock({ locked: target, reason: reason.trim(), performedBy: profileId, idempotencyKey: getKey() });
       resetKey();
       onChanged(next);
+      // A replayed receipt may be older than the switch: show what is current now.
+      loadProductRateLock().then(onChanged).catch(() => undefined);
       setOpen(false);
       setReason('');
       toast('success', next.is_locked ? 'Rates locked' : 'Rates unlocked');

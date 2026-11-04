@@ -58,6 +58,9 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
   const ratePerAcre = rate.trim() === '' ? null : Number(rate.trim());
   const previewInput = JSON.stringify([rate.trim(), unit]);
   const previewed = preview?.input === previewInput ? preview.prices : null;
+  // Nothing is confirmed that the window could not show as an exact amount.
+  const shownExactly = previewed != null
+    && TIERS.every((tier) => perAcre(previewed.after[`tier${tier}_price_per_acre`]) !== 'Invalid amount');
   const canSave = rateValid && reason.trim() !== '' && !saving && Number.isInteger(product.pricing_version);
 
   const refuse = (error: unknown) => {
@@ -117,7 +120,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
         <>
           <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
           {previewed
-            ? <Button onClick={() => void save()} loading={saving} disabled={!canSave}>Save correction</Button>
+            ? <Button onClick={() => void save()} loading={saving} disabled={!canSave || !shownExactly}>Save correction</Button>
             : <Button onClick={() => void showPreview()} loading={saving} disabled={!canSave}>Preview</Button>}
         </>
       )}

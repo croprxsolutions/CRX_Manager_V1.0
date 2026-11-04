@@ -31,6 +31,18 @@ describe('rate lock switch failure paths', () => {
     expect(screen.getByLabelText('Reason (required)')).toHaveValue('');
   });
 
+  it('shows the state read after a save, not an older replayed receipt', async () => {
+    mockSet.mockReset().mockResolvedValueOnce(locked);
+    mockLoad.mockReset().mockResolvedValue(open);
+    const onChanged = vi.fn();
+    render(<ProductRateLockControl lock={open} loadFailed={false} onRetry={vi.fn()} isAdmin profileId="u1" onChanged={onChanged} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Lock rates' }));
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'season' } });
+    const buttons = screen.getAllByRole('button', { name: 'Lock rates' });
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(onChanged).toHaveBeenLastCalledWith(open));
+  });
+
   it('shows the current state when another admin switched it first', async () => {
     mockSet.mockRejectedValue(new Error('PRODUCT_RATE_LOCK_UNCHANGED: rates are already locked'));
     mockLoad.mockResolvedValue(locked);

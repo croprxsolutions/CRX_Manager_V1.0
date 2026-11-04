@@ -15,7 +15,8 @@
 --     write take turns and an upload that started before a switch cannot save after it.
 --   * set_product_rates(rows): the bulk rate writer the CSV import (WP-PM-10) and the setup workbook
 --     (WP-PM-11a-2) will call (admin, retry key, all-or-nothing). Each row carries the rate values it
---     expects to replace; a row changed since is refused by product name. The product page still
+--     expects to replace and the per-acre prices its preview showed; a row changed since, or whose
+--     prices would differ from that preview, is refused by product name. The product page still
 --     writes rates directly while unlocked; the guard below covers it when locked.
 --   * set_product_rate_lock(locked, reason): any admin, with a reason, logged.
 --   * correct_product_rates(product, ..., expected pricing_version, previewed prices, reason): one
@@ -326,6 +327,8 @@ DECLARE
   v_stale text[] := ARRAY[]::text[];
   v_invalid text[] := ARRAY[]::text[];
   v_bad_unit text[] := ARRAY[]::text[];
+  v_moved text[] := ARRAY[]::text[];
+  v_tier text;
   v_results jsonb := '[]'::jsonb;
   v_write jsonb;
   v_changed integer := 0;
@@ -361,7 +364,8 @@ BEGIN
        OR NOT (r->'expected' ? 'rate_per_acre' AND r->'expected' ? 'rate_unit'
                AND r->'expected' ? 'suggested_rate' AND r->'expected' ? 'pricing_version'
                AND r->'expected' ? 'unit_size' AND r->'expected' ? 'inventory_unit'
-               AND r->'expected' ? 'product_form')
+               AND r->'expected' ? 'product_form' AND r->'expected' ? 'prices')
+       OR jsonb_typeof(r->'expected'->'prices') <> 'object'
        OR jsonb_typeof(r->'expected'->'pricing_version') <> 'number'
        OR jsonb_typeof(r->'expected'->'unit_size') NOT IN ('string', 'number', 'null')
        OR jsonb_typeof(r->'expected'->'inventory_unit') NOT IN ('string', 'null')
@@ -373,7 +377,7 @@ BEGIN
        OR jsonb_typeof(r->'expected'->'suggested_rate') NOT IN ('string', 'null')
        OR length(r->>'rate_unit') > 40 OR length(r->>'suggested_rate') > 200
   ) THEN
-    RAISE EXCEPTION 'PRODUCT_RATE_ROW_SHAPE_INVALID: each row needs product_id, rate_per_acre, rate_unit, suggested_rate and expected';
+    RAISE EXCEPTION 'PRODUCT_RATE_ROW_SHAPE_INVALID: each row needs product_id, rate_per_acre, rate_unit, suggested_rate and expected (with its previewed prices)';
   END IF;
   IF (SELECT count(DISTINCT lower(r->>'product_id')) FROM jsonb_array_elements(p_rows) r)
      <> jsonb_array_length(p_rows) THEN
@@ -441,6 +445,14 @@ BEGIN
           IS DISTINCT FROM NULLIF(v_product.rate_unit, '')
        OR v_suggested IS DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '') THEN
       v_write := public._write_product_rates(v_product.id, v_rate, v_unit, v_suggested);
+      -- As in a correction: a unit conversion changed since the preview moves the prices but no
+      -- version, so each written row must save the per-acre prices its preview showed.
+      FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
+        IF (v_write->'after'->v_tier) IS DISTINCT FROM (v_row->'expected'->'prices'->v_tier) THEN
+          v_moved := v_moved || v_product.product_name;
+          EXIT;
+        END IF;
+      END LOOP;
       v_changed := v_changed + 1;
       v_results := v_results || (jsonb_build_object('product_id', v_product.id,
         'product_name', v_product.product_name, 'changed', true) || v_write);
@@ -449,6 +461,11 @@ BEGIN
         'product_name', v_product.product_name, 'changed', false));
     END IF;
   END LOOP;
+
+  IF cardinality(v_moved) > 0 THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_PREVIEW_CHANGED: the per-acre prices changed since the preview; preview again: %',
+      array_to_string(v_moved[1:20], ', ') USING ERRCODE = 'check_violation';
+  END IF;
 
   v_result := jsonb_build_object('changed_count', v_changed, 'rows', v_results);
   PERFORM public.save_idempotency(p_idempotency_key, 'set_product_rates',

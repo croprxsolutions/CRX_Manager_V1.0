@@ -84,6 +84,17 @@ describe('correct rates while locked', () => {
     expect(onCorrected).not.toHaveBeenCalled();
   });
 
+  it('will not save prices it could not show exactly', async () => {
+    mockPreview.mockResolvedValue({ before: values(13, 4.06), after: values(16, 80_000_000_000_000) });
+    render(<ProductRateCorrectionModal open product={product} profileId="u1" unitOptions={['oz']}
+      onClose={vi.fn()} onCorrected={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'x' } });
+    fireEvent.change(screen.getByLabelText('Rate Per Acre'), { target: { value: '16' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByRole('button', { name: 'Save correction' })).toBeDisabled();
+    expect(screen.getByText('Invalid amount')).toBeInTheDocument();
+  });
+
   it('shows the database refusal text without its code', () => {
     expect(sanitizeError(new Error('PRODUCT_RATES_LOCKED: rates are locked; an admin can correct one product')))
       .toBe('Nothing was saved. Rates are locked; an admin can correct one product');

@@ -258,8 +258,14 @@ const versionOf = (p) => scalar(`SELECT pricing_version FROM public.products WHE
 // Like a fresh export: the per-acre inputs other than the rates are read from the product as it is now.
 const facts = (p) => JSON.parse(scalar(`SELECT json_build_object('pricing_version', pricing_version, 'unit_size', unit_size,
   'inventory_unit', inventory_unit, 'product_form', product_form) FROM public.products WHERE id = '${p}';`));
+// The prices the export's preview shows now; a row the preview refuses gets none (the writer refuses it first).
+const prices = (p, rate, unit) => {
+  const r = as(ADMIN, `SELECT public.preview_product_rate_correction('${p}', ${rate === '' || rate === null ? 'NULL' : rate}, ${unit === null ? 'NULL' : `'${unit}'`})->'after';`);
+  return r.status === 0 ? JSON.parse(r.rows.at(-1)) : {};
+};
 const row = (p, rate, unit, suggested, expected) => ({ product_id: p, rate_per_acre: rate, rate_unit: unit,
-  suggested_rate: suggested, expected: { rate_per_acre: expected[0], rate_unit: expected[1], suggested_rate: expected[2], ...facts(p) } });
+  suggested_rate: suggested, expected: { rate_per_acre: expected[0], rate_unit: expected[1], suggested_rate: expected[2], ...facts(p),
+    prices: prices(p, rate, unit) } });
 const setRates = (rows, key, actor = ADMIN) =>
   `SELECT public.set_product_rates('${JSON.stringify(rows)}'::jsonb, '${actor}', '${key}');`;
 const lock = (on, reason, key, actor = ADMIN) =>
@@ -308,6 +314,13 @@ function main() {
   refused(ADMIN, setRates([row(P.GAL, '1.1234567', 'oz', '', ['13', 'oz', '13 oz/A'])], 'k-scale'), /PRODUCT_RATE_INVALID: .*\[PROVER\] Gal/);
   // An unknown unit would price per acre as one ounce, so it is refused by name.
   refused(ADMIN, setRates([row(P.GAL, '2', 'gallons', '', ['13', 'oz', '13 oz/A'])], 'k-unit'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Gal/);
+  // A unit factor moved after the preview: refused by name, nothing saved; a row without prices is malformed.
+  const previewed = row(P.GAL, '20', 'oz', '', ['13', 'oz', '13 oz/A']);
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 0.5 WHERE unit = 'oz';");
+  refused(ADMIN, setRates([previewed], 'k-moved'), /PRODUCT_RATE_PREVIEW_CHANGED: .*\[PROVER\] Gal/);
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
+  refused(ADMIN, setRates([{ ...previewed, expected: { ...previewed.expected, prices: undefined } }], 'k-noprices'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
+  assert.match(rates(P.GAL), /^13\|oz\|/);
   refused(ADMIN, setRates([{ ...row(P.GAL, '2', 'oz', '', ['13', 'oz', '13 oz/A']), rate_unit: { a: 1 } }], 'k-obj'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
   // A rate with no unit is ambiguous, so it is refused; a correction is only for locked rates.
   refused(ADMIN, setRates([row(P.OTHER, '8', '', '', [null, null, null])], 'k-nounit'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\]/);

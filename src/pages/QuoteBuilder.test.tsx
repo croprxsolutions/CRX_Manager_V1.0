@@ -1345,6 +1345,51 @@ describe('QuoteBuilder', () => {
       expect(sessionStorage.length).toBe(0);
     });
 
+    it('keeps an earlier lost draw when a later retry is refused before its receipt is read', async () => {
+      const fixture = configureDrawDownFixture({ message: 'Failed to fetch' });
+      await submitOneUnitDraw(fixture.quote.id);
+      await waitFor(() => expect(drawCalls()).toHaveLength(1));
+
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'draw_down_quote'
+        ? { data: null, error: { code: 'P0001', message: 'DRAW_DOWN_CUTOVER_IN_PROGRESS' } }
+        : { data: null, error: null }));
+      let dialog = await reloadAndOpenDraw(fixture.quote.id);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Finish it' }));
+      await waitFor(() => expect(drawCalls()).toHaveLength(2));
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Finish it' })).not.toBeDisabled());
+      expect(sessionStorage.length).toBe(1);
+
+      dialog = await reloadAndOpenDraw(fixture.quote.id);
+      expect(await within(dialog).findByText(/got no reply/)).toBeInTheDocument();
+    });
+
+    it('will not finish a draw older than the server keeps its receipt', async () => {
+      const fixture = configureDrawDownFixture({ message: 'Failed to fetch' });
+      await submitOneUnitDraw(fixture.quote.id);
+      await waitFor(() => expect(drawCalls()).toHaveLength(1));
+
+      const dialog = await reloadAndOpenDraw(fixture.quote.id);
+      const finish = await within(dialog).findByRole('button', { name: 'Finish it' });
+      const stored = JSON.parse(sessionStorage.getItem(sessionStorage.key(0)!)!);
+      sessionStorage.setItem(sessionStorage.key(0)!, JSON.stringify({ ...stored, sentAt: stored.sentAt - 24 * 60 * 60 * 1000 - 1 }));
+      fireEvent.click(finish);
+
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('too old to finish safely')));
+      expect(drawCalls()).toHaveLength(1);
+      expect(within(dialog).queryByRole('button', { name: 'Finish it' })).not.toBeInTheDocument();
+
+      // A new draw is refused too, until the rep says they checked the booking's orders.
+      fireEvent.change(await within(dialog).findByRole('spinbutton'), { target: { value: '1' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      await waitFor(() => expect(mockToast.mock.calls.filter(([, text]) => String(text).includes('too old to finish safely'))).toHaveLength(2));
+      expect(drawCalls()).toHaveLength(1);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'I checked' }));
+      expect(sessionStorage.length).toBe(0);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      await waitFor(() => expect(drawCalls()).toHaveLength(2));
+      expect(drawCalls()[1].p_idempotency_key).not.toBe(drawCalls()[0].p_idempotency_key);
+    });
+
     it('offers nothing to finish after the server clearly refused the draw', async () => {
       const fixture = configureDrawDownFixture({ code: 'P0001', message: 'BOOKING_OVERDRAWN: only 5 gal left' });
       await submitOneUnitDraw(fixture.quote.id);

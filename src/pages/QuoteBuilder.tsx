@@ -227,6 +227,9 @@ interface DrawRow {
 }
 
 type DrawRequestLine = { product_id: string; quantity: number; extra_price?: 'today' | 'booked' };
+const isDrawRequest = (request: unknown): request is DrawRequestLine[] => Array.isArray(request)
+  && request.every((line) => typeof line?.product_id === 'string' && Number.isFinite(line.quantity) && line.quantity > 0
+    && (line.extra_price === undefined || line.extra_price === 'today' || line.extra_price === 'booked'));
 
 let keyCounter = 0;
 // The price changes save_quote recorded on this quote's sent lines (quote_price_changes, read-only
@@ -3553,7 +3556,7 @@ export default function QuoteBuilder() {
       return false;
     }
     let loaded = false;
-    setPendingDraw(loadPendingRetry<DrawRequestLine[]>(drawPendingName));
+    setPendingDraw(loadPendingRetry(drawPendingName, isDrawRequest));
     setDrawLoading(true);
     setShowDrawModal(true);
     try {
@@ -3644,7 +3647,18 @@ export default function QuoteBuilder() {
     // One key per quote: the server binds this key to its request, so edited details after a lost reply are refused with the committed result (a re-entered quantity can newly exceed what is left).
     // A key kept from before a reload wins over a fresh one, for the same reason (S14).
     const drawScope = id ?? '';
-    const drawKey = resume?.key ?? loadPendingRetry<DrawRequestLine[]>(drawPendingName)?.key ?? drawDownIdem.getKeyFor(drawScope);
+    const kept = loadPendingRetry(drawPendingName, isDrawRequest);
+    // Past the receipt's lifetime the server can no longer tell whether that draw was made, so any
+    // send could make a second order: refuse until the rep has checked the booking's orders.
+    if (kept?.expired || (resume && kept?.key !== resume.key)) {
+      setPendingDraw(kept);
+      setDrawing(false);
+      toast('error', 'An earlier Partial Order here got no reply, may have gone through, and is too old to finish safely. Check the orders on this booking first.');
+      return;
+    }
+    const drawKey = resume?.key ?? kept?.key ?? drawDownIdem.getKeyFor(drawScope);
+    // An earlier send with this key got no reply, so it may have made the order.
+    const earlierUnresolved = kept?.key === drawKey;
     savePendingRetry(drawPendingName, drawKey, drawPayload);
     try {
       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('draw_down_quote', withBelowCostReason('draw_down_quote', {
@@ -3675,8 +3689,10 @@ export default function QuoteBuilder() {
       navigate(`/orders/${result.order_id}`);
     } catch (error: unknown) {
       // The server answered and wrote nothing (or the rep cancelled the below-cost approval), so
-      // there is no lost reply to finish: forget the kept draw. Only a missing reply keeps it.
-      if (isBelowCostApprovalHandledError(error) || isDefinitiveRpcRejection(error)) {
+      // there is no lost reply to finish: forget the kept draw. Only a missing reply keeps it, and
+      // so does an earlier lost reply: some refusals (cutover, sign-in) come before the receipt
+      // check, so refusing this send says nothing about whether that earlier one made the order.
+      if ((isBelowCostApprovalHandledError(error) || isDefinitiveRpcRejection(error)) && !earlierUnresolved) {
         clearPendingRetry(drawPendingName);
         setPendingDraw(null);
       }
@@ -5864,7 +5880,24 @@ export default function QuoteBuilder() {
               remaining balance and stays open until it is fully drawn. You can send more than
               is left: the extra goes on its own order at the price you choose.
             </p>
-            {pendingDraw && (
+            {pendingDraw?.expired && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm flex items-start justify-between gap-3">
+                <p>
+                  Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}) got no reply
+                  and may have gone through, but it is too old to finish safely. Check the orders on this booking before drawing again.
+                </p>
+                <button
+                  onClick={() => {
+                    clearPendingRetry(drawPendingName);
+                    setPendingDraw(null);
+                  }}
+                  className="shrink-0 px-3 py-1.5 bg-crx-green text-white rounded-lg"
+                >
+                  I checked
+                </button>
+              </div>
+            )}
+            {pendingDraw && !pendingDraw.expired && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm flex items-start justify-between gap-3">
                 <p>
                   Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}) got no reply,

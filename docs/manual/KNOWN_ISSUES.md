@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-03 for the live ledger only (see the WP-PM-7, pm5-registry-refresh and WP-PM-9 changelog notes); other evidence retains its stated dates.
+**Last verified:** 2026-11-04 for the live ledger only (see the S02, S16b and #13 changelog notes); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -269,7 +269,7 @@ QuoteBuilder used to save the quote as Accepted (releasing its inventory holds) 
 failed second step left an accepted quote with no order. It now calls `convert_quote_to_order` on the sent or
 revised quote, which marks it accepted in the same transaction as the order; a failure leaves the quote as it was
 (proof: `scripts/smoke/smoke-convert-sent-quote-in-one-step.sql`). A direct `quotes.status` update by an owning
-rep can still flip a quote to accepted without an order (the column is writable); that path is not in the app. Candidate fix: `20261029090000` (PR #1200, not applied) refuses it at commit (`QUOTE_ACCEPTED_WITHOUT_ORDER`).
+rep could flip a quote to accepted without an order (the column is writable); that path is not in the app. Fix: `20261029090000` (PR #1200) refuses it at commit (`QUOTE_ACCEPTED_WITHOUT_ORDER`); it is in the live ledger (version `20261031103934`, re-read 2026-11-04), the live refusal was not re-tested.
 Q-2026-2059 (accepted, no order, no draws; seen 2026-10-25) predates the fix and is untouched.
 **The December pre-booking flow had the same gap** (raised by Maksym, checked in the code 2026-10-26): a
 Planned Program quote reserves its stock with holds (`create_planned_holds`), and the trigger
@@ -364,7 +364,7 @@ orders and job lines. Two later paths read `quote_items.price_per_unit` live ins
 `_blend_quote_pick_valid_20261020`, or the first line of the job's quote section) and the field-application
 invoice (`_save_field_app_invoice_impl_20260714`, `resolve_field_app_chemical_price`, which take the first quote
 line on the field with no status, customer or deleted filter). After a revision that changed a price and was not
-re-sent, either can bill the unsent price (with the candidate `20261029120000`, PR #1203, a price change recorded by `save_quote` is the agreed price and needs no re-send); the field-application lookup can also take a draft, declined or deleted
+re-sent, either can bill the unsent price (with `20261029120000`, PR #1203, in the live ledger as version `20261031130629`, a price change recorded by `save_quote` is the agreed price and needs no re-send); the field-application lookup can also take a draft, declined or deleted
 quote's price. Fix: read the price from the version last sent (or refuse like the lock), with a real-schema proof.
 
 ### KI-82 — The open quote screen can show a stale cost for a line it just saved

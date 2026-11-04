@@ -15,6 +15,14 @@
  *   2. psql (SUPABASE_DB_URL set): executes each chain via `psql -1 -f` and
  *      interprets the result itself.
  *
+ *   3. --live: sends each chain file, byte for byte, as ONE statement to the
+ *      live project through the Supabase Management API and grades the result
+ *      itself. Only chains named in smoke-specs.json, from this folder, that
+ *      raise SMOKE_PASS_ROLLBACK. The token is read in memory from Windows
+ *      Credential Manager and never printed or saved. Not read_only: chains
+ *      write fixtures, then the terminal raise rolls them back. Mason approved
+ *      this use on 2026-11-03 (docs/manual/SERVICES_AND_ACCOUNTS.md).
+ *
  * Result contract (both modes): every chain is a single DO block that ALWAYS
  * raises. Error text containing SMOKE_PASS_ROLLBACK = PASS (and proves the
  * rollback fired). Anything else = FAIL, reported with the message.
@@ -24,6 +32,7 @@
  *   node scripts/smoke/run-smoke.mjs --spec <rpc> [--spec <rpc> ...]
  *   node scripts/smoke/run-smoke.mjs --area <area> [--area <area> ...]
  *   node scripts/smoke/run-smoke.mjs --all
+ *   node scripts/smoke/run-smoke.mjs --live --spec <rpc>   (npm run smoke:live -- --spec <rpc>)
  *
  * --spec <rpc> matches a spec key OR any entry in a spec's "covers" array,
  * so `--spec receive_return` selects the return-credit chain.
@@ -39,12 +48,14 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { interpretResult, PASS_TOKEN } from './interpret-result.mjs';
+import { readCredentialToken } from '../lib/supabase-credential.mjs';
 
 export { interpretResult } from './interpret-result.mjs';
 
 const SMOKE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SPECS_PATH = path.join(SMOKE_DIR, 'smoke-specs.json');
 const AREAS_PATH = path.join(SMOKE_DIR, '..', 'test-areas.json');
+const LIVE_QUERY_URL = 'https://api.supabase.com/v1/projects/rhyzpcqhnizqbxphqdkr/database/query';
 
 /** Area vocabulary comes from scripts/test-areas.json so the two files can't drift. */
 const VALID_AREAS = (() => {
@@ -143,11 +154,12 @@ function dropPsqlOnly(selected) {
 }
 
 function parseArgs(argv) {
-  const args = { list: false, all: false, specs: [], areas: [], allowPrereqSkips: false };
+  const args = { list: false, all: false, live: false, specs: [], areas: [], allowPrereqSkips: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--list' || a === '-l') args.list = true;
     else if (a === '--all' || a === '-a') args.all = true;
+    else if (a === '--live') args.live = true;
     // Exploratory opt-out. A prerequisite skip exits NONZERO by default (see the
     // exit-code block at the bottom of main); this flag is for running --all
     // against a database that is deliberately behind, and it must be typed on
@@ -220,6 +232,53 @@ function runViaPsql(key, spec, dbUrl) {
   return interpretResult(`${res.stdout || ''}\n${res.stderr || ''}`);
 }
 
+/**
+ * The exact SQL --live may send for one registry key. Refuses anything that is
+ * not a runnable registry chain in this folder that raises the pass token.
+ */
+export function readLiveChain(specs, key) {
+  const spec = Object.hasOwn(specs, key) ? specs[key] : null;
+  if (!spec || typeof spec.chain !== 'string') throw new Error(`"${key}" is not in smoke-specs.json.`);
+  if (spec.container_only || spec.psql_only) throw new Error(`"${key}" is container-only or psql-only; --live never sends it.`);
+  const file = path.resolve(SMOKE_DIR, spec.chain);
+  if (path.dirname(file) !== SMOKE_DIR || !file.endsWith('.sql')) {
+    throw new Error(`"${key}" chain ${spec.chain} is not a .sql file in scripts/smoke/.`);
+  }
+  const sql = readFileSync(file, 'utf8');
+  if (!sql.includes(PASS_TOKEN)) throw new Error(`"${key}" chain ${spec.chain} never raises ${PASS_TOKEN}; refusing it.`);
+  return sql;
+}
+
+/**
+ * Management API response -> text interpretResult can grade. A raised error
+ * comes back as {"message":"Failed to run sql query: ERROR:  P0001: <text>"};
+ * drop the prefix and SQLSTATE so it reads like psql's "ERROR:  <text>".
+ * A success response means the chain did not raise, which is a FAIL.
+ */
+export function liveResultText(status, bodyText) {
+  if (status >= 200 && status < 300) return `chain returned without raising (HTTP ${status})`;
+  let message;
+  try { message = JSON.parse(bodyText)?.message; } catch { /* not JSON: report the raw body */ }
+  if (typeof message !== 'string') return `HTTP ${status}: ${bodyText.slice(0, 500)}`;
+  return message
+    .replace(/^Failed to run sql query:\s*/, '')
+    .replace(/^ERROR:\s+[0-9A-Z]{5}:\s+/, 'ERROR:  ');
+}
+
+async function runViaLive(key, specs, token) {
+  try {
+    const res = await fetch(LIVE_QUERY_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: readLiveChain(specs, key) }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    return interpretResult(liveResultText(res.status, await res.text()));
+  } catch (e) {
+    return { pass: false, message: `live run failed: ${e.message}` };
+  }
+}
+
 function printForClaude(key, spec) {
   const file = path.join(SMOKE_DIR, spec.chain);
   const sql = readFileSync(file, 'utf8');
@@ -242,15 +301,17 @@ function printForClaude(key, spec) {
   console.log(`\n--- end of ${spec.chain} ---\n`);
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   const specs = loadSpecs();
 
   if (args.help || (!args.list && !args.all && args.specs.length === 0 && args.areas.length === 0)) {
     console.log(
       'Usage: node scripts/smoke/run-smoke.mjs --list | --spec <rpc> [...] | --area <area> [...] | --all\n' +
-      '                                        [--allow-prereq-skips]\n\n' +
-      'Modes: SUPABASE_DB_URL set -> executes via psql and reports PASS/FAIL;\n' +
+      '                                        [--live] [--allow-prereq-skips]\n\n' +
+      'Modes: --live -> sends each chain unchanged to the LIVE project through the\n' +
+      '       Management API (Mason\'s stored token) and reports PASS/FAIL;\n' +
+      '       SUPABASE_DB_URL set -> executes via psql and reports PASS/FAIL;\n' +
       '       otherwise prints each chain with banners for Claude/MCP execution.\n\n' +
       `PASS contract: PostgreSQL error text starts '${PASS_TOKEN}'.\n\n` +
       'Prerequisite skips exit NONZERO by default: post-apply, a skip means the\n' +
@@ -316,9 +377,10 @@ function main() {
     );
   }
 
-  const dbUrl = process.env.SUPABASE_DB_URL;
-  // In Claude-first mode, keep chains with destructive probes out of the SQL
-  // printed for MCP. Unlike a normal print-only chain, this is not a pass.
+  // --live wins over SUPABASE_DB_URL: the caller asked for the live project.
+  const dbUrl = args.live ? null : process.env.SUPABASE_DB_URL;
+  // In Claude-first and --live modes, keep chains with destructive probes out
+  // of anything but psql. Unlike a normal print-only chain, this is not a pass.
   const psqlSkipped = dbUrl ? [] : dropPsqlOnly(selected);
   for (const [key] of psqlSkipped) {
     console.log(
@@ -337,7 +399,7 @@ function main() {
     );
   }
 
-  if (!dbUrl) {
+  if (!dbUrl && !args.live) {
     // Claude-first mode: emit the chains for MCP execution.
     for (const [key, spec] of selected) printForClaude(key, spec);
     console.log(
@@ -351,11 +413,12 @@ function main() {
     return;
   }
 
+  const token = args.live ? readCredentialToken() : null;
   let failures = 0;
   let prereqSkips = 0;
   for (const [key, spec] of selected) {
-    process.stdout.write(`[smoke] ${key} (${spec.chain}) ... `);
-    const result = runViaPsql(key, spec, dbUrl);
+    process.stdout.write(`[smoke] ${key} (${spec.chain}) ${args.live ? 'on LIVE ' : ''}... `);
+    const result = args.live ? await runViaLive(key, specs, token) : runViaPsql(key, spec, dbUrl);
     if (result.pass) {
       console.log('PASS (rolled back)');
     } else if (result.prereq) {
@@ -379,6 +442,10 @@ function main() {
   if (failures > 0) {
     console.log('A failing chain means the fix is NOT fixed - do not declare it done.');
     process.exitCode = 1;
+  }
+  if (psqlSkipped.length > 0) {
+    console.log('A psql-only chain was skipped and proved NOTHING; this run is not green.');
+    process.exitCode = 2;
   }
   // A prerequisite skip is a NONZERO exit unless it was asked for explicitly.
   //
@@ -411,5 +478,5 @@ const modulePath = fileURLToPath(import.meta.url);
 if (invokedPath && (process.platform !== 'win32'
   ? invokedPath === modulePath
   : invokedPath.toLowerCase() === modulePath.toLowerCase())) {
-  main();
+  main().catch((e) => fail(e.message));
 }

@@ -81,7 +81,12 @@ template is `.env.example`.
   guard recognises, always with `read_only: true`, and never prints or saves the token.
   (Mason's yes, 2026-11-03) `node scripts/regenerate-schema-registry.mjs --live` uses it the
   same way for the six fixed catalog queries that rebuild `.claude/schema-registry.json`.
-  `scripts/apply-migration-file.mjs`, the sweep runner and the registry refresh read it themselves through
+  (Mason's yes, 2026-11-03, about 7:30 PM Central: "Do 1 (approve token)".) `npm run smoke:live`
+  (`scripts/smoke/run-smoke.mjs --live`) uses it to run post-apply smoke chains on live. It sends
+  only `.sql` files that `scripts/smoke/smoke-specs.json` names, from `scripts/smoke/`, unchanged
+  and one statement each. It refuses a file with no `SMOKE_PASS_ROLLBACK`. These requests are NOT
+  `read_only`: a chain writes test rows, then its final error rolls every write back.
+  `scripts/apply-migration-file.mjs`, the sweep runner, the smoke runner and the registry refresh read it themselves through
   `scripts/lib/supabase-credential.mjs` (2026-11-02), so no session sets `SUPABASE_ACCESS_TOKEN`
   or builds a launcher. For the apply script only, a set `SUPABASE_ACCESS_TOKEN` still wins. The developer should get their own
   Supabase login, not this token.

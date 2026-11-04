@@ -10,6 +10,21 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-03 — Live smoke chains run byte-exact with Mason's Supabase token
+
+**Source:** Mason, about 7:30 PM Central on 2026-11-03 (session d0657249, retro proposal 1): "Do 1 (approve token)".
+
+**Decision.** `npm run smoke:live` (`scripts/smoke/run-smoke.mjs --live`) may use the Supabase
+Management token in Credential Manager to run post-apply smoke chains on live. This extends the
+2026-11-02 read-only sweep approval (`docs/manual/SERVICES_AND_ACCOUNTS.md`). It sends only chain
+files named in `scripts/smoke/smoke-specs.json`, unchanged, and refuses any file without
+`SMOKE_PASS_ROLLBACK`. The requests are not `read_only`, because each chain writes test rows and
+then rolls them back with its final error. Agents no longer retype chains into MCP `execute_sql`.
+
+**Why.** On 2026-11-03 (PR #1398) one 15KB chain was retyped by hand. That is the failure that cut
+off sweeps and led to `db-sweeps:live`, and a retyped chain can't prove the file itself ran. A
+33KB chain also ran from a throwaway script, using the token before Mason had approved it.
+
 ## 2026-11-03 — Product Master Wave 3 plan fixes (vendor steps, rate lock split, gates)
 
 **Source:** Mason's in-chat "ok fix all issues" on 2026-11-03, after an independent read-only review

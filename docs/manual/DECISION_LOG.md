@@ -10,6 +10,20 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-04 — A trigger's TRUNCATE event no longer counts as deleting data
+
+**Source:** Mason, 2026-11-04, in the retro of the WP-PM-11a-1 session (PR #1425): "spin up item 2".
+
+**Decision.** `destructiveMigrationCheck` (`.claude/hooks/live-testdata-lib.mjs`) ignores `TRUNCATE`
+only where it is an event in a `CREATE [OR REPLACE] [CONSTRAINT] TRIGGER … BEFORE|AFTER|INSTEAD OF … ON`
+event list. Such a trigger blocks a table wipe; it cannot perform one. Every real `TRUNCATE`
+statement stays destructive: at top level, in a DO block, in an `EXECUTE` string, or beside a
+trigger in the same file. A function the migration runs that truncates is still parked by the
+data-rewrite check. The destructive-migration approval gate is otherwise unchanged.
+
+**Why.** PR #1425's append-only audit tables use `BEFORE TRUNCATE` triggers, and the owner-approval
+screen told Mason that migration "Deletes data: TRUNCATE", which was false.
+
 ## 2026-11-03 — A migration's apply accepts a carried-forward Sol proof
 
 **Source:** Mason, about 11 PM Central on 2026-11-03 (session 0beec9c6, after the PR #1389 landing): "Yes, update the rule".

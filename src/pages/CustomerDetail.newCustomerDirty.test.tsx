@@ -40,6 +40,7 @@ afterEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   root?.unmount();
   root = null;
+  document.body.innerHTML = '';
 });
 
 describe('blank /customers/new', () => {

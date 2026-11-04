@@ -14,6 +14,14 @@
 > with no back-entry of past purchases. Totes are mostly stocked already filled; there is no bulk chemical
 > storage, only fertilizer.
 >
+> **Revised 2026-11-04 (afternoon) after a Sol (gpt-6-sol, high) review of the whole plan, 44 findings.**
+> Mason's direction: **keep it simple but practical; this is not a major feature.** Changes: vendor-bill
+> matching moves into Phase 4 (D11) and Phase 4 is simplified to a report on explicitly linked shipments
+> (section 9); the engine's hard questions are listed in section 4.8; wording fixed throughout. **Then Sol
+> checked the plan against the real code (33 findings, one refuted):** Phase 1's age rule became a starting
+> date per product plus CRX receipts after it (the ledger cannot be replayed reliably); PR 1A tightens write
+> permissions on receipts and the stock ledger; Phase 2's scope is now the small design (section 4.0).
+>
 > **What changed in the 2026-11-04 refresh** (against current `main`, the live database and the research report
 > `docs/research/2026-11-03-inventory-cost-valuation/README.md`, draft PR #1428, reviewed by Sol in three rounds):
 > 1. The engine's number is renamed **"average recorded PO cost"** (it was "on-hand average purchase cost").
@@ -22,9 +30,9 @@
 >    Phase 2. Freight and rebates (Phase 3), the sell-then-buy true-up (Phase 4) and pricing hooks (Phase 5) are
 >    added as later phases, each with its own plan and review. Each phase names its Sol-required paths.
 > 3. The report's design corrections are folded in: a cost status on **every receipt** (section 6), the initial
->    snapshot-vs-receipt difference recorded at allocation (section 9), a deterministic cost-forwarding process
+>    snapshot-vs-receipt difference recorded at allocation (section 9; replaced by the simplified Phase 4), a deterministic cost-forwarding process
 >    for late costs (section 7), quantity-based order ↔ PO ↔ receipt allocation with ordered, received, delivered,
->    invoiced and credited limits (section 9), rebate eligibility and receipt-allocation records (section 8),
+>    invoiced and credited limits (section 9; replaced by explicit special-order links), rebate eligibility and receipt-allocation records (section 8),
 >    freight allocation (section 8), coverage and partial-total rules (section 3.2), and a verified common unit
 >    for both receipt and inventory quantities (Gate 0, section 5).
 > 4. Section 2 was re-grounded on 2026-11-04 with read-only live queries. The C1 writer list (section 4.3) was
@@ -67,16 +75,19 @@ Four separate cost facts, never merged:
 | 3 | Recorded PO-line cost | `purchase_order_items.unit_cost` / `unit_cost_cents` | not a matched vendor bill; can come from the catalog |
 | **4** | **Average recorded PO cost** (NEW, Phase 2) | **this engine** | inventory value, provisional until bills are matched |
 
-**Label honestly.** Fact 4 is an **average recorded PO cost**. It stays *provisional* until vendor bills,
-freight and rebates are matched (Phases 3-4); only then may it be called an **invoiced net acquisition cost**.
-It is never "average paid" or "true cost". It never writes `products.current_cost` (the 2026-03-13 doctrine:
+**Label honestly.** Fact 4 is an **average recorded PO cost**. It stays *provisional* until vendor bills are
+matched (Phase 4); then the matched share may be called **vendor-billed cost**. With freight and rebates left
+out (D7) it is never called "net acquisition cost", "average paid" or "true cost". Because the pool also holds
+owner-confirmed opening costs and estimated additions (sections 4.4-4.5), the screen always shows, beside the
+average, the share of value that came from CRX receipts. It never writes `products.current_cost` (the 2026-03-13 doctrine:
 the pricing basis is an owner decision). These are management numbers; the books stay in QuickBooks Desktop
 and use the cost basis the accountant approves.
 
 ## 2. Verified current state (re-grounded 2026-11-04, read-only)
 
-- **Ledger is unsigned:** `inventory_transactions.quantity` is a magnitude; direction lives in
-  `transaction_type`. Allowed types (CHECK): `received`, `booked`, `delivered`, `returned`, `adjusted`,
+- **Ledger direction:** `inventory_transactions.quantity` is a positive magnitude with direction set by
+  `transaction_type`, **except `adjusted` and `returned`, which are signed** (adjusted: 26 positive, 11
+  negative live; a cancelled customer return writes a negative `returned` row; corrected after the Sol review). Replaying physical movements matches on-hand for 107 of 117 products. Allowed types (CHECK): `received`, `booked`, `delivered`, `returned`, `adjusted`,
   `transferred`, `job_applied`, `cancelled_delivery_reversal`, `void_delivery_reversal`, `prebooked`,
   `released`, `prebook_reconciliation`. Live counts: booked 295, delivered 204, received 136, adjusted 37,
   prebook_reconciliation 32, prebooked 22, released 21, job_applied 6, void_delivery_reversal 5; `returned`,
@@ -124,27 +135,26 @@ and use the cost basis the accountant approves.
 ## 3. Phase 1 — Reporting only (FIRST STEP; needs Mason's go-ahead)
 
 **Detailed build plan:** `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`. It adds decision
-D10 (a bulk estimated-date entry), so Phase 1 now has one small append-only table and one admin write function.
+D10 (a bulk estimated-date entry). **Where this section and the build plan differ, the build plan wins.**
 
-No new tables, no change to any inventory writer, no change to prices, orders, invoices or commissions.
-New read-only, admin-only RPCs (`SECURITY DEFINER` with `SET search_path = public, pg_temp`, explicit grants,
-role check inside) and **one setting row** for the annual carrying rate (a small, non-destructive migration).
+Two small append-only tables (owner starting dates: batches and lines) and one admin save function; no change to any inventory
+writer, prices, orders, invoices or commissions. New read-only, admin-only RPCs (`SECURITY DEFINER` with
+`SET search_path = public, pg_temp`, explicit grants, role check inside) and **two setting rows** (holding
+rate, aged-days threshold), validated in the database (a small, non-destructive migration).
 
 ### 3.1 What it shows
 
 1. **Rename** today's Inventory Cost report and Inventory page total to **"Pricing-basis valuation"**. Never
    silently change what an existing report means.
-2. **Estimated aging report:** on-hand quantity allocated to the newest receipts first (oldest assumed sold
-   first), from `receiving_records.received_at`, in buckets 0-90 / 91-180 / 181-365 / 366+ days and
-   **"age unknown"**. It counts a product only where receipt **and** inventory quantities are verified in a
-   common unit and reconcile to recorded movements (Gate 0's check, read-only here); everything else is
-   "age unknown". Past quantities are never silently repaired inside a report. It stays an **estimate** in
-   every phase; exact age needs lots tracked through every movement (decision D6). A row with zero or negative
-   on-hand is never allocated to receipts: it shows 0 aged quantity, no holding charge, and is listed as
-   **"negative stock — not aged"** (never a negative bucket or a negative charge).
-3. **Estimated holding charge** for receipt-attributed stock only: annual rate × days held ÷ 365 × cost
-   basis, with the assumed age and cost basis shown; unmatched stock shows "unknown". It is a period expense
-   for decisions, never added to inventory value.
+2. **Estimated aging report:** a starting date per product entered by Mason (D10), plus CRX receiving records
+   after it, newest first, up to today's on-hand (build plan section 3). Dates are trusted only while the
+   history since the starting date is plain receipts (units matching), deliveries and jobs that add up to
+   on-hand; otherwise the row asks for a new starting date. The ledger is **not** replayed: the code check showed it cannot be tied to
+   receipts reliably. Past quantities are never silently repaired inside a report. It stays an **estimate** in
+   every phase (D6). Rows below zero are listed as **"negative stock — not aged"**; rows at zero are left out.
+3. **Estimated holding charge** for dated stock (receipt or starting date, shown separately): annual rate ×
+   days held ÷ 365 × price-list cost, labelled "estimate at today's cost and rate"; unknown stock gets none. It
+   is a decision aid, never added to inventory value.
 4. **Replacement-cost and price-exposure columns** only where a current, unit-matched supplier price exists:
    price exposure = units on hand × (pricing-basis cost − replacement cost). A replacement-cost drop is a
    review signal, not a write-down test.
@@ -152,8 +162,9 @@ role check inside) and **one setting row** for the annual carrying rate (a small
 
 ### 3.2 Coverage and partial-total rules (apply to every phase's reports)
 
-- Every column shows its **coverage**: the share of eligible product-location rows, and of unit-normalized
-  quantity, that it can measure.
+- Every column shows its **coverage**: the share of eligible product-location rows, and of pricing-basis
+  value, that it can measure. A unit-normalized quantity coverage is added only once Gate 0 verifies units;
+  quantities in different units are never summed.
 - Any sum over incomplete coverage is labelled **"partial"**, with the excluded rows and their likely
   materiality listed beside it. An unqualified total appears only at **complete, reconciled** coverage.
 - Age-bucket dollars appear only labelled *quantity × stated valuation basis*; neither cost basis identifies
@@ -169,9 +180,32 @@ nothing; prove the renamed report's totals equal the old ones to the cent.
 **Sol-required paths:** yes — `supabase/` (RPCs and the setting migration) and `src/pages/Reports.tsx`
 (also `InventoryPage` if its file name carries a money word; run the classifier).
 
-## 4. Phase 2 — The average-cost engine (PARKED; the original C1-C4)
+## 4. Phase 2 — Cost of stock on hand (PARKED)
 
-**Perpetual moving weighted-average pool per product + location, value in integer cents, event-sourced,
+### 4.0 Phase 2 scope: the small design (recommended, 2026-11-04)
+
+Mason: "keep it simple but practical, this is not a major feature". Sol's code check showed a report cannot
+rebuild a running average from today's data (no receipt links, no posting order). So Phase 2 reuses Phase 1's
+age layers and gives each one a cost:
+- **Starting-point lines** get Mason's confirmed cost per unit, entered at the physical stock count before busy
+  season (D9), as a new starting batch with costs.
+- **Receipts after the starting point** get the PO-line unit cost **frozen at receipt**: one new column on
+  `receiving_records`, written by the receiving function (the only existing writer this touches). Receipts
+  before the build have no frozen cost and are covered by the stock count.
+- **Value of stock on hand** = Σ layer quantity × layer cost over **costed layers only**; **average** = that
+  value ÷ the costed quantity (never ÷ all on-hand), labelled "average recorded cost of stock on hand" with
+  the share from CRX receipts shown. Uncosted or age-unknown quantity is never valued at zero: the row shows
+  "partial — N units without a cost" until it is fully covered, and partial rows are labelled as such in
+  totals (section 3.2). Rows that fail Phase 1's "adds up"
+  check show "value unknown — re-enter starting date".
+- No event stream, no guards on stock writers, no cost forwarding. Vendor-bill cost replaces PO cost on a
+  receipt's layer once Phase 4 settles it.
+
+**Option B — the full event-sourced engine (sections 4.1-4.7 below):** kept as a design record only. It needs
+its own approval, and the code prerequisites in section 4.8 items 13-14, and is built only if the small design
+proves not good enough.
+
+**Option B: perpetual moving weighted-average pool per product + location, value in integer cents, event-sourced,
 T0-forward, reporting-only screens.**
 
 - **Pool math:** state = physical on-hand quantity `Q` + total on-hand value `V` (integer cents). Displayed
@@ -193,6 +227,11 @@ T0-forward, reporting-only screens.**
   `_mark_inventory_row_verified_replay_impl_20261015`, do not move `quantity_available` and pass.) React flows
   stay unchanged.
 - **T0-forward only:** no reconstruction of history before the owner-approved opening (section 4.4).
+- **Dark until switched on (Sol 2026-11-04 #3):** the writers' cost-event code and both guards ship
+  **inactive**. One atomic switch-on writes the openings, initializes state, activates costing and turns the
+  guards on together, so no delivery can post between "events required" and "pool opened".
+- **BLK-1a (shop-fill quantities, grand plan overlap 14) must land before switch-on** or carry its own cost
+  events; a quantity-only movement after switch-on would be rejected by the guard (Sol #4).
 
 ### 4.1 Negative-stock policy (Sol disagreement #1)
 
@@ -256,8 +295,10 @@ with no caller and no API grant; confirm it stays unreachable or drop it in a re
 
 Dedicated **Inventory Valuation Opening** workbook (same parser, validation, row_version, preview and
 change-set machinery as the pricing workbook, separate workflow): a frozen export of every inventory row
-(positive and negative); suggested cost = most recent **received** PO cost after verified conversion, else the
-price-list cost labelled "pricing-basis estimate"; Mason confirms every nonzero row; products with no receipt
+(positive and negative); suggested dates = Phase 1's starting dates; suggested cost = **today's** recorded
+PO-line cost of the most recent received line after verified conversion (receipt-day cost is not stored and PO
+lines can be edited, Sol code check #26), else the price-list cost, each labelled an estimate; Mason confirms
+every nonzero row; products with no receipt
 history need explicit values; negative rows collect a **provisional deficit cost**. Quantity-only shop fills
 recorded by BLK-1a before T0 are listed, never given an invented history. Apply is atomic; any quantity drift
 since export rejects the workbook. The same transaction writes `inventory_cost_openings`, initializes state
@@ -266,7 +307,8 @@ and activates costing at exact T0. Opening values stay marked **owner-establishe
 ### 4.5 Confidence model
 
 Per product: **Confirmed** (every remaining cent from receipts whose cost status is *settled*, or exact
-reversals) / **Provisional** (from receipts not yet settled) / **Estimated** (opening declaration, pricing-basis
+reversals; possible only once Phase 4 matches bills, so in Phase 2 every receipt is provisional) /
+**Provisional** (from receipts not yet settled) / **Estimated** (opening declaration, pricing-basis
 fallback, pre-T0 return, count gain; tracked as `estimated_value_cents`, removed proportionally) / **Needs
 review** (negative stock, unverified unit, unresolved cost, unpaired event, state mismatch) / **No stock**.
 Display: last receipt date, % of value from settled receipts, late-posting count. One exception list; cost
@@ -286,7 +328,7 @@ events, moves Bulk's average recorded PO cost per gallon (exact attributable cen
 added for the tote), keeps provisional/estimated status, and creates no P&L. A vendor-filled tote keeps its own
 receipt cost. A safe undo restores the exact cents. No container, labor or yield allocation.
 
-### 4.7 Phase 2 sub-steps
+### 4.7 Option B sub-steps (not the default Phase 2 scope; see 4.0)
 
 - **Gate 0 (section 5)** — verified common unit. Must pass before C1 can value any receipt.
 - **C1 — Dark foundation:** tables, private cents-pool engine, negative-stock variance, companion events in
@@ -297,6 +339,42 @@ receipt cost. A safe undo restores the exact cents. No container, labor or yield
 - **C3 — Reporting-only UI:** product page shows the four facts with labels; a new **"Average recorded PO cost
   valuation"** report beside the pricing-basis one; confidence and coverage on every column (section 3.2).
 - **C4 — Custom-fill coverage:** classify tote rows (decision D8), then BLK-1b.
+
+### 4.8 Questions Phase 2's own plan must answer (Sol review, 2026-11-04)
+
+Phase 2's scope is the small design in section 4.0. Items 1-12 and 14 below apply mainly to **Option B** (the
+full engine); its plan must answer each one, with a worked example and a test, before any build. For the small
+design, items 9 (units), 10 (PO cost edits: the frozen receipt cost never changes) and 12 (admin-only) apply:
+1. **Negative stock:** the exact equations for issuing with no average, repairing a deficit and resolving an
+   unresolved issue (Sol #23).
+2. **Receipt reversal after some stock sold:** reversing the whole receipt can leave negative value; define a
+   forward adjustment instead (Sol #24).
+3. **Partial returns:** remaining returnable quantity and cents per original issue; the last return takes the
+   last cent (Sol #25). Later cost corrections and linked returns (Sol #26).
+4. **Cost forwarding (section 7):** the algorithm, posting order, rounding remainder and reversal; or drop it
+   and post late differences to the current period only (Sol #27).
+5. **Status changes without value changes:** how provisional cents become settled (Sol #28).
+6. **The guard checks the match, not just existence:** product, location, signed quantity and type, one to
+   one (Sol #29).
+7. **One lock per product pool** for every event, with posting order taken after the lock (Sol #30).
+8. **Switch-on checks the whole inventory set** (new rows, unit changes) and says how a new product enters an
+   active pool (Sol #31).
+9. **Units:** valuation needs a snapshotted numeric conversion; the receipt total is supplier quantity × unit
+   price, rounded once, and inventory quantity = supplier quantity × factor (Sol #32, #33).
+10. **PO cost edits after receipt** never change the receipt event; an authorized correction posts a linked
+    adjustment (Sol #34).
+11. **Partial fill from a full tote (C4)** needs an approved product-to-product conversion and a quantity
+    balance check (Sol #39).
+12. **Admin-only by database:** every new cost field is read only through admin-checked functions, proven by
+    a rep's real API responses (Sol #40).
+13. **What the code lacks today (Sol code check, 2026-11-04):** a `received` ledger row has no receiving-record
+    or PO-line link; ledger rows written together can share a timestamp (no posting sequence); signs differ by
+    writer (`adjusted` and `returned` signed; void reversals use `from_location` in one writer and
+    `to_location` in another); not every stock change is guaranteed a ledger row. The full engine would need a
+    receipt link, a posting sequence and per-writer sign and location mapping first.
+14. **Guards must cover inventory INSERT and DELETE, not just UPDATE** (manual add, retirement, phantom rows),
+    treating a missing row as zero, and be keyed by product **and** location (one location is today's data,
+    not a database rule).
 
 **Sol-required paths:** yes — `supabase/` (every writer body), `src/components/receiving/`,
 `src/pages/Receiving.tsx`, `src/pages/ProductDetail.tsx`, `src/pages/Reports.tsx`, and any inventory or money
@@ -320,15 +398,16 @@ disagree with on-hand.
 
 ## 6. Cost status on every receipt
 
-Each receiving record carries a cost status, whether or not it serves an order:
+**Built in Phase 4 with vendor-bill matching (D11).** Until then every receipt is provisional and no status
+is stored. Each receiving record then carries a cost status, whether or not it serves an order:
 - **provisional** — valued at the recorded PO-line cost;
-- **partially matched** — some vendor-bill lines or charges matched to part of its quantity;
-- **settled** — bill lines, freight and credits matched for its whole quantity.
+- **partially matched** — vendor-bill lines matched to part of its quantity;
+- **settled** — vendor-bill lines matched for its whole quantity (freight and rebates are out, D7).
 
 This is separate from `purchase_order_items.cost_needs_review` (which only means an admin entered a cost).
-Bills, credits and freight arrive separately, so one status per PO line is too coarse; matching is by receipt
-quantity. A later credit after settlement posts as a further adjustment. An order allocation's "pending final
-cost" status is derived from the receipts it uses. Status lives in PostgreSQL and changes only through
+Bills and credits arrive separately, so one status per PO line is too coarse; matching is by receipt
+quantity. A later credit after settlement posts as a further adjustment. A linked special order's "pending bill"
+label is derived from the receipts it uses. Status lives in PostgreSQL and changes only through
 idempotent, admin-only RPCs.
 
 ## 7. Deterministic cost forwarding for late costs
@@ -357,26 +436,41 @@ Kept as the design record if freight or rebates are revisited.
   rebate to the receipts that earn it. Estimate, actual and catch-up adjustments are kept separate and split
   between stock on hand and stock already sold. Estimates need accountant approval. Today's `rebate_claims`
   (orders and customers only) are not enough.
-- Needs a vendor-bill line table matched to receipt quantities (section 6).
+- Vendor-bill lines matched to receipt quantities moved to Phase 4 (D11); this phase would reuse them.
 
 **Sol-required paths:** yes — `supabase/`, `src/pages/Rebates.tsx`, `src/components/receiving/`.
 
-## 9. Phase 4 — Sell-then-buy true-up (PARKED)
+## 9. Phase 4 — Vendor bills and special-order true-up (PARKED; simplified 2026-11-04)
 
-1. **Quantity-based allocation table** linking order line ↔ PO line ↔ receiving record with a quantity, so one
-   PO fills several orders and several receipts fill one order. PostgreSQL enforces separate limits for
-   **ordered, received, delivered, invoiced and credited** quantities in unit-verified quantities, checked in
-   aggregate under row locks; every write takes `p_idempotency_key`.
-2. **Initial difference at allocation:** when a receipt is allocated, record the difference between the sale's
-   snapshot cost and the allocated receipt cost as the first append-only adjustment. Otherwise a sale booked at
-   $100 and filled at $110 is never corrected even when the bill equals the PO.
-3. **Later adjustments** (bill, credit, freight, rebate) post as further linked rows and flow through the pool
-   by section 7.
-4. **Three margin views, never mixed:** *snapshot margin* (today's reports, unchanged); *adjusted order margin*
-   (snapshot + initial difference + later adjustments; "pending final cost" until its receipts are settled);
-   and the *inventory-cost view* from the engine. Each report states which it uses; period reports place
-   adjustments by effective date and reconcile to QuickBooks before going live.
-5. Unlinked historical sales get a read-only "likely next PO" variance report, labelled an estimate.
+Kept small on purpose (Mason: "keep it simple but practical"). Live today: no table links an order line to a
+PO line, and `vendor_bills` has no line table.
+
+1. **Vendor-bill lines (D11).** A bill gets lines; an admin matches each line to a receiving record and
+   quantity (one bill line may cover part of a receipt). Matching sets the receipt's cost status (section 6).
+   Amounts in integer cents; matching is an idempotent admin-only RPC; matched quantity can never exceed the
+   received quantity, enforced in PostgreSQL under a row lock.
+2. **Special-order link.** For a special order, an admin links each **invoiced sale line** (`invoice_items`)
+   to the **receiving record** (the actual shipment) that supplied it, with a quantity in the same
+   unit-verified unit (Gate 0). Linking at the invoice line settles which shipment supplied which invoiced
+   units, across partial deliveries and invoices. Only explicit links count; an unlinked sale is never matched
+   to a PO by guesswork (Sol #36). PostgreSQL keeps the **sum of all active links** to a receipt within its
+   received quantity, and to an invoice line within its quantity minus credited quantity, and the sum of all
+   bill matches to a receipt within its received quantity, each checked under row locks.
+3. **A report, not new postings.** For each link: booked cost = `invoice_items.cost_cents` (a **per-unit**
+   snapshot) × linked quantity; corrected cost = the receipt's frozen PO unit cost (section 4.0) × linked
+   quantity, except that units covered by the receipt's matched bill lines use the bill price. Bill-matched
+   units are applied to links in link order, and the report shows the "billed" and "pending bill" portions
+   separately until the receipt is fully settled. Each line is rounded once to cents. Credits reduce the
+   linked quantity first (Sol #38). It writes nothing to invoices, commissions or the inventory pool, so
+   nothing is counted twice (Sol #35).
+4. **Two margins side by side** (Mason, special-order decision): *booked margin* (today's, unchanged) and
+   *corrected margin* (with its pending-bill portion shown).
+5. If Phase 2 is live, a matched bill difference reaches the inventory pool only through the method Phase 2's
+   plan chose (section 4.8, item 4).
+6. **Receipt reversal:** today `reverse_receiving_record` refuses a receipt whenever its PO has **any** active
+   vendor bill. Once bill lines exist, the rule changes to refuse only a receipt with its own active bill
+   matches or special-order links; those must be unmatched or unlinked first, through recorded,
+   append-only actions.
 
 **Sol-required paths:** yes — `supabase/`, money reports and any `src/` file with a money word.
 
@@ -402,18 +496,19 @@ numbers is decision D2.
 - **`inventory_cost_state`** (rebuildable projection): on_hand_quantity, value_cents, estimated_value_cents,
   provisional_value_cents, negative_provisional_value_cents, unresolved_quantity, last basis qty/value,
   last_event_id, last_receipt_at, late_posting_count, row_version.
-- **Receipt cost status** (section 6), **allocation** and **cost-adjustment** tables (Phase 4), **freight** and
+- **Receipt cost status** (section 6), **vendor-bill lines** and **special-order links** (all Phase 4), **freight** and
   **rebate eligibility / allocation** tables (Phase 3): each designed in its own phase plan.
 
 **Hard Rules for every phase:**
 - Money is integer cents (bigint) in storage and arithmetic; averages are derived, never stored rounded.
-- Invariants (pool balance, allocation limits, completeness, append-only) live in PostgreSQL: RPCs,
+- Invariants (pool balance, bill-match and link limits, completeness, append-only) live in PostgreSQL: RPCs,
   triggers and constraints, not React.
 - Every mutating RPC accepts and enforces `p_idempotency_key text DEFAULT NULL`. Every **new** costing RPC
-  (opening apply, receipt cost status, allocation, adjustment, cost forwarding, repack) **refuses a null key**,
-  so a retry cannot post twice. Keys are scoped by operation name and actor (the existing `idempotency_keys`
-  pattern): a key reused for a different operation is refused, never answered with another operation's cached
-  result. Existing writers keep their current key contract; their companion cost events cannot duplicate
+  (opening apply, receipt cost status, bill matching, special-order link, adjustment, cost forwarding, repack) **refuses a null key**,
+  so a retry cannot post twice. Keys follow the existing `check_idempotency_intent` contract: a key is
+  globally unique, bound to its operation, actor and a fingerprint of the full request, so a key reused for a
+  different operation, actor or request is refused, never answered with another request's cached result.
+  Because cached keys expire, each new table also stores the key under a unique constraint. Existing writers keep their current key contract; their companion cost events cannot duplicate
   because `inventory_cost_events.inventory_transaction_id` is UNIQUE.
 - Every new table has RLS and policies in the same migration; no anon; no client DML policies; append-only
   triggers reject UPDATE/DELETE.
@@ -428,19 +523,21 @@ Taken from report section 7, plus this plan's own. Mason answered D2-D9 in a pla
 he asked to plan the whole thing before anything is built. Live check that day: the last receipt in CRX was
 2026-06-10 and no PO has been created in the last 60 days.
 
-- **NEEDS MASON - DECISION REQUIRED (D1): approve building Phase 1** (reporting only, no new tables). Still open:
-  Mason wants the full plan settled first.
+- **NEEDS MASON - DECISION REQUIRED (D1): approve building Phase 1** (reports plus one small owner-estimate
+  table and its save action; build plan `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`). Still
+  open: Mason wants the full plan settled and checked against the code first.
 - **D2 — DECIDED: admins only.** The new cost numbers (holding charge, replacement cost, stock age) follow
   today's rule: only admins see any cost. Reps see nothing new.
 - **D3 — DECIDED: 270 days.** Stock older than 270 days is flagged (Phase 1 dead-stock list; Phase 5 quote
   warning).
 - **D4 — DECIDED: flat 10% a year for now, adjustable later.** Mason: "set it to a flat 10% for now but make this
-  adjustable in future." Phase 1's one setting row defaults to 10% and is an admin-editable setting.
+  adjustable in future." Phase 1's rate setting defaults to 10% and is an admin-editable, database-checked setting.
 - **D5 — DECIDED (order only): Phase 1 → Phase 2 → Phase 4 → Phase 5.** Phase 3 is dropped (D7). Each phase still
   needs its own build go-ahead, plan, Luna and Sol review.
 - **D6 — DECIDED: no lots.** Estimated age is enough. Age stays an estimate in every phase.
 - **D7 — DECIDED: no freight or rebates for now.** Phase 3 is not planned. Cost stays the vendor price on the PO;
-  sections 7 and 9 keep freight and rebate hooks out of scope until revisited.
+  sections 7 and 9 keep freight and rebate hooks out of scope until revisited. Vendor-bill matching, which used
+  to sit in Phase 3, is **not** dropped: it moved to Phase 4 (D11).
 - **D8 — DECIDED: totes are stocked already filled.** Totes are mostly bought and kept filled on the shelf, so
   they keep their own receipt cost. Occasionally a customer wants a custom amount, filled from a full tote into
   a partial container. There is **no bulk chemical storage, only fertilizer**. So C4 becomes a narrow "full tote →
@@ -453,19 +550,27 @@ he asked to plan the whole thing before anything is built. Live check that day: 
   up.
 - **D10 — DECIDED: gap stock shows "age unknown", with a bulk date entry.** Mason (2026-11-04): "show age
   unknown but allow a bulk edit add a date etc". Stock CRX cannot date because of the June gap shows "age
-  unknown"; admins can select many products and enter an estimated received date (optionally the quantity it
-  covers and a note), shown as an "owner estimate". Details: the Phase 1 build plan, section 4.
+  unknown"; admins can select many products and enter an estimated received date (optionally split by
+  quantity, with a note). After the code check this became each product's **starting date**: CRX receipts after
+  it are added on top. Details: the Phase 1 build plan, section 4.
+- **D11 — DECIDED: vendor-bill matching goes into Phase 4.** Mason (2026-11-04, after the Sol review): "on item
+  2 yes we need to do vendor bill matching into phase 4". Phase 4 adds vendor-bill lines matched to receipts,
+  without freight or rebates (section 9). Mason also asked that every phase stay simple and practical.
 - **Special-order margin — DECIDED: show both.** Phase 4 keeps the margin booked at the sale and shows the
-  corrected margin beside it once the bill lands; invoices never change (section 9, view 4).
+  corrected margin beside it once the bill lands; invoices never change (section 9, item 4).
 - **Ask the accountant:** which cost basis QuickBooks should carry once CRX can produce a complete one, and
   whether carryover stock needs a write-down to net realizable value. (Rebate booking is moot while D7 stands.)
 
 ## 13. Explicitly NOT building
 
-FIFO/LIFO/lot depletion; lot-level remaining quantities (unless D6); pre-T0 reconstruction; rewriting posted
+FIFO/LIFO costing or lot depletion (Phase 1 uses oldest-sold-first only to estimate age); lot-level remaining quantities (unless D6); pre-T0 reconstruction; rewriting posted
 invoices or closed periods; automatic writes to `products.current_cost`; changes to sale-time cost snapshots,
 commissions or tax; GL journal posting; container, labor or yield costing; manufacturing/BOM; multi-warehouse
 transfer costing (one location exists); AI/OCR; editing ledger rows; carrying cost inside inventory value.
+
+**Deferred research ideas (no phase commits to them; Sol #43):** GMROI per product (needs a season of Phase 2
+average stock value), an admin "margin after carrying cost" view, and a weekly aged-stock action list. Revisit
+after Phase 2 if Mason wants them.
 
 ## 14. Advisory record
 

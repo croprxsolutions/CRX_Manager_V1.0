@@ -2,186 +2,250 @@
 
 > **STATUS 2026-11-04: PLAN ONLY, NOT APPROVED TO BUILD.** This is the detailed build plan for Phase 1 of
 > `docs/plans/2026-07-16-inventory-costing-plan.md` (section 3). Building it needs Mason's separate go-ahead
-> (decision D1, still open). Mason's decisions D2-D10 are in that plan's section 12.
+> (decision D1, still open). Mason's decisions D2-D11 are in that plan's section 12.
+>
+> **Revised three times on 2026-11-04 by Sol (gpt-6-sol, high) reviews:** the whole plan (44 findings), the
+> plan against the real code (33 findings, one refuted), and a re-check of the revision (28 findings). The
+> code check showed the stock ledger cannot be replayed reliably for age, so the rule is now the simplest one
+> the code supports: **a starting date per product (Mason's estimate), plus CRX receipts after it, trusted
+> only while the product's later history is ordinary receipts and sales that add up.** Anything else asks for
+> a new starting date instead of guessing. Mason's direction for every revision: **keep it simple but
+> practical; this is not a major feature.**
 
-**Date:** 2026-11-04. **Grounded on:** `main` at `f44f1931c` and read-only live queries the same day.
+**Date:** 2026-11-04. **Grounded on:** `main` and read-only live queries the same day.
 
 ## 1. What Phase 1 gives Mason (plain English)
 
-Admins only. Nothing here changes stock, prices, quotes, orders, invoices or commissions.
+Admins only. Nothing here changes stock, prices, quotes, orders, invoices or commissions. Phase 1 adds **two
+small tables** (Mason's starting dates: a batch and its lines) and **one admin save action**; everything else
+is read-only.
 
-1. **An honest name for today's valuation.** The Reports tab "Inventory Cost" and the Inventory page card
-   "Inventory Value" become **"Pricing-basis valuation"** and **"Pricing-basis value"**. The numbers do not
-   change; only the label does, because the number is quantity × price-list cost, not what the stock cost.
-2. **Stock age report.** How long stock has likely sat on the shelf, in buckets 0-90, 91-180, 181-270, 271-365
-   and 366+ days, plus **"age unknown"** and **"negative stock — not aged"**. It is an estimate (no lots, D6).
-3. **Estimated holding cost.** The yearly rate (10% to start, D4) charged for the days stock has sat. A
-   decision aid only; never added to inventory value.
-4. **Supplier-price check.** Where a current supplier price exists in the same unit, the gap between the
+1. **An honest name for today's valuation.** The Reports tab "Inventory Cost", its "Unit Cost" and "Total
+   Value" columns and CSV headings, and the Inventory page card "Inventory Value" are relabelled
+   **"Pricing-basis …"**. The numbers do not change; only the labels do, because the number is quantity ×
+   price-list cost, not what the stock cost.
+2. **Stock age report.** How long stock has likely sat, in buckets 0-90, 91-180, 181-270, 271-365 and 366+
+   days, plus **"age unknown"**. Rows below zero are listed apart as **"negative stock — not aged"**; rows at
+   zero are left out. Every age is an estimate (no lots, D6).
+3. **Estimated holding cost.** The yearly rate (10% to start, D4) for the days stock has sat, at **today's**
+   price-list cost and rate. A decision aid only; never added to inventory value.
+4. **Supplier-price check.** Where a recent, verified per-unit supplier quote exists, the gap between the
    price-list cost and what it would cost to buy again.
 5. **Aged-stock list.** Stock past 270 days (D3), with value and holding cost side by side, never summed.
-6. **Bulk "estimated received date" entry (D10, new).** For stock the report cannot date, an admin selects
-   any number of products and enters an estimated received date (and optionally how much of the stock that
-   date covers, plus a note). Those rows then age from the entered date, marked **"owner estimate"**.
+6. **Bulk "starting date" entry (D10).** An admin selects any number of in-stock products and records roughly
+   when the stock CRX shows on hand came in (one date, or a few date-and-quantity lines). That is the
+   product's **starting point**; CRX receipts after it are added on top. It is an estimate against CRX's
+   **recorded** on-hand, not a physical count; Phase 2's opening still needs the physical stock count (D9).
 
-## 2. What the live data says (2026-11-04, read-only)
+## 2. What the code and live data say (2026-11-04)
 
-- 117 inventory rows, all `Main Warehouse`: 66 positive, 19 negative, the rest zero.
-- 53 of the 66 in-stock products have at least one CRX receipt; 13 have none.
-- **Units:** only 23 of the 66 have every receipt, the inventory row and the product all in the same unit.
-  12 in-stock rows carry a unit different from their product's inventory unit. Gate 0 (common unit) is not
-  built, and no product is formally "unit-verified". No cycle count has ever been completed.
-- **The June gap:** the last CRX receipt was 2026-06-10. Since then product was bought by phone and email
-  (D9). 42 of the 66 in-stock products had a delivery or job after their last CRX receipt, and 13 had a
-  stock adjustment, so CRX cannot tell which receipt their current stock came from.
-- No in-stock product's last receipt is older than 270 days yet, so the aged-stock list starts nearly empty
-  unless Mason enters older estimated dates.
-- 10 current supplier price observations exist, so the supplier-price check will cover only a handful of
-  products at first.
-- Settings live in `app_settings` (key/value text). Any signed-in user can read a setting and only admins can
-  write one; the Settings page writes them directly.
-- Today's valuation: `get_inventory_cost_report` (admin-only via `require_admin()`, latest body
-  `20261103100000`) and the Inventory page card, which sums `quantity_available × current_cost` in the browser
-  (negative rows subtract). Phase 1 leaves both calculations untouched.
+- 117 inventory rows, one per product, all `Main Warehouse`: 66 above zero, 19 below zero, 32 at zero.
+  "One location" is today's data, not a database rule, so everything here is keyed by product **and**
+  location.
+- **The stock ledger cannot be replayed reliably for age** (Sol code check): a `received` ledger row carries
+  the PO but not the receiving record or PO line; reversing a receipt deletes the receiving record and writes a
+  generic negative `adjusted` row; rows written in one transaction can share a timestamp; and signs differ by
+  writer (`adjusted` and `returned` are signed; void reversals use `from_location` in one writer and
+  `to_location` in another).
+- **Ordinary movements are consistent:** `received`, `delivered` and `job_applied` rows are positive
+  magnitudes. Summing physical movements matches on-hand for 107 of 117 products.
+- **Receiving records are the dated source:** each has `received_at`, quantity, `unit_size` and its PO line;
+  a reversed receipt's record is deleted. The last CRX receipt was 2026-06-10; since then product was bought
+  by phone and email (D9).
+- **Write paths:** every screen changes receipts and the stock ledger through the receiving and stock
+  functions. The report must still rely only on records those functions write; PR 1A tightens database write
+  permissions to match (details are in private review notes until that change is live).
+- **Units:** receiving adds the entered quantity as-is (no conversion). 30 of the 53 in-stock products with
+  receipts have a receipt whose unit text differs from the inventory row or product. Gate 0 is not built.
+- **Supplier prices:** 10 current observations, all `price_kind = quote`, `package_quantity = 1`, in Qt, Gal
+  or Lb. A replacement observation points at the one it replaces (`supersedes_observation_id`).
+- **Settings** live in `app_settings` (key/value text); admins write them by a direct upsert from the Settings
+  page.
+- **Today's valuation:** `get_inventory_cost_report` (admin-only; its implementation function is not callable
+  by API roles, checked live) rounds each row to cents and turns a missing `current_cost` into 0; the
+  Inventory page card sums unrounded browser numbers. Phase 1 leaves both untouched and does not claim they
+  agree to the cent.
 
 ## 3. How the age estimate works
 
-For each inventory row with stock above zero, on-hand quantity is matched to **"layers"**, newest first (the
-oldest stock is assumed to have sold first). Each layer has a date, a quantity and a source:
+For each product and location **with a starting point** (section 4) and stock above zero, the report first
+checks that the history since the starting point is **ordinary and adds up**:
+- every **physical** ledger row after it is a `received`, `delivered` or `job_applied` row (no adjustment,
+  return, return cancellation, delivery reversal, cycle-count change or receipt reversal). Reservation-only
+  rows (`booked`, `prebooked`, `released`, `prebook_reconciliation`) change only `quantity_prebooked`, so
+  they are ignored and ordinary order-taking never resets a starting date;
+- every receiving record after it has a unit matching the inventory row and the product's inventory unit;
+- the on-hand recorded **at the moment the starting point was saved** + receipts after it − deliveries and
+  jobs after it = today's on-hand (this also catches any stock change made outside the ordinary actions). That
+  saved on-hand, not the dated lines' total, is the starting quantity, so a starting point that dates only
+  part of the stock leaves the rest "age unknown" and still passes.
 
-1. **CRX receipts dated on or after 2026-06-11** (after the gap began): always usable.
-2. **The product's latest owner estimate** (section 4), for the quantity it covers.
-3. **CRX receipts dated on or before 2026-06-10:** usable **only** if the product had no delivery, job or
-   adjustment after its **last receipt dated on or before 2026-06-10** (its pre-gap stock is untouched since
-   then). Otherwise skipped (D10: gap stock shows "age unknown"). The check is anchored to that last pre-gap
-   receipt, never to the newest receipt, so a new CRX receipt cannot erase gap-era movements: if 50 units of
-   gap stock sit beside 10 newly received units, the 10 are dated and the 50 stay "age unknown".
+**If the check passes**, on-hand is dated newest first: the receipts after the starting point (by
+`received_at`), then the starting point's lines (newest date first, each capped at its quantity). Anything
+left is "age unknown" (only possible if the starting point covered less than all the stock).
 
-A receipt layer is usable only when the receipt's unit, the inventory row's unit and the product's inventory
-unit all match. If any differ, that receipt is skipped. Phase 1 never converts units; that waits for Gate 0. An
-owner estimate is entered in the inventory row's own unit, so this check does not apply to it.
+**If the check fails**, the whole row shows **"age unknown — re-enter starting date"**, with the reason (for
+example "count correction on 3 Dec"). A fresh starting date resets it. This keeps the rule simple and never
+gives a confident date to stock whose origin is unclear.
 
-Whatever quantity is still unmatched is **"age unknown"**. A row at zero or below is never matched to anything:
-it is listed as "negative stock — not aged", with no bucket and no holding cost.
+**Without a starting point**, the row shows "age unknown — needs a starting date". Receipts before 2026-06-11
+are never used: CRX cannot tell whether that stock is still on the shelf or was replaced by a phone or email
+purchase.
 
-Age = days from the layer date to today in Central time. Each layer shows its source (CRX receipt or owner
-estimate), so Mason can see what the estimate rests on.
+Why newest first: the oldest stock is assumed to have sold first, so what remains came in most recently.
 
-Known limit, stated on the report: if purchases are made outside CRX again, the report cannot see them. It will
-then show matched stock as older than it really is.
+**Known limits, stated on the report:** starting dates are estimates; unit labels are matched as text until
+Gate 0 verifies them; stock bought outside CRX stays invisible.
 
-## 4. Bulk estimated-date entry (D10)
+Age = days from the layer date to today in Central time. Each layer shows its source (CRX receipt or starting
+date). The report is always "as of today": the Reports page's shared date bar is hidden on this tab.
 
-**Where:** on the new report, a filter "Age unknown only" with a checkbox on each row.
-- Select rows, choose **"Set estimated received date"**, pick one date, and optionally add a note. By default
-  the date covers all stock currently on hand; it can be lowered per row.
-- A preview lists every product, the quantity covered and the date, then a `ConfirmModal`. One save covers
-  all rows, or none if any row fails.
-- Single-row edit uses the same flow. **"Clear estimate"** removes a row's estimate, so that row goes back to
-  "age unknown".
-- Validation: the date cannot be in the future or before 2020-01-01. The covered quantity must be above zero
-  and no more than the row's on-hand quantity at the moment of saving. The product must still have that
-  inventory row.
+## 4. Bulk starting-date entry (D10)
 
-**What it is not:** it does not enter a cost (starting costs come with Phase 2's stock count, D9). It never
-changes stock quantities or any receipt. The entries can later be offered to Phase 2's opening workbook as
-suggested dates.
+**Where:** on the new report, a filter "Needs a starting date" with a checkbox on each row.
+- **Set starting date** (rows above zero only): pick one date for the whole on-hand quantity or, per row, split
+  it into a few date-and-quantity lines; optional note.
+- **Remove starting date** (any row): saves an empty replacement, so the row goes back to "needs a starting
+  date".
+- A preview lists every product, its lines and the recorded on-hand they describe, then a `ConfirmModal`. One
+  save covers all rows, or none if any row fails.
+- **A new starting point replaces the old one** for that product and location; history is kept.
 
-**History:** every save adds new rows; nothing is overwritten. The newest entry per product and location is
-the one in use, and older ones stay as history showing who entered what and when.
+**Validation (in the database):** at most one entry per product and location per request; each date is a
+real date no later than the save (older dates are allowed and land in 366+); each quantity is finite and
+above zero; the lines' total is finite and no more than the row's on-hand at the moment of saving; the
+inventory row exists.
+
+**Storage (two small append-only tables):**
+- `inventory_age_baseline_batches`: one row per product-location replacement, with a database sequence
+  number (the highest sequence is the one in use), product, location, as-of time, **the on-hand quantity read
+  under the inventory lock at save time**, note, entered by, the request's idempotency key and its
+  fingerprint.
+- `inventory_age_baseline_lines`: zero or more lines per batch (estimated received date, quantity). Zero lines
+  means "removed".
+
+**What it is not:** no cost entry and no change to stock quantities or receipts.
 
 ## 5. Holding cost and supplier-price check
 
-- **Cost basis:** the price-list cost (`products.current_cost`), turned into whole cents before any arithmetic.
-  It is the only per-unit cost CRX holds in the inventory unit. Labelled "price-list cost basis" everywhere,
-  never "what we paid". It assumes the same unit as today's valuation does.
-- **Holding cost so far for a layer:** layer quantity × cost in cents × rate × days ÷ 365. Computed in exact
-  PostgreSQL `numeric` and rounded once per layer, half away from zero, to whole cents. Also shown: the
-  holding cost per month going forward.
-- **Rate:** setting `inventory_carrying_rate_bps`, an integer in basis points (1000 = 10%, so there are no
-  fractions). It is edited on the Settings page, accepts whole numbers from 0 to 10000, and starts at 1000.
-- **Aged threshold:** setting `inventory_aged_days`, 270 to start (D3), edited on the Settings page.
-- **Supplier-price check:** uses a current observation (no end date, or one in the future, and not superseded)
-  in the product's inventory unit. If the unit differs, the price is left out and that row is counted as "not
-  covered". Price exposure = units on hand × (price-list cost − supplier cost). It is a review signal only.
+- **Cost basis:** the price-list cost (`products.current_cost`) read directly (not through the existing
+  report, which turns a missing cost into 0). A missing cost is "value unknown" and excluded from valued
+  totals. Labelled "price-list cost basis", never "what we paid".
+- **Holding cost so far** for each dated layer: quantity × unit cost × rate × days ÷ 365, all in exact
+  PostgreSQL `numeric` (the unit cost is **not** rounded first), then rounded **once** per layer, half away
+  from zero, to whole cents. Labelled **"estimate at today's cost and rate"**. Starting-date layers are shown
+  in their own column. Unknown stock gets no charge.
+- **Holding cost per month from now:** 30 days at today's quantity, cost and rate, assuming the stock stays.
+- **Rate:** setting `inventory_carrying_rate_bps`, a whole number of basis points (1000 = 10%), 0 to 10000.
+- **Aged threshold:** setting `inventory_aged_days`, a whole number of days, 30 to 1095, starting at 270.
+- **Both settings are checked by the database:** a trigger on `app_settings` rejects a non-integer or
+  out-of-range value for these keys and refuses renaming or deleting either key. The report raises a clear
+  error if either row is missing or bad.
+- **Supplier-price check:** a quote counts only if `price_kind = quote`, `package_quantity = 1`, its
+  supplier link's `inventory_units_per_supplier_unit` is exactly 1 (one supplier unit is one inventory unit),
+  `price_unit` equals the product's inventory unit, `effective_from` is on or before today, `effective_to` is
+  empty or not yet passed, no other observation supersedes it (checked against other rows'
+  `supersedes_observation_id`), and it is no more than 90 days old. The newest qualifying quote is used, with
+  vendor and date shown. Older quotes are listed for reference but never used for the exposure. Otherwise
+  "not covered". Price exposure = units on hand × (price-list cost − quote). A review signal only.
 
-## 6. Coverage and totals (rule from the main plan, section 3.2)
+## 6. Coverage and totals
 
-- Each column shows its coverage: the share of in-stock rows it can measure, and the share of on-hand quantity
-  it covers.
-- Any total over incomplete coverage is labelled **"partial"**, with the count of excluded rows beside it.
-- Every product's buckets + age unknown always add back to its on-hand quantity. The report checks this itself
-  and flags any row where it fails.
+- **Coverage** is shown two ways: the number of in-stock rows a column can measure, and their share of
+  pricing-basis value (rows with a cost only). Quantities in different units are never added together; a
+  unit-normalized quantity coverage waits for Gate 0.
+- **Positive stock, negative stock and the net** are shown separately.
+- Any total over incomplete coverage is labelled **"partial"**, with the excluded rows' count and their
+  pricing-basis value beside it ("value unknown" where a row has no cost).
+- Each product's buckets + unknown always add back to its on-hand; the report flags any row where they don't.
 - Footer on every view: "These are management views. The books use the cost basis the accountant approves,
   reconciled to QuickBooks, after any write-downs."
 
 ## 7. Build steps (two PRs, database first)
 
-A new database function and the screens that call it are never shipped in one PR. That deadlocks the apply
-and merge gates, so the database PR lands first.
+A new database function and the screens that call it are never shipped in one PR (it deadlocks the apply and
+merge gates), so the database PR lands first.
 
 ### PR 1A: database (one migration plus its ledger note)
 
+- **Tighten write permissions** so receipts and stock-ledger rows change only through the receiving and stock
+  functions (specifics in private review notes until live). This changes permissions, so it needs **Mason's
+  explicit OK at build time**, plus `/security-review`, and the build first re-checks that no screen depends
+  on what is removed.
 - **Setting rows** `inventory_carrying_rate_bps` = `1000` and `inventory_aged_days` = `270`, inserted only if
-  they are missing (non-destructive).
-- **New table `inventory_age_estimates`:** product, location, estimated received date, covered quantity (or
-  empty for "all on hand"), cleared flag, note, entered by and entered at, and the idempotency key. Row Level
-  Security is on, with no client read or write policies, in the same migration. A trigger rejects UPDATE and
-  DELETE. Reads and writes go only through the functions below.
-- **`get_inventory_aging_report()`**: read-only. Returns one row per layer plus per-row totals and coverage, as
-  in sections 3, 5 and 6.
-- **`set_inventory_age_estimates(p_rows jsonb, p_idempotency_key text)`**: bulk save or clear. It **refuses a
-  null key**, records the key in the existing `idempotency_keys` table scoped to this operation and caller,
-  locks the affected inventory rows, validates every row and inserts all of them or none.
-- Both functions are `SECURITY DEFINER` with `SET search_path = public, pg_temp`. Each calls
-  `require_admin()` first, before reading any cached idempotent result. Execute is revoked from `PUBLIC` and
-  `anon` and granted to `authenticated` only.
+  missing, plus the validation trigger from section 5.
+- **The two tables in section 4:** Row Level Security on, no client read or write policies, in the same
+  migration; triggers reject UPDATE and DELETE.
+- **`get_inventory_aging_report()`**: read-only; sections 3, 5 and 6.
+- **`set_inventory_age_baselines(p_rows jsonb, p_idempotency_key text)`**: bulk save. It refuses a null key;
+  calls `require_admin()`; follows the existing `check_idempotency_intent` contract (a globally unique key,
+  bound to the actor and a fingerprint of the full request, so the same key with different rows is refused);
+  because cached keys expire, also refuses a key already stored on a batch; rejects duplicate product-location
+  entries; locks the distinct inventory rows in inventory-id order; re-reads on-hand under the lock; validates
+  every entry; and inserts all or none.
+- Both functions are `SECURITY DEFINER` with `SET search_path = public, pg_temp`, and are revoked from
+  `PUBLIC` and `anon` and granted to `authenticated` only. No new cost value is added to any shared product or
+  inventory query.
 - Refresh `.claude/schema-registry.json` after the live apply.
 
 ### PR 1B: screens
 
-- `src/pages/Reports.tsx`: rename the tab; add a **"Stock age & holding cost"** tab (admins only, like the
-  existing cost tabs) with the buckets, an aged-stock filter, the supplier-price columns, coverage badges, a CSV
-  export and the bulk-date flow from section 4.
-- `src/pages/InventoryPage.tsx`: rename the card only.
-- `src/pages/SettingsPage.tsx`: two admin fields (holding rate as a percent, converted to whole basis points;
-  aged days).
+- `src/pages/Reports.tsx`: relabel the existing tab, columns and CSV headings; add a **"Stock age & holding
+  cost"** tab through every existing integration point: the `OperationalTab` type, the admin-only tab set, the
+  role-change reset, the load routing and state, the table rendering and the CSV dispatch; hide the shared date
+  bar on this tab. The tab has the buckets, the reasons for unknown rows, an aged-stock filter, the
+  supplier-price columns, coverage and the starting-date flow.
+- `src/pages/InventoryPage.tsx`: relabel the card and the per-row value column only.
+- `src/pages/SettingsPage.tsx`: two admin fields through the page's whole settings path (`SettingsForm`,
+  `toSettingValues`, `GROUP_KEYS`, saved-value tracking and the upsert); the rate is entered as a percent and
+  saved as whole basis points.
 - Uses `src/lib/db.ts`, `assertRpcResult()`, `ConfirmModal`, toasts and the house table component; no new
   dependency.
 
 ### Gates (from `.claude/commands/ship.md`)
 
 Both PRs are on the Sol list (`supabase/`; `Reports.tsx`, `SettingsPage.tsx`, and `InventoryPage.tsx` through
-the money word `inventor`). Each gets Luna rounds, then one clean Sol high review, plus `/security-review`
-because they add an admin-only permission boundary. PR 1A's migration is non-destructive. It goes through the
-migration-apply proof gate before merge, and 1B waits until 1A is live.
+the money word `inventor`). Each gets Luna rounds, one clean Sol high review and `/security-review`. PR 1A's
+migration is non-destructive and goes through the migration-apply proof gate before merge; 1B waits until 1A
+is live.
 
 ## 8. Proof before calling it done
 
-1. Run the report against live data (read-only) and record the coverage numbers. For every row, check that the
-   buckets + unknown add back to on-hand.
-2. Spot-check three products by hand: one dated by a post-gap receipt (once one exists), one untouched pre-gap
-   product, and one gap product after an owner estimate.
-3. A sales rep and a signed-out caller each get "admin required" from both functions, and the new tab does not
-   appear for a rep.
-4. Bulk save the same request twice with one key: only one set of rows is written. Reusing that key for a
-   different request is refused. A row covering more than on-hand rejects the whole save.
-5. The renamed report and card show the same totals as before, to the cent (screenshots before and after).
-6. Change the holding rate in Settings and watch the holding cost change, then set it back.
-7. Screenshots of the new tab on desktop and phone width.
+1. Run the report against live data (read-only) and record coverage; every row's buckets + unknown equal
+   on-hand.
+2. **Cases on a throwaway copy** (a local database or a rolled-back transaction, never live): no starting date;
+   a starting date only; a starting date covering part of the stock (rest unknown, check still passes); a
+   booking or quick-delivery reservation after the starting date (must not reset it); a starting date plus a
+   later receipt, then a sale; a receipt in a different unit
+   (row must ask for a new starting date); a count correction, a return and its cancellation, a delivery
+   reversal and a receipt reversal after the starting date (each must ask for a new starting date); a stock
+   change outside the ordinary actions (must fail "adds up"); a split starting point; a replaced and a removed starting
+   point.
+3. Spot-check three live products by hand against their receipts and starting dates.
+4. A sales rep gets "admin required" from both functions and the tab does not appear for them; a signed-out
+   caller is refused by database permissions and gets no data; a rep's existing product and inventory API
+   responses are unchanged; after PR 1A the permission tightening is proven by the private test list, and
+   receiving through the app still works.
+5. Bulk save the same request twice with one key: one set of batches. The same key with different rows is
+   refused. Two entries for one product, a non-finite quantity, or lines adding up to more than on-hand reject
+   the whole save.
+6. Bad setting values, a renamed key and a deleted key are rejected by the database.
+7. Each renamed total shows the same number as before (screenshots before and after).
+8. Screenshots of the new tab on desktop and phone width.
 
 ## 9. Not in Phase 1
 
-Unit conversion (Gate 0); any cost entry or average cost (Phase 2); lots (D6); freight and rebates (D7); quote
-warnings (Phase 5); changes to the existing valuation's math; a "fresh start date" setting (the fixed gap date
-2026-06-10 covers today's case).
+Ledger replay; unit conversion (Gate 0); any cost entry or average cost (Phase 2); lots (D6); freight and
+rebates (D7); vendor bills (Phase 4, D11); quote warnings (Phase 5); changes to the existing valuation's math;
+past holding cost at past rates; ageing for products without a starting date.
 
 ## 10. Risks Mason should know
 
-- **The report starts mostly "age unknown"** (about 42 of 66 in-stock products) until Mason enters estimated
-  dates or new CRX receipts come in. That is deliberate: it shows nothing it cannot back up.
-- **Units:** 30 of the 53 in-stock products with receipts fail the unit match, so their receipt layers are skipped until the unit
-  clean-up and Gate 0 land. Owner estimates still work for them.
+- **The report starts almost entirely "needs a starting date".** It fills in once starting dates are entered
+  (one bulk session, ideally right after the stock count before busy season, D9) and as new CRX receipts
+  arrive.
+- **Any unusual movement asks for a new starting date** (a count correction, a return, a reversal). That is
+  deliberate: simple and never wrong in a confident way, at the cost of some re-entry.
+- **Starting dates are your estimates**, shown as such, against CRX's recorded on-hand.
 - **Price-list cost is not purchase cost.** Holding cost is only as good as the price list until Phase 2.
-- **Purchases outside CRX make ages look older than they are.** Entering POs and receiving in CRX (D9) is what
-  keeps the report true.
+- **Purchases outside CRX stay invisible.** Entering POs and receiving in CRX (D9) is what keeps it true.

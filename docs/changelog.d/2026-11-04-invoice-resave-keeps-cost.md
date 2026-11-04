@@ -10,3 +10,6 @@
 - New smoke chain `smoke-invoice-resave-keeps-cost.sql` (spec `invoice_resave_keeps_cost`).
 - `src/lib/rpcContracts.test.ts`: `_enforce_below_cost_line` is listed again as a re-emitted
   trigger-only guard while this candidate is not applied (as for `20261019010000`).
+- Freshness re-check (read-only, 2026-11-04 14:41 UTC): the live ledger has 1117 rows and does not contain
+  `20261106140000`; this migration is not live yet. The 2026-11-04 re-stamp of `CURRENT_STATE.md` and
+  `KNOWN_ISSUES.md` comes from #1431 (S16b), which this branch is stacked on.

@@ -98,6 +98,10 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
     }
   };
 
+  // The fix went through but its reply was lost: the delivery is no longer completed and this key was kept.
+  const alreadyUndone = !!plan && !!submittedScope && fixIdem.hasKeyFor(submittedScope)
+    && plan.refusals.some((r) => r.code === 'NOT_COMPLETED');
+
   return (
     <Modal open={open} onClose={onClose} closeDisabled={saving} title="Fix Delivery">
       <div className="space-y-4 text-sm">
@@ -110,40 +114,13 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
         {loadError && <p role="alert" className="p-3 rounded-lg bg-red-50 text-red-800">{loadError}</p>}
         {!plan && !loadError && <p className="text-secondary">Checking this delivery…</p>}
 
-        {plan && submittedScope && fixIdem.hasKeyFor(submittedScope) && plan.order_id && plan.refusals.some((r) => r.code === 'NOT_COMPLETED') && (
-          <p role="status" className="p-3 rounded-lg bg-green-50 text-green-900">
-            This delivery was already undone.{' '}
-            <Link className="font-semibold underline" to={`/deliveries/new?order=${encodeURIComponent(plan.order_id)}`} onClick={onClose}>Enter the corrected delivery</Link>
-          </p>
-        )}
+        {alreadyUndone && <AlreadyUndoneNotice orderId={plan?.order_id ?? null} onClose={onClose} />}
 
-        {plan && plan.refusals.length > 0 && (
-          <div role="alert" className="p-3 rounded-lg bg-amber-50 text-amber-900 space-y-1">
-            <p className="flex items-center gap-2 font-semibold"><AlertTriangle className="w-4 h-4" /> This delivery cannot be fixed here yet:</p>
-            <ul className="list-disc list-inside">{plan.refusals.map((r) => <li key={r.code}>{r.message}</li>)}</ul>
-          </div>
-        )}
-
-        {plan?.can_fix && (
-          <div className="p-3 rounded-lg bg-red-50 text-red-900 space-y-2">
-            <p className="font-semibold">What will happen:</p>
-            <ul className="list-disc list-inside space-y-0.5">
-              {plan.invoices.map((i) => (
-                <li key={i.id}>
-                  Invoice {i.invoice_number} ({formatCents(i.total_cents)}) will be {i.action === 'void' ? 'voided' : 'cancelled'}
-                  {i.prepay_applied_cents > 0 && `; ${formatCents(i.prepay_applied_cents)} of prepay goes back to the customer's credit`}
-                </li>
-              ))}
-              {plan.invoices.length === 0 && <li>No invoice is linked to this delivery.</li>}
-              {plan.other_draft_invoices.map((i) => <li key={i.id}>Draft invoice {i.invoice_number} on this order will be cancelled</li>)}
-              {plan.items.map((it, n) => <li key={`${it.product_name ?? ''}-${n}`}>{it.quantity} {it.unit ?? ''} of {it.product_name ?? 'a product'} go back into stock</li>)}
-              <li>Order {plan.order_number ?? ''} reopens for these lines; the sales rep keeps the commission</li>
-            </ul>
-          </div>
-        )}
+        {plan && <FixRefusals refusals={plan.refusals} />}
 
         {plan?.can_fix && (
           <>
+            <FixPlanSummary plan={plan} />
             <div>
               <label htmlFor="fix-delivery-reason" className="block font-medium text-nav-dark mb-1">What was wrong? <span aria-hidden="true" className="text-red-500">*</span></label>
               <textarea
@@ -179,5 +156,45 @@ export default function FixDeliveryModal({ open, onClose, deliveryId, deliveryNu
         </div>
       </div>
     </Modal>
+  );
+}
+
+function AlreadyUndoneNotice({ orderId, onClose }: { orderId: string | null; onClose: () => void }) {
+  if (!orderId) return null;
+  return (
+    <p role="status" className="p-3 rounded-lg bg-green-50 text-green-900">
+      This delivery was already undone.{' '}
+      <Link className="font-semibold underline" to={`/deliveries/new?order=${encodeURIComponent(orderId)}`} onClick={onClose}>Enter the corrected delivery</Link>
+    </p>
+  );
+}
+
+function FixRefusals({ refusals }: { refusals: FixDeliveryPlan['refusals'] }) {
+  if (refusals.length === 0) return null;
+  return (
+    <div role="alert" className="p-3 rounded-lg bg-amber-50 text-amber-900 space-y-1">
+      <p className="flex items-center gap-2 font-semibold"><AlertTriangle className="w-4 h-4" /> This delivery cannot be fixed here yet:</p>
+      <ul className="list-disc list-inside">{refusals.map((r) => <li key={r.code}>{r.message}</li>)}</ul>
+    </div>
+  );
+}
+
+function FixPlanSummary({ plan }: { plan: FixDeliveryPlan }) {
+  return (
+    <div className="p-3 rounded-lg bg-red-50 text-red-900 space-y-2">
+      <p className="font-semibold">What will happen:</p>
+      <ul className="list-disc list-inside space-y-0.5">
+        {plan.invoices.map((i) => (
+          <li key={i.id}>
+            Invoice {i.invoice_number} ({formatCents(i.total_cents)}) will be {i.action === 'void' ? 'voided' : 'cancelled'}
+            {i.prepay_applied_cents > 0 && `; ${formatCents(i.prepay_applied_cents)} of prepay goes back to the customer's credit`}
+          </li>
+        ))}
+        {plan.invoices.length === 0 && <li>No invoice is linked to this delivery.</li>}
+        {plan.other_draft_invoices.map((i) => <li key={i.id}>Draft invoice {i.invoice_number} on this order will be cancelled</li>)}
+        {plan.items.map((it, n) => <li key={`${it.product_name ?? ''}-${n}`}>{it.quantity} {it.unit ?? ''} of {it.product_name ?? 'a product'} go back into stock</li>)}
+        <li>Order {plan.order_number ?? ''} reopens for these lines; the sales rep keeps the commission</li>
+      </ul>
+    </div>
   );
 }

@@ -2138,7 +2138,12 @@ export default function ProductDetail() {
           onClose={() => setCorrectingRates(false)}
           // A correction bumps pricing_version, so reload the cost-basis workspace and histories too;
           // the window stays over the form until then, so no edit is lost to the reload.
-          onCorrected={() => { loadRateLock(); void handlePricingReload().then(() => setCorrectingRates(false)); }}
+          // Until the product reloads, edits stay blocked and Reload Product stays offered.
+          onCorrected={() => {
+            setPricingReloadRequired(true);
+            loadRateLock();
+            void handlePricingReload().then(() => setCorrectingRates(false));
+          }}
         />
       )}
       <UnsavedChangesModal

@@ -956,6 +956,14 @@ describe('ProductDetail governed pricing flow', () => {
     fireEvent.click(within(banner).getByRole('button', { name: 'Correct rates' }));
     fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
     await waitFor(() => expect(mockGetCostBasisWorkspace.mock.calls.length).toBeGreaterThan(workspaceLoads));
+
+    // If that reload fails, editing stays locked and Reload Product stays offered.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Finish correction' })).toBeNull());
+    fireEvent.click(within(banner).getByRole('button', { name: 'Correct rates' }));
+    productLoadResults.push({ data: null, error: new Error('reload failed') });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    expect(await screen.findByText(/Editing is locked until the latest values load/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload Product' })).toBeInTheDocument();
   });
 
   it('opens the folded section that holds a refused field', async () => {

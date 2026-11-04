@@ -1596,10 +1596,12 @@ export default function ProductDetail() {
                 </div>
               </div>
               <div className="mt-3">
-                <p className="text-sm font-medium text-secondary">Max Label Rate</p>
-                <p className="text-sm text-nav-dark" data-testid="product-max-label-rate">
-                  {product.max_label_rate != null ? `${product.max_label_rate} ${product.max_label_rate_unit ?? ''}`.trim() : 'Not recorded'}
-                </p>
+                <dl>
+                  <dt id="product-max-label-rate-label" className="text-sm font-medium text-secondary">Max Label Rate</dt>
+                  <dd className="text-sm text-nav-dark" data-testid="product-max-label-rate" aria-labelledby="product-max-label-rate-label">
+                    {product.max_label_rate != null ? `${product.max_label_rate} ${product.max_label_rate_unit ?? ''}`.trim() : 'Not recorded'}
+                  </dd>
+                </dl>
                 <p className="mt-1 text-xs text-secondary">
                   The highest rate the label allows, read only here. Update it through{' '}
                   {isAdmin ? <button type="button" onClick={() => navigate('/label-review')} className="text-crx-green underline hover:text-crx-green-dark">Label Review</button> : 'Label Review'}.

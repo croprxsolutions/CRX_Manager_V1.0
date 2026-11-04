@@ -703,8 +703,6 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
 
       {/* Desktop sidebar — collapsible icon sidebar */}
       <aside
-        role="navigation"
-        aria-label="Main navigation"
         className={`
           hidden md:flex flex-col shrink-0
           h-screen sticky top-0
@@ -725,7 +723,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
         </div>
 
         {/* Nav items */}
-        <nav className="flex-1 py-3 overflow-y-auto overflow-x-hidden">
+        <nav aria-label="Main navigation" className="flex-1 py-3 overflow-y-auto overflow-x-hidden">
           {renderFrequent(false)}
           <div className="space-y-0.5">{renderNavEntries(false)}</div>
         </nav>

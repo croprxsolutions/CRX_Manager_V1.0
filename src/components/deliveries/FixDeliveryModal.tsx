@@ -189,6 +189,7 @@ function FixPlanSummary({ plan }: { plan: FixDeliveryPlan }) {
           <li key={i.id}>
             Invoice {i.invoice_number} ({formatCents(i.total_cents)}) will be {i.action === 'void' ? 'voided' : 'cancelled'}
             {i.prepay_applied_cents > 0 && `; ${formatCents(i.prepay_applied_cents)} of prepay goes back to the customer's credit`}
+            {i.credit_applied_cents > 0 && `; ${formatCents(i.credit_applied_cents)} of applied credit goes back to its credit memo`}
           </li>
         ))}
         {plan.invoices.length === 0 && <li>No invoice is linked to this delivery.</li>}

@@ -53,6 +53,13 @@ describe('FixDeliveryModal', () => {
     }));
   });
 
+  it('says an applied credit goes back to its credit memo', async () => {
+    const invoice = { ...plan().invoices[0], credit_applied_cents: 4000 };
+    H.rpc.mockResolvedValue({ data: plan({ invoices: [invoice] }), error: null });
+    renderModal();
+    await screen.findByText(/\$40\.00 of applied credit goes back to its credit memo/);
+  });
+
   it('shows why a delivery cannot be fixed and offers no way to submit', async () => {
     H.rpc.mockResolvedValue({ data: plan({ can_fix: false, refusals: [{ code: 'PAYMENT_APPLIED', message: 'A payment is applied to this invoice.' }] }), error: null });
     renderModal();

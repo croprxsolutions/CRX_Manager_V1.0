@@ -303,8 +303,8 @@ function scenarios() {
     ${fix('k-new-draft')}`, 'an order draft added after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET total_amount_cents=20000 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-amount')}`, 'an invoice amount changed after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
-  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET write_off_cents=500 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
-    ${fix('k-new-write-off')}`, 'a write-off added after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET credit_applied_cents=500 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${fix('k-new-credit')}`, 'a credit applied after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; SELECT set_config('app.crx_below_cost_operation','create_direct_order',true);
     INSERT INTO public.order_items (id,order_id,product_id,product_name,unit_size,price_per_unit,total_units_needed,quantity_delivered,total_price,cost_per_unit) VALUES
       ('${LINE2}','${ORDER}','${PRODUCT}','[PROVER] Product','gal',10,10,10,100,6);
@@ -315,6 +315,18 @@ function scenarios() {
 
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET paid_amount_cents=100 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-paid')}`, 'a payment on the invoice refuses the fix', /FIX_DELIVERY_REFUSED: A payment is applied/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET write_off_cents=500 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${fix('k-write-off')}`, 'a write-off on the posted invoice refuses the fix', /FIX_DELIVERY_REFUSED: A write-off is recorded on this invoice/);
+  refused(`RESET ROLE; ALTER TABLE public.write_offs DISABLE TRIGGER USER;
+    INSERT INTO public.write_offs (invoice_id,customer_id,amount_cents,reason,approved_by,created_by) VALUES ('${INV}','${CUSTOMER}',500,'[PROVER]','${ADMIN}','${ADMIN}');
+    ALTER TABLE public.write_offs ENABLE TRIGGER USER;
+    ${fix('k-write-off-row')}`, 'an active write-off row refuses the fix', /FIX_DELIVERY_REFUSED: A write-off is recorded on this invoice/);
+  refused(`RESET ROLE; ALTER TABLE public.deliveries DISABLE TRIGGER USER; UPDATE public.deliveries SET completed_at=now() - interval '40 days' WHERE id='${DELIVERY}'; ALTER TABLE public.deliveries ENABLE TRIGGER USER;
+    ALTER TABLE public.accounting_periods DISABLE TRIGGER USER;
+    INSERT INTO public.accounting_periods (period_start,period_end,status) VALUES
+      (date_trunc('month',(now() - interval '40 days')::date)::date,(date_trunc('month',(now() - interval '40 days')::date)+interval '1 month - 1 day')::date,'closed');
+    ALTER TABLE public.accounting_periods ENABLE TRIGGER USER;
+    ${fix('k-closed-delivery')}`, 'a delivery completed in a closed month refuses the fix', /FIX_DELIVERY_REFUSED: This delivery was completed in a closed month/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET invoice_group_id=gen_random_uuid() WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-split')}`, 'a split-group invoice refuses the fix', /FIX_DELIVERY_REFUSED: This delivery is billed on a split invoice/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
@@ -322,7 +334,9 @@ function scenarios() {
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-INV','${ORDER}','${CUSTOMER}','chemical_sale','posted',CURRENT_DATE,'${ADMIN}','${REP}',now());
     ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-order-inv')}`, 'an order-level posted invoice refuses the fix', /FIX_DELIVERY_REFUSED: This order is billed on one invoice/);
-  refused(`RESET ROLE; ALTER TABLE public.accounting_periods DISABLE TRIGGER USER;
+  // The delivery moves to last month (open) so only the invoice's closed month refuses.
+  refused(`RESET ROLE; ALTER TABLE public.deliveries DISABLE TRIGGER USER; UPDATE public.deliveries SET completed_at=now() - interval '40 days' WHERE id='${DELIVERY}'; ALTER TABLE public.deliveries ENABLE TRIGGER USER;
+    ALTER TABLE public.accounting_periods DISABLE TRIGGER USER;
     INSERT INTO public.accounting_periods (period_start,period_end,status) VALUES (date_trunc('month',CURRENT_DATE)::date,(date_trunc('month',CURRENT_DATE)+interval '1 month - 1 day')::date,'closed');
     ALTER TABLE public.accounting_periods ENABLE TRIGGER USER;
     ${fix('k-closed')}`, 'an invoice in a closed month refuses the fix', /FIX_DELIVERY_REFUSED: The invoice, or a credit applied to it, is dated in a closed month/);

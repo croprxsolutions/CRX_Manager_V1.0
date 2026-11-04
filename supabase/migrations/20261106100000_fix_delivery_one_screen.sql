@@ -26,6 +26,8 @@
 --   * an active non-draft invoice on the ORDER with no delivery (it bills other deliveries too);
 --   * an invoice in a split group (invoice_group_id), which needs the group void;
 --   * cash already applied (paid_amount_cents > 0): unapply the payment first;
+--   * an active write-off (void_invoice leaves the write_offs row active);
+--   * a delivery completed in a closed accounting period;
 --   * a posted/paid/overdue invoice dated in a closed accounting period;
 --   * a pending order commission already in an active payout batch.
 --
@@ -161,6 +163,26 @@ BEGIN
                        WHERE ila.invoice_id = i.id AND aset.entity_type = 'payment' AND aset.is_active))) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'PAYMENT_APPLIED',
       'message', 'A payment is applied to this invoice. Unapply it first (the money stays on the customer''s account as credit).');
+  END IF;
+
+  -- void_invoice zeros write_off_cents but leaves the write_offs row active, which would strand it.
+  IF EXISTS (SELECT 1 FROM invoices i
+              WHERE i.delivery_id = p_delivery_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
+                AND i.status NOT IN ('voided', 'cancelled')
+                AND (COALESCE(i.write_off_cents, 0) <> 0
+                     OR EXISTS (SELECT 1 FROM write_offs w WHERE w.invoice_id = i.id AND w.reversed_at IS NULL))) THEN
+    v_refusals := v_refusals || jsonb_build_object('code', 'WRITE_OFF_RECORDED',
+      'message', 'A write-off is recorded on this invoice. Reverse it from the invoice page first.');
+  END IF;
+
+  -- Voiding the delivery returns stock and reopens order lines as of today, so a delivery completed
+  -- in a closed month would change that month's inventory history.
+  IF EXISTS (SELECT 1 FROM deliveries d
+               JOIN accounting_periods ap ON ap.status = 'closed'
+                AND COALESCE(d.completed_at::date, d.scheduled_date) BETWEEN ap.period_start AND ap.period_end
+              WHERE d.id = p_delivery_id) THEN
+    v_refusals := v_refusals || jsonb_build_object('code', 'DELIVERY_IN_CLOSED_PERIOD',
+      'message', 'This delivery was completed in a closed month. Reopen that month or use a return instead.');
   END IF;
 
   IF EXISTS (SELECT 1 FROM invoices i

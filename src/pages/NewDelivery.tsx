@@ -120,8 +120,9 @@ export default function NewDelivery() {
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
 
   // Track dirty state for unsaved changes warning
+  // Set only by the user's own edits: loading an order (a ?order= link or a pick) fills the
+  // lines and address too, and that is not unsaved work.
   const [isDirty, setIsDirty] = useState(false);
-  const initialLoadDone = useRef(false);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
   const skipUnsavedPromptRef = useRef(false);
   const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
@@ -261,13 +262,7 @@ export default function NewDelivery() {
   }, [customerIdParam, toast]);
 
   useEffect(() => {
-    if (!initialLoadDone.current) return;
-    setIsDirty(true);
-  }, [selectedOrderId, selectedAddressId, selectedDriverId, scheduledDate, scheduledTime, deliveryNotes, deliveryItems]);
-
-  useEffect(() => {
     fetchDrivers();
-    setTimeout(() => { initialLoadDone.current = true; }, 0);
   }, [fetchDrivers]);
 
   useEffect(() => {
@@ -370,6 +365,7 @@ export default function NewDelivery() {
   }, [deliveryItems]);
 
   const updateItemQty = (orderItemId: string, qty: number) => {
+    setIsDirty(true);
     setDeliveryItems((prev) =>
       prev.map((item) =>
         item.order_item_id === orderItemId
@@ -380,6 +376,7 @@ export default function NewDelivery() {
   };
 
   const updateItemTote = (orderItemId: string, tote: string) => {
+    setIsDirty(true);
     setDeliveryItems((prev) =>
       prev.map((item) =>
         item.order_item_id === orderItemId ? { ...item, tote_number: tote } : item
@@ -388,6 +385,7 @@ export default function NewDelivery() {
   };
 
   const removeItem = (orderItemId: string) => {
+    setIsDirty(true);
     setDeliveryItems((prev) => prev.filter((item) => item.order_item_id !== orderItemId));
   };
 
@@ -525,6 +523,7 @@ export default function NewDelivery() {
               value={selectedOrderId}
               selectedLabel={orderLabel}
               onSelect={(order) => {
+                setIsDirty(true);
                 setSelectedOrderId(order?.id ?? '');
                 setOrderLabel(order ? orderSearchLabel(order) : '');
               }}
@@ -565,7 +564,7 @@ export default function NewDelivery() {
               <label className="block text-sm font-medium text-secondary mb-1">Delivery Address</label>
               <select
                 value={selectedAddressId}
-                onChange={(e) => setSelectedAddressId(e.target.value)}
+                onChange={(e) => { setIsDirty(true); setSelectedAddressId(e.target.value); }}
                 className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               >
                 <option value="">Use billing address</option>
@@ -580,7 +579,7 @@ export default function NewDelivery() {
               <label className="block text-sm font-medium text-secondary mb-1">Assigned Driver</label>
               <select
                 value={selectedDriverId}
-                onChange={(e) => setSelectedDriverId(e.target.value)}
+                onChange={(e) => { setIsDirty(true); setSelectedDriverId(e.target.value); }}
                 className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               >
                 <option value="">Unassigned</option>
@@ -598,13 +597,13 @@ export default function NewDelivery() {
               label="Scheduled Date"
               type="date"
               value={scheduledDate}
-              onChange={(e) => setScheduledDate(e.target.value)}
+              onChange={(e) => { setIsDirty(true); setScheduledDate(e.target.value); }}
             />
             <Input
               label="Scheduled Time (optional)"
               type="time"
               value={scheduledTime}
-              onChange={(e) => setScheduledTime(e.target.value)}
+              onChange={(e) => { setIsDirty(true); setScheduledTime(e.target.value); }}
             />
           </div>
 
@@ -613,7 +612,7 @@ export default function NewDelivery() {
           <Input
             label="Delivery Notes (optional)"
             value={deliveryNotes}
-            onChange={(e) => setDeliveryNotes(e.target.value)}
+            onChange={(e) => { setIsDirty(true); setDeliveryNotes(e.target.value); }}
             placeholder="Special instructions, gate codes, etc."
           />
         </div>

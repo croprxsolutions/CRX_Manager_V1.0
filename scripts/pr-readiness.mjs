@@ -82,8 +82,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       }
       // sol-needed exits 1 for SOL NEEDED, so read its output, not its exit code.
       const solRun = spawnSync(process.execPath, [fileURLToPath(new URL("./sol-needed.mjs", import.meta.url)), n], { encoding: "utf8" });
-      if (![0, 1].includes(solRun.status)) throw new Error(`sol-needed failed: ${(solRun.stderr || solRun.error?.message || "no output").trim()}`);
-      const sol = solRun.stdout.trim();
+      const sol = String(solRun.stdout || "").trim();
+      // sol-needed also exits 1 when it cannot read the PR, printing its reason to stderr only.
+      if (![0, 1].includes(solRun.status) || !/^(NO )?SOL NEEDED: /.test(sol)) {
+        throw new Error(`sol-needed gave no verdict: ${(solRun.stderr || solRun.error?.message || "no output").trim()}`);
+      }
       console.log(formatBlock(n, view, threads, sol) + "\n");
     } catch (error) {
       failed = true;

@@ -414,10 +414,6 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 `p_payment_date` after today in Central time (`PAYMENT_DATE_IN_FUTURE`), so a payment can no longer make a customer
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
-### KI-99 — A CSV import can end partly saved if rates are locked mid-upload
-**FIXED in the same candidate (#1442) · product import**
-A CSV file that sets rates now saves in one insert, so a lock switched on mid-upload refuses the whole file and nothing is imported. Files with no rates still save row by row. Source: the WP-PM-11a-1 changelog note.
-
 ### KI-100 — An open product page learns of a lock change only on reload or a refused save
 **LOW · product UI · LOCAL CANDIDATE `20261106155000` — NOT APPLIED**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.

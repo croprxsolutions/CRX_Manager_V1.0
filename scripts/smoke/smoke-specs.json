@@ -935,6 +935,18 @@
         "billing"
       ]
     },
+    "invoice_resave_keeps_cost": {
+      "chain": "smoke-invoice-resave-keeps-cost.sql",
+      "description": "Migration 20261106140000 (#13): a $36.65 draft invoice delivered from a booking at a $6.00 cost; after the product's cost rises to $8.00 (above the $7.33 price) through the governed pricing path, re-saving the draft with only a note changed is accepted and keeps the $6.00 invoiced cost and $36.65 total (it was refused below cost); re-saving it with the price lowered to $5.00, with the saved line sent twice, with the line lowered to 3 gal and later raised to 4 gal, or with the line repriced to $9.00 and lowered back to $7.33 is still refused by the below-cost check; after a second cost rise to $10.00, a note-only re-save keeps the $9.00 line and its cost, and repricing it to $9.50 is refused. Terminal rollback.",
+      "covers": [
+        "save_invoice",
+        "_enforce_below_cost_line"
+      ],
+      "area": [
+        "billing",
+        "regression"
+      ]
+    },
     "invoice_resave_keeps_line_cents": {
       "chain": "smoke-invoice-resave-keeps-line-cents.sql",
       "description": "Migration 20261106130000 (S16b): 5 gal at $7.33 drawn from a booking and delivered in two halves bills $18.33 + $18.32; re-saving the second draft invoice with only a note changed keeps $18.32 (the pair still totals $36.65; before the migration it re-rounded to $18.33), and the invoice total equals the sum of its lines; re-saving it at 2 gal re-prices it to $14.66. Terminal rollback.",

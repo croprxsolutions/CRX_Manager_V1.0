@@ -1,5 +1,5 @@
 -- Written 2026-11-04. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261106170000_job_reservation_whole_hundredths.md.
+-- docs/reference/migrations.d/20261107030000_job_reservation_whole_hundredths.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (KI-100, follow-up to S02 20261106110000): a Partial Order must be in whole hundredths, but a
@@ -188,7 +188,7 @@ BEGIN
         WHERE quote_id = p_quote_id AND product_id = v_row.product_id;
 
         v_crop_pool := GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0);
-        -- JOB_DRAW_HUNDREDTHS<<< (20261106170000, KI-100) A booking and its Partial Orders are in whole
+        -- JOB_DRAW_HUNDREDTHS<<< (20261107030000, KI-100) A booking and its Partial Orders are in whole
         -- hundredths (20261106110000), so the booking's job draws are too: an unrounded unit conversion
         -- (1 fl oz = 0.0078125 gal) would leave a remainder no Partial Order can take. Each active job
         -- draws against the booking's completed and invoiced job demand only, rounded to 0.01, so many

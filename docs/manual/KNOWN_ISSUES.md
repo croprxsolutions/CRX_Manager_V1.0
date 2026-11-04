@@ -537,7 +537,7 @@ Residual: a line completed before the migration has no record and still restores
 read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20); nothing is corrected.
 
 ### KI-100 — A spray job could leave a booking with a remainder no Partial Order can take
-**MED · FIX WRITTEN, NOT YET LIVE: migration `20261106170000`, to be applied before its PR merges · database · found 2026-11-04 (PR #1362 review)**
+**MED · FIX WRITTEN, NOT YET LIVE: migration `20261107030000`, to be applied before its PR merges · database · found 2026-11-04 (PR #1362 review)**
 Since `20261106110000` (S02) a Partial Order must be in whole hundredths, but `_sync_quote_job_reservations`
 drew a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking left 9.9921875 gal,
 which no draw can take, so the booking never closed. The fix keeps a booking's job draws in whole hundredths that

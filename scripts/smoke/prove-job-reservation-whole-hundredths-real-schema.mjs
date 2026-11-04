@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for KI-100 (20261106170000). Builds the checked-in schema baseline in a
+ * Real-schema proof for KI-100 (20261107030000). Builds the checked-in schema baseline in a
  * network-disabled PostgreSQL container and replays migrations up to the candidate. With invented
  * rows, a spray job on a 10 gal booking that applies 1 fl oz (0.0078125 gal) is synced BEFORE the
  * candidate: its draw is 0.0078125 and the booking is left with 9.9921875 gal, more decimals than
@@ -27,7 +27,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261106170000_job_reservation_whole_hundredths.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261107030000_job_reservation_whole_hundredths.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

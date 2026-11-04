@@ -1,6 +1,6 @@
 ## 2026-11-04 — A spray job no longer leaves a booking remainder no Partial Order can take (KI-100)
 
-- New migration `20261106170000_job_reservation_whole_hundredths.sql` (record in
+- New migration `20261107030000_job_reservation_whole_hundredths.sql` (record in
   `docs/reference/migrations.d/`). Since S02 (`20261106110000`) a Partial Order must be in whole
   hundredths, but a spray job that reserves product from a booking drew an unrounded unit conversion
   from it: 1 fl oz from a 10 gal booking drew 0.0078125 gal and left 9.9921875 gal, so the booking

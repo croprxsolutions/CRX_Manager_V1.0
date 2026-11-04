@@ -43,6 +43,32 @@ describe('rate lock switch failure paths', () => {
     await waitFor(() => expect(onChanged).toHaveBeenLastCalledWith(open));
   });
 
+  it('drops an older save\'s late read once a newer save has started', async () => {
+    let releaseFirstRead: (lock: typeof locked) => void = () => undefined;
+    mockSet.mockReset().mockResolvedValueOnce(locked).mockResolvedValueOnce(open);
+    mockLoad.mockReset()
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseFirstRead = resolve; }))
+      .mockResolvedValueOnce(open);
+    const onChanged = vi.fn();
+    const props = { loadFailed: false, onRetry: vi.fn(), isAdmin: true, profileId: 'u1', onChanged };
+    const { rerender } = render(<ProductRateLockControl lock={open} {...props} />);
+    const flip = async (name: string, reason: string) => {
+      fireEvent.click(screen.getByRole('button', { name }));
+      fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: reason } });
+      const buttons = screen.getAllByRole('button', { name });
+      fireEvent.click(buttons[buttons.length - 1]);
+    };
+    await flip('Lock rates', 'season');
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith(locked));
+    rerender(<ProductRateLockControl lock={locked} {...props} />);
+    await flip('Unlock rates', 'done');
+    await waitFor(() => expect(mockLoad).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onChanged).toHaveBeenLastCalledWith(open));
+    releaseFirstRead(locked);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onChanged).toHaveBeenLastCalledWith(open);
+  });
+
   it('shows the current state when another admin switched it first', async () => {
     mockSet.mockRejectedValue(new Error('PRODUCT_RATE_LOCK_UNCHANGED: rates are already locked'));
     mockLoad.mockResolvedValue(locked);

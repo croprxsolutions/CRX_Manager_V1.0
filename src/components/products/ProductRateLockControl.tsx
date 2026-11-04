@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Lock, LockOpen } from 'lucide-react';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
@@ -25,6 +25,8 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
   const setOpen = (next: boolean) => { setTarget(next && lock ? !lock.is_locked : null); if (!next) setReason(''); };
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
+  // Only the newest save's follow-up read may show its state; an older read finishing late is dropped.
+  const saveSeq = useRef(0);
   const { getKey, resetKey } = useIdempotencyKey('set_product_rate_lock', profileId, `${target}:${reason.trim()}`);
   if (!lock) {
     if (!loadFailed) return null;
@@ -38,13 +40,14 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
 
   const save = async () => {
     setSaving(true);
+    const seq = ++saveSeq.current;
     try {
       if (target === null) return;
       const next = await setProductRateLock({ locked: target, reason: reason.trim(), performedBy: profileId, idempotencyKey: getKey() });
       resetKey();
       onChanged(next);
       // A replayed receipt may be older than the switch: show what is current now.
-      loadProductRateLock().then(onChanged).catch(() => undefined);
+      loadProductRateLock().then((current) => { if (seq === saveSeq.current) onChanged(current); }).catch(() => undefined);
       setOpen(false);
       setReason('');
       toast('success', next.is_locked ? 'Rates locked' : 'Rates unlocked');
@@ -53,6 +56,7 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
       // Another admin, or this save before its answer was lost, may have switched it already:
       // show the current state, and close the window once it is already where it was going.
       loadProductRateLock().then((current) => {
+        if (seq !== saveSeq.current) return;
         onChanged(current);
         // Retire the key too, or a later switch with the same reason would replay this receipt.
         if (current.is_locked === target) { resetKey(); setOpen(false); setReason(''); }

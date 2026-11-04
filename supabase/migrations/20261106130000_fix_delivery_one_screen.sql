@@ -133,6 +133,8 @@ BEGIN
            'id', i.id,
            'invoice_number', i.invoice_number,
            'status', i.status,
+           -- The month it is voided in; a re-dated invoice makes the preview stale.
+           'invoice_date', i.invoice_date,
            'total_cents', i.total_amount_cents,
            'paid_cents', COALESCE(i.paid_amount_cents, 0),
            'prepay_applied_cents', COALESCE(i.prepay_applied_cents, 0),

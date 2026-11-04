@@ -8,11 +8,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const reuseIndex = process.argv.indexOf('--reuse');
-const reusedContainer = reuseIndex >= 0 ? process.argv[reuseIndex + 1] : process.env.CRX_PROVER_REUSE_CONTAINER;
-const NAME = reusedContainer || `crx-fix-delivery-${process.pid}-${Date.now().toString(36)}`;
-const REUSE = Boolean(reusedContainer);
-const KEEP = process.argv.includes('--keep') || process.env.CRX_PROVER_KEEP_CONTAINER === '1' || REUSE;
+// Always a fresh throwaway container: no option points the seed (which commits rows) at an existing database.
+const NAME = `crx-fix-delivery-${process.pid}-${Date.now().toString(36)}`;
+const KEEP = process.argv.includes('--keep') || process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const VERBOSE = process.env.CRX_PROVER_VERBOSE === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -304,6 +302,8 @@ function scenarios() {
     ${fix('k-new-draft')}`, 'an order draft added after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET total_amount_cents=20000 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-amount')}`, 'an invoice amount changed after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET invoice_date=invoice_date - 1 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${fix('k-new-date')}`, 'an invoice re-dated after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET credit_applied_cents=500 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-credit')}`, 'a credit applied after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; SELECT set_config('app.crx_below_cost_operation','create_direct_order',true);
@@ -446,13 +446,11 @@ function scenarios() {
 }
 
 try {
-  if (!REUSE) buildContainer();
-  if (!REUSE || scalar("SELECT count(*) FROM pg_proc WHERE proname='fix_delivery';") === '0') {
-    stageText('candidate.sql', lf(CANDIDATE)); const r = apply('candidate.sql');
-    if (r.status !== 0) throw new Error(`candidate apply failed:\n${r.output}`);
-    console.log('[prover] candidate applied');
-  }
-  if (scalar(`SELECT count(*) FROM public.deliveries WHERE id='${DELIVERY}';`) === '0') seed();
+  buildContainer();
+  stageText('candidate.sql', lf(CANDIDATE)); const r = apply('candidate.sql');
+  if (r.status !== 0) throw new Error(`candidate apply failed:\n${r.output}`);
+  console.log('[prover] candidate applied');
+  seed();
   TOKEN = scalar(`SELECT public._fix_delivery_plan('${DELIVERY}')->>'plan_token';`);
   assert.match(TOKEN, /^[0-9a-f]{32}$/, 'the preview carries a plan token');
   scenarios();

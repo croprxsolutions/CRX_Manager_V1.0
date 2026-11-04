@@ -288,6 +288,12 @@ describe('ProductDetail brands section', () => {
     }
   });
 
+  it('names the read-only Max Label Rate value for screen readers', async () => {
+    H.product = baseProduct({ max_label_rate: 32, max_label_rate_unit: 'fl oz/acre' });
+    render(<ProductDetail />);
+    expect(await screen.findByRole('definition', { name: 'Max Label Rate' })).toHaveTextContent('32 fl oz/acre');
+  });
+
   it('sends the vendor when creating a product', async () => {
     H.routeId = 'new';
     render(<ProductDetail />);

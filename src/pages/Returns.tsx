@@ -164,6 +164,9 @@ export default function Returns() {
     reason_notes: '',
     notes: '',
   });
+  // Read by the delayed inactive-customer check, which must not clear a customer picked since.
+  const newFormCustomerRef = useRef('');
+  useEffect(() => { newFormCustomerRef.current = newForm.customer_id; }, [newForm.customer_id]);
   const [newItems, setNewItems] = useState<EditItem[]>([]);
   const [unresolvedCreateIntent, setUnresolvedCreateIntent] = useState<{
     form: CreateReturnForm;
@@ -421,9 +424,10 @@ export default function Returns() {
       void customersLoaded.then((list) => {
         // A newer create form owns the screen; this older check must not touch it.
         if (session !== createSessionRef.current || !list || list.some((c) => c.id === prefill.customer_id)) return;
+        if (newFormCustomerRef.current !== prefill.customer_id) return;
         customerOrdersRequestRef.current += 1;
         orderItemsRequestRef.current += 1;
-        setNewForm((f) => (f.customer_id === prefill.customer_id ? { ...f, customer_id: '', order_id: '' } : f));
+        setNewForm((f) => ({ ...f, customer_id: '', order_id: '' }));
         setCustomerOrders([]);
         setOrderItems([]);
         toast('error', 'This customer is inactive, so a return cannot be started for them here.');

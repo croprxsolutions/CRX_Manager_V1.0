@@ -16,8 +16,24 @@ type Row = Record<string, unknown>;
 const H = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   failing: new Set<string>(),
+  // A table whose reads wait until this promise settles.
+  held: {} as Partial<Record<string, Promise<void>>>,
   toast: vi.fn(),
 }));
+
+// Delays an in-memory query's answer until the table's hold is released.
+function heldQuery(q: Record<string, unknown>, gate: Promise<void>): Record<string, unknown> {
+  return new Proxy(q, {
+    get(target, prop) {
+      if (prop === 'then') {
+        return (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+          gate.then(() => (target.then as (a: unknown, b: unknown) => unknown).call(target, resolve, reject));
+      }
+      const value = target[prop as string];
+      return typeof value === 'function' ? (...args: unknown[]) => heldQuery(value.apply(target, args), gate) : value;
+    },
+  });
+}
 
 // A query whose every method chains and whose answer is a read error.
 function failingQuery(): Record<string, unknown> {
@@ -37,7 +53,9 @@ vi.mock('../lib/db', async () => {
   return {
     ...actual,
     supabase: {
-      from: (table: string) => (H.failing.has(table) ? failingQuery() : buildInMemoryQuery(H.tables[table] ?? [])),
+      from: (table: string) => (H.failing.has(table) ? failingQuery()
+        : H.held[table] ? heldQuery(buildInMemoryQuery(H.tables[table] ?? []) as unknown as Record<string, unknown>, H.held[table])
+        : buildInMemoryQuery(H.tables[table] ?? [])),
       // The Returns screen's read-only lookups (20261021155000) answer with empty lists here.
       rpc: vi.fn(async (name: string) => ({
         data: name === 'get_split_payer_return_orders' || name === 'get_return_line_allowances' ? [] : null,
@@ -63,6 +81,7 @@ const pad = (i: number) => String(i).padStart(4, '0');
 beforeEach(() => {
   vi.clearAllMocks();
   H.failing = new Set();
+  H.held = {};
   H.tables = {
     customers: [{ id: 'customer-1', farm_name: 'Big Farm', assigned_tier: null, is_active: true }],
     // Newest first, the order the picker asks the server for. A draft, a deleted order and
@@ -122,6 +141,19 @@ describe('Return product from a delivery', () => {
     render(<MemoryRouter initialEntries={['/returns?customer=customer-1&order=order-0003']}><Returns /></MemoryRouter>);
     await screen.findByRole('dialog', { name: 'New Return / RMA' });
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load customers. Close the form and try again.'));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(H.toast).not.toHaveBeenCalledWith('error', expect.stringContaining('inactive'));
+  });
+
+  it('a late inactive-customer check leaves a customer changed since alone', async () => {
+    let release = () => {};
+    H.held.customers = new Promise<void>((r) => { release = r; });
+    render(<MemoryRouter initialEntries={['/returns?customer=gone-customer&order=order-0003']}><Returns /></MemoryRouter>);
+    const dialog = await screen.findByRole('dialog', { name: 'New Return / RMA' });
+    fireEvent.change(within(dialog).getByLabelText('Customer'), { target: { value: '' } });
+    release();
+    const customer = within(dialog).getByLabelText<HTMLSelectElement>('Customer');
+    await waitFor(() => expect(customer.querySelectorAll('option')).toHaveLength(2));
     await new Promise((r) => setTimeout(r, 50));
     expect(H.toast).not.toHaveBeenCalledWith('error', expect.stringContaining('inactive'));
   });

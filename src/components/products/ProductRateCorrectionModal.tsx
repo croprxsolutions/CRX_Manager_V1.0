@@ -136,7 +136,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
           <PerAcreTable prices={result} />
         </div>
       ) : (
-        <div className="space-y-3">
+        <fieldset disabled={saving} className="space-y-3">
           <p className="text-sm text-secondary">
             Rates are locked. This changes only this product, is logged with your reason, and reprices its per-acre prices.
           </p>
@@ -173,7 +173,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
               <PerAcreTable prices={previewed} />
             </div>
           )}
-        </div>
+        </fieldset>
       )}
     </Modal>
   );

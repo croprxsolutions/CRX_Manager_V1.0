@@ -31,6 +31,16 @@ describe('rate lock switch failure paths', () => {
     expect(screen.getByLabelText('Reason (required)')).toHaveValue('');
   });
 
+  it('freezes the reason while the switch is saving, so the logged reason is the one shown', async () => {
+    mockSet.mockReset().mockReturnValueOnce(new Promise(() => undefined));
+    render(<ProductRateLockControl lock={open} loadFailed={false} onRetry={vi.fn()} isAdmin profileId="u1" onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Lock rates' }));
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'season' } });
+    const buttons = screen.getAllByRole('button', { name: 'Lock rates' });
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(screen.getByLabelText('Reason (required)')).toBeDisabled());
+  });
+
   it('shows the state read after a save, not an older replayed receipt', async () => {
     mockSet.mockReset().mockResolvedValueOnce(locked);
     mockLoad.mockReset().mockResolvedValue(open);

@@ -104,6 +104,7 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
           rows={2}
           maxLength={500}
           value={reason}
+          disabled={saving}
           onChange={(e) => setReason(e.target.value)}
         />
       </Modal>

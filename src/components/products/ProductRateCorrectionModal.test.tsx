@@ -48,6 +48,19 @@ describe('correct rates while locked', () => {
     expect(onCorrected).toHaveBeenCalled();
   });
 
+  it('freezes the form while a save is pending, so the saved rate is the one shown', async () => {
+    mockPreview.mockResolvedValue({ before: values(13, 4.06), after: values(16, 5) });
+    mockCorrect.mockReset().mockReturnValueOnce(new Promise(() => undefined));
+    render(<ProductRateCorrectionModal open product={product} profileId="u1" unitOptions={['oz']}
+      onClose={vi.fn()} onCorrected={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Rate Per Acre'), { target: { value: '16' } });
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'label fix' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(screen.getByLabelText('Rate Per Acre')).toBeDisabled());
+    expect(screen.getByLabelText('Reason (required)')).toBeDisabled();
+  });
+
   it('refuses a negative or non-numeric rate before sending', () => {
     render(<ProductRateCorrectionModal open product={product} profileId="u1" unitOptions={['oz']}
       onClose={vi.fn()} onCorrected={vi.fn()} />);

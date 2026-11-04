@@ -108,7 +108,7 @@ Quote sections and quote items are RPC-owned: browser roles may read them but mu
 
 ### Key RPCs
 - `convert_quote_to_order()` — creates order + order_items + commissions from a `sent`, `revised` or `accepted` quote and sets the quote to `accepted`. Any active admin or sales rep can convert any booking, not only the rep who created it (Mason, 2026-10-27, as for Partial Order); the order and its commissions take the booking's commission split, so the commission stays with the booking's rep. Any other status is refused (`BOOKING_CLOSED`), as is a partly drawn booking (`BOOKING_PARTIALLY_DRAWN`) or a line without a positive quote-time cost (`COST_BASIS_REQUIRED`)
-- `draw_down_quote()` — Partial Order: draws part of a booking into a new order (`booking_draw`). From `20261029110000` (once applied), a line may go over what is left when it carries `extra_price` (`today` | `booked`; the screen defaults to today): the booking part draws what is left, and the extra is written to its own ordinary order (no `quote_id`, notes name the booking) at that price with today's cost. The booking ledger never exceeds what was booked. Without `extra_price` an over-draw is refused with `BOOKING_OVERDRAWN` as before.
+- `draw_down_quote()` — Partial Order: draws part of a booking into a new order (`booking_draw`). From `20261029110000` (once applied), a line may go over what is left when it carries `extra_price` (`today` | `booked`; the screen defaults to today): the booking part draws what is left, and the extra is written to its own ordinary order (no `quote_id`, notes name the booking) at that price with today's cost. The booking ledger never exceeds what was booked. Without `extra_price` an over-draw is refused with `BOOKING_OVERDRAWN` as before. From `20261106110000`, a draw quantity has at most 2 decimal places, like the booked quantity it draws from (`BOOKING_QUANTITY_PRECISION`), so what is left is always drawable and the booking can close.
 - `create_direct_order()` — creates an order without a quote
 - `cancel_order()` — cancels order and releases its prebooked stock (the undelivered remainder, recorded as `released` ledger rows)
 - `update_order_items()` — modify order items (admin or sales rep)
@@ -148,6 +148,8 @@ Quote sections and quote items are RPC-owned: browser roles may read them but mu
 - **completed**: Delivery finished (`complete_delivery()` RPC). Inventory deducted, order updated.
 - **cancelled**: Delivery was cancelled (`cancel_delivery()` or `batch_cancel_deliveries()`).
 - **voided**: Completed delivery reversed by admin (`void_delivery()` RPC). Inventory restored.
+  - A posted, paid or overdue invoice blocks `void_delivery()`. **Fix Delivery** (`preview_fix_delivery()` then `fix_delivery()`, admin only, one screen with a typed confirmation) voids or cancels the delivery's own unpaid invoice and voids the delivery in one transaction, keeps the order's pending commission (a new pending copy replaces the one the invoice void cancels), then opens New Delivery for the same order. It refuses an applied payment, a split-group or whole-order invoice, a closed month, a return, outside billing, or a commission already in a payout.
+  - **Return Product** on a completed delivery opens Returns with the customer and order already picked (`/returns?customer=&order=`).
 
 ### Two-step delivery flow (CRITICAL)
 1. **`confirm_delivery()`** — transitions scheduled -> in_progress. It does not check stock: the low-stock warning is the shortage badge on the Deliveries page, and `complete_delivery()` warns rather than blocks.

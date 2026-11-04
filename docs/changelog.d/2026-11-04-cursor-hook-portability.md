@@ -1,0 +1,3 @@
+## 2026-11-04 — Claude hooks run correctly in Cursor on Windows
+
+Cursor imports the `.claude/settings.json` hooks and runs them in PowerShell 7, where `$CLAUDE_PROJECT_DIR` was empty, so every CRX guard failed to start in Cursor: fail-open guards were silently off, and the merge guard's fallback denied every shell and MCP call. Hook paths now use `$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}` (unchanged under Git Bash, relative to the project root under PowerShell), and the merge fallback is `|| echo '<denial>'; exit 0` so Cursor honours it. `scripts/windows-hook-command.test.mjs` now checks the Claude manifest, and `merge-guard-launcher.test.mjs` runs the wired merge command under `pwsh`.

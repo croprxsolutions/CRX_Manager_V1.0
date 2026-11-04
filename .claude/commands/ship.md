@@ -176,6 +176,16 @@ Once Step 4 is clean and Step 2/2.5 are green, present the branch, commit, verif
 - **A Mason-only action** (a destructive migration, an Edge Function deploy, data deletion, or any other hard gate in `AGENTS.md` › Safety and Protected Delivery): stop and ask Mason for explicit approval of that specific action. Do not treat the landing rule — or any older approval — as covering these. A destructive, data-overwriting or access-changing migration needs his own `I approve` reply in this conversation, right after you show the request for that exact file (`scripts/owner-approve-migration.mjs` builds the request; the reply hook records it and the apply gate enforces it).
 - **A required gate ran degraded or could not run:** do not land and do not self-certify. Stop and hand over per the stop rule in `AGENTS.md`, saying which gate and why; approval does not replace the gate, which must run and pass before landing.
 
+### Landing several PRs with a merge captain
+
+When one session (the captain) lands PRs that child sessions get green (Mason, 2026-11-04):
+- The first brief names each PR's owner: the session that fixes it, and the author whose work it is. #1442 and #1345 stalled when nobody owned them.
+- A child reports `#N READY head=<full 40-character sha>, Sol=<proof path|n/a>, migration=<none|applied>`, or `#N BLOCKED` with its options. The captain settles technical forks itself and checks with `npm run pr-readiness -- <n> ...` (read-only) before it merges as in item 6.
+- A moved main costs a PR without a migration nothing (item 4), so its session does not merge main in just because main moved.
+- A migration PR is different: Sol's pre-flight refuses a migration branch that lacks origin/main, and the apply gate wants the head and the Sol proof bound to GitHub's current base. Any merge to main before its apply costs it another main merge, push and Codex App round (#1437 lost about four that way). So its session sends `#N WINDOW` just before its last push, and the captain merges nothing into main until #N is applied and merged, or until #N's session reports `#N BLOCKED`, which ends the hold.
+- Don't push to a branch whose author pushed in the last 30 minutes (Mason, 2026-11-04); leave a PR comment instead.
+- A child that goes idle right after `/compact` gets a one-line "carry on" message.
+
 ```
 ═══════════════════════════════════════════════════
   SHIP — <job>   (<YYYY-MM-DD HH:MM>)

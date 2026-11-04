@@ -164,19 +164,31 @@ export default function NewPurchaseOrder() {
     setTimeout(() => { initialLoadDone.current = true; }, 0);
   }, [fetchProducts]);
 
+  // An admin's line starts at the preferred vendor's newest cost while the PO is for that vendor.
+  // Skipped once the line changed product or cost meanwhile.
+  const suggestPreferredVendorCost = useCallback(async (itemKey: string, product: Product) => {
+    const catalog = product.current_cost || 0;
+    const suggestion = await fetchPreferredVendorCost(product.id);
+    if (!suggestion) return;
+    const unitCost = costForVendor(suggestion, vendorRef.current, catalog); // the vendor on the form now, not at selection
+    setItems((prev) => prev.map((i) => (i.key === itemKey && i.product_id === product.id && !i.costEdited && i.unit_cost === catalog
+      ? { ...i, suggestion, unit_cost: unitCost, ...(unitCost !== catalog ? { costFromAdmin: true } : {}) } : i)));
+  }, []);
+
   // Reorder deep-link: pre-fill the first line from ?product=<id> once products load.
   const preselectProductId = searchParams.get('product') || '';
   const preselectApplied = useRef(false);
+  const firstItemKey = items[0]?.key ?? '';
   useEffect(() => {
     if (preselectApplied.current || !preselectProductId || products.length === 0) return;
     const prod = products.find((p) => p.id === preselectProductId);
     if (!prod) return;
     preselectApplied.current = true;
     setItems((prev) => prev.map((i, idx) => (idx === 0
-      ? { ...i, product_id: prod.id, unit_cost: prod.current_cost || 0, unit_size: prod.unit_size || '', costFromAdmin: isAdmin }
-      : i)));
-    if (prod.vendor) setVendor((v) => v || prod.vendor || '');
-  }, [products, preselectProductId, isAdmin]);
+      ? { ...i, product_id: prod.id, unit_cost: prod.current_cost || 0, unit_size: prod.unit_size || '', costFromAdmin: isAdmin } : i)));
+    if (prod.vendor && !vendorRef.current) setVendor(vendorRef.current = prod.vendor);
+    if (isAdmin) void suggestPreferredVendorCost(firstItemKey, prod);
+  }, [products, preselectProductId, isAdmin, firstItemKey, suggestPreferredVendorCost]);
 
   const addItem = () => {
     setItems((prev) => [
@@ -213,21 +225,10 @@ export default function NewPurchaseOrder() {
       )
     );
     // The product's vendor is its preferred vendor (WP-PM-15b): suggest it when none is entered yet.
-    if (product.vendor) setVendor((v) => v || product.vendor || '');
+    if (product.vendor && !vendorRef.current) setVendor(vendorRef.current = product.vendor);
     setProductSearchOpen(null);
     setProductQuery('');
     if (isAdmin) void suggestPreferredVendorCost(itemKey, product);
-  };
-
-  // An admin's line starts at the preferred vendor's newest cost while the PO is for that vendor.
-  // Skipped once the line changed product or cost meanwhile.
-  const suggestPreferredVendorCost = async (itemKey: string, product: Product) => {
-    const catalog = product.current_cost || 0;
-    const suggestion = await fetchPreferredVendorCost(product.id).catch((err) => { Sentry.captureException(err); return null; });
-    if (!suggestion) return;
-    const unitCost = costForVendor(suggestion, vendorRef.current, catalog);
-    setItems((prev) => prev.map((i) => (i.key === itemKey && i.product_id === product.id && !i.costEdited && i.unit_cost === catalog
-      ? { ...i, suggestion, unit_cost: unitCost, ...(unitCost !== catalog ? { costFromAdmin: true } : {}) } : i)));
   };
 
   const changeVendor = (next: string) => {

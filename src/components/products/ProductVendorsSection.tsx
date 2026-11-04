@@ -133,7 +133,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       )}
       {vendors !== null && vendors.length > 0 && (
         <ul className="divide-y divide-gray-100">
-          {vendors.map((v) => (
+          {vendors.map((v, i) => (
             <li key={v.link_id} className="flex flex-wrap items-center gap-2 py-2">
               <span className="font-medium text-gray-900">{v.vendor_name}</span>
               {v.is_preferred && <Badge variant="success" size="sm">Preferred</Badge>}
@@ -150,7 +150,8 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
               )}
               {isAdmin && (
                 <span className="ml-auto flex gap-1">
-                  {!v.is_preferred && (
+                  {/* One action per vendor: the server makes that vendor's best link preferred. */}
+                  {!vendors.some((o, j) => o.vendor_id === v.vendor_id && (o.is_preferred || j < i)) && (
                     <Button size="sm" variant="ghost" icon={<Star className="w-4 h-4" />} disabled={busy}
                       onClick={() => void link(v.vendor_id, true)}>
                       Make preferred

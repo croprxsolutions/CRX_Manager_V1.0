@@ -36,9 +36,10 @@ function buildProductsQuery() {
   return chain;
 }
 
+const mockSearch = vi.hoisted(() => ({ value: '' }));
 vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
-  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  useSearchParams: () => [new URLSearchParams(mockSearch.value), vi.fn()],
 }));
 
 vi.mock('../lib/db', () => ({
@@ -187,6 +188,21 @@ describe('NewPurchaseOrder save and submit workflow', () => {
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_purchase_order', expect.anything()));
     const [, args] = mockRpc.mock.calls.find(([name]) => name === 'save_purchase_order')!;
     expect(args.p_items).toEqual([expect.objectContaining({ unit_cost_cents: 1250, unit_cost: 12.5 })]);
+  });
+
+  it('suggests the preferred vendor cost on the Reorder deep link too', async () => {
+    mockAuth.role = 'admin';
+    mockSearch.value = 'product=product-1';
+    mockRpc.mockImplementation(async (name: string) => {
+      if (name === 'get_product_vendors') return { data: [{ vendor_name: 'Test Vendor', is_preferred: true, last_cost_cents: 980 }], error: null };
+      throw new Error(`Unexpected RPC ${name}`);
+    });
+    try {
+      render(<NewPurchaseOrder />);
+      await waitFor(() => expect(screen.getByDisplayValue('9.8')).toBeInTheDocument());
+    } finally {
+      mockSearch.value = '';
+    }
   });
 
   it('suggests the preferred vendor and, for an admin, its last cost per unit (WP-PM-15b)', async () => {

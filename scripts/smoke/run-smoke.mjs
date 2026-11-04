@@ -43,7 +43,7 @@
  *             2 = usage / selection / spec-registry error.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -240,12 +240,18 @@ export function readLiveChain(specs, key) {
   const spec = Object.hasOwn(specs, key) ? specs[key] : null;
   if (!spec || typeof spec.chain !== 'string') throw new Error(`"${key}" is not in smoke-specs.json.`);
   if (spec.container_only || spec.psql_only) throw new Error(`"${key}" is container-only or psql-only; --live never sends it.`);
+  const notHere = new Error(`"${key}" chain ${spec.chain} is not a .sql file in scripts/smoke/.`);
   const file = path.resolve(SMOKE_DIR, spec.chain);
-  if (path.dirname(file) !== SMOKE_DIR || !file.endsWith('.sql')) {
-    throw new Error(`"${key}" chain ${spec.chain} is not a .sql file in scripts/smoke/.`);
-  }
+  if (path.dirname(file) !== SMOKE_DIR || !file.endsWith('.sql') || !existsSync(file)) throw notHere;
+  // Resolve links too, so a symlink in this folder cannot send a file from elsewhere.
+  if (path.dirname(realpathSync(file)) !== realpathSync(SMOKE_DIR)) throw notHere;
   const sql = readFileSync(file, 'utf8');
-  if (!sql.includes(PASS_TOKEN)) throw new Error(`"${key}" chain ${spec.chain} never raises ${PASS_TOKEN}; refusing it.`);
+  // The token must be raised, not merely mentioned: a chain that never raises would commit its writes.
+  // shortcut: comment stripping is lexical (a "--" inside a string can hide later text); registry chains are reviewed SQL.
+  const code = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
+  if (!new RegExp(`RAISE\\s+EXCEPTION\\s+'${PASS_TOKEN}`, 'i').test(code)) {
+    throw new Error(`"${key}" chain ${spec.chain} never raises ${PASS_TOKEN}; refusing it.`);
+  }
   return sql;
 }
 

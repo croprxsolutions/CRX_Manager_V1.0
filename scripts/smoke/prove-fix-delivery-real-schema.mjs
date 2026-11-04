@@ -364,6 +364,19 @@ function scenarios() {
     ${check(`(SELECT NOT (p->>'can_fix')::boolean FROM pc)`, 'the preview already refuses')}
     ${fix('k-closed-credit')}`, 'a credit applied to the invoice in a closed month refuses the fix at preview', /FIX_DELIVERY_REFUSED: The invoice, or a credit applied to it, is dated in a closed month/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+    INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents,posted_at)
+      VALUES ('${CM}','PROVER-FIX-CM','${ORDER}','${CUSTOMER}','credit_memo','posted',CURRENT_DATE,'${ADMIN}','${REP}',-500,now());
+    ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ALTER TABLE public.credit_memo_applications DISABLE TRIGGER USER;
+    INSERT INTO public.credit_memo_applications (credit_memo_id,target_invoice_id,amount_cents,applied_by,applied_at)
+      VALUES ('${CM}','${INV}',500,'${ADMIN}',(date_trunc('month',CURRENT_DATE)::timestamp AT TIME ZONE 'UTC') + interval '2 hours');
+    ALTER TABLE public.credit_memo_applications ENABLE TRIGGER USER;
+    ALTER TABLE public.accounting_periods DISABLE TRIGGER USER;
+    INSERT INTO public.accounting_periods (period_start,period_end,status) VALUES
+      ((date_trunc('month',CURRENT_DATE) - interval '1 month')::date,(date_trunc('month',CURRENT_DATE) - interval '1 day')::date,'closed');
+    ALTER TABLE public.accounting_periods ENABLE TRIGGER USER;
+    ${fix('k-closed-credit-chicago')}`, 'a credit applied 02:00 UTC on the 1st counts in the prior, closed Chicago month', /FIX_DELIVERY_REFUSED: The invoice, or a credit applied to it, is dated in a closed month/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
     INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents,prepay_applied_cents)
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000,2000);
     ALTER TABLE public.invoices ENABLE TRIGGER USER;

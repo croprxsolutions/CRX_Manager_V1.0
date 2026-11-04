@@ -189,11 +189,14 @@ BEGIN
                JOIN accounting_periods ap ON ap.status = 'closed' AND i.invoice_date BETWEEN ap.period_start AND ap.period_end
               WHERE i.delivery_id = p_delivery_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
                 AND i.status IN ('posted', 'paid', 'overdue'))
-     -- void_invoice also reverses each credit-memo application in that application's own month.
+     -- void_invoice also reverses each credit-memo application in that application's own month. It
+     -- checks the UTC date; the business month is the Chicago date, so either one closed refuses.
      OR EXISTS (SELECT 1 FROM invoices i
                   JOIN credit_memo_applications cma ON cma.reversed_at IS NULL
                    AND (cma.credit_memo_id = i.id OR cma.target_invoice_id = i.id)
-                  JOIN accounting_periods ap ON ap.status = 'closed' AND cma.applied_at::date BETWEEN ap.period_start AND ap.period_end
+                  JOIN accounting_periods ap ON ap.status = 'closed'
+                   AND (cma.applied_at::date BETWEEN ap.period_start AND ap.period_end
+                        OR (cma.applied_at AT TIME ZONE 'America/Chicago')::date BETWEEN ap.period_start AND ap.period_end)
                  WHERE i.delivery_id = p_delivery_id AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
                    AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue')) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'CLOSED_PERIOD',
@@ -349,10 +352,18 @@ BEGIN
     FROM (SELECT id FROM commissions
            WHERE order_id = v_order_id AND status = 'pending' AND deleted_at IS NULL
            FOR UPDATE) c;
-  -- Hold the delivery month against close_accounting_period, as check_period_open does, so the
-  -- plan's closed-month check cannot pass just before that month closes.
-  PERFORM public._lock_accounting_months(ARRAY[(SELECT COALESCE((d.completed_at AT TIME ZONE 'America/Chicago')::date, d.scheduled_date)
-                                                  FROM deliveries d WHERE d.id = p_delivery_id)], false);
+  -- Hold the delivery month and each applied credit's months (UTC and Chicago dates) against
+  -- close_accounting_period, as check_period_open does, so the plan's closed-month checks cannot
+  -- pass just before one of those months closes.
+  PERFORM public._lock_accounting_months(
+    ARRAY[(SELECT COALESCE((d.completed_at AT TIME ZONE 'America/Chicago')::date, d.scheduled_date)
+             FROM deliveries d WHERE d.id = p_delivery_id)]
+    || ARRAY(SELECT x FROM invoices i
+               JOIN credit_memo_applications cma ON cma.reversed_at IS NULL
+                AND (cma.credit_memo_id = i.id OR cma.target_invoice_id = i.id),
+               LATERAL (VALUES (cma.applied_at::date), ((cma.applied_at AT TIME ZONE 'America/Chicago')::date)) v(x)
+              WHERE i.delivery_id = p_delivery_id),
+    false);
 
   v_plan := public._fix_delivery_plan(p_delivery_id);
   IF NOT (v_plan ->> 'can_fix')::boolean THEN

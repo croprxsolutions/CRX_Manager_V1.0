@@ -58,7 +58,7 @@ import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
-import { catalogPricePerAcre, getQuoteTierPrice, isTierPriceMissing, validateCommissionSplits } from '../lib/quoteCalc';
+import { billedLine, catalogPricePerAcre, exactRound2, getQuoteTierPrice, isTierPriceMissing, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
 import {
   buildRowVersionPatch,
@@ -1715,19 +1715,16 @@ export default function QuoteBuilder() {
 
       if (item.calc_mode === 'units_direct') {
         // User entered total_units_needed directly — skip rate×acres computation
-        const totalInventoryUnits = item.total_units_needed || 0;
-        const totalPrice = pricePerUnit * totalInventoryUnits;
-        const profit = (pricePerUnit - cost) * totalInventoryUnits;
-        const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+        const enteredUnits = item.total_units_needed || 0;
+        const billed = billedLine(pricePerUnit, cost, [enteredUnits]);
 
-        // Back-calculate oz/acre and $/acre if acres provided
+        // Back-calculate oz/acre and $/acre if acres provided; save_quote uses the entered units
         const acres = item.acres || 0;
         let ozPerAcre: number | null = item.oz_per_acre;
         let pricePerAcre: number | null = item.price_per_acre;
         if (acres > 0 && inventoryUnitFactorOz > 0) {
-          const totalOz = totalInventoryUnits * inventoryUnitFactorOz;
-          ozPerAcre = Math.round((totalOz / acres) * 100) / 100;
-          pricePerAcre = Math.round((totalPrice / acres) * 100) / 100;
+          ozPerAcre = exactRound2([enteredUnits, inventoryUnitFactorOz], [acres]);
+          pricePerAcre = exactRound2([pricePerUnit, enteredUnits], [acres]);
         }
 
         return {
@@ -1736,10 +1733,10 @@ export default function QuoteBuilder() {
           current_cost: cost,
           oz_per_acre: ozPerAcre,
           price_per_acre: pricePerAcre,
-          total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-          total_price: Math.round(totalPrice * 100) / 100,
-          profit: Math.round(profit * 100) / 100,
-          net_margin: Math.round(netMargin * 100 * 100) / 100,
+          total_units_needed: billed.units,
+          total_price: billed.totalPrice,
+          profit: billed.profit,
+          net_margin: billed.netMargin,
         };
       }
 
@@ -1748,30 +1745,23 @@ export default function QuoteBuilder() {
       const acres = item.acres || 0;
 
       const rateUnitFactorOz = getConversionFactor(item.rate_unit);
-      const rateInOz = actualRate * rateUnitFactorOz;
-      const ozPerAcre = rateInOz;
-
-      const totalInventoryUnits = inventoryUnitFactorOz > 0
-        ? (acres * rateInOz) / inventoryUnitFactorOz
-        : 0;
-
-      const pricePerAcre = inventoryUnitFactorOz > 0
-        ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
-        : 0;
-      const totalPrice = pricePerUnit * totalInventoryUnits;
-      const profit = (pricePerUnit - cost) * totalInventoryUnits;
-      const netMargin = totalPrice > 0 ? profit / totalPrice : 0;
+      // S09: the quantity, total and profit the database stores and bills (see billedLine).
+      const billed = inventoryUnitFactorOz > 0
+        ? billedLine(pricePerUnit, cost, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+        : billedLine(pricePerUnit, cost, [0]);
 
       return {
         ...item,
         price_per_unit: pricePerUnit,
         current_cost: cost,
-        oz_per_acre: Math.round(ozPerAcre * 100) / 100,
-        price_per_acre: Math.round(pricePerAcre * 100) / 100,
-        total_units_needed: Math.round(totalInventoryUnits * 100) / 100,
-        total_price: Math.round(totalPrice * 100) / 100,
-        profit: Math.round(profit * 100) / 100,
-        net_margin: Math.round(netMargin * 100 * 100) / 100,
+        oz_per_acre: exactRound2([actualRate, rateUnitFactorOz]),
+        price_per_acre: inventoryUnitFactorOz > 0
+          ? exactRound2([pricePerUnit, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+          : 0,
+        total_units_needed: billed.units,
+        total_price: billed.totalPrice,
+        profit: billed.profit,
+        net_margin: billed.netMargin,
       };
     },
     [products, getTierPrice, getConversionFactor, lineBasisFor]

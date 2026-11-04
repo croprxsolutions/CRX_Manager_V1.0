@@ -16,7 +16,7 @@ import FixDeliveryModal from './FixDeliveryModal';
 const plan = (over = {}) => ({
   delivery_id: 'd1', delivery_number: 'DEL-7', order_id: 'o1', order_number: 'ORD-1', customer_id: 'c1',
   can_fix: true, refusals: [], other_draft_invoices: [], plan_token: 'tok1',
-  invoices: [{ id: 'i2', invoice_number: 'INV-2', status: 'posted', total_cents: 12345, paid_cents: 0, prepay_applied_cents: 0, action: 'void' }],
+  invoices: [{ id: 'i2', invoice_number: 'INV-2', status: 'posted', total_cents: 12345, paid_cents: 0, prepay_applied_cents: 0, write_off_cents: 0, credit_applied_cents: 0, action: 'void' }],
   items: [{ id: 'di1', order_item_id: 'oi1', product_id: 'p1', product_name: 'Roundup', quantity: 10, unit: 'gal' }],
   ...over,
 });

@@ -42,7 +42,9 @@ import * as ts from 'typescript';
 // -------------------------------------------------------------------------
 // Checked-in live snapshot — re-read in full from live 2026-11-04 after the
 // 20261105180000 apply (ledger 20261104024012): 795 public functions; the list md5 matched live.
-// Plus the 3 functions of 20261106100000 (Fix delivery), applied before this list merges: 798.
+// Plus the 3 functions of 20261106100000 (Fix delivery), listed ahead of the live apply: ship.md applies it
+// before this PR merges (a merge needs green checks, and the queued-exception route fails them by design).
+// If the PR is parked unapplied, drop these 3 names. Until applied, the screen shows the preview error.
 // (see LIVE_PG_PROC_COUNT below, which is authoritative; includes trigger/helper
 // functions and supersets the user-facing RPCs).
 // Kept as the raw comma-joined DB output to make regeneration a single paste.

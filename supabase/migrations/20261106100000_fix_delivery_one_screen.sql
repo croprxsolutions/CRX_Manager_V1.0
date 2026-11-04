@@ -108,11 +108,13 @@ BEGIN
       'message', 'This order is billed on one invoice that covers more than this delivery. Void that invoice from the invoice page first.');
   END IF;
 
-  -- void_delivery cancels the order's drafts outright, so a draft holding money would strand it
+  -- void_delivery cancels the order's drafts outright, and void_invoice cancels the delivery's own
+  -- draft or unposted invoice without reversing anything, so one holding money would strand it
   -- (same refusal as void_order's ORDER_VOID_DRAFT_HAS_APPLIED_MONEY).
-  IF v_delivery.order_id IS NOT NULL AND EXISTS (
+  IF EXISTS (
     SELECT 1 FROM invoices i
-     WHERE i.order_id = v_delivery.order_id AND i.delivery_id IS NULL AND i.status = 'draft'
+     WHERE ((i.order_id = v_delivery.order_id AND i.delivery_id IS NULL AND i.status = 'draft')
+            OR (i.delivery_id = p_delivery_id AND i.status IN ('draft', 'unposted')))
        AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL
        AND (COALESCE(i.paid_amount_cents, 0) <> 0 OR COALESCE(i.prepay_applied_cents, 0) <> 0
             OR COALESCE(i.write_off_cents, 0) <> 0 OR COALESCE(i.credit_applied_cents, 0) <> 0
@@ -121,7 +123,7 @@ BEGIN
                         WHERE ila.invoice_id = i.id AND aset.entity_type = 'payment' AND aset.is_active))
   ) THEN
     v_refusals := v_refusals || jsonb_build_object('code', 'DRAFT_HAS_MONEY',
-      'message', 'A draft invoice on this order has a payment, prepay, credit or write-off recorded. Reverse it from the invoice page first.');
+      'message', 'A draft or unposted invoice on this delivery or order has a payment, prepay, credit or write-off recorded. Reverse it from the invoice page first.');
   END IF;
 
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -131,6 +133,9 @@ BEGIN
            'total_cents', i.total_amount_cents,
            'paid_cents', COALESCE(i.paid_amount_cents, 0),
            'prepay_applied_cents', COALESCE(i.prepay_applied_cents, 0),
+           -- In the plan token too, so a write-off or credit added after the preview makes it stale.
+           'write_off_cents', COALESCE(i.write_off_cents, 0),
+           'credit_applied_cents', COALESCE(i.credit_applied_cents, 0),
            'action', CASE WHEN i.status IN ('draft', 'unposted') THEN 'cancel' ELSE 'void' END
          ) ORDER BY i.invoice_number, i.id), '[]'::jsonb)
     INTO v_invoices

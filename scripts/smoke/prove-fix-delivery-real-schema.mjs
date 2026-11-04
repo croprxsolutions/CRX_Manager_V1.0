@@ -303,6 +303,8 @@ function scenarios() {
     ${fix('k-new-draft')}`, 'an order draft added after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET total_amount_cents=20000 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-amount')}`, 'an invoice amount changed after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET write_off_cents=500 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${fix('k-new-write-off')}`, 'a write-off added after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; SELECT set_config('app.crx_below_cost_operation','create_direct_order',true);
     INSERT INTO public.order_items (id,order_id,product_id,product_name,unit_size,price_per_unit,total_units_needed,quantity_delivered,total_price,cost_per_unit) VALUES
       ('${LINE2}','${ORDER}','${PRODUCT}','[PROVER] Product','gal',10,10,10,100,6);
@@ -343,7 +345,7 @@ function scenarios() {
     INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents,prepay_applied_cents)
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000,2000);
     ALTER TABLE public.invoices ENABLE TRIGGER USER;
-    ${fix('k-draft-money')}`, 'an order draft holding prepay refuses the fix', /FIX_DELIVERY_REFUSED: A draft invoice on this order has a payment/);
+    ${fix('k-draft-money')}`, 'an order draft holding prepay refuses the fix', /FIX_DELIVERY_REFUSED: A draft or unposted invoice on this delivery or order has a payment/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
     INSERT INTO public.invoices (id,invoice_number,order_id,customer_id,invoice_type,status,invoice_date,created_by,salesman_id,total_amount_cents)
       VALUES ('${ORDER_INV}','PROVER-FIX-ORDER-DRAFT','${ORDER}','${CUSTOMER}','chemical_sale','draft',CURRENT_DATE,'${ADMIN}','${REP}',5000);
@@ -353,7 +355,9 @@ function scenarios() {
     INSERT INTO public.invoice_line_allocations (allocation_set_id,invoice_id,bill_to_customer_id,split_percentage,amount_cents)
       VALUES ('${ALLOC}','${ORDER_INV}','${CUSTOMER}',100,1000);
     ALTER TABLE public.allocation_sets ENABLE TRIGGER USER; ALTER TABLE public.invoice_line_allocations ENABLE TRIGGER USER;
-    ${fix('k-draft-alloc')}`, 'an order draft with an active payment allocation refuses the fix', /FIX_DELIVERY_REFUSED: A draft invoice on this order has a payment/);
+    ${fix('k-draft-alloc')}`, 'an order draft with an active payment allocation refuses the fix', /FIX_DELIVERY_REFUSED: A draft or unposted invoice on this delivery or order has a payment/);
+  refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET status='draft', posted_at=NULL, prepay_applied_cents=2000 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
+    ${fix('k-own-draft-money')}`, "the delivery's own draft invoice holding prepay refuses the fix", /FIX_DELIVERY_REFUSED: A draft or unposted invoice on this delivery or order has a payment/);
   refused(`RESET ROLE; INSERT INTO public.idempotency_keys (idempotency_key,operation,result)
       VALUES ('k-pre-used:void_invoice:${INV}','void_invoice','{"success":true}');
     ${fix('k-pre-used')}`,

@@ -10,6 +10,7 @@
 --      refused by the below-cost check
 --   C  Sending the saved line twice is refused below cost (the invoiced cost is kept once)
 --   D  Lowering the line to 3 gal keeps its cost; raising it to 4 gal later is refused below cost
+--   E  Repricing the line to $9.00 is accepted; lowering it back to $7.33 is refused below cost
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -187,9 +188,32 @@ BEGIN
     END IF;
   END;
 
+  -- --------------------------------------------------------------------
+  -- E: a line repriced to $9.00 (above today's $8.00 cost) is accepted; lowering it back to the
+  --    $7.33 order price, below today's cost, is refused below cost.
+  -- --------------------------------------------------------------------
+  BEGIN
+    PERFORM save_invoice(v_hdr, jsonb_build_array(v_line || '{"quantity": 3, "unit_price_cents": 900}'),
+      'smk-rescost-up-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (E) repricing to $9.00 was refused: ' || left(SQLERRM, 80) || ';';
+  END;
+  SELECT jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id, 'description', it.description,
+           'quantity', it.quantity, 'unit_price_cents', 733, 'sort_order', it.sort_order,
+           'unit_size', it.unit_size)
+    INTO v_line FROM invoice_items it WHERE it.invoice_id = v_inv2 LIMIT 1;
+  BEGIN
+    PERFORM save_invoice(v_hdr, jsonb_build_array(v_line), 'smk-rescost-down-' || v_suffix);
+    v_fails := v_fails || ' (E) lowering $9.00 back to $7.33 under the $8.00 cost skipped the check;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BELOW_COST%' THEN
+      v_fails := v_fails || ' (E) refused with the wrong error: ' || left(SQLERRM, 80) || ';';
+    END IF;
+  END;
+
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL invoice resave cost:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK invoice resave cost: after a cost rise above price, a note-only re-save kept $6.00 cost and $36.65; a $5.00 price, a line sent twice and a line raised from 3 to 4 gal were each still refused below cost';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK invoice resave cost: after a cost rise above price, a note-only re-save kept $6.00 cost and $36.65; a $5.00 price, a line sent twice, a line raised from 3 to 4 gal and a $9.00 line lowered back to $7.33 were each still refused below cost';
 END
 $smoke$;

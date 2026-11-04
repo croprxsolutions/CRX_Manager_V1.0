@@ -105,6 +105,8 @@ function chainable(resolveWith: unknown) {
   return builder;
 }
 
+// The Vendors section has its own tests; these page tests do not mock its reads.
+vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
 vi.mock('../lib/db', async () => {
   // Use the REAL sanitizeError. Stubbing it as `e instanceof Error ? e.message : …`
   // would re-implement the very defect these screens were just fixed for: a

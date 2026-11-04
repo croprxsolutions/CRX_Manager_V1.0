@@ -7,7 +7,8 @@
 import { CRX_GREEN, CHARCOAL, GRAY, RED, AMBER, type JsPDFWithAutoTable } from './pdfTheme';
 import type { autoTable as autoTableFn } from 'jspdf-autotable';
 import type { CellHookData } from 'jspdf-autotable';
-import { COMPANY_FOOTER_THANKS } from './companyInfo';
+import { companyFooterThanks, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 
 
 
@@ -42,6 +43,7 @@ const conditionColor = (c: string): [number, number, number] => {
 
 function renderReceivingPage(
   doc: JsPDFWithAutoTable,
+  company: CompanyInfo,
   data: PdfReceivingData,
   autoTable: typeof autoTableFn
 ) {
@@ -55,7 +57,8 @@ function renderReceivingPage(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(20);
   doc.setTextColor(255, 255, 255);
-  doc.text('CROP RX SOLUTIONS', margin, 32);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 200, 20);
+  doc.text(company.name.toUpperCase(), margin, 32);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text('RECEIVING RECEIPT', margin, 50);
@@ -195,15 +198,21 @@ function renderReceivingPage(
   doc.line(margin, footerY - 10, pageW - margin, footerY - 10);
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
-  doc.text(COMPANY_FOOTER_THANKS, pageW / 2, footerY, { align: 'center' });
+  doc.text(
+    doc.splitTextToSize(companyFooterThanks(company), pageW - margin * 2).slice(0, 2),
+    pageW / 2,
+    footerY,
+    { align: 'center' },
+  );
 }
 
 export async function generateReceivingPdf(data: PdfReceivingData) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
-  renderReceivingPage(doc, data, autoTable);
+  renderReceivingPage(doc, company, data, autoTable);
   return doc;
 }
 

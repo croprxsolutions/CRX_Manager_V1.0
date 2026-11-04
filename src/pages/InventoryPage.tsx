@@ -1525,7 +1525,7 @@ export default function InventoryPage() {
         const lowStockItems = inventory.filter((i) => i.is_low_stock);
         if (lowStockItems.length === 0) return null;
 
-        // Group by vendor
+        // Group by vendor: products.vendor is the preferred vendor's name, kept by the database (WP-PM-15b)
         const byVendor = new Map<string, InventoryRow[]>();
         for (const item of lowStockItems) {
           const vendor = item.vendor || 'No Vendor';

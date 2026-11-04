@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Settings company details (Company Info) the PDF letterhead and footer print.
+const companyInfo = vi.hoisted(() => ({
+  load: vi.fn(async () => ({ name: 'Prairie Ag Co', phone: '555-0100', email: '', address: '12 Main St Annapolis, IL 62413' })),
+}));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
+
 const mockDoc = {
   internal: { pageSize: { getWidth: () => 612, getHeight: () => 792 } },
   setFillColor: vi.fn(),
@@ -72,13 +78,19 @@ describe('generateReceivingPdf', () => {
     expect(doc.save).toBeDefined();
   });
 
-  it('renders company header "CROP RX SOLUTIONS"', async () => {
+  it('renders Settings company name in the header', async () => {
     await generateReceivingPdf(makeReceivingData());
     const textCalls = mockDoc.text.mock.calls;
     const headerCall = textCalls.find(
-      (call) => typeof call[0] === 'string' && call[0] === 'CROP RX SOLUTIONS'
+      (call) => typeof call[0] === 'string' && call[0] === 'PRAIRIE AG CO'
     );
     expect(headerCall).toBeDefined();
+  });
+
+  it('prints the Settings name and address in the footer', async () => {
+    await generateReceivingPdf(makeReceivingData());
+    const footer = mockDoc.text.mock.calls.find((call) => String(call[0]).includes('Thank you for your business'));
+    expect(String(footer?.[0])).toContain('Prairie Ag Co  •  12 Main St Annapolis, IL 62413');
   });
 
   it('renders PO number', async () => {

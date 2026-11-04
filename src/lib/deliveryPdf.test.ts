@@ -4,6 +4,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Settings company details (Company Info) the PDF letterhead and footer print.
+const companyInfo = vi.hoisted(() => ({
+  load: vi.fn(async () => ({ name: 'Prairie Ag Co', phone: '555-0100', email: '', address: '12 Main St Annapolis, IL 62413' })),
+}));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
 import type { PdfDeliveryData } from './deliveryPdf';
 
 // ── Mock jsPDF doc instance ─────────────────────────────────────────────
@@ -20,6 +26,7 @@ const mockDoc = {
   line: vi.fn(),
   roundedRect: vi.fn(),
   splitTextToSize: vi.fn((text: string) => [text]),
+  getTextWidth: vi.fn(() => 50),
   addPage: vi.fn(),
   save: vi.fn(),
   lastAutoTable: { finalY: 400 },
@@ -93,7 +100,7 @@ describe('generateDeliveryPdf', () => {
   it('renders the company header', async () => {
     await generateDeliveryPdf(makeDeliveryData());
     expect(mockDoc.text).toHaveBeenCalledWith(
-      'CROP RX SOLUTIONS',
+      'PRAIRIE AG CO',
       expect.any(Number),
       expect.any(Number),
     );
@@ -286,7 +293,7 @@ describe('generateDeliveryPdf', () => {
     const textCalls = mockDoc.text.mock.calls;
     const hasFooter = textCalls.some(
       (args: unknown[]) =>
-        typeof args[0] === 'string' && args[0].includes('Thank you for your business')
+        String(args[0]).includes('Thank you for your business') && String(args[0]).includes('12 Main St Annapolis')
     );
     expect(hasFooter).toBe(true);
   });

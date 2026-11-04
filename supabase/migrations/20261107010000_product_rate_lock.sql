@@ -14,6 +14,11 @@
 --     import, any SECURITY DEFINER function. It takes the lock row FOR SHARE, so a switch and a rate
 --     write take turns and an upload that started before a switch cannot save after it.
 --   * While locked, unit_conversions cannot change either: pricing converts every rate through it.
+--     Unlocked, a change takes the lock row FOR UPDATE, so it waits for a rate write in flight, and a
+--     rate write after it prices with the new factor (a moved preview is refused).
+--     Every products insert or update takes the lock row FOR SHARE in a trigger that runs first, so
+--     a product save prices with the factor of a change that committed before it, never a stale one.
+--     Locking is refused while any stored per-acre price differs from what the factors price today.
 --   * set_product_rates(rows): the bulk rate writer the CSV import (WP-PM-10) and the setup workbook
 --     (WP-PM-11a-2) will call (admin, retry key, all-or-nothing). Each row carries the rate values it
 --     expects to replace and the per-acre prices its preview showed; a row changed since, or whose
@@ -100,6 +105,8 @@ ALTER TABLE public.product_rate_events ENABLE ROW LEVEL SECURITY;
 CREATE POLICY product_rate_events_select ON public.product_rate_events
   FOR SELECT TO authenticated USING ((SELECT public.is_active_profile()));
 REVOKE ALL ON TABLE public.product_rate_events FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+-- Default privileges grant API roles the identity sequence too; only the definer functions insert.
+REVOKE ALL ON SEQUENCE public.product_rate_events_id_seq FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 GRANT SELECT ON TABLE public.product_rate_events TO authenticated;
 
 -- The correction's one-transaction pass: correct_product_rates adds a row for its product and
@@ -190,15 +197,14 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
   -- Open or not, every writer (product page, import) gets the rate writers' unit rule: per-acre
-  -- pricing prices an unknown unit as one ounce. Seed and each units are held to the stock unit
-  -- by validate_product_units instead.
+  -- pricing prices an unknown unit as one ounce. Seed and each products too: their rate unit is the
+  -- stock unit (validate_product_units), which still needs one finite factor in every spelling.
   IF (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre)
      AND NOT public._product_rate_value_ok(to_jsonb(NEW.rate_per_acre::text)) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a rate per acre must be blank or a number of 0 or more with at most 6 decimals'
       USING ERRCODE = 'check_violation';
   END IF;
-  IF NOT COALESCE(NEW.product_form IN ('seed', 'each'), false)
-     AND (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
+  IF (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
           OR NULLIF(OLD.rate_unit, '') IS DISTINCT FROM v_new_unit OR v_basis_changed)
      AND NOT public._product_rate_unit_ok(NEW.rate_per_acre, v_new_unit,
                                           CASE WHEN TG_OP = 'UPDATE' THEN OLD.rate_unit END, NEW.product_form,
@@ -216,6 +222,23 @@ CREATE TRIGGER trigger_zzz_guard_product_rate_lock
   BEFORE INSERT OR UPDATE ON public.products
   FOR EACH ROW EXECUTE FUNCTION public.guard_product_rate_lock();
 
+-- validate_product_units and recalc_product_price_per_acre price a row from unit_conversions before
+-- the guard above runs. Taking the lock row FOR SHARE first makes a save wait for a factor change in
+-- flight (which holds it FOR UPDATE), so pricing then reads the committed factor.
+CREATE FUNCTION public.share_product_rate_lock() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+BEGIN
+  PERFORM 1 FROM public.product_rate_lock WHERE id FOR SHARE;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public.share_product_rate_lock() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.share_product_rate_lock() FROM PUBLIC, anon, authenticated, service_role;
+-- Named to run before every other BEFORE trigger on products (trg_keep_... is the first today).
+CREATE TRIGGER trg_a_share_product_rate_lock
+  BEFORE INSERT OR UPDATE ON public.products
+  FOR EACH ROW EXECUTE FUNCTION public.share_product_rate_lock();
+
 -- Pricing converts every rate through unit_conversions, so a changed factor reprices locked products at
 -- their next save without any rate write: while locked, the table cannot change (unlock, with a reason, first).
 CREATE FUNCTION public.guard_unit_conversions_rate_lock() RETURNS trigger
@@ -223,7 +246,8 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function
 DECLARE
   v_locked boolean;
 BEGIN
-  SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR SHARE;
+  -- FOR UPDATE, not SHARE: rate writes hold the row FOR SHARE, so a factor change waits for them.
+  SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR UPDATE;
   IF COALESCE(v_locked, true) THEN  -- a missing lock row counts as locked
     RAISE EXCEPTION 'PRODUCT_RATES_LOCKED: rates are locked; unit conversions price every rate, so unlock rates with a reason before changing one'
       USING ERRCODE = 'check_violation';
@@ -330,7 +354,7 @@ REVOKE ALL ON FUNCTION public._product_rate_value(jsonb) FROM PUBLIC, anon, auth
 
 -- The price workbook's unit rule (20260722091359), tightened: a new unit must be a unit_conversions key
 -- for the product's form (or type both); an unchanged legacy unit is kept only while it is a key of any
--- form. Either way its factor must be above zero, and the same in every row spelled alike but for case,
+-- form. Either way its factor must be finite and above zero (numeric takes Infinity and NaN), and the same in every row spelled alike but for case,
 -- since per-acre pricing prices an unknown unit as one ounce, a zero factor as $0, and takes any one
 -- of those rows. A rate needs a unit, except on seed and each products, where
 -- validate_product_units fills it from the stock unit (their unchanged unit is kept as it is).
@@ -342,21 +366,31 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
   -- Clearing a rate always passes: no rate prices nothing, and the next rate write checks the unit.
   SELECT CASE WHEN p_rate IS NULL THEN true
     WHEN p_new_unit IS NULL THEN COALESCE(p_form IN ('seed', 'each'), false)
-    -- A kept seed or each unit may be unlisted (priced as one ounce on both sides), but never a zero factor.
+    -- A kept seed or each unit, or one equal to the stock unit (as validate_product_units fills it), cancels
+    -- out against the stock unit, so it may be unlisted or of any kind (seed in Lb), but never a zero
+    -- factor, and rate and stock look it up separately, so every case variant must share one factor.
     WHEN COALESCE(p_form IN ('seed', 'each'), false)
-         AND p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') THEN
-      NOT EXISTS (SELECT 1 FROM public.unit_conversions u
-                   WHERE lower(u.unit) = lower(p_new_unit) AND (u.factor_oz IS NULL OR u.factor_oz <= 0))
+         AND (p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') OR lower(p_new_unit) = lower(p_stock_unit)) THEN
+      (SELECT count(*) = count(u.factor_oz) AND COALESCE(min(u.factor_oz) > 0 AND max(u.factor_oz) < 'Infinity' AND min(u.factor_oz) = max(u.factor_oz), true)
+         FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
     ELSE EXISTS (SELECT 1 FROM public.unit_conversions uc
                   WHERE lower(uc.unit) = lower(p_new_unit)
                     AND (p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '')
                          OR p_form IS NULL OR uc.unit_type = p_form OR uc.unit_type = 'both'))
       -- Pricing takes any one row matching regardless of case, so every such row must agree.
-      AND (SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
+      AND (SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND max(u.factor_oz) < 'Infinity' AND min(u.factor_oz) = max(u.factor_oz)
              FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_new_unit))
       AND (COALESCE(p_form IN ('seed', 'each'), false)
-           OR COALESCE((SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND min(u.factor_oz) = max(u.factor_oz)
-                          FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_stock_unit)), false))
+           OR (COALESCE((SELECT count(*) = count(u.factor_oz) AND min(u.factor_oz) > 0 AND max(u.factor_oz) < 'Infinity' AND min(u.factor_oz) = max(u.factor_oz)
+                           FROM public.unit_conversions u WHERE lower(u.unit) = lower(p_stock_unit)), false)
+               -- The stock unit is pricing's divisor, so it must be the same kind: listed for the form,
+               -- or with no form, sharing a kind with the rate unit (Lb against Gal is no price).
+               AND EXISTS (SELECT 1 FROM public.unit_conversions s
+                            WHERE lower(s.unit) = lower(p_stock_unit)
+                              AND (s.unit_type = 'both' OR s.unit_type = p_form
+                                   OR (p_form IS NULL AND EXISTS (
+                                     SELECT 1 FROM public.unit_conversions r WHERE lower(r.unit) = lower(p_new_unit)
+                                        AND (r.unit_type = s.unit_type OR r.unit_type = 'both')))))))
   END;
 $function$;
 ALTER FUNCTION public._product_rate_unit_ok(numeric, text, text, text, text) OWNER TO postgres;
@@ -502,7 +536,8 @@ BEGIN
       -- As in a correction: a unit conversion changed since the preview moves the prices but no
       -- version, so each written row must save the per-acre prices its preview showed.
       FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
-        IF (v_write->'after'->v_tier) IS DISTINCT FROM (v_row->'expected'->'prices'->v_tier) THEN
+        IF NOT (v_row->'expected'->'prices' ? v_tier)
+           OR (v_write->'after'->v_tier) IS DISTINCT FROM (v_row->'expected'->'prices'->v_tier) THEN
           v_moved := v_moved || v_product.product_name;
           EXIT;
         END IF;
@@ -545,6 +580,7 @@ DECLARE
   v_name text;
   v_lock public.product_rate_lock%ROWTYPE;
   v_result jsonb;
+  v_stale text;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
@@ -570,6 +606,32 @@ BEGIN
   IF v_lock.is_locked = p_locked THEN
     RAISE EXCEPTION 'PRODUCT_RATE_LOCK_UNCHANGED: rates are already %',
       CASE WHEN p_locked THEN 'locked' ELSE 'unlocked' END;
+  END IF;
+  -- A lock freezes the stored per-acre prices, so they must be what unit_conversions prices today: an
+  -- unlocked factor change reprices nothing until a product's next save. Same formula as
+  -- recalc_product_price_per_acre; the FOR UPDATE above holds off saves and factor changes meanwhile.
+  IF p_locked THEN
+    -- A zero or missing factor prices a rate at $0 (or nothing), and spellings alike but for case with
+    -- different factors let pricing take either; the check below would accept both, so refuse them first.
+    SELECT string_agg(u.unit, ', ' ORDER BY u.unit) INTO v_stale FROM public.unit_conversions u
+     WHERE u.factor_oz IS NULL OR NOT (u.factor_oz > 0 AND u.factor_oz < 'Infinity')
+        OR EXISTS (SELECT 1 FROM public.unit_conversions o
+                    WHERE lower(o.unit) = lower(u.unit) AND o.factor_oz IS DISTINCT FROM u.factor_oz);
+    IF v_stale IS NOT NULL THEN
+      RAISE EXCEPTION 'PRODUCT_RATES_STALE: unit conversions % have no finite factor above zero or disagree with another spelling; fix them, then lock', v_stale;
+    END IF;
+    SELECT string_agg(s.product_name, ', ' ORDER BY s.product_name) INTO v_stale FROM (
+      SELECT p.product_name FROM public.products p
+       WHERE p.tier1_price_per_acre IS DISTINCT FROM public.product_price_per_acre(COALESCE(p.tier1_price, 0),
+               p.rate_per_acre, p.rate_unit, p.inventory_unit, p.unit_size)
+          OR p.tier2_price_per_acre IS DISTINCT FROM public.product_price_per_acre(
+               COALESCE(NULLIF(p.tier2_price, 0), COALESCE(p.tier1_price, 0)), p.rate_per_acre, p.rate_unit, p.inventory_unit, p.unit_size)
+          OR p.tier3_price_per_acre IS DISTINCT FROM public.product_price_per_acre(
+               COALESCE(NULLIF(p.tier3_price, 0), COALESCE(p.tier1_price, 0)), p.rate_per_acre, p.rate_unit, p.inventory_unit, p.unit_size)
+       ORDER BY p.product_name LIMIT 20) s;
+    IF v_stale IS NOT NULL THEN
+      RAISE EXCEPTION 'PRODUCT_RATES_STALE: per-acre prices no longer match the unit conversions for %; save each on its product page, then lock', v_stale;
+    END IF;
   END IF;
   SELECT full_name INTO v_name FROM public.profiles WHERE id = v_actor;
   UPDATE public.product_rate_lock
@@ -686,7 +748,7 @@ BEGIN
   -- The prices must be the ones the admin confirmed: a unit conversion changed since the preview
   -- moves them without moving pricing_version. Raising undoes the write.
   FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
-    IF (v_write->'after'->v_tier) IS DISTINCT FROM (p_expected->'prices'->v_tier) THEN
+    IF NOT (p_expected->'prices' ? v_tier) OR (v_write->'after'->v_tier) IS DISTINCT FROM (p_expected->'prices'->v_tier) THEN
       RAISE EXCEPTION 'PRODUCT_RATE_PREVIEW_CHANGED: the per-acre prices changed since the preview; preview again'
         USING ERRCODE = 'check_violation';
     END IF;

@@ -148,7 +148,11 @@ BEGIN
       v_status := 'invalid_rate';
     ELSE
       v_rate := public._product_rate_value(v_row->'rate_per_acre');
-      IF NOT public._product_rate_unit_ok(v_rate, v_unit, v_product.rate_unit, v_product.product_form,
+      -- A blank seed/each unit is filled from the stock unit before guard_product_rate_lock judges it, so judge that.
+      IF NOT public._product_rate_unit_ok(v_rate,
+                                          COALESCE(v_unit, CASE WHEN v_product.product_form IN ('seed', 'each')
+                                                                THEN NULLIF(btrim(v_product.inventory_unit), '') END),
+                                          v_product.rate_unit, v_product.product_form,
                                           COALESCE(NULLIF(v_product.inventory_unit, ''), v_product.unit_size))
          -- validate_product_units refuses a seed or each rate unit other than the stock unit (unnamed);
          -- set_product_rates' own check lets an 'Ea'/'Unit' through, so name it here instead.

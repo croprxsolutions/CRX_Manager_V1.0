@@ -2833,6 +2833,7 @@ export type Database = {
           product_id: string
           quantity: number
           quantity_delivered: number | null
+          quantity_prebooked_released: number | null
           tote_number: string | null
           unit_size: string | null
         }
@@ -2844,6 +2845,7 @@ export type Database = {
           product_id: string
           quantity?: number
           quantity_delivered?: number | null
+          quantity_prebooked_released?: number | null
           tote_number?: string | null
           unit_size?: string | null
         }
@@ -2855,6 +2857,7 @@ export type Database = {
           product_id?: string
           quantity?: number
           quantity_delivered?: number | null
+          quantity_prebooked_released?: number | null
           tote_number?: string | null
           unit_size?: string | null
         }

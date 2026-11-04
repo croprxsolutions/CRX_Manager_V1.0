@@ -53,17 +53,18 @@ echo "🛡️ Validating staged SQL migrations..."
 bash scripts/validate-sql.sh || exit 1
 
 # A migration can re-define an RPC that the idempotency/contract registries must
-# name; these tests failed only in CI on PR #1298. They read the working tree.
+# name; these tests failed only in CI on PR #1298. costFields: a column added to a
+# per-column-granted table needs its grants (CI-only catch on PR #1437). They read the working tree.
 if printf '%s\n' "$STAGED_FILES" | grep -Eq '^supabase/migrations/'; then
   echo "🧾 Checking RPC idempotency and contract registries..."
-  if ! git diff --quiet -- supabase/migrations/ src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts ||
-    [ -n "$(git ls-files --others -- supabase/migrations/ src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts)" ]; then
+  if ! git diff --quiet -- supabase/migrations/ src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts src/lib/costFields.test.ts src/lib/costFields.ts ||
+    [ -n "$(git ls-files --others -- supabase/migrations/ src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts src/lib/costFields.test.ts src/lib/costFields.ts)" ]; then
     echo "❌ Migrations or RPC registry tests have unstaged or untracked edits — stage or remove them so the commit matches what was tested."
     exit 1
   fi
-  npx vitest run src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts || {
+  npx vitest run src/lib/rpcIdempotencyScope.test.ts src/lib/rpcContracts.test.ts src/lib/costFields.test.ts || {
     echo ""
-    echo "❌ RPC REGISTRY TESTS FAILED — add the registry entry this migration needs."
+    echo "❌ RPC REGISTRY OR COLUMN-GRANT TESTS FAILED — add the registry entry or column grants this migration needs."
     exit 1
   }
 fi

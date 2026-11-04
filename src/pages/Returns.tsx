@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, CheckCircle, XCircle, ArrowDownToLine, DollarSign, Download, FileText, Trash2, Ban } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -163,6 +164,9 @@ export default function Returns() {
     reason_notes: '',
     notes: '',
   });
+  // Read by the delayed inactive-customer check, which must not clear a customer picked since.
+  const newFormCustomerRef = useRef('');
+  useEffect(() => { newFormCustomerRef.current = newForm.customer_id; }, [newForm.customer_id]);
   const [newItems, setNewItems] = useState<EditItem[]>([]);
   const [unresolvedCreateIntent, setUnresolvedCreateIntent] = useState<{
     form: CreateReturnForm;
@@ -173,6 +177,9 @@ export default function Returns() {
   const [orderItems, setOrderItems] = useState<ReturnableOrderItem[]>([]);
   const customerOrdersRequestRef = useRef(0);
   const orderItemsRequestRef = useRef(0);
+  const createSessionRef = useRef(0);
+  // A pre-filled customer stays unsubmittable until the active-customer check settles (create_return does not check).
+  const [checkingPrefill, setCheckingPrefill] = useState(false);
 
   // Detail modal
   const [showDetail, setShowDetail] = useState(false);
@@ -273,7 +280,7 @@ export default function Returns() {
     fetchReturns();
   }, [fetchReturns]);
 
-  const loadCreateData = async () => {
+  const loadCreateData = async (session: number) => {
     const custRes = await fetchAllRows<Pick<Customer, 'id' | 'farm_name' | 'assigned_tier'>>((from, to) =>
       supabase
         .from('customers')
@@ -283,11 +290,16 @@ export default function Returns() {
         .order('id')
         .range(from, to),
     );
+    // A closed or newer create form owns the customer list; this older read must not touch it.
+    if (session !== createSessionRef.current) return null;
     if (custRes.error) {
       Sentry.captureException(custRes.error, { tags: { source: 'fetch', action: 'load_return_customers' } });
       toast('error', 'Failed to load customers. Close the form and try again.');
     }
-    setCustomers((custRes.data || []) as unknown as Customer[]);
+    const list = (custRes.data || []) as unknown as Customer[];
+    setCustomers(list);
+    // null = unknown: a failed read must not pass for "this customer is inactive".
+    return custRes.error ? null : list;
   };
 
   const loadOrderItems = async (orderId: string, customerId: string, preserveDraftItems = false) => {
@@ -390,10 +402,12 @@ export default function Returns() {
     setCustomerOrders(orders);
   };
 
-  const openCreate = () => {
+  const openCreate = (prefill?: { customer_id: string; order_id: string }) => {
+    const session = ++createSessionRef.current;
     customerOrdersRequestRef.current += 1;
     orderItemsRequestRef.current += 1;
-    loadCreateData();
+    const customersLoaded = loadCreateData(session);
+    setCheckingPrefill(!!prefill && !unresolvedCreateIntent);
     if (unresolvedCreateIntent) {
       setNewForm({ ...unresolvedCreateIntent.form });
       setNewItems(unresolvedCreateIntent.items.map((item) => ({ ...item })));
@@ -404,15 +418,46 @@ export default function Returns() {
       setShowCreate(true);
       return;
     }
-    setNewForm({ customer_id: '', order_id: '', reason: 'defective', reason_notes: '', notes: '' });
+    setNewForm({ customer_id: prefill?.customer_id ?? '', order_id: prefill?.order_id ?? '', reason: 'defective', reason_notes: '', notes: '' });
     setNewItems([]);
     setCustomerOrders([]);
     setOrderItems([]);
+    if (prefill) {
+      void loadCustomerOrders(prefill.customer_id);
+      void loadOrderItems(prefill.order_id, prefill.customer_id);
+      // The picker lists active customers only; never keep a hidden customer selected. A failed list
+      // cannot prove the customer active (create_return does not check), so it clears the pre-fill too.
+      void customersLoaded.then((list) => {
+        // A newer or closed create form owns the screen; this older check must not touch it.
+        if (session !== createSessionRef.current) return;
+        setCheckingPrefill(false);
+        if (list?.some((c) => c.id === prefill.customer_id)) return;
+        if (newFormCustomerRef.current !== prefill.customer_id) return;
+        customerOrdersRequestRef.current += 1;
+        orderItemsRequestRef.current += 1;
+        setNewForm((f) => ({ ...f, customer_id: '', order_id: '' }));
+        setCustomerOrders([]);
+        setOrderItems([]);
+        if (list) toast('error', 'This customer is inactive, so a return cannot be started for them here.');
+      });
+    }
     setShowCreate(true);
   };
 
+  // "Return product" on a delivery opens here with ?customer=&order= to start the return pre-filled.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const customer = searchParams.get('customer');
+    const order = searchParams.get('order');
+    if (!customer || !order) return;
+    setSearchParams({}, { replace: true });
+    openCreate({ customer_id: customer, order_id: order });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const closeCreate = () => {
     if (creating) return;
+    createSessionRef.current += 1;
     customerOrdersRequestRef.current += 1;
     orderItemsRequestRef.current += 1;
     setShowCreate(false);
@@ -436,7 +481,7 @@ export default function Returns() {
   };
 
   const handleCreate = async () => {
-    if (!profile) return;
+    if (!profile || checkingPrefill) return;
     if (!newForm.customer_id) {
       toast('error', 'Please select a customer');
       return;
@@ -872,7 +917,7 @@ export default function Returns() {
         actions={(
           <>
           {canBulkAction && <BulkActionBar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />}
-          <Button icon={<Plus className="w-4 h-4" />} onClick={openCreate}>
+          <Button icon={<Plus className="w-4 h-4" />} onClick={() => openCreate()}>
             New Return
           </Button>
           </>
@@ -891,7 +936,7 @@ export default function Returns() {
             emptyTitle="No returns yet"
             emptyDescription="Create a return when products need to come back"
             emptyAction={
-              <Button icon={<Plus className="w-4 h-4" />} onClick={openCreate}>
+              <Button icon={<Plus className="w-4 h-4" />} onClick={() => openCreate()}>
                 New Return
               </Button>
             }
@@ -1126,7 +1171,7 @@ export default function Returns() {
 
           <div className="flex justify-end gap-2 pt-2 border-t">
             <Button variant="secondary" onClick={closeCreate} disabled={creating}>Cancel</Button>
-            <Button onClick={handleCreate} loading={creating}>Create Return</Button>
+            <Button onClick={handleCreate} loading={creating} disabled={checkingPrefill}>Create Return</Button>
           </div>
         </div>
       </Modal>

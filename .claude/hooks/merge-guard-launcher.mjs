@@ -21,9 +21,10 @@
 // (@proven-by .claude/hooks/merge-guard-launcher.test.mjs).
 //
 // The launcher always exits 0. The hook entry in .claude/settings.json adds a
-// shell fallback after it (`|| printf <denial>`), so if node cannot start the
-// launcher at all, or the launcher dies before answering, every shell and MCP
-// call is denied until that is fixed; file edits still work (Luna, 2026-09-28).
+// shell fallback after it (`|| echo '<denial>'; exit 0`, valid in Git Bash and in
+// Cursor's PowerShell 7), so if node cannot start the launcher at all, or the
+// launcher dies before answering, every shell and MCP call is denied until that
+// is fixed; file edits still work (Luna, 2026-09-28; portable form 2026-11-04).
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";

@@ -1213,6 +1213,31 @@ export interface ReceiptRecipient {
   contactName: string | null;
   farmName: string | null;
 }
+/** preview_fix_delivery's plan (20261106150000): what Fix delivery will undo, or why it refuses. */
+export interface FixDeliveryPlan {
+  delivery_id: string;
+  delivery_number: string;
+  order_id: string | null;
+  order_number: string | null;
+  customer_id: string;
+  can_fix: boolean;
+  refusals: Array<{ code: string; message: string }>;
+  invoices: Array<{ id: string; invoice_number: string; status: InvoiceStatus; total_cents: number; paid_cents: number; prepay_applied_cents: number; write_off_cents: number; credit_applied_cents: number; action: 'cancel' | 'void' }>;
+  other_draft_invoices: Array<{ id: string; invoice_number: string; total_cents: number }>;
+  items: Array<{ id: string; order_item_id: string | null; product_id: string | null; product_name: string | null; quantity: number; unit: string | null }>;
+  /** Fingerprint of what the preview showed; fix_delivery refuses when it no longer matches. */
+  plan_token: string;
+}
+/** fix_delivery's result: the order and customer to re-enter the corrected delivery for. */
+export interface FixDeliveryResult {
+  success: boolean;
+  delivery_id: string;
+  delivery_number: string;
+  order_id: string;
+  customer_id: string;
+  invoices: FixDeliveryPlan['invoices'];
+  commissions_restored: number;
+}
 export type DeliveryIssueType = 'none' | 'customer_not_home' | 'gate_locked' | 'road_blocked' | 'wrong_address' | 'refused' | 'weather' | 'other';
 
 export interface Delivery {
@@ -1506,7 +1531,7 @@ export interface ProductMarginFloorChange {
   created_at: string;
 }
 
-/** The one "Lock rates" record (20261106155000). While locked, product rates change only by correction. */
+/** The one "Lock rates" record (20261107010000). While locked, product rates change only by correction. */
 export interface ProductRateLock {
   is_locked: boolean;
   changed_by_name: string | null;
@@ -1628,6 +1653,8 @@ export interface Commission {
   deleted_at: string | null;
   cancelled_at: string | null;
   cancelled_amount_cents: number | null;
+  /** The cancelled commission this row re-creates (set only by fix_delivery). */
+  replaces_commission_id?: string | null;
   created_at: string;
 }
 

@@ -12890,6 +12890,14 @@ export type Database = {
         }
         Returns: Json
       }
+      apply_product_setup: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_rows: Json
+        }
+        Returns: Json
+      }
       apply_remaining_prepayments: {
         Args: {
           p_customer_id: string
@@ -14319,6 +14327,10 @@ export type Database = {
         Args: { p_product_id: string }
         Returns: Json
       }
+      get_product_setup_workbook: {
+        Args: never
+        Returns: Json
+      }
       get_product_vendors: { Args: { p_product_id: string }; Returns: Json }
       get_profitability_report: {
         Args: { p_end_date?: string; p_group_by: string; p_start_date?: string }
@@ -15065,6 +15077,10 @@ export type Database = {
           p_rows?: Json
           p_source: string
         }
+        Returns: Json
+      }
+      preview_product_rates: {
+        Args: { p_rows: Json }
         Returns: Json
       }
       price_order: {

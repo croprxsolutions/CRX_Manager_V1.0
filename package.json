@@ -42,6 +42,7 @@
     "next-migration-stamp": "node scripts/next-migration-stamp.mjs",
     "smoke": "node scripts/smoke/run-smoke.mjs",
     "proof:vendor-bill-period-close": "node scripts/smoke/vendor-bill-period-close-readiness.test.mjs && node scripts/smoke/prove-vendor-bill-period-close-concurrency.mjs",
+    "proof:undo-paths": "node scripts/smoke/undo-paths/run.mjs",
     "proof:pricing-phase1a": "node scripts/smoke/prove-supplier-pricing-phase1a.mjs",
     "proof:pricing-phase2": "node scripts/smoke/prove-supplier-cost-basis-phase2.mjs",
     "check:pricing-phase2-live-smoke": "node scripts/smoke/check-supplier-cost-basis-phase2-live.mjs",

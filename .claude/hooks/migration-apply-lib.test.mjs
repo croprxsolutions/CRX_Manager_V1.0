@@ -185,6 +185,31 @@ const evaluate = (root, over = {}) => evaluateMigrationApply({ landingGate: land
 // ── BASELINE: the fixture must ALLOW, or every deny below proves nothing ─────
 allows(evaluate(fixture()), "known-good UNARMED fixture (both reviewers + fresh Sol proof) is allowed — no per-migration ask since 2026-09-26");
 
+// Restamp carry (Mason, 2026-11-04): the reviewed migration got a new timestamp
+// with byte-identical SQL. Its proofs name the old stamp, so the guard refuses
+// until `write-apply-proofs.mjs --restamp-from` carries them; then it allows.
+{
+  const RESTAMPED = "20260816130000_add_widgets";
+  const root = fixture({ migrationName: RESTAMPED });
+  const applyRestamped = () => evaluate(root, {
+    name: RESTAMPED,
+    gitTrackedMigrations: () => `supabase/migrations/${RESTAMPED}.sql\n`,
+  });
+  denies(applyRestamped(), MIG, "a restamped migration is refused while its proofs name the old stamp");
+  const { carryRestampedApplyProofs } = await import("../../scripts/write-apply-proofs-lib.mjs");
+  const carried = carryRestampedApplyProofs({
+    stateDir: path.join(root, ".claude", "session-state"),
+    migrationsDir: path.join(root, "supabase", "migrations"),
+    fromName: MIG,
+    toName: RESTAMPED,
+    model: "gpt-6-sol",
+    effort: "high",
+  });
+  ok(!carried.problem, `the restamp carry succeeds (${carried.problem})`);
+  allows(applyRestamped(), "the guard accepts the carried proofs for the restamped name");
+  rmSync(root, { recursive: true, force: true });
+}
+
 // Mason's "skip coderabbit" waiver counts only in the applying session, so the
 // apply must hand the landing gate THIS session's id (Luna round 1).
 {

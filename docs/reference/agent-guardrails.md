@@ -74,6 +74,20 @@
 > landing gate honours it too while it is under 24 hours old (`APPLY_SOL_PROOF_MAX_AGE_MS`, 30 minutes before 2026-10-29); `pr-merge-guard.mjs` prints `SOL CARRY-FORWARD` when it allows
 > one. The minter is the same protected wrapper, so `review-proof-guard.mjs` still blocks hand-written proofs.
 >
+> **Restamp carry (Mason, 2026-11-04).** When the forward-only ordering guard forces a reviewed migration onto a new
+> timestamp, the review carries instead of re-running. `node scripts/write-codex-push-proof.mjs --carry-restamp` mints
+> a carried proof (`carry.mode` `restamp`, same `base_sha` as the source) with no model call, only when HEAD is ONE
+> ordinary commit on top of a head with a clean Sol proof under 24 hours old, and that commit renames exactly one
+> `supabase/migrations/<stamp>_<name>.sql` to a new stamp with the same name and identical LF-normalized SQL, and
+> otherwise only renames or edits files by replacing the old stamp with the new one (same file modes, no other
+> `supabase/` file). Anything else refuses, and the full review runs. `carriedSolProof()` accepts `restamp` only with
+> an unchanged base. `node scripts/write-apply-proofs.mjs --restamp-from <old-name> <new-name>` copies both apply
+> proofs (`migration-review-*`, `codex-review-mig-*`) to the new name, keeping their original timestamps, only when
+> both are clean, record both reviewers and `gpt-6-sol`/`high`, are under 24 hours old, their `queryHash` equals the new
+> file's, and the old file is gone; a refusal clears any proof for the new name. **Mason's owner approval
+> (`owner-approve-migration.mjs`) never carries:** a parked migration needs his `I approve` for the new stamp. Every other
+> apply check (ordering, landing gate, checks, CI) is unchanged.
+>
 > **Sol pre-flight (Mason, 2026-10-23).** A full `write-codex-push-proof.mjs` run first checks the head is quiet and
 > refuses with no Codex call otherwise: the head contains the exact origin/main the review pins, no Codex App review of
 > this commit is still running, no open Codex App thread stands on it, no open CodeRabbit thread stands on current code,

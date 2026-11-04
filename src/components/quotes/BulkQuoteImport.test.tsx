@@ -16,8 +16,14 @@ const mocks = vi.hoisted(() => {
       'csv','explain',
     ];
     for (const m of methods) builder[m] = vi.fn(self);
+    // A list answers with its exact count, as the server does for a `{ count: 'exact' }` read, so a
+    // paged read (fetchAllRows) stops after one page instead of asking for an empty second one.
+    const withCount = (value: unknown) => {
+      const v = value as { data?: unknown; count?: unknown } | null;
+      return v && Array.isArray(v.data) && v.count === undefined ? { ...v, count: v.data.length } : value;
+    };
     builder.then = vi.fn((resolve: (v: unknown) => void) => {
-      Promise.resolve(resolveWith).then(resolve);
+      Promise.resolve(withCount(resolveWith)).then(resolve);
       return builder;
     });
     return builder;
@@ -68,6 +74,31 @@ vi.mock('../../lib/documentOCR', () => ({
 vi.mock('../ui/Toast', () => ({
   useToast: () => ({ toast: mocks.toast }),
 }));
+
+// A list as the server returns it: a read without .range() stops at the 1,000-row cap; a ranged
+// read returns that page and the exact count (S12b).
+function serverCapped(rows: Array<Record<string, unknown>>) {
+  let from: number | null = null;
+  let to: number | null = null;
+  const builder = mocks.chainable() as Record<string, unknown>;
+  builder.range = vi.fn((f: number, t: number) => { from = f; to = t; return builder; });
+  builder.then = vi.fn((resolve: (v: unknown) => void) => {
+    const page = from === null ? rows.slice(0, 1000) : rows.slice(from, (to ?? from) + 1);
+    Promise.resolve({ data: page, error: null, count: rows.length }).then(resolve);
+    return builder;
+  });
+  return builder;
+}
+
+async function importQuoteCsv(container: HTMLElement, csv: string, quoteNumber: RegExp) {
+  const file = new File([csv], 'page.csv', { type: 'text/csv' });
+  Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+  fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+  await screen.findByText(/page\.csv/i);
+  fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+  await screen.findByText(quoteNumber);
+  fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+}
 
 import BulkQuoteImport from './BulkQuoteImport';
 
@@ -305,6 +336,43 @@ describe('BulkQuoteImport', () => {
 
     await waitFor(() => expect(mocks.rpc).not.toHaveBeenCalledWith('save_quote', expect.anything()));
     expect(await screen.findByText(/ambiguous/i)).toBeInTheDocument();
+  });
+
+  it('imports a line for a product past the first 1,000 in the catalog (S12b)', async () => {
+    const catalog: Array<Record<string, unknown>> = Array.from({ length: 1000 }, (_, i) => ({
+      id: `product-${i}`, product_name: `Filler ${i}`, sku: `FILL-${i}`, is_active: true, inventory_unit: 'Gallon',
+    }));
+    catalog.push({ id: 'product-late', product_name: 'Late Product', sku: 'SKU-LATE', is_active: true, inventory_unit: 'Gallon' });
+    mocks.from.mockImplementation((table: string) => table === 'products'
+      ? serverCapped(catalog)
+      : mocks.chainable({ data: table === 'customers' ? [{ id: 'customer-1', farm_name: 'North Farm' }]
+        : table === 'unit_conversions' ? [{ unit: 'oz', factor_oz: 1 }, { unit: 'Gallon', factor_oz: 128 }] : [], error: null }));
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    await importQuoteCsv(container, [
+      'quote_number,customer_farm_name,section_name,product_name,acres,price_per_unit,oz_per_acre,status',
+      'Q-LATE,North Farm,Spring,SKU-LATE,10,20,32,draft',
+    ].join('\n'), /Q-LATE/);
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+    const call = mocks.rpc.mock.calls.find(([name]) => name === 'save_quote');
+    expect(JSON.stringify(call)).toContain('product-late');
+  });
+
+  it('refuses a quote whose customer name is shared by two customers, instead of picking one', async () => {
+    mocks.from.mockImplementation((table: string) => {
+      const dataByTable: Record<string, unknown[]> = {
+        customers: [{ id: 'customer-1', farm_name: 'North Farm' }, { id: 'customer-2', farm_name: 'north farm ' }],
+        products: [{ id: 'product-1', product_name: 'Roundup', sku: 'RU-1', inventory_unit: 'Gallon', unit_size: null }],
+        unit_conversions: [{ unit: 'oz', factor_oz: 1 }, { unit: 'Gallon', factor_oz: 128 }],
+      };
+      return mocks.chainable({ data: dataByTable[table] ?? [], error: null });
+    });
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    await importQuoteCsv(container, [
+      'quote_number,customer_farm_name,section_name,product_name,acres,price_per_unit,oz_per_acre,status',
+      'Q-TWIN,North Farm,Spring,Roundup,10,20,32,draft',
+    ].join('\n'), /Q-TWIN/);
+    expect(await screen.findByText(/More than one customer is named "North Farm"/)).toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
   });
 
   it('rejects a cross-field name/SKU collision before save_quote', async () => {

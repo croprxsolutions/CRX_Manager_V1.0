@@ -1,8 +1,18 @@
 # Inventory Costing (Average Recorded PO Cost) — Scoped Plan
 
 > **STATUS 2026-11-04 — still PARKED, never built. Refreshed 2026-11-04; building any phase needs Mason's
-> separate go-ahead.** The recommended first step is **Phase 1 (reporting only)**, which needs no new tables.
+> separate go-ahead.** The recommended first step is **Phase 1 (reporting only)**; its detailed build plan is
+> `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md` (one small owner-estimate table, decision D10).
 > The engine below is Phase 2 and stays parked until Mason un-parks it (section 12).
+>
+> **Mason's planning decisions, 2026-11-04** (full list in section 12; he asked to plan the whole thing before
+> building anything): admins only see the new cost numbers; holding rate a flat **10%** a year, adjustable later;
+> aged-stock flag at **270 days**; **no lots** (estimated age is enough); **no freight or rebates for now**
+> (Phase 3 dropped); special orders **show both** the booked and the corrected margin; build order **Phase 1 →
+> 2 → 4 → 5**; purchases go **back through CRX POs** (since June they were made by phone and email, outside
+> CRX), and Phase 2 **starts fresh** from a stock count with confirmed starting costs **before busy season**,
+> with no back-entry of past purchases. Totes are mostly stocked already filled; there is no bulk chemical
+> storage, only fertilizer.
 >
 > **What changed in the 2026-11-04 refresh** (against current `main`, the live database and the research report
 > `docs/research/2026-11-03-inventory-cost-valuation/README.md`, draft PR #1428, reviewed by Sol in three rounds):
@@ -112,6 +122,9 @@ and use the cost basis the accountant approves.
   `quantity_available × products.current_cost`: a **pricing-basis valuation**, not book value.
 
 ## 3. Phase 1 — Reporting only (FIRST STEP; needs Mason's go-ahead)
+
+**Detailed build plan:** `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`. It adds decision
+D10 (a bulk estimated-date entry), so Phase 1 now has one small append-only table and one admin write function.
 
 No new tables, no change to any inventory writer, no change to prices, orders, invoices or commissions.
 New read-only, admin-only RPCs (`SECURITY DEFINER` with `SET search_path = public, pg_temp`, explicit grants,
@@ -261,6 +274,11 @@ prompts appear only at actions that create unpriced value.
 
 ### 4.6 Custom fill / repack (C4) and BLK-1b
 
+**Narrowed by D8 (2026-11-04):** chemical totes are stocked already filled and keep their own receipt cost;
+the only chemical repack is the occasional custom partial fill from a full tote. Bulk storage exists only for
+fertilizer. The text below still applies, read as "full tote → partial fill" for chemicals and "bulk → container"
+for fertilizer only.
+
 Until a bulk → tote movement exists, affected rows show **"Not valued — bulk/custom-fill movement is not
 recorded."** BLK-1a (grand plan overlap 14) records quantities only. BLK-1b, after this engine is active: one
 idempotent movement that locks both pools in a stable order, writes two ledger rows and two correlated cost
@@ -328,7 +346,9 @@ cost-adjustment run), covering:
 Effects post as new, append-only, linked adjustment events dated in an **open** period. Posted invoices and
 closed periods are never rewritten. The pool and the issued costs reconcile after every run.
 
-## 8. Phase 3 — Freight and rebates (PARKED; extends this plan, which excluded both in July)
+## 8. Phase 3 — Freight and rebates (NOT PLANNED for now — Mason, 2026-11-04, decision D7)
+
+Kept as the design record if freight or rebates are revisited.
 
 - **Freight:** a freight line on the PO or vendor bill, allocated to receipt lines by cost (or another stated
   basis), entering receipt cost and the pool through section 7.
@@ -404,28 +424,41 @@ numbers is decision D2.
 
 ## 12. Owner decisions
 
-Taken from report section 7, plus this plan's own.
+Taken from report section 7, plus this plan's own. Mason answered D2-D9 in a planning session on 2026-11-04;
+he asked to plan the whole thing before anything is built. Live check that day: the last receipt in CRX was
+2026-06-10 and no PO has been created in the last 60 days.
 
-- **NEEDS MASON - DECISION REQUIRED (D1): approve Phase 1** (reporting only, no new tables). Recommended first.
-- **NEEDS MASON - DECISION REQUIRED (D2): who sees carrying cost and replacement cost.** Admins only (today's rule
-  for all cost numbers), or reps too at quote time? Showing reps dollar costs changes the admin-only rule.
-- **NEEDS MASON - DECISION REQUIRED (D3): the aging trigger.** How many days before stock is flagged for price
-  review or return (suggested 270)?
-- **NEEDS MASON - DECISION REQUIRED (D4): the carrying-cost rate.** The line-of-credit rate alone, or plus a
-  storage, insurance and shrink allowance (suggested 3-5%)?
-- **NEEDS MASON - DECISION REQUIRED (D5): un-park the average-cost engine (Phase 2)**, including T0 and the
-  opening-valuation session where you confirm each product's starting cost.
-- **NEEDS MASON - DECISION REQUIRED (D6): track lots.** Exact aging and expiry need lot numbers at receiving and
-  lot quantities through every movement (sales, returns, adjustments, repacks, jobs, blends, transfers) from an
-  opening lot balance. Today no lots are entered.
-- **NEEDS MASON - DECISION REQUIRED (D7): extend to freight and rebates (Phase 3).** July excluded them on
-  purpose; the report recommends adding them later.
-- **NEEDS MASON - DECISION REQUIRED (D8): custom-fill classification.** For each tote row: physically stocked,
-  or filled from bulk on demand? (Pairs with PAR-2 and BLK-1.)
-- **NEEDS MASON - DECISION REQUIRED (D9): purchase-recording habit.** The engine stays "Confirmed" only if
-  purchases flow through POs, receiving and vendor bills; no receipt has been recorded since 2026-06-10.
-- **Ask the accountant:** which cost basis QuickBooks should carry once CRX can produce a complete one; how to
-  book expected rebates; whether carryover stock needs a write-down to net realizable value.
+- **NEEDS MASON - DECISION REQUIRED (D1): approve building Phase 1** (reporting only, no new tables). Still open:
+  Mason wants the full plan settled first.
+- **D2 — DECIDED: admins only.** The new cost numbers (holding charge, replacement cost, stock age) follow
+  today's rule: only admins see any cost. Reps see nothing new.
+- **D3 — DECIDED: 270 days.** Stock older than 270 days is flagged (Phase 1 dead-stock list; Phase 5 quote
+  warning).
+- **D4 — DECIDED: flat 10% a year for now, adjustable later.** Mason: "set it to a flat 10% for now but make this
+  adjustable in future." Phase 1's one setting row defaults to 10% and is an admin-editable setting.
+- **D5 — DECIDED (order only): Phase 1 → Phase 2 → Phase 4 → Phase 5.** Phase 3 is dropped (D7). Each phase still
+  needs its own build go-ahead, plan, Luna and Sol review.
+- **D6 — DECIDED: no lots.** Estimated age is enough. Age stays an estimate in every phase.
+- **D7 — DECIDED: no freight or rebates for now.** Phase 3 is not planned. Cost stays the vendor price on the PO;
+  sections 7 and 9 keep freight and rebate hooks out of scope until revisited.
+- **D8 — DECIDED: totes are stocked already filled.** Totes are mostly bought and kept filled on the shelf, so
+  they keep their own receipt cost. Occasionally a customer wants a custom amount, filled from a full tote into
+  a partial container. There is **no bulk chemical storage, only fertilizer**. So C4 becomes a narrow "full tote →
+  partial fill" movement (and fertilizer bulk, if needed), not a general bulk → tote flow; BLK-1b's bulk-to-tote
+  design applies only to fertilizer.
+- **D9 — DECIDED: purchases go back through CRX, and Phase 2 starts fresh.** Since June, product was bought by
+  phone and email outside CRX; Mason will use CRX POs and receiving again. Phase 2 opens from a stock count with
+  owner-confirmed starting costs (section 4.4), held **before busy season**, with **no back-entry** of past
+  purchases; stock with no receipt since the fresh start shows "age unknown" in Phase 1 until new receipts build
+  up.
+- **D10 — DECIDED: gap stock shows "age unknown", with a bulk date entry.** Mason (2026-11-04): "show age
+  unknown but allow a bulk edit add a date etc". Stock CRX cannot date because of the June gap shows "age
+  unknown"; admins can select many products and enter an estimated received date (optionally the quantity it
+  covers and a note), shown as an "owner estimate". Details: the Phase 1 build plan, section 4.
+- **Special-order margin — DECIDED: show both.** Phase 4 keeps the margin booked at the sale and shows the
+  corrected margin beside it once the bill lands; invoices never change (section 9, view 4).
+- **Ask the accountant:** which cost basis QuickBooks should carry once CRX can produce a complete one, and
+  whether carryover stock needs a write-down to net realizable value. (Rebate booking is moot while D7 stands.)
 
 ## 13. Explicitly NOT building
 

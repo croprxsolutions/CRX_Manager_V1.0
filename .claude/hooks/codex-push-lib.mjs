@@ -1690,17 +1690,20 @@ function reviewProofValid(data, headSha, nowMs, ranKey, expectedBaseSha, maxAgeM
 // share no files or because a focused Sol collision check came back clean. It
 // says so (codex_ran:false), names the head and base it came from, and must
 // still pass every head/base/age check below for the head being gated.
+// A "restamp" carry (Mason, 2026-11-04) keeps the same base: its one new commit
+// only renamed a migration to a new timestamp, with byte-identical SQL.
 const CARRY_SHA_RE = /^[0-9a-f]{40}$/i;
 export function carriedSolProof(data) {
   const carry = data?.carry;
   return data?.codex_ran === false
     && data.carried_forward === true
     && !!carry && typeof carry === "object"
-    && (carry.mode === "disjoint" || carry.mode === "collision_check")
+    && (carry.mode === "restamp"
+      ? carry.from_base === data.base_sha
+      : (carry.mode === "disjoint" || carry.mode === "collision_check") && carry.from_base !== data.base_sha)
     && CARRY_SHA_RE.test(String(carry.from_head || ""))
     && CARRY_SHA_RE.test(String(carry.from_base || ""))
-    && carry.from_head !== data.head_sha
-    && carry.from_base !== data.base_sha;
+    && carry.from_head !== data.head_sha;
 }
 
 // Validate Claude's existing Codex-review proof shape (a full review, or a

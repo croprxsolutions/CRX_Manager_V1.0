@@ -1,0 +1,5 @@
+## 2026-11-04 — Fixture check for not-yet-applied functions; KI-99; live ledger re-read
+
+`src/lib/rpcFixtureLiveDiff.test.ts` now fails when the live-function snapshot lists a function that only a not-yet-applied migration creates (the trap that deadlocked PR #1421). `KNOWN_ISSUES.md` gains KI-99: two live `void_invoice` gaps found in the Fix Delivery reviews.
+
+Ledger re-read for the `CURRENT_STATE.md` and `KNOWN_ISSUES.md` stamps: read-only `execute_sql` on `supabase_migrations.schema_migrations`, 2026-11-04 about 13:15 UTC (7:15 AM Central), versions from `20261103000000`: 20 rows, newest `20261104112804` = `20261106110000_draw_quantity_whole_hundredths`. Every migration file through `20261105190000` is in the ledger. Two gaps between the ledger and the repo records, neither mentioned in either manual doc: `20261104130000_any_rep_changes_booked_prices` is live (ledger `20261103132202`) but its record still reads NOT APPLIED (Taha's open PR #1350 corrects it), and `20261106110000_draw_quantity_whole_hundredths` is live with its file still on Taha's open PR #1362.

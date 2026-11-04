@@ -308,6 +308,31 @@ function main() {
     psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${jobN}';`);
   }
   console.log(`[prover] AFTER: 8 jobs of 1 fl oz completed one by one drew ${scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}';`)} gal for 0.0625 gal applied`);
+  // Small jobs ahead of a larger sibling: they complete, the sibling is cancelled. Their kept draws
+  // must still match what they applied, rounded once (12 x 1 fl oz = 0.09375 -> 0.09), not one
+  // rounded-up 0.01 each (0.10) that the sibling's demand had covered.
+  const big = id('31');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      VALUES ('${big}', 'KI100-BIG', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '1 day');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${big}', '${P}', 1, 'gal', false);`);
+  const smalls = [41, 42, 43, 44].map((n) => id(String(n)));
+  for (const [i, jobN] of smalls.entries()) {
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        VALUES ('${jobN}', 'KI100-S${i}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() - interval '1 day');
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        VALUES ('${jobN}', '${P}', 1, 'fl oz', false);`);
+  }
+  sync();
+  psql(`SET session_replication_role = replica;
+    UPDATE public.jobs SET status = 'completed' WHERE id IN (${smalls.map((s) => `'${s}'`).join(', ')});
+    UPDATE public.jobs SET status = 'cancelled' WHERE id = '${big}';`);
+  sync();
+  const kept = scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
+  assert.equal(Number(kept), 0.09, `12 completed jobs of 1 fl oz should keep 0.09 gal of draws, not ${kept}`);
+  console.log(`[prover] AFTER: 4 more small jobs completed ahead of a cancelled 1 gal sibling keep ${kept} gal for 0.09375 gal applied`);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

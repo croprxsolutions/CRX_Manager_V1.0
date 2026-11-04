@@ -85,6 +85,8 @@ function lookupResult(overrides: Partial<EpaLookupResult> = {}): EpaLookupResult
   };
 }
 
+// The Vendors section has its own tests; these page tests do not mock its reads.
+vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
 vi.mock('../lib/db', () => {
   function chainable(resolveWith: unknown) {
     const builder: Record<string, unknown> = {};

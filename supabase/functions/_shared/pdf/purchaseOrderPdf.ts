@@ -22,11 +22,11 @@ import {
   TABLE_HEADER_BG,
 } from "./theme.ts";
 import {
-  COMPANY_CITY,
   COMPANY_LEGAL_NAME,
-  COMPANY_PHONE,
-  COMPANY_TAGLINE_HEADER,
   COMPANY_WEBSITE,
+  companyTaglineHeader,
+  type CompanyInfo,
+  fitCompanyNameFont,
 } from "./companyInfo.ts";
 import { purchaseOrderLineTotalCents, purchaseOrderUnitCostCents } from "./purchaseOrderMoney.ts";
 
@@ -128,7 +128,8 @@ export function purchaseOrderPdfFilename(poNumber: string): string {
   return `Purchase-Order-${poNumber}.pdf`;
 }
 
-export function drawPurchaseOrderPdf({ jsPDF, autoTable }: PdfLib, data: PdfPurchaseOrderData): JsPDFWithAutoTable {
+/** `company` is the Settings Company Info (loadCompanyInfo): the letterhead and BUYER block print it. */
+export function drawPurchaseOrderPdf({ jsPDF, autoTable }: PdfLib, data: PdfPurchaseOrderData, company: CompanyInfo): JsPDFWithAutoTable {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as JsPDFWithAutoTable;
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -138,12 +139,12 @@ export function drawPurchaseOrderPdf({ jsPDF, autoTable }: PdfLib, data: PdfPurc
   doc.setFillColor(...CRX_GREEN);
   doc.rect(0, 0, pageW, 70, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(22);
   doc.setTextColor(255, 255, 255);
-  doc.text('CROP RX SOLUTIONS', margin, 35);
+  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 200, 22);
+  doc.text(company.name.toUpperCase(), margin, 35);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(COMPANY_TAGLINE_HEADER, margin, 53);
+  doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 170).slice(0, 2), margin, 53);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   doc.text('PURCHASE ORDER', pageW - margin, 30, { align: 'right' });
@@ -183,7 +184,7 @@ export function drawPurchaseOrderPdf({ jsPDF, autoTable }: PdfLib, data: PdfPurc
       width: innerW * 0.29 - 20,
       title: 'BUYER',
       heading: COMPANY_LEGAL_NAME,
-      lines: [COMPANY_CITY, COMPANY_PHONE, COMPANY_WEBSITE],
+      lines: [company.address, company.phone, COMPANY_WEBSITE],
     },
     {
       x: margin + 12 + innerW * 0.75,
@@ -317,7 +318,7 @@ export function drawPurchaseOrderPdf({ jsPDF, autoTable }: PdfLib, data: PdfPurc
     doc.setFontSize(7);
     doc.setTextColor(160, 160, 160);
     doc.text(
-      `${COMPANY_LEGAL_NAME}  •  ${COMPANY_PHONE}  •  Please reference ${data.po_number} on your invoice and packing slip.`,
+      `${COMPANY_LEGAL_NAME}  •  ${company.phone}  •  Please reference ${data.po_number} on your invoice and packing slip.`,
       margin,
       footerY,
     );

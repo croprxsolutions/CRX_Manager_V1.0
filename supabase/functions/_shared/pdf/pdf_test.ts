@@ -133,9 +133,10 @@ Deno.test("a purchase order PDF is drawn from the saved order and its vendor rec
   );
   assertEquals(data.lines[0].quantity_ordered, 3);
   assertEquals(data.lines[0].unit_cost, 19.99);
-  const text = pdfText(drawPurchaseOrderPdf({ jsPDF, autoTable }, data));
+  const company = { name: "Prairie Ag Co", phone: "555-0199", email: "", address: "12 Main St Annapolis, IL 62413" };
+  const text = pdfText(drawPurchaseOrderPdf({ jsPDF, autoTable }, data, company));
   assert(text.startsWith("%PDF-"), "not a PDF");
-  for (const printed of ["PO-KI98-1", "Atrazine 4L", "$59.97"]) {
+  for (const printed of ["PO-KI98-1", "Atrazine 4L", "$59.97", "PRAIRIE AG CO", "12 Main St Annapolis, IL 62413", "555-0199"]) {
     assert(text.includes(printed), `PDF does not print ${printed}`);
   }
 });

@@ -6,6 +6,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
+// The Vendors section has its own tests; these page tests do not mock its reads.
+vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
 vi.mock('../lib/db', () => {
   const mockProduct = {
     id: 'test-product-id',

@@ -1755,6 +1755,14 @@ export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, 
   }
 }
 
+// The first proof `accept(data, exactHead)` takes, trying exact-head proofs first:
+// each earlier-commit proof can cost several GitHub calls, and enough of them
+// spent the merge gate's whole budget before the exact head was read (PR #1389).
+export function firstAcceptedProof(proofs, headSha, accept) {
+  const exact = (d) => String(d?.head_sha).toLowerCase() === String(headSha).toLowerCase();
+  return [...proofs.filter(exact), ...proofs.filter((d) => !exact(d))].find((d) => accept(d, exact(d))) ?? null;
+}
+
 // The full review at the root of a carry chain must name a real head and base,
 // come no later than the carry itself, and be inside the 24 hours.
 function carryRootReviewOk(data, nowMs) {

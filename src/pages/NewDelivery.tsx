@@ -523,7 +523,7 @@ export default function NewDelivery() {
               value={selectedOrderId}
               selectedLabel={orderLabel}
               onSelect={(order) => {
-                setIsDirty(true);
+                if ((order?.id ?? '') !== selectedOrderId) setIsDirty(true);
                 setSelectedOrderId(order?.id ?? '');
                 setOrderLabel(order ? orderSearchLabel(order) : '');
               }}

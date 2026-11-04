@@ -1452,7 +1452,8 @@ function collisionPromptSkipsWork(prompt) {
     // Only ONE commit on top of the reviewed head carries.
     git("reset", "-q", "--hard", reviewedHead);
     restamp();
-    commitAll("restamp");
+    // A different message, so this commit can never share the carried head's id within one second.
+    commitAll("restamp, then more");
     writeFileSync(path.join(repo, "notes.txt"), "x\n");
     commitAll("later");
     const twoCommits = restampCarry();

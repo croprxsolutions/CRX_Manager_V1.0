@@ -1,7 +1,7 @@
 import { supabase } from './db';
 import type { ProductRateLock } from '../types';
 
-/** The one "Lock rates" record (20261107100000). Every signed-in staff member may read it. */
+/** The one "Lock rates" record (20261107010000). Every signed-in staff member may read it. */
 export async function loadProductRateLock(): Promise<ProductRateLock> {
   const { data, error } = await supabase
     .from('product_rate_lock')

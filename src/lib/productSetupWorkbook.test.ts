@@ -128,6 +128,27 @@ describe('setup workbook', () => {
     expect(rebaseRateRowsAfterSetup([row], saved(5))[0].expected.pricing_version).toBe(4); // someone else moved it first
   });
 
+  it('protects the sheets with blank editable cells open, refuses a changed Rates product id, and names a product listed twice', async () => {
+    const exp = exported([product({ sku: null }), product({ product_id: '22222222-2222-4222-8222-222222222222', product_name: 'Other' })]);
+    let sheetProtected = false;
+    let blankSkuLocked: boolean | undefined;
+    await roundTrip(exp, (wb) => {
+      const ws = wb.getWorksheet('Setup')!;
+      sheetProtected = Boolean((ws as unknown as { sheetProtection?: object }).sheetProtection);
+      const headers = (ws.getRow(1).values as string[]).slice(1);
+      blankSkuLocked = ws.getCell(2, headers.indexOf('sku') + 1).protection?.locked;
+    });
+    expect(sheetProtected).toBe(true);
+    expect(blankSkuLocked).toBe(false);
+    await expect(roundTrip(exp, (wb) => setCell(wb, 'Rates', 'product_id', exp.rows[1].product_id)))
+      .rejects.toThrow(/Rates row 2 is damaged/);
+    const twice = await roundTrip(exp, (wb) => {
+      setCell(wb, 'Setup', 'product_id', exp.rows[1].product_id);
+      setCell(wb, 'Setup', 'manufacturer', 'Twice');
+    });
+    expect(buildSetupPreview(twice.setupRows, exp, OPTIONS, CATEGORIES).invalid.map((p) => p.problem)).toContain('listed twice in the file');
+  });
+
   it('refuses a file with added rows or another format', async () => {
     const exp = exported([product()]);
     await expect(roundTrip(exp, (wb) => wb.getWorksheet('Setup')!.addRow(['x']))).rejects.toThrow(/added or removed rows/);

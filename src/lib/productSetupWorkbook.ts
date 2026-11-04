@@ -228,7 +228,7 @@ function setupCell(product: SetupWorkbookProduct, field: (typeof SETUP_HEADERS)[
   return value ?? '';
 }
 
-function styleSheet(sheet: Worksheet, headers: readonly string[], editable: (header: string) => boolean): void {
+async function styleSheet(sheet: Worksheet, headers: readonly string[], rowCount: number, editable: (header: string) => boolean): Promise<void> {
   sheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 1, showGridLines: false }];
   const header = sheet.getRow(1);
   header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -239,12 +239,14 @@ function styleSheet(sheet: Worksheet, headers: readonly string[], editable: (hea
     column.hidden = HIDDEN.has(name);
     // Text, so Excel never turns an SKU, EPA number or rate into a date or a rounded float.
     column.numFmt = '@';
-    column.eachCell({ includeEmpty: false }, (cell, rowNumber) => {
-      if (rowNumber === 1) return;
+    for (let row = 2; row <= rowCount + 1; row += 1) {
+      const cell = sheet.getCell(row, index + 1);
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: editable(name) ? 'FFEAF7EF' : 'FFF2F4F3' } };
       cell.protection = { locked: !editable(name) };
-    });
+    }
   });
+  // A usability guard only (no secret password): the upload re-checks every row against the database.
+  await sheet.protect('crx-setup-layout', { selectLockedCells: true, selectUnlockedCells: true, autoFilter: true, sort: true });
 }
 
 /** The download: a Setup tab, a Rates tab and a hidden manifest. Grey columns are for reference only. */
@@ -258,7 +260,7 @@ export async function generateSetupWorkbook(
   const setup = workbook.addWorksheet(SETUP_WORKBOOK_SHEET);
   setup.addRow([...SETUP_HEADERS]);
   for (const product of exported.rows) setup.addRow(SETUP_HEADERS.map((field) => setupCell(product, field, options)));
-  styleSheet(setup, SETUP_HEADERS, (name) => (SETUP_EDITABLE_FIELDS as readonly string[]).includes(name));
+  await styleSheet(setup, SETUP_HEADERS, exported.rows.length, (name) => (SETUP_EDITABLE_FIELDS as readonly string[]).includes(name));
   const timingColumn = SETUP_HEADERS.indexOf('use_timings') + 1;
   setup.getCell(1, timingColumn).note = 'Exact use timing labels, separated by a semicolon (;). Only Herbicide and Foliar Fertilizer products take them.';
   setup.getCell(1, SETUP_HEADERS.indexOf('is_rup') + 1).note = 'yes or no';
@@ -271,11 +273,11 @@ export async function generateSetupWorkbook(
       pricing_version: p.pricing_version, unit_size: p.unit_size, inventory_unit: p.inventory_unit,
       product_form: p.product_form,
     };
-    rates.addRow([p.product_id, JSON.stringify(state), p.product_name, p.sku ?? '', p.product_form ?? '',
+    rates.addRow([p.product_id, JSON.stringify({ product_id: p.product_id, ...state }), p.product_name, p.sku ?? '', p.product_form ?? '',
       p.inventory_unit ?? '', p.unit_size ?? '', p.tier1_price_per_acre ?? '', p.tier2_price_per_acre ?? '',
       p.tier3_price_per_acre ?? '', p.rate_per_acre ?? '', p.rate_unit ?? '', p.suggested_rate ?? '']);
   }
-  styleSheet(rates, RATES_HEADERS, (name) => RATES_EDITABLE.has(name));
+  await styleSheet(rates, RATES_HEADERS, exported.rows.length, (name) => RATES_EDITABLE.has(name));
   if (exported.rates_locked) rates.getCell(1, RATES_HEADERS.indexOf('rate_per_acre') + 1).note = 'Rates are locked: a Rates upload is refused until an admin unlocks them.';
 
   const manifest = workbook.addWorksheet(MANIFEST_SHEET, { state: 'veryHidden' });
@@ -329,12 +331,16 @@ export async function parseSetupWorkbook(arrayBuffer: ArrayBuffer): Promise<Pars
   const setupRows = readSheet(workbook.getWorksheet(SETUP_WORKBOOK_SHEET), SETUP_WORKBOOK_SHEET, SETUP_HEADERS, rowCount);
   const rateRows = readSheet(workbook.getWorksheet(RATES_WORKBOOK_SHEET), RATES_WORKBOOK_SHEET, RATES_HEADERS, rowCount)
     .map((row, index) => {
-      let expected: RateRowState;
+      const damaged = new PricingWorkbookFormatError(`Rates row ${index + 2} is damaged (its hidden download record or product id). Download a fresh workbook.`);
+      let saved: unknown;
       try {
-        expected = JSON.parse(row.row_state) as RateRowState;
+        saved = JSON.parse(row.row_state);
       } catch {
-        throw new PricingWorkbookFormatError(`Rates row ${index + 2} is damaged (its hidden download record). Download a fresh workbook.`);
+        throw damaged;
       }
+      if (!saved || typeof saved !== 'object' || (saved as { product_id?: unknown }).product_id !== row.product_id
+          || typeof (saved as { pricing_version?: unknown }).pricing_version !== 'number') throw damaged;
+      const { product_id: _boundTo, ...expected } = saved as RateRowState & { product_id: string };
       return {
         product_id: row.product_id,
         rate_per_acre: blankToNull(row.rate_per_acre),
@@ -410,7 +416,13 @@ export function buildSetupPreview(
 ): SetupPreview {
   const byId = new Map(current.rows.map((row) => [row.product_id, row]));
   const preview: SetupPreview = { changes: [], stale: [], invalid: [] };
+  const seen = new Set<string>();
   for (const row of rows) {
+    if (seen.has(row.product_id)) {
+      preview.invalid.push({ product_id: row.product_id, product_name: byId.get(row.product_id)?.product_name ?? row.product_id, problem: 'listed twice in the file' });
+      continue;
+    }
+    seen.add(row.product_id);
     const product = byId.get(row.product_id);
     if (!product) {
       preview.invalid.push({ product_id: row.product_id, product_name: row.product_name || row.product_id, problem: 'product not found' });
@@ -423,7 +435,7 @@ export function buildSetupPreview(
       const parsed = parseSetupValue(field, row[field], options);
       if ('problem' in parsed) {
         // An old value nobody edited is not this upload's problem.
-        if (row[field].trim() !== String(product[field] ?? '').trim()) problems.push(parsed.problem);
+        if (row[field].trim() !== String(setupCell(product, field, options)).trim()) problems.push(parsed.problem);
         continue;
       }
       if (sameSetupValue(field, product, parsed.value)) continue;

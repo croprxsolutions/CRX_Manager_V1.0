@@ -6,6 +6,7 @@ import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { sanitizeError } from '../../lib/db';
 import { formatExactUSD } from '../../lib/money';
+import { listProductCategories } from '../../lib/productSetup';
 import { listProductUseTimingOptions } from '../../lib/productUseTimings';
 import {
   applyProductSetup,
@@ -16,6 +17,7 @@ import {
   MAX_SETUP_WORKBOOK_SAVE_ROWS,
   parseSetupWorkbook,
   previewProductRates,
+  rebaseRateRowsAfterSetup,
   saveProductRates,
   type RatePreview,
   type RatePreviewRow,
@@ -87,8 +89,8 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
     setBusy(true);
     try {
       const parsed = await parseSetupWorkbook(await file.arrayBuffer());
-      const [current, options] = await Promise.all([loadSetupWorkbookExport(), listProductUseTimingOptions()]);
-      const setupPreview = buildSetupPreview(parsed.setupRows, current, options);
+      const [current, options, categories] = await Promise.all([loadSetupWorkbookExport(), listProductUseTimingOptions(), listProductCategories()]);
+      const setupPreview = buildSetupPreview(parsed.setupRows, current, options, categories.filter((c) => c.is_active).map((c) => c.name));
       const rateRows = editedRateRows(parsed.rateRows);
       if (setupPreview.changes.length > MAX_SETUP_WORKBOOK_SAVE_ROWS || rateRows.length > MAX_SETUP_WORKBOOK_SAVE_ROWS) {
         throw new Error(`Save at most ${MAX_SETUP_WORKBOOK_SAVE_ROWS} changed rows per tab at a time.`);
@@ -112,6 +114,11 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
       setupKey.resetKey();
       setSetupSaved(saved.rows.map((row) => row.product_name));
       toast('success', `Saved setup changes to ${saved.changed_count} products`);
+      // Rates not yet saved: carry over this save's own version moves and show their preview again.
+      if (rates && rates.rows.length > 0 && ratesSaved == null) {
+        const rows = rebaseRateRowsAfterSetup(rates.rows, saved);
+        setRates({ rows, preview: await previewProductRates(rows) });
+      }
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {

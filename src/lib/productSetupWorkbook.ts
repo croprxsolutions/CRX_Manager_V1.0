@@ -172,9 +172,14 @@ export async function saveProductRates(input: {
   return assertRpcResult<{ changed_count: number }>(data, 'set_product_rates');
 }
 
+export interface SetupSaveResult {
+  changed_count: number;
+  rows: Array<{ product_id: string; product_name: string; pricing_version_before: number; pricing_version_after: number; fields: string[] }>;
+}
+
 export async function applyProductSetup(input: {
   rows: SetupChangeRow[]; performedBy: string; idempotencyKey: string;
-}): Promise<{ changed_count: number; rows: Array<{ product_id: string; product_name: string; fields: string[] }> }> {
+}): Promise<SetupSaveResult> {
   const { data, error } = await supabase.rpc('apply_product_setup', {
     p_rows: input.rows.map(({ product_id, setup_fingerprint, changes }) => ({ product_id, setup_fingerprint, changes })) as unknown as Json,
     p_performed_by: input.performedBy,
@@ -182,6 +187,20 @@ export async function applyProductSetup(input: {
   });
   if (error) throw error;
   return assertRpcResult(data, 'apply_product_setup');
+}
+
+/**
+ * After this workbook's own Setup save: notes and use timings move a product's pricing_version, which
+ * would make its Rates row look stale. Move the expected version only where it moved from exactly the
+ * downloaded one, so a change by someone else is still refused.
+ */
+export function rebaseRateRowsAfterSetup(rows: RateUploadRow[], saved: SetupSaveResult): RateUploadRow[] {
+  return rows.map((row) => {
+    const own = saved.rows.find((r) => r.product_id === row.product_id);
+    return own && own.pricing_version_before === row.expected.pricing_version
+      ? { ...row, expected: { ...row.expected, pricing_version: own.pricing_version_after } }
+      : row;
+  });
 }
 
 /** set_product_rates rows: only the previewed changes, each carrying the per-acre prices the preview showed. */
@@ -341,7 +360,8 @@ function parseSetupValue(
   if ((SETUP_TEXT_FIELDS as readonly string[]).includes(field)) return { value: trimmed === '' ? null : trimmed };
   if ((SETUP_DECIMAL_FIELDS as readonly string[]).includes(field)) {
     if (trimmed === '') return { value: null };
-    return /^\d{1,12}(\.\d{1,6})?$/.test(trimmed) ? { value: trimmed } : { problem: `${field} must be a number of 0 or more, up to 6 decimals` };
+    if (!/^\d{1,12}(\.\d{1,6})?$/.test(trimmed)) return { problem: `${field} must be a number of 0 or more, up to 6 decimals` };
+    return field === 'container_size' && Number(trimmed) <= 0 ? { problem: 'container_size must be above 0' } : { value: trimmed };
   }
   if ((SETUP_WHOLE_FIELDS as readonly string[]).includes(field)) {
     if (trimmed === '') return { value: null };
@@ -366,7 +386,9 @@ function sameSetupValue(field: SetupField, current: SetupWorkbookProduct, value:
     return [...current.use_timings].sort().join('\u0000') === [...(value as string[])].sort().join('\u0000');
   }
   if ((SETUP_DECIMAL_FIELDS as readonly string[]).includes(field)) return sameDecimal(current[field as 'container_size'], value as string | null);
-  return (current[field] ?? null) === value;
+  // The database trims text, so stray spaces on a stored value are not a change.
+  const stored = current[field];
+  return (typeof stored === 'string' ? (stored.trim() === '' ? null : stored.trim()) : stored ?? null) === value;
 }
 
 const shown = (field: SetupField, value: SetupValue | undefined, options: readonly UseTimingOption[]): string => {
@@ -383,6 +405,8 @@ const shown = (field: SetupField, value: SetupValue | undefined, options: readon
  */
 export function buildSetupPreview(
   rows: ParsedSetupWorkbook['setupRows'], current: SetupWorkbookExport, options: readonly UseTimingOption[],
+  /** Active category names; a changed category must be one of them. */
+  categories: readonly string[],
 ): SetupPreview {
   const byId = new Map(current.rows.map((row) => [row.product_id, row]));
   const preview: SetupPreview = { changes: [], stale: [], invalid: [] };
@@ -397,8 +421,17 @@ export function buildSetupPreview(
     const problems: string[] = [];
     for (const field of SETUP_EDITABLE_FIELDS) {
       const parsed = parseSetupValue(field, row[field], options);
-      if ('problem' in parsed) { problems.push(parsed.problem); continue; }
+      if ('problem' in parsed) {
+        // An old value nobody edited is not this upload's problem.
+        if (row[field].trim() !== String(product[field] ?? '').trim()) problems.push(parsed.problem);
+        continue;
+      }
       if (sameSetupValue(field, product, parsed.value)) continue;
+      // Only listed names: an old alias would be rewritten by the database and move the use timings.
+      if (field === 'category' && parsed.value != null && !categories.includes(parsed.value as string)) {
+        problems.push(`unknown category "${parsed.value}"`);
+        continue;
+      }
       changes[field] = parsed.value;
       display.push({ field, before: shown(field, product[field], options), after: shown(field, parsed.value, options) });
     }

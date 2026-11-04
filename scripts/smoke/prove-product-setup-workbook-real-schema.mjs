@@ -285,6 +285,7 @@ const BATCH = Array.from({ length: 20 }, (_, i) => ({
   t1: 2000 + i * 137, t2: 1900 + i * 111, t3: 1800 + i * 97, // cents
   rate10: 5 + i * 7, // tenths of an ounce per acre: 0.5 oz .. 13.8 oz
 }));
+const SEED = id('e1');
 const cents = (c) => (c / 100).toFixed(2);
 // Hand calculation, in whole cents: price per gallon x (rate oz / 128 oz), half away from zero.
 const perAcre = (priceCents, rate10) => {
@@ -294,7 +295,11 @@ const perAcre = (priceCents, rate10) => {
 
 function seedBatch() {
   asOwner(`INSERT INTO public.products (id, product_name, sku, category, inventory_unit, is_active, tier1_price, tier2_price, tier3_price)
-    VALUES ${BATCH.map((b, i) => `('${b.id}', '[PROVER] Batch ${i + 1}', 'SW-${i + 1}', 'Herbicide', 'gal', true, ${cents(b.t1)}, ${cents(b.t2)}, ${cents(b.t3)})`).join(',\n')};`);
+    VALUES ${BATCH.map((b, i) => `('${b.id}', '[PROVER] Batch ${i + 1}', 'SW-${i + 1}', 'Herbicide', 'gal', true, ${cents(b.t1)}, ${cents(b.t2)}, ${cents(b.t3)})`).join(',\n')};
+    -- A seed product stocked in Lb, and a unit of type both, which the rate writers' unit check accepts for seed.
+    INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Unit', 1, 'both');
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, rate_unit, is_active, tier1_price)
+    VALUES ('${SEED}', '[PROVER] Seed', 'SW-S', 'seed', 'Lb', 'Lb', true, 3.00);`);
 }
 const exportRows = (uid = ADMIN) => JSON.parse(ok(uid, 'SELECT public.get_product_setup_workbook();'));
 const byId = (exp, p) => exp.rows.find((r) => r.product_id === p);
@@ -374,6 +379,14 @@ function main() {
     { ...rateRow(f1, '1', 'oz', ''), product_id: id('dead') },
   ]);
   assert.deepEqual(checks.rows.map((r) => r.status), ['unchanged', 'invalid_rate', 'invalid_unit', 'not_found']);
+  // A seed product: only its stock unit is a rate unit; the preview names any other and shows the unit it stores.
+  const seedRow = byId(fresh, SEED);
+  assert.equal(previewRates([rateRow(seedRow, '2', 'Unit', '')]).rows[0].status, 'invalid_unit');
+  const seedOk = previewRates([rateRow(seedRow, '2', 'Lb', '')]);
+  assert.equal(seedOk.rows[0].status, 'change');
+  assert.equal(seedOk.rows[0].after.rate_unit, 'Lb');
+  ok(ADMIN, setRates(saveFromPreview([rateRow(seedRow, '2', 'Lb', '')], seedOk), 'k-seed-rate'));
+  assert.equal(field(SEED, 'rate_per_acre'), '2');
   refused(ADMIN, `SELECT public.preview_product_rates('${JSON.stringify([rateRow(f1, '1', 'oz', ''), rateRow(f1, '2', 'oz', '')])}'::jsonb);`, /PRODUCT_RATE_DUPLICATE_PRODUCT/);
   refused(ADMIN, `SELECT public.preview_product_rates('[{"product_id":"${P.GAL}"}]'::jsonb);`, /PRODUCT_RATE_ROW_SHAPE_INVALID/);
   console.log('[prover] the rate preview names stale, invalid and unknown rows, and refuses duplicates and bad shapes');
@@ -423,6 +436,25 @@ function main() {
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { sku: 'A' } }], 'k-actor', REP), /ACTOR_MISMATCH|ADMIN_REQUIRED/);
   refused(ADMIN, `SELECT public.apply_product_setup('[{"product_id":"${m.product_id}","setup_fingerprint":"${m.setup_fingerprint}","changes":{"sku":"A"}}]'::jsonb, '${ADMIN}', NULL);`, /IDEMPOTENCY_KEY_REQUIRED/);
   console.log('[prover] Setup tab refuses stale rows and bad values by product name, all-or-nothing, and never writes vendor, rates, prices, cost, active, form or units');
+
+  // One file, Setup saved first: a notes change moves pricing_version, so the screen moves the Rates row's
+  // expected version only where this save moved it from the downloaded one (rebaseRateRowsAfterSetup).
+  const f3 = exportRows();
+  const own = byId(f3, BATCH[6].id); const other = byId(f3, BATCH[7].id);
+  asOwner(`UPDATE public.products SET pricing_version = pricing_version + 1 WHERE id = '${other.product_id}';`); // someone else's price change
+  const ownSave = JSON.parse(ok(ADMIN, setup([own, other].map((e) => ({ product_id: e.product_id, setup_fingerprint: e.setup_fingerprint,
+    changes: { quoting_notes: 'from the workbook' } })), 'k-setup-then-rates')));
+  const versions = Object.fromEntries(ownSave.rows.map((r) => [r.product_id, r]));
+  assert.equal(versions[own.product_id].pricing_version_after, own.pricing_version + 1, 'a notes change moves pricing_version');
+  const rebased = [own, other].map((e) => {
+    const r = rateRow(e, '2', 'oz', ''); const v = versions[e.product_id];
+    return v.pricing_version_before === r.expected.pricing_version ? { ...r, expected: { ...r.expected, pricing_version: v.pricing_version_after } } : r;
+  });
+  const afterSetup = previewRates(rebased);
+  assert.deepEqual(afterSetup.rows.map((r) => r.status), ['change', 'stale'], 'only our own version move is carried over');
+  ok(ADMIN, setRates(saveFromPreview([rebased[0]], afterSetup), 'k-rates-after-setup'));
+  assert.equal(field(own.product_id, 'rate_per_acre'), '2');
+  console.log('[prover] Setup then Rates from one file: our own version move is carried over, someone else\'s still refuses the row');
 
   // Lock on: the same Rates upload is refused; the Setup tab still saves.
   ok(ADMIN, lock(true, 'season set', 'k-lock'));

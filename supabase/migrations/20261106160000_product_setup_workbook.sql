@@ -148,7 +148,11 @@ BEGIN
       v_status := 'invalid_rate';
     ELSE
       v_rate := public._product_rate_value(v_row->'rate_per_acre');
-      IF NOT public._product_rate_unit_ok(v_rate, v_unit, v_product.rate_unit, v_product.product_form) THEN
+      IF NOT public._product_rate_unit_ok(v_rate, v_unit, v_product.rate_unit, v_product.product_form)
+         -- validate_product_units refuses a seed or each rate unit other than the stock unit (unnamed);
+         -- set_product_rates' own check lets an 'Ea'/'Unit' through, so name it here instead.
+         OR (v_product.product_form IN ('seed', 'each') AND v_unit IS NOT NULL
+             AND lower(v_unit) IS DISTINCT FROM lower(btrim(v_product.inventory_unit))) THEN
         v_status := 'invalid_unit';
       ELSIF public._product_rate_value(v_row->'expected'->'rate_per_acre') IS DISTINCT FROM v_product.rate_per_acre
          OR NULLIF(v_row->'expected'->>'rate_unit', '') IS DISTINCT FROM NULLIF(v_product.rate_unit, '')
@@ -176,7 +180,10 @@ BEGIN
         'tier2_price_per_acre', v_product.tier2_price_per_acre,
         'tier3_price_per_acre', v_product.tier3_price_per_acre),
       'after', CASE WHEN v_status = 'change' THEN jsonb_build_object(
-        'rate_per_acre', v_rate::text, 'rate_unit', v_unit, 'suggested_rate', v_suggested) || v_prices END);
+        'rate_per_acre', v_rate::text,
+        -- What will be stored: a seed or each product keeps its stock unit.
+        'rate_unit', CASE WHEN v_product.product_form IN ('seed', 'each') THEN v_product.inventory_unit ELSE v_unit END,
+        'suggested_rate', v_suggested) || v_prices END);
   END LOOP;
   RETURN jsonb_build_object(
     'rates_locked', COALESCE((SELECT is_locked FROM public.product_rate_lock WHERE id), true),
@@ -207,6 +214,8 @@ DECLARE
   v_stale text[] := ARRAY[]::text[];
   v_invalid text[] := ARRAY[]::text[];
   v_name text;
+  v_version_before bigint;
+  v_version_after bigint;
   v_results jsonb := '[]'::jsonb;
   v_result jsonb;
 BEGIN
@@ -292,6 +301,7 @@ BEGIN
   BEGIN
     FOR v_row IN SELECT r FROM jsonb_array_elements(p_rows) r LOOP
       v_changes := v_row->'changes';
+      SELECT pricing_version INTO v_version_before FROM public.products WHERE id = (v_row->>'product_id')::uuid;
       UPDATE public.products p SET
         product_name = CASE WHEN v_changes ? 'product_name' THEN NULLIF(btrim(v_changes->>'product_name'), '') ELSE p.product_name END,
         sku = CASE WHEN v_changes ? 'sku' THEN NULLIF(btrim(v_changes->>'sku'), '') ELSE p.sku END,
@@ -313,14 +323,17 @@ BEGIN
           THEN ARRAY(SELECT jsonb_array_elements_text(v_changes->'use_timings')) ELSE p.use_timings END,
         updated_at = now()
       WHERE p.id = (v_row->>'product_id')::uuid
-      RETURNING p.product_name INTO v_name;
+      RETURNING p.product_name, p.pricing_version INTO v_name, v_version_after;
       v_results := v_results || jsonb_build_object('product_id', v_row->>'product_id',
-        'product_name', v_name, 'fields', (SELECT jsonb_agg(k ORDER BY k) FROM jsonb_object_keys(v_changes) k));
+        'product_name', v_name,
+        -- Notes and use timings move pricing_version (the price workbook's rule); the Rates tab uses these
+        -- to tell its own Setup save from someone else's change.
+        'pricing_version_before', v_version_before, 'pricing_version_after', v_version_after, 'fields', (SELECT jsonb_agg(k ORDER BY k) FROM jsonb_object_keys(v_changes) k));
     END LOOP;
   EXCEPTION WHEN OTHERS THEN
     -- Name the product the table's own check refused; nothing is saved.
     SELECT product_name INTO v_name FROM public.products WHERE id = (v_row->>'product_id')::uuid;
-    RAISE EXCEPTION 'PRODUCT_SETUP_ROW_REFUSED: %: %', v_name, SQLERRM USING ERRCODE = 'check_violation';
+    RAISE EXCEPTION 'PRODUCT_SETUP_ROW_REFUSED: %: %', v_name, SQLERRM USING ERRCODE = SQLSTATE;
   END;
 
   v_result := jsonb_build_object('changed_count', jsonb_array_length(v_results), 'rows', v_results);

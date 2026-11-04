@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSetupPreview,
+  rebaseRateRowsAfterSetup,
   editedRateRows,
   generateSetupWorkbook,
   parseSetupWorkbook,
@@ -11,6 +12,7 @@ import {
 import { loadExcelJs } from './productPricingWorkbook';
 import type { UseTimingOption } from '../types';
 
+const CATEGORIES = ['Herbicide', 'Fungicide'];
 const OPTIONS: UseTimingOption[] = [
   { code: 'pre_emerge', label: 'Pre-Emerge', timing_code: 'pre_emergence', crop: null, category: 'Herbicide', sort_order: 10, is_active: true },
   { code: 'post_emergence', label: 'Post-Emergence', timing_code: 'post_emergence', crop: null, category: 'Herbicide', sort_order: 40, is_active: true },
@@ -54,7 +56,7 @@ describe('setup workbook', () => {
   it('reads back an untouched download as no changes on either tab', async () => {
     const exp = exported([product()]);
     const parsed = await roundTrip(exp);
-    expect(buildSetupPreview(parsed.setupRows, exp, OPTIONS)).toEqual({ changes: [], stale: [], invalid: [] });
+    expect(buildSetupPreview(parsed.setupRows, exp, OPTIONS, CATEGORIES)).toEqual({ changes: [], stale: [], invalid: [] });
     expect(editedRateRows(parsed.rateRows)).toEqual([]);
   });
 
@@ -67,7 +69,7 @@ describe('setup workbook', () => {
       setCell(wb, 'Setup', 'container_size', '2.5'); // same amount as 2.50: not a change
       setCell(wb, 'Setup', 'use_timings', 'pre-emerge; Post-Emergence');
     });
-    const preview = buildSetupPreview(parsed.setupRows, exp, OPTIONS);
+    const preview = buildSetupPreview(parsed.setupRows, exp, OPTIONS, CATEGORIES);
     expect(preview.stale).toEqual([]);
     expect(preview.invalid).toEqual([]);
     expect(preview.changes).toHaveLength(1);
@@ -85,7 +87,7 @@ describe('setup workbook', () => {
       ws.getCell(3, headers.indexOf('phi_days') + 1).value = '-1';
     });
     const now = exported([product({ setup_fingerprint: 'b'.repeat(32) }), exp.rows[1]]);
-    const preview = buildSetupPreview(parsed.setupRows, now, OPTIONS);
+    const preview = buildSetupPreview(parsed.setupRows, now, OPTIONS, CATEGORIES);
     expect(preview.changes).toEqual([]);
     expect(preview.stale.map((p) => p.product_name)).toEqual(['Atrazine 4L']);
     expect(preview.invalid[0].product_name).toBe('Other');
@@ -107,6 +109,23 @@ describe('setup workbook', () => {
       after: { rate_per_acre: '13.5', rate_unit: 'oz', suggested_rate: '13 oz/A', ...prices } }] }, edited);
     expect(save[0].expected.prices).toEqual(prices);
     expect(rateSaveRows({ rates_locked: false, rows: [{ product_id: exp.rows[0].product_id, status: 'stale' }] }, edited)).toEqual([]);
+  });
+
+  it('ignores stray spaces and old bad values nobody edited, and refuses an unlisted category or a zero container size', async () => {
+    const exp = exported([product({ notes: ' spaced ', rei_hours: -1 as unknown as number })]);
+    expect(buildSetupPreview((await roundTrip(exp)).setupRows, exp, OPTIONS, CATEGORIES)).toEqual({ changes: [], stale: [], invalid: [] });
+    const edited = await roundTrip(exp, (wb) => { setCell(wb, 'Setup', 'category', 'Post Emergence'); setCell(wb, 'Setup', 'container_size', '0'); });
+    const preview = buildSetupPreview(edited.setupRows, exp, OPTIONS, CATEGORIES);
+    expect(preview.invalid[0].problem).toMatch(/container_size must be above 0/);
+    expect(preview.invalid[0].problem).toMatch(/unknown category "Post Emergence"/);
+  });
+
+  it('after its own Setup save, moves a Rates row expected version only from the downloaded one', () => {
+    const row = { product_id: 'p1', rate_per_acre: '1', rate_unit: 'oz', suggested_rate: null,
+      expected: { rate_per_acre: null, rate_unit: null, suggested_rate: null, pricing_version: 4, unit_size: null, inventory_unit: 'Gal', product_form: 'liquid' } };
+    const saved = (before: number) => ({ changed_count: 1, rows: [{ product_id: 'p1', product_name: 'P', pricing_version_before: before, pricing_version_after: before + 1, fields: ['notes'] }] });
+    expect(rebaseRateRowsAfterSetup([row], saved(4))[0].expected.pricing_version).toBe(5);
+    expect(rebaseRateRowsAfterSetup([row], saved(5))[0].expected.pricing_version).toBe(4); // someone else moved it first
   });
 
   it('refuses a file with added rows or another format', async () => {

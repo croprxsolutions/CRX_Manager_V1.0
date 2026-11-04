@@ -8,7 +8,8 @@
  * candidate the same sync draws 0.01 and leaves 9.99 (whole hundredths, which a Partial Order can
  * take); the job's shed hold is at least that draw (0.01), and a demand under 0.005 gal draws
  * nothing while its full hold is kept. The candidate refuses to apply over a completed job that
- * keeps an unrounded draw.
+ * keeps an unrounded draw. Each active job draws against completed demand only, so many small jobs,
+ * out-of-order completions and a cancelled active sibling never pile up rounding in the kept draws.
  *
  * Run: node scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs   (needs local Docker image)
  * Prints JOB_RESERVATION_HUNDREDTHS_PROOF_PASS on success.
@@ -326,9 +327,12 @@ function main() {
         VALUES ('${jobN}', '${P}', 1, 'fl oz', false);`);
   }
   sync();
-  psql(`SET session_replication_role = replica;
-    UPDATE public.jobs SET status = 'completed' WHERE id IN (${smalls.map((s) => `'${s}'`).join(', ')});
-    UPDATE public.jobs SET status = 'cancelled' WHERE id = '${big}';`);
+  // One at a time, each followed by the sync complete_job's status update fires.
+  for (const jobN of smalls) {
+    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${jobN}';`);
+    sync();
+  }
+  psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'cancelled' WHERE id = '${big}';`);
   sync();
   const kept = scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
   assert.equal(Number(kept), 0.09, `12 completed jobs of 1 fl oz should keep 0.09 gal of draws, not ${kept}`);
@@ -375,6 +379,40 @@ function main() {
   assert.equal(Number(freshDraw), 1, `a 1 gal job should draw 1.00 gal, not ${freshDraw}`);
   console.log(`[prover] AFTER: after a completed job outran its booking, a new 1 gal job draws ${freshDraw} gal, not the old shortfall`);
   console.log(`[prover] AFTER: 3 out-of-order completions with a cancelled earlier sibling keep ${scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND job_id <> '${fresh}';`)} gal for 0.10546875 gal applied (never more than 0.01 over)`);
+  // Luna: three rounds on a fresh product, each with a new pair of active jobs, A then B in FIFO order
+  // (0.004/0.004, then 0.010/0.002, then 0.018/0.002 gal). B completes and A is cancelled each round.
+  // A running-total share let B borrow A's rounding every round (0.03 kept for 0.008 applied); the
+  // kept draws must stay within 0.01 of the rounded completed demand.
+  const P2 = id('f2');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+      VALUES ('${P2}', 'KI-100 Liquid 2', 'gal', 'gal', 'liquid');
+    INSERT INTO public.inventory (product_id, location) VALUES ('${P2}', 'Main Warehouse');
+    INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+      VALUES ('${Q}', '${S}', '${P2}', 10);`);
+  const keptP2 = () => Number(scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P2}';`));
+  let completedP2 = 0;
+  for (const [k, [qa, qb]] of [[0.004, 0.004], [0.010, 0.002], [0.018, 0.002]].entries()) {
+    const a = id(`8${k}`);
+    const b = id(`9${k}`);
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        VALUES ('${a}', 'KI100-A${k}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '4 days'),
+               ('${b}', 'KI100-B${k}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '5 days');
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        VALUES ('${a}', '${P2}', ${qa}, 'gal', false), ('${b}', '${P2}', ${qb}, 'gal', false);`);
+    sync();
+    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${b}';`);
+    sync();
+    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'cancelled' WHERE id = '${a}';`);
+    sync();
+    completedP2 += qb;
+    const keptNow = keptP2();
+    assert.ok(keptNow <= Math.round(completedP2 * 100) / 100 + 0.01 + 1e-9,
+      `Luna round ${k + 1}: kept ${keptNow} gal is more than 0.01 over the rounded ${completedP2} gal applied`);
+    assert.ok(Number(scaleOf(keptNow)) <= 2, `Luna round ${k + 1}: kept draws should be whole hundredths`);
+  }
+  console.log(`[prover] AFTER: Luna's 3 rounds (B completes, A cancelled) keep ${keptP2()} gal for ${completedP2.toFixed(3)} gal applied`);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

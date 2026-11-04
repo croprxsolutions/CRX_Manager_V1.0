@@ -6,10 +6,14 @@
 --   spray job that reserves product from a booking drew an unrounded unit conversion from it. 1 fl oz
 --   from a 10 gal booking drew 0.0078125 gal and left 9.9921875 gal, which no Partial Order can take,
 --   so the booking could never close. _sync_quote_job_reservations (the only writer of
---   job_product_draws) now keeps the booking's job draws in whole hundredths: together they track
---   the booking's running job demand (completed jobs, then active ones in FIFO order) rounded to 0.01,
---   half up, as save_quote rounds a booking: each job draws its share of that rounded running total,
---   so many small jobs never drift from what was really applied, even if a later sibling is cancelled. A job's inventory hold is at least its draw
+--   job_product_draws) now keeps the booking's job draws in whole hundredths. Each active job, in
+--   FIFO order, draws the step it alone adds to the booking's completed and invoiced job demand
+--   rounded to 0.01 (half up, as save_quote rounds a booking), capped at its own demand rounded up
+--   and at the open booking balance. No job counts an active sibling's demand, so a sibling cancelled
+--   later leaves no borrowed rounding in a kept draw. Active siblings may briefly over-reserve
+--   together; complete_job's status update re-syncs every sibling in the same transaction, so the
+--   kept draws stay at ROUND(completed demand, 2) (within 0.01) and many small jobs never drift from
+--   what was really applied. A job's inventory hold is at least its draw
 --   (a draw rounded up would otherwise leave the shed holding less than the booking gave up). The preflight refuses if any job
 --   already has a draw finer than 0.01 (a kept one is never rebuilt; an active one would wait for
 --   its next sync).
@@ -19,6 +23,10 @@
 --   owner, SECURITY DEFINER, search_path and grants. No table, column, grant or row is added,
 --   changed or deleted; a job's draw is rebuilt only when it or its booking next syncs (live had no
 --   job draws on 2026-11-04).
+--
+-- KNOWN LIMIT: complete_job finishes one job per call. A direct status write that completes several
+--   sibling jobs in one statement (bypassing complete_job) syncs only after all of them, so each
+--   keeps its own step and the kept draws can sit up to about 0.005 per such job over the rounded total.
 --
 -- ROLLBACK (its own reviewed migration): re-emit _sync_quote_job_reservations from its
 --   20260710120000 body.
@@ -81,8 +89,7 @@ DECLARE
   v_order_drawn numeric;
   v_consumed_drawn numeric;
   v_crop_pool numeric := 0;
-  v_job_demand numeric := 0; -- JOB_DRAW_HUNDREDTHS
-  v_allocated numeric := 0; -- JOB_DRAW_HUNDREDTHS
+  v_completed_demand numeric := 0; -- JOB_DRAW_HUNDREDTHS
   v_draw numeric;
   v_hold numeric;
 BEGIN
@@ -181,11 +188,11 @@ BEGIN
         v_crop_pool := GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0);
         -- JOB_DRAW_HUNDREDTHS<<< (20261106170000, KI-100) A booking and its Partial Orders are in whole
         -- hundredths (20261106110000), so the booking's job draws are too: an unrounded unit conversion
-        -- (1 fl oz = 0.0078125 gal) would leave a remainder no Partial Order can take. The job draws
-        -- track the booking's running job demand (completed jobs, then active ones in FIFO order) rounded
-        -- to 0.01, so many small jobs never draw more (or less) than half a hundredth off what was applied.
+        -- (1 fl oz = 0.0078125 gal) would leave a remainder no Partial Order can take. Each active job
+        -- draws against the booking's completed and invoiced job demand only, rounded to 0.01, so many
+        -- small jobs never keep more (or less) than half a hundredth off what was applied.
         SELECT COALESCE(SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)), 0)
-          INTO v_job_demand
+          INTO v_completed_demand
           FROM jobs j
           JOIN job_chemicals jc ON jc.job_id = j.id
           JOIN products p ON p.id = jc.product_id
@@ -193,7 +200,6 @@ BEGIN
            AND jc.product_id = v_row.product_id
            AND jc.customer_supplied = false
            AND j.status IN ('completed', 'invoiced');
-        v_allocated := v_consumed_drawn;
         v_crop_pool := ROUND(FLOOR(v_crop_pool * 100) / 100, 2);
         -- >>>JOB_DRAW_HUNDREDTHS
       ELSE
@@ -204,14 +210,14 @@ BEGIN
     END IF;
 
     -- Draw from the open booking balance (for billing / no double-bill), FIFO.
-    -- JOB_DRAW_HUNDREDTHS<<< Each job draws its share of the rounded running total, in FIFO order, so
-    -- the jobs before any point draw their real demand to within 0.005 (a later sibling cancelled
-    -- after they complete leaves no rounding behind).
-    v_job_demand := v_job_demand + v_row.demand;
+    -- JOB_DRAW_HUNDREDTHS<<< Each active job draws the step it alone would add to the booking's rounded
+    -- completed demand: ROUND(completed demand + its own demand) less the kept draws. It never counts an
+    -- active sibling, so a sibling cancelled later leaves no borrowed rounding behind. Active siblings
+    -- may briefly over-reserve together; each completion re-syncs the rest (complete_job's status update
+    -- fires _sync_job_holds in the same transaction), so the kept draws stay at ROUND(completed demand).
     -- Never more than the job's own demand rounded up: a completed job's shortfall against an older,
     -- smaller booking is not caught up by a later job.
-    v_draw := LEAST(GREATEST(ROUND(v_job_demand, 2) - v_allocated, 0), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);
-    v_allocated := v_allocated + v_draw;
+    v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - v_consumed_drawn, 0), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);
     -- >>>JOB_DRAW_HUNDREDTHS
     v_crop_pool := v_crop_pool - v_draw;
     -- Hold the FULL application demand in the shed (channels don't offset, #A).
@@ -258,8 +264,8 @@ BEGIN
   IF NOT FOUND
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_sync_quote_job_reservations') <> 1
-     OR position('v_draw := LEAST(GREATEST(ROUND(v_job_demand, 2) - v_allocated, 0), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
-     OR position('v_allocated := v_consumed_drawn;' IN p.prosrc) = 0
+     OR position('v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - v_consumed_drawn, 0), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
+     OR position('INTO v_completed_demand' IN p.prosrc) = 0
      OR position('v_hold := GREATEST(v_row.demand, v_draw);' IN p.prosrc) = 0
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef

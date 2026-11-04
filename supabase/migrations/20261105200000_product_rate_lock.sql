@@ -663,12 +663,15 @@ BEGIN
   END IF;
   SELECT * INTO v_product FROM public.products WHERE id = p_product_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND'; END IF;
-  IF length(v_unit) > 40
-     OR NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form) THEN
+  IF length(v_unit) > 40 THEN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form';
   END IF;
-  -- validate_product_units stores a seed or each product's stock unit as its rate unit.
+  -- validate_product_units stores a seed or each product's stock unit as its rate unit; the unit is
+  -- checked after that swap, as correct_product_rates checks it.
   IF v_product.product_form IN ('seed', 'each') THEN v_unit := v_product.inventory_unit; END IF;
+  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form) THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form';
+  END IF;
   v_t1 := COALESCE(v_product.tier1_price, 0);
   RETURN jsonb_build_object(
     'before', jsonb_build_object('tier1_price_per_acre', v_product.tier1_price_per_acre,

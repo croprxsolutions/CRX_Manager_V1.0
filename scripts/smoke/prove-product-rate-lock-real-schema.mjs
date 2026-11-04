@@ -398,6 +398,10 @@ function main() {
     VALUES ('[PROVER] Seed new', 'RL-5', 'seed', 'Lb', true);`);
   assert.equal(scalar(`SELECT rate_unit FROM public.products WHERE sku = 'RL-5';`), 'Lb');
   ok(ADMIN, `UPDATE public.products SET product_name = '[PROVER] Seed renamed' WHERE sku = 'RL-5';`);
+  // A seed preview checks the stock unit the save will use, not the typed one it discards.
+  const seedPreview = JSON.parse(ok(ADMIN, `SELECT public.preview_product_rate_correction(
+    (SELECT id FROM public.products WHERE sku = 'RL-5'), 2, 'gallons');`));
+  assert.ok('tier1_price_per_acre' in seedPreview.after, 'a seed preview ignores the typed unit');
   refused(ADMIN, `INSERT INTO public.products (product_name, sku, inventory_unit, is_active, rate_per_acre, rate_unit)
     VALUES ('[PROVER] Rated new 2', 'RL-6', 'gal', true, 5, 'oz');`, /save the new product without rates/);
   console.log('[prover] locked: browser edits, the rate writer, definer functions and rated inserts are refused; other edits save');

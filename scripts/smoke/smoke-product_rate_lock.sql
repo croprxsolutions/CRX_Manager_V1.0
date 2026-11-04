@@ -31,7 +31,7 @@ BEGIN
     ('public._product_rate_unit_ok(numeric,text,text,text)', '8177b1aaaddb1659d00d19f28c3924df'),
     ('public.guard_product_rate_lock()', '9a4fa35ae3a1533e755d840aed47fa62'),
     ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
-    ('public.preview_product_rate_correction(uuid,numeric,text)', '8604511cd222c804da7913992b2f8daa')) AS pins(sig, body_md5) LOOP
+    ('public.preview_product_rate_correction(uuid,numeric,text)', 'b7156b259b0e1e71391674dc474072fa')) AS pins(sig, body_md5) LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM v_md5 THEN
       RAISE EXCEPTION 'SMOKE_FAIL: % is not the body of 20261105200000', v_sig;
     END IF;

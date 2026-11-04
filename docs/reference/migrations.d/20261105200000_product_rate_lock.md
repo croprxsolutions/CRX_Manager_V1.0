@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied.** `20261105200000_product_rate_lock.sql` (LF SQL sha256: `0ccd9235e8ba227b1043561633ab6f7ff8c5bb47e34b853c18f067ff3b334e2e`). WP-PM-11a-1. REQUIRES the price workbook tables (`product_info_change_set_rows`), which its preflight checks, and `unit_conversions`, without which creating the unit check fails; either way the one-transaction apply changes nothing.
+**LOCAL CANDIDATE, not applied.** `20261105200000_product_rate_lock.sql` (LF SQL sha256: `25dda37dc233fccb553bfffd1812f31a5a34b2740c354a90821c90b3bba08c0f`). WP-PM-11a-1. REQUIRES the price workbook tables (`product_info_change_set_rows`), which its preflight checks, and `unit_conversions`, without which creating the unit check fails; either way the one-transaction apply changes nothing.
 
 What it does:
 - New one-row `product_rate_lock` (starts unlocked) and append-only `product_rate_events`. A private `product_rate_correction_passes` table (row security on, no API-role access) holds the correction's one-transaction pass, so no session can forge it. Every signed-in user can read both; nobody writes them directly, and updates, deletes and truncates are refused.

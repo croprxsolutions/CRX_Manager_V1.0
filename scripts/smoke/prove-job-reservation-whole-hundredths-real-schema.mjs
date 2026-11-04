@@ -413,6 +413,43 @@ function main() {
     assert.ok(Number(scaleOf(keptNow)) <= 2, `Luna round ${k + 1}: kept draws should be whole hundredths`);
   }
   console.log(`[prover] AFTER: Luna's 3 rounds (B completes, A cancelled) keep ${keptP2()} gal for ${completedP2.toFixed(3)} gal applied`);
+  // Codex: a 15 gal job outruns a 10 gal booking (draws the 10 left) and completes; the booking is
+  // raised to 20 gal; then 20 jobs of 1 fl oz complete one by one. The old shortfall must not make
+  // each small job round up to 0.01 (0.20 gal for 0.15625 applied): they keep 0.16 and leave 9.84.
+  const P3 = id('f3');
+  const outrun = id('a0');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+      VALUES ('${P3}', 'KI-100 Liquid 3', 'gal', 'gal', 'liquid');
+    INSERT INTO public.inventory (product_id, location) VALUES ('${P3}', 'Main Warehouse');
+    INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+      VALUES ('${Q}', '${S}', '${P3}', 10);
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      VALUES ('${outrun}', 'KI100-OUTRUN', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '6 days');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${outrun}', '${P3}', 15, 'gal', false);
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);
+    UPDATE public.jobs SET status = 'completed' WHERE id = '${outrun}';
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);
+    UPDATE public.quote_items SET total_units_needed = 20 WHERE quote_id = '${Q}' AND product_id = '${P3}';`);
+  assert.equal(Number(scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${outrun}';`)), 10,
+    'the 15 gal job should keep the 10 gal its booking had');
+  for (let n = 0; n < 20; n += 1) {
+    const small = id(`b${String(n).padStart(2, '0')}`);
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        VALUES ('${small}', 'KI100-T${n}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '7 days');
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        VALUES ('${small}', '${P3}', 1, 'fl oz', false);
+      SELECT public._sync_quote_job_reservations('${Q}', NULL);
+      UPDATE public.jobs SET status = 'completed' WHERE id = '${small}';
+      SELECT public._sync_quote_job_reservations('${Q}', NULL);`);
+  }
+  const smallKept = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P3}' AND job_id <> '${outrun}';`);
+  assert.equal(Number(smallKept), 0.16, `20 jobs of 1 fl oz after an old shortfall should keep 0.16 gal, not ${smallKept}`);
+  const leftP3 = scalar(`SELECT 20 - sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P3}';`);
+  assert.equal(Number(leftP3), 9.84, `the raised booking should have 9.84 gal left, not ${leftP3}`);
+  console.log(`[prover] AFTER: after a 15 gal job outran a 10 gal booking raised to 20, 20 jobs of 1 fl oz keep ${smallKept} gal for 0.15625 applied and leave ${leftP3} gal`);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

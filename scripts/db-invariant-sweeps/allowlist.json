@@ -850,14 +850,14 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "close_quote_as_applied(p_quote_id uuid, p_performed_by uuid, p_idempotency_key text)#713b54fec909",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "close_quote_as_applied(p_quote_id uuid, p_performed_by uuid, p_idempotency_key text)#f05a92b348b0",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-03 after 20261105160000_quote_sent_requires_version (PR #1398, ledger 20261104004244): the only changed function this chain reaches is _enforce_quote_status_transition, which now also checks that a sent version exists before a quote leaves draft; it reads no cost and returns no data, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "close_quote_as_short(p_quote_id uuid, p_performed_by uuid, p_idempotency_key text)#598ae3dba2b6",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "close_quote_as_short(p_quote_id uuid, p_performed_by uuid, p_idempotency_key text)#d5ce77a46e45",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: per function; quantities, ids and reasons only; whole-row copies go to the admin-only audit log and carry no cost. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-03 after 20261105160000_quote_sent_requires_version (PR #1398, ledger 20261104004244): the only changed function this chain reaches is _enforce_quote_status_transition, which now also checks that a sent version exists before a quote leaves draft; it reads no cost and returns no data, and every gate in the chain is unchanged.",
       "dated": "2026-11-02"
     },
     {

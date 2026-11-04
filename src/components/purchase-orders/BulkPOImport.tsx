@@ -21,6 +21,7 @@ import {
 } from '../../lib/purchaseOrderMoney';
 import { isWholeCentDollarInput, MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCents';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../../lib/costFields';
+import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import {
   buildBulkPOIntentKey,
   buildBulkPOIdempotencyKey,
@@ -266,11 +267,14 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
   const productLoadSeqRef = useRef(0);
   const fetchProducts = async () => {
     const seq = ++productLoadSeqRef.current;
-    const { data, error } = await supabase
+    // Paged: one read stops at 1,000 rows, so later products could not be matched.
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('products')
-      .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`)
+      .select(`${PRODUCT_COLUMNS}, product_family:product_families(name)`, { count: 'exact' })
       .eq('is_active', true)
-      .order('product_name');
+      .order('product_name')
+      .order('id')
+      .range(from, to)));
     if (seq !== productLoadSeqRef.current) return;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_bulk_po_products' } });

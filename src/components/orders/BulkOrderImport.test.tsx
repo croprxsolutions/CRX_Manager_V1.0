@@ -56,6 +56,21 @@ vi.mock('../../lib/sentry', () => ({
   Sentry: { captureException: vi.fn() },
 }));
 
+// Products as the server returns them: a read without .range() stops at the 1,000-row cap; a
+// ranged read returns that page and the exact count (S12b).
+function serverCappedProducts(rows: Array<Record<string, unknown>>) {
+  let from: number | null = null;
+  let to: number | null = null;
+  const builder = chainable();
+  builder.range = vi.fn((f: number, t: number) => { from = f; to = t; return builder; });
+  builder.then = vi.fn((resolve: (v: unknown) => void) => {
+    const page = from === null ? rows.slice(0, 1000) : rows.slice(from, (to ?? from) + 1);
+    Promise.resolve({ data: page, error: null, count: rows.length }).then(resolve);
+    return builder;
+  });
+  return builder;
+}
+
 import BulkOrderImport from './BulkOrderImport';
 
 async function parseCsvFile(container: HTMLElement, csv: string) {
@@ -82,7 +97,7 @@ describe('BulkOrderImport', () => {
         });
       }
       if (table === 'customers') {
-        return chainable({ data: { id: 'customer-1' }, error: null });
+        return chainable({ data: [{ id: 'customer-1' }], error: null });
       }
       return chainable();
     });
@@ -123,7 +138,7 @@ describe('BulkOrderImport', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
   it('matches asterisk, percent, underscore, backslash and regex characters in customer names literally', async () => {
-    const customerQuery = chainable({ data: { id: 'customer-literal' }, error: null });
+    const customerQuery = chainable({ data: [{ id: 'customer-literal' }], error: null });
     const original = mocks.from.getMockImplementation()!;
     mocks.from.mockImplementation((table: string) => table === 'customers' ? customerQuery : original(table));
     const { container } = render(<BulkOrderImport {...defaultProps} />);
@@ -132,6 +147,35 @@ describe('BulkOrderImport', () => {
     fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('bulk_import_order', expect.objectContaining({ p_customer_id: 'customer-literal' })));
     expect(customerQuery.regexIMatch).toHaveBeenCalledWith('farm_name', '^Farm\\*_1%\\\\East\\.\\(North\\)\\+\\?$');
+  });
+
+  it('matches a product past the first 1,000 in the catalog (S12b)', async () => {
+    const catalog = Array.from({ length: 1000 }, (_, i) => ({
+      id: `product-${i}`, product_name: `Filler ${i}`, sku: `FILL-${i}`, is_active: true,
+    }));
+    catalog.push({ id: 'product-late', product_name: 'Late Product', sku: 'SKU-LATE', is_active: true });
+    const original = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => table === 'products' ? serverCappedProducts(catalog) : original(table));
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    await parseCsvFile(container, 'order_number,customer_name,product_name,quantity,price_per_unit\nO-LATE,North Farm,SKU-LATE,1,20');
+    await screen.findByText(/O-LATE/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('bulk_import_order', expect.objectContaining({
+      p_items: [expect.objectContaining({ product_id: 'product-late' })],
+    })));
+  });
+
+  it('says plainly when two customers share the name on the order', async () => {
+    const original = mocks.from.getMockImplementation()!;
+    mocks.from.mockImplementation((table: string) => table === 'customers'
+      ? chainable({ data: [{ id: 'customer-1' }, { id: 'customer-2' }], error: null })
+      : original(table));
+    const { container } = render(<BulkOrderImport {...defaultProps} />);
+    await parseCsvFile(container, 'order_number,customer_name,product_name,quantity,price_per_unit\nO-TWIN,North Farm,SKU-B,1,20');
+    await screen.findByText(/O-TWIN/);
+    fireEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
+    expect(await screen.findByText(/More than one customer is named "North Farm"/)).toBeInTheDocument();
+    expect(mocks.rpc).not.toHaveBeenCalledWith('bulk_import_order', expect.anything());
   });
 
   it('excludes only the order with an invalid status and preserves an unrelated order', async () => {
@@ -204,7 +248,7 @@ describe('BulkOrderImport', () => {
   });
 
   it('imports quoted names without shifting mapped quantity or price', async () => {
-    const customerQuery = chainable({ data: { id: 'customer-quoted' }, error: null });
+    const customerQuery = chainable({ data: [{ id: 'customer-quoted' }], error: null });
     mocks.from.mockImplementation((table: string) => table === 'customers' ? customerQuery : chainable({
       data: [{ id: 'product-quoted', product_name: 'Mix, "A"', sku: 'MIX-A', is_active: true }], error: null,
     }));

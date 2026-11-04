@@ -31,6 +31,20 @@ function chainable(resolveWith: unknown = { data: [], error: null }) {
   return builder;
 }
 
+// Mimics PostgREST's 1,000-row cap: an unranged read gets only the first 1,000 rows.
+function serverCapped(rows: Array<Record<string, unknown>>) {
+  let from: number | null = null;
+  let to: number | null = null;
+  const builder = chainable();
+  builder.range = vi.fn((f: number, t: number) => { from = f; to = t; return builder; });
+  builder.then = vi.fn((resolve: (v: unknown) => void) => {
+    const page = from === null ? rows.slice(0, 1000) : rows.slice(from, (to ?? from) + 1);
+    Promise.resolve({ data: page, error: null, count: rows.length }).then(resolve);
+    return builder;
+  });
+  return builder;
+}
+
 // Fixtures already carry cost; the admin cost read (get_admin_cost_fields) passes rows through.
 vi.mock('../../lib/costFields', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/costFields')>()),
@@ -698,5 +712,38 @@ describe('BulkPOImport', () => {
       target: { value: 'Vendor B' },
     });
     expect(await screen.findByRole('button', { name: /import 1 po/i })).toBeEnabled();
+  });
+
+  it('matches a product that sits past the first 1,000 active products', async () => {
+    const filler = Array.from({ length: 1000 }, (_, i) => ({
+      ...product, id: `filler-${i}`, product_name: `Filler ${String(i).padStart(4, '0')}`, sku: `F-${i}`,
+    }));
+    const late = { ...product, id: 'product-late', product_name: 'Zinc Late 2.5', sku: 'ZN-LATE' };
+    mocks.from.mockImplementation(() => serverCapped([...filler, late]));
+    mocks.processDocumentWithOCR.mockImplementation(async (file: File) => ({
+      success: true,
+      raw_text: 'parsed',
+      document_type: 'purchase_order',
+      parsed_data: {
+        vendor_name: 'Vendor A',
+        invoice_number: file.name,
+        invoice_date: '2026-07-16',
+        items: [{ product_name: late.product_name, quantity: 2, unit_cost: 10, unit_size: 'GAL' }],
+      },
+      confidence: 1,
+      processing_time_ms: 1,
+    }));
+
+    render(<BulkPOImport {...defaultProps} />);
+    fireEvent.change(document.querySelector('#po-pdf-upload')!, {
+      target: { files: [new File(['one'], 'INV-LATE.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /process 1 file/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /import 1 po/i }));
+
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith(
+      'save_purchase_order',
+      expect.objectContaining({ p_items: [expect.objectContaining({ product_id: 'product-late' })] }),
+    ));
   });
 });

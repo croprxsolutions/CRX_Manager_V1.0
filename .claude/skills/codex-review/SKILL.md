@@ -241,6 +241,13 @@ Anything else refuses, and the full Step 3B review above is the answer. The carr
 after the original full review at the root of its chain (it can never outlive that review). Every
 merge gate accepts it on the same head/base/age terms.
 
+**Migration restamped after a clean Sol pass? Carry it (Mason, 2026-11-04).** When a newer live
+migration makes the ordering guard refuse the apply, give the migration a new stamp in ONE commit on
+top of the reviewed head (rename it with byte-identical SQL; elsewhere only swap the old stamp for the
+new one), then run `node scripts/write-codex-push-proof.mjs --carry-restamp` and
+`node scripts/write-apply-proofs.mjs --restamp-from <old-name> <new-name>`. No model call; anything
+beyond that refuses and needs the full review. Mason's owner approval never carries.
+
 **Skip Step 3B for a change off `docs/reference/sol-required-paths.md`** (Mason, 2026-10-30): both
 merge gates read the PR's real file list and accept it on green checks.
 

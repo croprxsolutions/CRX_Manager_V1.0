@@ -79,7 +79,7 @@ export function isRetiredPricingColumn(header: string): boolean {
  */
 export function importRowSetsRates(product: ParsedProduct): boolean {
   return product.rate_per_acre != null || Boolean(product.suggested_rate?.trim())
-    || (Boolean(product.rate_unit?.trim()) && !['seed', 'each'].includes(product.product_form?.trim() ?? ''));
+    || (Boolean(product.rate_unit?.trim()) && !['seed', 'each'].includes(product.product_form?.trim().toLowerCase() ?? ''));
 }
 
 export function buildProductInsert(product: ParsedProduct) {
@@ -96,7 +96,7 @@ export function buildProductInsert(product: ParsedProduct) {
     suggested_rate: product.suggested_rate,
     rate_per_acre: product.rate_per_acre,
     rate_unit: product.rate_unit,
-    product_form: product.product_form,
+    product_form: product.product_form?.trim().toLowerCase(),
     inventory_unit: product.inventory_unit,
     container_unit: product.container_unit,
     container_type: product.container_type,

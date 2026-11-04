@@ -20,7 +20,7 @@ import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
 import ProductStockCard from '../components/products/ProductStockCard';
 import ProductRateCorrectionModal from '../components/products/ProductRateCorrectionModal';
-import { loadProductRateLock, rateLockSummary } from '../lib/productRateLock';
+import { loadProductRateLock, PRODUCT_RATE_KEYS, rateLockSummary } from '../lib/productRateLock';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -99,8 +99,9 @@ function nonpricingProductPayload(product: Partial<Product>, persisted?: Product
   ]);
   // Send these only when edited here, so a page left open never re-saves an old value over one
   // changed elsewhere: the vendor by WP-PM-15 (preferred vendor's copy), the rest by Label Review's commit.
+  // Rates too: a stale rate resent while rates are locked would refuse a details-only save.
   if (persisted) {
-    for (const field of PRODUCT_FIELDS_WRITTEN_ELSEWHERE) {
+    for (const field of [...PRODUCT_FIELDS_WRITTEN_ELSEWHERE, ...PRODUCT_RATE_KEYS]) {
       if (payload[field] === (persisted[field] ?? null)) delete payload[field];
     }
   }

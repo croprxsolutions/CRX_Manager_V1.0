@@ -57,7 +57,7 @@ import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
-import { catalogPricePerAcre, getQuoteTierPrice, validateCommissionSplits } from '../lib/quoteCalc';
+import { catalogPricePerAcre, getQuoteTierPrice, isTierPriceMissing, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
 import {
   buildRowVersionPatch,
@@ -5283,6 +5283,14 @@ export default function QuoteBuilder() {
                                   </button>
                                 )}
                               </div>
+                              {/* Early warning only: the database refuses this line on save (QUOTE_PRICE_MISSING) */}
+                              {!customerView && prod && item.price_override == null && !item.price_per_unit
+                                && isTierPriceMissing(prod, tier) && (
+                                <p role="alert" className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
+                                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                                  No tier {tier} price. Type one.
+                                </p>
+                              )}
                               {!customerView && priceLocked && (() => {
                                 const raise = priceRaise(savedLineIdByKey.get(item._key), item);
                                 return raise && (

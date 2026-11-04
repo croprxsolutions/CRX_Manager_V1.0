@@ -64,6 +64,13 @@ export function getStatedTierPriceCents(product: Product, tierNum: 1 | 2 | 3): n
   return dollars == null ? null : parseDollarsToCents(String(dollars));
 }
 
+/** True when the product states no price for the tier (nor tier 1). The database refuses a $0
+ * sale line for such a product (QUOTE/ORDER/INVOICE_PRICE_MISSING); a stated $0 is a price. */
+export function isTierPriceMissing(product: Product, tierNum: number): boolean {
+  const own = tierNum === 1 ? product.tier1_price : tierNum === 2 ? product.tier2_price : product.tier3_price;
+  return (own ?? product.tier1_price) == null;
+}
+
 /** Look up unit→oz conversion factor — pure function */
 export function getConversionFactor(
   unit: string | null,

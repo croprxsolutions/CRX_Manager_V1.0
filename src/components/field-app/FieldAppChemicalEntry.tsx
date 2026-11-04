@@ -12,6 +12,7 @@ import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCen
 import { useToast } from '../ui/Toast';
 import { toGallonOrLbEquivalent, fieldAppPricedQuantity } from '../../lib/chemCalculator';
 import { rateUnitOptionsForProduct } from '../../lib/units';
+import { isTierPriceMissing } from '../../lib/quoteCalc';
 import {
   compareToMaxRate,
   phiHarvestWarning,
@@ -71,6 +72,8 @@ export interface ChemicalLine {
   max_label_rate_unit?: string | null;
   rei_hours?: number | null;
   phi_days?: number | null;
+  /** UI-only, NOT persisted: the product had no price at the primary customer's tier when picked. */
+  price_missing?: boolean;
   /**
    * #56 (UI-only, NOT persisted): a hand-entered "custom line" with no catalog
    * product. Renders a free-text name input instead of the product search box.
@@ -336,6 +339,7 @@ export default function FieldAppChemicalEntry({
         ? product.inventory_unit || '' : product.rate_unit || product.inventory_unit || 'oz',
       unit: product.inventory_unit || 'oz',
       unit_price_cents: Math.round(tierPrice(product, primaryCustomerTier) * 100),
+      price_missing: isTierPriceMissing(product, primaryCustomerTier),
       price_unit: product.inventory_unit || 'oz',
       inventory_unit: product.inventory_unit,
       unit_cost_cents: Math.round((product.current_cost || 0) * 100),
@@ -617,6 +621,12 @@ export default function FieldAppChemicalEntry({
                       </span>
                     )}
                   </div>
+                  {/* Early warning only: the database refuses this line on save (INVOICE_PRICE_MISSING) */}
+                  {line.price_missing && !line.manual_override && !readOnly && (
+                    <p role="alert" className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-800">
+                      <AlertTriangle className="w-3 h-3 shrink-0" /> No tier {primaryCustomerTier} price
+                    </p>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-center text-gray-600">{line.price_unit}</td>
                 <td className="px-3 py-2 text-right font-medium tabular-nums">{fmt(line.extended_cents)}</td>

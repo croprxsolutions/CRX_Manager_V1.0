@@ -286,7 +286,9 @@ REVOKE ALL ON FUNCTION public._product_rate_value_ok(jsonb) FROM PUBLIC, anon, a
 CREATE FUNCTION public._product_rate_value(p_value jsonb) RETURNS numeric
 LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp AS $function$
 BEGIN
-  IF NOT public._product_rate_value_ok(p_value) THEN RAISE EXCEPTION 'PRODUCT_RATE_INVALID'; END IF;
+  IF NOT public._product_rate_value_ok(p_value) THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a rate per acre must be blank or a number of 0 or more with at most 6 decimals';
+  END IF;
   RETURN NULLIF(btrim(p_value #>> '{}'), '')::numeric;
 END;
 $function$;
@@ -579,6 +581,7 @@ BEGIN
   IF p_product_id IS NULL OR p_expected_pricing_version IS NULL
      OR jsonb_typeof(p_expected->'prices') IS DISTINCT FROM 'object'
      OR jsonb_typeof(p_expected->'rate_per_acre') NOT IN ('string', 'number', 'null')
+     OR (p_expected->>'rate_per_acre') !~ '^[0-9]+([.][0-9]+)?\Z'
      OR jsonb_typeof(p_expected->'rate_unit') NOT IN ('string', 'null')
      OR jsonb_typeof(p_expected->'suggested_rate') NOT IN ('string', 'null') THEN
     RAISE EXCEPTION 'PRODUCT_AND_EXPECTED_VERSION_REQUIRED';
@@ -616,7 +619,8 @@ BEGIN
   -- pricing_version moves only with prices, so the rates the admin started from are compared too:
   -- a suggested-rate-only correction by another admin leaves the version where it was.
   IF v_product.pricing_version IS DISTINCT FROM p_expected_pricing_version
-     OR public._product_rate_value(p_expected->'rate_per_acre') IS DISTINCT FROM v_product.rate_per_acre
+     -- Compared as a plain number: an older stored rate that breaks the 6-decimal rule can still be corrected.
+     OR (p_expected->>'rate_per_acre')::numeric IS DISTINCT FROM v_product.rate_per_acre
      OR NULLIF(p_expected->>'rate_unit', '') IS DISTINCT FROM NULLIF(v_product.rate_unit, '')
      OR NULLIF(btrim(p_expected->>'suggested_rate'), '') IS DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '') THEN
     RAISE EXCEPTION 'PRODUCT_RATES_STALE: % changed since you opened it; reload and try again', v_product.product_name;

@@ -8,6 +8,6 @@
   migration have no record and keep the old restore.
 - New proof `scripts/smoke/prove-void-delivery-exact-reservation-real-schema.mjs` (bug reproduced before the
   candidate; short, fully reserved, part delivered, nothing reserved and legacy cases after it).
-- Seven `cost-exposure-review` keys in `scripts/db-invariant-sweeps/allowlist.json` re-keyed to their post-apply
-  values (no cost field, cost read or reply path added).
+- Seven `cost-exposure-review` chains reach the re-emitted functions; their allowlist keys are re-keyed from a live
+  sweep after the apply (no cost field, cost read or reply path added).
 - Live read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20). Nothing corrected.

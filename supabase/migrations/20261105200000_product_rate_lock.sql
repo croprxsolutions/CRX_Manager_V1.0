@@ -157,6 +157,15 @@ BEGIN
      AND NULLIF(btrim(OLD.suggested_rate), '') IS NOT DISTINCT FROM NULLIF(btrim(NEW.suggested_rate), '') THEN
     RETURN NEW;
   END IF;
+  -- Likewise on UPDATE of an unrated product that is or becomes seed or each: the stock unit
+  -- validate_product_units fills into a blank rate_unit prices nothing.
+  IF TG_OP = 'UPDATE' AND OLD.rate_per_acre IS NULL AND NEW.rate_per_acre IS NULL
+     AND NULLIF(btrim(OLD.rate_unit), '') IS NULL
+     AND COALESCE(NEW.product_form IN ('seed', 'each'), false)
+     AND NEW.rate_unit IS NOT DISTINCT FROM NEW.inventory_unit
+     AND NULLIF(btrim(OLD.suggested_rate), '') IS NOT DISTINCT FROM NULLIF(btrim(NEW.suggested_rate), '') THEN
+    RETURN NEW;
+  END IF;
   IF TG_OP = 'INSERT' AND NEW.rate_per_acre IS NULL
      AND (v_derived OR v_new_unit IS NULL)
      AND NULLIF(btrim(NEW.suggested_rate), '') IS NULL THEN

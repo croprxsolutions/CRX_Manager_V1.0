@@ -381,9 +381,10 @@ function main() {
   ownerRefused(`UPDATE public.products SET rate_unit = 'pt' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
   // Per-acre pricing reads the unit untrimmed, so a trailing space is a unit change.
   refused(ADMIN, `UPDATE public.products SET rate_unit = 'oz ' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
-  // Switching a product with no rate unit to Seed copies the stock unit into rate_unit: a rate change too.
-  // (A different unit already there is refused by validate_product_units.)
-  refused(ADMIN, `UPDATE public.products SET product_form = 'seed' WHERE id = '${P.DRY}';`, /PRODUCT_RATES_LOCKED/);
+  // Switching an unrated product with no rate unit to Seed copies the stock unit into rate_unit, which
+  // prices nothing, so it saves while locked. (A different unit already there is refused by validate_product_units.)
+  ok(ADMIN, `UPDATE public.products SET product_form = 'seed' WHERE id = '${P.DRY}';`);
+  assert.equal(scalar(`SELECT concat_ws('|', product_form, rate_unit) FROM public.products WHERE id = '${P.DRY}';`), 'seed|Lb');
   refused(ADMIN, `INSERT INTO public.products (product_name, sku, inventory_unit, is_active, rate_per_acre, rate_unit)
     VALUES ('[PROVER] Rated new', 'RL-3', 'gal', true, 5, 'oz');`, /PRODUCT_RATES_LOCKED/);
   assert.equal(rates(P.GAL), '13|oz|13 oz/A|4.06|3.66|3.25');

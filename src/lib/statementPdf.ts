@@ -19,12 +19,14 @@ import type {
 import { CRX_GREEN, CHARCOAL, GRAY, LIGHT_BG, RED, TABLE_HEADER_BG, ALT_ROW_BG, type JsPDFWithAutoTable } from './pdfTheme';
 import type { autoTable as autoTableFn } from 'jspdf-autotable';
 import {
-  COMPANY_TAGLINE_HEADER as COMPANY_TAGLINE,
+  companyTaglineHeader,
   COMPANY_REMIT_ADDRESS,
   COMPANY_LEGAL_NAME,
   COMPANY_PHONE,
   COMPANY_WEBSITE,
+  fitCompanyNameFont,
 } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatCents as fmt } from './money';
 import { getStatementAccountPosition } from './statementBalance';
 
@@ -56,9 +58,6 @@ function reserveAccountPositionSpace(
   return margin;
 }
 
-const COMPANY_NAME = 'CROP RX SOLUTIONS';
-// COMPANY_TAGLINE + COMPANY_REMIT_ADDRESS now come from src/lib/companyInfo.ts (single source).
-
 // ── Main Generator ──────────────────────────────────────────────────────
 
 export async function generateStatementPdf(
@@ -67,6 +66,7 @@ export async function generateStatementPdf(
 ) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
   const pageW = doc.internal.pageSize.getWidth();
@@ -107,12 +107,13 @@ export async function generateStatementPdf(
     doc.setFillColor(...CRX_GREEN);
     doc.rect(0, 0, pageW, 70, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
     doc.setTextColor(255, 255, 255);
-    doc.text(COMPANY_NAME, margin, 35);
+    fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 200, 22);
+    doc.text(company.name.toUpperCase(), margin, 35);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(COMPANY_TAGLINE, margin, 53);
+    // Two lines fill the 70pt green bar; more would spill into the page body.
+    doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 170).slice(0, 2), margin, 53);
 
     // Statement label (right)
     doc.setFontSize(14);

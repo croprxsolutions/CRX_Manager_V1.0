@@ -290,9 +290,10 @@ BEGIN
                      OR (c.key = 'container_size' AND jsonb_typeof(c.value) <> 'null'
                          AND CASE WHEN btrim(c.value #>> '{}') ~ '^[0-9]{1,12}(\.[0-9]{1,6})?$'
                                   THEN btrim(c.value #>> '{}')::numeric <= 0 ELSE true END)
-                     OR (c.key = 'use_timings' AND (jsonb_typeof(c.value) <> 'array'
-                         OR EXISTS (SELECT 1 FROM jsonb_array_elements(c.value) t
-                                    WHERE jsonb_typeof(t) <> 'string')))) THEN
+                     -- CASE, since OR does not promise to skip the array expansion for a non-array.
+                     OR (c.key = 'use_timings' AND CASE WHEN jsonb_typeof(c.value) <> 'array' THEN true
+                         ELSE EXISTS (SELECT 1 FROM jsonb_array_elements(c.value) t
+                                      WHERE jsonb_typeof(t) <> 'string') END)) THEN
       v_invalid := v_invalid || v_product.product_name;
     END IF;
   END LOOP;

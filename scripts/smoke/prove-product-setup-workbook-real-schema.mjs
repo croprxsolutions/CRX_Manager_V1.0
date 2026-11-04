@@ -435,6 +435,7 @@ function main() {
   assert.equal(field(k.product_id, 'manufacturer'), '', 'all or nothing');
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { category: 'Nope' } }], 'k-setup-cat'), /PRODUCT_SETUP_ROW_REFUSED: \[PROVER\] Batch 5/);
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { use_timings: ['no_such_code'] } }], 'k-setup-ut'), /PRODUCT_SETUP_ROW_REFUSED/);
+  refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { use_timings: 'bad' } }], 'k-setup-ut-scalar'), /PRODUCT_SETUP_INVALID/);
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { container_size: '0' } }], 'k-setup-cs'), /PRODUCT_SETUP_INVALID: .*Batch 5/);
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { rei_hours: 'twelve' } }], 'k-setup-rei'), /PRODUCT_SETUP_INVALID/);
   // Fields the Setup tab never writes: vendor, rates, prices, cost, active, form, stock unit, pack size.

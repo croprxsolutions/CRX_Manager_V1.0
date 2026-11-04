@@ -6,6 +6,7 @@ import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
 import { supabase, assertRpcResult } from '../../lib/db';
+import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { generateIdempotencyKey } from '../../lib/idempotency';
 import { processDocumentWithOCR, isCSVFile, isOCRSupported } from '../../lib/documentOCR';
 import { localToday } from '../../lib/dateUtils';
@@ -391,10 +392,15 @@ export default function BulkOrderImport({
     let successCount = 0;
     let failedCount = 0;
     const failures: OrderImportFailure[] = [];
-    const productResult = await supabase
+    // Page by page: one read stops at the server's 1,000-row cap, and a product past it could
+    // never be matched (S12b).
+    const productResult = await fetchAllRows((from, to) => pageWithList(supabase
       .from('products')
-      .select('id, product_name, sku, is_active')
-      .eq('is_active', true);
+      .select('id, product_name, sku, is_active', { count: 'exact' })
+      .eq('is_active', true)
+      .order('product_name')
+      .order('id')
+      .range(from, to)));
     if (productResult.error) {
       Sentry.captureException(productResult.error, { extra: { context: 'Failed to load Product identities for order import' } });
       toast('error', 'Failed to load Products. No orders were imported.');
@@ -417,11 +423,11 @@ export default function BulkOrderImport({
 
     for (const order of validation.valid) {
       try {
-        const { data: customer, error: custError } = await supabase
+        const { data: customerMatches, error: custError } = await supabase
           .from('customers')
           .select('id')
           .regexIMatch('farm_name', `^${order.customer_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
-          .maybeSingle();
+          .limit(2);
 
         if (custError) {
           Sentry.captureException(new Error(String(custError.message)), { extra: { context: 'Failed to look up customer' } });
@@ -433,6 +439,16 @@ export default function BulkOrderImport({
           continue;
         }
 
+        // Two customers with the same name: say so, instead of a lookup failure (#1177 review).
+        if ((customerMatches?.length ?? 0) > 1) {
+          failedCount++;
+          failures.push({
+            orderNumber: order.order_number,
+            details: [`More than one customer is named "${order.customer_name}". Give each a different name (for example add the town), then retry.`],
+          });
+          continue;
+        }
+        const customer = customerMatches?.[0];
         if (!customer) {
           failedCount++;
           failures.push({

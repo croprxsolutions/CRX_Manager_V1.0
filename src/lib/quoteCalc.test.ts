@@ -823,4 +823,11 @@ describe('recalcItem per-acre total (S09)', () => {
     expect(line.price_per_acre).toBe(0.5);
     expect(line.total_price).toBe(0.01);
   });
+
+  it('figures a rate × acres $/acre exactly: 0.145 gal/acre at $1 is $0.15, as 100 acres bill $14.50', () => {
+    const product = makeProduct({ tier1_price: 1, current_cost: 0, inventory_unit: 'Gallon', unit_size: 'Gallon' });
+    const line = recalcItem({ calc_mode: 'rate_acres', actual_rate: 0.145, rate_unit: 'Gallon', acres: 100 } as CalcItem, product, 1, conversions);
+    expect(line.price_per_acre).toBe(0.15);
+    expect(line.total_price).toBe(14.5);
+  });
 });

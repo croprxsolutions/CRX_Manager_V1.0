@@ -188,13 +188,6 @@ export function recalcItem(
   const acres = item.acres || 0;
 
   const rateUnitFactorOz = getConversionFactor(rateUnitOf(item.rate_unit, product), conversions);
-  const rateInOz = actualRate * rateUnitFactorOz;
-  const ozPerAcre = rateInOz;
-
-  const pricePerAcre =
-    inventoryUnitFactorOz > 0
-      ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
-      : 0;
   const billed = inventoryUnitFactorOz > 0
     ? billedLine(pricePerUnit, product.current_cost || 0, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
     : billedLine(pricePerUnit, product.current_cost || 0, [0]);
@@ -203,8 +196,10 @@ export function recalcItem(
     ...item,
     price_per_unit: pricePerUnit,
     current_cost: product.current_cost || 0,
-    oz_per_acre: Math.round(ozPerAcre * 100) / 100,
-    price_per_acre: Math.round(pricePerAcre * 100) / 100,
+    oz_per_acre: exactRound2([actualRate, rateUnitFactorOz]),
+    price_per_acre: inventoryUnitFactorOz > 0
+      ? exactRound2([pricePerUnit, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+      : 0,
     total_units_needed: billed.units,
     total_price: billed.totalPrice,
     profit: billed.profit,

@@ -1736,12 +1736,6 @@ export default function QuoteBuilder() {
       const acres = item.acres || 0;
 
       const rateUnitFactorOz = getConversionFactor(item.rate_unit);
-      const rateInOz = actualRate * rateUnitFactorOz;
-      const ozPerAcre = rateInOz;
-
-      const pricePerAcre = inventoryUnitFactorOz > 0
-        ? pricePerUnit * (rateInOz / inventoryUnitFactorOz)
-        : 0;
       // S09: the quantity, total and profit the database stores and bills (see billedLine).
       const billed = inventoryUnitFactorOz > 0
         ? billedLine(pricePerUnit, cost, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
@@ -1751,8 +1745,10 @@ export default function QuoteBuilder() {
         ...item,
         price_per_unit: pricePerUnit,
         current_cost: cost,
-        oz_per_acre: Math.round(ozPerAcre * 100) / 100,
-        price_per_acre: Math.round(pricePerAcre * 100) / 100,
+        oz_per_acre: exactRound2([actualRate, rateUnitFactorOz]),
+        price_per_acre: inventoryUnitFactorOz > 0
+          ? exactRound2([pricePerUnit, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+          : 0,
         total_units_needed: billed.units,
         total_price: billed.totalPrice,
         profit: billed.profit,

@@ -37,6 +37,7 @@ DO $preflight$
 BEGIN
   IF to_regclass('public.product_rate_lock') IS NOT NULL
      OR to_regclass('public.product_rate_events') IS NOT NULL
+     OR to_regclass('public.product_rate_correction_passes') IS NOT NULL
      OR to_regprocedure('public.guard_product_rate_lock()') IS NOT NULL
      OR to_regprocedure('public.set_product_rates(jsonb,uuid,text)') IS NOT NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_RATE_LOCK_ALREADY_EXISTS';
@@ -95,6 +96,22 @@ CREATE POLICY product_rate_events_select ON public.product_rate_events
 REVOKE ALL ON TABLE public.product_rate_events FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 GRANT SELECT ON TABLE public.product_rate_events TO authenticated;
 
+-- The correction's one-transaction pass: correct_product_rates adds a row for its product and
+-- transaction, writes, and removes it; the guard lets that one write through. No API role can
+-- read or write it, so no session can forge a pass (a session setting could be set by any SQL session).
+CREATE TABLE public.product_rate_correction_passes (
+  txid bigint NOT NULL,
+  product_id uuid NOT NULL,
+  PRIMARY KEY (txid, product_id)
+);
+ALTER TABLE public.product_rate_correction_passes OWNER TO postgres;
+COMMENT ON TABLE public.product_rate_correction_passes IS
+  'Internal: the rate correction in progress, one row for the life of its transaction. Only correct_product_rates writes it.';
+ALTER TABLE public.product_rate_correction_passes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY product_rate_correction_passes_none ON public.product_rate_correction_passes
+  FOR ALL TO authenticated USING (false) WITH CHECK (false);
+REVOKE ALL ON TABLE public.product_rate_correction_passes FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+
 CREATE FUNCTION public.refuse_product_rate_record_mutation() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $function$
 BEGIN
@@ -142,8 +159,8 @@ BEGIN
   END IF;
   SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR SHARE;
   IF COALESCE(v_locked, true)  -- a missing lock row counts as locked
-     AND current_setting('crx.product_rate_correction', true)
-         IS DISTINCT FROM NEW.id::text || ':' || txid_current()::text THEN
+     AND NOT EXISTS (SELECT 1 FROM public.product_rate_correction_passes
+                     WHERE txid = txid_current() AND product_id = NEW.id) THEN
     IF TG_OP = 'INSERT' THEN
       RAISE EXCEPTION 'PRODUCT_RATES_LOCKED: rates are locked; save the new product without rates, then an admin can correct its rates from its product page, with a reason'
         USING ERRCODE = 'check_violation';
@@ -154,6 +171,11 @@ BEGIN
   -- Open or not, every writer (product page, import) gets the rate writers' unit rule: per-acre
   -- pricing prices an unknown unit as one ounce. Seed and each units are held to the stock unit
   -- by validate_product_units instead.
+  IF (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre)
+     AND NOT public._product_rate_value_ok(to_jsonb(NEW.rate_per_acre::text)) THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a rate per acre must be blank or a number of 0 or more with at most 6 decimals'
+      USING ERRCODE = 'check_violation';
+  END IF;
   IF NOT COALESCE(NEW.product_form IN ('seed', 'each'), false)
      AND (TG_OP = 'INSERT' OR OLD.rate_per_acre IS DISTINCT FROM NEW.rate_per_acre
           OR NULLIF(OLD.rate_unit, '') IS DISTINCT FROM v_new_unit)
@@ -327,7 +349,7 @@ BEGIN
                AND r->'expected' ? 'unit_size' AND r->'expected' ? 'inventory_unit'
                AND r->'expected' ? 'product_form')
        OR jsonb_typeof(r->'expected'->'pricing_version') <> 'number'
-       OR jsonb_typeof(r->'expected'->'unit_size') NOT IN ('string', 'null')
+       OR jsonb_typeof(r->'expected'->'unit_size') NOT IN ('string', 'number', 'null')
        OR jsonb_typeof(r->'expected'->'inventory_unit') NOT IN ('string', 'null')
        OR jsonb_typeof(r->'expected'->'product_form') NOT IN ('string', 'null')
        OR (r->>'product_id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -558,9 +580,9 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form';
   END IF;
 
-  PERFORM set_config('crx.product_rate_correction', p_product_id::text || ':' || txid_current()::text, true);
+  INSERT INTO public.product_rate_correction_passes (txid, product_id) VALUES (txid_current(), p_product_id);
   v_write := public._write_product_rates(p_product_id, p_rate_per_acre, v_unit, v_suggested);
-  PERFORM set_config('crx.product_rate_correction', '', true);
+  DELETE FROM public.product_rate_correction_passes WHERE txid = txid_current() AND product_id = p_product_id;
 
   SELECT full_name INTO v_name FROM public.profiles WHERE id = v_actor;
   INSERT INTO public.product_rate_events
@@ -638,7 +660,10 @@ BEGIN
      OR has_function_privilege('service_role', 'public._write_product_rates(uuid,numeric,text,text)', 'EXECUTE')
      OR has_table_privilege('authenticated', 'public.product_rate_events', 'INSERT')
      OR has_table_privilege('metabase_ro', 'public.product_rate_lock', 'SELECT')
-     OR has_table_privilege('metabase_ro', 'public.product_rate_events', 'SELECT') THEN
+     OR has_table_privilege('metabase_ro', 'public.product_rate_events', 'SELECT')
+     OR has_table_privilege('authenticated', 'public.product_rate_correction_passes', 'SELECT,INSERT,UPDATE,DELETE')
+     OR has_table_privilege('anon', 'public.product_rate_correction_passes', 'SELECT,INSERT,UPDATE,DELETE')
+     OR has_table_privilege('service_role', 'public.product_rate_correction_passes', 'SELECT,INSERT,UPDATE,DELETE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_RATE_LOCK_GRANTS_WRONG';
   END IF;
 END;

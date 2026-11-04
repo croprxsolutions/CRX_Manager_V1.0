@@ -312,6 +312,7 @@ function main() {
   // Every other writer gets the same unit rule while open: a direct save of an unknown unit is refused.
   refused(ADMIN, `UPDATE public.products SET rate_per_acre = 8, rate_unit = 'gallons' WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
   refused(ADMIN, `UPDATE public.products SET rate_per_acre = 8 WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
+  refused(ADMIN, `UPDATE public.products SET rate_per_acre = 1.1234567, rate_unit = 'oz' WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_INVALID/);
   refused(ADMIN, lock(true, '	', 'k-tab-reason'), /REASON_REQUIRED/);
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', versionOf(P.GAL), 'label fix', 'k-cor-open'), /PRODUCT_RATES_NOT_LOCKED/);
   // Per-acre prices are whole cents, 0 or more, and finite (triggers off, so the recalculation cannot hide it).
@@ -399,6 +400,10 @@ function main() {
   // The correction's permission ends with it, inside the same transaction.
   refused(ADMIN, `${correct(P.GAL, 17, 'oz', '17 oz/A', versionOf(P.GAL), 'second', 'k-cor-2')}
     UPDATE public.products SET rate_per_acre = 99 WHERE id = '${P.OTHER}';`, /PRODUCT_RATES_LOCKED/);
+  // Nobody can forge the pass: the old session setting is ignored, and the pass table is closed to every API role.
+  refused(ADMIN, `SELECT set_config('crx.product_rate_correction', '${P.GAL}:' || txid_current(), true);
+    UPDATE public.products SET rate_per_acre = 99 WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
+  refused(ADMIN, `INSERT INTO public.product_rate_correction_passes VALUES (txid_current(), '${P.GAL}');`, /permission denied/);
   assert.equal(rates(P.GAL), '16|oz|16 oz/A|5.00|4.50|4.00');
   console.log('[prover] locked: an admin corrects one product with a reason; prices follow to the cent; it is logged; the permission ends with the correction');
 

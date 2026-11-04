@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Settings company details (Company Info) the PO letterhead and BUYER block print.
+const companyInfo = vi.hoisted(() => ({
+  load: vi.fn(async () => ({ name: 'Prairie Ag Co', phone: '555-0199', email: '', address: '12 Main St Annapolis, IL 62413' })),
+}));
+vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load }));
+
 const mockDoc = {
   internal: { pageSize: { getWidth: () => 612, getHeight: () => 792 } },
   setFillColor: vi.fn(),
@@ -12,6 +18,7 @@ const mockDoc = {
   line: vi.fn(),
   roundedRect: vi.fn(),
   splitTextToSize: vi.fn((text: string) => [text]),
+  getTextWidth: vi.fn(() => 50),
   addPage: vi.fn(),
   getNumberOfPages: vi.fn(() => 2),
   setPage: vi.fn(),
@@ -117,6 +124,8 @@ describe('generatePurchaseOrderPdf', () => {
     expect(texts).toContain('Spinner Ag');
     expect(texts).toContain('Attn: Pat');
     expect(texts).toContain('Deliver to the north shed.');
+    expect(texts).toContain('PRAIRIE AG CO');
+    expect(texts).toContain('12 Main St Annapolis, IL 62413');
     expect(texts.filter((t) => t.startsWith('Page '))).toEqual(['Page 1 of 2', 'Page 2 of 2']);
 
     const opts = autoTableMock.mock.calls[0][1] as unknown as { body: string[][]; foot: string[][] };

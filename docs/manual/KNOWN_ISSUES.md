@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
+| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 58 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
@@ -415,7 +415,7 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
 ### KI-100 — An open product page learns of a lock change only on reload or a refused save
-**LOW · product UI · LOCAL CANDIDATE `20261106155000` — NOT APPLIED**
+**LOW · product UI · LOCAL CANDIDATE `20261107010000` — NOT APPLIED**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
 
 ---
@@ -530,12 +530,24 @@ Neither checks for the other, and same-operation retry protection does not cover
 path refuses when the ticket already went down the other one, inside PostgreSQL.
 
 ### KI-94 — Voiding a delivery can put back more reserved stock than completion took
-**LOW-MED · OPEN (found 2026-11-02, Ponytail audit #16, confirmed by Sol) · database/inventory · unassigned**
+**LOW-MED · FIXED 2026-11-04 (migration `20261106230000` applied live, ledger `20261104202037`; residual below) · database/inventory · Claude**
 Completion (`supabase/migrations/20261014210000_order_invoices_rep_own_name.sql` ~L612) lowers
 `quantity_prebooked` by `LEAST(delivered, prebooked)`, but `void_delivery` adds back the full delivered quantity.
 Prebooked 3, delivered 10, voided: prebooked becomes 10, so available stock reads low. Fully reserved deliveries are
-unaffected. Cancelling a completed delivery is refused since PR #1284, so only void remains. Fix needs a decision
-first (Sol): put back exactly what completion took (store it), or rebuild the order's outstanding reservation.
+unaffected. Cancelling a completed delivery is refused since PR #1284, so only void remains. Fix (Option A): completion
+records per delivery line what it took (`delivery_items.quantity_prebooked_released`) and void puts back exactly that.
+Residual: a line completed before the migration has no record and still restores the delivered quantity; since
+`20261106233000` (applied live 2026-11-04, ledger `20261104220928`; Mason chose "flag them for review") that void's ledger row is marked
+`requires_review` with a note to check reserved stock. Live
+read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20); nothing is corrected.
+
+### KI-100 — A spray job can leave a booking with a remainder no Partial Order can take
+**MED · OPEN (deferred from PR #1362) · database · Taha**
+Since `20261106110000` (S02) a Partial Order must be in whole hundredths, but `_sync_quote_job_reservations`
+stores a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking leaves 9.9921875 gal,
+which no draw can take, so the booking never closes. Live impact on 2026-11-04: none (`job_product_draws` has 0 rows).
+- **Next step.** A small migration rounding job reservations to 0.01 (Sol-listed: inventory), before spray jobs
+  reserve from bookings in earnest.
 
 ## Database and release process
 

@@ -130,7 +130,14 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. This delivery is already completed, so it cannot be cancelled. An admin can void it instead'],
   // enforce_delivery_void_needs_invoice_void: a delivery with an active posted invoice cannot be voided or cancelled
   [/^DELIVERY_HAS_POSTED_INVOICE\b/,
-   'Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery'],
+   'Nothing was changed. This delivery, or its order, has an active invoice that is posted, paid, overdue or reversed (unposted). Void that invoice first, then void or cancel the delivery. For a completed delivery, an admin can use Fix Delivery to do both at once'],
+  // fix_delivery (20261106150000): the server re-checks the preview and refuses if anything changed.
+  [/^FIX_DELIVERY_REFUSED\b/,
+   'Nothing was changed. Something on this delivery now blocks a fix. The reasons are shown on the Fix Delivery screen'],
+  [/^FIX_DELIVERY_PREVIEW_STALE\b/,
+   'Nothing was changed. This delivery, its invoices or the order\'s drafts changed while you were looking. Check the updated plan and try again'],
+  [/^DELIVERY_ORDER_BUSY_RETRY\b/,
+   'Nothing was changed. This order is being updated elsewhere. Wait a moment and retry'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
   // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
   [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,
@@ -263,7 +270,7 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';
   }
-  // Rate lock (20261106155000): the server text after the token is the operator's answer.
+  // Rate lock (20261107010000): the server text after the token is the operator's answer.
   const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG):\s*(.+)$/s)?.[1];
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;

@@ -2837,6 +2837,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261104140000',
   '20261104150000',
   '20261105160000',
+  '20261106150000',
 ]);
 
 /**
@@ -3011,6 +3012,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // registry high-water passes 20261020210000 (the body never reaches the generated types).
   '_create_order_from_blend_ticket_replay_impl_20261015',
   'set_product_active', // WP-PM-3 local migration: admin-only mutator, receipt-bound through check_idempotency_intent.
+  'fix_delivery', // 20261106150000 local migration: admin-only, receipt-bound through check_idempotency_intent; prune after live type regeneration.
   // 20261102180000 (replay-binding batch 4a) re-emits this renamed body so it unposts each member
   // through the private _unpost_invoice_replay_impl_20261015; it keeps p_idempotency_key behind the
   // required-key public wrapper and never reaches the generated types.
@@ -3020,6 +3022,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // passes 20261102140000 (the bodies never reach the generated types).
   '_cancel_delivery_replay_impl_20261015',
   '_batch_cancel_deliveries_replay_impl_20261015',
+  // 20261106230000 (KI-94) re-emits the void body to restore exactly the reservation completion took; it keeps
+  // p_idempotency_key behind its required-key public wrapper. Prune once the registry high-water passes 20261106230000.
+  '_void_delivery_replay_impl_20261015',
   // 20261102200000 (cost admin-only) re-emits these two bodies; each keeps p_idempotency_key behind its
   // required-key public wrapper. Prune once the registry high-water passes 20261102200000.
   '_manual_inventory_add_replay_impl_20261015',
@@ -3067,9 +3072,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // types, so it is discovered again even though its migration is below the high-water.
   _bind_replay_receipt_20261015:
     'idempotency infrastructure helper (20261016060000, replay-binding batch 1): stamps the actor and request fingerprint on the receipt its calling wrapper just wrote; every API-role EXECUTE is revoked',
-  // Local candidate 20261106155000 (WP-PM-11a-1): internal helper behind the two rate writers.
+  // Local candidate 20261107010000 (WP-PM-11a-1): internal helper behind the two rate writers.
   _write_product_rates:
-    'internal rate writer (20261106155000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',
+    'internal rate writer (20261107010000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',
   // Pruned on the 2026-08-11 merge of origin/main, per the standing rule below that a
   // dead exemption silently pre-suppresses any future RPC reusing the name:
   //   _guard_job_commission_split_immutable remains parked with Wave A under
@@ -3122,6 +3127,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Pruned 2026-10-19: _enforce_below_cost_line, re-emitted by the cost-admin-only
   //   candidate 20261019010000, which is now in the applied-name snapshot (ledger
   //   20261019182757), so the trigger left the discovered inventory.
+  // Pruned 2026-11-04: _enforce_below_cost_line again, re-emitted by #13 candidate
+  //   20261106140000, which is now in the applied-name snapshot (ledger 20261104194231).
   record_commission_earned_state:
     'local commission-label repair candidate re-emits this trigger-only recorder; direct client EXECUTE is revoked and the parent commission write owns the transaction',
   record_commission_settlement_event:

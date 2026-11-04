@@ -138,7 +138,7 @@ export const RpcErrorCodes = {
   // refusal. Registering the token here lets the caller use the object-aware
   // hasRpcCode() instead.
   SHARE_NOT_100: 'SHARE_NOT_100',
-  // The product rate lock (migration 20261106155000): a rate change while locked, a correction of a
+  // The product rate lock (migration 20261107010000): a rate change while locked, a correction of a
   // product changed since it was loaded, and a correction once rates were unlocked.
   PRODUCT_RATES_LOCKED: 'PRODUCT_RATES_LOCKED',
   PRODUCT_RATES_STALE: 'PRODUCT_RATES_STALE',
@@ -161,6 +161,7 @@ export const RpcErrorCodes = {
   // draw_down_quote intent wrapper: reject malformed product identifiers with
   // a governed token before PostgreSQL attempts the UUID cast.
   BOOKING_PRODUCT_INVALID: 'BOOKING_PRODUCT_INVALID',
+  BOOKING_QUANTITY_PRECISION: 'BOOKING_QUANTITY_PRECISION',
   // draw_down_quote cutover barrier (migration 20260816110000). Raised only
   // while the tier-split cutover holds its advisory key; the draw is refused
   // instantly having written nothing, and retrying after the cutover succeeds.

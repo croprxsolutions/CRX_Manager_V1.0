@@ -212,6 +212,9 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   // JobDetail's Save as Recipe button deliberately rotates intent when it opens its modal
   // (Codex round-5). Its save/complete/assign keys are payload-scoped since KI-11 (2026-11-02).
   'src/pages/JobDetail.tsx': ['intent-rotation'],
+  // Fix Delivery's lost-reply replay (#1421): a getIdempotencyBindingRejection recovery reset inside
+  // `if (error)`; the success reset follows assertRpcResult.
+  'src/components/deliveries/FixDeliveryModal.tsx': ['recovery'],
 };
 
 /**

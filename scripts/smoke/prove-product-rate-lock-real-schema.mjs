@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for WP-PM-11a-1 (20261106155000): the "Lock rates" switch, the one rate writer
+ * Real-schema proof for WP-PM-11a-1 (20261107010000): the "Lock rates" switch, the one rate writer
  * (set_product_rates) and the locked-state correction (correct_product_rates). Builds the checked-in
  * schema baseline in a network-disabled PostgreSQL container, replays migrations up to the candidate,
  * seeds invented rows, and checks: rates and per-acre prices to the cent, stale rows refused by
@@ -25,7 +25,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261106155000_product_rate_lock.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261107010000_product_rate_lock.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -334,6 +334,8 @@ function main() {
   refused(ADMIN, setRates([previewed], 'k-moved'), /PRODUCT_RATE_PREVIEW_CHANGED: .*\[PROVER\] Gal/);
   asOwner("UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
   refused(ADMIN, setRates([{ ...previewed, expected: { ...previewed.expected, prices: undefined } }], 'k-noprices'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
+  // A preview with no prices cannot vouch for a cleared rate's empty prices.
+  refused(ADMIN, setRates([{ ...row(P.GAL, '0', 'oz', '', ['13', 'oz', '13 oz/A']), expected: { ...previewed.expected, prices: {} } }], 'k-emptyprices'), /PRODUCT_RATE_PREVIEW_CHANGED: .*\[PROVER\] Gal/);
   assert.match(rates(P.GAL), /^13\|oz\|/);
   refused(ADMIN, setRates([{ ...row(P.GAL, '2', 'oz', '', ['13', 'oz', '13 oz/A']), rate_unit: { a: 1 } }], 'k-obj'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
   // A rate with no unit is ambiguous, so it is refused; a correction is only for locked rates.
@@ -351,6 +353,25 @@ function main() {
   // A kept seed or each unit may be unlisted, but a zero factor would price nothing per acre.
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(5, 'Zero', 'Zero', 'seed', 'Zero');`), 'f');
   assert.equal(scalar(`SELECT public._product_rate_unit_ok(5, 'Bag', 'Bag', 'seed', 'Bag');`), 't');
+  // A kept seed or each unit whose case variants disagree would price at an arbitrary ratio.
+  asOwner(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Bag', 1, 'dry'), ('BAG', 100, 'dry');`);
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(5, 'Bag', 'Bag', 'seed', 'Bag');`), 'f');
+  asOwner(`DELETE FROM public.unit_conversions WHERE unit IN ('Bag', 'BAG');`);
+  // A direct seed save is held to that rule too: its rate unit is its stock unit, looked up twice.
+  asOwner(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('LB', 99, 'dry');`);
+  refused(ADMIN, `INSERT INTO public.products (product_name, sku, product_form, inventory_unit, is_active, rate_per_acre)
+    VALUES ('[PROVER] Seed two spellings', 'RL-8', 'seed', 'Lb', true, 2);`, /PRODUCT_RATE_UNIT_INVALID/);
+  asOwner(`DELETE FROM public.unit_conversions WHERE unit = 'LB';`);
+  ok(ADMIN, `INSERT INTO public.products (product_name, sku, product_form, inventory_unit, is_active, rate_per_acre)
+    VALUES ('[PROVER] Seed rated', 'RL-8', 'seed', 'Lb', true, 2);`);
+  // The stock unit must be the product's kind: a dry rate against a gallon stock unit is no price.
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, 'dry', 'Gal');`), 'f');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, NULL, 'Gal');`), 'f');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'oz', NULL, NULL, 'Gal');`), 't');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Lb', NULL, 'dry', 'Lb');`), 't');
+  // A new seed rate filled from its Lb stock unit cancels out, so a dry-kind unit is fine there.
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(2, 'Lb', NULL, 'seed', 'Lb');`), 't');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(2, 'Lb', NULL, 'seed', 'Gal');`), 'f');
   // The stock unit is pricing's divisor: an unknown one prices as one ounce ($100/gal at 13 oz/A would be $1,300/A).
   asOwner(`UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL, inventory_unit = 'Jug' WHERE id = '${P.OTHER}';`);
   refused(ADMIN, setRates([row(P.OTHER, '13', 'oz', '', [null, null, null])], 'k-stock'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
@@ -366,8 +387,10 @@ function main() {
   asOwner(`UPDATE public.products SET product_form = 'dry', inventory_unit = 'Lb', rate_per_acre = 8, rate_unit = 'oz' WHERE id = '${P.OTHER}';`);
   ok(ADMIN, `UPDATE public.products SET rate_per_acre = 9 WHERE id = '${P.OTHER}';`);
   asOwner(`UPDATE public.products SET product_form = DEFAULT, inventory_unit = 'gal', rate_per_acre = NULL, rate_unit = NULL WHERE id = '${P.OTHER}';`);
+  // asOwner runs with triggers off, so clear the per-acre prices too: a lock refuses stale ones.
   asOwner(`DELETE FROM public.unit_conversions WHERE unit = 'Zero';
-    UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL WHERE id = '${P.OTHER}';`);
+    UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL, tier1_price_per_acre = NULL,
+      tier2_price_per_acre = NULL, tier3_price_per_acre = NULL WHERE id = '${P.OTHER}';`);
   refused(ADMIN, lock(true, '	', 'k-tab-reason'), /REASON_REQUIRED/);
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', versionOf(P.GAL), 'label fix', 'k-cor-open'), /PRODUCT_RATES_NOT_LOCKED/);
   // Per-acre prices are whole cents, 0 or more, and finite (triggers off, so the recalculation cannot hide it).
@@ -476,6 +499,7 @@ function main() {
   asOwner("UPDATE public.unit_conversions SET factor_oz = 2 WHERE unit = 'oz';");
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor-moved', ADMIN, shown), /PRODUCT_RATE_PREVIEW_CHANGED/);
   asOwner("UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
+  refused(ADMIN, correct(P.GAL, 0, 'oz', '', v, 'label fix', 'k-cor-empty', ADMIN, "'{}'::jsonb"), /PRODUCT_RATE_PREVIEW_CHANGED/);
   // A page opened before another admin's suggested-rate-only correction (same pricing_version) is stale.
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor-stale', ADMIN, shown,
     `jsonb_build_object('rate_per_acre', '13', 'rate_unit', 'oz', 'suggested_rate', '12 oz/A')`), /PRODUCT_RATES_STALE/);
@@ -535,6 +559,68 @@ function main() {
   refused(ADMIN, setRates([row(P.OTHER, '9', 'oz', '', ['8', 'oz', '8 oz/A'])], 'k-after'), /PRODUCT_RATES_LOCKED/);
   assert.equal(events(), 'locked,corrected,unlocked,locked');
   console.log('[prover] a lock waits for an upload already saving, then refuses the next one');
+
+  // Unlocked, a unit conversion change waits for a rate write in flight, so the write keeps the factor it priced with.
+  ok(ADMIN, lock(false, 'reopen again', 'k-unlock2'));
+  const saver = spawn('docker', ['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-c',
+    `BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+     SET LOCAL ROLE authenticated; ${setRates([row(P.OTHER, '9', 'oz', '9 oz/A', ['8', 'oz', '8 oz/A'])], 'k-conv-race')} SELECT pg_sleep(4); COMMIT;`],
+  { cwd: ROOT, stdio: 'ignore' });
+  const saving = "SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event = 'PgSleep' AND query LIKE '%k-conv-race%';";
+  for (let tries = 0; scalar(saving) !== '1'; tries += 1) {
+    assert.ok(tries < 100, 'the racing upload never reached its sleep inside the transaction');
+    wait(200);
+  }
+  const convStarted = Date.now();
+  ok(ADMIN, "UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
+  assert.ok(Date.now() - convStarted > 1000, 'the conversion change waited on the upload in flight');
+  saver.unref();
+  assert.match(rates(P.OTHER), /^9\|oz\|9 oz\/A\|/);
+  assert.equal(events(), 'locked,corrected,unlocked,locked,unlocked');
+  console.log('[prover] unlocked, a unit conversion change waits for an upload already saving');
+
+  // A direct product save waits for a unit conversion change in flight, then prices with the new factor.
+  const changer = spawn('docker', ['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-c',
+    `BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+     SET LOCAL ROLE authenticated; UPDATE public.unit_conversions SET factor_oz = 2 WHERE unit = 'oz'; SELECT pg_sleep(4); COMMIT;`],
+  { cwd: ROOT, stdio: 'ignore' });
+  const changing = "SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event = 'PgSleep' AND query LIKE '%factor_oz = 2%';";
+  for (let tries = 0; scalar(changing) !== '1'; tries += 1) {
+    assert.ok(tries < 100, 'the racing conversion change never reached its sleep inside the transaction');
+    wait(200);
+  }
+  const saveStarted = Date.now();
+  ok(ADMIN, `UPDATE public.products SET rate_per_acre = 8 WHERE id = '${P.OTHER}';`);
+  assert.ok(Date.now() - saveStarted > 1000, 'the product save waited on the conversion change in flight');
+  changer.unref();
+  assert.equal(rates(P.OTHER), '8|oz|9 oz/A|5.00|4.50|4.00');
+  ok(ADMIN, "UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
+  console.log('[prover] a direct product save waits for a unit conversion change already saving, then prices with it');
+
+  // The factor went back to 1 but the save above stored prices at 2: locking now would freeze stale prices.
+  refused(ADMIN, lock(true, 'stale', 'k-lock-stale'), /PRODUCT_RATES_STALE: per-acre prices no longer match/);
+  ok(ADMIN, `UPDATE public.products SET rate_per_acre = 8 WHERE id = '${P.OTHER}';`);  // a save reprices it
+  assert.equal(rates(P.OTHER), '8|oz|9 oz/A|2.50|2.25|2.00');
+  // A zero factor would price its rates at $0 and still match, so locking needs every factor above zero.
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 0 WHERE unit = 'Pt';");
+  refused(ADMIN, lock(true, 'zero factor', 'k-lock-zero'), /PRODUCT_RATES_STALE: unit conversions Pt have no finite factor above zero/);
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 'Infinity' WHERE unit = 'Pt';");
+  refused(ADMIN, lock(true, 'infinite factor', 'k-lock-inf'), /PRODUCT_RATES_STALE: unit conversions Pt have no finite factor/);
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'Pt', NULL, 'liquid', 'Gal');`), 'f');
+  assert.equal(scalar(`SELECT public._product_rate_unit_ok(1, 'oz', NULL, 'liquid', 'Pt');`), 'f');
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 16 WHERE unit = 'Pt';");
+  // Two spellings with different factors let pricing take either, so locking is refused too.
+  asOwner("INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('OZ', 128, 'liquid');");
+  refused(ADMIN, lock(true, 'two spellings', 'k-lock-spell'), /PRODUCT_RATES_STALE: unit conversions (OZ, oz|oz, OZ) have no finite factor above zero or disagree/);
+  asOwner("DELETE FROM public.unit_conversions WHERE unit = 'OZ';");
+  ok(ADMIN, lock(true, 'prices current', 'k-lock-fresh'));
+  ok(ADMIN, lock(false, 'open for the smoke', 'k-unlock3'));
+  assert.equal(events(), 'locked,corrected,unlocked,locked,unlocked,locked,unlocked');
+  console.log('[prover] locking is refused while a stored per-acre price is stale, and works once it is saved again');
+
+  // Only the definer functions write the audit log, so no API role may move its sequence.
+  assert.equal(scalar(`SELECT bool_or(has_sequence_privilege(r, 'public.product_rate_events_id_seq', 'USAGE,UPDATE'))
+    FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r;`), 'f');
 
   // The live smoke chain passes here too, and leaves nothing behind.
   const before = scalar('SELECT count(*) FROM public.product_rate_events;');

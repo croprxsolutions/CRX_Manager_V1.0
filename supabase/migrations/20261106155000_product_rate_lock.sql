@@ -16,6 +16,8 @@
 --   * While locked, unit_conversions cannot change either: pricing converts every rate through it.
 --     Unlocked, a change takes the lock row FOR UPDATE, so it waits for a rate write in flight, and a
 --     rate write after it prices with the new factor (a moved preview is refused).
+--     Every products insert or update takes the lock row FOR SHARE in a trigger that runs first, so
+--     a product save prices with the factor of a change that committed before it, never a stale one.
 --   * set_product_rates(rows): the bulk rate writer the CSV import (WP-PM-10) and the setup workbook
 --     (WP-PM-11a-2) will call (admin, retry key, all-or-nothing). Each row carries the rate values it
 --     expects to replace and the per-acre prices its preview showed; a row changed since, or whose
@@ -217,6 +219,23 @@ REVOKE ALL ON FUNCTION public.guard_product_rate_lock() FROM PUBLIC, anon, authe
 CREATE TRIGGER trigger_zzz_guard_product_rate_lock
   BEFORE INSERT OR UPDATE ON public.products
   FOR EACH ROW EXECUTE FUNCTION public.guard_product_rate_lock();
+
+-- validate_product_units and recalc_product_price_per_acre price a row from unit_conversions before
+-- the guard above runs. Taking the lock row FOR SHARE first makes a save wait for a factor change in
+-- flight (which holds it FOR UPDATE), so pricing then reads the committed factor.
+CREATE FUNCTION public.share_product_rate_lock() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+BEGIN
+  PERFORM 1 FROM public.product_rate_lock WHERE id FOR SHARE;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public.share_product_rate_lock() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.share_product_rate_lock() FROM PUBLIC, anon, authenticated, service_role;
+-- Named to run before every other BEFORE trigger on products (trg_keep_... is the first today).
+CREATE TRIGGER trg_a_share_product_rate_lock
+  BEFORE INSERT OR UPDATE ON public.products
+  FOR EACH ROW EXECUTE FUNCTION public.share_product_rate_lock();
 
 -- Pricing converts every rate through unit_conversions, so a changed factor reprices locked products at
 -- their next save without any rate write: while locked, the table cannot change (unlock, with a reason, first).

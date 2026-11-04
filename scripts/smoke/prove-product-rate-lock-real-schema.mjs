@@ -555,6 +555,24 @@ function main() {
   assert.equal(events(), 'locked,corrected,unlocked,locked,unlocked');
   console.log('[prover] unlocked, a unit conversion change waits for an upload already saving');
 
+  // A direct product save waits for a unit conversion change in flight, then prices with the new factor.
+  const changer = spawn('docker', ['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-c',
+    `BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+     SET LOCAL ROLE authenticated; UPDATE public.unit_conversions SET factor_oz = 2 WHERE unit = 'oz'; SELECT pg_sleep(4); COMMIT;`],
+  { cwd: ROOT, stdio: 'ignore' });
+  const changing = "SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event = 'PgSleep' AND query LIKE '%factor_oz = 2%';";
+  for (let tries = 0; scalar(changing) !== '1'; tries += 1) {
+    assert.ok(tries < 100, 'the racing conversion change never reached its sleep inside the transaction');
+    wait(200);
+  }
+  const saveStarted = Date.now();
+  ok(ADMIN, `UPDATE public.products SET rate_per_acre = 8 WHERE id = '${P.OTHER}';`);
+  assert.ok(Date.now() - saveStarted > 1000, 'the product save waited on the conversion change in flight');
+  changer.unref();
+  assert.equal(rates(P.OTHER), '8|oz|9 oz/A|5.00|4.50|4.00');
+  ok(ADMIN, "UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
+  console.log('[prover] a direct product save waits for a unit conversion change already saving, then prices with it');
+
   // The live smoke chain passes here too, and leaves nothing behind.
   const before = scalar('SELECT count(*) FROM public.product_rate_events;');
   const out = psql(lf(path.join(path.dirname(fileURLToPath(import.meta.url)), 'smoke-product_rate_lock.sql')), { allowFailure: true });

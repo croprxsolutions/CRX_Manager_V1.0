@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied.** `20261106155000_product_rate_lock.sql` (LF SQL sha256: `dc81a136491085f34b8d4d8f5759dffcf1316a6867c3adb91673b88520198b9e`). WP-PM-11a-1. REQUIRES the price workbook tables (`product_info_change_set_rows`), which its preflight checks, and `unit_conversions`, without which creating the unit check fails; either way the one-transaction apply changes nothing.
+**LOCAL CANDIDATE, not applied.** `20261106155000_product_rate_lock.sql` (LF SQL sha256: `961ba4b5f923d39d0e88ca1bfdc44fa7fde720bbb6043a2b3f1cc8563812cd1c`). WP-PM-11a-1. REQUIRES the price workbook tables (`product_info_change_set_rows`), which its preflight checks, and `unit_conversions`, without which creating the unit check fails; either way the one-transaction apply changes nothing.
 
 What it does:
 - New one-row `product_rate_lock` (starts unlocked) and append-only `product_rate_events`. A private `product_rate_correction_passes` table (row security on, no API-role access) holds the correction's one-transaction pass, so no session can forge it. Every signed-in user can read both; nobody writes them directly, and updates, deletes and truncates are refused.
@@ -13,7 +13,7 @@ What it does:
 
 Grants: both tables are revoked from PUBLIC, anon, authenticated, service_role and metabase_ro, then SELECT to `authenticated`. Every function is revoked from PUBLIC, anon, authenticated and service_role; EXECUTE goes to `authenticated` only on `set_product_rates`, `set_product_rate_lock`, `correct_product_rates` and `preview_product_rate_correction`. All four are SECURITY DEFINER with `search_path = public, pg_temp`.
 
-Rollback: drop the triggers `trigger_zzz_guard_product_rate_lock` and `product_info_change_set_rows_rates_read_only`, the three whole-cent CHECK constraints, the eleven functions this file creates, and the three tables. Dropping `product_rate_events` loses the lock and correction log, so export it first. Product rates written while it was live stay as written.
+Rollback: drop the triggers `trg_a_share_product_rate_lock` and `trigger_zzz_guard_product_rate_lock` (products), `unit_conversions_rate_lock` and `unit_conversions_rate_lock_no_truncate` (unit_conversions) and `product_info_change_set_rows_rates_read_only`, the three whole-cent CHECK constraints, the thirteen functions this file creates, and the three tables. Dropping `product_rate_events` loses the lock and correction log, so export it first. Product rates written while it was live stay as written.
 
 Proof: `node scripts/smoke/prove-product-rate-lock-real-schema.mjs` prints `PRODUCT_RATE_LOCK_PROOF_PASS`; `scripts/smoke/smoke-product_rate_lock.sql` pins every function body and ends `SMOKE_PASS_ROLLBACK`.
 

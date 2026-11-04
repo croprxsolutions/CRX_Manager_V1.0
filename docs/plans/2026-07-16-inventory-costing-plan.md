@@ -1,7 +1,8 @@
 # Inventory Costing (Average Recorded PO Cost) — Scoped Plan
 
 > **STATUS 2026-11-04 — still PARKED, never built. Refreshed 2026-11-04; building any phase needs Mason's
-> separate go-ahead.** The recommended first step is **Phase 1 (reporting only)**, which needs no new tables.
+> separate go-ahead.** The recommended first step is **Phase 1 (reporting only)**; its detailed build plan is
+> `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md` (one small owner-estimate table, decision D10).
 > The engine below is Phase 2 and stays parked until Mason un-parks it (section 12).
 >
 > **Mason's planning decisions, 2026-11-04** (full list in section 12; he asked to plan the whole thing before
@@ -121,6 +122,9 @@ and use the cost basis the accountant approves.
   `quantity_available × products.current_cost`: a **pricing-basis valuation**, not book value.
 
 ## 3. Phase 1 — Reporting only (FIRST STEP; needs Mason's go-ahead)
+
+**Detailed build plan:** `docs/plans/2026-11-04-inventory-costing-phase1-build-plan.md`. It adds decision
+D10 (a bulk estimated-date entry), so Phase 1 now has one small append-only table and one admin write function.
 
 No new tables, no change to any inventory writer, no change to prices, orders, invoices or commissions.
 New read-only, admin-only RPCs (`SECURITY DEFINER` with `SET search_path = public, pg_temp`, explicit grants,
@@ -447,6 +451,10 @@ he asked to plan the whole thing before anything is built. Live check that day: 
   owner-confirmed starting costs (section 4.4), held **before busy season**, with **no back-entry** of past
   purchases; stock with no receipt since the fresh start shows "age unknown" in Phase 1 until new receipts build
   up.
+- **D10 — DECIDED: gap stock shows "age unknown", with a bulk date entry.** Mason (2026-11-04): "show age
+  unknown but allow a bulk edit add a date etc". Stock CRX cannot date because of the June gap shows "age
+  unknown"; admins can select many products and enter an estimated received date (optionally the quantity it
+  covers and a note), shown as an "owner estimate". Details: the Phase 1 build plan, section 4.
 - **Special-order margin — DECIDED: show both.** Phase 4 keeps the margin booked at the sale and shows the
   corrected margin beside it once the bill lands; invoices never change (section 9, view 4).
 - **Ask the accountant:** which cost basis QuickBooks should carry once CRX can produce a complete one, and

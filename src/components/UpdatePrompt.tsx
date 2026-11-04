@@ -22,7 +22,7 @@ export default function UpdatePrompt() {
     onRegistered(r: ServiceWorkerRegistration | undefined) {
       // Periodically check for updates (every 60 minutes)
       if (r) {
-        setInterval(() => r.update(), 60 * 60 * 1000);
+        setInterval(() => r.update().catch(() => {}), 60 * 60 * 1000);
       }
     },
   });

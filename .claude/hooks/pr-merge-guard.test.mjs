@@ -729,7 +729,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   const fast = scan(readdirOrder, (ps, accept) => firstAcceptedProof(ps, H, accept));
   eq(fast.accepted?.head_sha, H, "the exact-head proof is accepted though it is read last");
   ok(fast.calls <= 2, `...after ${fast.calls} GitHub calls, well inside the budget`);
-  eq(scan(older, (ps, accept) => firstAcceptedProof(ps, H, accept)).accepted, null,
+  eq(scan(older.slice(0, 3), (ps, accept) => firstAcceptedProof(ps, H, accept)), { accepted: null, calls: 15 },
     "earlier proofs whose later commits touch the Sol list are still refused");
   eq(scan(older, (ps, accept) => firstAcceptedProof(ps, H, accept), false).accepted?.head_sha, older[0].head_sha,
     "with no exact-head proof an earlier low-risk one still counts");

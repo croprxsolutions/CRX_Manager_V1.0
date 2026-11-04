@@ -483,6 +483,13 @@ function scenarios() {
     ${check(`${stock}=${committedBefore + 10}`, 'committed retry did not restore stock twice')}
     ${check(`(SELECT status FROM public.invoices WHERE id='${INV}')='voided'`, 'invoice stays voided')}`,
     'a retry after the fix committed replays the stored result and changes nothing more');
+  // The re-entered delivery's invoice is voided later too, cancelling the copy: still counted once.
+  allowed(`RESET ROLE; ALTER TABLE public.commissions DISABLE TRIGGER USER; UPDATE public.commissions SET status='cancelled' WHERE order_id='${ORDER}';
+    ALTER TABLE public.commissions ENABLE TRIGGER USER;
+    ${check(`(SELECT count(*) FROM public.commissions WHERE order_id='${ORDER}' AND status='cancelled')=2`, 'original and copy both cancelled')}
+    ${check(`(SELECT amount FROM public._get_bottom_line_pnl_cost_impl_20261019(CURRENT_DATE, CURRENT_DATE) WHERE line_item='Commissions')=40`, 'P&L counts a cancelled original and cancelled copy once')}
+    ${asUser(ADMIN)} DO $m$ BEGIN IF (public.get_monthly_summary(CURRENT_DATE, CURRENT_DATE)->'commissions'->>'earned_cents')::bigint <> 4000 THEN RAISE EXCEPTION 'PROOF_FAIL: month-end counts a cancelled original and copy twice'; END IF; END $m$;`,
+    'when the copy is cancelled later too, the commission still counts once');
 }
 
 try {

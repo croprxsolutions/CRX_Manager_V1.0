@@ -470,9 +470,10 @@ END
 $postflight$;
 
 -- ---------------------------------------------------------------------------------------------
--- 4. Reports skip a cancelled commission only when a live copy replaced it: a later row for the same
---    order, recipient, split and amount (an order's commissions are minted once, together, so only
---    Fix Delivery makes such a row; shortcut: no link column, add one if another flow re-mints). A fix leaves the
+-- 4. Reports skip a cancelled commission only when a copy replaced it: a later row for the same
+--    order, recipient, split and amount, whatever its status (an order's commissions are minted once,
+--    together, so only Fix Delivery makes such a row; shortcut: no link column, add one if another flow
+--    re-mints). If the copy is cancelled later too, it counts once in its place. A fix leaves the
 --    cancelled original next to its pending copy (cancelled rows keep their amount and cannot
 --    reopen), so summing every status counted it twice. A commission an ordinary void cancelled has
 --    no copy and still counts, so no past month's total moves.
@@ -518,7 +519,7 @@ BEGIN
     'orders', jsonb_build_object('count', (SELECT count(*) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 'total_cents', COALESCE((SELECT sum((total_price * 100)::bigint) FROM public.orders WHERE order_date BETWEEN p_period_start AND p_period_end AND deleted_at IS NULL AND status NOT IN ('cancelled', 'draft')), 0)),
     'deliveries', jsonb_build_object('count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status NOT IN ('cancelled', 'voided') AND deleted_at IS NULL), 'completed_count', (SELECT count(*) FROM public.deliveries WHERE scheduled_date BETWEEN p_period_start AND p_period_end AND status = 'completed' AND deleted_at IS NULL)),
     'applications', jsonb_build_object('count', (SELECT count(*) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 'total_acres', COALESCE((SELECT sum(total_acres) FROM public.application_records WHERE application_date BETWEEN p_period_start AND p_period_end), 0)),
-    'commissions', jsonb_build_object('earned_cents', COALESCE((SELECT sum((c.commission_amount * 100)::bigint) FROM public.commissions c WHERE c.order_date BETWEEN p_period_start AND p_period_end AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.order_id = c.order_id AND r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id AND r.recipient = c.recipient AND r.split_percentage = c.split_percentage AND r.commission_amount = c.commission_amount AND r.created_at > c.created_at AND r.status <> 'cancelled'))), 0), 'paid_count', (SELECT count(*) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status = 'paid')),
+    'commissions', jsonb_build_object('earned_cents', COALESCE((SELECT sum((c.commission_amount * 100)::bigint) FROM public.commissions c WHERE c.order_date BETWEEN p_period_start AND p_period_end AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.order_id = c.order_id AND r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id AND r.recipient = c.recipient AND r.split_percentage = c.split_percentage AND r.commission_amount = c.commission_amount AND r.created_at > c.created_at))), 0), 'paid_count', (SELECT count(*) FROM public.commissions WHERE order_date BETWEEN p_period_start AND p_period_end AND status = 'paid')),
     'ar_balance_cents', COALESCE((SELECT sum(balance_cents) FROM public.invoices WHERE status IN ('posted', 'overdue') AND balance_cents > 0 AND deleted_at IS NULL), 0)
   ) INTO v_result;
   RETURN v_result;
@@ -555,12 +556,12 @@ BEGIN
     AND i.deleted_at IS NULL;
 
   v_gross_profit := v_revenue - v_cogs;
-  -- A cancelled commission still counts unless a live copy replaced it (Fix Delivery re-creates the
+  -- A cancelled commission still counts unless a later copy replaced it (Fix Delivery re-creates the
   -- order's commission), so an ordinary invoice void does not change a past month's total.
   SELECT COALESCE(SUM(c.commission_amount), 0) INTO v_commissions
   FROM public.commissions c
   WHERE c.order_date >= p_start_date AND c.order_date <= p_end_date
-    AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.order_id = c.order_id AND r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id AND r.recipient = c.recipient AND r.split_percentage = c.split_percentage AND r.commission_amount = c.commission_amount AND r.created_at > c.created_at AND r.status <> 'cancelled'));
+    AND (c.status <> 'cancelled' OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.order_id = c.order_id AND r.recipient_user_id IS NOT DISTINCT FROM c.recipient_user_id AND r.recipient = c.recipient AND r.split_percentage = c.split_percentage AND r.commission_amount = c.commission_amount AND r.created_at > c.created_at));
   v_net_profit := v_gross_profit - v_commissions;
 
   RETURN QUERY VALUES

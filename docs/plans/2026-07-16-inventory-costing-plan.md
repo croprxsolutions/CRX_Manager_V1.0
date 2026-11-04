@@ -84,8 +84,8 @@ and use the cost basis the accountant approves.
 ## 2. Verified current state (re-grounded 2026-11-04, read-only)
 
 - **Ledger direction:** `inventory_transactions.quantity` is a positive magnitude with direction set by
-  `transaction_type`, **except `adjusted`, which is signed** (26 positive, 11 negative live; corrected after
-  the Sol review). Replaying physical movements matches on-hand for 107 of 117 products. Allowed types (CHECK): `received`, `booked`, `delivered`, `returned`, `adjusted`,
+  `transaction_type`, **except `adjusted` and `returned`, which are signed** (adjusted: 26 positive, 11
+  negative live; a cancelled customer return writes a negative `returned` row; corrected after the Sol review). Replaying physical movements matches on-hand for 107 of 117 products. Allowed types (CHECK): `received`, `booked`, `delivered`, `returned`, `adjusted`,
   `transferred`, `job_applied`, `cancelled_delivery_reversal`, `void_delivery_reversal`, `prebooked`,
   `released`, `prebook_reconciliation`. Live counts: booked 295, delivered 204, received 136, adjusted 37,
   prebook_reconciliation 32, prebooked 22, released 21, job_applied 6, void_delivery_reversal 5; `returned`,
@@ -413,12 +413,14 @@ PO line, and `vendor_bills` has no line table.
    quantity (one bill line may cover part of a receipt). Matching sets the receipt's cost status (section 6).
    Amounts in integer cents; matching is an idempotent admin-only RPC; matched quantity can never exceed the
    received quantity, enforced in PostgreSQL under a row lock.
-2. **Special-order link.** When a PO line is bought for a specific order line, an admin links them with a
-   quantity in the same unit-verified unit (Gate 0). Only these explicit links count; an unlinked sale is
-   never matched to a PO by guesswork (Sol #36). Linked quantity can never exceed the order line's or the PO
-   line's quantity.
+2. **Special-order link.** When stock is bought for a specific order line, an admin links the order line to
+   the **receiving record** (the actual shipment) with a quantity in the same unit-verified unit (Gate 0). A
+   PO received in several shipments, or serving several orders, is split by these receipt-level links. Only
+   explicit links count; an unlinked sale is never matched to a PO by guesswork (Sol #36). PostgreSQL keeps
+   the total linked to a receipt within its received quantity and the total linked to an order line within its
+   quantity, checked under row locks.
 3. **A report, not new postings.** The corrected special-order margin is **calculated**: the sale's booked
-   cost versus the linked receipt's PO cost, then the matched bill cost once billed, for the invoiced
+   cost versus each linked receipt's PO cost, then that receipt's matched bill cost once billed, for the invoiced
    quantity not yet credited (so a partial return removes its share, Sol #38). It writes nothing to invoices,
    commissions or the inventory pool, so nothing is counted twice (Sol #35).
 4. **Two margins side by side** (Mason, special-order decision): *booked margin* (today's, unchanged) and

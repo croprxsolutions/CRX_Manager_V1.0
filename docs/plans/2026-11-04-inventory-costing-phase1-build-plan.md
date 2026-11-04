@@ -36,8 +36,11 @@ small table** (Mason's estimated dates) and **one admin save action**; everythin
 - **The stock history adds up for most products.** Replaying each product's physical movements (received,
   delivered, job applied, delivery reversals, returns, adjustments) gives exactly today's on-hand for 107 of
   117 products, and for 57 of the 66 in stock. The other 9 in-stock products cannot be aged from history.
-- `inventory_transactions.adjusted` quantities are **signed** (26 positive, 11 negative); the other physical
-  types are stored as positive magnitudes with direction set by the type. Reservations (`booked`,
+- `inventory_transactions` signs: **`adjusted` and `returned` are signed** (adjusted: 26 positive, 11
+  negative live; a cancelled customer return writes a **negative** `returned` row, see `cancel_return` in
+  `20260715115155_harden_return_lifecycle_updates.sql`). `received`, `delivered`, `job_applied` and the
+  delivery reversals are positive magnitudes with direction set by the type. The replay uses the stored sign
+  for the signed types, and PR 1A re-checks every live ledger writer's sign before relying on it. Reservations (`booked`,
   `prebooked`, `released`, `prebook_reconciliation`) do not move physical stock and are ignored.
 - 53 of the 66 in-stock products have a CRX receipt; the last one was 2026-06-10. Since then product was bought
   by phone and email (D9). Those purchases show up in the history only as adjustments, or not at all.
@@ -60,7 +63,7 @@ For each product, walk its physical stock movements in the order they happened, 
   Phase 1 never converts units; that waits for Gate 0.
 - **Anything else that adds stock** (a positive adjustment or count correction, a return, a delivery
   reversal) adds an **unknown** layer. CRX cannot tell where that stock came from.
-- **Anything that removes stock** (a delivery, a job, a negative adjustment) takes from the **oldest-dated
+- **Anything that removes stock** (a delivery, a job, a negative adjustment, a cancelled return) takes from the **oldest-dated
   layer first**, with unknown layers taken after the dated ones of the same entry time. If it removes more
   than the layers hold, the shortfall is a **deficit**; later additions fill the deficit first and only the
   remainder becomes a layer.
@@ -181,7 +184,8 @@ before merge; 1B waits until 1A is live.
    equal on-hand and that exactly the non-reconciling rows show "history does not match".
 2. **Replay cases on a throwaway copy** (a local database or a rolled-back transaction, never live): a new
    receipt then a sale; stock sold then replaced by a count correction (must become unknown, not keep the
-   receipt's date); a deficit filled by a later receipt; two owner estimates on one product; a clear.
+   receipt's date); a deficit filled by a later receipt; a customer return then its cancellation (must net
+   to zero); two owner estimates on one product; a clear.
 3. Spot-check three live products by hand against their history.
 4. A sales rep and a signed-out caller each get "admin required" from both functions; the tab does not appear
    for a rep; a rep's existing product and inventory API responses are unchanged.

@@ -117,7 +117,7 @@ describe('sanitizeError', () => {
 
   it('maps the Fix Delivery refusals to plain English', () => {
     expect(sanitizeError('FIX_DELIVERY_REFUSED: A payment is applied')).toMatch(/^Nothing was changed\. Something on this delivery now blocks a fix/);
-    expect(sanitizeError('FIX_DELIVERY_PREVIEW_STALE: x')).toMatch(/invoices on this delivery changed/);
+    expect(sanitizeError('FIX_DELIVERY_PREVIEW_STALE: x')).toMatch(/its invoices or the order.s drafts changed/);
     expect(sanitizeError('DELIVERY_ORDER_BUSY_RETRY')).toMatch(/being updated elsewhere/);
   });
 

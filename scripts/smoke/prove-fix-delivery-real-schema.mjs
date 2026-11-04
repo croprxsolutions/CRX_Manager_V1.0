@@ -194,7 +194,7 @@ function buildContainer() {
 
 const id = (n) => `7e330000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ADMIN=id(1), REP=id(2), CUSTOMER=id(3), PRODUCT=id(4);
-const ORDER=id(10), LINE=id(11), DELIVERY=id(12), INV=id(13), COMM=id(14), ORDER_INV=id(15), RET=id(16), PAYOUT=id(17);
+const ORDER=id(10), LINE=id(11), DELIVERY=id(12), INV=id(13), COMM=id(14), ORDER_INV=id(15), RET=id(16), PAYOUT=id(17), LINE2=id(18);
 function asUser(uid) {
   return `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
     SELECT set_config('request.jwt.claim.sub', '${uid}', true); SET LOCAL ROLE authenticated;`;
@@ -303,6 +303,13 @@ function scenarios() {
     ${fix('k-new-draft')}`, 'an order draft added after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET total_amount_cents=20000 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-new-amount')}`, 'an invoice amount changed after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
+  refused(`RESET ROLE; SELECT set_config('app.crx_below_cost_operation','create_direct_order',true);
+    INSERT INTO public.order_items (id,order_id,product_id,product_name,unit_size,price_per_unit,total_units_needed,quantity_delivered,total_price,cost_per_unit) VALUES
+      ('${LINE2}','${ORDER}','${PRODUCT}','[PROVER] Product','gal',10,10,10,100,6);
+    ALTER TABLE public.delivery_items DISABLE TRIGGER USER;
+    UPDATE public.delivery_items SET order_item_id='${LINE2}' WHERE delivery_id='${DELIVERY}';
+    ALTER TABLE public.delivery_items ENABLE TRIGGER USER;
+    ${fix('k-moved-line')}`, 'a delivery line moved to another order line after the preview makes it stale', /FIX_DELIVERY_PREVIEW_STALE/);
 
   refused(`RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER; UPDATE public.invoices SET paid_amount_cents=100 WHERE id='${INV}'; ALTER TABLE public.invoices ENABLE TRIGGER USER;
     ${fix('k-paid')}`, 'a payment on the invoice refuses the fix', /FIX_DELIVERY_REFUSED: A payment is applied/);

@@ -179,7 +179,11 @@ BEGIN
    WHERE i.order_id = v_delivery.order_id AND i.status = 'draft' AND i.deleted_at IS NULL
      AND i.invoice_type <> 'credit_memo' AND i.delivery_id IS NULL;
 
+  -- The ids keep the plan token tied to the exact lines void_delivery reopens.
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
+           'id', di.id,
+           'order_item_id', di.order_item_id,
+           'product_id', di.product_id,
            'product_name', p.product_name,
            'quantity', di.quantity_delivered,
            'unit', COALESCE(di.unit_size, p.unit_size)

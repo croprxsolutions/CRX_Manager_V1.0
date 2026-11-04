@@ -1224,7 +1224,7 @@ export interface FixDeliveryPlan {
   refusals: Array<{ code: string; message: string }>;
   invoices: Array<{ id: string; invoice_number: string; status: InvoiceStatus; total_cents: number; paid_cents: number; prepay_applied_cents: number; action: 'cancel' | 'void' }>;
   other_draft_invoices: Array<{ id: string; invoice_number: string; total_cents: number }>;
-  items: Array<{ product_name: string | null; quantity: number; unit: string | null }>;
+  items: Array<{ id: string; order_item_id: string | null; product_id: string | null; product_name: string | null; quantity: number; unit: string | null }>;
   /** Fingerprint of what the preview showed; fix_delivery refuses when it no longer matches. */
   plan_token: string;
 }

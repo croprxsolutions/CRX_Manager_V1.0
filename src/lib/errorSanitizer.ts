@@ -135,7 +135,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^FIX_DELIVERY_REFUSED\b/,
    'Nothing was changed. Something on this delivery now blocks a fix. The reasons are shown on the Fix Delivery screen'],
   [/^FIX_DELIVERY_PREVIEW_STALE\b/,
-   'Nothing was changed. The invoices on this delivery changed while you were looking. Check the updated plan and try again'],
+   'Nothing was changed. This delivery, its invoices or the order\'s drafts changed while you were looking. Check the updated plan and try again'],
   [/^DELIVERY_ORDER_BUSY_RETRY\b/,
    'Nothing was changed. This order is being updated elsewhere. Wait a moment and retry'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer

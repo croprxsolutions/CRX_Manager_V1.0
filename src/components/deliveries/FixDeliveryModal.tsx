@@ -193,7 +193,7 @@ function FixPlanSummary({ plan }: { plan: FixDeliveryPlan }) {
         ))}
         {plan.invoices.length === 0 && <li>No invoice is linked to this delivery.</li>}
         {plan.other_draft_invoices.map((i) => <li key={i.id}>Draft invoice {i.invoice_number} on this order will be cancelled</li>)}
-        {plan.items.map((it, n) => <li key={`${it.product_name ?? ''}-${n}`}>{it.quantity} {it.unit ?? ''} of {it.product_name ?? 'a product'} go back into stock</li>)}
+        {plan.items.map((it) => <li key={it.id}>{it.quantity} {it.unit ?? ''} of {it.product_name ?? 'a product'} go back into stock</li>)}
         <li>Order {plan.order_number ?? ''} reopens for these lines; the sales rep keeps the commission</li>
       </ul>
     </div>

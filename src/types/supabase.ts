@@ -15048,6 +15048,14 @@ export type Database = {
         }
         Returns: Json
       }
+      preview_product_rate_correction: {
+        Args: {
+          p_product_id: string
+          p_rate_per_acre: number
+          p_rate_unit: string
+        }
+        Returns: Json
+      }
       preview_product_pricing_changes: {
         Args: {
           p_export_id?: string

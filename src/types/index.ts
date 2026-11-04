@@ -1532,6 +1532,13 @@ export interface ProductRateWriteResult {
   after: ProductRateValues;
 }
 
+/** The tier 1-3 per-acre prices a rate correction would save, before it is confirmed. */
+export type ProductRatePerAcre = Pick<ProductRateValues, 'tier1_price_per_acre' | 'tier2_price_per_acre' | 'tier3_price_per_acre'>;
+export interface ProductRatePreview {
+  before: ProductRatePerAcre;
+  after: ProductRatePerAcre;
+}
+
 /** One row of the admin-only, append-only purchase-order cost history (20261021140000). */
 export type PurchaseOrderCostChangeSource = 'entered' | 'edited' | 'catalog_default' | 'set_by_admin' | 'confirmed';
 

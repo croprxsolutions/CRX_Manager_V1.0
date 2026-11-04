@@ -117,19 +117,21 @@ CREATE TRIGGER product_rate_lock_no_truncate
   FOR EACH STATEMENT EXECUTE FUNCTION public.refuse_product_rate_record_mutation();
 
 -- The guard. SECURITY DEFINER so a browser writer can take the lock row FOR SHARE.
--- Blank and spaces are the same rate text (the price workbook saves trimmed text). For seed and each
--- products validate_product_units sets rate_unit to the stock unit, so that copy is not a rate.
+-- Blank and spaces are the same suggested rate (the price workbook saves trimmed text). rate_unit is
+-- compared untrimmed, because product_price_per_acre reads it untrimmed. On INSERT of a seed or each
+-- product validate_product_units copies the stock unit into rate_unit, so that copy is not a rate; on
+-- UPDATE it is compared like any other unit, so a form or stock-unit change cannot move a locked rate.
 CREATE FUNCTION public.guard_product_rate_lock() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
   v_locked boolean;
-  v_new_unit text := NULLIF(btrim(NEW.rate_unit), '');
-  v_derived boolean := COALESCE(NEW.product_form IN ('seed', 'each'), false)
+  v_new_unit text := NULLIF(NEW.rate_unit, '');
+  v_derived boolean := TG_OP = 'INSERT' AND COALESCE(NEW.product_form IN ('seed', 'each'), false)
                        AND NEW.rate_unit IS NOT DISTINCT FROM NEW.inventory_unit;
 BEGIN
   IF TG_OP = 'UPDATE'
      AND OLD.rate_per_acre IS NOT DISTINCT FROM NEW.rate_per_acre
-     AND (v_derived OR NULLIF(btrim(OLD.rate_unit), '') IS NOT DISTINCT FROM v_new_unit)
+     AND NULLIF(OLD.rate_unit, '') IS NOT DISTINCT FROM v_new_unit
      AND NULLIF(btrim(OLD.suggested_rate), '') IS NOT DISTINCT FROM NULLIF(btrim(NEW.suggested_rate), '') THEN
     RETURN NEW;
   END IF;
@@ -139,7 +141,7 @@ BEGIN
     RETURN NEW;
   END IF;
   SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR SHARE;
-  IF v_locked
+  IF COALESCE(v_locked, true)  -- a missing lock row counts as locked
      AND current_setting('crx.product_rate_correction', true)
          IS DISTINCT FROM NEW.id::text || ':' || txid_current()::text THEN
     IF TG_OP = 'INSERT' THEN
@@ -160,9 +162,9 @@ CREATE TRIGGER trigger_zzz_guard_product_rate_lock
   FOR EACH ROW EXECUTE FUNCTION public.guard_product_rate_lock();
 
 ALTER TABLE public.products
-  ADD CONSTRAINT products_tier1_price_per_acre_whole_cents_chk CHECK (tier1_price_per_acre = round(tier1_price_per_acre, 2)),
-  ADD CONSTRAINT products_tier2_price_per_acre_whole_cents_chk CHECK (tier2_price_per_acre = round(tier2_price_per_acre, 2)),
-  ADD CONSTRAINT products_tier3_price_per_acre_whole_cents_chk CHECK (tier3_price_per_acre = round(tier3_price_per_acre, 2));
+  ADD CONSTRAINT products_tier1_price_per_acre_whole_cents_chk CHECK (tier1_price_per_acre >= 0 AND tier1_price_per_acre < 'Infinity'::numeric AND tier1_price_per_acre = round(tier1_price_per_acre, 2)),
+  ADD CONSTRAINT products_tier2_price_per_acre_whole_cents_chk CHECK (tier2_price_per_acre >= 0 AND tier2_price_per_acre < 'Infinity'::numeric AND tier2_price_per_acre = round(tier2_price_per_acre, 2)),
+  ADD CONSTRAINT products_tier3_price_per_acre_whole_cents_chk CHECK (tier3_price_per_acre >= 0 AND tier3_price_per_acre < 'Infinity'::numeric AND tier3_price_per_acre = round(tier3_price_per_acre, 2));
 
 -- Rates are read-only in the price workbook: its preview refuses a row that would change one.
 CREATE FUNCTION public.refuse_price_workbook_rate_change() RETURNS trigger
@@ -234,17 +236,19 @@ ALTER FUNCTION public._product_rate_value(jsonb) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_rate_value(jsonb) FROM PUBLIC, anon, authenticated, service_role;
 
 -- The price workbook's unit rule (20260722091359): an unchanged legacy unit is kept; a new one must be
--- a unit_conversions key for the product's form (or type both).
-CREATE FUNCTION public._product_rate_unit_ok(p_new_unit text, p_old_unit text, p_form text) RETURNS boolean
+-- a unit_conversions key for the product's form (or type both). A rate needs a unit, except on seed and
+-- each products, where validate_product_units fills it from the stock unit.
+CREATE FUNCTION public._product_rate_unit_ok(p_rate numeric, p_new_unit text, p_old_unit text, p_form text) RETURNS boolean
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
-  SELECT p_new_unit IS NULL
-      OR p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '')
+  SELECT CASE WHEN p_new_unit IS NULL THEN p_rate IS NULL OR COALESCE(p_form IN ('seed', 'each'), false)
+    ELSE p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '')
       OR EXISTS (SELECT 1 FROM public.unit_conversions uc
                   WHERE lower(uc.unit) = lower(p_new_unit)
-                    AND (p_form IS NULL OR uc.unit_type = p_form OR uc.unit_type = 'both'));
+                    AND (p_form IS NULL OR uc.unit_type = p_form OR uc.unit_type = 'both'))
+  END;
 $function$;
-ALTER FUNCTION public._product_rate_unit_ok(text, text, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._product_rate_unit_ok(text, text, text) FROM PUBLIC, anon, authenticated, service_role;
+ALTER FUNCTION public._product_rate_unit_ok(numeric, text, text, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._product_rate_unit_ok(numeric, text, text, text) FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE FUNCTION public.set_product_rates(
   p_rows jsonb,
@@ -313,7 +317,7 @@ BEGIN
   END IF;
 
   -- Takes turns with set_product_rate_lock: a switch made first is seen here; one made later waits.
-  IF (SELECT is_locked FROM public.product_rate_lock WHERE id FOR SHARE) THEN
+  IF COALESCE((SELECT is_locked FROM public.product_rate_lock WHERE id FOR SHARE), true) THEN
     RAISE EXCEPTION 'PRODUCT_RATES_LOCKED: rates are locked; an admin can correct one product''s rates from its product page, with a reason'
       USING ERRCODE = 'check_violation';
   END IF;
@@ -334,7 +338,8 @@ BEGIN
     END IF;
     IF NOT public._product_rate_value_ok(v_row->'rate_per_acre') THEN
       v_invalid := v_invalid || v_product.product_name;
-    ELSIF NOT public._product_rate_unit_ok(NULLIF(btrim(v_row->>'rate_unit'), ''), v_product.rate_unit, v_product.product_form) THEN
+    ELSIF NOT public._product_rate_unit_ok(public._product_rate_value(v_row->'rate_per_acre'),
+                                            NULLIF(btrim(v_row->>'rate_unit'), ''), v_product.rate_unit, v_product.product_form) THEN
       v_bad_unit := v_bad_unit || v_product.product_name;
     ELSIF public._product_rate_value(v_row->'expected'->'rate_per_acre') IS DISTINCT FROM v_product.rate_per_acre
        OR NULLIF(btrim(v_row->'expected'->>'rate_unit'), '') IS DISTINCT FROM NULLIF(btrim(v_product.rate_unit), '')
@@ -347,7 +352,7 @@ BEGIN
       array_to_string(v_invalid[1:20], ', ');
   END IF;
   IF cardinality(v_bad_unit) > 0 THEN
-    RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is not a known unit for the product''s form: %',
+    RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for the product''s form: %',
       array_to_string(v_bad_unit[1:20], ', ');
   END IF;
   IF cardinality(v_stale) > 0 THEN
@@ -495,7 +500,10 @@ BEGIN
     RETURN v_existing->'response';
   END IF;
 
-  PERFORM 1 FROM public.product_rate_lock WHERE id FOR SHARE;
+  IF NOT COALESCE((SELECT is_locked FROM public.product_rate_lock WHERE id FOR SHARE), true) THEN
+    RAISE EXCEPTION 'PRODUCT_RATES_NOT_LOCKED: rates are open; change them on the product page'
+      USING ERRCODE = 'check_violation';
+  END IF;
   SELECT * INTO v_product FROM public.products WHERE id = p_product_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND'; END IF;
   IF v_product.pricing_version IS DISTINCT FROM p_expected_pricing_version THEN
@@ -506,8 +514,8 @@ BEGIN
      AND v_suggested IS NOT DISTINCT FROM NULLIF(btrim(v_product.suggested_rate), '') THEN
     RAISE EXCEPTION 'PRODUCT_RATE_CORRECTION_NO_CHANGE: the new rates match the current ones';
   END IF;
-  IF NOT public._product_rate_unit_ok(v_unit, v_product.rate_unit, v_product.product_form) THEN
-    RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is not a known unit for this product''s form';
+  IF NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form) THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form';
   END IF;
 
   PERFORM set_config('crx.product_rate_correction', p_product_id::text || ':' || txid_current()::text, true);
@@ -532,6 +540,48 @@ REVOKE ALL ON FUNCTION public.correct_product_rates(uuid, numeric, text, text, b
 GRANT EXECUTE ON FUNCTION public.correct_product_rates(uuid, numeric, text, text, bigint, text, uuid, text)
   TO authenticated;
 
+-- Read-only: the tier 1-3 per-acre prices a correction would save, shown before the admin confirms it.
+-- Worked out as recalc_product_price_per_acre does; the proof checks the preview equals the saved result.
+CREATE FUNCTION public.preview_product_rate_correction(
+  p_product_id uuid, p_rate_per_acre numeric, p_rate_unit text
+) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_product public.products%ROWTYPE;
+  v_unit text := NULLIF(btrim(p_rate_unit), '');
+  v_t1 numeric;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF NOT public.is_admin() THEN RAISE EXCEPTION 'ADMIN_REQUIRED'; END IF;
+  IF NOT public._product_rate_value_ok(to_jsonb(p_rate_per_acre::text)) THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a rate per acre must be blank or a number of 0 or more with at most 6 decimals';
+  END IF;
+  SELECT * INTO v_product FROM public.products WHERE id = p_product_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND'; END IF;
+  IF length(v_unit) > 40
+     OR NOT public._product_rate_unit_ok(p_rate_per_acre, v_unit, v_product.rate_unit, v_product.product_form) THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for this product''s form';
+  END IF;
+  -- validate_product_units stores a seed or each product's stock unit as its rate unit.
+  IF v_product.product_form IN ('seed', 'each') THEN v_unit := v_product.inventory_unit; END IF;
+  v_t1 := COALESCE(v_product.tier1_price, 0);
+  RETURN jsonb_build_object(
+    'before', jsonb_build_object('tier1_price_per_acre', v_product.tier1_price_per_acre,
+      'tier2_price_per_acre', v_product.tier2_price_per_acre, 'tier3_price_per_acre', v_product.tier3_price_per_acre),
+    'after', jsonb_build_object(
+      'tier1_price_per_acre', public.product_price_per_acre(v_t1, p_rate_per_acre, v_unit,
+        v_product.inventory_unit, v_product.unit_size),
+      'tier2_price_per_acre', public.product_price_per_acre(COALESCE(NULLIF(v_product.tier2_price, 0), v_t1),
+        p_rate_per_acre, v_unit, v_product.inventory_unit, v_product.unit_size),
+      'tier3_price_per_acre', public.product_price_per_acre(COALESCE(NULLIF(v_product.tier3_price, 0), v_t1),
+        p_rate_per_acre, v_unit, v_product.inventory_unit, v_product.unit_size)));
+END;
+$function$;
+ALTER FUNCTION public.preview_product_rate_correction(uuid, numeric, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.preview_product_rate_correction(uuid, numeric, text)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.preview_product_rate_correction(uuid, numeric, text) TO authenticated;
+
 DO $postflight$
 BEGIN
   IF (SELECT count(*) FROM public.product_rate_lock) <> 1
@@ -541,6 +591,7 @@ BEGIN
   IF has_function_privilege('anon', 'public.set_product_rates(jsonb,uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.correct_product_rates(uuid,numeric,text,text,bigint,text,uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.set_product_rate_lock(boolean,text,uuid,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.preview_product_rate_correction(uuid,numeric,text)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._write_product_rates(uuid,numeric,text,text)', 'EXECUTE')
      OR has_table_privilege('authenticated', 'public.product_rate_lock', 'UPDATE')
      OR has_function_privilege('anon', 'public._write_product_rates(uuid,numeric,text,text)', 'EXECUTE')

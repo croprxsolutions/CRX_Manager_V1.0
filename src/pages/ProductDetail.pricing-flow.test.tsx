@@ -113,6 +113,7 @@ vi.mock('../lib/db', async () => {
   const { sanitizeError } = await vi.importActual<typeof import('../lib/errorSanitizer')>(
     '../lib/errorSanitizer',
   );
+  const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   const supabase = {
     from: vi.fn((table: string) => chainable(
       table === 'products'
@@ -137,6 +138,9 @@ vi.mock('../lib/db', async () => {
       if (result.error) throw result.error;
     }),
     sanitizeError,
+    // The real token matchers: the page reads a rate-lock refusal through them.
+    hasRpcCode: actual.hasRpcCode,
+    RpcErrorCodes: actual.RpcErrorCodes,
   };
 });
 

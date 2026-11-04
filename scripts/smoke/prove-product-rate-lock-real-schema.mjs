@@ -210,7 +210,7 @@ const ADMIN = id('a1');
 const REP = id('a2');
 // The smoke chain probes one active profile of each other staff role.
 const OTHER_ROLES = [[id('a3'), 'driver'], [id('a4'), 'applicator'], [id('a5'), 'entity_recipient']];
-const P = { GAL: id('c1'), OTHER: id('c2') };
+const P = { GAL: id('c1'), OTHER: id('c2'), DRY: id('c3') };
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -226,8 +226,9 @@ function seed() {
     INSERT INTO public.product_form_units (product_form, unit) VALUES ('seed', 'Lb');
     INSERT INTO public.products (id, product_name, sku, inventory_unit, is_active, tier1_price, tier2_price, tier3_price)
     VALUES ('${P.GAL}', '[PROVER] Gal', 'RL-1', 'gal', true, 40.00, 36.00, 32.00),
-           ('${P.OTHER}', '[PROVER] Other', 'RL-2', 'gal', true, 40.00, 36.00, 32.00);`);
-  console.log('[prover] seeded an admin, a sales rep, one of each other staff role and two products priced per gallon with no rate yet');
+           ('${P.OTHER}', '[PROVER] Other', 'RL-2', 'gal', true, 40.00, 36.00, 32.00),
+           ('${P.DRY}', '[PROVER] Dry', 'RL-7', 'Lb', true, 16.00, 16.00, 16.00);`);
+  console.log('[prover] seeded an admin, a sales rep, one of each other staff role and two products priced per gallon and one per pound, all with no rate yet');
 }
 function asOwner(sql) { psql(`SET session_replication_role = replica;
 ${sql}
@@ -295,6 +296,16 @@ function main() {
   // An unknown unit would price per acre as one ounce, so it is refused by name.
   refused(ADMIN, setRates([row(P.GAL, '2', 'gallons', '', ['13', 'oz', '13 oz/A'])], 'k-unit'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Gal/);
   refused(ADMIN, setRates([{ ...row(P.GAL, '2', 'oz', '', ['13', 'oz', '13 oz/A']), rate_unit: { a: 1 } }], 'k-obj'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
+  // A rate with no unit is ambiguous, so it is refused; a correction is only for locked rates.
+  refused(ADMIN, setRates([row(P.OTHER, '8', '', '', [null, null, null])], 'k-nounit'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\]/);
+  refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', versionOf(P.GAL), 'label fix', 'k-cor-open'), /PRODUCT_RATES_NOT_LOCKED/);
+  // Per-acre prices are whole cents, 0 or more, and finite (triggers off, so the recalculation cannot hide it).
+  for (const bad of ['-1', "'NaN'", '1.001']) {
+    const r = psql(`SET session_replication_role = replica; UPDATE public.products SET tier1_price_per_acre = ${bad} WHERE id = '${P.GAL}';`,
+      { user: 'supabase_admin', allowFailure: true });
+    assert.notEqual(r.status, 0, `per-acre ${bad} should be refused`);
+    assert.match(`${r.stdout}${r.stderr}`, /whole_cents_chk/);
+  }
   // The price workbook cannot change rates: a change row carrying one is refused; a notes row passes the check.
   const infoRow = (changes) => `INSERT INTO public.product_info_change_set_rows (change_set_id, product_id, expected_version,
     before_values, after_values, changes, output_fingerprint) VALUES (gen_random_uuid(), '${P.GAL}', 1, '{}', '{}', '${changes}', 'x');`;
@@ -323,6 +334,11 @@ function main() {
   refused(ADMIN, setRates([row(P.GAL, '20', 'oz', '', ['13', 'oz', '13 oz/A'])], 'k-set-locked'), /PRODUCT_RATES_LOCKED/);
   // The database owner stands in for every SECURITY DEFINER writer (price workbook apply, imports).
   ownerRefused(`UPDATE public.products SET rate_unit = 'pt' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
+  // Per-acre pricing reads the unit untrimmed, so a trailing space is a unit change.
+  refused(ADMIN, `UPDATE public.products SET rate_unit = 'oz ' WHERE id = '${P.GAL}';`, /PRODUCT_RATES_LOCKED/);
+  // Switching a product with no rate unit to Seed copies the stock unit into rate_unit: a rate change too.
+  // (A different unit already there is refused by validate_product_units.)
+  refused(ADMIN, `UPDATE public.products SET product_form = 'seed' WHERE id = '${P.DRY}';`, /PRODUCT_RATES_LOCKED/);
   refused(ADMIN, `INSERT INTO public.products (product_name, sku, inventory_unit, is_active, rate_per_acre, rate_unit)
     VALUES ('[PROVER] Rated new', 'RL-3', 'gal', true, 5, 'oz');`, /PRODUCT_RATES_LOCKED/);
   assert.equal(rates(P.GAL), '13|oz|13 oz/A|4.06|3.66|3.25');
@@ -336,6 +352,7 @@ function main() {
   ok(ADMIN, `INSERT INTO public.products (product_name, sku, product_form, inventory_unit, is_active)
     VALUES ('[PROVER] Seed new', 'RL-5', 'seed', 'Lb', true);`);
   assert.equal(scalar(`SELECT rate_unit FROM public.products WHERE sku = 'RL-5';`), 'Lb');
+  ok(ADMIN, `UPDATE public.products SET product_name = '[PROVER] Seed renamed' WHERE sku = 'RL-5';`);
   refused(ADMIN, `INSERT INTO public.products (product_name, sku, inventory_unit, is_active, rate_per_acre, rate_unit)
     VALUES ('[PROVER] Rated new 2', 'RL-6', 'gal', true, 5, 'oz');`, /save the new product without rates/);
   console.log('[prover] locked: browser edits, the rate writer, definer functions and rated inserts are refused; other edits save');
@@ -348,8 +365,16 @@ function main() {
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, ' ', 'k-cor-blank'), /REASON_REQUIRED/);
   refused(ADMIN, correct(P.GAL, 16, 'gallons', '16 oz/A', v, 'label fix', 'k-cor-unit'), /PRODUCT_RATE_UNIT_INVALID/);
   refused(ADMIN, correct(P.GAL, 16.1234567, 'oz', '16 oz/A', v, 'label fix', 'k-cor-scale'), /PRODUCT_RATE_INVALID/);
+  // The preview shows the per-acre prices the correction then saves.
+  const previewSql = `SELECT public.preview_product_rate_correction('${P.GAL}', 16, 'oz');`;
+  refused(REP, previewSql, /ADMIN_REQUIRED/);
+  const preview = JSON.parse(ok(ADMIN, previewSql));
   const fix = correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor');
   const corrected = JSON.parse(ok(ADMIN, fix));
+  for (const t of [1, 2, 3]) {
+    const k = `tier${t}_price_per_acre`;
+    assert.deepEqual([preview.before[k], preview.after[k]], [corrected.before[k], corrected.after[k]], `preview ${k}`);
+  }
   assert.deepEqual([corrected.before.tier1_price_per_acre, corrected.after.tier1_price_per_acre], [4.06, 5]);
   assert.equal(rates(P.GAL), '16|oz|16 oz/A|5.00|4.50|4.00');
   assert.deepEqual(JSON.parse(ok(ADMIN, fix)), corrected, 'a same-key replay answers the same');

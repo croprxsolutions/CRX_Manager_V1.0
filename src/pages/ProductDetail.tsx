@@ -25,7 +25,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
-import { sanitizeError, assertRpcResult, checkMutationResult, supabase, supabaseUntyped } from '../lib/db';
+import { sanitizeError, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from '../lib/db';
 import { localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
@@ -771,7 +771,12 @@ export default function ProductDetail() {
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_product' } });
       toast('error', sanitizeError(err));
-      if (String((err as { message?: unknown } | null)?.message ?? '').startsWith('PRODUCT_RATES_LOCKED')) loadRateLock();
+      if (hasRpcCode(err, RpcErrorCodes.PRODUCT_RATES_LOCKED)) {
+        // Rates were locked meanwhile: put the saved rates back so the rest of the edit can save.
+        loadRateLock();
+        setProduct((current) => ({ ...current, rate_per_acre: persistedProduct?.rate_per_acre ?? null,
+          rate_unit: persistedProduct?.rate_unit ?? null, suggested_rate: persistedProduct?.suggested_rate ?? null }));
+      }
       revealPhoneSection(pricingChanged(product, persistedProduct, pricingMoneyDrafts) ? 'pricing' : 'information');
     } finally {
       setSaving(false);

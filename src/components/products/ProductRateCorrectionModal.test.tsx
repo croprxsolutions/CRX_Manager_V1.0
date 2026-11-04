@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Product } from '../../types';
 
-const { mockCorrect } = vi.hoisted(() => ({ mockCorrect: vi.fn() }));
-vi.mock('../../lib/productRateLock', () => ({ correctProductRates: mockCorrect }));
+const { mockCorrect, mockPreview } = vi.hoisted(() => ({ mockCorrect: vi.fn(), mockPreview: vi.fn() }));
+vi.mock('../../lib/productRateLock', () => ({ correctProductRates: mockCorrect, previewProductRateCorrection: mockPreview }));
 
 import ProductRateCorrectionModal from './ProductRateCorrectionModal';
 import { sanitizeError } from '../../lib/db';
@@ -17,18 +17,27 @@ const values = (rate: number, perAcre: number) => ({
 });
 
 describe('correct rates while locked', () => {
-  it('sends one product with the version it loaded and the reason, then shows per-acre before and after', async () => {
+  it('previews per-acre prices, then sends one product with the version it loaded and the reason', async () => {
+    mockPreview.mockResolvedValue({ before: values(13, 4.06), after: values(16, 5) });
     mockCorrect.mockResolvedValue({ product_id: 'p1', product_name: 'Alpha', pricing_version: 8,
       before: values(13, 4.06), after: values(16, 5) });
     const onCorrected = vi.fn();
     render(<ProductRateCorrectionModal open product={product} profileId="u1" unitOptions={['oz', 'Gal']}
       onClose={vi.fn()} onCorrected={onCorrected} />);
-    const save = screen.getByRole('button', { name: 'Save correction' });
-    expect(save).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Rate Per Acre'), { target: { value: '16' } });
     fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: ' label fix ' } });
-    fireEvent.click(save);
-    await waitFor(() => expect(screen.getByText('$5.00')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await waitFor(() => expect(screen.getByText('Per-acre prices if you save:')).toBeInTheDocument());
+    expect(screen.getByText('$5.00')).toBeInTheDocument();
+    expect(mockPreview).toHaveBeenCalledWith({ productId: 'p1', ratePerAcre: 16, rateUnit: 'oz' });
+    expect(mockCorrect).not.toHaveBeenCalled();
+    // Changing the rate after a preview needs a new preview before it can save.
+    fireEvent.change(screen.getByLabelText('Rate Per Acre'), { target: { value: '17' } });
+    expect(screen.queryByRole('button', { name: 'Save correction' })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Rate Per Acre'), { target: { value: '16' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(screen.getByText('Saved and logged. Per-acre prices now:')).toBeInTheDocument());
     expect(screen.getByText('$4.06')).toBeInTheDocument();
     expect(mockCorrect).toHaveBeenCalledWith(expect.objectContaining({
       productId: 'p1', ratePerAcre: 16, rateUnit: 'oz', suggestedRate: '13 oz/A', expectedPricingVersion: 7, reason: 'label fix',
@@ -42,7 +51,20 @@ describe('correct rates while locked', () => {
       onClose={vi.fn()} onCorrected={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Rate Per Acre'), { target: { value: '-1' } });
     fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'x' } });
-    expect(screen.getByRole('button', { name: 'Save correction' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled();
+  });
+
+  it('reloads the product when it changed or rates were unlocked meanwhile', async () => {
+    mockPreview.mockResolvedValue({ before: values(13, 4.06), after: values(16, 5) });
+    mockCorrect.mockRejectedValue(new Error('PRODUCT_RATES_NOT_LOCKED: rates are open; change them on the product page'));
+    const onCorrected = vi.fn();
+    render(<ProductRateCorrectionModal open product={product} profileId="u1" unitOptions={['oz']}
+      onClose={vi.fn()} onCorrected={onCorrected} />);
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'x' } });
+    fireEvent.change(screen.getByLabelText('Rate Per Acre'), { target: { value: '16' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(onCorrected).toHaveBeenCalled());
   });
 
   it('shows the database refusal text without its code', () => {

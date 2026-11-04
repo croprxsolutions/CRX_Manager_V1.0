@@ -4,17 +4,35 @@ import Input from '../ui/Input';
 import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
-import { sanitizeError } from '../../lib/db';
+import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
 import { formatExactUSD } from '../../lib/money';
-import { correctProductRates } from '../../lib/productRateLock';
-import type { Product, ProductRateWriteResult } from '../../types';
+import { correctProductRates, previewProductRateCorrection } from '../../lib/productRateLock';
+import type { Product, ProductRatePreview, ProductRateWriteResult } from '../../types';
 
 const TIERS = [1, 2, 3] as const;
 const perAcre = (value: number | null) => (value == null ? 'none' : formatExactUSD(value));
 
+function PerAcreTable({ prices }: { prices: ProductRatePreview }) {
+  return (
+    <table className="w-full text-left text-sm">
+      <thead><tr className="text-secondary"><th className="font-medium">Tier</th><th className="font-medium">Before</th><th className="font-medium">After</th></tr></thead>
+      <tbody>
+        {TIERS.map((tier) => (
+          <tr key={tier}>
+            <td>Tier {tier}</td>
+            <td>{perAcre(prices.before[`tier${tier}_price_per_acre`])}</td>
+            <td className="font-medium text-nav-dark">{perAcre(prices.after[`tier${tier}_price_per_acre`])}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 /**
- * While rates are locked, an admin corrects one product's rates with a reason. The database checks
- * the product has not changed since this page loaded it, logs the correction, and reprices per acre.
+ * While rates are locked, an admin corrects one product's rates with a reason. It previews the new
+ * per-acre prices first; the database then checks the product has not changed since this page loaded
+ * it, logs the correction, and reprices per acre.
  */
 export default function ProductRateCorrectionModal({ open, product, profileId, unitOptions, onClose, onCorrected }: {
   open: boolean;
@@ -30,19 +48,40 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
   const [suggested, setSuggested] = useState(product.suggested_rate ?? '');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState<{ input: string; prices: ProductRatePreview } | null>(null);
   const [result, setResult] = useState<ProductRateWriteResult | null>(null);
   const { getKey, resetKey } = useIdempotencyKey('correct_product_rates', profileId,
     JSON.stringify([product.id, product.pricing_version, rate, unit, suggested, reason.trim()]));
 
-  const rateValid = rate.trim() === '' || /^\d{1,12}(\.\d{1,6})?$/.test(rate.trim());
+  // 9 whole digits keep the rate exact as a JavaScript number on its way to the database.
+  const rateValid = rate.trim() === '' || /^\d{1,9}(\.\d{1,6})?$/.test(rate.trim());
+  const ratePerAcre = rate.trim() === '' ? null : Number(rate.trim());
+  const previewInput = JSON.stringify([rate.trim(), unit]);
+  const previewed = preview?.input === previewInput ? preview.prices : null;
   const canSave = rateValid && reason.trim() !== '' && !saving && Number.isInteger(product.pricing_version);
 
+  const refuse = (error: unknown) => {
+    toast('error', sanitizeError(error));
+    // The product or the lock changed since this page loaded it: reload rather than retry.
+    if (hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_STALE) || hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_NOT_LOCKED)) onCorrected();
+  };
+  const showPreview = async () => {
+    setSaving(true);
+    try {
+      const prices = await previewProductRateCorrection({ productId: product.id, ratePerAcre, rateUnit: unit });
+      setPreview({ input: previewInput, prices });
+    } catch (error) {
+      refuse(error);
+    } finally {
+      setSaving(false);
+    }
+  };
   const save = async () => {
     setSaving(true);
     try {
       const corrected = await correctProductRates({
         productId: product.id,
-        ratePerAcre: rate.trim() === '' ? null : Number(rate.trim()),
+        ratePerAcre,
         rateUnit: unit,
         suggestedRate: suggested,
         expectedPricingVersion: product.pricing_version,
@@ -54,9 +93,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
       setResult(corrected);
       toast('success', 'Rates corrected');
     } catch (error) {
-      toast('error', sanitizeError(error));
-      // The product changed since this page loaded it: reload it rather than retry a stale version.
-      if (String((error as { message?: unknown } | null)?.message ?? '').startsWith('PRODUCT_RATES_STALE')) onCorrected();
+      refuse(error);
     } finally {
       setSaving(false);
     }
@@ -75,25 +112,16 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
       footer={result ? <Button onClick={finish}>Done</Button> : (
         <>
           <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={() => void save()} loading={saving} disabled={!canSave}>Save correction</Button>
+          {previewed
+            ? <Button onClick={() => void save()} loading={saving} disabled={!canSave}>Save correction</Button>
+            : <Button onClick={() => void showPreview()} loading={saving} disabled={!canSave}>Preview</Button>}
         </>
       )}
     >
       {result ? (
         <div className="space-y-2 text-sm">
           <p className="text-secondary">Saved and logged. Per-acre prices now:</p>
-          <table className="w-full text-left">
-            <thead><tr className="text-secondary"><th className="font-medium">Tier</th><th className="font-medium">Before</th><th className="font-medium">After</th></tr></thead>
-            <tbody>
-              {TIERS.map((tier) => (
-                <tr key={tier}>
-                  <td>Tier {tier}</td>
-                  <td>{perAcre(result.before[`tier${tier}_price_per_acre`])}</td>
-                  <td className="font-medium text-nav-dark">{perAcre(result.after[`tier${tier}_price_per_acre`])}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <PerAcreTable prices={result} />
         </div>
       ) : (
         <div className="space-y-3">
@@ -102,7 +130,7 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
           </p>
           <Input label="Suggested Rate" value={suggested} onChange={(e) => setSuggested(e.target.value)} />
           <Input label="Rate Per Acre" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)}
-            error={rateValid ? undefined : 'Enter zero or more with at most 6 decimals, or leave blank'} />
+            error={rateValid ? undefined : 'Enter zero or more, up to 9 digits and 6 decimals, or leave blank'} />
           <div>
             <label htmlFor="product-rate-correction-unit" className="block text-sm font-medium text-secondary mb-1">Rate Unit</label>
             <select
@@ -127,6 +155,12 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
               onChange={(e) => setReason(e.target.value)}
             />
           </div>
+          {previewed && (
+            <div className="space-y-2">
+              <p className="text-sm text-secondary">Per-acre prices if you save:</p>
+              <PerAcreTable prices={previewed} />
+            </div>
+          )}
         </div>
       )}
     </Modal>

@@ -9,8 +9,10 @@ import { Sentry } from '../../lib/sentry';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { EPA_REGISTRATION_PATTERN } from '../../lib/productBrands';
 import { listProductCategories } from '../../lib/productSetup';
+import { loadProductRateLock } from '../../lib/productRateLock';
 import {
   buildProductInsert,
+  importRowSetsRates,
   isProductImportStringField,
   isRetiredPricingColumn,
   normalizeProductImportHeader,
@@ -233,6 +235,24 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const handleUpload = async () => {
     if (!validation || validation.valid.length === 0) return;
     setUploading(true);
+
+    // While rates are locked every row with a rate would be refused one by one, leaving half a file
+    // imported, so check once and import nothing.
+    const rated = validation.valid.filter(importRowSetsRates).length;
+    if (rated > 0) {
+      let locked: boolean;
+      try {
+        locked = (await loadProductRateLock()).is_locked;
+      } catch (error) {
+        Sentry.captureException(error);
+        locked = true;
+      }
+      if (locked) {
+        toast('error', `Nothing was imported: ${rated} row${rated === 1 ? ' sets' : 's set'} a rate, and rates are locked or could not be checked. Remove the rate columns, or ask an admin to unlock rates.`);
+        setUploading(false);
+        return;
+      }
+    }
 
     let success = 0;
     let failed = 0;

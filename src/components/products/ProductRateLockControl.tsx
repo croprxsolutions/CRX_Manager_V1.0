@@ -18,10 +18,12 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
   onChanged: (lock: ProductRateLock) => void;
 }) {
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
+  // The switch's direction is fixed when the window opens, so a reload after a failed save never flips it.
+  const [target, setTarget] = useState<boolean | null>(null);
+  const open = target !== null;
+  const setOpen = (next: boolean) => setTarget(next && lock ? !lock.is_locked : null);
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
-  const target = !lock?.is_locked;
   const { getKey, resetKey } = useIdempotencyKey('set_product_rate_lock', profileId, `${target}:${reason.trim()}`);
   if (!lock) {
     if (!loadFailed) return null;
@@ -36,6 +38,7 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
   const save = async () => {
     setSaving(true);
     try {
+      if (target === null) return;
       const next = await setProductRateLock({ locked: target, reason: reason.trim(), performedBy: profileId, idempotencyKey: getKey() });
       resetKey();
       onChanged(next);
@@ -44,8 +47,12 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
       toast('success', next.is_locked ? 'Rates locked' : 'Rates unlocked');
     } catch (error) {
       toast('error', sanitizeError(error));
-      // Another admin may have switched it first; show the current state.
-      loadProductRateLock().then(onChanged).catch(() => undefined);
+      // Another admin, or this save before its answer was lost, may have switched it already:
+      // show the current state, and close the window once it is already where it was going.
+      loadProductRateLock().then((current) => {
+        onChanged(current);
+        if (current.is_locked === target) { setOpen(false); setReason(''); }
+      }).catch(() => undefined);
     } finally {
       setSaving(false);
     }

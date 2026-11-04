@@ -23,11 +23,12 @@ DECLARE
   v_md5 text;
 BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
-    ('public.set_product_rates(jsonb,uuid,text)', 'dc6b860afe8a47a99959af916eda66a2'),
+    ('public.set_product_rates(jsonb,uuid,text)', '4ec72b2bb8ee9cea281aa6195820b4b3'),
     ('public.set_product_rate_lock(boolean,text,uuid,text)', '3485bd94f99f6968829b7d57ee75eff2'),
-    ('public.correct_product_rates(uuid,numeric,text,text,bigint,text,uuid,text)', '723555f3879c8bd0b3fa061ef9028224'),
-    ('public.guard_product_rate_lock()', '0dc9bdb156360691d182427537d9948e'),
-    ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4')) AS pins(sig, body_md5) LOOP
+    ('public.correct_product_rates(uuid,numeric,text,text,bigint,text,uuid,text)', '815cb2f2ccb07e6fdc3b1fae6e720e0e'),
+    ('public.guard_product_rate_lock()', '1c4204d0cecdee479054ddcb0ba0324a'),
+    ('public.refuse_price_workbook_rate_change()', '8e55d2451eb8beff17bac81d156f3bd4'),
+    ('public.preview_product_rate_correction(uuid,numeric,text)', '8604511cd222c804da7913992b2f8daa')) AS pins(sig, body_md5) LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM v_md5 THEN
       RAISE EXCEPTION 'SMOKE_FAIL: % is not the body of 20261105200000', v_sig;
     END IF;

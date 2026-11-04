@@ -1,6 +1,6 @@
 import { assertRpcResult, supabase } from './db';
 import { BUSINESS_TIMEZONE } from './dateUtils';
-import type { ProductRateLock, ProductRateWriteResult } from '../types';
+import type { ProductRateLock, ProductRatePreview, ProductRateWriteResult } from '../types';
 
 /** The one "Lock rates" record (20261105200000). Every signed-in staff member may read it. */
 export async function loadProductRateLock(): Promise<ProductRateLock> {
@@ -26,6 +26,21 @@ export async function setProductRateLock(input: {
   });
   if (error) throw error;
   return assertRpcResult<ProductRateLock>(data, 'set_product_rate_lock');
+}
+
+/** The per-acre prices a correction would save; read-only, admin only. */
+export async function previewProductRateCorrection(input: {
+  productId: string;
+  ratePerAcre: number | null;
+  rateUnit: string;
+}): Promise<ProductRatePreview> {
+  const { data, error } = await supabase.rpc('preview_product_rate_correction', {
+    p_product_id: input.productId,
+    p_rate_per_acre: input.ratePerAcre as number, // NULL clears the rate; generated Args omit null
+    p_rate_unit: input.rateUnit,
+  });
+  if (error) throw error;
+  return assertRpcResult<ProductRatePreview>(data, 'preview_product_rate_correction');
 }
 
 /** One product's rates while locked: admin only, with a reason and the version the admin saw. */

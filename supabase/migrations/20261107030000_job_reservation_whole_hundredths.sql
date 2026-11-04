@@ -57,6 +57,10 @@
 
 SET LOCAL lock_timeout = '5s';
 
+-- Hold off every job draw writer (a sync still running the old body) until this transaction
+-- commits, so no unrounded draw can land between the precision check and the new body.
+LOCK TABLE public.job_product_draws IN SHARE ROW EXCLUSIVE MODE;
+
 CREATE TEMP TABLE job_draw_hundredths_tx ON COMMIT DROP AS
 SELECT pg_current_xact_id()::text AS transaction_id;
 
@@ -477,6 +481,9 @@ BEGIN
             AND ARRAY(SELECT a.attname::text FROM pg_attribute a
                       WHERE a.attrelid = 'public.jobs'::regclass AND a.attnum = ANY (t.tgattr::int2[])) = ARRAY['status']) THEN
     RAISE EXCEPTION 'POSTFLIGHT: _trg_mark_job_completing or its trigger is missing or wrong';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.job_product_draws WHERE scale(trim_scale(quantity_drawn)) > 2) THEN
+    RAISE EXCEPTION 'POSTFLIGHT: a job has a draw finer than 0.01';
   END IF;
 END
 $postflight$;

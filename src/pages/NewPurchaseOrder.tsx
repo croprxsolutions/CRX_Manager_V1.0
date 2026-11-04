@@ -188,22 +188,22 @@ export default function NewPurchaseOrder() {
     if (isAdmin) void suggestPreferredVendorCost(firstItemKey, prod);
   }, [products, preselectProductId, isAdmin, firstItemKey, suggestPreferredVendorCost]);
 
+  // A user edit to the lines: unsaved work.
+  const editItems: typeof setItems = (update) => { setIsDirty(true); setItems(update); };
+
   const addItem = () => {
-    setIsDirty(true);
-    setItems((prev) => [
+    editItems((prev) => [
       ...prev,
       { key: nextKey(), product_id: '', quantity_ordered: 0, unit_cost: 0, unit_size: '' },
     ]);
   };
 
   const removeItem = (key: string) => {
-    setIsDirty(true);
-    setItems((prev) => prev.filter((i) => i.key !== key));
+    editItems((prev) => prev.filter((i) => i.key !== key));
   };
 
   const updateItem = (key: string, field: keyof POItemDraft, value: string | number) => {
-    setIsDirty(true);
-    setItems((prev) =>
+    editItems((prev) =>
       prev.map((i) => (i.key === key
         ? { ...i, [field]: value, ...(field === 'unit_cost' ? { costFromAdmin: isAdmin, costEdited: true } : {}) }
         : i))
@@ -211,8 +211,7 @@ export default function NewPurchaseOrder() {
   };
 
   const assignProduct = (itemKey: string, product: Product) => {
-    setIsDirty(true);
-    setItems((prev) =>
+    editItems((prev) =>
       prev.map((i) =>
         i.key === itemKey
           ? {
@@ -234,9 +233,8 @@ export default function NewPurchaseOrder() {
   };
 
   const changeVendor = (next: string) => {
-    setIsDirty(true);
     setVendor(next);
-    setItems((prev) => prev.map((i) => (i.suggestion && !i.costEdited ? { ...i,
+    editItems((prev) => prev.map((i) => (i.suggestion && !i.costEdited ? { ...i,
       unit_cost: costForVendor(i.suggestion, next, products.find((p) => p.id === i.product_id)?.current_cost || 0) } : i)));
   };
 

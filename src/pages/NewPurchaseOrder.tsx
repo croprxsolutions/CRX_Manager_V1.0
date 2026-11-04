@@ -25,7 +25,7 @@ import { Sentry } from '../lib/sentry';
 import { ProductOptionDetails, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
-import { listProductVendors } from '../lib/productVendors';
+import { costForVendor, fetchPreferredVendorCost, type CostSuggestion } from '../lib/poVendorSuggestion';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
@@ -42,7 +42,7 @@ interface POItemDraft {
   /** The user typed this line's unit cost, so no suggestion replaces it. */
   costEdited?: boolean;
   // The preferred vendor's last cost, applied while the PO is for that vendor.
-  suggestion?: { vendor: string; cents: number };
+  suggestion?: CostSuggestion;
 }
 
 let keyCounter = 0;
@@ -62,7 +62,7 @@ export default function NewPurchaseOrder() {
   const [vendor, setVendor] = useState('');
   // Read when an async cost lookup returns, so it checks the vendor on the form then.
   const vendorRef = useRef(vendor);
-  vendorRef.current = vendor;
+  useEffect(() => { vendorRef.current = vendor; }, [vendor]);
   const [expectedDate, setExpectedDate] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<POItemDraft[]>([
@@ -207,8 +207,7 @@ export default function NewPurchaseOrder() {
               unit_cost: product.current_cost || 0,
               unit_size: product.unit_size || '',
               costFromAdmin: isAdmin,
-              costEdited: false,
-              suggestion: undefined,
+              costEdited: false, suggestion: undefined,
             }
           : i
       )
@@ -220,42 +219,21 @@ export default function NewPurchaseOrder() {
     if (isAdmin) void suggestPreferredVendorCost(itemKey, product);
   };
 
-  // An admin's line starts at the preferred vendor's newest price per inventory unit, when one is
-  // known and the PO is for that vendor, instead of the catalog cost. Skipped once the line changed
-  // product or cost meanwhile.
+  // An admin's line starts at the preferred vendor's newest cost while the PO is for that vendor.
+  // Skipped once the line changed product or cost meanwhile.
   const suggestPreferredVendorCost = async (itemKey: string, product: Product) => {
-    let cents: number | null = null;
-    let suggestedFor = '';
-    try {
-      const preferred = (await listProductVendors(product.id)).find((v) => v.is_preferred);
-      if (!preferred) return;
-      cents = preferred.last_cost_cents;
-      suggestedFor = preferred.vendor_name;
-    } catch (err) {
-      Sentry.captureException(err);
-      return;
-    }
-    if (cents === null || !Number.isSafeInteger(cents)) return;
-    const suggestion = { vendor: suggestedFor, cents };
-    const applies = suggestedFor === vendorRef.current.trim();
-    setItems((prev) => prev.map((i) => (
-      i.key === itemKey && i.product_id === product.id && !i.costEdited && i.unit_cost === (product.current_cost || 0)
-        ? { ...i, suggestion, ...(applies ? { unit_cost: cents / 100, costFromAdmin: true } : {}) }
-        : i
-    )));
+    const catalog = product.current_cost || 0;
+    const suggestion = await fetchPreferredVendorCost(product.id).catch((err) => { Sentry.captureException(err); return null; });
+    if (!suggestion) return;
+    const unitCost = costForVendor(suggestion, vendorRef.current, catalog);
+    setItems((prev) => prev.map((i) => (i.key === itemKey && i.product_id === product.id && !i.costEdited && i.unit_cost === catalog
+      ? { ...i, suggestion, unit_cost: unitCost, ...(unitCost !== catalog ? { costFromAdmin: true } : {}) } : i)));
   };
 
-  // A suggested cost belongs to its vendor: a PO for another vendor uses the catalog cost, and
-  // switching back to that vendor brings the suggestion back.
   const changeVendor = (next: string) => {
     setVendor(next);
-    setItems((prev) => prev.map((i) => (
-      i.suggestion && !i.costEdited
-        ? { ...i, unit_cost: i.suggestion.vendor === next.trim()
-            ? i.suggestion.cents / 100
-            : products.find((p) => p.id === i.product_id)?.current_cost || 0 }
-        : i
-    )));
+    setItems((prev) => prev.map((i) => (i.suggestion && !i.costEdited ? { ...i,
+      unit_cost: costForVendor(i.suggestion, next, products.find((p) => p.id === i.product_id)?.current_cost || 0) } : i)));
   };
 
   const totalCostCents = items.reduce(

@@ -21,3 +21,16 @@ export function hasWindowsShellVariable(commandWindows) {
 export function findWindowsShellVariableHooks(hooks) {
   return hooks.filter((hook) => hasWindowsShellVariable(hook?.commandWindows));
 }
+
+// Cursor on Windows runs `.claude/settings.json` hook commands in PowerShell 7 from
+// the project root (measured 2026-11-04, Cursor CLI 2026.10.22). There
+// `$CLAUDE_PROJECT_DIR` is an empty PowerShell variable, so `"$CLAUDE_PROJECT_DIR/.claude/hooks/x.mjs"`
+// became `C:\.claude\hooks\x.mjs`: every fail-open guard silently off, and the merge
+// guard's fallback denying every shell call. The portable prefix
+// `$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}` is the full path in Git Bash and
+// empty in PowerShell, leaving the path relative to the project root.
+const PORTABLE_PROJECT_DIR = "$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}";
+
+export function hasNonPortableProjectDir(command) {
+  return POWERSHELL_EXPANSION.test(String(command || "").split(PORTABLE_PROJECT_DIR).join(""));
+}

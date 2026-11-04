@@ -264,10 +264,12 @@ BEGIN
   -- #13 (bug list): a draft is rebuilt line by line, and a product line used to take today's
   -- product cost. An order-linked line saved back as the same product and unit keeps the cost it
   -- was invoiced at and its order line, so a later cost change neither re-costs the draft nor
-  -- makes the below-cost check refuse a note edit.
+  -- makes the below-cost check refuse a note edit. Only a line no larger than it was saved keeps
+  -- them, and each saved line is kept once, so a re-save cannot raise the below-cost exposure.
   SELECT COALESCE(jsonb_object_agg(ii.id::text, jsonb_build_object(
            'order_item_id', ii.order_item_id, 'product_id', ii.product_id,
-           'unit_size', ii.unit_size, 'cost_cents', ii.cost_cents)), '{}'::jsonb)
+           'unit_size', ii.unit_size, 'cost_cents', ii.cost_cents,
+           'quantity', ii.quantity)), '{}'::jsonb)
     INTO v_kept
     FROM invoice_items ii
    WHERE ii.invoice_id = v_invoice_id
@@ -298,9 +300,11 @@ BEGIN
     v_order_item_id := NULL;
     IF v_kept_line IS NOT NULL AND NOT v_is_field
        AND (v_kept_line->>'product_id') IS NOT DISTINCT FROM (v_item->>'product_id')
-       AND (v_kept_line->>'unit_size') IS NOT DISTINCT FROM (v_item->>'unit_size') THEN
+       AND (v_kept_line->>'unit_size') IS NOT DISTINCT FROM (v_item->>'unit_size')
+       AND v_qty <= (v_kept_line->>'quantity')::numeric THEN
       v_cost_cents := (v_kept_line->>'cost_cents')::bigint;
       v_order_item_id := (v_kept_line->>'order_item_id')::uuid;
+      v_kept := v_kept - (v_item->>'id');
     END IF;
     -- A charge line carries no cost (Mason, 2026-10-15); the shape CHECK refuses anything else.
     v_charge_type := NULLIF(btrim(v_item->>'charge_type'), '');

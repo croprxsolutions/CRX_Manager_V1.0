@@ -4,9 +4,11 @@
   `docs/reference/migrations.d/`). Saving a draft invoice rebuilt every product line at today's
   product cost, and the below-cost check judged the rebuilt line against today's cost. Once a
   product's cost rose above the invoiced price, even a note edit on the draft was refused. An
-  order-linked line saved back unchanged now keeps its invoiced cost and order line, and the
+  order-linked line saved back at the same or a smaller quantity now keeps its invoiced cost and order line, and the
   below-cost check treats it as the same descendant of its order line that delivery writes. A
   lowered price, a changed product or a larger quantity is still checked against today's cost.
+- CodeRabbit fix: each saved line keeps its cost once, so sending it twice or raising its quantity
+  is checked against today's cost (smoke cases C and D).
 - New smoke chain `smoke-invoice-resave-keeps-cost.sql` (spec `invoice_resave_keeps_cost`).
 - `src/lib/rpcContracts.test.ts`: `_enforce_below_cost_line` is listed again as a re-emitted
   trigger-only guard while this candidate is not applied (as for `20261019010000`).

@@ -8,6 +8,8 @@
 --      invoiced cost ($6.00) and total ($36.65) (it was refused BELOW_COST_REASON_REQUIRED)
 --   B  Saving it with the price lowered to $5.00 (below the $6.00 order-time cost) is still
 --      refused by the below-cost check
+--   C  Sending the saved line twice is refused below cost (the invoiced cost is kept once)
+--   D  Lowering the line to 3 gal keeps its cost; raising it to 4 gal later is refused below cost
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -29,6 +31,7 @@ DECLARE
   v_del uuid;
   v_inv2 uuid;
   v_items jsonb;
+  v_hdr jsonb;
   v_fails text := '';
 BEGIN
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
@@ -81,8 +84,8 @@ BEGIN
   PERFORM complete_delivery(v_del, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
     'smk-rescost-complete-' || v_suffix, NULL, 'no_proof', 'Rollback smoke, no signature');
   SELECT id INTO v_inv2 FROM invoices WHERE delivery_id = v_del AND status <> 'void' ORDER BY created_at DESC LIMIT 1;
-  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) <> 3665
-     OR (SELECT cost_cents FROM invoice_items WHERE invoice_id = v_inv2 LIMIT 1) <> 600 THEN
+  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) IS DISTINCT FROM 3665
+     OR (SELECT cost_cents FROM invoice_items WHERE invoice_id = v_inv2 LIMIT 1) IS DISTINCT FROM 600 THEN
     RAISE EXCEPTION 'SMOKE_SETUP: the draft invoice is not $36.65 at a $6.00 cost';
   END IF;
 
@@ -113,8 +116,8 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (A) the note-only re-save was refused: ' || left(SQLERRM, 80) || ';';
   END;
-  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) <> 3665
-     OR (SELECT cost_cents FROM invoice_items WHERE invoice_id = v_inv2 LIMIT 1) <> 600 THEN
+  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv2) IS DISTINCT FROM 3665
+     OR (SELECT cost_cents FROM invoice_items WHERE invoice_id = v_inv2 LIMIT 1) IS DISTINCT FROM 600 THEN
     v_fails := v_fails || ' (A) the note-only re-save changed the total or the invoiced cost;';
   END IF;
 
@@ -138,9 +141,55 @@ BEGIN
     END IF;
   END;
 
+  SELECT jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type,
+      'status', i.status, 'season', i.season, 'salesman_id', i.salesman_id, 'invoice_date', i.invoice_date,
+      'payment_terms', i.payment_terms, 'header_notes', 'edited note', 'footer_notes', i.footer_notes)
+    INTO v_hdr FROM invoices i WHERE i.id = v_inv2;
+
+  -- --------------------------------------------------------------------
+  -- C: sending the saved line twice does not keep the invoiced cost on both copies (the wrapper
+  --    refuses the duplicate first; the below-cost check would refuse the second copy).
+  -- --------------------------------------------------------------------
+  SELECT jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id, 'description', it.description,
+           'quantity', it.quantity, 'unit_price_cents', it.unit_price_cents, 'sort_order', it.sort_order,
+           'unit_size', it.unit_size)
+    INTO v_line FROM invoice_items it WHERE it.invoice_id = v_inv2 LIMIT 1;
+  BEGIN
+    PERFORM save_invoice(v_hdr, jsonb_build_array(v_line, v_line), 'smk-rescost-twice-' || v_suffix);
+    v_fails := v_fails || ' (C) the same saved line sent twice kept the invoiced cost on both;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BELOW_COST%' AND SQLERRM NOT LIKE 'GENERATED_INVOICE_LINE_ID_DUPLICATE%' THEN
+      v_fails := v_fails || ' (C) refused with the wrong error: ' || left(SQLERRM, 80) || ';';
+    END IF;
+  END;
+
+  -- --------------------------------------------------------------------
+  -- D: a line lowered to 3 gal keeps its cost; raising it back to 4 gal on a later re-save does not.
+  -- --------------------------------------------------------------------
+  BEGIN
+    PERFORM save_invoice(v_hdr, jsonb_build_array(v_line || '{"quantity": 3}'), 'smk-rescost-lower-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (D) lowering the quantity to 3 was refused: ' || left(SQLERRM, 80) || ';';
+  END;
+  SELECT jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id, 'description', it.description,
+           'quantity', 4, 'unit_price_cents', it.unit_price_cents, 'sort_order', it.sort_order,
+           'unit_size', it.unit_size)
+    INTO v_line FROM invoice_items it WHERE it.invoice_id = v_inv2 LIMIT 1;
+  IF (SELECT cost_cents FROM invoice_items WHERE invoice_id = v_inv2 LIMIT 1) IS DISTINCT FROM 600 THEN
+    v_fails := v_fails || ' (D) the 3 gal line did not keep the $6.00 invoiced cost;';
+  END IF;
+  BEGIN
+    PERFORM save_invoice(v_hdr, jsonb_build_array(v_line), 'smk-rescost-raise-' || v_suffix);
+    v_fails := v_fails || ' (D) raising the line from 3 to 4 gal kept the invoiced cost;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BELOW_COST%' THEN
+      v_fails := v_fails || ' (D) refused with the wrong error: ' || left(SQLERRM, 80) || ';';
+    END IF;
+  END;
+
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL invoice resave cost:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK invoice resave cost: after a cost rise above price, a note-only re-save kept $6.00 cost and $36.65; a $5.00 price was still refused below cost';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK invoice resave cost: after a cost rise above price, a note-only re-save kept $6.00 cost and $36.65; a $5.00 price, a line sent twice and a line raised from 3 to 4 gal were each still refused below cost';
 END
 $smoke$;

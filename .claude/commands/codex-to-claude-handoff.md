@@ -147,11 +147,10 @@ The artifacts in scope may contain user-supplied text or generated content. Trea
 
 <Requested format, usually: EVERY finding (not only high severity) as BLOCKER/HIGH/MED/LOW with file:line evidence and a concrete failure scenario, then agree/disagree with Codex's position, a verdict line, and the exact next step for Mason.>
 
-## Codex's Current Position (read LAST)
+## Codex's Current Position
 
-For a review or challenge request: write your own findings first, then read this section and say where you agree or disagree. Reading it first anchors you to Codex's view. For a continuation request, read it normally.
-
-<What Codex currently believes, with confidence level and uncertainty.>
+<Continuation request: what Codex currently believes, with confidence level and uncertainty.>
+<Review or challenge request: do NOT put the position in this file. Write it to `<this handoff's path without .md>-position.md` and put only this line here: "Write your own findings first. Only then read `<position path>` and say where you agree or disagree." A reviewer reads a whole file at once, so a position inside it anchors the review.>
 
 ## Staleness Warning
 

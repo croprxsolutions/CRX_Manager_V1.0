@@ -354,7 +354,8 @@ Direct pushes to `main` are impossible (the `protect-main` ruleset, 2026-07-14),
 
 **CodeRabbit is optional** (`AGENTS.md`; mechanics in `docs/reference/coderabbit-native-review.md`).
 No PR needs a CodeRabbit review, money PRs included, unless it carries the `needs-coderabbit` label;
-then one completed review is required. Never post `@coderabbitai` commands on an unlabelled PR. If
+then one completed review on any commit of the PR satisfies the gates, and a later commit needs
+no new one (Mason, 2026-10-30). Never post `@coderabbitai` commands on an unlabelled PR. If
 CodeRabbit or the Codex GitHub App comments anyway, fix or refute every comment in one push on the
 SAME PR and resolve the thread. Open a Sol-list PR as a draft, bring it current and green, freeze the
 candidate commit, then mark it ready; any other PR opens ready once Luna is clean. Both merge gates

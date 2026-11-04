@@ -40,7 +40,7 @@ The workflow runs `rls-security-reviewer` + `migration-drift-reviewer` + `typesc
 2. Show Mason each real blocker in plain English: what it is, where (`location`), why it matters, and the recommended fix.
 3. Offer to fix them. After fixing, re-run this command — the workflow re-verifies, and only a clean pass produces a proof.
 
-### 4. Apply (only after a clean proof exists, and only with Mason's authorization)
+### 4. Apply (only after a clean proof exists, and only under the authorization below)
 The proof unblocks the apply; it does not authorize it on its own. Authorization follows `AGENTS.md` autonomous landing and `.claude/commands/ship.md` Step 5: a NON-destructive migration with no permission change applies without a per-migration ask, but only through `scripts/apply-migration-file.mjs` and the full migration-apply-guard proof gate (both reviewer proofs plus a content-bound Sol proof, each under 24 hours, on the open PR's green, Sol-cleared head). A destructive, data-overwriting or permission-changing migration needs Mason's `I approve` for that exact file. Mint the proofs with `node scripts/write-apply-proofs.mjs <mig-name>` (it runs the Codex gate itself; hand-writing a proof is blocked by design).
 
 ### 5. After the apply

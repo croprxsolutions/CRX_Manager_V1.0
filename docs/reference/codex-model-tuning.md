@@ -2,7 +2,7 @@
 
 Read this only when choosing a Codex (OpenAI) model or reasoning effort, writing a Codex prompt, or changing a script that runs `codex`. The shared owner, safety, delivery, and verification rules remain in `AGENTS.md`; the Claude equivalent is `docs/reference/claude-model-tuning.md`.
 
-Last verified: 2026-09-26 (against the pins on `main` after PR #796).
+Last verified: 2026-09-26 (against the pins on `main` after PR #796); model availability re-probed 2026-11-03.
 
 ## The GPT-6 family
 

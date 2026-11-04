@@ -1235,8 +1235,8 @@ export default function ProductDetail() {
                 </fieldset>
               )}
               <div>
-                <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin} placeholder="Type or select..." />
-                {isAdmin && <NearMatchWarning kind="vendor" matches={nearMatchNames(product.vendor, vendorOptions)} onPick={(name) => update('vendor', name)} />}
+                <Combobox label="Vendor" value={product.vendor || ''} onChange={(v) => update('vendor', v)} options={vendorOptions} disabled={!isAdmin || !isNew} placeholder="Type or select..." />
+                {isAdmin && isNew && <NearMatchWarning kind="vendor" matches={nearMatchNames(product.vendor, vendorOptions)} onPick={(name) => update('vendor', name)} />}
               </div>
               <div>
                 <Combobox label="Manufacturer" value={product.manufacturer || ''} onChange={(v) => update('manufacturer', v)} options={manufacturerOptions} disabled={!isAdmin} placeholder="Type or select..." />

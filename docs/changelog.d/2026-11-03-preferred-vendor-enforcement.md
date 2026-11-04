@@ -1,0 +1,3 @@
+## 2026-11-03 — Preferred vendor enforcement (WP-PM-15b, local candidate)
+
+Local candidate migration `20261105180000_preferred_vendor_enforcement.sql`, applied only after DATA-11. A product with vendors always has exactly one preferred vendor, and the product's vendor text always shows that vendor's name, following renames and preferred changes. Typing over the vendor text is refused with a message pointing to the Vendors section of the product page. New products still save and pick up their vendor automatically when the typed name matches one vendor. A preferred vendor cannot be removed from a product, or deleted, until another is chosen. Proof: `scripts/smoke/prove-preferred-vendor-enforcement-real-schema.mjs`.

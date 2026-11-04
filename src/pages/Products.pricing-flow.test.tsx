@@ -273,12 +273,14 @@ describe('Products governed inline pricing flow', () => {
     });
   });
 
-  it('trims an inline name and saves blank vendor and category as NULL', async () => {
+  it('trims an inline name, saves a blank category as NULL and never sends the vendor', async () => {
     render(<Products />);
     fireEvent.click(await screen.findByRole('button', { name: 'Test detail normalization' }));
     await waitFor(() => expect(mockProductUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      product_name: 'Trimmed Name', vendor: null, category: null,
+      product_name: 'Trimmed Name', category: null,
     })));
+    // The vendor is a copy of the preferred vendor (WP-PM-15b); it changes only on the product page.
+    expect(mockProductUpdate.mock.calls[0][0]).not.toHaveProperty('vendor');
   });
 
   it('refuses an inline blank name before an update', async () => {

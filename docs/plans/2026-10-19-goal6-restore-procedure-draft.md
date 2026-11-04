@@ -169,7 +169,7 @@ and Supabase support (runbook 4.6).
    Compare the restored ledger with that registry, list every entry newer than the archive, and for each
    one require a reviewed, data-specific recovery plan with Mason's approval before cutover. If a plan is
    not ready, choose a newer archive or stop and escalate. For entries older than the archive, run any
-   after-restore check their registry entry names (DATA-11: every active product has a preferred vendor link).
+   after-restore check its registry entry names (DATA-11: the preferred vendor links row of the data proof in `supabase/baselines/README.md`).
    Applying migrations to the new project needs Mason's approval in the current conversation.
 9. A dump holds the database only. A new project has **no Edge Functions and no secrets**. Before going
    live on the restored copy: deploy every function directory under `supabase/functions/` to it, install

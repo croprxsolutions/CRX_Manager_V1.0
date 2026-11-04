@@ -197,7 +197,7 @@ describe('BulkProductImport', () => {
     expect(await screen.findByText(/Chem: Choose a category from the product category list/)).toBeInTheDocument();
   });
 
-  it.each(['-1', 'not-a-number', '0.1234567', '1e21'])('refuses invalid imported Rate Per Acre %s', async (rate) => {
+  it.each(['-1', 'not-a-number', '0.1234567', '1e21', '123456789012.123456'])('refuses invalid imported Rate Per Acre %s', async (rate) => {
     render(<BulkProductImport {...defaultProps} />);
     const csv = `product_name,rate_per_acre\nChem,${rate}`;
     const file = new File([csv], 'products.csv', { type: 'text/csv' });

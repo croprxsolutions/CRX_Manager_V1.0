@@ -20,10 +20,12 @@
 --   * set_product_rate_lock(locked, reason): any admin, with a reason, logged.
 --   * correct_product_rates(product, ..., expected pricing_version, reason): one product at a time,
 --     admin, reason, retry key; the only write the guard lets through while locked. It is recognised
---     by a transaction-local setting only this function sets, holding the product id and the
---     transaction id, never by anything a client sends.
+--     by a row in the private product_rate_correction_passes table that only this function writes,
+--     holding the product id and the transaction id, never by anything a client sends.
 --   * Both writers refuse a changed rate unit that unit_conversions does not know for the product's
---     form (the price workbook's rule), since an unknown unit prices per acre as one ounce.
+--     form (the price workbook's rule), since an unknown unit prices per acre as one ounce; a kept
+--     legacy unit and every unit must also have a factor above zero, outside seed and each products,
+--     whose unit is their stock unit (live: every rated product passes).
 --   * The price workbook can no longer change rates: a rate change in its change rows is refused.
 --   * tier1/2/3_price_per_acre get whole-cent CHECKs (live has none off the cent, read 2026-11-03).
 -- Rate changes these functions make are logged in cost_history as product-page edits (the history
@@ -279,16 +281,22 @@ $function$;
 ALTER FUNCTION public._product_rate_value(jsonb) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_rate_value(jsonb) FROM PUBLIC, anon, authenticated, service_role;
 
--- The price workbook's unit rule (20260722091359): an unchanged legacy unit is kept; a new one must be
--- a unit_conversions key for the product's form (or type both). A rate needs a unit, except on seed and
--- each products, where validate_product_units fills it from the stock unit.
+-- The price workbook's unit rule (20260722091359), tightened: a new unit must be a unit_conversions key
+-- for the product's form (or type both); an unchanged legacy unit is kept only while it is a key of any
+-- form. Either way its factor must be above zero, since per-acre pricing prices an unknown unit as one
+-- ounce and a zero factor as $0. A rate needs a unit, except on seed and each products, where
+-- validate_product_units fills it from the stock unit (their unchanged unit is kept as it is).
 CREATE FUNCTION public._product_rate_unit_ok(p_rate numeric, p_new_unit text, p_old_unit text, p_form text) RETURNS boolean
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
-  SELECT CASE WHEN p_new_unit IS NULL THEN p_rate IS NULL OR COALESCE(p_form IN ('seed', 'each'), false)
-    ELSE p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '')
-      OR EXISTS (SELECT 1 FROM public.unit_conversions uc
-                  WHERE lower(uc.unit) = lower(p_new_unit)
-                    AND (p_form IS NULL OR uc.unit_type = p_form OR uc.unit_type = 'both'))
+  -- Clearing a rate always passes: no rate prices nothing, and the next rate write checks the unit.
+  SELECT CASE WHEN p_rate IS NULL THEN true
+    WHEN p_new_unit IS NULL THEN COALESCE(p_form IN ('seed', 'each'), false)
+    WHEN COALESCE(p_form IN ('seed', 'each'), false)
+         AND p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '') THEN true
+    ELSE EXISTS (SELECT 1 FROM public.unit_conversions uc
+                  WHERE lower(uc.unit) = lower(p_new_unit) AND uc.factor_oz > 0
+                    AND (p_new_unit IS NOT DISTINCT FROM NULLIF(btrim(p_old_unit), '')
+                         OR p_form IS NULL OR uc.unit_type = p_form OR uc.unit_type = 'both'))
   END;
 $function$;
 ALTER FUNCTION public._product_rate_unit_ok(numeric, text, text, text) OWNER TO postgres;

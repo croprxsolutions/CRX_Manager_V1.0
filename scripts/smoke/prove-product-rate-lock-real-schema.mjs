@@ -313,6 +313,20 @@ function main() {
   refused(ADMIN, `UPDATE public.products SET rate_per_acre = 8, rate_unit = 'gallons' WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
   refused(ADMIN, `UPDATE public.products SET rate_per_acre = 8 WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
   refused(ADMIN, `UPDATE public.products SET rate_per_acre = 1.1234567, rate_unit = 'oz' WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_INVALID/);
+  // A kept legacy unit must still be a priced unit, and a zero factor would price per acre at $0.
+  asOwner(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Zero', 0, 'liquid');
+    UPDATE public.products SET rate_per_acre = 8, rate_unit = 'Bushel' WHERE id = '${P.OTHER}';`);
+  refused(ADMIN, setRates([row(P.OTHER, '16', 'Bushel', '', ['8', 'Bushel', null])], 'k-legacy'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
+  refused(ADMIN, `UPDATE public.products SET rate_per_acre = 16 WHERE id = '${P.OTHER}';`, /PRODUCT_RATE_UNIT_INVALID/);
+  refused(ADMIN, setRates([row(P.OTHER, '16', 'Zero', '', ['8', 'Bushel', null])], 'k-zero'), /PRODUCT_RATE_UNIT_INVALID: .*\[PROVER\] Other/);
+  // Clearing the rate still works: no rate prices nothing.
+  ok(ADMIN, `UPDATE public.products SET rate_per_acre = NULL WHERE id = '${P.OTHER}';`);
+  // A kept unit listed only for the other form, with a real factor, stays (live: two dry products keep liquid oz).
+  asOwner(`UPDATE public.products SET product_form = 'dry', inventory_unit = 'Lb', rate_per_acre = 8, rate_unit = 'oz' WHERE id = '${P.OTHER}';`);
+  ok(ADMIN, `UPDATE public.products SET rate_per_acre = 9 WHERE id = '${P.OTHER}';`);
+  asOwner(`UPDATE public.products SET product_form = DEFAULT, inventory_unit = 'gal', rate_per_acre = NULL, rate_unit = NULL WHERE id = '${P.OTHER}';`);
+  asOwner(`DELETE FROM public.unit_conversions WHERE unit = 'Zero';
+    UPDATE public.products SET rate_per_acre = NULL, rate_unit = NULL WHERE id = '${P.OTHER}';`);
   refused(ADMIN, lock(true, '	', 'k-tab-reason'), /REASON_REQUIRED/);
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', versionOf(P.GAL), 'label fix', 'k-cor-open'), /PRODUCT_RATES_NOT_LOCKED/);
   // Per-acre prices are whole cents, 0 or more, and finite (triggers off, so the recalculation cannot hide it).

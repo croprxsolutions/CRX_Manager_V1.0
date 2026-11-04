@@ -68,8 +68,9 @@ function validateImportRow(
       const number = Number(trimmed);
       const valid = !/^0[xob]/i.test(trimmed) && Number.isFinite(number)
         && (field !== 'container_size' || number > 0)
-        // The database's rate rule, applied to the text it will receive.
-        && (field !== 'rate_per_acre' || /^[0-9]{1,12}(\.[0-9]{1,6})?$/.test(String(number)));
+        // The database's rate rule, checked on the typed text; past 15 digits a JS number would round it.
+        && (field !== 'rate_per_acre' || (/^[0-9]{1,12}(\.[0-9]{1,6})?$/.test(trimmed)
+          && trimmed.replace('.', '').replace(/^0+/, '').length <= 15));
       if (valid) product[field] = number;
       else numberError = field === 'container_size'
         ? 'Container size must be a number greater than 0.'

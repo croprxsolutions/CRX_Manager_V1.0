@@ -192,8 +192,11 @@ age layers and gives each one a cost:
 - **Receipts after the starting point** get the PO-line unit cost **frozen at receipt**: one new column on
   `receiving_records`, written by the receiving function (the only existing writer this touches). Receipts
   before the build have no frozen cost and are covered by the stock count.
-- **Value of stock on hand** = Σ layer quantity × layer cost; **average** = value ÷ quantity, labelled "average
-  recorded cost of stock on hand" with the share from CRX receipts shown. Rows that fail Phase 1's "adds up"
+- **Value of stock on hand** = Σ layer quantity × layer cost over **costed layers only**; **average** = that
+  value ÷ the costed quantity (never ÷ all on-hand), labelled "average recorded cost of stock on hand" with
+  the share from CRX receipts shown. Uncosted or age-unknown quantity is never valued at zero: the row shows
+  "partial — N units without a cost" until it is fully covered, and partial rows are labelled as such in
+  totals (section 3.2). Rows that fail Phase 1's "adds up"
   check show "value unknown — re-enter starting date".
 - No event stream, no guards on stock writers, no cost forwarding. Vendor-bill cost replaces PO cost on a
   receipt's layer once Phase 4 settles it.

@@ -168,7 +168,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
 
         {setup && (
           <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Setup tab preview">
-            <h3 className="font-semibold text-nav-dark">Setup tab: {setup.changes.length} products to change</h3>
+            <h3 className="font-semibold text-nav-dark">Setup tab: {setup.changes.length} {setup.changes.length === 1 ? 'product' : 'products'} to change</h3>
             {[...setup.stale, ...setup.invalid].map((p) => (
               <p key={p.product_id} className="text-red-700">{p.product_name}: {p.problem}</p>
             ))}
@@ -195,7 +195,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
 
         {rates && (
           <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Rates tab preview">
-            <h3 className="font-semibold text-nav-dark">Rates tab: {rateChanges.length} products to change</h3>
+            <h3 className="font-semibold text-nav-dark">Rates tab: {rateChanges.length} {rateChanges.length === 1 ? 'product' : 'products'} to change</h3>
             {rates.preview?.rates_locked && (
               <p className="text-red-700">Rates are locked. An admin can correct one product at a time from its product page, with a reason.</p>
             )}

@@ -412,7 +412,7 @@ function makeQuoteFixture(status: 'draft' | 'sent' | 'accepted' = 'draft', rowVe
 }
 
 function configureDrawDownFixture(
-  drawError: { message: string; details?: string },
+  drawError: { message: string; details?: string; code?: string },
   { failRecoveryLoad = false }: { failRecoveryLoad?: boolean } = {},
 ) {
   const fixture = makeQuoteFixture('sent', 7);
@@ -1343,6 +1343,17 @@ describe('QuoteBuilder', () => {
       await submitOneUnitDraw(fixture.quote.id);
       await waitFor(() => expect(mockResetIdempotencyKey).toHaveBeenCalled());
       expect(sessionStorage.length).toBe(0);
+    });
+
+    it('offers nothing to finish after the server clearly refused the draw', async () => {
+      const fixture = configureDrawDownFixture({ code: 'P0001', message: 'BOOKING_OVERDRAWN: only 5 gal left' });
+      await submitOneUnitDraw(fixture.quote.id);
+      await waitFor(() => expect(drawCalls()).toHaveLength(1));
+      await waitFor(() => expect(sessionStorage.length).toBe(0));
+
+      const dialog = await reloadAndOpenDraw(fixture.quote.id);
+      await within(dialog).findByRole('spinbutton');
+      expect(within(dialog).queryByText(/got no reply/)).not.toBeInTheDocument();
     });
   });
 

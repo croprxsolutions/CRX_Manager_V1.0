@@ -17,9 +17,9 @@ Use this when Mason asks anything like: "what's parked", "anything waiting on me
 3. **If Mason asks to APPLY one — never apply it directly from here.** Route into the existing gated flow, in order:
    1. `/explain-migration <file>` — plain-English explanation of exactly what the SQL will do to the live database, what could go wrong, and what rollback looks like.
    2. `/migration-review <file>` — the deep parallel review (RLS + drift + types with adversarial verification); only a clean verdict stamps the proof file the `migration-apply-guard` hook requires.
-   3. **Mason's explicit OK** — a live migration is a hard-gated action. Approval for a push, deploy, or another migration does not cover it. Only after his clear yes in the current conversation does `apply_migration` run, followed by the standard post-apply verification (smoke the change against live, `list_migrations`, update docs).
+   3. **Apply** — follows `AGENTS.md` autonomous landing and `.claude/commands/ship.md` Step 5: a NON-destructive migration with no permission change applies without a per-migration ask, but only through `scripts/apply-migration-file.mjs` and the full migration-apply-guard proof gate (both reviewer proofs plus a content-bound Sol proof, each under 24 hours, on the open PR's green, Sol-cleared head). A destructive, data-overwriting or permission-changing migration needs Mason's `I approve` for that exact file. The Supabase MCP `apply_migration` cannot pass the guard. Then run the post-apply steps in `ship.md` Step 5 (smoke chains, ledger check, registry refresh, sweeps).
 
-   The human gate stays. If any step fails or the review comes back blocked, stop and tell Mason what was found and what you recommend instead.
+   The gates stay. If any step fails or the review comes back blocked, stop and tell Mason what was found and what you recommend instead.
 
 4. If a parked draft lives in ANOTHER worktree, don't edit or move that worktree's files — coordinate: tell Mason which window/session owns it, or copy the SQL content read-only for review here. (See the staging-migrations DRAFT/APPLY protocol — check for parallel-session writes first.)
 

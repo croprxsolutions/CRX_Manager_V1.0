@@ -2806,6 +2806,9 @@ function registryMigrationHighWater(): string {
 // 20261103100000, 20261103120000 and 20261103130000 were added on 2026-11-02: they applied live
 // that evening and the wave-4 registry refresh moved the authored boundary to 20261103130000
 // while src/types/supabase.ts still predates them. Clear them on the same type-regeneration rule.
+// 20261104130000, 20261104140000 and 20261104150000 were added on 2026-11-03 for the same reason:
+// all three applied live that day and the registry refresh after WP-PM-9 moved the boundary to
+// 20261104150000.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2830,6 +2833,10 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261103100000',
   '20261103120000',
   '20261103130000',
+  '20261104130000',
+  '20261104140000',
+  '20261104150000',
+  '20261105160000',
 ]);
 
 /**
@@ -3069,6 +3076,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   //     landed on main and applied live; it drops both helpers before finishing.
   // Pruned 2026-10-22 when 20261021140000 applied live (ledger 20261021224056) and the registry
   // high-water moved past it: _po_item_cost_change_log is trigger-returning, so it is no longer discovered.
+  // Pruned 2026-11-03: the five WP-PM-15b trigger-only helpers of 20261105180000 (_sync_product_vendor_copy,
+  //   link_new_product_vendor, prepare_product_supplier_link, sync_product_vendor_from_links,
+  //   sync_product_vendor_on_vendor_rename); it applied live (ledger 20261104024012), so they left the inventory.
   _insert_commissions_for_job: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   _insert_commissions_for_order: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   // _guard_delivery_completion_authorized is also parked with Wave A in

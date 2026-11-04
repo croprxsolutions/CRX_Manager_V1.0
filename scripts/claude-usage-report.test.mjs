@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
-import os from "node:os";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "./lib/test-temp-dir.mjs";
 
 const script = fileURLToPath(new URL("./claude-usage-report.mjs", import.meta.url));
-const root = mkdtempSync(path.join(os.tmpdir(), "claude-usage-prompts-"));
+const root = tempDir("claude-usage-prompts-");
 const timestamp = "2026-09-04T12:00:00Z";
 const user = (content) => ({ type: "user", timestamp, message: { content } });
 const assistant = (id, content = []) => ({

@@ -2,10 +2,10 @@
 // Pre-push skips the app type check and build only when no app file changed, and builds on any doubt.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { needsAppBuild } from './prepush-needs-build.mjs';
+import { tempDir } from './lib/test-temp-dir.mjs';
 
 assert.equal(needsAppBuild(['scripts/a.mjs', 'docs/x.md', 'supabase/migrations/1_x.sql']), false);
 for (const file of ['src/App.tsx', 'public/sw.js', 'index.html', 'vite.config.ts', 'tsconfig.app.json', 'package-lock.json', 'vercel.json']) {
@@ -25,7 +25,7 @@ assert.equal(verdict(''), 'build', 'no refs: build');
 assert.equal(verdict('garbage line here\n'), 'build', 'an unreadable ref line must build');
 
 // A move out of src/ must still build: rename detection would report only the new path.
-const repo = mkdtempSync(path.join(os.tmpdir(), 'crx-prepush-move-'));
+const repo = tempDir('crx-prepush-move-');
 try {
   const inRepo = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repo, encoding: 'utf8' }).trim();
   inRepo('init', '-q');

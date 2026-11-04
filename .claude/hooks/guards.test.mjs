@@ -12,6 +12,7 @@ import { isHoldPhrase, isResumePhrase, isBuildActionUnderHold, holdDecision, hol
 import { classifySql } from "./live-testdata-lib.mjs";
 import { isGitPush, pushTargetsMain, mainPushSource, riskyFiles, contentIsRisky, proofValid } from "./codex-push-lib.mjs";
 import { DENY_TOOLNAME_RE } from "./autopilot-lib.mjs";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -576,7 +577,7 @@ ok(r.stdout.includes("deny"), "live-testdata-guard denies real business-table up
 // REAL-DATA-OK (2026-10-23): a fresh marker relaxes ordinary writes only; a stale
 // one is ignored; destructive rules never relax, even later in the same batch.
 {
-  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "crx-realdata-"));
+  const proj = tempDir("crx-realdata-");
   const stateDir = path.join(proj, ".claude", "session-state");
   fs.mkdirSync(stateDir, { recursive: true });
   const marker = path.join(stateDir, "REAL-DATA-OK");
@@ -901,7 +902,7 @@ for (const command of [
 // dead for the exact hazard its own deny text describes. These assertions fail
 // against the old ordering.
 {
-  const mirrorRepo = fs.mkdtempSync(path.join(os.tmpdir(), "crx-mirror-guard-"));
+  const mirrorRepo = tempDir("crx-mirror-guard-");
   const git = (...args) => spawnSync("git", ["-C", mirrorRepo, ...args], { encoding: "utf8" });
   spawnSync("git", ["init", "-q", mirrorRepo], { encoding: "utf8" });
   git("config", "user.email", "test@example.com");
@@ -1069,7 +1070,7 @@ for (const command of [
 // directory, blocking an ordinary feature push that never touched it. `-C` is a
 // documented global form. The deny must survive in the direction that matters.
 {
-  const outer = fs.mkdtempSync(path.join(os.tmpdir(), "crx-outer-")); // deliberately NOT a repo
+  const outer = tempDir("crx-outer-"); // deliberately NOT a repo
   const repo = path.join(outer, "repo");
   fs.mkdirSync(repo);
   const git = (...args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
@@ -1110,7 +1111,7 @@ for (const command of [
 // with `spawnSync git ENOENT` because the guard read "$W" as a folder name. Any
 // variable the guard cannot prove is that one literal stays denied.
 {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "crx-folder-var-"));
+  const repo = tempDir("crx-folder-var-");
   const git = (...args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
   spawnSync("git", ["init", "-q", repo], { encoding: "utf8" });
   git("config", "user.email", "test@example.com");
@@ -1156,11 +1157,40 @@ for (const command of [
     `W="${dir}"; . ./env.sh; git -C "$W" ${pushVerb} origin feature`,
     `W=~/repo; git -C "$W" ${pushVerb} origin feature`,
     `GIT_X="${dir}"; git -C "$GIT_X" ${pushVerb} origin feature`,
-    `W="${dir}"; cd "$W" && git ${pushVerb} origin feature`,
+    `W="${dir}"; W="${dir}"; cd "$W" && git ${pushVerb} origin feature`,
+    `cd "${dir}" && cd "${dir}" && git ${pushVerb} origin feature`,
+    `cd "${dir}" || git ${pushVerb} origin feature`,
+    `git ${pushVerb} origin feature; cd "${dir}"`,
+    // A push after any directory change stays refused (P2's cd binding was dropped).
     `cd "${dir}" && git ${pushVerb} origin feature`,
+    `W="${dir}"; cd "$W" && git ${pushVerb} origin feature`,
+    `cd && git ${pushVerb} origin feature`,
   ]) {
     ok(/"permissionDecision":"deny"/.test(run(command).stdout), `unbindable folder variable stays denied: ${command}`);
   }
+
+  // P1 (2026-11-03): a Git Bash `/c/…` folder binds to the real drive now, and
+  // that folder's gates still apply.
+  const bashDir = process.platform === "win32" ? dir.replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`) : dir;
+  eq(run(`git -C ${bashDir} ${pushVerb} -u origin feature 2>&1 | tail -3`).stdout.trim(), "",
+    "Git Bash path push passes");
+  ok(/push to main/.test(run(`git -C ${bashDir} ${pushVerb} origin HEAD:main`).stdout),
+    "Git Bash path risky push to main is still refused");
+  ok(/force-pushing/.test(run(`git -C ${bashDir} ${pushVerb} -f origin feature`).stdout),
+    "Git Bash path force push is still refused");
+  ok(/push to main/.test(run(`cat <<'EOF' | bash\ngit -C "${dir}" ${pushVerb} origin HEAD:main\nEOF`).stdout),
+    "a push inside a here-document fed to bash is still inspected");
+  ok(/not an existing folder/.test(run(`git -C "${dir}/missing" ${pushVerb} origin feature`).stdout),
+    "a push into a folder that does not exist is refused with a clear reason");
+  // P1 must never fail open: with no git to run, a real repo's push still refuses.
+  const noGitEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^path$/i.test(key)));
+  noGitEnv.PATH = fs.mkdtempSync(path.join(os.tmpdir(), "crx-no-git-"));
+  for (const command of [`git -C "${dir}" ${pushVerb} origin feature`, `git -C ${bashDir} ${pushVerb} origin feature`]) {
+    const noGit = spawnSync(process.execPath, [path.join(__dirname, "codex-push-guard.mjs")],
+      { input: JSON.stringify({ cwd: os.tmpdir(), tool_name: "Bash", tool_input: { command } }), encoding: "utf8", env: noGitEnv });
+    ok(/could not determine the repository\/branch/.test(noGit.stdout), `no git on PATH still refuses: ${command}`);
+  }
+  fs.rmSync(noGitEnv.PATH, { recursive: true, force: true });
 
   // (c) a variable pointing at a protected main push is still refused.
   const literalMain = run(`git -C "${dir}" ${pushVerb} origin HEAD:main`).stdout;

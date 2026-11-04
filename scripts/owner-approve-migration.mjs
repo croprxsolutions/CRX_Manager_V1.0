@@ -121,6 +121,26 @@ if (!categories.length) {
     `It applies through the normal proofs; do not ask him to approve it.`);
 }
 
+// A later-stamped migration applied first gets this one refused by the ordering guard, after
+// Mason already approved it (WP-PM-6a, 2026-11-03). Warn, never refuse: refusing only makes the
+// two sessions leapfrog. A separate process, so the scanner (not a trust file) can only print.
+const ownStamp = migName.match(/^(\d{14})_/)?.[1];
+if (ownStamp) {
+  try {
+    const later = String(execFileSync(process.execPath, [path.join(checkout, "scripts", "next-migration-stamp.mjs"), "--later-than", ownStamp], {
+      cwd: checkout, encoding: "utf8", timeout: 120_000, stdio: ["ignore", "pipe", "pipe"],
+    })).trim();
+    if (later) {
+      console.error(
+        `WARNING: migrations stamped after ${migName} exist elsewhere:\n${later.split("\n").map((l) => `  - ${l}`).join("\n")}\n` +
+        `If any of them is applied first, this one is refused and must be restamped (Mason approves again). ` +
+        `Apply right after his reply, or ask the session holding it to wait. One on origin/main is probably live already: restamp before asking him.\n`);
+    }
+  } catch (err) {
+    console.error(`note: could not check for later-stamped migrations (${String(err?.stderr || err?.message || err).trim().split("\n")[0]}).\n`);
+  }
+}
+
 // The pull request the approval is bound to: this checkout's branch, open, at this exact head.
 const git = (args) => String(execFileSync("git", args, { cwd: checkout, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] })).trim();
 let head;

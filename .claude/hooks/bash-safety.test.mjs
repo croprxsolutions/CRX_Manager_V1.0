@@ -7,9 +7,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
-import os from "node:os";
+import { writeFileSync, rmSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   checkDangerousCommand,
   checkCommandDeep,
@@ -82,6 +82,30 @@ ok(checkDangerousCommand("cat <<'SQL' | psql\nDROP TABLE customers;\nSQL"), "cat
 ok(checkDangerousCommand('grep -l "DROP TABLE" f | xargs cat | psql'), "readers feeding psql still blocked");
 ok(checkDangerousCommand(`grep "$(psql -c 'DROP SCHEMA x')" f`), "a client run from a reader's command substitution still blocked");
 ok(checkDangerousCommand('git grep "psql" -- "DROP SCHEMA"'), "git stays a non-reader");
+// 2026-11-03: a git grep/log exemption (P4) was tried and dropped — a pager set
+// in git's config can run a program the command text never names. These pin
+// that every real SQL route stays refused.
+ok(checkDangerousCommand('git commit -q -m "stop refusing psql -c TRUNCATE in a search"'), "a commit message stays as main treats it (no text skipping)");
+ok(checkDangerousCommand('git -c alias.x="!psql" x "DROP SCHEMA"'), "git with a global option before the subcommand stays a non-reader");
+ok(checkDangerousCommand('git -C . grep "psql" "DROP SCHEMA"'), "git with -C before grep stays a non-reader");
+ok(checkDangerousCommand('git log --ext-diff -p "psql" "DROP SCHEMA"'), "git log running an external diff program stays refused");
+ok(checkDangerousCommand('git grep -O"psql -c" "DROP SCHEMA"'), "git grep opening a pager program stays refused");
+ok(checkDangerousCommand('git commit -m "$(psql -c \'DROP TABLE x\')"'), "a client in a commit message's command substitution stays refused");
+ok(checkDangerousCommand("cat <<'EOF' | psql\nDROP TABLE customers;\nEOF"), "a here-document piped to psql stays refused");
+ok(checkDangerousCommand("psql <<'EOF'\nDROP TABLE customers;\nEOF"), "a here-document fed to psql stays refused");
+ok(checkDangerousCommand("python - <<'EOF'\nimport os; os.system('psql -c \"DROP TABLE x\"')\nEOF"), "an interpreter here-document naming psql stays refused");
+ok(checkDangerousCommand('echo "DROP TABLE x;" | psql'), "echo piped into psql stays refused");
+ok(checkDangerousCommand('supabase sql "DROP SCHEMA public"'), "supabase sql DROP SCHEMA stays refused");
+// Real SQL routes stay refused (Sol on the P4 proposal, 2026-11-03).
+for (const [command, label] of [
+  ['git grep x; npx psql "$DB" -c "DROP TABLE x"', "npx psql after a git grep"],
+  ["git log -1 && bash -c 'psql -c \"DROP TABLE x\"'", "bash -c psql after a git log"],
+  ["git grep x\nsh <<'EOF'\npsql -c 'TRUNCATE x'\nEOF", "heredoc fed to sh"],
+  ["cat wipe.sql | psql \"$DB\" # DROP TABLE", "file piped into psql"],
+  ["cat > wipe.sql <<'EOF'\nDROP TABLE customers;\nEOF\npsql -f wipe.sql", "a written SQL file run by psql"],
+  ["cat(){ bash; }; cat <<'EOF'\npsql -c 'DROP TABLE customers'\nEOF", "a function named cat running bash"],
+  ['git grep "$(psql -c \'DROP TABLE x\')"', "a client in a git grep's command substitution"],
+]) ok(checkDangerousCommand(command), `SQL route stays refused: ${label}`);
 ok(checkDangerousCommand('rg --pre psql "DROP SCHEMA" db.sql'), "rg --pre running a client stays refused (Codex App, PR #1337)");
 ok(checkDangerousCommand(`rg --p''re=psql "DROP SCHEMA" db.sql`), "a quote-split --pre= spelling stays refused");
 // A reader spanning a line break is never exempt (Codex App, PR #1337).
@@ -534,7 +558,7 @@ ok(!checkDangerousCommand("cat .env.example"), "reading .env.example is not a wr
 
 // ── migration-modify check (unchanged) ─────────────────────────────────────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bash-safety-migtest-"));
+  const tmp = tempDir("bash-safety-migtest-");
   try {
     const migDir = path.join(tmp, "supabase", "migrations");
     mkdirSync(migDir, { recursive: true });
@@ -556,7 +580,7 @@ ok(!checkDangerousCommand("cat .env.example"), "reading .env.example is not a wr
 
 // ── FIX 2: npm-script indirection ──────────────────────────────────────────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bash-safety-npmtest-"));
+  const tmp = tempDir("bash-safety-npmtest-");
   try {
     const pkg = {
       scripts: {
@@ -701,7 +725,7 @@ eq(extractNpmRunNames("npm --loglevel=silent run dangerous")[0], "dangerous", "n
   ok(chain.includes("git push --force origin main"), "prebuild lifecycle script is resolved with npm run build");
 }
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bashsafety-lifecycle-"));
+  const tmp = tempDir("bashsafety-lifecycle-");
   try {
     writeFileSync(path.join(tmp, "package.json"), JSON.stringify({
       scripts: { build: "echo building", postbuild: "git reset --hard HEAD~1" },
@@ -727,7 +751,7 @@ eq(checkDangerousCommand("dotenv -e .env.test -- npm run test"), null, "mentioni
 // ── Codex P1 2026-07-13: npm-resolved script bodies must also hit the
 //    migration-immutability check, not just the dangerous-command table ──────
 {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), "bashsafety-npm-mig-"));
+  const tmp = tempDir("bashsafety-npm-mig-");
   try {
     mkdirSync(path.join(tmp, "supabase", "migrations"), { recursive: true });
     writeFileSync(path.join(tmp, "supabase", "migrations", "20260101000000_existing.sql"), "select 1;\n");

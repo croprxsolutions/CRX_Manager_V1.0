@@ -24,10 +24,14 @@ function fakeDb(tables: Record<string, Array<Record<string, unknown>>>, fail: Se
   return {
     from(table: string) {
       const eqs: Array<[string, unknown]> = [];
+      const ins: Array<[string, unknown[]]> = [];
       const rows = (): Reply => {
         if (fail.has(table)) return { data: null, error: { message: `${table} read failed` } };
         const all = tables[table] ?? [];
-        return { data: all.filter((r) => eqs.every(([k, v]) => r[k] === v)), error: null };
+        return {
+          data: all.filter((r) => eqs.every(([k, v]) => r[k] === v) && ins.every(([k, vs]) => vs.includes(r[k]))),
+          error: null,
+        };
       };
       const builder = {
         select: () => builder,
@@ -35,6 +39,10 @@ function fakeDb(tables: Record<string, Array<Record<string, unknown>>>, fail: Se
         is: () => builder,
         eq: (column: string, value: unknown) => {
           eqs.push([column, value]);
+          return builder;
+        },
+        in: (column: string, values: unknown[]) => {
+          ins.push([column, values]);
           return builder;
         },
         maybeSingle: () => {
@@ -69,6 +77,12 @@ const invoiceTables = () => ({
     { invoice_id: "inv-1", description: "Surfactant", quantity: 1, unit_size: "gal", unit_price_cents: 2_345, extended_cents: 2_345, product: { product_name: "Surfactant", epa_registration: null, product_form: "liquid" } },
   ],
   invoice_shares: [],
+  app_settings: [
+    { setting_key: "company_name", setting_value: "Test Ag Co" },
+    { setting_key: "company_phone", setting_value: "555-0199" },
+    { setting_key: "company_email", setting_value: "office@testag.test" },
+    { setting_key: "company_address", setting_value: "" },
+  ],
 });
 
 Deno.test("an invoice PDF is drawn from the saved invoice, and prints its saved money", async () => {
@@ -87,10 +101,15 @@ Deno.test("an invoice PDF is drawn from the saved invoice, and prints its saved 
   for (const printed of ["INV-KI98-1", "GREEN ACRES", "Atrazine 4L", "$123.45", "$100.00"]) {
     assert(text.includes(printed), `PDF does not print ${printed}`);
   }
+  // The letterhead takes the Settings company details; a blank address keeps the default town.
+  for (const printed of ["TEST AG CO", "555-0199", "office@testag.test", "West York, IL"]) {
+    assert(text.includes(printed), `PDF does not print the Settings value ${printed}`);
+  }
+  assert(!text.includes("CROP RX SOLUTIONS"), "PDF still prints the built-in company name");
 });
 
 Deno.test("any failed invoice read refuses instead of drawing a PDF with parts missing", async () => {
-  for (const table of ["invoices", "profiles", "customers", "invoice_items", "invoice_shares"]) {
+  for (const table of ["invoices", "profiles", "customers", "invoice_items", "invoice_shares", "app_settings"]) {
     let refused = false;
     try {
       await loadInvoicePdfData(fakeDb(invoiceTables(), new Set([table])), "inv-1");
@@ -114,9 +133,10 @@ Deno.test("a purchase order PDF is drawn from the saved order and its vendor rec
   );
   assertEquals(data.lines[0].quantity_ordered, 3);
   assertEquals(data.lines[0].unit_cost, 19.99);
-  const text = pdfText(drawPurchaseOrderPdf({ jsPDF, autoTable }, data));
+  const company = { name: "Prairie Ag Co", phone: "555-0199", email: "", address: "12 Main St Annapolis, IL 62413" };
+  const text = pdfText(drawPurchaseOrderPdf({ jsPDF, autoTable }, data, company));
   assert(text.startsWith("%PDF-"), "not a PDF");
-  for (const printed of ["PO-KI98-1", "Atrazine 4L", "$59.97"]) {
+  for (const printed of ["PO-KI98-1", "Atrazine 4L", "$59.97", "PRAIRIE AG CO", "12 Main St Annapolis, IL 62413", "555-0199"]) {
     assert(text.includes(printed), `PDF does not print ${printed}`);
   }
 });

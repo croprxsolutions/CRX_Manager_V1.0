@@ -324,7 +324,7 @@ Rules for new pages and for any page a screen-cleanup PR touches. Existing pages
 - A count beside a tab or jump pill is a small round bubble. On the selected tab or pill it is solid `crx-green` with white text (or white with green text when the pill itself is solid green). On the others it is gray-100 with gray-600 text.
 
 ### Form errors and placeholders
-- Error text and the required asterisk are `red-600`, and an input in error has a `red-500` border. Placeholders are `gray-500`, never lighter (gray-400 fails contrast on white). Keyboard focus shows a full-strength `crx-green` ring.
+- Error text and the required asterisk are `red-600`, and an input in error has a `red-500` border. Placeholders are `gray-500`, never lighter (gray-400 fails contrast on white). Keyboard focus shows a full-strength `crx-green` ring. An element with no focus classes of its own gets a 2px `crx-green` outline from `src/index.css` (`crx-green-on-dark` inside the dark backgrounds listed there), never the browser's default.
 
 ---
 

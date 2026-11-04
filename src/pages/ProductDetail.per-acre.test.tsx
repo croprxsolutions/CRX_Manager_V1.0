@@ -9,6 +9,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const mockSavedForm = vi.hoisted(() => ({ value: 'liquid' as 'liquid' | 'dry' | 'seed' | 'each' | null }));
 const mockStockUnit = vi.hoisted(() => ({ value: 'gal' as string | null }));
 
+// The Vendors section has its own tests; these page tests do not mock its reads.
+vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
 vi.mock('../lib/db', () => {
   const mockProduct = {
     id: 'test-product-id',

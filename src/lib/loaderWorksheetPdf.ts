@@ -18,7 +18,8 @@
  * (drawFooter / ensureRoom / fmtDate, dynamic jsPDF + autotable import).
  */
 import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from './pdfTheme';
-import { COMPANY_NAME, COMPANY_CITY, COMPANY_FOOTER_INTERNAL } from './companyInfo';
+import { companyFooterInternal, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
+import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { fmtNum, type ApplicatorSheetCustomer } from './applicatorSheetData';
 import {
   computeLoaderWorksheet,
@@ -41,7 +42,7 @@ function fmtDate(d: string): string {
 }
 
 /** Footer rule + company line on every page (mirrors applicatorSheetPdf.drawFooter). */
-function drawFooter(doc: JsPDFWithAutoTable, margin: number): void {
+function drawFooter(doc: JsPDFWithAutoTable, margin: number, company: CompanyInfo): void {
   const pageW = doc.internal.pageSize.getWidth();
   const footerY = doc.internal.pageSize.getHeight() - 30;
   doc.setDrawColor(200, 200, 200);
@@ -49,7 +50,7 @@ function drawFooter(doc: JsPDFWithAutoTable, margin: number): void {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
-  doc.text(COMPANY_FOOTER_INTERNAL, pageW / 2, footerY + 12, { align: 'center' });
+  doc.text(doc.splitTextToSize(companyFooterInternal(company), pageW - margin * 2).slice(0, 2), pageW / 2, footerY + 12, { align: 'center' });
 }
 
 /** Page-break guard: add a page when the next block won't fit. Returns new y. */
@@ -138,15 +139,16 @@ export async function generateLoaderWorksheetPdf(
 ): Promise<void> {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
-  drawLoaderWorksheet(doc, autoTable, data);
+  drawLoaderWorksheet(doc, autoTable, data, company);
 
   // Footer on every page (drawn last so page count is final).
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    drawFooter(doc, 40);
+    drawFooter(doc, 40, company);
   }
 
   doc.save(filename || `loader-worksheet-${data.job_number}.pdf`);
@@ -164,17 +166,18 @@ export async function generateLoaderWorksheetBatchPdf(
   if (jobs.length === 0) return;
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+  const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' }) as unknown as JsPDFWithAutoTable;
   jobs.forEach((data, i) => {
     if (i > 0) doc.addPage();
-    drawLoaderWorksheet(doc, autoTable, data);
+    drawLoaderWorksheet(doc, autoTable, data, company);
   });
 
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    drawFooter(doc, 40);
+    drawFooter(doc, 40, company);
   }
 
   doc.save(filename || `loader-worksheets-${jobs.length}-jobs.pdf`);
@@ -189,6 +192,7 @@ function drawLoaderWorksheet(
   doc: JsPDFWithAutoTable,
   autoTable: typeof import('jspdf-autotable').default,
   data: LoaderWorksheetPdfData,
+  company: CompanyInfo,
 ): void {
   const plan = buildLoaderWorksheetPdfPlan(data);
   const ws = plan.worksheet;
@@ -206,8 +210,10 @@ function drawLoaderWorksheet(
   doc.text('Loader Worksheet', margin, 26);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(COMPANY_NAME, margin, 40);
-  doc.text(COMPANY_CITY, margin, 50);
+  fitCompanyNameFont(doc, company.name, pageW / 2 - margin, 9);
+  doc.text(company.name, margin, 40);
+  fitCompanyNameFont(doc, company.address, pageW / 2 - margin, 9);
+  doc.text(company.address, margin, 50);
   doc.setFontSize(9);
   doc.text(`Job ${data.job_number}`, pageW - margin, 26, { align: 'right' });
   doc.text(`Scheduled: ${fmtDate(data.scheduled_date)}${data.scheduled_time ? ` ${data.scheduled_time}` : ''}`, pageW - margin, 40, { align: 'right' });

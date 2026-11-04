@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   getTierPrice,
   getQuoteTierPrice,
+  isTierPriceMissing,
   getConversionFactor,
   recalcItem,
   catalogPricePerAcre,
@@ -166,6 +167,19 @@ describe('getQuoteTierPrice', () => {
     const item = recalcItem(makeItem({ product_id: p.id, acres: 10, actual_rate: 1 }), p, 2, []);
     expect(item.price_per_unit).toBe(0);
     expect(item.total_price).toBe(0);
+  });
+});
+
+describe('isTierPriceMissing', () => {
+  it('treats a stated $0 as a price, as the sale-line trigger does', () => {
+    expect(isTierPriceMissing(makeProduct({ tier1_price: null, tier2_price: 0 }), 2)).toBe(false);
+    expect(isTierPriceMissing(makeProduct({ tier1_price: 0, tier2_price: null }), 2)).toBe(false);
+  });
+
+  it('is missing only when neither the tier nor tier 1 states a price', () => {
+    expect(isTierPriceMissing(makeProduct({ tier1_price: 20, tier3_price: null }), 3)).toBe(false);
+    expect(isTierPriceMissing(makeProduct({ tier1_price: null, tier2_price: 18 }), 1)).toBe(true);
+    expect(isTierPriceMissing(makeProduct({ tier1_price: null, tier2_price: null, tier3_price: null }), 3)).toBe(true);
   });
 });
 

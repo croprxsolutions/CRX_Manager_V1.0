@@ -42,7 +42,7 @@ export function resolveExactProductIdentity<T extends ProductIdentityCandidate>(
   return { status: 'missing', product: null };
 }
 
-function calculateSimilarity(left: string, right: string): number {
+export function calculateSimilarity(left: string, right: string): number {
   if (left === right) return 1;
   if (!left || !right) return 0;
   if (left.includes(right) || right.includes(left)) return 0.85;

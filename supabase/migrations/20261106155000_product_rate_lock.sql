@@ -105,6 +105,8 @@ ALTER TABLE public.product_rate_events ENABLE ROW LEVEL SECURITY;
 CREATE POLICY product_rate_events_select ON public.product_rate_events
   FOR SELECT TO authenticated USING ((SELECT public.is_active_profile()));
 REVOKE ALL ON TABLE public.product_rate_events FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+-- Default privileges grant API roles the identity sequence too; only the definer functions insert.
+REVOKE ALL ON SEQUENCE public.product_rate_events_id_seq FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 GRANT SELECT ON TABLE public.product_rate_events TO authenticated;
 
 -- The correction's one-transaction pass: correct_product_rates adds a row for its product and
@@ -534,7 +536,8 @@ BEGIN
       -- As in a correction: a unit conversion changed since the preview moves the prices but no
       -- version, so each written row must save the per-acre prices its preview showed.
       FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
-        IF (v_write->'after'->v_tier) IS DISTINCT FROM (v_row->'expected'->'prices'->v_tier) THEN
+        IF NOT (v_row->'expected'->'prices' ? v_tier)
+           OR (v_write->'after'->v_tier) IS DISTINCT FROM (v_row->'expected'->'prices'->v_tier) THEN
           v_moved := v_moved || v_product.product_name;
           EXIT;
         END IF;
@@ -608,6 +611,12 @@ BEGIN
   -- unlocked factor change reprices nothing until a product's next save. Same formula as
   -- recalc_product_price_per_acre; the FOR UPDATE above holds off saves and factor changes meanwhile.
   IF p_locked THEN
+    -- A zero or missing factor prices a rate at $0 (or nothing), which the check below would accept.
+    SELECT string_agg(u.unit, ', ' ORDER BY u.unit) INTO v_stale FROM public.unit_conversions u
+     WHERE u.factor_oz IS NULL OR u.factor_oz <= 0;
+    IF v_stale IS NOT NULL THEN
+      RAISE EXCEPTION 'PRODUCT_RATES_STALE: unit conversions % have no factor above zero; fix them, then lock', v_stale;
+    END IF;
     SELECT string_agg(s.product_name, ', ' ORDER BY s.product_name) INTO v_stale FROM (
       SELECT p.product_name FROM public.products p
        WHERE p.tier1_price_per_acre IS DISTINCT FROM public.product_price_per_acre(COALESCE(p.tier1_price, 0),
@@ -736,7 +745,7 @@ BEGIN
   -- The prices must be the ones the admin confirmed: a unit conversion changed since the preview
   -- moves them without moving pricing_version. Raising undoes the write.
   FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
-    IF (v_write->'after'->v_tier) IS DISTINCT FROM (p_expected->'prices'->v_tier) THEN
+    IF NOT (p_expected->'prices' ? v_tier) OR (v_write->'after'->v_tier) IS DISTINCT FROM (p_expected->'prices'->v_tier) THEN
       RAISE EXCEPTION 'PRODUCT_RATE_PREVIEW_CHANGED: the per-acre prices changed since the preview; preview again'
         USING ERRCODE = 'check_violation';
     END IF;

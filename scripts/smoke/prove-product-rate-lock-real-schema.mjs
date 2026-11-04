@@ -334,6 +334,8 @@ function main() {
   refused(ADMIN, setRates([previewed], 'k-moved'), /PRODUCT_RATE_PREVIEW_CHANGED: .*\[PROVER\] Gal/);
   asOwner("UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
   refused(ADMIN, setRates([{ ...previewed, expected: { ...previewed.expected, prices: undefined } }], 'k-noprices'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
+  // A preview with no prices cannot vouch for a cleared rate's empty prices.
+  refused(ADMIN, setRates([{ ...row(P.GAL, '0', 'oz', '', ['13', 'oz', '13 oz/A']), expected: { ...previewed.expected, prices: {} } }], 'k-emptyprices'), /PRODUCT_RATE_PREVIEW_CHANGED: .*\[PROVER\] Gal/);
   assert.match(rates(P.GAL), /^13\|oz\|/);
   refused(ADMIN, setRates([{ ...row(P.GAL, '2', 'oz', '', ['13', 'oz', '13 oz/A']), rate_unit: { a: 1 } }], 'k-obj'), /PRODUCT_RATE_ROW_SHAPE_INVALID/);
   // A rate with no unit is ambiguous, so it is refused; a correction is only for locked rates.
@@ -487,6 +489,7 @@ function main() {
   asOwner("UPDATE public.unit_conversions SET factor_oz = 2 WHERE unit = 'oz';");
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor-moved', ADMIN, shown), /PRODUCT_RATE_PREVIEW_CHANGED/);
   asOwner("UPDATE public.unit_conversions SET factor_oz = 1 WHERE unit = 'oz';");
+  refused(ADMIN, correct(P.GAL, 0, 'oz', '', v, 'label fix', 'k-cor-empty', ADMIN, "'{}'::jsonb"), /PRODUCT_RATE_PREVIEW_CHANGED/);
   // A page opened before another admin's suggested-rate-only correction (same pricing_version) is stale.
   refused(ADMIN, correct(P.GAL, 16, 'oz', '16 oz/A', v, 'label fix', 'k-cor-stale', ADMIN, shown,
     `jsonb_build_object('rate_per_acre', '13', 'rate_unit', 'oz', 'suggested_rate', '12 oz/A')`), /PRODUCT_RATES_STALE/);
@@ -588,10 +591,18 @@ function main() {
   refused(ADMIN, lock(true, 'stale', 'k-lock-stale'), /PRODUCT_RATES_STALE: per-acre prices no longer match/);
   ok(ADMIN, `UPDATE public.products SET rate_per_acre = 8 WHERE id = '${P.OTHER}';`);  // a save reprices it
   assert.equal(rates(P.OTHER), '8|oz|9 oz/A|2.50|2.25|2.00');
+  // A zero factor would price its rates at $0 and still match, so locking needs every factor above zero.
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 0 WHERE unit = 'Pt';");
+  refused(ADMIN, lock(true, 'zero factor', 'k-lock-zero'), /PRODUCT_RATES_STALE: unit conversions Pt have no factor above zero/);
+  asOwner("UPDATE public.unit_conversions SET factor_oz = 16 WHERE unit = 'Pt';");
   ok(ADMIN, lock(true, 'prices current', 'k-lock-fresh'));
   ok(ADMIN, lock(false, 'open for the smoke', 'k-unlock3'));
   assert.equal(events(), 'locked,corrected,unlocked,locked,unlocked,locked,unlocked');
   console.log('[prover] locking is refused while a stored per-acre price is stale, and works once it is saved again');
+
+  // Only the definer functions write the audit log, so no API role may move its sequence.
+  assert.equal(scalar(`SELECT bool_or(has_sequence_privilege(r, 'public.product_rate_events_id_seq', 'USAGE,UPDATE'))
+    FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r;`), 'f');
 
   // The live smoke chain passes here too, and leaves nothing behind.
   const before = scalar('SELECT count(*) FROM public.product_rate_events;');

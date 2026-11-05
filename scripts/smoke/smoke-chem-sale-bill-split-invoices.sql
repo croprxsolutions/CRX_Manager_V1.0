@@ -6,6 +6,7 @@
 --      invoices in one group, base-1 and base-2, CS- numbers, each line adds up exactly
 --   B  A three-way split: the leftover cents go to the main customer
 --   C  The card and the line shares refuse changes after the first delivery (BILL_SPLIT_FROZEN)
+--   C2 A frozen share can't leave its sale by moving to an open one; a card can't total over 100%
 --   D  A direct write to a payer's line is refused, and save_invoice can't bill past the delivery
 --   E  Re-saving a payer's draft keeps its cents; a freight charge goes on one payer's draft
 --   F  A one-customer chemical-sale invoice on this sale is refused (ORDER_HAS_BILL_SPLIT)
@@ -129,6 +130,27 @@ BEGIN
     IF FOUND THEN v_fails := v_fails || ' (C) a line share changed after delivery;'; END IF;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'BILL_SPLIT_FROZEN:%' THEN v_fails := v_fails || ' (C) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+
+  PERFORM pg_temp.smk_new_sale('c' || v_suffix);
+  BEGIN
+    UPDATE order_shares SET order_id = (SELECT o FROM smk_sale) WHERE order_id = v_o AND customer_id = v_payer2;
+    v_fails := v_fails || ' (C2) a frozen card row moved to an open sale;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'ORDER_SHARES_ORDER_IMMUTABLE:%' THEN v_fails := v_fails || ' (C2) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+  BEGIN
+    UPDATE order_item_shares SET order_item_id = (SELECT l1 FROM smk_sale) WHERE order_item_id = v_l2;
+    v_fails := v_fails || ' (C2) a frozen line share moved to an open sale;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'ORDER_ITEM_SHARES_LINE_IMMUTABLE:%' THEN v_fails := v_fails || ' (C2) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+  BEGIN
+    PERFORM pg_temp.smk_card((SELECT o FROM smk_sale), v_main, 50.005);
+    PERFORM pg_temp.smk_card((SELECT o FROM smk_sale), v_payer2, 50.005);
+    v_fails := v_fails || ' (C2) a card totalling 100.01% was accepted;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'ORDER_SHARES_OVER_100:%' THEN v_fails := v_fails || ' (C2) wrong refusal: ' || SQLERRM || ';'; END IF;
   END;
 
   BEGIN

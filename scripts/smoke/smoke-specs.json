@@ -1865,6 +1865,12 @@
       "area": [
         "security"
       ]
+    },
+    "check_uncertain_request_clearable": {
+      "chain": "smoke-uncertain-request-clear-check.sql",
+      "description": "REQUIRES 20261107150000. KI-27 server check before an admin clears a stuck request: the body is pinned, anon cannot execute it; for a live active profile, a recorded key is safe, an unrecorded key needs two checks 15+ minutes apart by server time (first, future and 5-minute checks refused, 16 minutes safe); another user's key, a derived row key and a signed-out session are refused. The in-progress answer needs two sessions and is proven on the local test database.",
+      "covers": ["check_uncertain_request_clearable"],
+      "area": ["idempotency", "regression"]
     }
   }
 }

@@ -498,6 +498,10 @@ These RPCs are called from `src/` but had no entry in this file. Each purpose wa
 
 ---
 
+### Stuck-request recovery (KI-27, 2026-11-05)
+
+- `check_uncertain_request_clearable(p_request_key text, p_first_checked_at timestamptz DEFAULT NULL)` → jsonb `{safe, reason, checked_at, wait_until?}` — read-only, SECURITY DEFINER, authenticated only (migration `20261107150000_uncertain_request_clear_check.sql`). Tells the admin "clear this" button whether a stuck request may be cleared, judged by server time: `recorded` (safe), `in_progress` (refused while the key's idempotency lock is held), `first_check` / `waiting` (refused until a second check 15+ minutes after the returned `checked_at`), `not_recorded_after_wait` (safe). Only the caller's own `<operation>:<auth.uid()>:<uuid>` keys are accepted (`REQUEST_KEY_NOT_OWNED`).
+
 ## Internal / Trigger Functions
 
 These are NOT called directly from the frontend. They power triggers, guards, and infrastructure.

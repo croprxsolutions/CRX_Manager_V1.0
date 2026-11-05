@@ -3099,7 +3099,12 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   //   sync_product_vendor_on_vendor_rename); it applied live (ledger 20261104024012), so they left the inventory.
   // Local candidate 20261107160000 (KI-28): prune when it applies live and the high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:
-    'trigger-only dispatch-board sync (RETURNS trigger); ON CONFLICT DO NOTHING makes re-runs convergent and every API-role EXECUTE is revoked',
+    'trigger-only dispatch-board sync (RETURNS trigger); its upsert only fills missing or re-dispatches held rows, so re-runs converge, and every API-role EXECUTE is revoked',
+  // The same candidate re-emits these two 20260707020000 trigger-only syncs (RETURNS trigger, no direct call possible).
+  _sync_job_location_dispatch_on_applicator_change:
+    'local KI-28 candidate re-emits this trigger-only dispatch sync (RETURNS trigger); the parent jobs.applicator_id update owns the transaction',
+  _sync_job_location_dispatch_on_field_insert:
+    'local KI-28 candidate re-emits this trigger-only dispatch sync (RETURNS trigger); the parent job_fields insert owns the transaction',
   _insert_commissions_for_job: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   _insert_commissions_for_order: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   // _guard_delivery_completion_authorized is also parked with Wave A in

@@ -445,12 +445,14 @@ is an admin-only "I checked, clear this" control.
 **MED · OPEN · database · LOCAL CANDIDATE — NOT APPLIED**
 The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later does not
 add the job back. A detection sweep exists (`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`).
+Reassigning a dispatched job to an inactive person also left the old holder working it.
 Fix: `20261107160000_dispatch_sync_on_applicator_reactivation.sql` syncs a person's open jobs when they become an
-active applicator, except one whose licenses have all expired (same rule as the dispatch screen; a later license
-renewal does not re-sync, so those jobs wait for the wizard). Proof
-`prove-dispatch-sync-on-applicator-reactivation-real-schema.mjs`. Live 2026-11-05: 0 rows. Still open after it: a
-location already dispatched to someone else, or undispatched ('cancelled'), when the job was reassigned to an
-inactive person keeps that row on re-activation, because it looks the same as a deliberate split or undispatch.
+active applicator, except one whose licenses have all expired (same rule as the dispatch screen). Reassigning to a
+non-qualifying person now takes the job off the old holder's board and holds it for the new person, who gets it on
+activation. Proof `prove-dispatch-sync-on-applicator-reactivation-real-schema.mjs`. Live 2026-11-05: 0 rows.
+Accepted limits: a later license renewal does not re-sync (those jobs wait for the wizard); a location the
+dispatcher undispatched from a person on their own job returns to them if they are deactivated and re-activated;
+saving a person's job at the exact instant they are re-activated can fail one of the two saves with a retry error.
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
 **LOW-MED · UNVERIFIED · inventory/process · Mason**

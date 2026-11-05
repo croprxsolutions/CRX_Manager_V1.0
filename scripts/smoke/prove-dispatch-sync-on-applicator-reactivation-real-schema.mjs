@@ -16,7 +16,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -217,9 +217,10 @@ const CUSTOMER = () => id('c1');
 const FIELD = (n) => id(`f${n}`);
 // People: A = inactive applicator (the KI-28 case), B = active applicator (a wizard split),
 // X = inactive applicator whose only tracked license has expired, D = active driver later made applicator.
+// 'moved' is dispatched to B, then reassigned to inactive A (the old holder must not keep it).
 const PERSON = { A: 'b1', B: 'b2', X: 'b3', D: 'b4' };
 const P = (k) => id(PERSON[k]);
-const JOB = { open: 'd1', done: 'd2', deleted: 'd3', expired: 'd4', role: 'd5' };
+const JOB = { open: 'd1', done: 'd2', deleted: 'd3', expired: 'd4', role: 'd5', moved: 'd6' };
 const J = (k) => id(JOB[k]);
 const JF = (k, n) => id(`e${JOB[k].slice(1)}${n}`);
 
@@ -256,7 +257,7 @@ function seed() {
     INSERT INTO public.customers (id, farm_name) VALUES ('${CUSTOMER()}', '[PROVER] KI28 Farm ${PHASE}');
     INSERT INTO public.fields (id, customer_id, field_name)
       SELECT ('28000000-000${PHASE}-4000-8000-' || lpad('f' || n, 12, '0'))::uuid, '${CUSTOMER()}', '[PROVER] KI28 field ' || n
-        FROM generate_series(1, 9) n;`);
+        FROM generate_series(1, 12) n;`);
   const job = (k, applicator, status, fields, extra = '') => `
     INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by)
       VALUES ('${J(k)}', 'PROVER-KI28-${PHASE}-${k}', '${CUSTOMER()}', current_date, '${status}', '${P(applicator)}', '${ADMIN()}');
@@ -266,14 +267,16 @@ function seed() {
     ${job('done', 'A', 'completed', [4])}
     ${job('deleted', 'A', 'scheduled', [5])}
     ${job('expired', 'X', 'scheduled', [6])}
-    ${job('role', 'D', 'in_progress', [7, 8])}`);
+    ${job('role', 'D', 'in_progress', [7, 8])}
+    ${job('moved', 'B', 'scheduled', [9, 10])}`);
   // X's only license expired after the job was assigned (the assignment-time license gate passed).
   // The wizard split location 3 of the open job to active applicator B (stays exactly as it is).
   psql(`INSERT INTO public.applicator_licenses (profile_id, holder_name, license_number, expiry_date, is_active)
       VALUES ('${P('X')}', '[PROVER] KI28 x', 'KI28-X-${PHASE}', current_date - 30, true);
     INSERT INTO public.job_location_dispatches (job_field_id, job_id, applicator_id, dispatch_status, dispatched_by, dispatched_at)
       VALUES ('${JF('open', 3)}', '${J('open')}', '${P('B')}', 'dispatched', '${ADMIN()}', '2026-01-02 03:04:05+00');
-    UPDATE public.jobs SET deleted_at = now() WHERE id = '${J('deleted')}';`);
+    UPDATE public.jobs SET deleted_at = now() WHERE id = '${J('deleted')}';
+    UPDATE public.jobs SET applicator_id = '${P('A')}' WHERE id = '${J('moved')}';`);
 }
 
 // "<job>: <field n>=<applicator letter>/<status>/<dispatched_by letter> ..." for every location of a job.
@@ -292,10 +295,29 @@ function sweepRows() {
   const sql = readFileSync(SWEEP, 'utf8').replace(/;\s*$/, '');
   return scalar(`SELECT count(*) FROM (${sql}) s WHERE s.job_id::text LIKE '28000000-000${PHASE}-%';`);
 }
+// A second psql session left running (an open transaction), for the concurrency checks.
+function psqlAsync(sql) {
+  const child = spawn('docker', psqlArgs(), { cwd: ROOT });
+  let output = '';
+  child.stdout.on('data', (d) => { output += d; });
+  child.stderr.on('data', (d) => { output += d; });
+  child.stdin.end(sql);
+  return new Promise((resolve) => child.on('close', (code) => resolve({ code, output })));
+}
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// One-location jobs created inside the concurrency checks (kept out of boards()).
+const RACE = (n) => ({ job: id(`d${6 + n}`), field: id(`e${6 + n}1`), fieldId: FIELD(10 + n) });
+const raceJob = (n) => `INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by)
+    VALUES ('${RACE(n).job}', 'PROVER-KI28-${PHASE}-race${n}', '${CUSTOMER()}', current_date, 'scheduled', '${P('A')}', '${ADMIN()}');
+  INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${RACE(n).field}', '${RACE(n).job}', '${RACE(n).fieldId}');`;
+const raceBoard = (n) => scalar(`SELECT coalesce(string_agg(coalesce(CASE d.applicator_id WHEN '${P('A')}' THEN 'A' ELSE d.applicator_id::text END
+    || '/' || d.dispatch_status, 'none'), ' '), '') FROM public.job_fields jf LEFT JOIN public.job_location_dispatches d ON d.job_field_id = jf.id
+  WHERE jf.job_id = '${RACE(n).job}';`);
+
 const SPLIT_ROW = () => scalar(`SELECT applicator_id || ' ' || dispatch_status || ' ' || dispatched_at::text
   FROM public.job_location_dispatches WHERE job_field_id = '${JF('open', 3)}';`);
 
-function main() {
+async function main() {
   if (REUSE) {
     // Only this proof's own throwaway container, checked before any write: its name, pinned image, no network.
     assert.match(NAME, /^crx-ki28-dispatch-sync-\d+-[a-z0-9]+$/, 'CRX_PROVER_REUSE_CONTAINER must name a container this proof created');
@@ -309,13 +331,15 @@ function main() {
   // BEFORE: KI-28 reproduces. A job assigned to an inactive applicator gets no dispatch rows, and
   // re-activating that applicator still adds none.
   seed();
-  const seeded = { open: '1=none 2=none 3=B/dispatched/admin', done: '1=none', deleted: '1=none', expired: '1=none', role: '1=none 2=none' };
-  assert.deepEqual(boards(), seeded, 'seeded: no automatic dispatch rows for inactive/non-applicator assignees');
+  const seededBase = { open: '1=none 2=none 3=B/dispatched/admin', done: '1=none', deleted: '1=none', expired: '1=none', role: '1=none 2=none' };
+  // Before the candidate, reassigning B's dispatched job to inactive A leaves B holding it (KI-28's second shape).
+  const seeded = { ...seededBase, moved: '1=B/dispatched/admin 2=B/dispatched/admin' };
+  assert.deepEqual(boards(), seeded, 'seeded: no automatic dispatch rows for inactive/non-applicator assignees; B keeps the moved job');
   // The sweep flags open-job locations whose assignee does not qualify now: A open 1-2, A deleted 1, X 1, D 1-2.
   assert.equal(sweepRows(), '6', 'the sweep sees every seeded KI-28 shape');
   updateProfile('A', 'new_is_active => true', `ki28-before-${PHASE}`);
-  assert.deepEqual(boards(), seeded, 'BEFORE: re-activating A leaves its open job off the board (KI-28)');
-  console.log('[prover] BEFORE: a job assigned to an inactive applicator stays off the board after re-activation (KI-28 reproduces)');
+  assert.deepEqual(boards(), seeded, 'BEFORE: re-activating A leaves its open job off the board and the moved job with B (KI-28)');
+  console.log('[prover] BEFORE: a job assigned to an inactive applicator stays off the board after re-activation, and a job moved to them stays with its old holder (KI-28 reproduces)');
 
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
@@ -323,28 +347,34 @@ function main() {
   const again = apply('candidate.sql');
   assert.notEqual(again.status, 0, 'a second apply must refuse');
   assert.match(again.output, /PREFLIGHT_DISPATCH_SYNC_QUALIFY_EXISTS/);
-  assert.equal(scalar(`SELECT prosecdef::text || ' ' || array_to_string(proconfig, ',') || ' ' || proowner::regrole::text
-    FROM pg_proc WHERE oid = '${FN}'::regprocedure;`), 'true search_path=public, pg_temp postgres');
+  for (const fn of [FN, 'public._sync_job_location_dispatch_on_applicator_change()', 'public._sync_job_location_dispatch_on_field_insert()']) {
+    assert.equal(scalar(`SELECT prosecdef::text || ' ' || array_to_string(proconfig, ',') || ' ' || proowner::regrole::text
+      FROM pg_proc WHERE oid = '${fn}'::regprocedure;`), 'true search_path=public, pg_temp postgres', fn);
+    assert.equal(scalar(`SELECT has_function_privilege('anon', '${fn}', 'EXECUTE');`), 'f', `anon must not execute ${fn}`);
+  }
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(scalar(`SELECT has_function_privilege('${role}', '${FN}', 'EXECUTE');`), 'f', `${role} must not execute the trigger function`);
   }
   // Applying the file wrote nothing: the earlier phase's re-activated A still has no rows (no backfill).
-  assert.equal(board('open'), seeded.open, 'the migration itself writes no rows');
+  assert.deepEqual(boards(), seeded, 'the migration itself writes no rows');
   console.log('[prover] candidate applied once (no rows written); a second apply refuses; definer, search_path, postgres-only EXECUTE');
 
   // AFTER: fresh rows.
   PHASE += 1;
   seed();
-  assert.deepEqual(boards(), seeded, 'AFTER seed: same starting state');
+  // AFTER: the reassignment to inactive A takes the moved job off B's board, held for A as cancelled.
+  const seededAfter = { ...seededBase, moved: '1=A/cancelled/admin 2=A/cancelled/admin' };
+  assert.deepEqual(boards(), seededAfter, 'AFTER seed: same starting state, except B no longer holds the moved job');
   assert.equal(sweepRows(), '6');
   const splitBefore = SPLIT_ROW();
 
   // Activate A (the admin screen's real call): its open job's two missing locations appear, once each.
   updateProfile('A', 'new_is_active => true', `ki28-activate-${PHASE}`);
-  const activated = { ...seeded, open: '1=A/dispatched/admin 2=A/dispatched/admin 3=B/dispatched/admin' };
-  assert.deepEqual(boards(), activated, 'AFTER: A\'s open job is on the board; completed/deleted jobs are not; the split is untouched');
+  const activated = { ...seededAfter, open: '1=A/dispatched/admin 2=A/dispatched/admin 3=B/dispatched/admin',
+    moved: '1=A/dispatched/admin 2=A/dispatched/admin' };
+  assert.deepEqual(boards(), activated, 'AFTER: A\'s open and moved jobs are on A\'s board; completed/deleted jobs are not; the split is untouched');
   assert.equal(SPLIT_ROW(), splitBefore, 'the wizard split row is byte-for-byte unchanged');
-  assert.equal(dispatchRows(), '3', 'exactly one row per open location (2 new + the split)');
+  assert.equal(dispatchRows(), '5', 'exactly one row per open location (2 new + the split + 2 moved)');
   assert.equal(sweepRows(), '3', 'A leaves the sweep; X (inactive) and D (a driver) remain');
   console.log('[prover] AFTER: activating A puts its open job\'s 2 missing locations on the board exactly once; split, completed and deleted jobs untouched');
 
@@ -355,7 +385,7 @@ function main() {
   updateProfile('A', 'new_is_active => false', `ki28-off-${PHASE}`);
   updateProfile('A', 'new_is_active => true', `ki28-on-${PHASE}`);
   assert.deepEqual(boards(), activated, 'deactivate then re-activate: still exactly one row per location, unchanged');
-  assert.equal(dispatchRows(), '3');
+  assert.equal(dispatchRows(), '5');
   console.log('[prover] retry (same key), a second save, and off/on again add nothing: still one row per location');
 
   // Expired license: X's re-activation does not auto-dispatch (same rule as dispatch_job_locations).
@@ -370,8 +400,31 @@ function main() {
   assert.equal(dispatchRows(), rowsBeforeB);
   assert.equal(sweepRows(), '0', 'every assignee qualifies now, so the sweep is clean');
   console.log('[prover] expired-license applicator skipped; driver->applicator role change syncs; an unchanged active applicator writes nothing');
+
+  // Concurrency (Sol MED): a reactivation and a new job for that person saved at the same instant.
+  // 1) Reactivation first, still open while the job is saved: the job's location trigger waits for it, then dispatches.
+  updateProfile('A', 'new_is_active => false', `ki28-race1-off-${PHASE}`);
+  const reactivating = psqlAsync(`BEGIN;\n${claims(ADMIN())}\nUPDATE public.profiles SET is_active = true WHERE id = '${P('A')}';\nSELECT pg_sleep(3);\nCOMMIT;\n`);
+  await pause(1500);
+  let started = Date.now();
+  psql(raceJob(1));
+  const waited1 = Date.now() - started;
+  const r1 = await reactivating;
+  assert.equal(r1.code, 0, r1.output);
+  assert.equal(raceBoard(1), 'A/dispatched', 'a job saved during an uncommitted reactivation still reaches the board');
+  // 2) Job first, still open while the person is reactivated: the reactivation waits for it, then its sync sees the job.
+  updateProfile('A', 'new_is_active => false', `ki28-race2-off-${PHASE}`);
+  const saving = psqlAsync(`BEGIN;\n${raceJob(2)}\nSELECT pg_sleep(3);\nCOMMIT;\n`);
+  await pause(1500);
+  started = Date.now();
+  updateProfile('A', 'new_is_active => true', `ki28-race2-on-${PHASE}`);
+  const waited2 = Date.now() - started;
+  const r2 = await saving;
+  assert.equal(r2.code, 0, r2.output);
+  assert.equal(raceBoard(2), 'A/dispatched', 'a reactivation during an uncommitted job save still puts that job on the board');
+  console.log(`[prover] concurrency: job saved during a reactivation waited ${waited1} ms, reactivation during a job save waited ${waited2} ms; both reached the board`);
   console.log('KI28_DISPATCH_SYNC_PROOF_PASS');
 }
 
-try { main(); }
+try { await main(); }
 finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }

@@ -177,6 +177,8 @@ interface NeedsDispatchJobRow {
 }
 
 interface CockpitData {
+  /** True matching rows per capped tile (Goal 4): each tile lists at most TILE_LIMIT examples. */
+  tileCounts: Record<keyof FailedTiles, number>;
   unbilledJobs: UnbilledJobRow[];
   postableInvoices: PostableInvoiceRow[];
   chemicalDrafts: ChemicalDraftRow[];
@@ -426,6 +428,11 @@ function tileReadFailed(res: { error: unknown; data: unknown }): boolean {
   return !!res.error || !Array.isArray(res.data);
 }
 
+/** The server's exact count of matching rows, not the TILE_LIMIT examples it sent (Goal 4). */
+function tileCount(res: { count?: number | null; data: unknown }): number {
+  return typeof res.count === 'number' ? res.count : Array.isArray(res.data) ? res.data.length : 0;
+}
+
 // ── Helper components ─────────────────────────────────────────────────────────
 
 function AllClear({ label }: { label: string }) {
@@ -513,6 +520,7 @@ export default function OfficeCockpit() {
   const [morningSummary, setMorningSummary] = useState<MorningSummaryData>(emptyMorningSummary);
   const [morningSummaryLoadOk, setMorningSummaryLoadOk] = useState(false);
   const [data, setData] = useState<CockpitData>({
+    tileCounts: { unbilledJobs: 0, postableInvoices: 0, chemicalDrafts: 0, upcomingJobs: 0, needsDispatchJobs: 0, expiringLicenses: 0, overdueAR: 0 },
     unbilledJobs: [],
     postableInvoices: [],
     chemicalDrafts: [],
@@ -590,7 +598,7 @@ export default function OfficeCockpit() {
       // (a) Completed jobs with no invoice
       supabase
         .from('jobs')
-        .select('id, job_number, job_date, total_acres, total_price_cents, customer:customers(farm_name)')
+        .select('id, job_number, job_date, total_acres, total_price_cents, customer:customers(farm_name)', { count: 'exact' })
         .eq('status', 'completed')
         .is('invoice_id', null)
         .is('deleted_at', null)
@@ -600,7 +608,7 @@ export default function OfficeCockpit() {
       // (b) Draft/unposted field-app invoices (§4 auto-populates these)
       supabase
         .from(INVOICES_POSTABLE)
-        .select('id, invoice_number, invoice_date, status, total_amount_cents, job_id, invoice_group_id, pricing_pending, invoice_post_version:invoice_postable_version, customer:customers(farm_name)')
+        .select('id, invoice_number, invoice_date, status, total_amount_cents, job_id, invoice_group_id, pricing_pending, invoice_post_version:invoice_postable_version, customer:customers(farm_name)', { count: 'exact' })
         .in('status', ['draft', 'unposted'])
         .eq('invoice_type', 'field_application')
         .is('deleted_at', null)
@@ -611,7 +619,7 @@ export default function OfficeCockpit() {
       // Do not mix these into the field-app "Post all clean" action above.
       supabase
         .from('invoices')
-        .select('id, invoice_number, status, total_amount_cents, customer:customers(farm_name)')
+        .select('id, invoice_number, status, total_amount_cents, customer:customers(farm_name)', { count: 'exact' })
         .eq('invoice_type', 'chemical_sale')
         .in('status', ['draft', 'unposted'])
         .is('deleted_at', null)
@@ -624,7 +632,7 @@ export default function OfficeCockpit() {
       // (d) Upcoming scheduled jobs (next 7 days) — proxy for weather-at-risk
       supabase
         .from('jobs')
-        .select('id, job_number, job_date, total_acres, customer:customers(farm_name)')
+        .select('id, job_number, job_date, total_acres, customer:customers(farm_name)', { count: 'exact' })
         .eq('status', 'scheduled')
         .is('deleted_at', null)
         .gte('job_date', today)
@@ -635,7 +643,7 @@ export default function OfficeCockpit() {
       // (e) Expiring applicator licenses / buyer certs within 30 days
       supabase
         .from('applicator_licenses')
-        .select('id, holder_name, license_type, expiry_date, customer:customers(farm_name)')
+        .select('id, holder_name, license_type, expiry_date, customer:customers(farm_name)', { count: 'exact' })
         .eq('is_active', true)
         .gte('expiry_date', past30Days)
         .lte('expiry_date', in30Days)
@@ -647,7 +655,7 @@ export default function OfficeCockpit() {
       // — filtering to 'posted' alone hides the invoices that are actually overdue.
       supabase
         .from('invoices')
-        .select('id, invoice_number, due_date, balance_cents, customer:customers(farm_name)')
+        .select('id, invoice_number, due_date, balance_cents, customer:customers(farm_name)', { count: 'exact' })
         .eq('invoice_type', 'field_application')
         .in('status', ['posted', 'overdue'])
         .lt('due_date', today)
@@ -667,7 +675,7 @@ export default function OfficeCockpit() {
       // needs-dispatch jobs whenever that first page was fully dispatched.
       supabase
         .from('jobs')
-        .select('id, job_number, job_date, customer:customers(farm_name), job_location_dispatches!left(id)')
+        .select('id, job_number, job_date, customer:customers(farm_name), job_location_dispatches!left(id)', { count: 'exact' })
         .eq('status', 'scheduled')
         .is('deleted_at', null)
         .is('applicator_id', null)
@@ -972,7 +980,18 @@ export default function OfficeCockpit() {
       overdueAR: tileReadFailed(overdueARRes),
     };
 
+    const tileCounts: CockpitData['tileCounts'] = {
+      unbilledJobs: tileCount(unbilledJobsRes),
+      postableInvoices: tileCount(postableInvRes),
+      chemicalDrafts: tileCount(chemicalDraftsRes),
+      upcomingJobs: tileCount(upcomingJobsRes),
+      needsDispatchJobs: tileCount(needsDispatchRes),
+      expiringLicenses: tileCount(expiringLicRes),
+      overdueAR: tileCount(overdueARRes),
+    };
+
     setData({
+      tileCounts,
       unbilledJobs,
       postableInvoices,
       chemicalDrafts,
@@ -1239,7 +1258,7 @@ export default function OfficeCockpit() {
           <TileHeader
             icon={<Tractor className="w-5 h-5 text-orange-500" />}
             title="Unbilled Jobs"
-            count={data.failedTiles.unbilledJobs ? null : data.unbilledJobs.length}
+            count={data.failedTiles.unbilledJobs ? null : data.tileCounts.unbilledJobs}
             countColor="text-orange-600"
             linkLabel="View all"
             onLink={() => navigate('/field-invoices/unbilled')}
@@ -1274,7 +1293,7 @@ export default function OfficeCockpit() {
                   onClick={() => navigate('/field-invoices/unbilled')}
                   className="w-full text-center py-2 text-sm text-crx-green hover:underline"
                 >
-                  +{data.unbilledJobs.length - 6} more
+                  +{data.tileCounts.unbilledJobs - 6} more
                 </button>
               )}
             </div>
@@ -1286,7 +1305,7 @@ export default function OfficeCockpit() {
           <TileHeader
             icon={<Send className="w-5 h-5 text-sky-500" />}
             title="Needs Dispatch"
-            count={data.failedTiles.needsDispatchJobs ? null : data.needsDispatchJobs.length}
+            count={data.failedTiles.needsDispatchJobs ? null : data.tileCounts.needsDispatchJobs}
             countColor="text-sky-600"
             linkLabel="View all"
             onLink={() => navigate('/jobs')}
@@ -1359,7 +1378,7 @@ export default function OfficeCockpit() {
           <TileHeader
             icon={<FileCheck className="w-5 h-5 text-blue-500" />}
             title="Ready to Post"
-            count={data.failedTiles.postableInvoices ? null : data.postableInvoices.length}
+            count={data.failedTiles.postableInvoices ? null : data.tileCounts.postableInvoices}
             countColor="text-blue-600"
             linkLabel="Field Invoices"
             onLink={() => navigate('/field-invoices/unposted')}
@@ -1426,7 +1445,7 @@ export default function OfficeCockpit() {
                   onClick={() => navigate('/field-invoices/unposted')}
                   className="w-full text-center py-2 text-sm text-crx-green hover:underline"
                 >
-                  +{data.postableInvoices.length - 6} more
+                  +{data.tileCounts.postableInvoices - 6} more
                 </button>
               )}
             </div>
@@ -1438,7 +1457,7 @@ export default function OfficeCockpit() {
           <TileHeader
             icon={<FileText className="w-5 h-5 text-violet-500" />}
             title="Chemical drafts to post"
-            count={data.failedTiles.chemicalDrafts ? null : data.chemicalDrafts.length}
+            count={data.failedTiles.chemicalDrafts ? null : data.tileCounts.chemicalDrafts}
             countColor="text-violet-600"
             linkLabel="Invoices"
             onLink={() => navigate('/invoices')}
@@ -1473,7 +1492,7 @@ export default function OfficeCockpit() {
                   onClick={() => navigate('/invoices')}
                   className="w-full text-center py-2 text-sm text-crx-green hover:underline"
                 >
-                  +{data.chemicalDrafts.length - 5} more
+                  +{data.tileCounts.chemicalDrafts - 5} more
                 </button>
               )}
             </div>
@@ -1592,7 +1611,7 @@ export default function OfficeCockpit() {
           <TileHeader
             icon={<CalendarClock className="w-5 h-5 text-indigo-500" />}
             title="Upcoming Jobs (7 days)"
-            count={data.failedTiles.upcomingJobs ? null : data.upcomingJobs.length}
+            count={data.failedTiles.upcomingJobs ? null : data.tileCounts.upcomingJobs}
             countColor="text-indigo-600"
             linkLabel="Schedule"
             onLink={() => navigate('/jobs')}
@@ -1631,7 +1650,7 @@ export default function OfficeCockpit() {
                   onClick={() => navigate('/jobs')}
                   className="w-full text-center py-2 text-sm text-crx-green hover:underline"
                 >
-                  +{data.upcomingJobs.length - 6} more
+                  +{data.tileCounts.upcomingJobs - 6} more
                 </button>
               )}
             </div>
@@ -1643,7 +1662,7 @@ export default function OfficeCockpit() {
           <TileHeader
             icon={<ShieldAlert className="w-5 h-5 text-yellow-500" />}
             title="Expiring Licenses"
-            count={data.failedTiles.expiringLicenses ? null : data.expiringLicenses.length}
+            count={data.failedTiles.expiringLicenses ? null : data.tileCounts.expiringLicenses}
             countColor="text-yellow-600"
             linkLabel="Compliance"
             onLink={() => navigate('/compliance')}
@@ -1680,7 +1699,7 @@ export default function OfficeCockpit() {
                   onClick={() => navigate('/compliance')}
                   className="w-full text-center py-2 text-sm text-crx-green hover:underline"
                 >
-                  +{data.expiringLicenses.length - 6} more
+                  +{data.tileCounts.expiringLicenses - 6} more
                 </button>
               )}
             </div>
@@ -1692,7 +1711,7 @@ export default function OfficeCockpit() {
           <TileHeader
             icon={<DollarSign className="w-5 h-5 text-red-500" />}
             title="Overdue Field-App AR"
-            count={data.failedTiles.overdueAR ? null : data.overdueAR.length}
+            count={data.failedTiles.overdueAR ? null : data.tileCounts.overdueAR}
             countColor="text-red-600"
             linkLabel={isAdmin ? 'AR Aging' : undefined}
             onLink={isAdmin ? () => navigate('/ar-aging') : undefined}
@@ -1725,7 +1744,7 @@ export default function OfficeCockpit() {
                   onClick={() => navigate('/ar-aging')}
                   className="w-full text-center py-2 text-sm text-crx-green hover:underline"
                 >
-                  +{data.overdueAR.length - 6} more
+                  +{data.tileCounts.overdueAR - 6} more
                 </button>
               )}
             </div>

@@ -3066,7 +3066,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
-  // KI-25 receipt queue (20261108100000).
+  // KI-25 receipt queue (20261110130000).
   _enqueue_delivery_receipt:
     'internal helper called only by complete_delivery after its required-key replay binding; inserts ON CONFLICT (delivery_id) DO NOTHING; every API-role EXECUTE (incl. service_role) is revoked',
   _close_undelivered_order_remainder_20260718:

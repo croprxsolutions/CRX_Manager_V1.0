@@ -1692,13 +1692,15 @@ function reviewProofValid(data, headSha, nowMs, ranKey, expectedBaseSha, maxAgeM
 // still pass every head/base/age check below for the head being gated.
 // A "restamp" carry (Mason, 2026-11-04) keeps the same base: its one new commit
 // only renamed a migration to a new timestamp, with byte-identical SQL.
+// A "post_apply" carry (Mason, 2026-11-04) keeps the same base too: its one new
+// commit only updated the records after a live migration apply.
 const CARRY_SHA_RE = /^[0-9a-f]{40}$/i;
 export function carriedSolProof(data) {
   const carry = data?.carry;
   return data?.codex_ran === false
     && data.carried_forward === true
     && !!carry && typeof carry === "object"
-    && (carry.mode === "restamp"
+    && (carry.mode === "restamp" || carry.mode === "post_apply"
       ? carry.from_base === data.base_sha
       : (carry.mode === "disjoint" || carry.mode === "collision_check") && carry.from_base !== data.base_sha)
     && CARRY_SHA_RE.test(String(carry.from_head || ""))

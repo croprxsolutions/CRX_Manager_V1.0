@@ -88,6 +88,9 @@ export interface SendEmailResult {
   error?: string;
 }
 
+/** The email may have reached the customer, but the server could not confirm it. Not a failure. */
+export class EmailUnconfirmedError extends Error {}
+
 // ── sendEmail ──────────────────────────────────────────────────────────
 
 export async function sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
@@ -114,7 +117,10 @@ export async function sendEmail(params: SendEmailParams): Promise<SendEmailResul
   } catch {
     throw new Error(`Email service returned invalid response (HTTP ${resp.status})`);
   }
-  if (!resp.ok) throw new Error((result.error as string) || 'Email send failed');
+  if (!resp.ok) {
+    const message = (result.error as string) || 'Email send failed';
+    throw result.needs_reconciliation === true ? new EmailUnconfirmedError(message) : new Error(message);
+  }
   return result as unknown as SendEmailResult;
 }
 

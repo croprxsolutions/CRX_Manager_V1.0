@@ -14,7 +14,7 @@ vi.mock('./db', () => ({
 
 vi.stubGlobal('fetch', mockFetch);
 
-import { sendEmail, pdfToBase64, buildEmailHtml, buildInvoiceEmailPayload } from './emailService';
+import { sendEmail, pdfToBase64, buildEmailHtml, buildInvoiceEmailPayload, EmailUnconfirmedError } from './emailService';
 import type { SendEmailParams, InvoiceEmailInput } from './emailService';
 
 beforeEach(() => {
@@ -147,6 +147,24 @@ describe('sendEmail', () => {
     });
 
     await expect(sendEmail(validParams)).rejects.toThrow('Invalid email address');
+  });
+
+  it('throws EmailUnconfirmedError when the server cannot confirm the send', async () => {
+    mockGetSession.mockResolvedValue(mockSession);
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 504,
+      json: async () => ({ error: 'Not confirmed: this email may have reached the customer.', needs_reconciliation: true }),
+    });
+    await expect(sendEmail(validParams)).rejects.toBeInstanceOf(EmailUnconfirmedError);
+  });
+
+  it('a plain failure is not an EmailUnconfirmedError', async () => {
+    mockGetSession.mockResolvedValue(mockSession);
+    mockFetch.mockResolvedValue({ ok: false, status: 502, json: async () => ({ error: 'Invalid `to` field' }) });
+    const err = await sendEmail(validParams).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(EmailUnconfirmedError);
   });
 
   it('throws generic message when error field is missing', async () => {

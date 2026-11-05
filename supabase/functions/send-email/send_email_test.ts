@@ -40,7 +40,7 @@ interface ResendCall {
   body: Record<string, unknown>;
 }
 
-// Minimal PostgREST: eq / in / gte filters, exact counts, unique email_log keys,
+// Minimal PostgREST: eq / neq / in / gte filters, exact counts, unique email_log keys,
 // and object replies with the 406 "0 rows" error postgrest-js turns into null.
 function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Promise<Response>) {
   const tables: Record<string, Row[]> = {
@@ -74,6 +74,7 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
       // uuid columns compare without regard to case, as in Postgres
       if (op === "eq" && cell?.toLowerCase() !== value.toLowerCase()) return false;
       if (op === "gte" && (cell == null || cell < value)) return false;
+      if (op === "neq" && cell === value) return false;
       if (op === "like") {
         const pattern = value.replace(/\\(.)|([%_])|([^\\%_]+)/g, (_m, esc, wild, lit) =>
           esc ? esc.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -421,7 +422,7 @@ Deno.test("a provider that never answers stops the request in time and blocks a 
     const first = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`));
     assertEquals(first.status, 504);
     assertEquals(first.body.needs_reconciliation, true);
-    assert(String(first.body.error).startsWith("Email provider did not answer within 30 seconds. It may still have been sent"), String(first.body.error));
+    assert(String(first.body.error).includes("Email provider did not answer within 30 seconds. It may still have been sent"), String(first.body.error));
     assertEquals(askedMs, [30_000]);
     const row = world.tables.email_log[0];
     assertEquals(row.status, "pending", "unknown outcome stays pending");
@@ -512,6 +513,7 @@ Deno.test("a gateway error (5xx, not JSON) stays pending: the email may have gon
   assertEquals(res.body.needs_reconciliation, true);
   assertEquals(world.tables.email_log[0].status, "pending");
   assert(String(world.tables.email_log[0].error_message).startsWith("Email provider replied 502"), "error message");
+  assert(String(res.body.error).startsWith("Not confirmed: this email may have reached the customer"), "caller message");
 });
 
 Deno.test("a 408 reply is not a refusal: the email stays pending", async () => {
@@ -526,4 +528,47 @@ Deno.test("an OK reply that cannot be read stays pending, not sent and not faile
   const res = await send(world, ADMIN, quoteEmail(QUOTE));
   assertEquals(res.status, 504);
   assertEquals(world.tables.email_log[0].status, "pending");
+});
+
+Deno.test("a send of the same email confirmed after the early check stops this one", async () => {
+  const world = makeWorld(okResend);
+  // Another request sent it moments ago, under its own key: no pending row is left
+  // for the early check or the unique index to see.
+  world.tables.email_log.push({
+    id: "sent-now", idempotency_key: "other-click-key", send_lock_key: quoteLock,
+    email_type: "quote", customer_id: CUSTOMER, status: "sent", resend_message_id: "re_0",
+    created_at: new Date().toISOString(),
+  });
+  const res = await send(world, ADMIN, quoteEmail(QUOTE, "second-click-key"));
+  assertEquals(res.status, 200);
+  assertEquals(res.body.deduplicated, true);
+  assertEquals(res.body.email_log_id, "sent-now");
+  assertEquals(world.resendCalls.length, 0, "Resend calls");
+  assertEquals(world.tables.email_log[1].status, "failed", "this request's row gives up the lock");
+});
+
+Deno.test("an earlier confirmed send of the same email does not block a new one", async () => {
+  const world = makeWorld(okResend);
+  world.tables.email_log.push({
+    id: "sent-earlier", idempotency_key: "yesterday-key", send_lock_key: quoteLock,
+    email_type: "quote", customer_id: CUSTOMER, status: "sent", resend_message_id: "re_0",
+    created_at: new Date(Date.now() - 60_000).toISOString(),
+  });
+  const res = await send(world, ADMIN, quoteEmail(QUOTE, "today-key"));
+  assertEquals(res.status, 200);
+  assertEquals(res.body.deduplicated, undefined);
+  assertEquals(world.resendCalls.length, 1, "Resend calls");
+});
+
+Deno.test("a bounced send is retried with its original key", async () => {
+  const world = makeWorld(okResend);
+  world.tables.email_log.push({
+    id: "bounced-1", idempotency_key: `quote:quote:${QUOTE}:bounce-key`, send_lock_key: quoteLock,
+    email_type: "quote", customer_id: CUSTOMER, status: "bounced",
+    created_at: new Date(Date.now() - 60_000).toISOString(),
+  });
+  const res = await send(world, ADMIN, quoteEmail(QUOTE, "bounce-key"));
+  assertEquals(res.status, 200);
+  assertEquals(world.tables.email_log[0].status, "sent");
+  assertEquals(world.resendCalls.length, 1, "Resend calls");
 });

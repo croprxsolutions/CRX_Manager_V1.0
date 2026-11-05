@@ -29,7 +29,7 @@ import { exportToCSV, fmtCSV, formatProductMoneyCSV } from '../lib/csvExport';
 import { agingCents, isPricedAgingRow } from '../lib/arAging';
 import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
 import { downloadStatementPdf, downloadBatchStatements, generateStatementPdf } from '../lib/statementPdf';
-import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
+import { sendEmail, pdfToBase64, buildEmailHtml, EmailUnconfirmedError } from '../lib/emailService';
 import { escapeHtml } from '../lib/proofNotification';
 import { buildStatementEmailContent } from '../lib/statementEmail';
 import { logActivity } from '../lib/activityLogger';
@@ -584,6 +584,7 @@ export default function ARaging() {
         let sent = 0;
         let skipped = 0;
         let failed = 0;
+        let unconfirmed = 0;
         let heldForCredit = 0;
 
         for (const cust of candidates) {
@@ -700,16 +701,19 @@ export default function ARaging() {
               Sentry.captureMessage(`AR reminder send returned failure for customer ${cust.customer_id}`, { level: 'error', tags: { action: 'send_ar_reminders' } });
             }
           } catch (sendErr) {
+            // Unconfirmed may have reached the customer: never report it as failed.
+            if (sendErr instanceof EmailUnconfirmedError) unconfirmed++;
             // A real send failure is NOT a dedup skip — count and report it distinctly.
-            failed++;
+            else failed++;
             Sentry.captureException(sendErr, { tags: { action: 'send_ar_reminders' } });
           }
         }
 
         logActivity({ event: 'ar_reminders_sent', description: `Sent ${sent} AR reminder(s) to overdue customers (${skipped} skipped/deduped, ${failed} failed, ${heldForCredit} held: credit on file covers balance)`, performedBy: profile.id, entityType: 'system' });
         const heldNote = heldForCredit > 0 ? `, ${heldForCredit} held (credit on file covers balance — apply it)` : '';
-        if (failed > 0) {
-          toast('error', `Sent ${sent} AR reminder(s) — ${failed} FAILED to send${skipped > 0 ? `, ${skipped} skipped (already sent today)` : ''}${heldNote}`);
+        const unconfirmedNote = unconfirmed > 0 ? `, ${unconfirmed} not confirmed (may have reached the customer — check the email log before resending)` : '';
+        if (failed > 0 || unconfirmed > 0) {
+          toast('error', `Sent ${sent} AR reminder(s)${failed > 0 ? ` — ${failed} FAILED to send` : ''}${unconfirmedNote}${skipped > 0 ? `, ${skipped} skipped (already sent today)` : ''}${heldNote}`);
         } else {
           toast('success', `Sent ${sent} AR reminder(s)${skipped > 0 ? `, ${skipped} skipped (already sent today)` : ''}${heldNote}`);
         }
@@ -728,6 +732,7 @@ export default function ARaging() {
         let sent = 0;
         let noEmail = 0;
         let emailFailed = 0;
+        let emailUnconfirmed = 0;
         let statementsDeduped = 0;
         const statementQueue: Array<{ custId: string; stmtData: DetailedStatementData }> = [];
 
@@ -797,9 +802,11 @@ export default function ARaging() {
               Sentry.captureMessage(`Statement email send returned failure for customer ${custId}`, { level: 'error', tags: { action: 'email_batch_statements' } });
             }
           } catch (sendErr) {
+            // Unconfirmed may have reached the customer: never report it as failed.
+            if (sendErr instanceof EmailUnconfirmedError) emailUnconfirmed++;
             // A failed statement email must be counted and reported — a customer
             // who never received their statement was previously undetectable.
-            emailFailed++;
+            else emailFailed++;
             Sentry.captureException(sendErr, { tags: { action: 'email_batch_statements', customer_id: custId } });
           }
         }
@@ -807,8 +814,9 @@ export default function ARaging() {
         if (profile) {
           logActivity({ event: 'batch_statements_emailed', description: `Emailed ${sent} statement(s)${statementsDeduped > 0 ? ` (${statementsDeduped} already sent — deduped)` : ''}${noEmail > 0 ? ` (${noEmail} had no email)` : ''}${emailFailed > 0 ? ` (${emailFailed} FAILED)` : ''}`, performedBy: profile.id, entityType: 'system' });
         }
-        if (emailFailed > 0) {
-          toast('error', `Emailed ${sent} statement(s) — ${emailFailed} FAILED to send${statementsDeduped > 0 ? `, ${statementsDeduped} already sent` : ''}${noEmail > 0 ? `, ${noEmail} had no email on file` : ''}`);
+        const stmtUnconfirmedNote = emailUnconfirmed > 0 ? `, ${emailUnconfirmed} not confirmed (may have reached the customer — check the email log before resending)` : '';
+        if (emailFailed > 0 || emailUnconfirmed > 0) {
+          toast('error', `Emailed ${sent} statement(s)${emailFailed > 0 ? ` — ${emailFailed} FAILED to send` : ''}${stmtUnconfirmedNote}${statementsDeduped > 0 ? `, ${statementsDeduped} already sent` : ''}${noEmail > 0 ? `, ${noEmail} had no email on file` : ''}`);
         } else {
           toast('success', `Emailed ${sent} statement(s)${statementsDeduped > 0 ? ` — ${statementsDeduped} already sent (deduped)` : ''}${noEmail > 0 ? ` — ${noEmail} customer(s) had no email on file` : ''}`);
         }

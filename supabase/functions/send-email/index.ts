@@ -883,6 +883,9 @@ Deno.serve(async (req: Request) => {
       return unconfirmedSend(data?.[0]?.id ?? null);
     };
 
+    // A send of this email that settles between the early check and this request
+    // taking the lock is found by the re-check below. 5s covers clock skew.
+    const lockCheckFrom = new Date(Date.now() - 5000).toISOString();
     // Early check; the unique index above is what holds when two arrive together.
     // It also sees pending rows logged before send_lock_key existed (scoped keys
     // begin with type + record).
@@ -909,7 +912,7 @@ Deno.serve(async (req: Request) => {
     if (emailLogId) {
       // Existing failed row from a prior attempt — reset it to pending and
       // record THIS attempt's content, so the log shows what was actually sent.
-      // Only a row still 'failed' is claimed: of two retries at the same moment,
+      // Only a row still 'failed' (or 'bounced') is claimed: of two retries at the same moment,
       // the second finds it 'pending' and stops (PR #1302 review, finding 3).
       const { data: claimedRow, error: updateErr } = await adminClient
         .from("email_log")
@@ -923,9 +926,11 @@ Deno.serve(async (req: Request) => {
           subject,
           html_body: html,
           attachment_name: attachments?.[0]?.filename || null,
+          // This attempt's time: the re-check below reads it.
+          created_at: new Date().toISOString(),
         })
         .eq("id", emailLogId)
-        .eq("status", "failed")
+        .in("status", ["failed", "bounced"])
         .select("id")
         .maybeSingle();
       if (!updateErr && !claimedRow) {
@@ -994,6 +999,40 @@ Deno.serve(async (req: Request) => {
         );
       }
       emailLogId = newRow.id;
+    }
+
+    // The unique index stops only a second PENDING row. A send of the same email
+    // that began after the early check and was confirmed before this request took
+    // the lock is caught here: give up the lock and report that send.
+    {
+      const { data: justSent, error: justSentErr } = await adminClient
+        .from("email_log")
+        .select("id, resend_message_id")
+        .eq("send_lock_key", sendLockKey)
+        .eq("status", "sent")
+        .gte("created_at", lockCheckFrom)
+        .neq("id", emailLogId)
+        .limit(1);
+      if (justSentErr || (justSent && justSent.length > 0)) {
+        const reason = justSentErr
+          ? `Not sent: checking for a send of this email at the same moment failed: ${justSentErr.message}`
+          : `Not sent: the same email was sent at the same moment (email_log ${justSent![0].id}).`;
+        const { error: releaseErr } = await adminClient
+          .from("email_log")
+          .update({ status: "failed", error_message: reason })
+          .eq("id", emailLogId)
+          .eq("status", "pending");
+        if (justSentErr || releaseErr) {
+          // A row left pending blocks new sends until someone checks it: safe.
+          return jsonResponse({ error: releaseErr ? `${reason}; releasing its log row also failed: ${releaseErr.message}` : reason }, 503);
+        }
+        return jsonResponse({
+          success: true,
+          email_log_id: justSent![0].id,
+          resend_message_id: justSent![0].resend_message_id,
+          deduplicated: true,
+        });
+      }
     }
 
     // 11. Resend send
@@ -1244,7 +1283,9 @@ Deno.serve(async (req: Request) => {
       });
       return jsonResponse({
         success: false,
-        error: errorMessage,
+        error: outcomeUnknown
+          ? `Not confirmed: this email may have reached the customer. Check before sending it again. (${errorMessage})`
+          : errorMessage,
         email_log_id: emailLogId,
         ...(outcomeUnknown ? { needs_reconciliation: true } : {}),
       }, outcomeUnknown ? 504 : 502);

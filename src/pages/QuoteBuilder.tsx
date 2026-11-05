@@ -29,6 +29,7 @@ import Card, { CardHeader } from '../components/ui/Card';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
+import { QuoteCreditStatus } from '../components/quotes/QuoteCustomerChecks';
 import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult } from '../components/customers/CustomerSearchPicker';
 import FieldSearchPicker, { FIELD_SEARCH_SELECT, type FieldSearchResult } from '../components/fields/FieldSearchPicker';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
@@ -4960,6 +4961,7 @@ export default function QuoteBuilder() {
             {productsLoadFailed && (
               <p role="alert" className="mt-1 text-sm text-red-600">Products failed to load. Refresh the page before adding products or saving this quote.</p>
             )}
+            {!customerView && selectedCustomer && <QuoteCreditStatus customerId={selectedCustomer.id} />}
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary mb-1">

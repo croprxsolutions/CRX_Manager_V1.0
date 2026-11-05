@@ -375,7 +375,14 @@ BEGIN
   PERFORM pg_temp.b4c_replays('confirm_delivery', format(v_sql, v_del[7], v_driver, v_key), v_res);
   PERFORM pg_temp.b4c_refused('confirm_delivery ran without an idempotency key',
     format('SELECT public.confirm_delivery(%L, %L)', v_del[8], v_driver), 'IDEMPOTENCY_KEY_REQUIRED%', '22023');
+  -- Taken off the delivery, the same driver's exact retry gets no saved success.
   PERFORM pg_temp.b4c_as(v_admin);
+  UPDATE public.deliveries SET assigned_driver = NULL WHERE id = v_del[7];
+  PERFORM pg_temp.b4c_as(v_driver);
+  PERFORM pg_temp.b4c_refused('confirm_delivery replayed to a driver taken off the delivery',
+    format(v_sql, v_del[7], v_driver, v_key), 'Not authorized to start this delivery');
+  PERFORM pg_temp.b4c_as(v_admin);
+  UPDATE public.deliveries SET assigned_driver = v_driver WHERE id = v_del[7];
 
   -- --------------------------------------------------------------------------------------------
   -- i. create_delivery_with_items: the items are the request.

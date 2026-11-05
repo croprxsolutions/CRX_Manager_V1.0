@@ -8,8 +8,8 @@
   `reverse_blend_ticket_approval`. A retry key reused for a different purchase order, quote, delivery,
   cycle count or blend ticket (or with a different reason, date, driver or set of lines) is refused with
   nothing changed, instead of reporting a false success. Each now requires a retry key and runs its
-  permission check before any saved answer is returned (`confirm_delivery` keeps its driver check in the
-  body, where it was). A quote copy retried with an approved below-cost reason still replays.
+  permission check before any saved answer is returned (for `confirm_delivery`, a driver taken off
+  the delivery no longer gets the saved success). A quote copy retried with an approved below-cost reason still replays.
 - `start_and_complete_delivery`'s internal start step now calls the renamed confirm body directly, so
   one-tap Delivered keeps working with no key of its own for that step.
 - Screens: every caller already sends a retry key. Customer page "New from Last" now keeps a separate key per

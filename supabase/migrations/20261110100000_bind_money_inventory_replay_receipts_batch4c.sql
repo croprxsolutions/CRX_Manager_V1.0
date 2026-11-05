@@ -827,8 +827,8 @@ BEGIN
   IF p_idempotency_key IS NULL THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: confirm_delivery requires p_idempotency_key' USING ERRCODE = '22023';
   END IF;
-  -- The body's first steps, in its order and with its messages (its role check follows its own
-  -- receipt lookup, as today).
+  -- The body's first steps, in its order and with its messages. A first call reaches the body's own
+  -- role check; a replay re-runs that check below before anything is returned.
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'p_performed_by does not match authenticated user';
@@ -838,6 +838,20 @@ BEGIN
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'confirm_delivery', v_actor, v_fingerprint);
   IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
+  END IF;
+  -- A replay is handed back only to someone still allowed to start this delivery (the body's own
+  -- check, same message): a driver taken off the delivery gets no saved success.
+  IF v_replay IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM public.deliveries d WHERE d.id = p_delivery_id) THEN
+      RAISE EXCEPTION 'Delivery not found';
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM public.profiles pr, public.deliveries d
+      WHERE pr.id = v_actor AND pr.is_active = true AND d.id = p_delivery_id
+        AND (pr.role IN ('admin', 'sales_rep') OR (pr.role = 'driver' AND v_actor = d.assigned_driver))
+    ) THEN
+      RAISE EXCEPTION 'Not authorized to start this delivery';
+    END IF;
   END IF;
   v_result := public._confirm_delivery_replay_impl_20261015(p_delivery_id, p_performed_by, p_idempotency_key);
   IF v_replay IS NULL THEN

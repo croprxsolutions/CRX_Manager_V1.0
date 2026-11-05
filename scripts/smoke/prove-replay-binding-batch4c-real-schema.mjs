@@ -446,7 +446,7 @@ const TARGET_HUNKS = {
   cancel_cycle_count: ["'actor_id', v_actor, 'cycle_count_id', p_cycle_count_id));", "'actor_id', v_actor));", "cancel_cycle_count replayed count 1's receipt as success for count 2"],
   reverse_blend_ticket_approval: ["'actor_id', v_actor, 'ticket_id', p_ticket_id, 'reason', p_reason));", "'actor_id', v_actor, 'reason', p_reason));", "reverse_blend_ticket_approval replayed ticket 1's receipt as success for ticket 2"],
 };
-// confirm_delivery keeps its role check in the body, after its own receipt lookup (as today).
+// confirm_delivery keeps its role check in the body; on a replay the wrapper re-runs that check first.
 const ROLE_RAISES = {
   submit_purchase_order: "RAISE EXCEPTION 'INSUFFICIENT_ROLE';",
   cancel_purchase_order: "RAISE EXCEPTION 'INSUFFICIENT_ROLE: only admins or sales reps can cancel purchase orders';",
@@ -597,6 +597,9 @@ function main() {
       `    RETURN ${call[1].replace('p_idempotency_key', 'NULL')};\n`,
       new RegExp(`SMOKE_FAIL: ${esc(fn)} ran without an idempotency key`)]);
   }
+  mutations.push(['confirm_delivery authorization before replay', 'confirm_delivery',
+    "      RAISE EXCEPTION 'Not authorized to start this delivery';\n", '      NULL;\n',
+    /SMOKE_FAIL: confirm_delivery replayed to a driver taken off the delivery/]);
   mutations.push(['duplicate_quote reason in fingerprint', 'duplicate_quote',
     "'actor_id', v_actor, 'source_quote_id', p_source_quote_id));",
     "'actor_id', v_actor, 'source_quote_id', p_source_quote_id, 'below_cost_reason', p_below_cost_reason));",

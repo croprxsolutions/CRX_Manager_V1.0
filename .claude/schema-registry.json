@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261105174225",
+    "migrations_high_water": "20261105224006",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -511,6 +511,12 @@
       "20261107140000_save_field_refuses_missing_field",
       "20261107150000_uncertain_request_clear_check",
       "20261108120000_product_parents",
+      "20261108160000_delivery_invoice_charge_lines",
+      "20261109120000_dashboard_action_true_counts",
+      "20261110110000_email_log_one_pending_send",
+      "20261110120000_uncertain_request_clear_any_staff",
+      "20261110140000_rup_records_require_posted_invoice",
+      "20261110150000_product_parent_stock_units",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -7754,7 +7760,8 @@
       "error_message",
       "idempotency_key",
       "created_by",
-      "created_at"
+      "created_at",
+      "send_lock_key"
     ],
     "external_identities": [
       "id",

@@ -260,7 +260,7 @@ describe('Receiving', () => {
     expect(Math.max(...H.logOffsets)).toBeLessThan(1005);
     // A page-2 row (index 1004) is on screen: the 5 rows past the first 1,000 loaded.
     expect((await screen.findAllByText('Widget 1004')).length).toBeGreaterThan(0);
-  });
+  }, 20_000); // renders 1,005 rows; CI runners took ~7s
 
   it('a failed receiving-totals read says so instead of hiding the damaged-goods alert', async () => {
     H.failing.set('get_receiving_summary', 'error');

@@ -1184,7 +1184,9 @@ Deno.serve(async (req: Request) => {
       }
       success = resendResp.ok && typeof resendResult?.id === "string" && resendResult.id !== "";
       resendMessageId = success ? resendResult!.id as string : null;
-      if (resendResp.ok && !success) {
+      if (success) {
+        // Confirmed: no error message.
+      } else if (resendResp.ok) {
         outcomeUnknown = true;
         errorMessage = `Email provider accepted the request but its reply was unreadable: ${resendText.slice(0, 200)}`;
       } else if (!RESEND_REFUSAL_STATUSES.has(resendResp.status)) {
@@ -1192,7 +1194,7 @@ Deno.serve(async (req: Request) => {
         // timeout (408), a server or gateway error, or anything else does not.
         outcomeUnknown = true;
         errorMessage = `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`;
-      } else if (!success) {
+      } else {
         errorMessage = typeof resendResult?.message === "string"
           ? resendResult.message
           : `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`;

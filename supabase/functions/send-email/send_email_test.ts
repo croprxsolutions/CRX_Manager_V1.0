@@ -336,6 +336,14 @@ Deno.test("a retry of a failed send is refused while the same email is held by a
   assertEquals(world.resendCalls.length, 0, "Resend calls");
 });
 
+Deno.test("a confirmed send is logged sent with no error message", async () => {
+  const world = makeWorld(okResend);
+  assertEquals((await send(world, ADMIN, quoteEmail(QUOTE, "ok-key"))).status, 200);
+  assertEquals(world.tables.email_log[0].status, "sent");
+  assertEquals(world.tables.email_log[0].resend_message_id, "re_1");
+  assertEquals(world.tables.email_log[0].error_message, null);
+});
+
 Deno.test("every new pending row names its email in send_lock_key", async () => {
   const world = makeWorld(okResend);
   assertEquals((await send(world, ADMIN, quoteEmail(QUOTE.toUpperCase(), "lock-key"))).status, 200);

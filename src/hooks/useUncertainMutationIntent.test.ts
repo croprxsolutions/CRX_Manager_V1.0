@@ -496,7 +496,7 @@ describe('useUncertainMutationIntent', () => {
       scope: 'bill-ki27-server',
     };
     const storageKey = `crx:uncertain-mutation:v4:${JSON.stringify([options.operation, options.userId])}`;
-    const checkKey = (key: string) => `crx:uncertain-mutation-clear-check:v1:${key}`;
+    const checkKey = (key: string) => `crx:uncertain-mutation-clear-check:v2:${key}`;
     const first = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
     await act(async () => first.result.current.beginIntent({ amount: 9000 }));
     const originalKey = first.result.current.getIdempotencyKey();
@@ -515,16 +515,16 @@ describe('useUncertainMutationIntent', () => {
     expect(window.localStorage.getItem(checkKey(originalKey))).toBeNull();
     expect(clearCheck).toHaveBeenLastCalledWith('check_uncertain_request_clearable', { p_request_key: originalKey });
 
-    // Not recorded: the server starts its own 15-minute wait and the clear keeps the server's time.
+    // Not recorded: the server starts its own 15-minute wait and the clear keeps the server's signed token.
     clearCheck.mockResolvedValueOnce({
-      data: { safe: false, reason: 'first_check', checked_at: '2026-08-26T12:00:10+00:00', wait_until: '2026-08-26T12:15:10+00:00' },
+      data: { safe: false, reason: 'first_check', checked_at: '2026-08-26T12:00:10+00:00', wait_until: '2026-08-26T12:15:10+00:00', first_check_token: '1787745610000000.signed' },
       error: null,
     });
     await expect(expired.result.current.clearExpiredIntent(originalKey))
       .rejects.toMatchObject({ reason: 'first_check', waitUntil: '2026-08-26T12:15:10+00:00' });
-    expect(window.localStorage.getItem(checkKey(originalKey))).toBe('2026-08-26T12:00:10+00:00');
+    expect(window.localStorage.getItem(checkKey(originalKey))).toBe('1787745610000000.signed');
 
-    // Asked again too soon by server time: the stored server time is sent, the device clock is not.
+    // Asked again too soon by server time: the stored token is sent, the device clock is not.
     clearCheck.mockResolvedValueOnce({
       data: { safe: false, reason: 'waiting', checked_at: '2026-08-26T12:05:00+00:00', wait_until: '2026-08-26T12:15:10+00:00' },
       error: null,
@@ -532,9 +532,9 @@ describe('useUncertainMutationIntent', () => {
     await expect(expired.result.current.clearExpiredIntent(originalKey)).rejects.toMatchObject({ reason: 'waiting' });
     expect(clearCheck).toHaveBeenLastCalledWith('check_uncertain_request_clearable', {
       p_request_key: originalKey,
-      p_first_checked_at: '2026-08-26T12:00:10+00:00',
+      p_first_check_token: '1787745610000000.signed',
     });
-    expect(window.localStorage.getItem(checkKey(originalKey))).toBe('2026-08-26T12:00:10+00:00');
+    expect(window.localStorage.getItem(checkKey(originalKey))).toBe('1787745610000000.signed');
 
     // A failed server call never clears.
     clearCheck.mockResolvedValueOnce({ data: null, error: new Error('network down') });

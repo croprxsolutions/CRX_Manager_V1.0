@@ -61,7 +61,7 @@ const DURABLE_INTENT_PREFIX = 'crx:uncertain-mutation:v4:';
 const LEGACY_SESSION_PREFIX = 'crx:uncertain-mutation:v1:';
 const ACKNOWLEDGMENT_PREFIX = 'crx:uncertain-mutation-ack:v1:';
 // The server time of the first clear check, per request key (KI-27).
-const CLEAR_CHECK_PREFIX = 'crx:uncertain-mutation-clear-check:v1:';
+const CLEAR_CHECK_PREFIX = 'crx:uncertain-mutation-clear-check:v2:';
 const DURABLE_INTENT_TAB_ID = 'crx:durable-mutation:tab-id';
 const DURABLE_INTENT_LIVE_CLAIM_PREFIX = 'crx:durable-mutation:live-claim:';
 const DURABLE_INTENT_DB = 'crx_durable_mutation_intents';
@@ -98,7 +98,7 @@ export class UncertainClearNotYetError extends Error {
   }
 }
 
-type ClearCheckVerdict = { safe: boolean; reason: string; checked_at: string; wait_until?: string };
+type ClearCheckVerdict = { safe: boolean; reason: string; checked_at: string; wait_until?: string; first_check_token?: string };
 export const UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE =
   'The safe automatic retry window expired. Do not submit this mutation again. Verify the authoritative record and reconcile it manually.';
 export const UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE =
@@ -1128,24 +1128,25 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     const attempt = readAcknowledgmentRecord<T>(acknowledgmentKey, options);
     if (!isClearable(mirror) || !isClearable(attempt)) throw new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT);
     // Safe only when the server says the request saved, or it was unsaved on two
-    // checks 15+ minutes apart by server time (it can no longer commit).
+    // checks 15+ minutes apart by server time (it can no longer commit). The first
+    // check's time comes back as a token the server signed; it is stored as-is.
     const checkKey = `${CLEAR_CHECK_PREFIX}${expectedIdempotencyKey}`;
-    let firstCheckedAt: string | null = null;
+    let firstCheckToken: string | null = null;
     try {
-      firstCheckedAt = window.localStorage.getItem(checkKey);
+      firstCheckToken = window.localStorage.getItem(checkKey);
     } catch {
-      // Without the first check's time the server simply starts the wait again.
+      // Without the token the server simply starts the wait again.
     }
     const { data, error } = await supabase.rpc('check_uncertain_request_clearable', {
       p_request_key: expectedIdempotencyKey,
-      ...(firstCheckedAt ? { p_first_checked_at: firstCheckedAt } : {}),
+      ...(firstCheckToken ? { p_first_check_token: firstCheckToken } : {}),
     });
     if (error) throw error;
     const verdict = assertRpcResult<ClearCheckVerdict>(data, 'check_uncertain_request_clearable');
     if (verdict.safe !== true) {
-      if (verdict.reason === 'first_check') {
+      if (verdict.reason === 'first_check' && verdict.first_check_token) {
         try {
-          window.localStorage.setItem(checkKey, verdict.checked_at);
+          window.localStorage.setItem(checkKey, verdict.first_check_token);
         } catch {
           // The next try starts the wait again.
         }

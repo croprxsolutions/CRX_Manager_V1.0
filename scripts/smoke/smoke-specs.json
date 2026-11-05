@@ -1868,7 +1868,7 @@
     },
     "delivery_invoice_charge_lines": {
       "chain": "smoke-delivery-invoice-charge-lines.sql",
-      "description": "Migration 20261107140000 (billing plan M1): on a completed delivery's invoice, a $45.00 freight charge saved through save_invoice is accepted and the invoice posts at the product total + $45.00 to the cent; a line with no product and no charge type is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; a product the delivery didn't carry is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; one more stored quantity tick on the delivered product is still refused. Fails on the old body at A and D. Terminal rollback.",
+      "description": "Migration 20261108110000 (billing plan M1): on a completed delivery's invoice, a $45.00 freight charge saved through save_invoice is accepted and the invoice posts at the product total + $45.00 to the cent; a line with no product and no charge type is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; a product the delivery didn't carry is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; one more stored quantity tick on the delivered product is still refused. Fails on the old body at A and D. Terminal rollback.",
       "covers": [
         "_delivery_invoice_overbilling",
         "enforce_delivery_invoice_within_delivered",

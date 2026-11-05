@@ -191,7 +191,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // lines on such an invoice, migration 20261021050000). Never on the field-invoices route.
   const isFromScratch = routeArea !== 'field' && isFromScratchInvoice(invoice);
   // Billing plan M1: a chemical sale backed by an order or a delivery also takes typed charge lines
-  // (freight, service...) beside its products (migration 20261107140000).
+  // (freight, service...) beside its products (migration 20261108110000).
   const takesCharges = isFromScratch || (routeArea !== 'field' && invoice.invoice_type === 'chemical_sale'
     && !!(invoice.order_id || invoice.delivery_id) && !invoice.blend_ticket_id);
   const [items, setItems] = useState<LineItem[]>([]);

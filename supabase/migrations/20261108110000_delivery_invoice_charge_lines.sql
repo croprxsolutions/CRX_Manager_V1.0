@@ -1,5 +1,5 @@
 -- Written 2026-11-05. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261107140000_delivery_invoice_charge_lines.md.
+-- docs/reference/migrations.d/20261108110000_delivery_invoice_charge_lines.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M1, Mason 4 Nov: "one-off misc charge lines (freight, delivery, service) can

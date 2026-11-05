@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a delivery invoice takes typed charge lines; every product rule stays
 -- ----------------------------------------------------------------------------
--- Migration 20261107140000_delivery_invoice_charge_lines (billing plan M1).
+-- Migration 20261108110000_delivery_invoice_charge_lines (billing plan M1).
 --   A  A $45.00 freight charge on a completed delivery's invoice is accepted
 --   B  A line with no product and no charge type is still refused
 --   C  One more stored quantity tick on the delivered product is still refused

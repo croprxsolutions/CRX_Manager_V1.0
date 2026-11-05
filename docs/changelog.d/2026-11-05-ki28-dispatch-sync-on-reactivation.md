@@ -9,7 +9,7 @@
   the save changes nothing. An applicator whose licenses have all expired is skipped, as the dispatch screen
   already requires; those jobs wait for the wizard's admin override.
 - Reassigning a dispatched job to someone who is not an active applicator now takes it off the old holder's board
-  (its locations become undispatched, and the new person gets them on activation) instead of leaving the old
+  (its active locations become undispatched, and the new person gets them on activation; an undispatch stands) instead of leaving the old
   holder working it.
 - Both existing sync triggers now lock the assigned person's profile while they read it, so a job and a
   re-activation saved at the same instant cannot both miss each other. Accepted: editing that person's job at the

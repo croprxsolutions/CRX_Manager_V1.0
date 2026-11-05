@@ -343,6 +343,11 @@ async function main() {
   console.log('[prover] BEFORE: a job assigned to an inactive applicator stays off the board after re-activation, and a job moved to them stays with its old holder (KI-28 reproduces)');
 
   stageText('candidate.sql', lf(CANDIDATE));
+  // A is active now with open-job locations missing: the file writes no rows, so it refuses to apply.
+  const refused = apply('candidate.sql');
+  assert.notEqual(refused.status, 0, 'the candidate must refuse while a qualifying person has missing locations');
+  assert.match(refused.output, /PREFLIGHT_DISPATCH_SYNC_QUALIFY_BACKFILL_NEEDED/);
+  updateProfile('A', 'new_is_active => false', `ki28-before-off-${PHASE}`);
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   const again = apply('candidate.sql');
@@ -356,9 +361,9 @@ async function main() {
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(scalar(`SELECT has_function_privilege('${role}', '${FN}', 'EXECUTE');`), 'f', `${role} must not execute the trigger function`);
   }
-  // Applying the file wrote nothing: the earlier phase's re-activated A still has no rows (no backfill).
+  // Applying the file wrote nothing.
   assert.deepEqual(boards(), seeded, 'the migration itself writes no rows');
-  console.log('[prover] candidate applied once (no rows written); a second apply refuses; definer, search_path, postgres-only EXECUTE');
+  console.log('[prover] candidate refuses while a qualifying person has missing locations; applied once (no rows written); a second apply refuses; definer, search_path, postgres-only EXECUTE');
 
   // AFTER: fresh rows.
   PHASE += 1;

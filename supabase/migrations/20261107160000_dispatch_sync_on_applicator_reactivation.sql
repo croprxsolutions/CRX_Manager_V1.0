@@ -19,11 +19,10 @@
 --      skipped, the same rule dispatch_job_locations enforces (no license on file = allowed); those jobs
 --      stay for the Dispatch Board wizard and its admin license override.
 --   2) _sync_job_location_dispatch_on_applicator_change: reassigning an open job to someone who does not
---      qualify now removes the job's dispatched and cancelled location rows (completed rows stay), instead
---      of leaving the old holders working it. The locations are then simply undispatched, as the table's
+--      qualify now removes the job's active ('dispatched') location rows, instead of leaving the old holders
+--      working it; completed rows and a dispatcher's undispatch ('cancelled') stay. The locations are then simply undispatched, as the table's
 --      ON DELETE CASCADE already treats a removed assignee; (1) adds them once the new person qualifies.
---      A qualifying reassignment already replaced every location with a fresh dispatch; this is the same
---      scope. Nothing references a dispatch row, so removing one leaves nothing behind.
+--      Nothing references a dispatch row, so removing one leaves nothing behind.
 --   3) Both existing triggers read the assignee's profile row with FOR SHARE (locked by id). A concurrent
 --      reactivation then either commits first and is seen, or waits for this job's transaction to commit,
 --      after which its own sync (new statements, fresh snapshot) sees the job. Without the lock, a job and
@@ -88,6 +87,20 @@ BEGIN
                            WHERE attrelid = 'public.job_location_dispatches'::regclass AND attname = 'job_field_id')
   ) THEN
     RAISE EXCEPTION 'PREFLIGHT_DISPATCH_SYNC_QUALIFY_DRIFT: job_location_dispatches.job_field_id is not uniquely keyed';
+  END IF;
+  -- This file writes no rows and the new trigger only fires when someone BECOMES qualified, so a location
+  -- already missing for a qualifying person would stay missing. Live 2026-11-05: 0. Refuse, never leave one.
+  IF EXISTS (
+    SELECT 1 FROM jobs j
+      JOIN job_fields jf ON jf.job_id = j.id
+      JOIN profiles p ON p.id = j.applicator_id
+     WHERE j.status IN ('scheduled', 'in_progress') AND j.deleted_at IS NULL
+       AND p.is_active IS TRUE AND p.role = 'applicator'
+       AND NOT EXISTS (SELECT 1 FROM job_location_dispatches d WHERE d.job_field_id = jf.id)
+       AND NOT EXISTS (SELECT 1 FROM applicator_licenses l WHERE l.profile_id = p.id AND l.is_active = true
+                       HAVING max(l.expiry_date) < CURRENT_DATE)
+  ) THEN
+    RAISE EXCEPTION 'PREFLIGHT_DISPATCH_SYNC_QUALIFY_BACKFILL_NEEDED: a qualifying applicator has open-job locations with no dispatch row';
   END IF;
 END
 $preflight$;
@@ -195,13 +208,13 @@ BEGIN
    WHERE p.id = NEW.applicator_id
      FOR SHARE;
   IF v_qualifies IS NOT TRUE THEN
-    -- KI-28: the job is no longer the old holders'. Its locations become undispatched (no row), the
-    -- scope a qualifying reassignment replaces below minus completed work; the reactivation sync adds
-    -- fresh rows once this person qualifies. A later reassignment between two people who do not qualify
-    -- finds nothing to move, so nothing can be stranded under an earlier assignee.
+    -- KI-28: the job is no longer the old holders'. Its active locations become undispatched (no row);
+    -- the reactivation sync adds fresh rows once this person qualifies. A dispatcher's undispatch
+    -- ('cancelled') and completed rows stay, so they still stand after that. A later reassignment between
+    -- two people who do not qualify finds nothing active to move, so nothing is stranded.
     DELETE FROM job_location_dispatches
      WHERE job_id = NEW.id
-       AND dispatch_status IN ('dispatched', 'cancelled');
+       AND dispatch_status = 'dispatched';
     RETURN NEW;
   END IF;
 

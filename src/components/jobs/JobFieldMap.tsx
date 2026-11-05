@@ -68,9 +68,11 @@ function toField(r: JobMapFieldRow): JobMapField {
 interface JobFieldMapProps {
   /** The job whose selected fields are plotted. */
   jobId: string;
+  /** Changes after each successful job load, so the always-visible map reloads after a save. */
+  refreshKey?: number;
 }
 
-export default function JobFieldMap({ jobId }: JobFieldMapProps) {
+export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [jobFields, setJobFields] = useState<JobMapField[]>([]);
@@ -133,7 +135,7 @@ export default function JobFieldMap({ jobId }: JobFieldMapProps) {
     return () => {
       cancelled = true;
     };
-  }, [jobId, toast]);
+  }, [jobId, toast, refreshKey]);
 
   const fieldsWithGeometry = useMemo(
     () => jobFields.filter((f) => f.boundary_geojson || f.centroid_geojson),

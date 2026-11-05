@@ -4976,7 +4976,7 @@ export default function JobDetail() {
                 </SectionCard>
               }
             >
-              <JobFieldMap jobId={id} />
+              <JobFieldMap jobId={id} refreshKey={baselineSettleTick} />
             </Suspense>
           )}
           {isNew || !id ? (

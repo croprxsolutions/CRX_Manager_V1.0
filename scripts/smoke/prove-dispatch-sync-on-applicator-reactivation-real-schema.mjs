@@ -301,6 +301,9 @@ function main() {
     assert.match(NAME, /^crx-ki28-dispatch-sync-\d+-[a-z0-9]+$/, 'CRX_PROVER_REUSE_CONTAINER must name a container this proof created');
     assert.equal(docker(['inspect', '--format', '{{.Config.Image}} {{.HostConfig.NetworkMode}}', NAME]).stdout.trim(),
       `${IMAGE} none`, 'the reused container is not a network-disabled prover container');
+    // A container kept after a full run already has the candidate and fixtures; only a pre-candidate one is reusable.
+    assert.equal(scalar(`SELECT count(*) FROM pg_proc WHERE proname = '_sync_job_location_dispatch_on_applicator_qualify';`)
+      + scalar(`SELECT count(*) FROM public.jobs;`), '00', 'reuse needs a container kept before the candidate and seed; start fresh');
   } else buildContainer();
 
   // BEFORE: KI-28 reproduces. A job assigned to an inactive applicator gets no dispatch rows, and

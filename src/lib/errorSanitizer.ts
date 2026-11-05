@@ -138,6 +138,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. This delivery, its invoices or the order\'s drafts changed while you were looking. Check the updated plan and try again'],
   [/^DELIVERY_ORDER_BUSY_RETRY\b/,
    'Nothing was changed. This order is being updated elsewhere. Wait a moment and retry'],
+  // void_delivery (20261107120000, KI-102): voiding the order already put this delivery's stock back.
+  [/^ORDER_VOIDED_DELIVERY_LOCKED\b/,
+   'Nothing was changed. This delivery\'s order is voided, which already put its stock back, so the delivery cannot be voided too. Fix its invoice from the invoice page if needed'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
   // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
   [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,

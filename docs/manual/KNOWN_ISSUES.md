@@ -458,9 +458,8 @@ WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup chec
 
 ### KI-31 — Field Setup and field-save loose ends
 **LOW · OPEN · UI/database · unassigned**
-Deleting every drawn polygon of a multi-part field falls back to the old boundary
-(`src/pages/FieldSetup.tsx:686`). `save_field` reports success for a missing id (`20260729222311:80`, no `FOUND`
-check). (The stale-acres sub-item was fixed 2026-11-05; see the archive.)
+`save_field` reports success for a missing id (`20260729222311:80`, no `FOUND` check). (The stale-acres and
+delete-every-polygon sub-items were closed 2026-11-05; see the archive.)
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
 **MED · PARTIAL · UI/database · Mason (Goal 4)**
@@ -593,8 +592,8 @@ logs `[SENTRY_MISCONFIG]` and drops the alert. Failing loudly needs the key conf
 
 ### KI-39 — Customer-facing PDF polish
 **LOW · OPEN · UI · unassigned**
-Long section notes on quote PDFs overprint the items table (`src/lib/quotePdf.ts:190-191`); the year-over-year
-"Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`).
+The year-over-year "Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`). The
+quote-PDF notes part was fixed 2026-11-05 (see the archive).
 
 ### KI-40 — CRM Phase 5 (AI receptionist) preconditions
 **LOW · OPEN (future work) · database · unassigned**

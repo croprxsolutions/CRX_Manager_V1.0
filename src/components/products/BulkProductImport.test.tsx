@@ -29,10 +29,12 @@ import {
   importRefusalReason,
   isRetiredPricingColumn,
   mapProductImportHeaders,
-  parseCsv,
+  parseCsvRecords,
   productImportColumn,
   toCsv,
 } from './bulkProductImportSafety';
+
+const parseCsv = (text: string) => parseCsvRecords(text).map((r) => r.cells);
 
 const okRow = (over: Record<string, unknown> = {}) => ({
   status: 'ok', error: null, after: { rate_per_acre: null, rate_unit: null, tier1_price_per_acre: null, tier2_price_per_acre: null, tier3_price_per_acre: null },
@@ -61,6 +63,10 @@ describe('CSV reader', () => {
     const rows = [['a', 'b,c'], ['line\nbreak', 'say "hi"']];
     expect(parseCsv(toCsv(rows))).toEqual(rows);
   });
+  it('numbers each record by the file line it starts on, past multi-line notes and blank lines', () => {
+    const text = 'product_name,notes\r\nA,"one\r\ntwo\nthree"\r\n\r\nB,x\nC,"a\rb"\nD,y';
+    expect(parseCsvRecords(text).map((r) => r.line)).toEqual([1, 2, 6, 7, 9]);
+  });
 });
 
 describe('template and columns', () => {
@@ -83,6 +89,14 @@ describe('template and columns', () => {
     expect(m.conflicts).toEqual(['"product_name" and "product" both mean product_name']);
     expect(m.ignored).toEqual(['colour']);
   });
+  it('refuses the old ambiguous "unit" and "type" headers instead of dropping them', () => {
+    const m = mapProductImportHeaders(['product_name', 'Unit', 'type']);
+    expect(m.ambiguous).toEqual(['"Unit" (rename it to unit_size or rate_unit)', '"type" (rename it to category, product_form or container_type)']);
+    expect(Object.values(m.byIndex)).toEqual(['product_name']);
+  });
+  it.each([['application_per_acre', 'rate_per_acre'], ['pricing_unit', 'inventory_unit'], ['type_liquid_dry', 'product_form'],
+    ['container', 'container_size'], ['units', 'unit_size'], ['use timing', 'use_timing']])(
+    'still reads the earlier template header %s as %s', (h, col) => expect(productImportColumn(h)).toBe(col));
   it.each(['cost', 'supplier-cost-cents', 'tier1_price', 't3_gross_margin', 'tier3_price_per_acre', 'pricing_version'])(
     'rejects pricing header %s', (h) => expect(isRetiredPricingColumn(h)).toBe(true));
   it('does not mistake rate details for pricing', () => {

@@ -10,14 +10,15 @@ export const PRODUCT_IMPORT_COLUMNS = [
 export type ProductImportColumn = typeof PRODUCT_IMPORT_COLUMNS[number];
 
 // No ambiguous aliases: "unit" could be the pack unit or the rate unit, "type" the category or the container.
+// The earlier template's other names stay mapped, so an old file never silently drops a column it used to import.
 const COLUMN_ALIASES: Record<ProductImportColumn, string[]> = {
   product_name: ['product', 'name', 'productname', 'item', 'item_name'],
   sku: ['item_code', 'product_code', 'code'],
   category: ['product_type'],
-  product_form: ['form', 'liquid_or_dry'],
-  inventory_unit: ['inv_unit', 'stock_unit'],
-  unit_size: ['uom'],
-  container_size: ['size', 'package_size'],
+  product_form: ['form', 'liquid_or_dry', 'type_liquid_dry'],
+  inventory_unit: ['inv_unit', 'stock_unit', 'pricing_unit'],
+  unit_size: ['uom', 'units'],
+  container_size: ['size', 'package_size', 'container'],
   container_unit: ['pkg_unit', 'package_unit'],
   container_type: ['package_type', 'pkg_type'],
   vendor: ['supplier', 'distributor'],
@@ -30,7 +31,7 @@ const COLUMN_ALIASES: Record<ProductImportColumn, string[]> = {
   max_label_rate: ['label_rate'],
   max_label_rate_unit: ['label_rate_unit'],
   use_timing: ['timing', 'application_timing', 'use_timings'],
-  rate_per_acre: ['acre_rate', 'per_acre'],
+  rate_per_acre: ['acre_rate', 'per_acre', 'application_per_acre'],
   rate_unit: ['rate_uom'],
   suggested_rate: ['rate', 'application_rate', 'use_rate'],
   notes: ['description', 'comments', 'note'],
@@ -71,30 +72,40 @@ export function isRetiredPricingColumn(header: string): boolean {
     || /^(?:price|margin)_(?:tier_?)?[123]$/.test(normalized);
 }
 
-/** RFC 4180 CSV: quoted fields may hold commas, doubled quotes and line breaks. A leading BOM is dropped; an unclosed quote throws. */
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
+/**
+ * RFC 4180 CSV: quoted fields may hold commas, doubled quotes and line breaks. A leading BOM is dropped; an unclosed
+ * quote throws. Each record keeps the file line it starts on, so a multi-line note does not shift row numbers.
+ */
+export function parseCsvRecords(text: string): { cells: string[]; line: number }[] {
+  const rows: { cells: string[]; line: number }[] = [];
   let row: string[] = [];
   let cell = '';
   let quoted = false;
+  let line = 1;
+  let start = 1;
   const src = text.replace(/^\uFEFF/, '');
   for (let i = 0; i < src.length; i += 1) {
     const ch = src[i];
     if (quoted) {
       if (ch === '"' && src[i + 1] === '"') { cell += '"'; i += 1; }
       else if (ch === '"') quoted = false;
-      else cell += ch;
+      else {
+        if (ch === '\n' || (ch === '\r' && src[i + 1] !== '\n')) line += 1;
+        cell += ch;
+      }
     } else if (ch === '"') quoted = true;
     else if (ch === ',') { row.push(cell); cell = ''; }
     else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && src[i + 1] === '\n') i += 1;
-      row.push(cell); rows.push(row); row = []; cell = '';
+      row.push(cell); rows.push({ cells: row, line: start }); row = []; cell = '';
+      line += 1;
+      start = line;
     } else cell += ch;
   }
   // An unclosed quote would swallow every later line into one cell, dropping those rows unseen.
   if (quoted) throw new Error('A quoted value is never closed (a " is missing). Fix the file and try again.');
-  if (cell !== '' || row.length > 0) { row.push(cell); rows.push(row); }
-  return rows.filter((r) => r.some((c) => c.trim() !== ''));
+  if (cell !== '' || row.length > 0) { row.push(cell); rows.push({ cells: row, line: start }); }
+  return rows.filter((r) => r.cells.some((c) => c.trim() !== ''));
 }
 
 const csvCell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
@@ -105,14 +116,24 @@ export interface ColumnMapping {
   byIndex: Record<number, ProductImportColumn>;
   ignored: string[];
   conflicts: string[];
+  /** Old headers that could mean two columns; the file is refused until they are renamed. */
+  ambiguous: string[];
 }
+
+const AMBIGUOUS_HEADERS: Record<string, string> = {
+  unit: 'unit_size or rate_unit',
+  type: 'category, product_form or container_type',
+};
 
 export function mapProductImportHeaders(headers: readonly string[]): ColumnMapping {
   const byIndex: Record<number, ProductImportColumn> = {};
   const seen = new Map<ProductImportColumn, string>();
   const ignored: string[] = [];
   const conflicts: string[] = [];
+  const ambiguous: string[] = [];
   headers.forEach((header, i) => {
+    const meaning = AMBIGUOUS_HEADERS[normalizeProductImportHeader(header)];
+    if (meaning) { ambiguous.push(`"${header.trim()}" (rename it to ${meaning})`); return; }
     const col = productImportColumn(header);
     if (!col) { if (header.trim()) ignored.push(header.trim()); return; }
     const prior = seen.get(col);
@@ -120,7 +141,7 @@ export function mapProductImportHeaders(headers: readonly string[]): ColumnMappi
     seen.set(col, header.trim());
     byIndex[i] = col;
   });
-  return { byIndex, ignored, conflicts };
+  return { byIndex, ignored, conflicts, ambiguous };
 }
 
 /** What insert mode of apply_product_setup takes (20261107090000). */

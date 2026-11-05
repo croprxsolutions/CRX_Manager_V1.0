@@ -18,7 +18,7 @@ import {
   importRefusalReason,
   isRetiredPricingColumn,
   mapProductImportHeaders,
-  parseCsv,
+  parseCsvRecords,
   type ProductImportRow,
 } from './bulkProductImportSafety';
 
@@ -60,7 +60,14 @@ function skipReason(r: Row): string | null {
   if (dup) return `Duplicate of ${dup.product_name}${dup.is_active ? '' : ' (inactive)'}: skipped.`;
   if (p.in_file_duplicate) return 'This name or SKU appears more than once in the file: skipped.';
   if (p.status !== 'ok') return importRefusalReason(p.error ?? 'Refused.', r.insert.product_name);
+  if (!pricesReadExactly(p.expected_prices)) return 'A previewed per-acre price is too large to check exactly: skipped.';
   return null;
+}
+
+// The preview's numeric prices arrive as JavaScript numbers, exact to the cent only below $10 trillion (15 digits).
+function pricesReadExactly(p: PerAcre | null): boolean {
+  return !p || [p.tier1_price_per_acre, p.tier2_price_per_acre, p.tier3_price_per_acre]
+    .every((v) => v == null || Math.abs(v) < 1e13);
 }
 
 function ImportPreview({ rows, ready, skipped, ratesLocked, ignored }: {
@@ -195,7 +202,8 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
     setParsing(true);
     setRatesLocked(false);
     try {
-      const [headers = [], ...data] = parseCsv(await file.text());
+      const [header, ...data] = parseCsvRecords(await file.text());
+      const headers = header?.cells ?? [];
       const pricingHeaders = headers.filter(isRetiredPricingColumn);
       if (pricingHeaders.length > 0) {
         toast('error', `Pricing columns are not allowed in Bulk Product Import: ${pricingHeaders.join(', ')}. Use the governed pricing worksheet or Product page instead.`);
@@ -211,12 +219,16 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         toast('error', `Two columns mean the same thing: ${mapping.conflicts.join('; ')}. Remove one and try again.`);
         return;
       }
+      if (mapping.ambiguous.length > 0) {
+        toast('error', `These columns could mean more than one thing: ${mapping.ambiguous.join('; ')}. Rename them and try again.`);
+        return;
+      }
       if (!Object.values(mapping.byIndex).includes('product_name')) {
         toast('error', 'Could not find product name column. Ensure your CSV has a "product_name" or "product" column.');
         return;
       }
       const categories = (await listProductCategories()).filter((c) => c.is_active).map((c) => c.name);
-      const built: Row[] = data.map((cells, i) => buildProductImportRow(cells, mapping, i + 2, categories));
+      const built: Row[] = data.map(({ cells, line }) => buildProductImportRow(cells, mapping, line, categories));
       const checkable = built.filter((r) => !r.error);
       if (checkable.length > 0) {
         const { data: res, error } = await supabase.rpc('preview_product_import', {

@@ -152,8 +152,15 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  for (const [i, file] of FOLLOW_UPS.entries()) assert.equal(all[at + 1 + i], file, `${path.basename(file)} must follow the candidate`);
-  for (const file of all.slice(at + 1 + FOLLOW_UPS.length)) {
+  // Others' migrations may sort between the candidate and a follow-up (live applied them in between);
+  // they are not replayed, so each must leave alone what this proof covers.
+  let last = at;
+  for (const file of FOLLOW_UPS) {
+    const i = all.indexOf(file);
+    assert.ok(i > last, `${path.basename(file)} must sort after the candidate and earlier follow-ups`);
+    last = i;
+  }
+  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f))) {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);

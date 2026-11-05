@@ -227,13 +227,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'An internal error occurred. Please try again.'],
 ];
 
-// The exact reasons 20261010120000 writes after `DELIVERY_INVOICE_EXCEEDS_DELIVERED: `.
+// The exact reasons 20261010120000 (and 20261107140000, typed charge lines) write after `DELIVERY_INVOICE_EXCEEDS_DELIVERED: `.
 const DOC_NUMBER = String.raw`[A-Za-z0-9][A-Za-z0-9-]{0,40}`;
 const QUANTITY = String.raw`\d{1,12}(?:\.\d{1,8})?`;
 const DELIVERY_CAP_REASONS: Array<{ shape: RegExp; labelGroup?: number }> = [
   { shape: new RegExp(`^invoice ${DOC_NUMBER} bills ${QUANTITY} of (.{1,120}), but delivery ${DOC_NUMBER} allows ${QUANTITY}$`), labelGroup: 1 },
   { shape: new RegExp(`^invoice ${DOC_NUMBER} bills (.{1,120}) from an order line delivery ${DOC_NUMBER} did not carry$`), labelGroup: 1 },
-  { shape: new RegExp(`^invoice ${DOC_NUMBER} has a line with no product or a negative quantity; a delivery invoice bills only the products delivery ${DOC_NUMBER} delivered$`) },
+  { shape: new RegExp(`^invoice ${DOC_NUMBER} has a line with no product and no charge type, or a negative quantity; a delivery invoice bills the products delivery ${DOC_NUMBER} delivered, plus typed charges \\(freight, application fee, service, other\\)$`) },
   { shape: new RegExp(`^invoice ${DOC_NUMBER} cannot be posted before delivery ${DOC_NUMBER} is completed$`) },
   { shape: new RegExp(`^invoice ${DOC_NUMBER} names a delivery that does not exist$`) },
 ];
@@ -344,6 +344,10 @@ export function sanitizeError(error: unknown): string {
   // shapes the database writes, with plain document numbers, quantities and a product label that
   // carries no identifier; anything else gets the generic sentence.
   const deliveryCapDetail = deliveryCapReason(message);
+  if (deliveryCapDetail?.includes(' has a line with no product and no charge type')) {
+    return 'Nothing was changed. Every line on this invoice needs a product, or a charge type (freight, application fee, service or other), and no quantity can be negative'
+      + ` (${deliveryCapDetail.split(' has a line')[0]})`;
+  }
   if (deliveryCapDetail?.includes(' cannot be posted before delivery ')) {
     return `Nothing was posted. This invoice is for one delivery, so it can be posted only after that delivery is completed (${deliveryCapDetail})`;
   }

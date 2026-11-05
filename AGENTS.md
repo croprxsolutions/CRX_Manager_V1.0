@@ -70,6 +70,12 @@ Choose the simplest complete implementation preserving business rules: existing 
 - Done requires observed behavior and risk-matched proof; new tests alone are insufficient. State unverified behavior and risk. Verify findings against current code or live read-only evidence; report location/severity. Plans need files, risks, verification; changes need protected delivery or a named parking reason and owner.
 - Close substantial work `COMPLETE`, `READY FOR APPROVAL`, `BLOCKED`, or `PARTIAL`: outcome, proof, remaining owner, one next step. Automation never loosens gates.
 
+## Knowledge Vaults
+
+- Business context (customers, suppliers, past decisions, the "why") lives in Mason's Obsidian vaults, not in this repo. Read the vault's `index.md` first, then the notes it points to. Code, migrations and live data win over notes.
+- `C:\Users\mason\Documents\CRX Notes` is the shared CRX app-knowledge vault (Ingest/Query/Lint workflows in its `CLAUDE.md`; never bypass its privacy guard). `C:\Users\mason\Documents\Obsidian Vault` is private: read-only from this repo, and none of its private facts (customer names, money, contacts, account numbers) go into code, commits, PRs or this public repo.
+- Cloud sessions and other machines lack these paths; skip this section there.
+
 ## Guidance Ownership
 
 Hand-maintain this contract; never edit generated `.agents/` adapters. Workflow sources: `.claude/commands/`, `.claude/skills/`, `.claude/hooks/`. Command/policy changes and shipped/parked work update affected manual/reference docs in the same change. A new migration needs a ledger record in the same commit (`docs/changelog.d/<YYYY-MM-DD>-<slug>.md` preferred); small fixes need no changelog note. Keep volatile status there. Run `npm run check:agent-guidance`; agent-tooling verification follows the collaboration route.

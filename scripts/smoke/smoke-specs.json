@@ -1798,7 +1798,7 @@
     "set_product_rates": {
       "chain": "smoke-product_rate_lock.sql",
       "container_prover": "prove-product-rate-lock-real-schema.mjs",
-      "description": "REQUIRES 20261107010000. The product rate lock (WP-PM-11a-1): the bodies of set_product_rates, set_product_rate_lock, correct_product_rates, preview_product_rate_correction, the unit rule and the rate guard are pinned and anon cannot execute the functions; on an invented product an admin saves rates through set_product_rates and a same-key replay answers the same, locks rates with a reason, is then refused PRODUCT_RATES_LOCKED by a direct browser rate edit and by set_product_rates, and corrects the one product, which is logged; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED by all three functions and a signed-out visitor is refused EXECUTE.",
+      "description": "REQUIRES 20261107060000. The product rate lock (WP-PM-11a-1): the bodies of set_product_rates, set_product_rate_lock, correct_product_rates, preview_product_rate_correction, the unit rule and the rate guard are pinned and anon cannot execute the functions; on an invented product an admin saves rates through set_product_rates and a same-key replay answers the same, locks rates with a reason, is then refused PRODUCT_RATES_LOCKED by a direct browser rate edit and by set_product_rates, and corrects the one product, which is logged; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED by all three functions and a signed-out visitor is refused EXECUTE.",
       "covers": [
         "set_product_rates",
         "set_product_rate_lock",
@@ -1813,7 +1813,7 @@
     "set_product_rate_lock": {
       "chain": "smoke-product_rate_lock.sql",
       "container_prover": "prove-product-rate-lock-real-schema.mjs",
-      "description": "REQUIRES 20261107010000. The product rate lock (WP-PM-11a-1): the bodies of set_product_rates, set_product_rate_lock, correct_product_rates, preview_product_rate_correction, the unit rule and the rate guard are pinned and anon cannot execute the functions; on an invented product an admin saves rates through set_product_rates and a same-key replay answers the same, locks rates with a reason, is then refused PRODUCT_RATES_LOCKED by a direct browser rate edit and by set_product_rates, and corrects the one product, which is logged; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED by all three functions and a signed-out visitor is refused EXECUTE.",
+      "description": "REQUIRES 20261107060000. The product rate lock (WP-PM-11a-1): the bodies of set_product_rates, set_product_rate_lock, correct_product_rates, preview_product_rate_correction, the unit rule and the rate guard are pinned and anon cannot execute the functions; on an invented product an admin saves rates through set_product_rates and a same-key replay answers the same, locks rates with a reason, is then refused PRODUCT_RATES_LOCKED by a direct browser rate edit and by set_product_rates, and corrects the one product, which is logged; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED by all three functions and a signed-out visitor is refused EXECUTE.",
       "covers": [
         "set_product_rates",
         "set_product_rate_lock",
@@ -1828,7 +1828,7 @@
     "correct_product_rates": {
       "chain": "smoke-product_rate_lock.sql",
       "container_prover": "prove-product-rate-lock-real-schema.mjs",
-      "description": "REQUIRES 20261107010000. The product rate lock (WP-PM-11a-1): the bodies of set_product_rates, set_product_rate_lock, correct_product_rates, preview_product_rate_correction, the unit rule and the rate guard are pinned and anon cannot execute the functions; on an invented product an admin saves rates through set_product_rates and a same-key replay answers the same, locks rates with a reason, is then refused PRODUCT_RATES_LOCKED by a direct browser rate edit and by set_product_rates, and corrects the one product, which is logged; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED by all three functions and a signed-out visitor is refused EXECUTE.",
+      "description": "REQUIRES 20261107060000. The product rate lock (WP-PM-11a-1): the bodies of set_product_rates, set_product_rate_lock, correct_product_rates, preview_product_rate_correction, the unit rule and the rate guard are pinned and anon cannot execute the functions; on an invented product an admin saves rates through set_product_rates and a same-key replay answers the same, locks rates with a reason, is then refused PRODUCT_RATES_LOCKED by a direct browser rate edit and by set_product_rates, and corrects the one product, which is logged; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED by all three functions and a signed-out visitor is refused EXECUTE.",
       "covers": [
         "set_product_rates",
         "set_product_rate_lock",

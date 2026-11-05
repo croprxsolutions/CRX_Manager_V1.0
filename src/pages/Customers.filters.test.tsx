@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
 
 const {
   mockFrom,
@@ -26,10 +27,13 @@ type QueryResult = { data: unknown; error: { message: string } | null; count?: n
 
 function buildChain(result: QueryResult): Record<string, unknown> {
   const self: Record<string, unknown> = {};
-  for (const method of ['select', 'update', 'eq', 'gt', 'is', 'in', 'order', 'limit']) {
+  for (const method of ['select', 'update', 'eq', 'gt', 'is', 'in', 'order', 'limit', 'range']) {
     self[method] = vi.fn(() => self);
   }
-  const promise = Promise.resolve(result);
+  // The customer list pages with fetchAllRows; a reply that holds every counted
+  // row ends the read in one request, as a small book does on the live server.
+  const counted = result.count == null && Array.isArray(result.data) ? { ...result, count: result.data.length } : result;
+  const promise = Promise.resolve(counted);
   self.then = promise.then.bind(promise);
   self.catch = promise.catch.bind(promise);
   self.finally = promise.finally.bind(promise);
@@ -83,10 +87,6 @@ const book = [
   customer({ id: 'c-3', farm_name: 'Retired Farm', is_active: false, assigned_sales_rep: REP_B }),
 ];
 
-// `count` is the TOTAL matching rows the server reports, which is independent of
-// how many the capped page returned — that difference is the whole point of the
-// truncation warning. Defaults to null, the "server did not report one" case, so
-// every test that predates the count reads through the page-length fallback.
 const profileRows = [
   { id: REP_A, full_name: 'Dana Rep', role: 'sales_rep', is_active: true },
   { id: REP_B, full_name: 'Sam Rep', role: 'sales_rep', is_active: false },
@@ -189,40 +189,20 @@ describe('Customers list filters', () => {
     expect(screen.getByText('Active Unassigned Farm')).toBeInTheDocument();
   });
 
-  // The two cap tests must render a full 1,000-row page — fewer rows could not
-  // tell the count-based check from the page-length fallback. That render is
-  // genuinely heavy (~0.3s locally, ~10x that on a busy CI runner), and every
-  // whole-document getByText/queryByText walk over it costs another ~0.1s, so
-  // they wait on the row count and read the warning from the page text once,
-  // and get a timeout sized for the render instead of the 5s default.
+  // Rendering 1,005 rows is heavy (~10x slower on a busy CI runner), so the test waits on the row count.
   const FULL_PAGE_TIMEOUT_MS = 20_000;
-  const waitForFullPage = () =>
-    waitFor(() => expect(document.querySelectorAll('tbody tr')).toHaveLength(1000), { timeout: FULL_PAGE_TIMEOUT_MS });
 
-  it('warns instead of silently truncating when there are more customers than the cap', async () => {
-    const capped = Array.from({ length: 1000 }, (_, i) => customer({ id: `c-${i}`, farm_name: `Farm ${i}` }));
-    mockTables(capped, 1500);
+  // KI-32: the list was one request, which the server stops at 1,000 rows. The
+  // in-memory server caps every reply the same way, so only a paged read shows all.
+  it('shows every customer past the 1,000-row server cap', async () => {
+    const big = Array.from({ length: 1005 }, (_, i) => customer({ id: `c-${String(i).padStart(4, '0')}`, farm_name: `Farm ${String(i).padStart(4, '0')}` }));
+    mockFrom.mockImplementation((table: string) => (table === 'customers'
+      ? buildInMemoryQuery(big)
+      : buildChain({ data: profileRows, error: null })));
     renderCustomers();
-    await waitForFullPage();
-    expect(document.body).toHaveTextContent('this list is truncated');
+    await waitFor(() => expect(document.querySelectorAll('tbody tr')).toHaveLength(1005), { timeout: FULL_PAGE_TIMEOUT_MS });
+    expect(document.body).toHaveTextContent('Farm 1004');
   }, FULL_PAGE_TIMEOUT_MS);
-
-  // A full page is not the same fact as a truncated one. A book of exactly the cap
-  // returns every customer there is, so warning would tell Mason rows are hidden
-  // when none are — the page-length test alone could not tell the two apart.
-  it('does not warn when the book is exactly the cap and all of it is shown', async () => {
-    const exact = Array.from({ length: 1000 }, (_, i) => customer({ id: `c-${i}`, farm_name: `Farm ${i}` }));
-    mockTables(exact, 1000);
-    renderCustomers();
-    await waitForFullPage();
-    expect(document.body).not.toHaveTextContent('this list is truncated');
-  }, FULL_PAGE_TIMEOUT_MS);
-
-  it('does not warn about truncation below the cap', async () => {
-    renderCustomers();
-    await screen.findByText('Active Assigned Farm');
-    expect(screen.queryByText(/this list is truncated/)).not.toBeInTheDocument();
-  });
 
   it('shows the bulk assignment action to admins only', async () => {
     mockAuth.profile = { id: REP_A, role: 'sales_rep' };

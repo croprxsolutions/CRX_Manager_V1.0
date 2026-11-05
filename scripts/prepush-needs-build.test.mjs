@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { needsAppBuild, needsMapCheck } from './prepush-needs-build.mjs';
+import { edgeSourceTests, needsAppBuild, needsMapCheck } from './prepush-needs-build.mjs';
 import { tempDir } from './lib/test-temp-dir.mjs';
 
 assert.equal(needsAppBuild(['scripts/a.mjs', 'docs/x.md', 'supabase/migrations/1_x.sql']), false);
@@ -16,6 +16,18 @@ assert.equal(needsMapCheck(['scripts/a.mjs', 'docs/x.md', 'public/sw.js', 'packa
 for (const file of ['src/pages/Jobs.tsx', 'docs/app-workflow-map.html', 'docs/reference/rpc-functions.md', 'scripts/generate-workflow-map.mjs']) {
   assert.equal(needsMapCheck([file]), true, `${file} must trigger the map check`);
 }
+
+// Edge Function source tests: pick tests that name a changed function folder, by path or by join() segments.
+const edgeTests = [
+  { path: 'src/a.test.ts', text: "readFileSync('supabase/functions/send-email/index.ts')" },
+  { path: 'src/b.test.ts', text: "join(root, 'supabase', 'functions', 'send-email', 'index.ts')" },
+  { path: 'src/c.test.ts', text: "path.join(root, 'supabase\\\\functions\\\\_shared\\\\x.ts')" },
+  { path: 'src/d.test.ts', text: 'supabase/functions/send-email-other/index.ts' },
+  { path: 'src/e.test.ts', text: 'unrelated' },
+];
+assert.deepEqual(edgeSourceTests(['supabase/functions/send-email/index.ts'], edgeTests), ['src/a.test.ts', 'src/b.test.ts']);
+assert.deepEqual(edgeSourceTests(['supabase/functions/_shared/x.ts'], edgeTests), ['src/c.test.ts']);
+assert.deepEqual(edgeSourceTests(['src/App.tsx', 'supabase/migrations/1_x.sql', 'supabase/functions/README.md'], edgeTests), []);
 
 const verdict = (stdin) => spawnSync(process.execPath, ['scripts/prepush-needs-build.mjs'], { input: stdin, encoding: 'utf8' }).stdout.trim();
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();

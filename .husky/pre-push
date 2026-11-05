@@ -43,6 +43,20 @@ if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --map)
   done
 fi
 
+# Tests that read an Edge Function's source break when it changes (PR #1515 found out in CI).
+EDGE_TESTS="$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --edge-tests)"
+if [ -n "$EDGE_TESTS" ]; then
+  echo ""
+  echo "Running tests that read the changed Edge Function source..."
+  # shellcheck disable=SC2086
+  if ! npx vitest run $EDGE_TESTS 2>&1; then
+    echo ""
+    echo "❌ EDGE FUNCTION SOURCE TESTS FAILED — push blocked."
+    echo "Files: $(printf '%s' "$EDGE_TESTS" | tr '\n' ' ')"
+    exit 1
+  fi
+fi
+
 # Type check, code health and build read only app files; CI builds every PR regardless.
 if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs)" = "skip" ]; then
   echo ""

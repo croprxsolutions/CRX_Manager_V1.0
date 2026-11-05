@@ -281,6 +281,18 @@ describe('sanitizeError', () => {
     )).toBe('A record with this information already exists');
   });
 
+  it('names a repeated product SKU', () => {
+    expect(sanitizeError(
+      'duplicate key value violates unique constraint "products_sku_unique"'
+    )).toBe('Another product already has this SKU');
+  });
+
+  it('names a repeated active product name', () => {
+    expect(sanitizeError(
+      'duplicate key value violates unique constraint "products_active_name_unique"'
+    )).toBe('Another active product already has this name');
+  });
+
   it('sanitizes foreign key constraint violations', () => {
     expect(sanitizeError(
       'insert or update on table "invoices" violates foreign key constraint "invoices_customer_id_fkey"'
@@ -424,5 +436,12 @@ describe('sanitizeError', () => {
     expect(sanitizeError(42)).toBe('An unexpected error occurred');
     expect(sanitizeError({})).toBe('An unexpected error occurred');
     expect(sanitizeError([])).toBe('An unexpected error occurred');
+  });
+});
+
+describe('product setup and import refusals (20261107090000)', () => {
+  it('keeps the server text, which names the products', () => {
+    expect(sanitizeError({ message: 'PRODUCT_SETUP_DUPLICATE: the SKU or name is already used by a product or twice in this file: Chem' }))
+      .toBe('Nothing was saved. The SKU or name is already used by a product or twice in this file: Chem');
   });
 });

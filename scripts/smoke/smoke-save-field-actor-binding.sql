@@ -1,5 +1,6 @@
 -- Rollback-only save_field actor-binding smoke.
--- Run after migration 20260729222311. It proves no-auth and forged actors are
+-- Run after migration 20261107140000 (which keeps 20260729222311's actor binding). It proves
+-- an id that matches no field fails with FIELD_NOT_FOUND and writes nothing (KI-31), no-auth and forged actors are
 -- rejected with the expected contract errors and leave no field rows, the
 -- production call shape (p_performed_by = auth.uid()) succeeds and replays
 -- idempotently, NULL compatibility remains safe, attribution is truthful, and
@@ -13,6 +14,7 @@ DECLARE
   v_customer uuid;
   v_field uuid;
   v_replay uuid;
+  v_missing uuid := gen_random_uuid();
   v_fn_oid oid;
   v_payload jsonb;
   v_count integer;
@@ -115,6 +117,25 @@ BEGIN
   IF v_count <> 2 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: expected two truthful field activities by %, got %',
       v_admin, v_count;
+  END IF;
+
+  BEGIN
+    PERFORM public.save_field(
+      v_missing, v_payload, '[]'::jsonb, v_admin, 'smk-field-missing-' || v_suffix
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: save_field reported success for a missing field id';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'FIELD_NOT_FOUND%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: missing id expected FIELD_NOT_FOUND, got %', SQLERRM;
+    END IF;
+  END;
+
+  SELECT count(*) INTO v_count
+  FROM activity_feed
+  WHERE related_entity_id = v_missing;
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: missing-id save wrote % activity row(s)', v_count;
   END IF;
 
   IF (

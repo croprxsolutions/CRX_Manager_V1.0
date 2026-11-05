@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const MIGRATION = path.join(ROOT, 'supabase', 'migrations', '20260729222311_bind_save_field_actor.sql');
+const MIGRATION = path.join(ROOT, 'supabase', 'migrations', '20261107140000_save_field_refuses_missing_field.sql');
 const PREDICATE = path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'save-field-actor-binding.sql');
 const SIGNATURE = 'CREATE OR REPLACE FUNCTION public.save_field(';
 

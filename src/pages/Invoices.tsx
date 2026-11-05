@@ -512,28 +512,21 @@ export default function Invoices() {
     const targets = selectedEmailable;
     const results: BulkEmailResult[] = [];
     try {
-      // Read each billed customer by id (the picker list skips inactive customers).
-      const custIds = targets.map((t) => t.customer_id).filter((id): id is string => !!id);
-      const { data: custs, error: custError } = await fetchAllRowsForIds(custIds, (idChunk, from, to) => pageWithList(supabase
-        .from('customers')
-        .select('id, email', { count: 'exact' })
-        .in('id', idChunk)
-        .order('id')
-        .range(from, to)))
-        .catch((err: unknown) => ({ data: null, error: err }));
-      const emailByCustomer = new Map((custs ?? []).map((c: { id: string; email: string | null }) => [c.id, c.email?.trim() || '']));
       for (const inv of targets) {
         const base = { invoiceId: inv.id, invoiceNumber: inv.invoice_number, customerName: inv.customer_name };
-        if (custError) {
-          results.push({ ...base, outcome: 'failed', detail: 'Could not load customer email addresses' });
-          continue;
-        }
-        const to = emailByCustomer.get(inv.customer_id);
-        if (!to) {
-          results.push({ ...base, outcome: 'skipped', detail: 'No email address on file' });
-          continue;
-        }
         try {
+          // Read the address right before each send, so a change made mid-batch is used.
+          const { data: cust, error: custError } = await supabase
+            .from('customers')
+            .select('email')
+            .eq('id', inv.customer_id)
+            .maybeSingle();
+          if (custError) throw custError;
+          const to = cust?.email?.trim() || '';
+          if (!to) {
+            results.push({ ...base, outcome: 'skipped', detail: 'No email address on file' });
+            continue;
+          }
           // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
           const pdfData = await loadInvoicePdfData(inv);
           // Re-read the server-owned gate and the version the retry key names: an invoice
@@ -575,8 +568,15 @@ export default function Invoices() {
       emailingRef.current = false;
       setEmailing(false);
     }
-    // Leave only the invoices that did not go out ticked, so a retry is one click.
-    setSelected(new Set(results.filter((r) => r.outcome === 'failed' || r.outcome === 'skipped').map((r) => r.invoiceId)));
+    // Untick what went out and keep what did not, so a retry is one click; other ticks made meanwhile stay.
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const r of results) {
+        if (r.outcome === 'failed' || r.outcome === 'skipped') next.add(r.invoiceId);
+        else next.delete(r.invoiceId);
+      }
+      return next;
+    });
     setEmailResults(results);
     const done = summarizeBulkEmail(results);
     toast(done.type, done.message);

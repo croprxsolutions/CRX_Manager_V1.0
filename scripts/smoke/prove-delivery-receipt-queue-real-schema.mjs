@@ -366,6 +366,12 @@ function main() {
   assert.equal(asUser(ADMIN, 'SELECT count(*) FROM public.delivery_receipt_queue').out, '1');
   assert.equal(asUser(DRIVER, 'SELECT count(*) FROM public.delivery_receipt_queue').out, '0');
   assert.match(asUser(ADMIN, "UPDATE public.delivery_receipt_queue SET status = 'sent'").err, /permission denied/);
+  // An admin may write the email log directly, but never a row in the worker's namespace.
+  const adminLog = (key) => asUser(ADMIN, `INSERT INTO public.email_log (recipient_email, email_type, subject, status, idempotency_key)
+    VALUES ('ki25-farm@example.invalid', 'delivery_completed', '[PROVER]', 'sent', '${key}')`);
+  assert.match(adminLog(`delivery-receipt-queue:${id('56')}:attempt-1`).err, /DELIVERY_RECEIPT_WORKER_ONLY/);
+  assert.equal(adminLog('ki25-admin-other').status, 0, 'other admin log rows are unaffected');
+  psql("DELETE FROM public.email_log WHERE idempotency_key = 'ki25-admin-other';");
   assert.match(asUser(ADMIN, 'SELECT public.claim_delivery_receipts(10)').err, /permission denied/);
   assert.match(asUser(ADMIN, "SELECT public.finish_delivery_receipt(gen_random_uuid(), gen_random_uuid(), 'sent', NULL, 'x', 'y')").err, /permission denied/);
   assert.match(asUser(ADMIN, `SELECT public._enqueue_delivery_receipt('${D(3)}', '${ADMIN}')`).err, /permission denied/);
@@ -437,13 +443,13 @@ function main() {
   const own = claim();
   assert.equal(own.length, 1, "the worker's own email rows do not settle the receipt");
   finish(own[0], 'retry');
-  // A send before the receipt was owed (before this completion) does not settle it.
+  // A send before the receipt was owed (before this completion, or retried since and keeping its created_at)
+  // neither settles it nor lets it send: the office checks.
   psql(`UPDATE public.delivery_receipt_queue SET created_at = now() + interval '1 minute' WHERE delivery_id = '${D(2)}';`);
   log(`delivery_completed:delivery:${D(2)}:office-before-completion`, 'sent');
-  fresh(2);
-  const early = claim();
-  assert.equal(early.length, 1, 'a confirmation sent before the receipt was owed does not settle it');
-  finish(early[0], 'retry');
+  fresh(2); assert.equal(claim().length, 0);
+  assert.match(row(2, "status || ' ' || last_error"), /^needs_check A confirmation for this delivery was emailed before this completion/);
+  psql(`DELETE FROM public.email_log WHERE idempotency_key = 'delivery_completed:delivery:${D(2)}:office-before-completion';`);
   psql(`UPDATE public.delivery_receipt_queue SET created_at = now() - interval '1 minute' WHERE delivery_id = '${D(2)}';`);
   log(`delivery_completed:delivery:${D(2)}:delivery-resend-${D(2)}-1730000000000`, 'sent');
   fresh(2); assert.equal(claim().length, 0); assert.equal(row(2, 'status'), 'sent_elsewhere');

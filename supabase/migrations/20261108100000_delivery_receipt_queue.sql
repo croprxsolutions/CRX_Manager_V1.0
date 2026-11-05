@@ -29,7 +29,11 @@
 --      attempt is logged sent (its finish was lost) is recorded sent, never sent again.
 --      The worker logs its sends as key 'delivery-receipt-queue:<queue id>:attempt-<n>' with created_by NULL.
 --      send-email cannot write that (it scopes every key as '<email_type>:<resource>:<key>' and sets created_by),
---      so no staff send can pass as the worker's.
+--      so no staff send can pass as the worker's; the email_log trigger also refuses any API user (an admin
+--      inserting directly) who writes or changes a row in that namespace.
+--      The sender must give every attempt for one receipt the same provider idempotency key
+--      ('delivery-receipt/<queue id>'): retries stop inside its 24-hour duplicate guard (23 hours), so an
+--      uncertain earlier attempt or an overlapping stale worker cannot email the customer twice.
 --   3b. _delivery_receipt_send_lock (trigger on email_log): while the worker holds a live claim on a receipt,
 --      any other delivery_completed send for that delivery (or, with no key, that customer) is refused at its
 --      pre-send log row. Both sides lock the queue row, so a claim and an office send never both pass.
@@ -508,16 +512,17 @@ BEGIN
 
     -- Any other delivery_completed email for this delivery (the office's Email Confirmation, or a phone send):
     -- send-email scopes keys as 'delivery_completed:delivery:<id>:<key>'; older rows used the bare app keys.
-    -- Only sends since the receipt was owed: an earlier one did not carry this completion.
-    SELECT CASE WHEN bool_or(e.status = 'sent') THEN 'sent'
-                WHEN bool_or(e.status = 'pending') THEN 'pending' END
+    -- One sent since the receipt was owed settles it; one sent earlier (perhaps retried since, which keeps
+    -- its created_at) may or may not carry this completion, so the office checks.
+    SELECT CASE WHEN bool_or(e.status = 'sent' AND e.created_at >= v_row.created_at) THEN 'sent'
+                WHEN bool_or(e.status = 'pending') THEN 'pending'
+                WHEN bool_or(e.status = 'sent') THEN 'earlier' END
       INTO v_other
       FROM public.email_log e
      WHERE e.email_type = 'delivery_completed'
        AND (left(e.idempotency_key, length(v_scoped)) = v_scoped
             OR e.idempotency_key = 'delivery-completed-' || v_row.delivery_id::text
-            OR left(e.idempotency_key, 53) = 'delivery-resend-' || v_row.delivery_id::text || '-')
-       AND e.created_at >= v_row.created_at;
+            OR left(e.idempotency_key, 53) = 'delivery-resend-' || v_row.delivery_id::text || '-');
     IF v_other = 'sent' THEN
       UPDATE public.delivery_receipt_queue
          SET status = 'sent_elsewhere', claim_token = NULL, claimed_at = NULL, last_error = NULL
@@ -527,6 +532,12 @@ BEGIN
       UPDATE public.delivery_receipt_queue
          SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
              last_error = 'Another send of this receipt did not finish; check whether the customer got it.'
+       WHERE id = v_row.id;
+      CONTINUE;
+    ELSIF v_other = 'earlier' THEN
+      UPDATE public.delivery_receipt_queue
+         SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
+             last_error = 'A confirmation for this delivery was emailed before this completion; check whether the customer needs this receipt.'
        WHERE id = v_row.id;
       CONTINUE;
     END IF;
@@ -715,6 +726,13 @@ DECLARE
   v_delivery uuid;
   v_busy boolean;
 BEGIN
+  -- Only the worker (service_role) or a direct database session writes the worker's rows. SECURITY DEFINER
+  -- changes current_user, not the session's role setting, so this reads the API caller's role.
+  IF (left(NEW.idempotency_key, 23) = 'delivery-receipt-queue:'
+      OR (TG_OP = 'UPDATE' AND left(OLD.idempotency_key, 23) = 'delivery-receipt-queue:'))
+     AND current_setting('role', true) IN ('authenticated', 'anon') THEN
+    RAISE EXCEPTION 'DELIVERY_RECEIPT_WORKER_ONLY: only the receipt sender writes its email log rows';
+  END IF;
   IF NEW.email_type IS DISTINCT FROM 'delivery_completed' OR NEW.status IS DISTINCT FROM 'pending'
      OR (TG_OP = 'UPDATE' AND OLD.status = 'pending')
      OR (left(NEW.idempotency_key, 23) = 'delivery-receipt-queue:' AND NEW.created_by IS NULL) THEN  -- not a new send, or the worker's own
@@ -740,7 +758,7 @@ END;
 $function$;
 ALTER FUNCTION public._delivery_receipt_send_lock() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._delivery_receipt_send_lock() FROM PUBLIC, anon, authenticated, service_role;
-CREATE TRIGGER delivery_receipt_send_lock BEFORE INSERT OR UPDATE OF status ON public.email_log
+CREATE TRIGGER delivery_receipt_send_lock BEFORE INSERT OR UPDATE ON public.email_log
   FOR EACH ROW EXECUTE FUNCTION public._delivery_receipt_send_lock();
 COMMENT ON FUNCTION public._delivery_receipt_send_lock() IS
   'KI-25 (trigger on email_log): refuses a new delivery_completed send while the receipt worker holds a live claim on that delivery''s receipt (no key: that customer''s), so the two never both email it.';

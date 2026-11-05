@@ -28,6 +28,7 @@ import { SkeletonTable } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import ProductRateLockControl from '../components/products/ProductRateLockControl';
+import ProductSetupWorkbookModal from '../components/products/ProductSetupWorkbookModal';
 import { loadProductRateLock } from '../lib/productRateLock';
 import type { Product, ProductCategory, ProductRateLock, SalesSheetFormat } from '../types';
 import {
@@ -165,6 +166,7 @@ export default function Products() {
   const [categoryChoices, setCategoryChoices] = useState<ProductCategory[]>([]);
   const [vendors, setVendors] = useState<string[]>([]);
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
+  const [setupWorkbookOpen, setSetupWorkbookOpen] = useState(false);
   const [activeReview, setActiveReview] = useState<{ ids: string[]; active: boolean; scope: string; result: ActiveReview } | null>(null);
   const activeReviewSeq = useRef(0);
   const [deactivating, setDeactivating] = useState(false);
@@ -1320,6 +1322,14 @@ export default function Products() {
               >
                 Import Products
               </Button>
+              <Button
+                variant="secondary"
+                icon={<FileSpreadsheet className="w-4 h-4" />}
+                onClick={() => setSetupWorkbookOpen(true)}
+                title="Product details and rates, separate from the price sheet"
+              >
+                Setup Workbook
+              </Button>
             </div>
           )}
           </div>
@@ -1461,6 +1471,15 @@ export default function Products() {
           />
         </div>
       </Card>
+
+      {isAdmin && (
+        <ProductSetupWorkbookModal
+          open={setupWorkbookOpen}
+          profileId={profile?.id ?? ''}
+          onClose={() => setSetupWorkbookOpen(false)}
+          onSaved={() => { void fetchProducts(); }}
+        />
+      )}
 
       <BulkProductImport
         open={bulkProductImportOpen}

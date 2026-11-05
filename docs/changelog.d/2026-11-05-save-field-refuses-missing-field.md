@@ -7,3 +7,6 @@
 - The rollback smoke `scripts/smoke/smoke-save-field-actor-binding.sql` gains a missing-id step, and
   `scripts/smoke/prove-save-field-actor-binding.mjs` now applies the new migration on top of `20260729222311`.
   Without the new migration that step fails ("reported success for a missing field id"); with it the proof passes.
+- The standing live sweep `scripts/db-invariant-sweeps/predicates/save-field-actor-binding.sql` now pins the new body
+  (SHA-256 `1db4e4fe…`). Its static test reads the new migration, and its container proof applies both migrations
+  and checks that the old body now fails closed. Until the live apply, that sweep reports the old live body.

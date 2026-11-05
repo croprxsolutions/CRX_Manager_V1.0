@@ -32,7 +32,7 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261108120000_product_parents.sql');
 // PAR-1's own follow-ups, installed right after the candidate.
-const FOLLOW_UPS = [path.join(MIGRATIONS, '20261108130000_product_parent_stock_units.sql')];
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20261110150000_product_parent_stock_units.sql')];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -399,7 +399,7 @@ function main() {
   assert.equal(prod(A1, 'rate_per_acre, rate_unit, suggested_rate'), '4|oz|4 oz/A');
   assert.equal(scalar(`SELECT concat_ws('|', rate_per_acre, rate_unit, suggested_rate) FROM public.product_parents WHERE id = '${PA}';`), '4|oz|4 oz/A');
   assert.equal(prices(A1), previewed(pv.sizes[0]));
-  // An upload that resends a parent's current rates skips that parent instead of refusing the batch (20261108130000).
+  // An upload that resends a parent's current rates skips that parent instead of refusing the batch (20261110150000).
   const vSame = version(PA);
   const same = call(ADMIN, setRates([rateRow(previewRates(PA, 4, 'oz', '4 oz/A'), '4', 'oz', '4 oz/A')], 'k-r3b'));
   assert.equal(same.changed_count, 0, JSON.stringify(same));
@@ -505,7 +505,7 @@ function main() {
   const E2 = call(ADMIN, addSize(E.parent_id, version(E.parent_id), { product_name: '[PROVER] Epsilon 2', sku: 'EP-2', inventory_unit: 'Gal',
     epa_registration: '200 - 1' }, 'k-e-add')).product_id;
   assert.equal(prod(E2, 'epa_registration'), '200-1');
-  // A size moved in with a spaced spelling of the parent's EPA number stores the normalized one too (20261108130000).
+  // A size moved in with a spaced spelling of the parent's EPA number stores the normalized one too (20261110150000).
   const P = call(ADMIN, create({ name: '[PROVER] Psi', product_form: 'liquid', category: 'Fungicide' },
     { product_name: '[PROVER] Psi 1', sku: 'PS-1', inventory_unit: 'Gal' }, 'k-create-p'));
   asOwner(`UPDATE public.products SET epa_registration = '200 - 1' WHERE id = '${P.product_id}';`);

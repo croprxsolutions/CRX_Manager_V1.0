@@ -92,6 +92,15 @@ BEGIN
      IS DISTINCT FROM 'CHECK ((change_type = ANY (ARRAY[''created''::text, ''updated''::text])))' THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_CHANGE_HISTORY_CHECK_CHANGED';
   END IF;
+  -- 20261102100000's two-column field_name CHECK: PostgreSQL names a column CHECK that reads
+  -- another column <table>_check, which this file drops and re-adds below.
+  IF (SELECT pg_get_constraintdef(oid) FROM pg_constraint
+       WHERE conname = 'product_change_history_check'
+         AND conrelid = 'public.product_change_history'::regclass) NOT LIKE '%field_name IS NULL%'
+     OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'product_change_history_check'
+                     AND conrelid = 'public.product_change_history'::regclass) THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRODUCT_CHANGE_HISTORY_FIELD_CHECK_CHANGED';
+  END IF;
 END;
 $preflight$;
 

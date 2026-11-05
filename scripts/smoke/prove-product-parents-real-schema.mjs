@@ -249,7 +249,7 @@ function refused(uid, sql, pattern) {
   assert.match(r.output, pattern);
 }
 const q = (v) => JSON.stringify(v).replaceAll("'", "''");
-const preview = (rows, uid = ADMIN) => JSON.parse(ok(uid, `SELECT public.preview_product_import('${q(rows)}'::jsonb);`));
+const preview = (rows, uid = ADMIN) => JSON.parse(ok(uid, `SELECT public.preview_product_import('${q(rows)}'::jsonb);`), exactPrices);
 const save = (rows, key, actor = ADMIN) => `SELECT public.apply_product_setup('${q(rows)}'::jsonb, '${actor}', '${key}');`;
 // What the screen sends: each confirmed row, with the preview's prices when it carries rates.
 const fromPreview = (rows, p) => rows.map((r, i) => (r.rates ? { ...r, expected_prices: p.rows[i].expected_prices } : r));
@@ -257,12 +257,14 @@ const count = () => scalar('SELECT count(*) FROM public.products;');
 const field = (name, cols) => scalar(`SELECT concat_ws('|', ${cols}) FROM public.products WHERE product_name = '${name.replaceAll("'", "''")}';`);
 // The amount exactly as returned, refused unless whole cents.
 // String padding, not Number: a large amount keeps its exact cents.
-const cents = (v) => { assert.match(String(v), /^[0-9]+([.][0-9]{1,2})?$/, `${v} is not whole cents`); const [i, f = ''] = String(v).split('.'); return `${i}.${f.padEnd(2, '0')}`; };
+// Prices keep their exact JSON text (JSON.rawJSON re-serializes it unchanged), never a JS number.
+const exactPrices = (k, v, ctx) => (typeof v === 'number' && /price/.test(k) ? JSON.rawJSON(ctx.source) : v);
+const cents = (raw) => { const v = raw && typeof raw === 'object' && 'rawJSON' in raw ? raw.rawJSON : raw; assert.match(String(v),/^[0-9]+([.][0-9]{1,2})?$/, `${v} is not whole cents`); const [i, f = ''] = String(v).split('.'); return `${i}.${f.padEnd(2, '0')}`; };
 const TIERS = ['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'];
 
 const PA_NAME = '[PROVER] Alpha 4L';
 const J = (v) => `'${q(v)}'::jsonb`;
-const call = (uid, sql) => JSON.parse(ok(uid, sql));
+const call = (uid, sql) => JSON.parse(ok(uid, sql), exactPrices);
 const owner = (sql) => { const r = psql(sql, { allowFailure: true }); return { status: r.status, output: `${r.stdout}\n${r.stderr}` }; };
 const ownerRefused = (sql, pattern) => { const r = owner(sql); assert.notEqual(r.status, 0, `expected a refusal:\n${sql}`); assert.match(r.output, pattern); };
 const ownerOk = (sql) => { const r = owner(sql); assert.equal(r.status, 0, r.output); };

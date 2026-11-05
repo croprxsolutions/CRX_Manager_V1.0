@@ -227,6 +227,39 @@ describe('BulkProductImport screen', () => {
     expect(props.onSuccess).not.toHaveBeenCalled();
   });
 
+  it('checks a large file in batches of 100 (KI-103) but still saves it in one all-or-nothing call', async () => {
+    let previews = 0;
+    rpc.mockImplementation(async (name: string, args: { p_rows: { insert: { product_name: string } }[] }) => {
+      if (name !== 'preview_product_import') return { data: { inserted_count: 250, rows: [] }, error: null };
+      previews += 1;
+      // Only the second batch reports the lock; the name check proves each result lands on its own row.
+      return { data: { rates_locked: previews === 2, rows: args.p_rows.map((r) => okRow({
+        status: r.insert.product_name === 'P 150' ? 'refused' : 'ok', error: r.insert.product_name === 'P 150' ? 'Row 150 refused' : null,
+      })) }, error: null };
+    });
+    render(<BulkProductImport {...props} />);
+    const csv = ['product_name', ...Array.from({ length: 250 }, (_, i) => `P ${i + 1}`)].join('\n');
+    await upload(csv);
+    expect(await screen.findByRole('button', { name: /Import 249 Product/ })).toBeInTheDocument();
+    const sizes = rpc.mock.calls.filter(([n]) => n === 'preview_product_import').map(([, a]) => a.p_rows.length);
+    expect(sizes).toEqual([100, 100, 50]);
+    expect(screen.getByText('Row 150 refused')).toBeInTheDocument();
+    expect(screen.getByText(/Rates are locked\. Rows that set a rate are skipped/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Import 249 Product/ }));
+    expect(await screen.findByText('Import Complete')).toBeInTheDocument();
+    const saves = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup');
+    expect(saves).toHaveLength(1);
+    expect(saves[0][1].p_rows).toHaveLength(249);
+  });
+
+  it('refuses a check reply with the wrong number of rows instead of pinning results to the wrong products', async () => {
+    rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
+    render(<BulkProductImport {...props} />);
+    await upload('product_name\nA\nB\n');
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/^Could not check the file/)));
+    expect(screen.queryByRole('button', { name: /Import \d+ Product/ })).not.toBeInTheDocument();
+  });
+
   it('shows the lock, skips rated rows it refuses, and reports the import', async () => {
     rpc.mockImplementation(async (name: string) => (name === 'preview_product_import'
       ? { data: { rates_locked: true, rows: [

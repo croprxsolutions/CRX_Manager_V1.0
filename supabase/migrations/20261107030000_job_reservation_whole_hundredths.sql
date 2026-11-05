@@ -60,7 +60,10 @@
 SET LOCAL lock_timeout = '5s';
 
 -- Hold off every job draw writer (a sync still running the old body) until this transaction
--- commits, so no unrounded draw can land between the precision check and the new body.
+-- commits, so no unrounded draw can land between the precision check and the new body. Every sync
+-- first takes its quote FOR UPDATE, so EXCLUSIVE on quotes (same order: quotes, then draws) also waits
+-- for an old-body sync that holds its quote but has not written a draw yet (Luna HIGH, 2026-11-05).
+LOCK TABLE public.quotes IN EXCLUSIVE MODE;
 LOCK TABLE public.job_product_draws IN SHARE ROW EXCLUSIVE MODE;
 
 CREATE TEMP TABLE job_draw_hundredths_tx ON COMMIT DROP AS

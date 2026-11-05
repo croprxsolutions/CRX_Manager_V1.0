@@ -57,7 +57,9 @@ import {
   Inbox,
   CheckSquare,
 } from 'lucide-react';
-import Card, { CardHeader } from '../components/ui/Card';
+import Card from '../components/ui/Card';
+import SectionCard from '../components/ui/SectionCard';
+import SectionJumpBar from '../components/ui/SectionJumpBar';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import PageHeader from '../components/ui/PageHeader';
@@ -451,13 +453,18 @@ function TileHeader({
   linkLabel?: string;
   onLink?: () => void;
 }) {
-  const color = count === null || count === 0 ? 'text-gray-400' : (countColor ?? 'text-red-600');
+  const color = count === null || count === 0 ? 'text-gray-600' : (countColor ?? 'text-red-600');
   return (
-    <div className="flex items-start justify-between gap-2 mb-3">
-      <div className="flex min-w-0 items-start gap-2">
-        {icon}
-        <h2 className="font-semibold text-nav-dark">{title}</h2>
-        <span className={`text-sm font-bold ${color}`}>({count ?? '–'})</span>
+    // Style D band (docs/workflows/UI_PATTERNS.md), bled to the edges of the tile's padded Card.
+    <div className="-mx-5 -mt-5 mb-3 flex items-center justify-between gap-2 rounded-t-xl bg-cream-dark px-4 py-2.5">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-crx-green [&_svg]:text-white!">
+          {icon}
+        </span>
+        <h2 className="font-heading text-lg font-bold leading-tight text-nav-dark">{title}</h2>
+        <span className={`inline-flex min-w-6 shrink-0 items-center justify-center rounded-full bg-white px-2 py-0.5 text-sm font-bold ${color}`}>
+          {count ?? '–'}
+        </span>
       </div>
       {onLink && (
         <button
@@ -1170,6 +1177,7 @@ export default function OfficeCockpit() {
       <PageHeader
         title="Office"
         accent="Cockpit"
+        large
         subtitle={<>Everything stuck or wrong &mdash; one screen, no report-running.</>}
         actions={
           <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
@@ -1177,11 +1185,12 @@ export default function OfficeCockpit() {
               onClick={() => navigate('/payments')}
               variant="ghost"
               size="sm"
+              showChevron
             >
-              Record payments &rarr;
+              Record payments
             </Button>
             {lastRefreshed && (
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-secondary">
                 Updated {lastRefreshed.toLocaleTimeString()}
               </span>
             )}
@@ -1196,6 +1205,15 @@ export default function OfficeCockpit() {
             </Button>
           </div>
         }
+      />
+
+      <SectionJumpBar
+        sections={[
+          { id: 'cockpit-exceptions', label: 'Needs attention', count: totalExceptions },
+          { id: 'cockpit-snapshot', label: 'Morning snapshot' },
+          { id: 'cockpit-inventory', label: 'Inventory' },
+          ...(isAdmin || profile?.role === 'sales_rep' ? [{ id: 'cockpit-actions', label: 'Quick actions' }] : []),
+        ]}
       />
 
       {/* All-clear banner when nothing is wrong */}
@@ -1214,7 +1232,7 @@ export default function OfficeCockpit() {
       )}
 
       {/* Tile grid — 3-column on large screens */}
-      <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
+      <div id="cockpit-exceptions" className="grid min-w-0 scroll-mt-32 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
 
         {/* (a) Completed-but-unbilled jobs */}
         <Card>
@@ -1765,9 +1783,9 @@ export default function OfficeCockpit() {
       </div>
 
       {/* The owner-approved morning sequence keeps exception queues first. */}
-      <section className="space-y-4">
+      <section id="cockpit-snapshot" className="scroll-mt-32 space-y-4">
         <div>
-          <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-3">Morning Snapshot</h2>
+          <h2 className="mb-3 font-heading text-2xl font-bold text-nav-dark">Morning Snapshot</h2>
           {!morningSummaryLoadOk ? (
             <Card>
               <p className="text-sm text-gray-400">Operational KPI summary is unavailable right now. Refresh to retry.</p>
@@ -1838,8 +1856,8 @@ export default function OfficeCockpit() {
         {isAdmin && <FinanceSnapshotCard />}
       </section>
 
-      <section>
-        <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-3">Inventory Position</h2>
+      <section id="cockpit-inventory" className="scroll-mt-32">
+        <h2 className="mb-3 font-heading text-2xl font-bold text-nav-dark">Inventory Position</h2>
         {!morningSummaryLoadOk ? (
           <Card>
             <p className="text-sm text-gray-400">Inventory position is unavailable until the operational summary loads.</p>
@@ -1892,8 +1910,8 @@ export default function OfficeCockpit() {
       </section>
 
       {(isAdmin || profile?.role === 'sales_rep') && (
-        <Card>
-          <CardHeader title="Quick" accent="Actions" />
+        <SectionCard id="cockpit-actions" icon={<Zap className="w-5 h-5" />} title="Quick Actions">
+          <div className="p-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:grid-cols-5">
             <button
               onClick={() => navigate('/deliveries?quickDeliver=1')}
@@ -1981,7 +1999,8 @@ export default function OfficeCockpit() {
               </button>
             </div>
           </div>
-        </Card>
+          </div>
+        </SectionCard>
       )}
 
       {/* §4: Post-all-clean confirmation — in-app modal (no confirm()/alert()). */}

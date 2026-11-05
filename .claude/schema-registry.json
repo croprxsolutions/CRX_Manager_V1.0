@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261105032430",
+    "migrations_high_water": "20261105162551",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -505,6 +505,11 @@
       "20261107050000_blend_tickets_application_records_only",
       "20261107060000_product_rate_lock",
       "20261107070000_job_reservation_whole_hundredths",
+      "20261107080000_product_setup_workbook",
+      "20261107120000_void_delivery_respects_voided_and_cancelled_orders",
+      "20261107130000_product_import",
+      "20261107140000_save_field_refuses_missing_field",
+      "20261107150000_uncertain_request_clear_check",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1505,6 +1510,7 @@
     "rebate_claim_counters",
     "receiving_photos",
     "receiving_records",
+    "retired_uncertain_requests",
     "return_credit_customer_claims",
     "return_items",
     "rup_sales_records",
@@ -1514,6 +1520,7 @@
     "supplier_price_observations",
     "team_note_attachments",
     "team_note_tags",
+    "uncertain_request_clear_check_key",
     "unit_conversions",
     "vendor_alias_stage_receipts",
     "vendor_payments",
@@ -2764,6 +2771,15 @@
       ],
       "constraints": [
         "receiving_records_condition_check"
+      ]
+    },
+    "retired_uncertain_requests.reason": {
+      "values": [
+        "recorded",
+        "not_recorded_after_wait"
+      ],
+      "constraints": [
+        "retired_uncertain_requests_reason_check"
       ]
     },
     "return_items.condition": {
@@ -4475,6 +4491,12 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "retired_uncertain_requests",
+      "constraint": "retired_uncertain_requests_request_key_check",
+      "def": "CHECK ((request_key ~ '^[a-z0-9_]+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
       "table": "return_items",
       "constraint": "return_items_positive_quantity_check",
       "def": "CHECK ((quantity > (0)::numeric))",
@@ -4605,6 +4627,18 @@
       "constraint": "supplier_price_observations_price_unit_check",
       "def": "CHECK ((btrim(price_unit) <> ''::text))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "uncertain_request_clear_check_key",
+      "constraint": "uncertain_request_clear_check_key_signing_key_check",
+      "def": "CHECK ((octet_length(signing_key) = 32))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "uncertain_request_clear_check_key",
+      "constraint": "uncertain_request_clear_check_key_singleton_check",
+      "def": "CHECK (singleton)",
+      "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
       "table": "user_list_settings",
@@ -6554,6 +6588,16 @@
         "is_non_returnable"
       ]
     },
+    "retired_uncertain_requests": {
+      "no_default": [
+        "request_key",
+        "retired_by",
+        "reason"
+      ],
+      "with_default": [
+        "retired_at"
+      ]
+    },
     "return_credit_customer_claims": {
       "no_default": [
         "return_id",
@@ -6751,6 +6795,14 @@
         "is_pinned",
         "created_at",
         "updated_at"
+      ]
+    },
+    "uncertain_request_clear_check_key": {
+      "no_default": [
+        "signing_key"
+      ],
+      "with_default": [
+        "singleton"
       ]
     },
     "unit_conversions": {
@@ -9098,6 +9150,12 @@
       "created_at",
       "is_non_returnable"
     ],
+    "retired_uncertain_requests": [
+      "request_key",
+      "retired_by",
+      "retired_at",
+      "reason"
+    ],
     "return_credit_customer_claims": [
       "return_id",
       "order_id",
@@ -9319,6 +9377,10 @@
       "linked_entity_type",
       "linked_entity_id",
       "last_escalated_at"
+    ],
+    "uncertain_request_clear_check_key": [
+      "singleton",
+      "signing_key"
     ],
     "unit_conversions": [
       "id",

@@ -26,6 +26,12 @@
 --      the worker only when a row is due AND both Vault secrets delivery_receipt_worker_url and
 --      delivery_receipt_worker_secret exist. Neither is created here: until they are stored (a separate approved
 --      step) the job does nothing.
+--      pg_net boundary: Supabase's issue_pg_net_access trigger grants PUBLIC on net.http_request_queue /
+--      net._http_response and EXECUTE on net.http_* to anon/authenticated; postgres cannot revoke those (owned by
+--      supabase_admin). They are unreachable from the app because PostgREST exposes only public and graphql_public
+--      (live, 2026-11-05: PGRST106 for net and extensions). Never add net or extensions to the exposed schemas.
+--      The wake secret is a dedicated wake-only value (never the service_role key): a wake is only a hint, the
+--      worker's claim/finish calls stay service_role-only, and its reply carries no customer data.
 --
 -- NOT CHANGED: what completion does to deliveries, stock, invoices or evidence; start_and_complete_delivery;
 --   process_offline_action; send-email; email_log; every grant on existing objects except complete_delivery's
@@ -66,7 +72,7 @@ BEGIN
   SELECT * INTO p FROM pg_proc
    WHERE oid = to_regprocedure('public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text)');
   IF p.oid IS NULL
-     OR md5(p.prosrc) <> 'c07f8ea8323f512549064a2ee6360dba'
+     OR md5(replace(p.prosrc, chr(13), '')) <> 'c07f8ea8323f512549064a2ee6360dba'  -- md5 ignores carriage returns
      OR NOT p.prosecdef
      OR p.proowner <> 'postgres'::regrole
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
@@ -198,7 +204,7 @@ CREATE FUNCTION public.complete_delivery(
   p_completed_at timestamp with time zone DEFAULT NULL::timestamp with time zone,
   p_evidence text DEFAULT NULL::text,
   p_evidence_ref text DEFAULT NULL::text,
-  p_email_receipt boolean DEFAULT NULL::boolean
+  p_email_receipt boolean DEFAULT NULL::boolean  -- 20261108100000 (KI-25)
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -656,8 +662,18 @@ BEGIN
      OR has_table_privilege('service_role', 'public.delivery_receipt_queue', 'INSERT') THEN
     RAISE EXCEPTION 'POSTFLIGHT: delivery_receipt_queue access is wider than read-only for staff';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'deliver-receipt-queue') THEN
-    RAISE EXCEPTION 'POSTFLIGHT: the deliver-receipt-queue job is missing';
+  IF (SELECT count(*) FROM cron.job
+       WHERE jobname = 'deliver-receipt-queue' AND username = 'postgres' AND database = 'postgres' AND active
+         AND schedule = '*/2 * * * *' AND command = 'SELECT public._wake_delivery_receipt_worker()') <> 1 THEN
+    RAISE EXCEPTION 'POSTFLIGHT: the deliver-receipt-queue job is missing or not the expected postgres job';
   END IF;
+  FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()',
+                                'claim_delivery_receipts(integer)', 'finish_delivery_receipt(uuid, uuid, text, text, text, text)'] LOOP
+    SELECT * INTO p FROM pg_proc WHERE oid = ('public.' || v_name)::regprocedure;
+    IF NOT p.prosecdef OR p.proowner <> 'postgres'::regrole
+       OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp'] THEN
+      RAISE EXCEPTION 'POSTFLIGHT: % lost its owner, mode or search_path', v_name;
+    END IF;
+  END LOOP;
 END;
 $postflight$;

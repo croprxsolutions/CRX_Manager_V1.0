@@ -159,6 +159,7 @@ DECLARE
   v_own_drawn numeric; -- JOB_DRAW_HUNDREDTHS
   v_pending_drawn numeric; -- JOB_DRAW_HUNDREDTHS
   v_pending_demand numeric; -- JOB_DRAW_HUNDREDTHS
+  v_counted_drawn numeric := 0; -- JOB_DRAW_HUNDREDTHS
   v_draw numeric;
   v_hold numeric;
 BEGIN
@@ -284,6 +285,19 @@ BEGIN
            AND jc.product_id = v_row.product_id
            AND jc.customer_supplied = false
            AND j.status IN ('completed', 'invoiced');
+        -- Each kept draw counts at most its job's current demand rounded up, so a completed job
+        -- edited down later never hides later jobs' demand (Sol HIGH and Codex P2, 2026-11-05).
+        SELECT COALESCE(SUM(LEAST(d.quantity_drawn, ROUND(CEIL(COALESCE(jd.demand, 0) * 100) / 100, 2))), 0)
+          INTO v_counted_drawn
+          FROM job_product_draws d
+          LEFT JOIN LATERAL (
+            SELECT SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)) AS demand
+              FROM job_chemicals jc
+              JOIN products p ON p.id = jc.product_id
+             WHERE jc.job_id = d.job_id AND jc.product_id = d.product_id AND jc.customer_supplied = false
+          ) jd ON true
+         WHERE d.quote_id = p_quote_id AND d.product_id = v_row.product_id
+           AND NOT (d.job_id = ANY (ARRAY[]::uuid[]));
         v_crop_pool := ROUND(FLOOR(v_crop_pool * 100) / 100, 2);
         -- >>>JOB_DRAW_HUNDREDTHS
       ELSE
@@ -320,9 +334,22 @@ BEGIN
            AND j.id = ANY (COALESCE(v_pending, ARRAY[]::uuid[]));
         v_completed_demand := v_completed_demand - v_row.demand - v_pending_demand;
         v_consumed_drawn := v_consumed_drawn - v_own_drawn - v_pending_drawn;
+        -- Each kept draw counts at most its job's current demand rounded up, so a completed job
+        -- edited down later never hides later jobs' demand (Sol HIGH and Codex P2, 2026-11-05).
+        SELECT COALESCE(SUM(LEAST(d.quantity_drawn, ROUND(CEIL(COALESCE(jd.demand, 0) * 100) / 100, 2))), 0)
+          INTO v_counted_drawn
+          FROM job_product_draws d
+          LEFT JOIN LATERAL (
+            SELECT SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)) AS demand
+              FROM job_chemicals jc
+              JOIN products p ON p.id = jc.product_id
+             WHERE jc.job_id = d.job_id AND jc.product_id = d.product_id AND jc.customer_supplied = false
+          ) jd ON true
+         WHERE d.quote_id = p_quote_id AND d.product_id = v_row.product_id
+           AND NOT (d.job_id = ANY (v_row.job_id || COALESCE(v_pending, ARRAY[]::uuid[])));
         -- The first kept job draw on a booking is at least 0.01, so the booking guards that look for a
         -- positive job draw (convert, delete, close) still see product already applied (Sol, 2026-11-05).
-        v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), LEAST(v_consumed_drawn, ROUND(v_completed_demand, 2) + 0.01)),
+        v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_counted_drawn),
                                  CASE WHEN v_consumed_drawn = 0 AND v_row.demand > 0 THEN 0.01 ELSE 0 END),
                         ROUND(CEIL(v_row.demand * 100) / 100, 2),
                         ROUND(FLOOR(GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0) * 100) / 100, 2));
@@ -333,6 +360,19 @@ BEGIN
         END IF;
         v_completed_demand := v_completed_demand + v_row.demand + v_pending_demand;
         v_consumed_drawn := v_consumed_drawn + v_draw + v_pending_drawn;
+        -- Each kept draw counts at most its job's current demand rounded up, so a completed job
+        -- edited down later never hides later jobs' demand (Sol HIGH and Codex P2, 2026-11-05).
+        SELECT COALESCE(SUM(LEAST(d.quantity_drawn, ROUND(CEIL(COALESCE(jd.demand, 0) * 100) / 100, 2))), 0)
+          INTO v_counted_drawn
+          FROM job_product_draws d
+          LEFT JOIN LATERAL (
+            SELECT SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)) AS demand
+              FROM job_chemicals jc
+              JOIN products p ON p.id = jc.product_id
+             WHERE jc.job_id = d.job_id AND jc.product_id = d.product_id AND jc.customer_supplied = false
+          ) jd ON true
+         WHERE d.quote_id = p_quote_id AND d.product_id = v_row.product_id
+           AND NOT (d.job_id = ANY (ARRAY[]::uuid[]));
         v_crop_pool := ROUND(FLOOR(GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0) * 100) / 100, 2);
       END IF;
       CONTINUE; -- a completed job holds no shed stock
@@ -345,16 +385,16 @@ BEGIN
     -- demand) and the kept draws. It never counts an active sibling, so a sibling cancelled later leaves
     -- no borrowed rounding behind. A completed job's shortfall (kept draws below the rounded completed
     -- demand, e.g. it outran an older, smaller booking) is never caught up, by one job or by many small
-    -- ones each rounding up; kept draws up to 0.01 above it (the rounding this sync itself leaves) are
-    -- absorbed by later steps, and any excess beyond that (a completed job edited down later) is not,
-    -- so it never hides a later job's demand (Sol HIGH, 2026-11-05). Active siblings may
+    -- ones each rounding up; kept draws above it are absorbed by later steps, but each kept draw counts
+    -- at most its job's current demand rounded up (v_counted_drawn), so a completed job edited down
+    -- later never hides later jobs' demand (Sol HIGH and Codex P2, 2026-11-05). Active siblings may
     -- briefly over-reserve together; each completion re-syncs the rest (complete_job's status update
     -- fires _sync_job_holds in the same transaction), so the kept draws move by ROUND(completed demand).
     -- Never more than the job's own demand rounded up. An active job with any demand draws at least
     -- 0.01 while the booking has it: every booking guard (convert, delete, close, rollover) treats a
     -- positive job draw as the sign an active job is using the booking, so it must never round to
     -- nothing. Its completion rebuild (above) has no such floor, so the kept draws still track ROUND.
-    v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), LEAST(v_consumed_drawn, ROUND(v_completed_demand, 2) + 0.01)), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);
+    v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_counted_drawn), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);
     -- >>>JOB_DRAW_HUNDREDTHS
     v_crop_pool := v_crop_pool - v_draw;
     -- Hold the FULL application demand in the shed (channels don't offset, #A).
@@ -455,7 +495,7 @@ BEGIN
   IF NOT FOUND
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_sync_quote_job_reservations') <> 1
-     OR position('v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), LEAST(v_consumed_drawn, ROUND(v_completed_demand, 2) + 0.01)), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
+     OR position('v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_counted_drawn), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
      OR position('INTO v_completed_demand' IN p.prosrc) = 0
      OR position('v_hold := GREATEST(v_row.demand, v_draw);' IN p.prosrc) = 0
      OR position('IF v_row.completing THEN' IN p.prosrc) = 0

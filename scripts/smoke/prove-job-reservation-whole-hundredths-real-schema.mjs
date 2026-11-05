@@ -595,12 +595,33 @@ function main() {
       VALUES ('${edB}', '${P10}', 1, 'gal', false);
     SELECT public._sync_quote_job_reservations('${Q}', NULL);`);
   const drawB = scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${edB}';`);
-  assert.equal(Number(drawB), 0.99, `after a completed job was edited down, a new 1 gal job should draw 0.99, not ${drawB}`);
+  assert.equal(Number(drawB), 1, `after a completed job was edited down, a new 1 gal job should draw 1.00, not ${drawB}`);
   psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${edB}';`);
   const keptB = scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${edB}';`);
   const leftP10 = scalar(`SELECT 3 - sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P10}';`);
-  assert.equal(Number(keptB), 0.99, `the edited-down case should keep 0.99 for the new job, not ${keptB}`);
+  assert.equal(Number(keptB), 1, `the edited-down case should keep 1.00 for the new job, not ${keptB}`);
   console.log(`[prover] completed 1 gal job edited down to 0.1: a new 1 gal job draws ${drawB}, keeps ${keptB}, booking left ${leftP10} (was 0.1 / 1.90)`);
+  // Codex P2: then 90 jobs of 0.01 gal complete one by one. The edited job's excess must not erase them.
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      SELECT ('6c000000-0000-4000-8000-c6' || lpad(n::text, 10, '0'))::uuid, 'KI100-c6-' || n, '${C}',
+             DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '12 days' + n * interval '1 minute'
+        FROM generate_series(1, 90) n;
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      SELECT ('6c000000-0000-4000-8000-c6' || lpad(n::text, 10, '0'))::uuid, '${P10}', 0.01, 'gal', false
+        FROM generate_series(1, 90) n;
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);
+    DO $tiny$
+    BEGIN
+      FOR n IN 1..90 LOOP
+        UPDATE public.jobs SET status = 'completed' WHERE id = ('6c000000-0000-4000-8000-c6' || lpad(n::text, 10, '0'))::uuid;
+      END LOOP;
+    END
+    $tiny$;`);
+  const tinyKept = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P10}' AND job_id::text LIKE '6c000000-0000-4000-8000-c6%';`);
+  const leftTiny = scalar(`SELECT 3 - sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P10}';`);
+  assert.equal(Number(tinyKept), 0.9, `90 jobs of 0.01 gal after the edited job should keep 0.90, not ${tinyKept}`);
+  console.log(`[prover] then 90 jobs of 0.01 gal completed one by one keep ${tinyKept} gal, booking left ${leftTiny}`);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

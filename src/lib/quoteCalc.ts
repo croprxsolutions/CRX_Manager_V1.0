@@ -139,19 +139,34 @@ export function exactRound2(nums: number[], dens: number[] = []): number {
  */
 export function billedLine(pricePerUnit: number, cost: number, unitNums: number[], unitDens: number[] = []) {
   const units = exactRound2(unitNums, unitDens);
-  const totalPrice = exactRound2([pricePerUnit, units]);
-  const profit = Math.round((totalPrice - exactRound2([cost, units])) * 100) / 100;
-  const netMargin = totalPrice > 0 ? exactRound2([profit, 100], [totalPrice]) : 0;
-  return { units, totalPrice, profit, netMargin };
+  return { units, ...pricedLine(pricePerUnit, cost, units) };
 }
 
-export function recalcItem(
-  item: CalcItem,
+/**
+ * An order line's money for a quantity taken as entered, as the order functions store it:
+ * ROUND(quantity × price, 2), profit = that minus ROUND(quantity × cost, 2), margin to 0.01%.
+ */
+export function pricedLine(pricePerUnit: number, cost: number, quantity: number) {
+  const totalPrice = exactRound2([pricePerUnit, quantity]);
+  const profit = Math.round((totalPrice - exactRound2([cost, quantity])) * 100) / 100;
+  const netMargin = totalPrice > 0 ? exactRound2([profit, 100], [totalPrice]) : 0;
+  return { totalPrice, profit, netMargin };
+}
+
+/**
+ * Re-price one quote line. `basis` is the price and cost the line is figured at when the screen
+ * knows better than today's tier price and cost (a manual price, a locked sent price, the
+ * quote-time cost); without it, today's tier price and cost.
+ */
+export function recalcItem<T extends CalcItem>(
+  item: T,
   product: Product,
   tierNum: number,
-  conversions: UnitConversion[]
-): CalcItem {
-  const pricePerUnit = getQuoteTierPrice(product, tierNum);
+  conversions: UnitConversion[],
+  basis?: { pricePerUnit: number; cost: number },
+): T {
+  const pricePerUnit = basis?.pricePerUnit ?? getQuoteTierPrice(product, tierNum);
+  const cost = basis?.cost ?? (product.current_cost || 0);
   const mode = item.calc_mode || 'rate_acres';
   // Stock unit: inventory_unit, falling back to unit_size for liquid/dry only
   const inventoryUnitFactorOz = getConversionFactor(stockUnitOf(product), conversions);
@@ -159,7 +174,7 @@ export function recalcItem(
   if (mode === 'units_direct') {
     // User entered total_units_needed directly — skip rate×acres computation
     const enteredUnits = item.total_units_needed || 0;
-    const billed = billedLine(pricePerUnit, product.current_cost || 0, [enteredUnits]);
+    const billed = billedLine(pricePerUnit, cost, [enteredUnits]);
 
     // Back-calculate rate if acres is also set (informational); save_quote uses the entered units
     const acres = item.acres || 0;
@@ -173,7 +188,7 @@ export function recalcItem(
     return {
       ...item,
       price_per_unit: pricePerUnit,
-      current_cost: product.current_cost || 0,
+      current_cost: cost,
       oz_per_acre: ozPerAcre,
       price_per_acre: pricePerAcre,
       total_units_needed: billed.units,
@@ -189,13 +204,13 @@ export function recalcItem(
 
   const rateUnitFactorOz = getConversionFactor(rateUnitOf(item.rate_unit, product), conversions);
   const billed = inventoryUnitFactorOz > 0
-    ? billedLine(pricePerUnit, product.current_cost || 0, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
-    : billedLine(pricePerUnit, product.current_cost || 0, [0]);
+    ? billedLine(pricePerUnit, cost, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
+    : billedLine(pricePerUnit, cost, [0]);
 
   return {
     ...item,
     price_per_unit: pricePerUnit,
-    current_cost: product.current_cost || 0,
+    current_cost: cost,
     oz_per_acre: exactRound2([actualRate, rateUnitFactorOz]),
     price_per_acre: inventoryUnitFactorOz > 0
       ? exactRound2([pricePerUnit, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])

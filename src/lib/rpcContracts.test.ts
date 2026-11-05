@@ -2845,6 +2845,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261105160000',
   '20261106150000',
   '20261107060000',
+  '20261107150000',
 ]);
 
 /**
@@ -3087,6 +3088,10 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Local candidate 20261107130000 (WP-PM-10): a dry run, so it keeps nothing to replay.
   preview_product_import:
     'import preview (20261107130000): runs the keyed apply_product_setup insert save per row inside a subtransaction it always rolls back (SQLSTATE CRXPV), so nothing it writes is kept; the real save is keyed',
+  // 20261107150000 (KI-27, applied live 2026-11-05): re-issued trigger; prune together with its
+  // MIGRATIONS_AWAITING_TYPE_REGENERATION entry (a trigger function never reaches the generated types).
+  _guard_idempotency_key_insert:
+    'idempotency infrastructure trigger (20261107150000): BEFORE INSERT on idempotency_keys; its only write purges an expired copy of the key being inserted, and every API-role EXECUTE is revoked',
   // Local candidate 20261107060000 (WP-PM-11a-1): internal helper behind the two rate writers.
   _write_product_rates:
     'internal rate writer (20261107060000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',

@@ -20,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { logActivity } from '../lib/activityLogger';
 import { assertRpcResult, checkMutationResult, supabase, supabaseUntyped } from '../lib/db';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import {
   buildFindingsForRegistration,
   buildLookupErrorFindings,
@@ -380,20 +381,25 @@ export default function LabelDataQuality() {
   const loadProducts = useCallback(async () => {
     setProductsLoading(true);
     try {
+      // Every matching product, page by page (Goal 4): one read stops silently at 1000 rows.
       const [registeredResponse, missingResponse] = await Promise.all([
-        supabase
+        fetchAllRows((from, to) => pageWithList(supabase
           .from('products')
-          .select('id, product_name, epa_registration, is_rup, signal_word, category')
+          .select('id, product_name, epa_registration, is_rup, signal_word, category', { count: 'exact' })
           .eq('is_active', true)
           .not('epa_registration', 'is', null)
-          .order('product_name'),
-        supabase
+          .order('product_name')
+          .order('id')
+          .range(from, to))),
+        fetchAllRows((from, to) => pageWithList(supabase
           .from('products')
-          .select('id, product_name, epa_registration, is_rup, signal_word, category')
+          .select('id, product_name, epa_registration, is_rup, signal_word, category', { count: 'exact' })
           .eq('is_active', true)
           .in('category', PESTICIDE_CATEGORIES)
           .or('epa_registration.is.null,epa_registration.eq.')
-          .order('product_name'),
+          .order('product_name')
+          .order('id')
+          .range(from, to))),
       ]);
       if (registeredResponse.error) throw registeredResponse.error;
       if (missingResponse.error) throw missingResponse.error;

@@ -1,22 +1,26 @@
-import { useState } from 'react';
-import { Upload, CheckCircle, AlertCircle, FileText, Sparkles } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Upload, CheckCircle, AlertCircle, FileText, Sparkles, Download, Lock } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
-import { supabase, checkMutationResult } from '../../lib/db';
+import { useAuth } from '../../contexts/AuthContext';
+import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import { supabase, assertRpcResult } from '../../lib/db';
 import { isCSVFile } from '../../lib/documentOCR';
 import { Sentry } from '../../lib/sentry';
 import { sanitizeError } from '../../lib/errorSanitizer';
-import { EPA_REGISTRATION_PATTERN } from '../../lib/productBrands';
 import { listProductCategories } from '../../lib/productSetup';
-import { loadProductRateLock } from '../../lib/productRateLock';
+import type { Json } from '../../types/supabase';
 import {
-  buildProductInsert,
-  importRowSetsRates,
-  isProductImportStringField,
+  PRODUCT_IMPORT_COLUMNS,
+  PRODUCT_IMPORT_TEMPLATE,
+  buildProductImportRow,
+  importRefusalReason,
   isRetiredPricingColumn,
-  normalizeProductImportHeader,
-  type ParsedProduct,
+  mapProductImportHeaders,
+  parseCsvRecords,
+  refuseInFileDuplicates,
+  type ProductImportRow,
 } from './bulkProductImportSafety';
 
 interface BulkProductImportProps {
@@ -25,330 +29,369 @@ interface BulkProductImportProps {
   onSuccess: () => void;
 }
 
-interface ValidationResult {
-  valid: ParsedProduct[];
-  invalid: Array<{ row: number; error: string; data: Record<string, string> }>;
+type PerAcre = { tier1_price_per_acre: number | null; tier2_price_per_acre: number | null; tier3_price_per_acre: number | null };
+interface Match { product_name: string; is_active: boolean }
+/** One row of preview_product_import (20261107090000). */
+interface PreviewResult {
+  status: 'ok' | 'refused';
+  error: string | null;
+  after: (PerAcre & { rate_per_acre: string | null; rate_unit: string | null }) | null;
+  expected_prices: PerAcre | null;
+  sku_matches: Match[];
+  name_matches: Match[];
+  epa_matches: Match[];
+  in_file_duplicate: boolean;
 }
+interface Row extends ProductImportRow { preview?: PreviewResult }
 
-const FIELD_MAPPINGS: Record<string, string[]> = {
-  product_name: ['product_name', 'product', 'name', 'productname', 'item', 'item_name'],
-  sku: ['sku', 'item_code', 'product_code', 'code'],
-  category: ['category', 'type', 'product_type'],
-  use_timing: ['use_timing', 'timing', 'application_timing', 'use timing'],
-  vendor: ['vendor', 'supplier', 'distributor'],
-  manufacturer: ['manufacturer', 'mfg', 'brand'],
-  container_size: ['container_size', 'size', 'container', 'package_size'],
-  unit_size: ['unit_size', 'unit', 'uom', 'units'],
-  epa_registration: ['epa_registration', 'epa_reg', 'epa_number', 'epa', 'registration_number', 'reg_number'],
-  suggested_rate: ['suggested_rate', 'rate', 'application_rate', 'use_rate'],
-  rate_per_acre: ['rate_per_acre', 'acre_rate', 'per_acre', 'application_per_acre'],
-  rate_unit: ['rate_unit', 'unit', 'rate_uom'],
-  product_form: ['product_form', 'form', 'type_liquid_dry', 'liquid_or_dry'],
-  inventory_unit: ['inventory_unit', 'inv_unit', 'pricing_unit'],
-  container_unit: ['container_unit', 'pkg_unit', 'package_unit'],
-  container_type: ['container_type', 'package_type', 'pkg_type'],
-  notes: ['notes', 'description', 'comments', 'note'],
+const MAX_ROWS = 500;
+// Live allows 8 s per request and a rate row takes ~20 ms to check, so 500 rate rows in one request timed out (KI-103).
+const PREVIEW_BATCH = 100;
+
+/** Checks rows a batch at a time, in order. In-file duplicates are refused across the whole file before this. */
+async function previewInBatches(rows: Row[]): Promise<{ rates_locked: boolean; rows: PreviewResult[] }> {
+  const out: PreviewResult[] = [];
+  let locked: boolean | undefined;
+  for (let i = 0; i < rows.length; i += PREVIEW_BATCH) {
+    const batch = rows.slice(i, i + PREVIEW_BATCH);
+    const { data, error } = await supabase.rpc('preview_product_import', {
+      p_rows: batch.map(({ insert, rates }) => (rates ? { insert, rates } : { insert })) as unknown as Json,
+    });
+    if (error) throw error;
+    const res = assertRpcResult<{ rates_locked: boolean; rows: PreviewResult[] }>(data, 'preview_product_import');
+    if (res.rows?.length !== batch.length) throw new Error('The check returned a different number of rows than it was sent.');
+    // Earlier batches' rows were checked under the other lock state, so the preview would mix the two.
+    if (locked !== undefined && locked !== res.rates_locked) {
+      throw new Error('Rates were locked or unlocked while the file was being checked. Check the file again.');
+    }
+    out.push(...res.rows);
+    locked = res.rates_locked;
+  }
+  return { rates_locked: locked ?? false, rows: out };
+}
+// Per-acre prices are whole cents in the database (a CHECK), so pad the digits as sent; never round a float.
+const money = (v: number | null) => {
+  if (v == null) return '—';
+  const [whole, frac = ''] = String(v).split('.');
+  return `$${whole}.${frac.padEnd(2, '0')}`;
 };
 
-function validateImportRow(
-  cols: string[], fieldMapping: Record<number, string>, allowedCategories: Set<string>, row: number,
-): { product?: ParsedProduct; invalid?: ValidationResult['invalid'][number] } {
-  const product: Partial<ParsedProduct> = {};
-  const data: Record<string, string> = {};
-  let numberError: string | null = null;
-  cols.forEach((value, index) => {
-    const field = fieldMapping[index];
-    if (!field) return;
-    data[field] = value;
-    if (isProductImportStringField(field)) {
-      if (value.trim()) product[field] = value;
-    } else if (field === 'container_size' || field === 'rate_per_acre') {
-      const trimmed = value.trim();
-      if (!trimmed) return;
-      const number = Number(trimmed);
-      const valid = !/^0[xob]/i.test(trimmed) && Number.isFinite(number)
-        && (field !== 'container_size' || number > 0)
-        // The database's rate rule, checked on the typed text; past 15 digits a JS number would round it.
-        && (field !== 'rate_per_acre' || (/^[0-9]{1,12}(\.[0-9]{1,6})?$/.test(trimmed)
-          && trimmed.replace('.', '').replace(/^0+/, '').length <= 15));
-      if (valid) product[field] = number;
-      else numberError = field === 'container_size'
-        ? 'Container size must be a number greater than 0.'
-        : 'Rate Per Acre must be a number of zero or greater, with at most 6 decimals.';
-    }
-  });
-  const error = !product.product_name?.trim() ? 'Missing product name'
-    : numberError
-      // The database refuses a rate without a unit, except on seed and each, which take the stock unit.
-      || (product.rate_per_acre !== undefined && !product.rate_unit
-        && !['seed', 'each'].includes(product.product_form?.trim().toLowerCase() ?? '')
-        ? 'A rate per acre needs a rate unit, except on seed and each products.' : null)
-      || (product.category && !allowedCategories.has(product.category.trim()) ? 'Choose an active category from the list.' : null)
-      || (product.epa_registration && !EPA_REGISTRATION_PATTERN.test(product.epa_registration.trim())
-        ? 'EPA number must look like 524-475 or 100-1234-5905. This checks format only.' : null);
-  return error ? { invalid: { row, error, data } } : { product: product as ParsedProduct };
+/** Why a row will not be imported, or null when it is ready. */
+function skipReason(r: Row): string | null {
+  if (r.error) return r.error;
+  const p = r.preview;
+  if (!p) return 'Not checked.';
+  const dup = [...p.sku_matches, ...p.name_matches][0];
+  if (dup) return `Duplicate of ${dup.product_name}${dup.is_active ? '' : ' (inactive)'}: skipped.`;
+  if (p.in_file_duplicate) return 'This name or SKU appears more than once in the file: skipped.';
+  if (p.status !== 'ok') return importRefusalReason(p.error ?? 'Refused.', r.insert.product_name);
+  if (!pricesReadExactly(p.expected_prices)) return 'A previewed per-acre price is too large to check exactly: skipped.';
+  return null;
+}
+
+// The preview's numeric prices arrive as JavaScript numbers, exact to the cent only below $10 trillion (15 digits).
+function pricesReadExactly(p: PerAcre | null): boolean {
+  return !p || [p.tier1_price_per_acre, p.tier2_price_per_acre, p.tier3_price_per_acre]
+    .every((v) => v == null || Math.abs(v) < 1e13);
+}
+
+/** The page closes the window itself after a save, so clear the finished import whenever it closes. */
+function useResetOnClose(open: boolean, reset: () => void) {
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (!open) reset();
+  }
+}
+
+function ImportPreview({ rows, ready, skipped, ratesLocked, ignored }: {
+  rows: Row[]; ready: number; skipped: number; ratesLocked: boolean; ignored: string[];
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="p-4 bg-green-50 border border-green-100 rounded-lg">
+          <div className="flex items-center gap-2 mb-1">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+            <span className="text-sm font-medium text-secondary">Ready to Import</span>
+          </div>
+          <p className="text-2xl font-semibold text-green-600">{ready}</p>
+        </div>
+        <div className="p-4 bg-red-50 border border-red-100 rounded-lg">
+          <div className="flex items-center gap-2 mb-1">
+            <AlertCircle className="w-5 h-5 text-red-600" />
+            <span className="text-sm font-medium text-secondary">Skipped</span>
+          </div>
+          <p className="text-2xl font-semibold text-red-600">{skipped}</p>
+          <p className="text-xs text-secondary mt-1">Errors and duplicates; nothing from these rows saves</p>
+        </div>
+      </div>
+      {ratesLocked && (
+        <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+          <Lock className="w-4 h-4" /> Rates are locked. Rows that set a rate are skipped; remove the rate columns or ask an admin to unlock rates.
+        </p>
+      )}
+      {ignored.length > 0 && (
+        <p className="text-xs text-amber-700">Columns not recognised, ignored: {ignored.join(', ')}</p>
+      )}
+      <div className="max-h-96 overflow-auto rounded-lg border border-gray-200">
+        <table className="w-full text-xs">
+          <thead className="sticky top-0 bg-gray-50 text-left text-secondary">
+            <tr>
+              <th className="p-2">Row</th>
+              <th className="p-2">Product</th>
+              <th className="p-2">Result</th>
+              <th className="p-2">Rate</th>
+              <th className="p-2 text-right">Per acre (T1 / T2 / T3)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => <ImportPreviewRow key={r.row} r={r} />)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function importStage(rows: Row[] | null, imported: number | null): 'choose' | 'preview' | 'done' {
+  if (imported !== null) return 'done';
+  return rows ? 'preview' : 'choose';
+}
+
+function ImportPreviewRow({ r }: { r: Row }) {
+  const why = skipReason(r);
+  const after = r.preview?.after;
+  return (
+    <tr className="border-t border-gray-100 align-top">
+      <td className="p-2 text-gray-500">{r.row}</td>
+      <td className="p-2">
+        <p className="font-medium text-nav-dark">{r.insert.product_name || '(no name)'}</p>
+        {r.insert.sku && <p className="text-gray-500">SKU {r.insert.sku}</p>}
+        {r.fixes.map((f) => <p key={f} className="text-gray-500">Fixed {f}</p>)}
+      </td>
+      <td className={`p-2 ${why ? 'text-red-700' : 'text-green-700'}`}>
+        {why ?? 'Ready'}
+        {!why && r.preview?.epa_matches.length ? (
+          <p className="text-gray-500">Same EPA number as {r.preview.epa_matches.map((m) => m.product_name).join(', ')} (another size is fine)</p>
+        ) : null}
+      </td>
+      <td className="p-2">{after?.rate_per_acre != null ? `${after.rate_per_acre} ${after.rate_unit ?? ''}` : '—'}</td>
+      <td className="p-2 text-right whitespace-nowrap">
+        {after?.rate_per_acre != null
+          ? `${money(after.tier1_price_per_acre)} / ${money(after.tier2_price_per_acre)} / ${money(after.tier3_price_per_acre)}`
+          : '—'}
+      </td>
+    </tr>
+  );
+}
+
+function ImportActions({ stage, hasFile, parsing, saving, unconfirmed, ready, onClose, onParse, onChooseAgain, onImport }: {
+  stage: 'choose' | 'preview' | 'done'; hasFile: boolean; parsing: boolean; saving: boolean; unconfirmed: boolean; ready: number;
+  onClose: () => void; onParse: () => void; onChooseAgain: () => void; onImport: () => void;
+}) {
+  const busy = parsing || saving;
+  return (
+    <div className="flex justify-end gap-2 pt-2">
+      <Button variant="secondary" onClick={onClose} disabled={busy}>
+        {stage === 'done' ? 'Close' : 'Cancel'}
+      </Button>
+      {stage === 'choose' && (
+        <Button icon={<Upload className="w-4 h-4" />} onClick={onParse} disabled={!hasFile || parsing} loading={parsing}>
+          {parsing ? 'Checking...' : 'Check File'}
+        </Button>
+      )}
+      {stage === 'preview' && (
+        <>
+          <Button variant="secondary" onClick={onChooseAgain} disabled={busy || unconfirmed}>Choose Different File</Button>
+          <Button onClick={onImport} disabled={ready === 0 || saving} loading={saving}>
+            Import {ready} Product(s)
+          </Button>
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function BulkProductImport({ open, onClose, onSuccess }: BulkProductImportProps) {
   const { toast } = useToast();
+  const { profile } = useAuth();
+  const userId = profile?.id ?? '';
+  const { getKeyFor, resetKeyFor } = useIdempotencyKey('apply_product_setup', userId);
   const [file, setFile] = useState<File | null>(null);
-  const [parsing, setParsing] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [uploadResults, setUploadResults] = useState<{ success: number; failed: number; errors: string[] } | null>(null);
+  // The generation being checked (0 = none), so only that check can clear it.
+  const [checking, setChecking] = useState(0);
+  const parsing = checking !== 0;
+  const [saving, setSaving] = useState(false);
+  const [rows, setRows] = useState<Row[] | null>(null);
+  const [ignored, setIgnored] = useState<string[]>([]);
+  const [ratesLocked, setRatesLocked] = useState(false);
+  const [imported, setImported] = useState<number | null>(null);
+  // A save whose reply was lost may have committed: keep this preview and its retry key until Import is confirmed.
+  const [unconfirmed, setUnconfirmed] = useState(false);
+  // Bumped whenever the file or preview changes; a reply from an older generation is ignored.
+  const generation = useRef(0);
+  // One retry key per previewed file: a double click or a retry after a lost reply saves once.
+  const [previewId, setPreviewId] = useState('');
+  const busy = parsing || saving;
+
+  const reset = () => {
+    generation.current += 1;
+    setFile(null); setRows(null); setIgnored([]); setImported(null); setRatesLocked(false);
+  };
+  // Never wipe an import mid-check or mid-save, so a late reply lands on the import it belongs to.
+  const resetIfSettled = () => { if (!unconfirmed && !busy) reset(); };
+  useResetOnClose(open, resetIfSettled);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      if (selectedFile.size > 10 * 1024 * 1024) {
-        toast('error', 'File too large. Maximum size is 10MB.');
-        e.target.value = '';
-        return;
-      }
-      if (!isCSVFile(selectedFile)) {
-        toast('error', 'Invalid file type. Bulk Product Import accepts CSV files only.');
-        e.target.value = '';
-        return;
-      }
-      setFile(selectedFile);
-      setValidation(null);
-      setUploadResults(null);
+    if (!selectedFile) return;
+    if (selectedFile.size > 10 * 1024 * 1024) {
+      toast('error', 'File too large. Maximum size is 10MB.');
+      e.target.value = '';
+      return;
     }
+    if (!isCSVFile(selectedFile)) {
+      toast('error', 'Invalid file type. Bulk Product Import accepts CSV files only.');
+      e.target.value = '';
+      return;
+    }
+    generation.current += 1;
+    setFile(selectedFile);
+    setRows(null);
+    setImported(null);
   };
 
-  const detectFieldMapping = (header: string): string | null => {
-    const normalized = normalizeProductImportHeader(header);
-    for (const [field, aliases] of Object.entries(FIELD_MAPPINGS)) {
-      if (aliases.includes(normalized)) {
-        return field;
-      }
-    }
-    return null;
-  };
-
-  const MAX_ROWS = 500;
-
-  /** Parse a single CSV line respecting quoted fields (handles commas inside quotes) */
-  const parseCSVLine = (line: string): string[] => {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (inQuotes) {
-        if (ch === '"' && line[i + 1] === '"') {
-          current += '"';
-          i++; // skip escaped quote
-        } else if (ch === '"') {
-          inQuotes = false;
-        } else {
-          current += ch;
-        }
-      } else {
-        if (ch === '"') {
-          inQuotes = true;
-        } else if (ch === ',') {
-          result.push(current.trim());
-          current = '';
-        } else {
-          current += ch;
-        }
-      }
-    }
-    result.push(current.trim());
-    return result;
-  };
-
-  const parseCSV = (text: string): { headers: string[]; rows: string[][] } => {
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) return { headers: [], rows: [] };
-
-    const headers = parseCSVLine(lines[0]);
-    const rows: string[][] = [];
-
-    for (let i = 1; i < lines.length; i++) {
-      const cols = parseCSVLine(lines[i]);
-      if (cols.some((value) => value.trim() !== '')) {
-        rows.push(cols);
-      }
-    }
-
-    return { headers, rows };
+  const downloadTemplate = () => {
+    const url = URL.createObjectURL(new Blob([PRODUCT_IMPORT_TEMPLATE], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'product-import-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleParse = async () => {
     if (!file) return;
-    setParsing(true);
-
+    const gen = ++generation.current;
+    setChecking(gen);
+    setRatesLocked(false);
     try {
-      const text = await file.text();
-      const { headers, rows } = parseCSV(text);
-
+      const [header, ...data] = parseCsvRecords(await file.text());
+      const headers = header?.cells ?? [];
       const pricingHeaders = headers.filter(isRetiredPricingColumn);
       if (pricingHeaders.length > 0) {
-        toast(
-          'error',
-          `Pricing columns are not allowed in Bulk Product Import: ${pricingHeaders.join(', ')}. Use the governed pricing worksheet or Product page instead.`,
-        );
-        setParsing(false);
+        toast('error', `Pricing columns are not allowed in Bulk Product Import: ${pricingHeaders.join(', ')}. Use the governed pricing worksheet or Product page instead.`);
         return;
       }
-
-      if (rows.length === 0) {
-        toast('error', 'No valid data found in file');
-        setParsing(false);
+      if (data.length === 0) { toast('error', 'No valid data found in file'); return; }
+      if (data.length > MAX_ROWS) {
+        toast('error', `File has ${data.length} rows. Maximum is ${MAX_ROWS}. Please split your file into smaller batches.`);
         return;
       }
-
-      if (rows.length > MAX_ROWS) {
-        toast('error', `File has ${rows.length} rows. Maximum is ${MAX_ROWS}. Please split your file into smaller batches.`);
-        setParsing(false);
+      const mapping = mapProductImportHeaders(headers);
+      if (mapping.conflicts.length > 0) {
+        toast('error', `Two columns mean the same thing: ${mapping.conflicts.join('; ')}. Remove one and try again.`);
         return;
       }
-
-      const fieldMapping: Record<number, string> = {};
-      headers.forEach((header, idx) => {
-        const field = detectFieldMapping(header);
-        if (field) {
-          fieldMapping[idx] = field;
-        }
-      });
-
-      if (!Object.values(fieldMapping).includes('product_name')) {
+      if (mapping.ambiguous.length > 0) {
+        toast('error', `These columns could mean more than one thing: ${mapping.ambiguous.join('; ')}. Rename them and try again.`);
+        return;
+      }
+      if (!Object.values(mapping.byIndex).includes('product_name')) {
         toast('error', 'Could not find product name column. Ensure your CSV has a "product_name" or "product" column.');
-        setParsing(false);
         return;
       }
-
-      const categories = await listProductCategories();
-      const allowedCategories = new Set(categories.filter((category) => category.is_active).map((category) => category.name));
-      const valid: ParsedProduct[] = [];
-      const invalid: Array<{ row: number; error: string; data: Record<string, string> }> = [];
-
-      rows.forEach((cols, idx) => {
-        const result = validateImportRow(cols, fieldMapping, allowedCategories, idx + 2);
-        if (result.invalid) invalid.push(result.invalid);
-        else if (result.product) valid.push(result.product);
-      });
-
-      setValidation({ valid, invalid });
+      const categories = (await listProductCategories()).filter((c) => c.is_active).map((c) => c.name);
+      const built: Row[] = refuseInFileDuplicates(data.map(({ cells, line }) => buildProductImportRow(cells, mapping, line, categories)));
+      const checkable = built.filter((r) => !r.error);
+      if (checkable.length > 0) {
+        const preview = await previewInBatches(checkable);
+        if (gen !== generation.current) return;
+        checkable.forEach((r, i) => { r.preview = preview.rows[i]; });
+        setRatesLocked(preview.rates_locked);
+      }
+      if (gen !== generation.current) return;
+      setPreviewId(`${file.name}:${file.lastModified}:${gen}`);
+      setIgnored(mapping.ignored);
+      setRows(built);
     } catch (error) {
       Sentry.captureException(error);
-      toast('error', 'Could not read the category list or parse the file. Try again.');
+      if (gen === generation.current) toast('error', `Could not check the file: ${sanitizeError(error)}`);
+    } finally {
+      setChecking((c) => (c === gen ? 0 : c));
     }
-    setParsing(false);
   };
 
-  const handleUpload = async () => {
-    if (!validation || validation.valid.length === 0) return;
-    setUploading(true);
+  const stage = importStage(rows, imported);
+  const ready = (rows ?? []).filter((r) => skipReason(r) === null);
+  const skipped = (rows ?? []).filter((r) => skipReason(r) !== null);
 
-    // While rates are locked every row with a rate would be refused one by one, leaving half a file
-    // imported, so check once and import nothing. A file that sets rates then saves in one insert, so
-    // a lock switched on mid-upload refuses the whole file instead of leaving it partial.
-    const rated = validation.valid.filter(importRowSetsRates).length;
-    if (rated > 0) {
-      let locked: boolean;
-      try {
-        locked = (await loadProductRateLock()).is_locked;
-      } catch (error) {
-        Sentry.captureException(error);
-        locked = true;
-      }
-      if (locked) {
-        toast('error', `Nothing was imported: ${rated} row${rated === 1 ? ' sets' : 's set'} a rate, and rates are locked or could not be checked. Remove the rate columns, or ask an admin to unlock rates.`);
-        setUploading(false);
-        return;
-      }
-      // Every row has the same keys; defaultToNull: false leaves an omitted value on its column default, as a one-row insert does.
-      const result = await supabase.from('products')
-        .insert(validation.valid.map(buildProductInsert), { defaultToNull: false }).select('id');
-      try {
-        checkMutationResult(result, 'Insert products');
-      } catch (e) {
-        Sentry.captureException(e instanceof Error ? e : new Error(String(e)), { extra: { context: 'Failed to insert rated product file' } });
-        const error = `Nothing was imported: ${sanitizeError(e)}`;
-        setUploadResults({ success: 0, failed: validation.valid.length, errors: [error] });
-        toast('error', error);
-        setUploading(false);
-        return;
-      }
-      setUploadResults({ success: validation.valid.length, failed: 0, errors: [] });
-      setUploading(false);
-      toast('success', `Successfully imported ${validation.valid.length} product(s)`);
+  const handleImport = async () => {
+    if (ready.length === 0) return;
+    const gen = generation.current;
+    setSaving(true);
+    try {
+      const { data, error } = await supabase.rpc('apply_product_setup', {
+        p_rows: ready.map(({ insert, rates, preview }) => (rates
+          ? { insert, rates, expected_prices: preview?.expected_prices }
+          : { insert })) as unknown as Json,
+        p_performed_by: userId,
+        p_idempotency_key: getKeyFor(previewId),
+      });
+      if (error) throw error;
+      const result = assertRpcResult<{ inserted_count: number }>(data, 'apply_product_setup');
+      if (gen !== generation.current) return;
+      resetKeyFor(previewId);
+      setUnconfirmed(false);
+      setImported(result.inserted_count);
+      toast('success', `Imported ${result.inserted_count} product(s)`);
       onSuccess();
-      return;
-    }
-
-    let success = 0;
-    let failed = 0;
-    const errors: string[] = [];
-
-    for (const product of validation.valid) {
-      const productResult = await supabase.from('products').insert(buildProductInsert(product)).select('id');
-
-      if (productResult.error) {
-        Sentry.captureException(productResult.error instanceof Error ? productResult.error : new Error(String(productResult.error)), { extra: { context: 'Failed to insert product' } });
-        failed++;
-        errors.push(`${product.product_name}: ${sanitizeError(productResult.error)}`);
-      } else {
-        try { checkMutationResult(productResult, 'Insert product'); } catch (e) {
-          Sentry.captureException(e instanceof Error ? e : new Error(String(e)));
-          failed++;
-          errors.push(`${product.product_name}: ${sanitizeError(e)}`);
-          continue;
-        }
-        success++;
-      }
-    }
-
-    setUploadResults({ success, failed, errors });
-    setUploading(false);
-
-    if (success > 0) {
-      toast('success', `Successfully imported ${success} product(s)`);
-      onSuccess();
-    }
-    if (failed > 0) {
-      toast('error', `Failed to import ${failed} product(s)`);
+    } catch (error) {
+      Sentry.captureException(error, { extra: { context: 'Bulk product import' } });
+      if (gen !== generation.current) return;
+      const message = sanitizeError(error);
+      // A refusal saved nothing; anything else (a lost reply) may have saved, and the same key makes a retry safe.
+      const refused = message.startsWith('Nothing was saved.');
+      setUnconfirmed(!refused);
+      toast('error', refused ? message
+        : `The import was not confirmed (${message}). Press Import again: it will not add products twice.`);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleClose = () => {
-    setFile(null);
-    setValidation(null);
-    setUploadResults(null);
-    onClose();
-  };
+  const handleClose = () => { if (busy) return; resetIfSettled(); onClose(); };
 
   return (
-    <Modal open={open} onClose={handleClose} title="Bulk Product" accent="Import" maxWidth="max-w-3xl">
+    <Modal open={open} onClose={handleClose} closeDisabled={busy} title="Bulk Product" accent="Import" maxWidth="max-w-4xl">
       <div className="space-y-4">
-        <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
-          <h4 className="text-sm font-medium text-nav-dark mb-2 flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-blue-600" />
-            How to Import
-          </h4>
-          <ol className="text-xs text-secondary space-y-1 list-decimal list-inside">
-            <li>Upload a CSV containing product identity and catalog details</li>
-            <li>Include a product_name column</li>
-            <li>Review detected products and import</li>
-          </ol>
-          <div className="mt-3 p-2 bg-white rounded border border-gray-200">
-            <p className="text-xs font-medium text-secondary mb-1">Supported Columns:</p>
-            <p className="text-xs text-gray-500 font-mono">
-              product_name, sku, category, vendor, manufacturer, container_size, unit_size,
-              epa_registration, suggested_rate, rate_per_acre, rate_unit, product_form,
-              inventory_unit, container_unit, container_type, use_timing, notes
-            </p>
-            <p className="text-xs text-gray-500 mt-2">For several use timings, separate labels with a semicolon (for example, Pre-Emerge; Post-Emergence).</p>
-            <p className="text-xs text-amber-700 mt-2">
-              Pricing columns are rejected. Update cost, margins, and tier prices from the Product page or governed pricing worksheet.
-            </p>
+        {stage === 'choose' && (
+          <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
+            <h4 className="text-sm font-medium text-nav-dark mb-2 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-blue-600" />
+              How to Import
+            </h4>
+            <ol className="text-xs text-secondary space-y-1 list-decimal list-inside">
+              <li>Download the template, or use a CSV with a product_name column</li>
+              <li>Check the preview: every row shows whether it will import, and why not</li>
+              <li>Import: the ready rows save together, or none do</li>
+            </ol>
+            <div className="mt-3 p-2 bg-white rounded border border-gray-200">
+              <p className="text-xs font-medium text-secondary mb-1">Supported Columns:</p>
+              <p className="text-xs text-gray-500 font-mono">{PRODUCT_IMPORT_COLUMNS.join(', ')}</p>
+              <p className="text-xs text-gray-500 mt-2">For several use timings, separate labels with a semicolon (for example, Pre-Emerge; Post-Emergence). RUP takes yes or no.</p>
+              <p className="text-xs text-amber-700 mt-2">
+                Pricing columns are rejected. Update cost, margins, and tier prices from the Product page or governed pricing worksheet.
+              </p>
+            </div>
+            <Button variant="secondary" className="mt-3" icon={<Download className="w-4 h-4" />} onClick={downloadTemplate}>
+              Download Template
+            </Button>
           </div>
-        </div>
+        )}
 
-        {!validation && !uploadResults && (
+        {stage === 'choose' && (
           <div>
             <label className="block text-sm font-medium text-secondary mb-2">Select File</label>
             <input
@@ -356,6 +399,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
               aria-label="Select File"
               accept=".csv,text/csv"
               onChange={handleFileChange}
+              disabled={busy}
               className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-crx-green-light file:text-crx-green file:hover:bg-crx-green file:hover:text-white transition-colors cursor-pointer"
             />
             {file && (
@@ -367,111 +411,28 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
           </div>
         )}
 
-        {validation && !uploadResults && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-4 bg-green-50 border border-green-100 rounded-lg">
-                <div className="flex items-center gap-2 mb-1">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                  <span className="text-sm font-medium text-secondary">Valid Products</span>
-                </div>
-                <p className="text-2xl font-semibold text-green-600">{validation.valid.length}</p>
-                <p className="text-xs text-secondary mt-1">Ready to import</p>
-              </div>
-              <div className="p-4 bg-red-50 border border-red-100 rounded-lg">
-                <div className="flex items-center gap-2 mb-1">
-                  <AlertCircle className="w-5 h-5 text-red-600" />
-                  <span className="text-sm font-medium text-secondary">Invalid Rows</span>
-                </div>
-                <p className="text-2xl font-semibold text-red-600">{validation.invalid.length}</p>
-                <p className="text-xs text-secondary mt-1">Will be skipped</p>
-              </div>
-            </div>
-
-            {validation.valid.length > 0 && (
-              <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
-                <p className="text-xs font-medium text-secondary mb-2">Preview (first 5):</p>
-                <div className="space-y-2">
-                  {validation.valid.slice(0, 5).map((product, idx) => (
-                    <div key={idx} className="text-xs bg-white p-2 rounded border border-gray-100">
-                      <p className="font-medium text-nav-dark">{product.product_name}</p>
-                      {product.sku && <p className="text-gray-500">SKU: {product.sku}</p>}
-                      {product.category && <p className="text-gray-500">Category: {product.category}</p>}
-                      {product.rate_per_acre && <p className="text-gray-500">Rate/Acre: {product.rate_per_acre} {product.rate_unit || ''}</p>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {validation.invalid.length > 0 && (
-              <div className="p-3 bg-red-50 border border-red-100 rounded-lg max-h-32 overflow-y-auto">
-                <p className="text-xs font-medium text-secondary mb-1">Invalid Rows:</p>
-                <div className="space-y-1">
-                  {validation.invalid.map((inv, idx) => (
-                    <p key={idx} className="text-xs text-secondary">
-                      Row {inv.row}: {inv.error}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          </div>
+        {stage === 'preview' && rows && (
+          <ImportPreview rows={rows} ready={ready.length} skipped={skipped.length} ratesLocked={ratesLocked} ignored={ignored} />
         )}
 
-        {uploadResults && (
-          <div className="p-4 bg-green-50 border border-green-100 rounded-lg text-center">
+        {stage === 'preview' && unconfirmed && (
+          <p role="alert" className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+            <AlertCircle className="w-4 h-4" /> The last import was not confirmed. Press Import again to finish it safely; another file can be chosen once it is confirmed. If you leave this page first, check the product list before importing this file again.
+          </p>
+        )}
+
+        {stage === 'done' && (
+          <div className="p-4 bg-green-50 border border-green-100 rounded-lg text-center" role="status">
             <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-2" />
             <h4 className="text-sm font-medium text-nav-dark mb-1">Import Complete</h4>
-            <p className="text-xs text-secondary">
-              Successfully imported {uploadResults.success} product(s)
-              {uploadResults.failed > 0 && `, ${uploadResults.failed} failed`}
-            </p>
-          </div>
-        )}
-        {uploadResults && uploadResults.errors.length > 0 && (
-          <div className="max-h-40 overflow-y-auto rounded-lg border border-red-200 bg-red-50 p-3" role="status">
-            <p className="text-sm font-medium text-red-800">Products that need a correction</p>
-            {uploadResults.errors.map((error, index) => <p key={index} className="mt-1 text-xs text-red-800">{error}</p>)}
+            <p className="text-xs text-secondary">Imported {imported} product(s){skipped.length > 0 && `; ${skipped.length} row(s) skipped`}</p>
           </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={handleClose}>
-            {uploadResults ? 'Close' : 'Cancel'}
-          </Button>
-          {!validation && !uploadResults && (
-            <Button
-              icon={<Upload className="w-4 h-4" />}
-              onClick={handleParse}
-              disabled={!file || parsing}
-              loading={parsing}
-            >
-              {parsing ? 'Parsing...' : 'Parse File'}
-            </Button>
-          )}
-          {validation && !uploadResults && (
-            <>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setFile(null);
-                  setValidation(null);
-                }}
-              >
-                Choose Different File
-              </Button>
-              <Button
-                onClick={handleUpload}
-                disabled={validation.valid.length === 0 || uploading}
-                loading={uploading}
-              >
-                Import {validation.valid.length} Product(s)
-              </Button>
-            </>
-          )}
-        </div>
+        <ImportActions
+          stage={stage} hasFile={!!file} parsing={parsing} saving={saving} unconfirmed={unconfirmed} ready={ready.length}
+          onClose={handleClose} onParse={handleParse} onChooseAgain={reset} onImport={handleImport}
+        />
       </div>
     </Modal>
   );

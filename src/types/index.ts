@@ -4151,6 +4151,8 @@ export interface EmailLog {
   status: 'pending' | 'sent' | 'failed' | 'bounced';
   error_message: string | null;
   idempotency_key: string | null;
+  /** Which email this row sends; at most one pending row per value (20261110110000). */
+  send_lock_key: string | null;
   created_by: string | null;
   created_at: string;
 }

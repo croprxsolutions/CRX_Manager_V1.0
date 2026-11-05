@@ -15428,6 +15428,14 @@ export type Database = {
         }
         Returns: Json
       }
+      retire_uncertain_request: {
+        Args: {
+          p_first_check_token?: string
+          p_idempotency_key?: string
+          p_request_key: string
+        }
+        Returns: Json
+      }
       retry_failed_notifications: { Args: never; Returns: Json }
       reverse_application_record: {
         Args: { p_application_record_id: string; p_idempotency_key?: string }

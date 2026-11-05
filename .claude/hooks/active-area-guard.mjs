@@ -12,7 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 
-function allow() { process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } })); process.exit(0); }
+function allow() { process.exit(0); } // no objection: print nothing ("allow" would pre-approve and skip the permission prompt)
 function passthrough() { process.exit(0); } // emit nothing → other hooks + normal flow
 function deny(reason) { process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } })); process.exit(0); }
 

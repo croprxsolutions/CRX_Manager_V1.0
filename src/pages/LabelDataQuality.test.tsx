@@ -89,6 +89,7 @@ vi.mock('../lib/db', () => {
     });
     builder.or = vi.fn(self);
     builder.order = vi.fn(self);
+    builder.range = vi.fn(self);
     builder.update = vi.fn((values: unknown) => {
       mutation = true;
       H.update(values);

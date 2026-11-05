@@ -21,6 +21,14 @@
         "pricing"
       ]
     },
+    "replay_binding_batch4c": {
+      "chain": "smoke-replay-binding-batch4c.sql",
+      "container_only": true,
+      "container_prover": "prove-replay-binding-batch4c-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-replay-binding-batch4c-real-schema.mjs, never through run-smoke.mjs against the live database: duplicate_quote, create_delivery_with_items and create_followup_delivery draw customer-visible quote and delivery numbers from non-transactional sequences that a rollback does not return (the prover reports which document-number sequences the chain moved), and the chain plants [SMOKE] customers, products, orders, purchase orders, deliveries, cycle counts and blend tickets, which the LIVE-DATA GUARD refuses. Proves the twelve batch 4c functions replay a stored receipt only for the same person and the exact same request (KNOWN_ISSUES KI-10 batch 4c).",
+      "covers": ["submit_purchase_order", "cancel_purchase_order", "delete_purchase_order", "duplicate_quote", "edit_delivery", "reassign_delivery", "batch_reschedule_deliveries", "confirm_delivery", "create_delivery_with_items", "create_followup_delivery", "cancel_cycle_count", "reverse_blend_ticket_approval"],
+      "area": ["billing", "inventory", "idempotency", "security"]
+    },
     "order_replay_binding_batch4b": {
       "chain": "smoke-order-replay-binding-batch4b.sql",
       "container_only": true,
@@ -949,6 +957,19 @@
         "billing"
       ]
     },
+    "tiers_credit_limits_admin_only": {
+      "chain": "smoke-tiers-credit-limits-admin-only.sql",
+      "description": "Migration 20261111100000 (Mason 2026-11-01, permissions): a sales rep's direct update of a customer's price tier is refused TIER_ADMIN_ONLY; a rep's save_customer that changes the credit limit is refused CREDIT_LIMIT_ADMIN_ONLY, while re-sending the unchanged tier and limit is accepted; a rep's new customer on the Settings Default Tier with no limit is accepted and one with a limit is refused; an admin changes both; a direct API update of a booking's tier is refused QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE even for an admin, while a direct update of header notes still works; a rep's direct insert of a tier-3 or already-planned booking is refused. Fails on the old bodies at A, B, D, F and G. Terminal rollback.",
+      "covers": [
+        "guard_customer_rep_edit_20261013",
+        "guard_quote_direct_tier_planned_20261107",
+        "save_customer"
+      ],
+      "area": [
+        "security",
+        "regression"
+      ]
+    },
     "invoice_resave_keeps_cost": {
       "chain": "smoke-invoice-resave-keeps-cost.sql",
       "description": "Migration 20261106140000 (#13): a $36.65 draft invoice delivered from a booking at a $6.00 cost; after the product's cost rises to $8.00 (above the $7.33 price) through the governed pricing path, re-saving the draft with only a note changed is accepted and keeps the $6.00 invoiced cost and $36.65 total (it was refused below cost); re-saving it with the price lowered to $5.00, with the saved line sent twice, with the line lowered to 3 gal and later raised to 4 gal, or with the line repriced to $9.00 and lowered back to $7.33 is still refused by the below-cost check; after a second cost rise to $10.00, a note-only re-save keeps the $9.00 line and its cost, and repricing it to $9.50 is refused. Terminal rollback.",
@@ -1320,6 +1341,19 @@
       ],
       "area": [
         "billing"
+      ]
+    },
+    "generate_rup_sales_records": {
+      "chain": "smoke-rup-records-require-posted-invoice.sql",
+      "container_prover": "prove-rup-records-require-posted-invoice-real-schema.mjs",
+      "description": "KI-05 (REQUIRES 20261110140000): the live body carries the RUP_INVOICE_NOT_POSTED check and the grants are unchanged; an active admin calling it directly on a [SMOKE] draft invoice with an RUP line is refused RUP_INVOICE_NOT_POSTED and nothing is written (no register row, no idempotency receipt), and the same admin's direct insert into rup_sales_records for the draft is refused by the new table trigger; post_invoice as the signed-in admin still posts the same invoice and writes exactly one compliant register row; a direct call on the posted invoice is let through and returns 0 (dedup).",
+      "covers": [
+        "generate_rup_sales_records",
+        "post_invoice"
+      ],
+      "area": [
+        "billing",
+        "security"
       ]
     },
     "dispatch_job_locations": {
@@ -1865,6 +1899,26 @@
       "area": [
         "security"
       ]
+    },
+    "delivery_invoice_charge_lines": {
+      "chain": "smoke-delivery-invoice-charge-lines.sql",
+      "description": "Migration 20261108160000 (billing plan M1): on a completed delivery's invoice, a $45.00 freight charge saved through save_invoice is accepted and the invoice posts at the product total + $45.00 to the cent; a line with no product and no charge type is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; a product the delivery didn't carry is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; one more stored quantity tick on the delivered product is still refused. Fails on the old body at A and D. Terminal rollback.",
+      "covers": [
+        "_delivery_invoice_overbilling",
+        "enforce_delivery_invoice_within_delivered",
+        "save_invoice",
+        "post_invoice"
+      ],
+      "area": [
+        "billing",
+        "regression"
+      ]
+    },
+    "retire_uncertain_request": {
+      "chain": "smoke-uncertain-request-clear-check.sql",
+      "description": "REQUIRES 20261110120000. KI-27 server check, and retire, before a staff member clears their own stuck request. Self-seeding (needs one active admin profile; everything is rolled back): the function and receipt-guard bodies are pinned, only authenticated can execute the function and no client role reaches either new table; a key recorded under its own operation is safe (expired too) and one under another operation is not; an unrecorded key needs two checks 15+ minutes apart by server time in a token signed for that exact request (no, forged, borrowed and future tokens start a new wait; 5 minutes refused, 16 minutes safe, then retired); a batch with a row saved under adjust_inventory is recorded and a row under another operation or not ending in a UUID is not; after a safe answer the database refuses a later save of the request, of any batch row under it (any ending) and of an expired key, while an unrelated key still saves and a retired request with a live receipt still replays (allocate_payment's claim row included); an active non-admin staff member (when one exists) is answered for their own key and refused another user's; a service profile (when one exists), another user's key, a row key, a wrong idempotency key and a signed-out session are refused. The in-progress answer needs two sessions and is proven on the local test database.",
+      "covers": ["retire_uncertain_request"],
+      "area": ["idempotency", "regression"]
     }
   }
 }

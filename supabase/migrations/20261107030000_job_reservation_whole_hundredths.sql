@@ -103,7 +103,7 @@ BEGIN
           WHERE t.tgfoid = p.oid AND NOT t.tgisinternal) <> 1
      OR NOT EXISTS (SELECT 1 FROM pg_trigger t
           WHERE t.tgfoid = p.oid AND t.tgrelid = 'public.jobs'::regclass
-            AND t.tgname = 'trg_release_job_holds_on_lifecycle' AND t.tgenabled = 'O'
+            AND t.tgname = 'trg_release_job_holds_on_lifecycle' AND t.tgenabled = 'O' AND t.tgqual IS NULL
             AND t.tgtype = 17 -- AFTER UPDATE, FOR EACH ROW
             AND ARRAY(SELECT a.attname::text FROM pg_attribute a
                       WHERE a.attrelid = 'public.jobs'::regclass AND a.attnum = ANY (t.tgattr::int2[])
@@ -311,7 +311,10 @@ BEGIN
            AND j.id = ANY (COALESCE(v_pending, ARRAY[]::uuid[]));
         v_completed_demand := v_completed_demand - v_row.demand - v_pending_demand;
         v_consumed_drawn := v_consumed_drawn - v_own_drawn - v_pending_drawn;
-        v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0),
+        -- The first kept job draw on a booking is at least 0.01, so the booking guards that look for a
+        -- positive job draw (convert, delete, close) still see product already applied (Sol, 2026-11-05).
+        v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn),
+                                 CASE WHEN v_consumed_drawn = 0 AND v_row.demand > 0 THEN 0.01 ELSE 0 END),
                         ROUND(CEIL(v_row.demand * 100) / 100, 2),
                         ROUND(FLOOR(GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0) * 100) / 100, 2));
         DELETE FROM job_product_draws WHERE job_id = v_row.job_id AND product_id = v_row.product_id;
@@ -462,7 +465,7 @@ BEGIN
      OR position($q$set_config('crx.job_completing', '', true)$q$ IN p.prosrc) = 0
      OR NOT EXISTS (SELECT 1 FROM pg_trigger t
           WHERE t.tgfoid = p.oid AND t.tgrelid = 'public.jobs'::regclass
-            AND t.tgname = 'trg_release_job_holds_on_lifecycle' AND t.tgenabled = 'O' AND t.tgtype = 17
+            AND t.tgname = 'trg_release_job_holds_on_lifecycle' AND t.tgenabled = 'O' AND t.tgqual IS NULL AND t.tgtype = 17
             AND ARRAY(SELECT a.attname::text FROM pg_attribute a
                       WHERE a.attrelid = 'public.jobs'::regclass AND a.attnum = ANY (t.tgattr::int2[])
                       ORDER BY 1) = ARRAY['deleted_at', 'status'])

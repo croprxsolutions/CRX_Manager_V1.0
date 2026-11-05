@@ -6,8 +6,8 @@
  * candidate: its draw is 0.0078125 and the booking is left with 9.9921875 gal, more decimals than
  * the live Partial Order rule (20261106110000) accepts, so the booking can never close. AFTER the
  * candidate the same sync draws 0.01 and leaves 9.99 (whole hundredths, which a Partial Order can
- * take); the job's shed hold is at least that draw (0.01), and a demand under 0.005 gal draws
- * nothing while its full hold is kept. The candidate refuses to apply over a completed job that
+ * take); the job's shed hold is at least that draw (0.01), and an active demand under 0.005 gal
+ * still draws 0.01, as does the first completed job, so every booking guard still sees it. The candidate refuses to apply over a completed job that
  * keeps an unrounded draw. Each active job draws against completed demand only, so many small jobs,
  * out-of-order completions and a cancelled active sibling never pile up rounding in the kept draws.
  *
@@ -555,6 +555,8 @@ function main() {
   bulk(id('f6'), 'c2', 2, 0.004, 0.01);
   bulk(id('f7'), 'c3', 2, 0.006, 0.01);
   bulk(id('f8'), 'c4', 100, 0.004, 0.4);
+  // A lone completed job under 0.005 gal keeps 0.01, so the booking never shows no job draw after product was applied (Sol, 2026-11-05).
+  bulk(id('f9'), 'c5', 1, 0.004, 0.01);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

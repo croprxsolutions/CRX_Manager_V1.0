@@ -9,12 +9,14 @@ import {
   Calendar,
   Droplets,
   FileText,
-  Clock,
   Download,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
+  Search,
 } from 'lucide-react';
-import Card from '../components/ui/Card';
+import SectionCard from '../components/ui/SectionCard';
+import SectionJumpBar from '../components/ui/SectionJumpBar';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import DataTable, { type Column } from '../components/ui/DataTable';
@@ -38,8 +40,6 @@ import type {
   FieldActivityEntry,
 } from '../types';
 
-type Tab = 'overview' | 'applications' | 'billing' | 'details' | 'crop_history';
-
 interface CropHistoryRecord {
   [k: string]: unknown;
   id: string;
@@ -60,7 +60,6 @@ export default function FieldDashboard() {
 
   const [data, setData] = useState<FieldDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [cropHistory, setCropHistory] = useState<CropHistoryRecord[]>([]);
   const [children, setChildren] = useState<Array<{ id: string; field_name: string; total_acres: number | null; boundary_geojson?: string; centroid_geojson?: string }>>([]);
 
@@ -155,223 +154,175 @@ export default function FieldDashboard() {
   const { field, season_summary, application_records, recent_activity } = data;
 
   return (
-    <div className="space-y-6">
+    <div className="phone-touch space-y-5">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/fields')}>
-          <ArrowLeft className="w-4 h-4" />
+      <header className="flex flex-wrap items-start gap-3">
+        <Button variant="ghost" size="sm" onClick={() => navigate('/fields')} aria-label="Back to Fields">
+          <ArrowLeft className="w-5 h-5" />
         </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-nav-dark">{field.field_name}</h1>
-          <p className="text-sm text-secondary">{field.customer_name}</p>
+        <div className="min-w-0 flex-1 basis-56">
+          <h1 className="font-heading text-4xl font-bold leading-none text-nav-dark break-words">{field.field_name}</h1>
+          <p className="mt-1.5 text-sm text-secondary">
+            {field.customer_name}
+            {field.total_acres != null && <> &middot; {field.total_acres.toLocaleString()} ac</>}
+            {field.crop_type && <> &middot; <span className="capitalize">{field.crop_type}</span></>}
+          </p>
         </div>
-        <Button variant="secondary" onClick={() => navigate(`/fields/${id}`)}>
-          <Pencil className="w-4 h-4 mr-2" />
+        <Button variant="secondary" icon={<Pencil className="w-4 h-4" />} showChevron onClick={() => navigate(`/fields/${id}`)}>
           Edit Field
         </Button>
-      </div>
+      </header>
 
-      {/* Top Section: Map + Key Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <CRXMap
-            bounds={mapBounds}
-            showLayerToggle
-            className="h-[300px] w-full"
-          >
-            <FieldBoundaryLayer fields={[field, ...children as unknown as typeof field[]]} showLabels={children.length > 0} />
-          </CRXMap>
-        </div>
-        <Card className="p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm">
-            <MapPin className="w-4 h-4 text-crx-green" />
-            <span className="text-secondary">Location</span>
-          </div>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-secondary">Acres</span>
-              <span className="font-medium">{field.total_acres?.toLocaleString() ?? '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-secondary">Crop</span>
-              <span className="font-medium capitalize">{field.crop_type ?? '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-secondary">County</span>
-              <span className="font-medium">{field.county ?? '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-secondary">State</span>
-              <span className="font-medium">{field.state ?? '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-secondary">Soil Type</span>
-              <span className="font-medium">{field.soil_type ?? '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-secondary">Irrigation</span>
-              <Badge variant={field.irrigation ? 'success' : 'default'}>
-                {field.irrigation ? 'Yes' : 'No'}
-              </Badge>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-secondary">Status</span>
-              <Badge variant={field.is_active ? 'success' : 'default'}>
-                {field.is_active ? 'Active' : 'Inactive'}
-              </Badge>
-            </div>
-          </div>
-        </Card>
-      </div>
+      <SectionJumpBar
+        sections={[
+          { id: 'field-overview', label: 'Overview' },
+          { id: 'field-applications', label: 'Applications', count: application_records.length },
+          { id: 'field-billing', label: 'Billing', count: field.billing_defaults?.length ?? 0 },
+          { id: 'field-details', label: 'Details' },
+          { id: 'field-crop-history', label: 'Crop History', count: cropHistory.length },
+        ]}
+      />
 
-      {/* Tab Bar */}
-      <div className="border-b border-gray-200">
-        <nav className="flex gap-6 overflow-x-auto" aria-label="Field dashboard tabs">
-          {([
-            { key: 'overview', label: 'Overview', icon: Sprout },
-            { key: 'applications', label: 'Applications', icon: Droplets },
-            { key: 'billing', label: 'Billing', icon: FileText },
-            { key: 'details', label: 'Details', icon: MapPin },
-            { key: 'crop_history', label: 'Crop History', icon: Calendar },
-          ] as const).map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setActiveTab(key)}
-              className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium whitespace-nowrap transition-colors ${
-                activeTab === key
-                  ? 'border-crx-green text-crx-green'
-                  : 'border-transparent text-secondary hover:text-nav-dark hover:border-gray-300'
-              }`}
+      <SectionCard id="field-overview" icon={<Sprout className="w-5 h-5" />} title="Overview">
+        <div className="grid grid-cols-1 lg:grid-cols-3">
+          <div className="lg:col-span-2 lg:border-r lg:border-gray-100">
+            <CRXMap
+              bounds={mapBounds}
+              showLayerToggle
+              className="h-[200px] md:h-[300px] w-full"
             >
-              <Icon className="w-4 h-4" />
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {/* Tab Content */}
-      {activeTab === 'overview' && (
-        <>
-          <OverviewTab summary={season_summary} activity={recent_activity} />
-          {children.length > 0 && (
-            <Card className="p-4 mt-6">
-              <h3 className="text-sm font-medium text-secondary mb-3">Sub-fields ({children.length})</h3>
-              <div className="space-y-2">
-                {children.map((child) => (
+              <FieldBoundaryLayer fields={[field, ...children as unknown as typeof field[]]} showLabels={children.length > 0} />
+            </CRXMap>
+          </div>
+          <dl className="divide-y divide-gray-100 text-sm">
+            <InfoRow label="Acres">{field.total_acres?.toLocaleString() ?? '—'}</InfoRow>
+            <InfoRow label="Crop"><span className="capitalize">{field.crop_type ?? '—'}</span></InfoRow>
+            <InfoRow label="County">{field.county ?? '—'}</InfoRow>
+            <InfoRow label="State">{field.state ?? '—'}</InfoRow>
+            <InfoRow label="Soil Type">{field.soil_type ?? '—'}</InfoRow>
+            <InfoRow label="Irrigation">
+              <Badge variant={field.irrigation ? 'success' : 'default'}>{field.irrigation ? 'Yes' : 'No'}</Badge>
+            </InfoRow>
+            <InfoRow label="Status">
+              <Badge variant={field.is_active ? 'success' : 'default'}>{field.is_active ? 'Active' : 'Inactive'}</Badge>
+            </InfoRow>
+          </dl>
+        </div>
+        <OverviewTab summary={season_summary} />
+        {children.length > 0 && (
+          <SubHeading title={`Sub-fields (${children.length})`}>
+            <ul className="divide-y divide-gray-100">
+              {children.map((child) => (
+                <li key={child.id}>
                   <button
-                    key={child.id}
+                    type="button"
                     onClick={() => navigate(`/fields/${child.id}/dashboard`)}
-                    className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors text-left"
+                    className="w-full flex min-h-11 items-center justify-between gap-3 px-4 py-2 hover:bg-cream transition-colors text-left"
                   >
-                    <div className="flex items-center gap-2">
-                      <MapPin className="w-3.5 h-3.5 text-crx-green" />
-                      <span className="text-sm font-medium">{child.field_name}</span>
-                    </div>
-                    <span className="text-xs text-secondary">{child.total_acres?.toLocaleString() ?? '—'} ac</span>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <MapPin className="w-4 h-4 shrink-0 text-crx-green" aria-hidden="true" />
+                      <span className="text-sm font-semibold text-nav-dark truncate">{child.field_name}</span>
+                    </span>
+                    <span className="flex items-center gap-1 shrink-0 text-sm text-secondary">
+                      {child.total_acres?.toLocaleString() ?? '—'} ac
+                      <ChevronRight className="w-4 h-4" aria-hidden="true" />
+                    </span>
                   </button>
-                ))}
-              </div>
-            </Card>
-          )}
-        </>
-      )}
-      {activeTab === 'applications' && (
-        <ApplicationsTab records={application_records} onExport={handleExportCSV} />
-      )}
-      {activeTab === 'billing' && (
+                </li>
+              ))}
+            </ul>
+          </SubHeading>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        id="field-applications"
+        icon={<Droplets className="w-5 h-5" />}
+        title="Applications"
+        action={(
+          <Button variant="secondary" size="sm" icon={<Download className="w-4 h-4" />} onClick={handleExportCSV} disabled={application_records.length === 0}>
+            Export CSV
+          </Button>
+        )}
+      >
+        <ApplicationsTab records={application_records} />
+      </SectionCard>
+
+      <SectionCard id="field-billing" icon={<FileText className="w-5 h-5" />} title="Billing Splits">
         <BillingTab billingDefaults={field.billing_defaults} />
-      )}
-      {activeTab === 'details' && (
+      </SectionCard>
+
+      <SectionCard id="field-details" icon={<MapPin className="w-5 h-5" />} title="Details">
         <DetailsTab field={field} activity={recent_activity} />
-      )}
-      {activeTab === 'crop_history' && (
-        <CropHistoryTab
-          history={cropHistory}
-          currentCrop={field.crop_type}
-          fieldId={id || ''}
-          onSaved={fetchDashboard}
-        />
-      )}
+      </SectionCard>
+
+      <CropHistoryTab
+        history={cropHistory}
+        currentCrop={field.crop_type}
+        fieldId={id || ''}
+        onSaved={fetchDashboard}
+      />
     </div>
   );
 }
 
-/* ─── Overview Tab ──────────────────────────────────────────────── */
+/* ─── Style D pieces ───────────────────────────────────────────── */
 
-function OverviewTab({
-  summary,
-  activity,
-}: {
-  summary: FieldDashboardResponse['season_summary'];
-  activity: FieldActivityEntry[];
-}) {
+/** A sub-part of a section: a Barlow sub-heading on a hairline divider. */
+function SubHeading({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="border-t border-gray-200">
+      <h3 className="px-4 pt-3 pb-1 font-heading text-lg font-semibold text-nav-dark">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+/** Label on the left, value on the right, on a gray-100 divider. */
+function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-9 items-center justify-between gap-4 px-4 py-1.5">
+      <dt className="font-semibold text-nav-dark">{label}</dt>
+      <dd className="text-right text-nav-dark">{children}</dd>
+    </div>
+  );
+}
+
+/* ─── Overview section ──────────────────────────────────────────── */
+
+function OverviewTab({ summary }: { summary: FieldDashboardResponse['season_summary'] }) {
   const stats = [
-    { label: 'Total Applications', value: summary.total_applications, icon: Droplets },
-    { label: 'Acres Treated', value: summary.total_acres_treated.toLocaleString(), icon: MapPin },
-    { label: 'Products Applied', value: summary.distinct_products, icon: Sprout },
+    { label: 'Applications', value: summary.total_applications },
+    { label: 'Acres Treated', value: summary.total_acres_treated.toLocaleString() },
+    { label: 'Products Applied', value: summary.distinct_products },
   ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-sm font-medium text-secondary mb-3">
-          Season {summary.season} Summary
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {stats.map(({ label, value, icon: Icon }) => (
-            <Card key={label} className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-crx-green/10 rounded-lg">
-                  <Icon className="w-5 h-5 text-crx-green" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-nav-dark">{value}</p>
-                  <p className="text-xs text-secondary">{label}</p>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      <Card className="p-4">
-        <h3 className="text-sm font-medium text-secondary mb-4">Recent Activity</h3>
-        {activity.length === 0 ? (
-          <p className="text-sm text-gray-400">No activity recorded for this field yet.</p>
-        ) : (
-          <div className="space-y-3">
-            {activity.map((entry) => (
-              <div key={entry.id} className="flex items-start gap-3">
-                <div className="mt-1 p-1 bg-gray-100 rounded-full">
-                  <Clock className="w-3 h-3 text-gray-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-nav-dark">{entry.description}</p>
-                  <p className="text-xs text-secondary">
-                    {entry.performed_by_name} &middot;{' '}
-                    {formatLocalDate(new Date(entry.created_at))}
-                  </p>
-                </div>
-              </div>
-            ))}
+    <SubHeading title={`Season ${summary.season} Summary`}>
+      <dl className="grid grid-cols-3 divide-x divide-gray-100 px-1 pb-3">
+        {stats.map(({ label, value }) => (
+          <div key={label} className="px-3 py-1">
+            <dd className="font-heading text-3xl font-bold leading-tight text-nav-dark tabular-nums">{value}</dd>
+            <dt className="text-xs font-medium text-secondary">{label}</dt>
           </div>
-        )}
-      </Card>
-    </div>
+        ))}
+      </dl>
+    </SubHeading>
   );
 }
 
-/* ─── Applications Tab ──────────────────────────────────────────── */
+/* ─── Applications section ──────────────────────────────────────── */
 
-function ApplicationsTab({
-  records,
-  onExport,
-}: {
-  records: FieldApplicationRecord[];
-  onExport: () => void;
-}) {
+function weatherText(w: FieldApplicationRecord['weather_conditions']): string {
+  if (!w) return '';
+  const parts: string[] = [];
+  if (w.temperature !== undefined) parts.push(`${w.temperature}°F`);
+  if (w.wind_speed !== undefined) parts.push(`${w.wind_speed} mph ${w.wind_direction || ''}`);
+  if (w.humidity !== undefined) parts.push(`${w.humidity}% RH`);
+  return parts.join(' · ');
+}
+
+function ApplicationsTab({ records }: { records: FieldApplicationRecord[] }) {
   const columns: Column<FieldApplicationRecord>[] = useMemo(
     () => [
       {
@@ -396,7 +347,7 @@ function ApplicationsTab({
         header: 'Products',
         render: (row: FieldApplicationRecord) => {
           const products = row.product_data || [];
-          if (products.length === 0) return <span className="text-gray-400">—</span>;
+          if (products.length === 0) return <span className="text-gray-500">—</span>;
           return (
             <div className="space-y-0.5">
               {products.slice(0, 3).map((p, i) => (
@@ -436,13 +387,8 @@ function ApplicationsTab({
         key: 'weather_conditions',
         header: 'Weather',
         render: (row: FieldApplicationRecord) => {
-          const w = row.weather_conditions;
-          if (!w) return <span className="text-gray-400">—</span>;
-          const parts: string[] = [];
-          if (w.temperature !== undefined) parts.push(`${w.temperature}°F`);
-          if (w.wind_speed !== undefined) parts.push(`${w.wind_speed} mph ${w.wind_direction || ''}`);
-          if (w.humidity !== undefined) parts.push(`${w.humidity}% RH`);
-          return <span className="text-xs">{parts.join(' · ') || '—'}</span>;
+          const text = weatherText(row.weather_conditions);
+          return text ? <span className="text-xs">{text}</span> : <span className="text-gray-500">—</span>;
         },
       },
       {
@@ -458,31 +404,45 @@ function ApplicationsTab({
     []
   );
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-secondary">
-          {records.length} Application{records.length !== 1 ? 's' : ''}
-        </h3>
-        <Button variant="ghost" size="sm" onClick={onExport} disabled={records.length === 0}>
-          <Download className="w-4 h-4 mr-1" />
-          Export CSV
-        </Button>
+  if (records.length === 0) {
+    return (
+      <div className="px-4 py-8 text-center">
+        <Droplets className="w-8 h-8 text-gray-300 mx-auto mb-2" aria-hidden="true" />
+        <p className="text-sm text-secondary">No application records for this field this season.</p>
       </div>
+    );
+  }
 
-      {records.length === 0 ? (
-        <Card className="p-8 text-center">
-          <Droplets className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-          <p className="text-sm text-gray-500">No application records for this field this season.</p>
-        </Card>
-      ) : (
+  return (
+    <>
+      {/* Phones: one list, a row per record. */}
+      <ul className="divide-y divide-gray-100 md:hidden">
+        {records.map((r) => {
+          const weather = weatherText(r.weather_conditions);
+          return (
+            <li key={r.id} className="px-4 py-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="font-semibold text-nav-dark">{r.application_date}</span>
+                <span className="font-heading text-lg font-bold text-nav-dark tabular-nums">{r.total_acres?.toLocaleString() ?? '—'} ac</span>
+              </div>
+              <p className="text-sm text-nav-dark">
+                {(r.product_data || []).map((p) => [p.product_name || 'Unknown', p.rate && p.rate_unit ? `${p.rate} ${p.rate_unit}` : ''].filter(Boolean).join(' ')).join(', ') || '—'}
+              </p>
+              <p className="text-xs text-secondary">
+                {[r.record_number, r.applicator_name, r.vehicle_name, weather, r.source_type === 'job' ? 'Job' : 'Blend Ticket'].filter(Boolean).join(' · ')}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="hidden md:block px-4 py-3">
         <DataTable columns={columns} data={records} />
-      )}
-    </div>
+      </div>
+    </>
   );
 }
 
-/* ─── Billing Tab ───────────────────────────────────────────────── */
+/* ─── Billing section ───────────────────────────────────────────── */
 
 function BillingTab({
   billingDefaults,
@@ -491,58 +451,59 @@ function BillingTab({
 }) {
   if (!billingDefaults || billingDefaults.length === 0) {
     return (
-      <Card className="p-8 text-center">
-        <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-        <p className="text-sm text-gray-500">No billing splits configured for this field.</p>
-      </Card>
+      <div className="px-4 py-8 text-center">
+        <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" aria-hidden="true" />
+        <p className="text-sm text-secondary">No billing splits configured for this field.</p>
+      </div>
     );
   }
 
   const colors = ['bg-crx-green', 'bg-blue-500', 'bg-orange-500', 'bg-purple-500', 'bg-yellow-500'];
 
   return (
-    <div className="space-y-4">
-      <h3 className="text-sm font-medium text-secondary">Billing Splits</h3>
-
-      <div className="h-6 rounded-full overflow-hidden flex bg-gray-100">
-        {billingDefaults.map((bd, i) => (
-          <div
-            key={bd.customer_id}
-            className={`${colors[i % colors.length]} flex items-center justify-center text-xs text-white font-medium`}
-            style={{ width: `${bd.split_pct}%` }}
-            title={`${bd.customer_name}: ${bd.split_pct}%`}
-          >
-            {bd.split_pct >= 10 ? `${bd.split_pct}%` : ''}
-          </div>
-        ))}
+    <>
+      <div className="px-4 pt-4 pb-2">
+        <div className="h-6 rounded-full overflow-hidden flex bg-gray-100">
+          {billingDefaults.map((bd, i) => (
+            <div
+              key={bd.customer_id}
+              className={`${colors[i % colors.length]} flex items-center justify-center text-xs text-white font-medium`}
+              style={{ width: `${bd.split_pct}%` }}
+              title={`${bd.customer_name}: ${bd.split_pct}%`}
+            >
+              {bd.split_pct >= 10 ? `${bd.split_pct}%` : ''}
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div className="space-y-2">
-        {billingDefaults.map((bd) => (
-          <Card key={bd.customer_id} className="p-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-sm">{bd.customer_name}</span>
+      <ul className="divide-y divide-gray-100">
+        {billingDefaults.map((bd, i) => (
+          <li key={bd.customer_id} className="px-4 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span aria-hidden="true" className={`h-3 w-3 shrink-0 rounded-full ${colors[i % colors.length]}`} />
+                <span className="font-semibold text-sm text-nav-dark truncate">{bd.customer_name}</span>
                 {bd.is_primary && <Badge variant="success">Primary</Badge>}
               </div>
-              <span className="font-bold text-crx-green">{bd.split_pct}%</span>
+              <span className="font-heading text-xl font-bold text-crx-green tabular-nums">{bd.split_pct}%</span>
             </div>
             {(bd.price_override_cents || bd.pricing_note) && (
-              <div className="mt-1 text-xs text-secondary space-x-4">
+              <div className="mt-0.5 pl-5 text-xs text-secondary space-x-4">
                 {bd.price_override_cents && (
                   <span>${(bd.price_override_cents / 100).toFixed(2)}/ac override</span>
                 )}
                 {bd.pricing_note && <span>{bd.pricing_note}</span>}
               </div>
             )}
-          </Card>
+          </li>
         ))}
-      </div>
-    </div>
+      </ul>
+    </>
   );
 }
 
-/* ─── Details Tab ───────────────────────────────────────────────── */
+/* ─── Details section ───────────────────────────────────────────── */
 
 function DetailsTab({
   field,
@@ -555,65 +516,40 @@ function DetailsTab({
   const displayedActivity = showAllActivity ? activity : activity.slice(0, 5);
 
   return (
-    <div className="space-y-6">
-      {(field.fsa_farm_number || field.fsa_tract_number || field.fsa_field_number) && (
-        <Card className="p-4">
-          <h3 className="text-sm font-medium text-secondary mb-3">FSA Numbers</h3>
-          <div className="grid grid-cols-3 gap-4 text-sm">
-            <div>
-              <p className="text-xs text-secondary">Farm #</p>
-              <p className="font-medium">{field.fsa_farm_number || '—'}</p>
-            </div>
-            <div>
-              <p className="text-xs text-secondary">Tract #</p>
-              <p className="font-medium">{field.fsa_tract_number || '—'}</p>
-            </div>
-            <div>
-              <p className="text-xs text-secondary">Field #</p>
-              <p className="font-medium">{field.fsa_field_number || '—'}</p>
-            </div>
-          </div>
-        </Card>
-      )}
+    <>
+      <dl className="divide-y divide-gray-100 text-sm">
+        {(field.fsa_farm_number || field.fsa_tract_number || field.fsa_field_number) && (
+          <>
+            <InfoRow label="FSA Farm #">{field.fsa_farm_number || '—'}</InfoRow>
+            <InfoRow label="FSA Tract #">{field.fsa_tract_number || '—'}</InfoRow>
+            <InfoRow label="FSA Field #">{field.fsa_field_number || '—'}</InfoRow>
+          </>
+        )}
+        <InfoRow label="Created">{formatLocalDate(new Date(field.created_at))}</InfoRow>
+        <InfoRow label="Last Updated">{formatLocalDate(new Date(field.updated_at))}</InfoRow>
+      </dl>
 
       {field.legal_description && (
-        <Card className="p-4">
-          <h3 className="text-sm font-medium text-secondary mb-2">Legal Description</h3>
-          <p className="text-sm">{field.legal_description}</p>
-        </Card>
+        <SubHeading title="Legal Description">
+          <p className="px-4 pb-3 text-sm text-nav-dark">{field.legal_description}</p>
+        </SubHeading>
       )}
 
       {field.notes && (
-        <Card className="p-4">
-          <h3 className="text-sm font-medium text-secondary mb-2">Notes</h3>
-          <p className="text-sm whitespace-pre-wrap">{field.notes}</p>
-        </Card>
+        <SubHeading title="Notes">
+          <p className="px-4 pb-3 text-sm text-nav-dark whitespace-pre-wrap">{field.notes}</p>
+        </SubHeading>
       )}
 
-      <Card className="p-4">
-        <h3 className="text-sm font-medium text-secondary mb-3">Record Info</h3>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <p className="text-xs text-secondary">Created</p>
-            <p className="font-medium">{formatLocalDate(new Date(field.created_at))}</p>
-          </div>
-          <div>
-            <p className="text-xs text-secondary">Last Updated</p>
-            <p className="font-medium">{formatLocalDate(new Date(field.updated_at))}</p>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="p-4">
-        <h3 className="text-sm font-medium text-secondary mb-3">Activity Log</h3>
+      <SubHeading title="Activity Log">
         {activity.length === 0 ? (
-          <p className="text-sm text-gray-400">No activity recorded.</p>
+          <p className="px-4 pb-3 text-sm text-secondary">No activity recorded.</p>
         ) : (
           <>
-            <div className="space-y-2">
+            <ul className="divide-y divide-gray-100">
               {displayedActivity.map((entry) => (
-                <div key={entry.id} className="flex items-start gap-3 text-sm">
-                  <Calendar className="w-3.5 h-3.5 mt-0.5 text-gray-400 shrink-0" />
+                <li key={entry.id} className="flex items-start gap-3 px-4 py-2 text-sm">
+                  <Calendar className="w-4 h-4 mt-0.5 text-secondary shrink-0" aria-hidden="true" />
                   <div className="flex-1 min-w-0">
                     <p className="text-nav-dark">{entry.description}</p>
                     <p className="text-xs text-secondary">
@@ -621,26 +557,26 @@ function DetailsTab({
                       {formatLocalDate(new Date(entry.created_at))}
                     </p>
                   </div>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
             {activity.length > 5 && (
               <button
                 type="button"
                 onClick={() => setShowAllActivity(!showAllActivity)}
-                className="mt-3 text-xs text-crx-green hover:underline flex items-center gap-1"
+                className="mx-4 mb-3 min-h-9 text-sm font-semibold text-crx-green hover:underline flex items-center gap-1"
               >
                 {showAllActivity ? (
-                  <><ChevronUp className="w-3 h-3" /> Show less</>
+                  <><ChevronUp className="w-4 h-4" aria-hidden="true" /> Show less</>
                 ) : (
-                  <><ChevronDown className="w-3 h-3" /> Show all {activity.length} entries</>
+                  <><ChevronDown className="w-4 h-4" aria-hidden="true" /> Show all {activity.length} entries</>
                 )}
               </button>
             )}
           </>
         )}
-      </Card>
-    </div>
+      </SubHeading>
+    </>
   );
 }
 
@@ -817,43 +753,39 @@ function CropHistoryTab({
       : []),
   ];
 
+  const emptyDescription = canEdit
+    ? 'Add a crop record, or it is auto-recorded when the field’s crop type changes between seasons.'
+    : 'Crop history is auto-recorded when the field’s crop type changes between seasons.';
+
   return (
-    <div className="space-y-4">
+    <SectionCard
+      id="field-crop-history"
+      icon={<Calendar className="w-5 h-5" />}
+      title="Crop History"
+      action={canEdit ? (
+        <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={openAdd}>
+          Add Entry
+        </Button>
+      ) : undefined}
+    >
       {currentCrop && (
-        <Card className="p-4">
-          <div className="flex items-center gap-3">
-            <Sprout className="w-5 h-5 text-crx-green" />
-            <div>
-              <p className="text-sm font-medium text-nav-dark">Current Crop</p>
-              <p className="text-lg font-semibold text-crx-green">{currentCrop}</p>
-            </div>
-          </div>
-        </Card>
+        <dl className="text-sm">
+          <InfoRow label="Current Crop"><span className="font-heading text-lg font-bold text-crx-green capitalize">{currentCrop}</span></InfoRow>
+        </dl>
       )}
-      {canEdit && (
-        <div className="flex justify-end">
-          <Button icon={<Plus className="w-4 h-4" />} onClick={openAdd}>
-            Add Entry
-          </Button>
-        </div>
-      )}
-      <Card padding={false}>
-        <div className="p-5">
-          <DataTable<CropHistoryRecord>
-            columns={columns}
-            data={history}
-            searchable
-            searchPlaceholder="Search crop history..."
-            searchKeys={['crop_type', 'variety', 'notes']}
-            emptyTitle="No crop history"
-            emptyDescription={
-              canEdit
-                ? 'Add a crop record, or it is auto-recorded when the field’s crop type changes between seasons.'
-                : 'Crop history is auto-recorded when the field’s crop type changes between seasons.'
-            }
-          />
-        </div>
-      </Card>
+      {/* Phones: one list, a row per season. */}
+      <CropHistoryPhoneList history={history} emptyDescription={emptyDescription} onEdit={canEdit ? openEdit : undefined} />
+      <div className="hidden md:block px-4 py-3">
+        <DataTable<CropHistoryRecord>
+          columns={columns}
+          data={history}
+          searchable
+          searchPlaceholder="Search crop history..."
+          searchKeys={['crop_type', 'variety', 'notes']}
+          emptyTitle="No crop history"
+          emptyDescription={emptyDescription}
+        />
+      </div>
 
       {canEdit && (
         <Modal
@@ -948,6 +880,73 @@ function CropHistoryTab({
           </div>
         </Modal>
       )}
-    </div>
+    </SectionCard>
+  );
+}
+
+/** Phones: one list, a row per season, with its own search (the desktop table has one built in). */
+function CropHistoryPhoneList({ history, emptyDescription, onEdit }: {
+  history: CropHistoryRecord[];
+  emptyDescription: string;
+  onEdit?: (r: CropHistoryRecord) => void;
+}) {
+  const [phoneSearch, setPhoneSearch] = useState('');
+  const needle = phoneSearch.trim().toLowerCase();
+  const phoneHistory = needle
+    ? history.filter((r) => [r.crop_type, r.variety, r.notes].some((v) => v?.toLowerCase().includes(needle)))
+    : history;
+
+  return (
+    <>
+      {history.length > 0 && (
+        <div className="relative border-t border-gray-100 px-4 py-2 md:hidden">
+          <Search className="absolute left-7 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" aria-hidden="true" />
+          <input
+            type="search"
+            value={phoneSearch}
+            onChange={(e) => setPhoneSearch(e.target.value)}
+            placeholder="Search crop history…"
+            aria-label="Search crop history"
+            className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-base text-nav-dark placeholder:text-gray-500"
+          />
+        </div>
+      )}
+      {phoneHistory.length === 0 ? (
+        <div className="px-4 py-6 text-center md:hidden">
+          <p className="font-semibold text-nav-dark">{history.length === 0 ? 'No crop history' : 'No matching seasons'}</p>
+          {history.length === 0 && <p className="text-sm text-secondary">{emptyDescription}</p>}
+        </div>
+      ) : (
+        <ul className="border-t border-gray-100 divide-y divide-gray-100 md:hidden">
+          {phoneHistory.map((r) => (
+            <li key={r.id} className="flex items-start justify-between gap-3 px-4 py-2.5">
+              <div className="min-w-0">
+                <p className="font-semibold text-nav-dark">
+                  {r.season - 1}–{r.season} <span className="font-normal">· {r.crop_type}{r.variety ? ` (${r.variety})` : ''}</span>
+                </p>
+                <p className="text-xs text-secondary">
+                  {[
+                    r.planting_date && `Planted ${r.planting_date}`,
+                    r.harvest_date && `Harvested ${r.harvest_date}`,
+                    r.yield_per_acre != null && `${r.yield_per_acre.toLocaleString()} ${r.yield_unit || ''}/ac`,
+                    r.notes,
+                  ].filter(Boolean).join(' · ') || '—'}
+                </p>
+              </div>
+              {onEdit && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(r)}
+                  className="shrink-0 rounded-lg p-2 text-secondary hover:bg-gray-100 hover:text-nav-dark"
+                  aria-label={`Edit ${r.season - 1}–${r.season} crop history`}
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

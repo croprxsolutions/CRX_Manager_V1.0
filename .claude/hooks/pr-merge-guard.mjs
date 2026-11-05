@@ -641,7 +641,12 @@ function gateRequest(request) {
     if (carried) {
       process.stderr.write(
         `SOL CARRY-FORWARD: the Sol review of head ${String(carried.from_head).slice(0, 12)} was carried to this head ` +
-        `after a conflict-free merge of main (${carried.mode === "disjoint" ? "no shared files, one side documentation-only" : "collision check clean"}; Mason, 2026-10-21).\n`,
+        `(${{
+          disjoint: "conflict-free merge of main, no shared files, one side documentation-only; Mason, 2026-10-21",
+          collision_check: "conflict-free merge of main, collision check clean; Mason, 2026-10-21",
+          restamp: "one commit that only restamped a migration; Mason, 2026-11-04",
+          post_apply: "one commit that only updated the records after a live apply; Mason, 2026-11-04",
+        }[carried.mode]}).\n`,
       );
     }
     advisoryQueue.push(request);

@@ -1474,6 +1474,225 @@ function collisionPromptSkipsWork(prompt) {
   assert.equal(restampProblem({ entries: entries.map((e) => ({ ...e, newMode: e.newMode === "100755" ? "100644" : e.newMode })), readFile: (side) => (side === "old" ? "SELECT 1;\r\n" : "SELECT 1;\n") }), null, "restamp: line endings alone are not an SQL change");
 }
 
+// ── post-apply carry (Mason, 2026-11-04), end to end on a throwaway repository ──
+{
+  const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
+  const repo = tempDir("crx-carry-post-apply-");
+  const git = (...args) => execFileSync("git", ["-c", "user.name=PostApply Test", "-c", "user.email=post-apply@example.invalid", ...args], {
+    cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  const postApplyCarry = (...extra) => spawnSync(process.execPath, [scriptPath, "--carry-post-apply", ...extra], { cwd: repo, encoding: "utf8" });
+  const MIG = "20261106233000_void_delivery_flags";
+  const file = (rel) => path.join(repo, ...rel.split("/"));
+  const write = (rel, text) => { mkdirSync(path.dirname(file(rel)), { recursive: true }); writeFileSync(file(rel), text); };
+  const ALLOWLIST = "scripts/db-invariant-sweeps/allowlist.json";
+  const entry = (sig, hash, why) => ({ predicate: "cost-exposure-review", violation_key: `${sig}#${hash}`, justification: why, dated: "2026-11-02" });
+  const allowlist = (entries) => `${JSON.stringify({ _README: "one key per entry", entries }, null, 2)}\n`;
+  const reviewedEntries = [
+    entry("cancel_delivery(p_delivery_id uuid)", "208f548aef54", "NO-COST. Re-read 2026-11-02 ’live’."),
+    entry("batch_cancel_deliveries(p_ids uuid[])", "7030273f9846", "NO-COST."),
+    { predicate: "anon-exec-secdef", violation_key: "trigger_fn()", justification: "Trigger function.", dated: "2026-06-22" },
+  ];
+  // The post-apply commit as it is really done: flip the record, note the changelog
+  // and KNOWN_ISSUES, regenerate the registry, re-key two allowlist entries.
+  const notes = () => {
+    write(`docs/reference/migrations.d/${MIG}.md`, `# ${MIG}\n\nStatus: APPLIED LIVE 2026-11-04 (ledger 20261104220928).\n`);
+    write("docs/changelog.d/2026-11-04-void.md", "- Void fix. Applied live 2026-11-04.\n");
+    write("docs/manual/KNOWN_ISSUES.md", "# Known issues\n\nKI-94: fixed live 2026-11-04.\n");
+  };
+  const paperwork = () => {
+    notes();
+    write(".claude/schema-registry.json", `${JSON.stringify({ generated: "2026-11-04", tables: { deliveries: {} } })}\n`);
+    const [a, b, c] = reviewedEntries;
+    write(ALLOWLIST, allowlist([
+      { ...a, violation_key: a.violation_key.replace("208f548aef54", "3eab94bbb035"), justification: `${a.justification} Re-keyed 2026-11-04 for ${MIG}.`, dated: "2026-11-04" },
+      { ...b, violation_key: b.violation_key.replace("7030273f9846", "61997c4b6d48"), justification: `${b.justification} Re-keyed.`, dated: "2026-11-04" },
+      c,
+    ]));
+  };
+  const commitAll = (message) => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
+  try {
+    git("init", "-q", "-b", "main");
+    git("config", "core.autocrlf", "false");
+    write(".gitignore", ".claude/session-state/\n");
+    write("src/a.ts", "export const a = 1;\n");
+    write("docs/manual/KNOWN_ISSUES.md", "# Known issues\n\nKI-94: open.\n");
+    write(".claude/schema-registry.json", `${JSON.stringify({ generated: "2026-11-01", tables: {} })}\n`);
+    write(ALLOWLIST, allowlist(reviewedEntries));
+    const base = commitAll("base");
+    git("update-ref", "refs/remotes/origin/main", base);
+    git("switch", "-q", "-c", "feature");
+    write(`supabase/migrations/${MIG}.sql`, "CREATE FUNCTION x() RETURNS int LANGUAGE sql AS 'SELECT 1';\n");
+    write(`docs/reference/migrations.d/${MIG}.md`, `# ${MIG}\n\nStatus: candidate.\n`);
+    write("src/a.ts", "export const a = 2;\n");
+    const reviewedHead = commitAll("pr change");
+    const proofPath = codexPushProofPath(repo, reviewedHead);
+    mkdirSync(path.dirname(proofPath), { recursive: true });
+    writeFileSync(proofPath, JSON.stringify(buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean" })));
+
+    // The registry and the allowlist feed guards: the full paperwork needs the focused
+    // Sol check (dry run: decision only, so no model call here).
+    paperwork();
+    const fullHead = commitAll("docs(db): record applied live, registry and re-keys");
+    const dry = postApplyCarry("--dry-run");
+    assert.equal(dry.status, 0, `post-apply e2e: dry run succeeds (${dry.stderr})`);
+    assert.match(dry.stdout, /Sol records check needed for \.claude\/schema-registry\.json, scripts\/db-invariant-sweeps\/allowlist\.json/, "post-apply e2e: registry and allowlist need the Sol records check");
+    assert.equal(existsSync(codexPushProofPath(repo, fullHead)), false, "post-apply e2e: the dry run writes nothing");
+
+    // Notes alone carry with no model call.
+    git("reset", "-q", "--hard", reviewedHead);
+    notes();
+    const paperworkHead = commitAll("docs(db): record applied live");
+    const notesDry = postApplyCarry("--dry-run");
+    assert.match(notesDry.stdout, /notes only — carries with no model call/, "post-apply e2e: notes need no model call");
+    const ok = postApplyCarry();
+    assert.equal(ok.status, 0, `post-apply e2e: post-apply notes carry (${ok.stderr})`);
+    const minted = JSON.parse(readFileSync(codexPushProofPath(repo, paperworkHead), "utf8"));
+    assert.equal(minted.carry.mode, "post_apply", "post-apply e2e: minted as a post_apply carry");
+    assert.equal(minted.carry.records_check, "none", "post-apply e2e: records that no model checked");
+    assert.equal(minted.codex_ran, false, "post-apply e2e: never claims a review ran");
+    assert.equal(minted.carry.from_head, reviewedHead, "post-apply e2e: names the reviewed head");
+    assert.equal(minted.carry.root_review.head_sha, reviewedHead, "post-apply e2e: keeps the full review at the root of the chain");
+    assert.equal(proofValid(minted, paperworkHead, Date.now(), base), true, "post-apply e2e: the apply/merge validator accepts it for the new head and same base");
+    assert.equal(proofValid(minted, reviewedHead, Date.now(), base), false, "post-apply e2e: and not for the old head");
+    assert.equal(proofValid({ ...minted, base_sha: "9".repeat(40) }, paperworkHead, Date.now(), "9".repeat(40)), false, "post-apply e2e: a post-apply carry cannot move the base");
+    assert.equal(carrySourceProofProblem(minted, { headSha: paperworkHead }), null, "post-apply e2e: a later main merge can carry it forward");
+    // The 24 hours stay bound to the original full review, not to the carry.
+    writeFileSync(proofPath, JSON.stringify(buildCodexPushProof({
+      headSha: reviewedHead, baseSha: base, verdict: "clean", timestamp: new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString(),
+    })));
+    assert.equal(postApplyCarry().status, 0, "post-apply e2e: a 23-hour-old review still carries");
+    const late = JSON.parse(readFileSync(codexPushProofPath(repo, paperworkHead), "utf8"));
+    assert.equal(proofValid(late, paperworkHead, Date.now() + 2 * 60 * 60 * 1000, base), false, "post-apply e2e: the carry expires with the original review");
+
+    const refused = (label, mutate, why, { sourceTimestamp } = {}) => {
+      git("reset", "-q", "--hard", reviewedHead);
+      writeFileSync(proofPath, JSON.stringify(buildCodexPushProof({
+        headSha: reviewedHead, baseSha: base, verdict: "clean", ...(sourceTimestamp ? { timestamp: sourceTimestamp } : {}),
+      })));
+      mutate();
+      const head = commitAll(`refused: ${label}`);
+      const result = postApplyCarry();
+      assert.equal(result.status, 1, `post-apply e2e: ${label} is refused`);
+      assert.match(result.stderr, why, `post-apply e2e: ${label} says why`);
+      assert.equal(existsSync(codexPushProofPath(repo, head)), false, `post-apply e2e: nothing minted for ${label}`);
+    };
+    const rewriteAllowlist = (edit) => {
+      paperwork();
+      const parsed = JSON.parse(readFileSync(file(ALLOWLIST), "utf8"));
+      edit(parsed);
+      write(ALLOWLIST, `${JSON.stringify(parsed, null, 2)}\n`);
+    };
+    refused("a code edit", () => { paperwork(); write("src/a.ts", "export const a = 3;\n"); }, /src\/a\.ts is not post-apply paperwork/);
+    refused("a migration edit", () => { paperwork(); write(`supabase/migrations/${MIG}.sql`, "SELECT 2;\n"); }, /supabase\/migrations\/.* is not post-apply paperwork/);
+    refused("another docs file", () => { paperwork(); write("docs/manual/DECISION_LOG.md", "x\n"); }, /DECISION_LOG\.md was added/);
+    refused("another migration's record", () => {
+      notes();
+      write("docs/reference/migrations.d/20261101000000_parked.md", "**APPLIED LIVE**\n");
+    }, /not the record of a migration this PR adds/);
+    refused("a records README", () => { notes(); write("docs/reference/migrations.d/README.md", "Rules.\n"); }, /instruction file/);
+    refused("an executable record", () => {
+      paperwork();
+      // On disk too, so a filemode-aware `git add` keeps the bit.
+      chmodSync(file(`docs/reference/migrations.d/${MIG}.md`), 0o755);
+      git("add", "-A");
+      git("update-index", "--chmod=+x", `docs/reference/migrations.d/${MIG}.md`);
+    }, /changed type or mode/);
+    refused("a deleted record", () => { rmSync(file(`docs/reference/migrations.d/${MIG}.md`)); }, /was deleted/);
+    refused("an added allowlist entry", () => rewriteAllowlist((list) => {
+      list.entries.push(entry("price_order(p uuid)", "aaaaaaaaaaaa", "NO-COST."));
+    }), /entry was added or removed/);
+    refused("a removed allowlist entry", () => rewriteAllowlist((list) => { list.entries.pop(); }), /entry was added or removed/);
+    refused("a swapped allowlist entry", () => rewriteAllowlist((list) => {
+      list.entries[2] = entry("price_order(p uuid)", "aaaaaaaaaaaa", "NO-COST.");
+    }), /changed beyond its key, justification and date/);
+    refused("a re-signatured allowlist key", () => rewriteAllowlist((list) => {
+      list.entries[0].violation_key = "cancel_delivery(p_delivery_id uuid, p_extra text)#3eab94bbb035";
+    }), /changed its signature, not just its hash/);
+    refused("a key that gains a hash", () => rewriteAllowlist((list) => {
+      list.entries[2].violation_key = "trigger_fn()#3eab94bbb035";
+    }), /changed its signature, not just its hash/);
+    refused("a non-hex hash", () => rewriteAllowlist((list) => {
+      list.entries[0].violation_key = "cancel_delivery(p_delivery_id uuid)#*";
+    }), /changed its signature, not just its hash/);
+    refused("a changed predicate", () => rewriteAllowlist((list) => { list.entries[0].predicate = "anon-exec-secdef"; }), /changed beyond its key/);
+    refused("a rewritten justification", () => rewriteAllowlist((list) => { list.entries[1].justification = "Re-keyed."; }), /justification was rewritten/);
+    refused("a bad date", () => rewriteAllowlist((list) => { list.entries[0].dated = "soon"; }), /date is not a real YYYY-MM-DD date/);
+    refused("a date moved backwards", () => rewriteAllowlist((list) => { list.entries[0].dated = "2026-11-01"; }), /date moved backwards/);
+    refused("an impossible date", () => rewriteAllowlist((list) => { list.entries[0].dated = "2026-02-30"; }), /date is not a real YYYY-MM-DD date/);
+    refused("an appended note with no re-key", () => rewriteAllowlist((list) => {
+      list.entries[0].violation_key = reviewedEntries[0].violation_key;
+    }), /changed without a new hash/);
+    refused("a re-key with no appended wording", () => rewriteAllowlist((list) => {
+      list.entries[1].justification = reviewedEntries[1].justification;
+    }), /justification was rewritten/);
+    refused("an allowlist header change", () => rewriteAllowlist((list) => { list._README = "anything goes"; }), /changed outside its entries/);
+    refused("a broken allowlist", () => { paperwork(); write(ALLOWLIST, "{ not json"); }, /not valid JSON/);
+    refused("a stale review", paperwork, /older than 24 hours/, { sourceTimestamp: new Date(Date.now() - CARRY_SOURCE_MAX_AGE_MS - 60_000).toISOString() });
+    // An unclean or wrong-model source proof never carries.
+    git("reset", "-q", "--hard", reviewedHead);
+    writeFileSync(proofPath, JSON.stringify(buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "blockers" })));
+    paperwork();
+    commitAll("paperwork on an unclean review");
+    const unclean = postApplyCarry();
+    assert.equal(unclean.status, 1, "post-apply e2e: an unclean source proof is refused");
+    assert.match(unclean.stderr, /not clean/, "post-apply e2e: says the review was not clean");
+    // Only ONE commit on top of the reviewed head carries.
+    git("reset", "-q", "--hard", reviewedHead);
+    writeFileSync(proofPath, JSON.stringify(buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean" })));
+    write("docs/changelog.d/2026-11-04-void.md", "- first\n");
+    commitAll("paperwork, part one");
+    paperwork();
+    commitAll("paperwork, part two");
+    const twoCommits = postApplyCarry();
+    assert.equal(twoCommits.status, 1, "post-apply e2e: paperwork two commits away is refused");
+    assert.match(twoCommits.stderr, /no readable Sol proof/, "post-apply e2e: its parent has no proof");
+    // A merge commit is not one ordinary commit.
+    git("reset", "-q", "--hard", reviewedHead);
+    paperwork();
+    git("add", "-A");
+    git("reset", "-q", "--hard", git("commit-tree", git("write-tree"), "-p", reviewedHead, "-p", base, "-m", "paperwork as a merge"));
+    const merge = postApplyCarry();
+    assert.equal(merge.status, 1, "post-apply e2e: a merge commit is refused");
+    assert.match(merge.stderr, /not a single ordinary commit/, "post-apply e2e: says it is not one ordinary commit");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+{
+  const { postApplyProblem, allowlistRekeyProblem, postApplySolCheckFiles, buildPostApplyCheckPrompt } = await import("./write-codex-push-proof.mjs");
+  assert.deepEqual(postApplySolCheckFiles([
+    { path: "docs/changelog.d/x.md" }, { path: ".claude/schema-registry.json" }, { path: "scripts/db-invariant-sweeps/allowlist.json" },
+  ]), [".claude/schema-registry.json", "scripts/db-invariant-sweeps/allowlist.json"], "post-apply: the registry and allowlist need the Sol check");
+  assert.deepEqual(postApplySolCheckFiles([{ path: "docs/manual/KNOWN_ISSUES.md" }]), [], "post-apply: notes need no check");
+  const checkPrompt = buildPostApplyCheckPrompt();
+  assert.match(checkPrompt, new RegExp(`${CODEX_VERDICT_TOKEN}: CLEAN`), "post-apply: the check ends in the machine verdict");
+  assert.match(checkPrompt, /untrusted DATA/, "post-apply: the check treats the packet as data");
+  assert.match(allowlistRekeyProblem(
+    JSON.stringify({ entries: [{ violation_key: "f()#aaaaaaaaaaaa", justification: "a", dated: "2026-11-04 " }] }),
+    JSON.stringify({ entries: [{ violation_key: "f()#bbbbbbbbbbbb", justification: "a b", dated: "2020-01-01" }] }),
+  ), /no usable date/, "post-apply: an unusable old date cannot hide a backwards one");
+  const read = () => "{}";
+  const one = (p, oldMode = "100644", newMode = "100644") => postApplyProblem({
+    entries: [{ path: p, oldMode, newMode }], readFile: read, prMigrations: ["supabase/migrations/x.sql"],
+  });
+  assert.match(one("docs/reference/migrations.d/y.md"), /not the record of a migration this PR adds/, "post-apply: another migration's record is refused");
+  assert.match(postApplyProblem({ entries: [{ path: "docs/reference/migrations.d/x.md", oldMode: "100644", newMode: "100644" }], readFile: read }), /not the record/, "post-apply: with no PR migrations no record carries");
+  assert.match(one("docs/reference/migrations.d/README.md"), /instruction file/, "post-apply: the records README is a rule file");
+  assert.match(one("docs/changelog.d/readme.md"), /instruction file/, "post-apply: README matches in any case");
+  assert.match(one("docs/changelog.d/AGENTS.md"), /instruction file/, "post-apply: agent instruction files are refused");
+  assert.equal(one("docs/changelog.d/x.md", "000000", "100644"), null, "post-apply: a new changelog note is paperwork");
+  assert.equal(one("docs/reference/migrations.d/x.md", "000000", "100644"), null, "post-apply: a new migration record is paperwork");
+  assert.match(one("docs/changelog.d/x.md", "120000", "120000"), /changed type or mode/, "post-apply: a symlink is refused");
+  assert.match(one("docs/changelog.d/x.md", "100644", "100755"), /changed type or mode/, "post-apply: an executable bit is refused");
+  assert.match(one("docs/manual/KNOWN_ISSUES.md", "000000", "100644"), /was added/, "post-apply: only notes may be added");
+  assert.match(one("docs/changelog.d/sub/x.md"), /not post-apply paperwork/, "post-apply: no nested folders");
+  assert.match(one("docs/manual/known_issues.md"), /not post-apply paperwork/, "post-apply: paths match exactly");
+  assert.match(postApplyProblem({ entries: [], readFile: read }), /changes nothing/, "post-apply: an empty commit is refused");
+  assert.equal(allowlistRekeyProblem('{"entries":[]}', '{"entries":[]}'), null, "post-apply: an unchanged allowlist passes");
+  assert.match(allowlistRekeyProblem('{"entries":[]}', '{"entries":{}}'), /no entries list/, "post-apply: entries must stay a list");
+}
+
 // ── Sol pre-flight: Sol runs only on a quiet head (Mason, 2026-10-23) ────────
 {
   const head = "f6adfe82ab17e710da063f2d927a9cb74faac90e";

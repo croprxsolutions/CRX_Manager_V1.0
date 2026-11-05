@@ -25,9 +25,8 @@
 -- caller can only retire a key carrying their own user id, and retiring it only refuses
 -- that same caller's later save of that same request, which is what the button does.
 --
--- Deliberately database-first: the screen still shows the button to admins only until a
--- separate follow-up PR, after this is applied live, shows it to every staff member
--- (a migration and its callers in one PR cannot land: the callers need it live first).
+-- The same PR shows the clear button to every signed-in staff member (it already calls
+-- this RPC, so no new function name is added); this is applied live before that merges.
 
 DO $preflight$
 BEGIN

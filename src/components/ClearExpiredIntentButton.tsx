@@ -22,7 +22,9 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
   const [clearing, setClearing] = useState(false);
 
   const request = intent.clearableExpiredRequest;
-  if (role !== 'admin' || !profile || !request) return null;
+  // Any signed-in staff member: the lock lives only in this browser, under the sender's own login,
+  // and the server accepts only their own request keys.
+  if (!role || !profile || !request) return null;
 
   const savedAt = new Date(request.createdAtMs).toLocaleString();
   const screen = request.surface.replace(/-/g, ' ');
@@ -34,7 +36,7 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
     // the clear itself may still refuse (retryable or damaged saved data).
     const logged = await logActivity({
       event: 'uncertain_request_clear_approved',
-      description: `Admin approved clearing an expired ${operation} request saved ${new Date(request.createdAtMs).toISOString()} `
+      description: `${role} approved clearing an expired ${operation} request saved ${new Date(request.createdAtMs).toISOString()} `
         + `on ${request.surface}${request.scope ? ` (record ${request.scope})` : ''}; request key ${request.idempotencyKey}`,
       performedBy: profile.id,
     });
@@ -87,7 +89,7 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
     const outcomeLogged = logOutcome('uncertain_request_cleared', 'succeeded');
     let flushed: Promise<unknown> = Promise.resolve();
     try {
-      Sentry.captureMessage('Admin cleared an expired uncertain mutation', {
+      Sentry.captureMessage('Staff member cleared an expired uncertain mutation', {
         level: 'info',
         tags: { operation, surface: request.surface },
         extra: {

@@ -14,4 +14,7 @@
 - Smoke chain `smoke-uncertain-request-clear-check.sql` now pins the new body and proves an active non-admin
   staff member is answered (`first_check`) for their own key and refused another user's
   (`REQUEST_KEY_NOT_OWNED`), and a service profile is refused (`NOT_AUTHORIZED`).
-- The screens half (showing the button to every staff member) follows in a separate PR after this is live.
+- Screens: the "Clear it" button on a stuck request now shows for any signed-in staff member, not admins only, and
+  the activity note names the clearer's role. The refusal shown when a cleared request is retried now reads "This
+  request was cleared after it got stuck" instead of "An admin cleared". The button already called this function,
+  so the migration is applied live before the merge and both arrive together.

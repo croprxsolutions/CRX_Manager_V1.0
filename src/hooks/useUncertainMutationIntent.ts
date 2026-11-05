@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { assertRpcResult, supabase } from '../lib/db';
 import { generateIdempotencyKey, isDefinitiveRpcRejection } from '../lib/idempotency';
 import { useLatestRef } from './useLatestRef';
 
@@ -41,9 +42,28 @@ type LegacyDurableMutationIntentCandidate<T> = {
   retryNotAfterMs?: number;
 };
 
+// What staff need to identify a locked request before clearing it (KI-27).
+export type LockedRequestDetails = {
+  surface: string;
+  scope: string;
+  idempotencyKey: string;
+  createdAtMs: number;
+  retryNotAfterMs: number;
+};
+
+// A legacy or damaged request has no known deadline (stored as 0), so it is
+// never treated as expired and never clearable.
+function hasKnownRetryDeadline(record: LockedRequestDetails) {
+  return record.surface !== '__reconciliation_required__' && record.retryNotAfterMs > record.createdAtMs;
+}
+
 const DURABLE_INTENT_PREFIX = 'crx:uncertain-mutation:v4:';
 const LEGACY_SESSION_PREFIX = 'crx:uncertain-mutation:v1:';
 const ACKNOWLEDGMENT_PREFIX = 'crx:uncertain-mutation-ack:v1:';
+// The server time of the first clear check, per request key (KI-27).
+const CLEAR_CHECK_PREFIX = 'crx:uncertain-mutation-clear-check:v2:';
+// Fallback when localStorage refuses the token, so this tab's wait still counts down.
+const clearCheckTokens = new Map<string, string>();
 const DURABLE_INTENT_TAB_ID = 'crx:durable-mutation:tab-id';
 const DURABLE_INTENT_LIVE_CLAIM_PREFIX = 'crx:durable-mutation:live-claim:';
 const DURABLE_INTENT_DB = 'crx_durable_mutation_intents';
@@ -65,6 +85,66 @@ const DURABLE_INTENT_LIVE_CLAIM_TTL_MS = 15 * 60 * 1000;
 const DURABLE_INTENT_LIVE_CLAIM_HEARTBEAT_MS = 60 * 1000;
 export const UNCERTAIN_MUTATION_RETRY_EXPIRED = 'DURABLE_MUTATION_INTENT_RETRY_EXPIRED';
 export const UNCERTAIN_MUTATION_INTENT_CONFLICT = 'DURABLE_MUTATION_INTENT_CONFLICT';
+const UNCERTAIN_MUTATION_CLEAR_NOT_YET = 'DURABLE_MUTATION_INTENT_CLEAR_NOT_YET';
+
+// KI-27: the server refused a clear because the request might still save.
+// reason is the server's ('in_progress', 'first_check' or 'waiting'); waitUntil is
+// the server time after which a second check can succeed, when it gave one.
+export class UncertainClearNotYetError extends Error {
+  readonly reason: string;
+  readonly waitUntil: string | null;
+  constructor(reason: string, waitUntil: string | null) {
+    super(UNCERTAIN_MUTATION_CLEAR_NOT_YET);
+    this.reason = reason;
+    this.waitUntil = waitUntil;
+  }
+}
+
+type ClearCheckVerdict = {
+  safe: boolean;
+  reason: string;
+  checked_at: string;
+  wait_until?: string;
+  first_check_token?: string;
+};
+
+// KI-27: resolves only when the server says the request can be cleared (and retires it
+// there), returning the stored first-check token's key; otherwise throws
+// UncertainClearNotYetError. Never trusts this device's clock.
+async function confirmClearWithServer(expectedIdempotencyKey: string): Promise<string> {
+  // Safe only when the server says the request saved, or it was unsaved on two
+  // checks 15+ minutes apart by server time (it can no longer commit). The first
+  // check's time comes back as a token the server signed; it is stored as-is.
+  const checkKey = `${CLEAR_CHECK_PREFIX}${expectedIdempotencyKey}`;
+  let firstCheckToken: string | null = clearCheckTokens.get(checkKey) ?? null;
+  try {
+    firstCheckToken = window.localStorage.getItem(checkKey) ?? firstCheckToken;
+  } catch {
+    // Without the token the server simply starts the wait again.
+  }
+  // A safe answer also retires the request in the database, so a late copy of it, or of
+  // any batch row sent under "<key>:<row id>", is refused from any tab after this clear.
+  const { data, error } = await supabase.rpc('retire_uncertain_request', {
+    p_request_key: expectedIdempotencyKey,
+    p_idempotency_key: expectedIdempotencyKey,
+    ...(firstCheckToken ? { p_first_check_token: firstCheckToken } : {}),
+  });
+  if (error) throw error;
+  const verdict = assertRpcResult<ClearCheckVerdict>(data, 'retire_uncertain_request');
+  if (verdict.safe !== true) {
+    if (verdict.reason === 'first_check' && verdict.first_check_token) {
+      clearCheckTokens.set(checkKey, verdict.first_check_token);
+      try {
+        window.localStorage.setItem(checkKey, verdict.first_check_token);
+      } catch {
+        // The next try starts the wait again.
+      }
+    }
+    throw new UncertainClearNotYetError(verdict.reason, verdict.wait_until ?? null);
+  }
+  return checkKey;
+}
+
 export const UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE =
   'The safe automatic retry window expired. Do not submit this mutation again. Verify the authoritative record and reconcile it manually.';
 export const UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE =
@@ -719,6 +799,11 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   const [retryNotAfterMs, setRetryNotAfterMs] = useState<number | null>(
     initialPending ? initialVisible.retryNotAfterMs : null,
   );
+  // Only the screen that saved the request can clear it: that screen shows the
+  // saved values staff need to find the real record.
+  const [lockedRequest, setLockedRequest] = useState<DurableMutationIntentRecord<T> | null>(
+    initialOwned ? initialVisible : null,
+  );
   const [, setExpiryRevision] = useState(0);
 
   const applyRecord = useCallback((record: DurableMutationIntentRecord<T> | null) => {
@@ -741,6 +826,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     setHasUnresolvedRecord(pending);
     setIsForeignIntentLocked(Boolean(pending && !owned));
     setRetryNotAfterMs(pending ? visible.retryNotAfterMs : null);
+    setLockedRequest(owned ? visible : null);
   }, [scope, surface]);
 
   const activateCurrentIdentity = useCallback((force = false) => {
@@ -1066,6 +1152,81 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     }
   }, [acknowledgmentKey, applyRecord, options, storageKey]);
 
+  // KI-27: once the safe retry window has passed, the saved request can never be
+  // retried and would lock this operation in this browser forever. After staff
+  // verify the authoritative record, this drops the expired request from every
+  // store this tab can reach. It refuses while any copy could still be retried.
+  // expectedIdempotencyKey is the request staff reviewed; any other request is refused.
+  const clearExpiredIntent = useCallback(async (expectedIdempotencyKey: string) => {
+    if (!options || !storageKey) throw new Error('DURABLE_MUTATION_INTENT_IDENTITY_MISSING');
+    // Only an intact request past a known deadline is clearable; damaged or
+    // legacy state proves nothing about its deadline, so it stays locked. This
+    // device's clock only decides when to offer the clear; the server check below
+    // decides whether the request could still save.
+    const isClearable = (record: DurableMutationIntentRecord<T> | null) => !record
+      || record.status === 'resolved'
+      || (record.idempotencyKey === expectedIdempotencyKey
+        && record.surface === surface
+        && record.scope === scope
+        && hasKnownRetryDeadline(record)
+        && Date.now() >= record.retryNotAfterMs);
+    const mirror = readDurableRecord<T>(storageKey, options);
+    const attempt = readAcknowledgmentRecord<T>(acknowledgmentKey, options);
+    if (!isClearable(mirror) || !isClearable(attempt)) throw new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT);
+    const checkKey = await confirmClearWithServer(expectedIdempotencyKey);
+    const db = await openDurableIntentDb();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(DURABLE_INTENT_STORE, 'readwrite');
+        const store = transaction.objectStore(DURABLE_INTENT_STORE);
+        const request = store.get(storageKey);
+        let refused = false;
+        request.onsuccess = () => {
+          const stored = request.result as { record?: unknown } | undefined;
+          if (!stored) return;
+          const candidate = stored.record as Partial<DurableMutationIntentRecord<T>> | undefined;
+          const record = candidate && isValidRecord(candidate, options) ? candidate : blockedDurableRecord(options);
+          // A resolved tombstone never locks anything; keep it as receipt proof.
+          if (record.status === 'resolved') return;
+          if (!isClearable(record)) {
+            refused = true;
+            return;
+          }
+          store.delete(storageKey);
+        };
+        request.onerror = () => reject(
+          request.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'),
+        );
+        transaction.oncomplete = () => (refused
+          ? reject(new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT))
+          : resolve());
+        transaction.onerror = () => reject(
+          transaction.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'),
+        );
+        transaction.onabort = () => reject(
+          transaction.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'),
+        );
+      });
+    } finally {
+      db.close();
+    }
+    clearCheckTokens.delete(checkKey);
+    try {
+      // Another tab may have started a new request since the read above; keep its mirror.
+      const current = readDurableRecord<T>(storageKey, options);
+      if (current && current.status !== 'resolved' && current.requestVersion === mirror?.requestVersion) {
+        window.localStorage.removeItem(storageKey);
+      }
+      if (acknowledgmentKey) window.sessionStorage.removeItem(acknowledgmentKey);
+      window.localStorage.removeItem(checkKey);
+    } catch {
+      throw new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
+    }
+    attemptRecordRef.current = null;
+    persistedAcknowledgmentIdentityRef.current = null;
+    applyRecord(readDurableRecord<T>(storageKey, options));
+  }, [acknowledgmentKey, applyRecord, options, scope, storageKey, surface]);
+
   // Same value as `unresolvedIntent`, read from the ref instead of state.
   // `unresolvedIntent` is React state, so a caller that awaits classifyFailure()
   // and then reads it in the SAME tick still sees the render-time value — which
@@ -1094,6 +1255,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     getIdempotencyKey,
     resolveIntent,
     classifyFailure,
+    clearExpiredIntent,
     unresolvedIntent,
     getUnresolvedIntent,
     getPendingIdempotencyKey,
@@ -1103,5 +1265,18 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     isForeignIntentLocked,
     // eslint-disable-next-line react-hooks/purity -- the retryNotAfterMs effect above re-renders exactly when the window expires, so this clock read cannot go stale
     isRetryExpired: retryNotAfterMs !== null && Date.now() >= retryNotAfterMs,
+    // Set only when an admin may clear the locked request: its known deadline has passed.
+    clearableExpiredRequest: lockedRequest
+      && hasKnownRetryDeadline(lockedRequest)
+      // eslint-disable-next-line react-hooks/purity -- same expiry re-render as isRetryExpired
+      && Date.now() >= lockedRequest.retryNotAfterMs
+      ? {
+        surface: lockedRequest.surface,
+        scope: lockedRequest.scope,
+        idempotencyKey: lockedRequest.idempotencyKey,
+        createdAtMs: lockedRequest.createdAtMs,
+        retryNotAfterMs: lockedRequest.retryNotAfterMs,
+      } satisfies LockedRequestDetails
+      : null,
   };
 }

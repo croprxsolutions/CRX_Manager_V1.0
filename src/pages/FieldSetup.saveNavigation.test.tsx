@@ -57,7 +57,10 @@ vi.mock('../components/customers/CustomerSearchPicker', () => ({
 vi.mock('../components/map/CRXMap', () => ({ default: ({ children }: { children: ReactNode }) => <div>{children}</div> }));
 vi.mock('../components/map/DrawLayer', () => ({
   default: ({ onPolygonsChange }: { onPolygonsChange?: (polygons: unknown[]) => void }) => (
-    <button type="button" onClick={() => onPolygonsChange?.([mockDrawnPolygon])}>Draw boundary</button>
+    <>
+      <button type="button" onClick={() => onPolygonsChange?.([mockDrawnPolygon])}>Draw boundary</button>
+      <button type="button" onClick={() => onPolygonsChange?.([])}>Delete every part</button>
+    </>
   ),
 }));
 vi.mock('../components/map/AddressSearch', () => ({ default: () => null }));
@@ -73,6 +76,13 @@ function chain(row: unknown) {
   const promise = Promise.resolve({ data: [], error: null });
   self.then = promise.then.bind(promise);
   return self;
+}
+
+// The tab-close warning is armed exactly while the page holds unsaved changes (useUnsavedChanges).
+function leaveWarningArmed() {
+  const event = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
 }
 
 function saveFieldCalls() {
@@ -205,5 +215,155 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
     fireEvent.click(screen.getByRole('button', { name: /Create Field/ }));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_field_override_acres', expect.objectContaining({ p_field_id: 'field-1', p_override_acres: 35 })));
+  });
+});
+
+describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockHasKey.mockReturnValue(false);
+    mockFrom.mockImplementation((table: string) => chain(
+      table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 } : null,
+    ));
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field') return Promise.resolve({ data: true, error: null });
+      if (name === 'set_field_boundary') return Promise.resolve({ data: { measured_acres: 40, billable_acres: 40 }, error: null });
+      return Promise.resolve({ data: [], error: null });
+    });
+  });
+
+  it('sends the acres the boundary save stored, not the acres loaded at the start', async () => {
+    const router = createMemoryRouter([{ path: '/fields/:id', element: <FieldSetup /> }], { initialEntries: ['/fields/field-1'] });
+    render(<RouterProvider router={router} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Draw boundary' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
+    expect(saveFieldCalls()[0][1].p_field_payload).toMatchObject({ total_acres: 12 });
+
+    fireEvent.change(screen.getByDisplayValue('Select crop...'), { target: { value: 'corn' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(2));
+    expect(saveFieldCalls()[1][1].p_field_payload).toMatchObject({ crop_type: 'corn', total_acres: 40 });
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'set_field_boundary')).toHaveLength(1);
+    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+  });
+
+  it('sends the acres an override save stored', async () => {
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field') return Promise.resolve({ data: true, error: null });
+      if (name === 'set_field_override_acres') return Promise.resolve({ data: { override_acres: 55, billable_acres: 55 }, error: null });
+      return Promise.resolve({ data: [], error: null });
+    });
+    const router = createMemoryRouter([{ path: '/fields/:id', element: <FieldSetup /> }], { initialEntries: ['/fields/field-1'] });
+    render(<RouterProvider router={router} />);
+    fireEvent.change(await screen.findByLabelText(/Acres to bill/), { target: { value: '55' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
+
+    fireEvent.change(screen.getByDisplayValue('Select crop...'), { target: { value: 'corn' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(2));
+    expect(saveFieldCalls()[1][1].p_field_payload).toMatchObject({ crop_type: 'corn', total_acres: 55 });
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'set_field_override_acres')).toHaveLength(1);
+  });
+
+  it('leaves with no prompt after a save that synced acres and changed a billing split', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'field_billing_defaults') {
+        return chain(table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 } : null);
+      }
+      const self = chain(null);
+      const splits = Promise.resolve({ data: [{ customer_id: 'customer-1', customer: { farm_name: 'Test Farm' }, split_pct: 100, is_primary: true, notes: null, price_override_cents: null, pricing_note: null }], error: null });
+      self.then = splits.then.bind(splits);
+      return self;
+    });
+    const router = createMemoryRouter(
+      [{ path: '/fields/:id', element: <FieldSetup /> }, { path: '/other', element: <div>Other page</div> }],
+      { initialEntries: ['/fields/field-1'] },
+    );
+    render(<RouterProvider router={router} />);
+    fireEvent.change(await screen.findByPlaceholderText('e.g. Prepaid rate, Landlord rate'), { target: { value: 'Landlord rate' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Draw boundary' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
+    expect(saveFieldCalls()[0][1].p_billing_defaults).toMatchObject([{ pricing_note: 'Landlord rate' }]);
+
+    await waitFor(() => expect(leaveWarningArmed()).toBe(false)); // the post-save dirty check has settled clean
+    await router.navigate('/other');
+    expect(router.state.location.pathname).toBe('/other');
+    expect(await screen.findByText('Other page')).toBeInTheDocument();
+    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+  });
+
+  it('keeps an edit made while the save was in flight unsaved', async () => {
+    let finishBoundary: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field') return Promise.resolve({ data: true, error: null });
+      if (name === 'set_field_boundary') return new Promise((resolve) => { finishBoundary = resolve; });
+      return Promise.resolve({ data: [], error: null });
+    });
+    const router = createMemoryRouter(
+      [{ path: '/fields/:id', element: <FieldSetup /> }, { path: '/other', element: <div>Other page</div> }],
+      { initialEntries: ['/fields/field-1'] },
+    );
+    render(<RouterProvider router={router} />);
+    const removeListener = vi.spyOn(window, 'removeEventListener');
+    fireEvent.click(await screen.findByRole('button', { name: 'Draw boundary' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_field_boundary', expect.anything()));
+    fireEvent.change(screen.getByDisplayValue('Select crop...'), { target: { value: 'corn' } });
+    finishBoundary({ data: { measured_acres: 40, billable_acres: 40 }, error: null });
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
+
+    // The save cleared the warning, then the mid-save edit re-armed it: that re-render is committed.
+    await waitFor(() => {
+      expect(removeListener).toHaveBeenCalledWith('beforeunload', expect.any(Function));
+      expect(leaveWarningArmed()).toBe(true);
+    });
+    removeListener.mockRestore();
+    await router.navigate('/other');
+    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/fields/field-1');
+  });
+});
+
+describe('FieldSetup — deleting every part of a saved multi-part boundary (KI-31)', () => {
+  const part = (id: string, west: number) => ({
+    id,
+    polygon_geojson: { type: 'Polygon', coordinates: [[[west, 39.15], [west + 0.0025, 39.15], [west + 0.0025, 39.1523], [west, 39.1523], [west, 39.15]]] },
+    label: null,
+    acres: 40,
+    sort_order: 0,
+  });
+  const parts = [part('poly-1', -89.05), part('poly-2', -89.04)];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockHasKey.mockReturnValue(false);
+    mockFrom.mockImplementation((table: string) => chain(
+      table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 80, measured_acres: 80 } : null,
+    ));
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field') return Promise.resolve({ data: true, error: null });
+      if (name === 'get_field_geojson') {
+        const boundary = { type: 'MultiPolygon', coordinates: parts.map((p) => p.polygon_geojson.coordinates) };
+        return Promise.resolve({ data: [{ boundary_geojson: JSON.stringify(boundary) }], error: null });
+      }
+      if (name === 'get_field_polygons') return Promise.resolve({ data: parts, error: null });
+      if (name === 'set_field_boundary') return Promise.resolve({ data: { measured_acres: 40, billable_acres: 40 }, error: null });
+      return Promise.resolve({ data: [], error: null });
+    });
+  });
+
+  it('never re-saves the old boundary, and says a measured boundary cannot be removed here', async () => {
+    const router = createMemoryRouter([{ path: '/fields/:id', element: <FieldSetup /> }], { initialEntries: ['/fields/field-1'] });
+    render(<RouterProvider router={router} />);
+    expect(await screen.findByText(/Part 2 of 2/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete every part' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'A measured boundary cannot be removed here — draw a replacement boundary and save.'));
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'set_field_boundary')).toHaveLength(0);
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
   });
 });

@@ -12893,6 +12893,14 @@ export type Database = {
         }
         Returns: Json
       }
+      apply_product_setup: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_rows: Json
+        }
+        Returns: Json
+      }
       apply_remaining_prepayments: {
         Args: {
           p_customer_id: string
@@ -14322,6 +14330,10 @@ export type Database = {
         Args: { p_product_id: string }
         Returns: Json
       }
+      get_product_setup_workbook: {
+        Args: never
+        Returns: Json
+      }
       get_product_vendors: { Args: { p_product_id: string }; Returns: Json }
       get_profitability_report: {
         Args: { p_end_date?: string; p_group_by: string; p_start_date?: string }
@@ -15070,6 +15082,14 @@ export type Database = {
         }
         Returns: Json
       }
+      preview_product_import: {
+        Args: { p_rows: Json }
+        Returns: Json
+      }
+      preview_product_rates: {
+        Args: { p_rows: Json }
+        Returns: Json
+      }
       price_order: {
         Args: {
           p_idempotency_key?: string
@@ -15298,6 +15318,14 @@ export type Database = {
           p_idempotency_key?: string
           p_inventory_id: string
           p_performed_by?: string
+        }
+        Returns: Json
+      }
+      retire_uncertain_request: {
+        Args: {
+          p_first_check_token?: string
+          p_idempotency_key?: string
+          p_request_key: string
         }
         Returns: Json
       }

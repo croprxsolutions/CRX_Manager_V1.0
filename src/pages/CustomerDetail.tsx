@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall } from 'lucide-react';
+import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket } from 'lucide-react';
+import type { ReactNode } from 'react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -19,6 +20,8 @@ import { supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpc
 import { isPricedAgingRow } from '../lib/arAging';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
+import SectionCard from '../components/ui/SectionCard';
+import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { parseLocalDate, localToday, localDatePlusDays, todayInBusinessTz } from '../lib/dateUtils';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import RelatedNotes from '../components/team/RelatedNotes';
@@ -108,6 +111,53 @@ const makeBlankCustomer = (salesRepId: string | undefined): Partial<Customer> =>
   default_application_service_id: null,
 });
 
+type CustomerSection = 'contacts' | 'knowledge' | 'documents' | 'timeline' | 'fields' | 'quotes' | 'orders' | 'deliveries' | 'financials' | 'history';
+
+// Info is always open; every other section folds and loads only when opened.
+const FOLD_SECTIONS: { id: CustomerSection; title: string; icon: ReactNode }[] = [
+  { id: 'contacts', title: 'Contacts', icon: <Users className="h-5 w-5" /> },
+  { id: 'knowledge', title: 'Knowledge', icon: <Lightbulb className="h-5 w-5" /> },
+  { id: 'documents', title: 'Documents', icon: <FolderOpen className="h-5 w-5" /> },
+  { id: 'timeline', title: 'Timeline', icon: <History className="h-5 w-5" /> },
+  { id: 'fields', title: 'Fields', icon: <Map className="h-5 w-5" /> },
+  { id: 'quotes', title: 'Quotes', icon: <FileText className="h-5 w-5" /> },
+  { id: 'orders', title: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
+  { id: 'deliveries', title: 'Deliveries', icon: <Package className="h-5 w-5" /> },
+  { id: 'financials', title: 'Financials', icon: <Wallet className="h-5 w-5" /> },
+  { id: 'history', title: 'History', icon: <ShoppingBasket className="h-5 w-5" /> },
+];
+
+const sectionAnchor = (section: CustomerSection | 'info') => `customer-section-${section}`;
+
+// A filter, not Set.delete: the idempotency-reset scanner reads any `.delete(` as a database call.
+const withoutSection = (sections: ReadonlySet<CustomerSection>, section: CustomerSection) =>
+  new Set([...sections].filter((s) => s !== section));
+
+function scrollToSection(section: CustomerSection | 'info') {
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  document.getElementById(sectionAnchor(section))?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+}
+
+/** Style D band that opens or folds one section of the customer page. */
+function FoldBand({ section, open, onToggle }: { section: (typeof FOLD_SECTIONS)[number]; open: boolean; onToggle: () => void }) {
+  return (
+    <h2 id={sectionAnchor(section.id)} className="scroll-mt-32">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex min-h-11 w-full items-center gap-3 rounded-xl bg-cream-dark px-4 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2"
+      >
+        <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-crx-green text-white">
+          {section.icon}
+        </span>
+        <span className="flex-1 font-heading text-2xl font-bold leading-none text-nav-dark">{section.title}</span>
+        <ChevronDown aria-hidden="true" className={`h-5 w-5 shrink-0 text-nav-dark transition-transform motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} />
+      </button>
+    </h2>
+  );
+}
+
 export default function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -162,7 +212,7 @@ export default function CustomerDetail() {
   // Narrow local structural state: generated types are refreshed only after apply.
   const customerRowVersionRef = useRef<number | null>(null);
   const [staleSaveOpen, setStaleSaveOpen] = useState(false);
-  const [tab, setTab] = useState<'info' | 'contacts' | 'knowledge' | 'documents' | 'timeline' | 'fields' | 'quotes' | 'orders' | 'deliveries' | 'financials' | 'history'>('info');
+  const [openSections, setOpenSections] = useState<ReadonlySet<CustomerSection>>(() => new Set());
   const [timeline, setTimeline] = useState<ActivityFeedItem[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
 
@@ -174,7 +224,13 @@ export default function CustomerDetail() {
   // The last purchase-history load failed: an error shows instead of "no history".
   const [historyFailed, setHistoryFailed] = useState(false);
   const [customerRemainders, setCustomerRemainders] = useState<DeliveryRemainder[]>([]);
-  const [tabLoading, setTabLoading] = useState(false);
+  const [loadingSections, setLoadingSections] = useState<ReadonlySet<CustomerSection>>(() => new Set());
+  const setSectionLoading = useCallback((section: CustomerSection, on: boolean) => {
+    setLoadingSections((prev) => {
+      if (prev.has(section) === on) return prev;
+      return on ? new Set(prev).add(section) : withoutSection(prev, section);
+    });
+  }, []);
   const [emailError, setEmailError] = useState('');
   const [phoneError, setPhoneError] = useState('');
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
@@ -461,10 +517,15 @@ export default function CustomerDetail() {
   // Same discipline the CRM child components got via `key={id}` (Sol 2.G r2):
   // an in-flight tab load for customer A must never write into customer B's
   // view, and B must never render A's leftover rows while its own load runs.
+  // Several sections can load at once, so each keeps the number of its own latest
+  // load. Numbers come from one counter and are never reused, so emptying the map
+  // on a route change makes every load still in flight for the last customer stale.
   const tabRequestSeq = useRef(0);
+  const latestSectionLoad = useRef<Partial<Record<CustomerSection, number>>>({});
 
   useEffect(() => {
-    tabRequestSeq.current += 1;
+    latestSectionLoad.current = {};
+    setLoadingSections(new Set());
     setQuotes([]);
     setOrders([]);
     setDeliveries([]);
@@ -519,7 +580,7 @@ export default function CustomerDetail() {
     setLoading(!isNew);
   }, [id, isNew, salesRepIdRef]);
 
-  const fetchTabData = useCallback(async (selectedTab: string) => {
+  const fetchTabData = useCallback(async (selectedTab: CustomerSection) => {
     // `id` is closed over per route, so it names the customer this load was
     // started FOR; the ref always holds the one the route is on NOW.
     const routeLeftThisCustomer = () => currentIdRef.current !== id;
@@ -537,13 +598,15 @@ export default function CustomerDetail() {
     // Refusing at the door rather than after the first await matters twice over.
     // Such a call would otherwise burn a sequence — invalidating the load that
     // legitimately belongs to the customer now on screen, which then returns
-    // having installed nothing AND without clearing `tabLoading` — and it would
+    // having installed nothing AND without clearing its loading flag — and it would
     // have already flipped this tab into a loading state nothing goes on to
     // clear. Either way the open customer is stranded behind a permanent spinner.
     if (routeLeftThisCustomer()) return;
 
     const seq = ++tabRequestSeq.current;
-    const supersededByNewerLoad = () => seq !== tabRequestSeq.current;
+    latestSectionLoad.current[selectedTab] = seq;
+    // Only a newer load of THIS section supersedes it; other sections load alongside.
+    const supersededByNewerLoad = () => latestSectionLoad.current[selectedTab] !== seq;
     // The route half is re-checked after each await as well. The door check
     // cannot cover a route change that happens while this load is in flight, and
     // the sequence bump that normally covers it lives in a passive effect, which
@@ -551,7 +614,7 @@ export default function CustomerDetail() {
     // layout effect, at the commit. A reply landing in that gap is superseded by
     // a route the sequence does not know about yet.
     const isStale = () => supersededByNewerLoad() || routeLeftThisCustomer();
-    setTabLoading(true);
+    setSectionLoading(selectedTab, true);
     if (selectedTab === 'fields') {
       const { data, error: fieldError } = await supabase.rpc('get_fields_with_geojson', { p_customer_id: id });
       // Before the error branch, not after: a superseded load must not toast over
@@ -669,7 +732,7 @@ export default function CustomerDetail() {
       if (isStale()) return;
       setCustomerRemainders(remainders as unknown as DeliveryRemainder[]);
     } else if (selectedTab === 'financials') {
-      if (financialsFetched.current) { setTabLoading(false); return; }
+      if (financialsFetched.current) { setSectionLoading(selectedTab, false); return; }
       setFinancialsLoading(true);
       // Set once this customer's balance is read; a later read failing leaves it on screen.
       let agingRead = false;
@@ -797,7 +860,7 @@ export default function CustomerDetail() {
           toast('error', 'Failed to load purchase history');
           setHistory([]);
           setHistoryFailed(true);
-          setTabLoading(false);
+          setSectionLoading(selectedTab, false);
           return;
         }
         // Aggregate by product
@@ -820,15 +883,44 @@ export default function CustomerDetail() {
       }
     }
     if (isStale()) return;
-    setTabLoading(false);
+    setSectionLoading(selectedTab, false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isAdmin]);
 
+  // Sections left open stay open on a switch to another customer and reload for it.
+  // Declared after the route-change reset above, so it runs once that has cleared.
+  const openSectionsRef = useLatestRef(openSections);
   useEffect(() => {
-    if (!isNew && id && tab !== 'info') {
-      fetchTabData(tab);
+    if (!isNew && id) openSectionsRef.current.forEach((section) => void fetchTabData(section));
+  }, [id, isNew, fetchTabData, openSectionsRef]);
+
+  const openSection = (section: CustomerSection) => {
+    if (openSections.has(section)) return;
+    setOpenSections((prev) => new Set(prev).add(section));
+    if (!isNew && id) void fetchTabData(section);
+  };
+
+  const toggleSection = (section: CustomerSection) => {
+    if (!openSections.has(section)) { openSection(section); return; }
+    setOpenSections((prev) => withoutSection(prev, section));
+  };
+
+  // A folded section near the bottom has too little page below it to scroll to the
+  // top, so a jump to one waits until it has unfolded.
+  const pendingJumpRef = useRef<CustomerSection | null>(null);
+  useEffect(() => {
+    const section = pendingJumpRef.current;
+    if (section && openSections.has(section)) {
+      pendingJumpRef.current = null;
+      scrollToSection(section);
     }
-  }, [tab, id, isNew, fetchTabData]);
+  }, [openSections]);
+
+  const jumpTo = (section: CustomerSection | 'info') => {
+    if (section === 'info' || openSections.has(section)) { scrollToSection(section); return; }
+    pendingJumpRef.current = section;
+    openSection(section);
+  };
 
   const handleSave = async () => {
     if (saving) return;
@@ -1128,8 +1220,6 @@ export default function CustomerDetail() {
     );
   }
 
-  const tabs = ['info', 'contacts', 'knowledge', 'documents', 'timeline', 'fields', 'quotes', 'orders', 'deliveries', 'financials', 'history'] as const;
-
   const handleGenerateSummary = async (season: number, options: YearEndSummaryOptions) => {
     if (!id || isNew) return;
     setSummaryLoading(true);
@@ -1169,11 +1259,14 @@ export default function CustomerDetail() {
         }}
         onReload={reloadAfterStaleSave}
       />
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold font-heading text-nav-dark">
-          {isNew ? 'New Customer' : customer.farm_name}
-        </h2>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-secondary">Customer</p>
+          <h1 className="font-heading text-3xl font-bold leading-tight break-words text-nav-dark md:text-4xl">
+            {isNew ? 'New Customer' : customer.farm_name}
+          </h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
           {!isNew && (
             <Button variant="secondary" size="sm" icon={<PhoneCall className="w-4 h-4" />} showChevron={false} onClick={() => setLogInteractionOpen(true)}>
               Log Call
@@ -1220,34 +1313,46 @@ export default function CustomerDetail() {
         </div>
       </div>
 
-      {!isNew && id && <CustomerSummaryBar customerId={id} onCardClick={(t) => setTab(t as typeof tab)} />}
+      {!isNew && id && <CustomerSummaryBar customerId={id} onCardClick={(t) => jumpTo(t as CustomerSection | 'info')} />}
 
       {!isNew && (
-        <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
-          {tabs.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-2.5 text-sm font-medium capitalize transition-colors ${
-                tab === t
-                  ? 'text-crx-green border-b-2 border-crx-green'
-                  : 'text-secondary hover:text-nav-dark'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+        // Style D pills: open the section if it is folded, then scroll to it.
+        <nav aria-label="Customer sections" className="flex items-center gap-2 border-b border-gray-200 pb-2">
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-secondary">Jump to</span>
+          <div className="flex min-w-0 gap-1.5 overflow-x-auto [-webkit-overflow-scrolling:touch]">
+            {[{ id: 'info' as const, title: 'Info' }, ...FOLD_SECTIONS].map((section) => (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => jumpTo(section.id)}
+                className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-gray-300 bg-white px-4 text-sm font-semibold whitespace-nowrap text-nav-dark transition-colors hover:bg-cream-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 md:min-h-9"
+              >
+                {section.title}
+              </button>
+            ))}
+          </div>
+        </nav>
       )}
 
-      {(tab === 'info' || isNew) && (
-        <fieldset disabled={isNew && saving} className="min-w-0 space-y-4">
+      {(
+        <fieldset id={sectionAnchor('info')} disabled={isNew && saving} className="min-w-0 scroll-mt-32 space-y-4">
           {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
           {/* key remounts on customer switch — in-flight loads/mutations from the previous customer must never write into this one's view (Sol 2.G r2) */}
           {/* interactionRefresh in the key: logging a call remounts the prep card so "Last conversation" is never stale (Sol final gauntlet) */}
+          <SectionJumpBar
+            sections={[
+              { id: 'customer-contact', label: 'Contact' },
+              { id: 'customer-acreage', label: 'Acreage' },
+              ...(!isNew && id ? [{ id: 'customer-crops', label: 'Crops' }] : []),
+              { id: 'customer-addresses', label: 'Addresses', count: addresses.length },
+              { id: 'customer-commission', label: 'Commission' },
+              { id: 'customer-service', label: 'Service' },
+              { id: 'customer-notes', label: 'Notes' },
+            ]}
+          />
           {!isNew && id && <CustomerPrepCard key={`${id}:${interactionRefresh}`} customerId={id} />}
-          <Card>
-            <CardHeader title="Contact" accent="Information" />
+          <SectionCard id="customer-contact" icon={<User className="w-5 h-5" />} title="Contact">
+            <div className="p-4 sm:p-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input label="Farm Name" required value={customer.farm_name || ''} onChange={(e) => update('farm_name', e.target.value)} />
               <Input label="Contact Name" value={customer.contact_name || ''} onChange={(e) => update('contact_name', e.target.value)} />
@@ -1345,21 +1450,23 @@ export default function CustomerDetail() {
                 <p className="text-xs text-secondary mt-1">Link this customer to a parent farm group</p>
               </div>
             </div>
-          </Card>
+          </div>
+          </SectionCard>
 
-          <Card>
-            <CardHeader title="Farm" accent="Acreage" />
+          <SectionCard id="customer-acreage" icon={<Ruler className="w-5 h-5" />} title="Acreage">
+            <div className="p-4 sm:p-5">
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
               <Input label="Total Acres" type="number" value={customer.total_acres ?? ''} onChange={(e) => update('total_acres', e.target.value ? parseFloat(e.target.value) : null)} />
               <Input label="Corn Acres" type="number" value={customer.corn_acres ?? ''} onChange={(e) => update('corn_acres', e.target.value ? parseFloat(e.target.value) : null)} />
               <Input label="Soybean Acres" type="number" value={customer.soybean_acres ?? ''} onChange={(e) => update('soybean_acres', e.target.value ? parseFloat(e.target.value) : null)} />
               <Input label="Other Acres" type="number" value={customer.other_acres ?? ''} onChange={(e) => update('other_acres', e.target.value ? parseFloat(e.target.value) : null)} />
             </div>
-          </Card>
+          </div>
+          </SectionCard>
 
           {!isNew && id && (
-            <Card>
-              <CardHeader title="Farm" accent="Crops" />
+            <SectionCard id="customer-crops" icon={<Sprout className="w-5 h-5" />} title="Crops">
+              <div className="p-4 sm:p-5">
               <p className="text-xs text-secondary mb-2">Tap to toggle — saves immediately, no need to hit Save Changes.</p>
               <div className="flex flex-wrap gap-2">
                 {ALLOWED_CROPS.map((option) => {
@@ -1382,14 +1489,15 @@ export default function CustomerDetail() {
                   );
                 })}
               </div>
-            </Card>
+            </div>
+            </SectionCard>
           )}
 
-          <Card>
-            <CardHeader
-              title="Delivery"
-              accent="Addresses"
-              action={
+          <SectionCard
+            id="customer-addresses"
+            icon={<MapPin className="w-5 h-5" />}
+            title="Delivery addresses"
+            action={
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1400,7 +1508,8 @@ export default function CustomerDetail() {
                   Add Address
                 </Button>
               }
-            />
+          >
+            <div className="p-4 sm:p-5">
             {addresses.length === 0 ? (
               <p className="text-sm text-secondary">No delivery addresses added</p>
             ) : (
@@ -1427,10 +1536,11 @@ export default function CustomerDetail() {
                 ))}
               </div>
             )}
-          </Card>
+          </div>
+          </SectionCard>
 
-          <Card>
-            <CardHeader title="Default" accent="Commission Split" />
+          <SectionCard id="customer-commission" icon={<Percent className="w-5 h-5" />} title="Commission split">
+            <div className="p-4 sm:p-5">
             {canEditDefaultSplit ? (
               <CommissionSplitEditor
                 value={(customer.default_commission_split as CommissionSplit) || { splits: [{ recipient: '', percentage: 100 }] }}
@@ -1461,10 +1571,11 @@ export default function CustomerDetail() {
             <p className="text-xs text-secondary mt-2">
               This default split is applied to new quotes for this customer.
             </p>
-          </Card>
+          </div>
+          </SectionCard>
 
-          <Card>
-            <CardHeader title="Default" accent="Application Service" />
+          <SectionCard id="customer-service" icon={<SprayCan className="w-5 h-5" />} title="Application service">
+            <div className="p-4 sm:p-5">
             <ApplicationServicePicker
               value={customer.default_application_service_id ?? null}
               onChange={(val) => update('default_application_service_id', val)}
@@ -1472,10 +1583,11 @@ export default function CustomerDetail() {
             <p className="text-xs text-secondary mt-2">
               Pre-fills the application service on new jobs created for this customer.
             </p>
-          </Card>
+          </div>
+          </SectionCard>
 
-          <Card>
-            <CardHeader title="Notes" accent="" />
+          <SectionCard id="customer-notes" icon={<StickyNote className="w-5 h-5" />} title="Notes">
+            <div className="p-4 sm:p-5">
             <textarea
               value={customer.notes || ''}
               onChange={(e) => update('notes', e.target.value)}
@@ -1483,7 +1595,8 @@ export default function CustomerDetail() {
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               placeholder="General notes about this customer..."
             />
-          </Card>
+          </div>
+          </SectionCard>
 
           <div className="flex justify-end">
             <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
@@ -1502,23 +1615,27 @@ export default function CustomerDetail() {
         </fieldset>
       )}
 
-      {tab === 'contacts' && !isNew && id && profile && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[0]} open={openSections.has('contacts')} onToggle={() => toggleSection('contacts')} />}
+      {openSections.has('contacts') && !isNew && id && profile && (
         <CustomerContacts key={id} customerId={id} performedBy={profile.id} />
       )}
 
       {/* key remounts on customer switch — see the CustomerPrepCard note above */}
-      {tab === 'knowledge' && !isNew && id && profile && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[1]} open={openSections.has('knowledge')} onToggle={() => toggleSection('knowledge')} />}
+      {openSections.has('knowledge') && !isNew && id && profile && (
         <CustomerFacts key={id} customerId={id} userId={profile.id} />
       )}
 
       {/* key remounts on customer switch — see the CustomerPrepCard note above */}
-      {tab === 'documents' && !isNew && id && profile && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[2]} open={openSections.has('documents')} onToggle={() => toggleSection('documents')} />}
+      {openSections.has('documents') && !isNew && id && profile && (
         <CustomerDocuments key={id} customerId={id} userId={profile.id} />
       )}
 
-      {tab === 'timeline' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[3]} open={openSections.has('timeline')} onToggle={() => toggleSection('timeline')} />}
+      {openSections.has('timeline') && !isNew && (
         <div className="space-y-4">
-          {timelineLoading || tabLoading ? (
+          {timelineLoading || loadingSections.has('timeline') ? (
             <div className="text-center py-8 text-sm text-gray-400">Loading timeline...</div>
           ) : timeline.length === 0 ? (
             <div className="text-center py-8 text-sm text-gray-400">No activity recorded yet</div>
@@ -1550,10 +1667,11 @@ export default function CustomerDetail() {
         </div>
       )}
 
-      {tab === 'fields' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[4]} open={openSections.has('fields')} onToggle={() => toggleSection('fields')} />}
+      {openSections.has('fields') && !isNew && (
         <>
           {/* Mini map showing this customer's fields */}
-          {!tabLoading && fields.some((f) => f.centroid_geojson) && (
+          {!loadingSections.has('fields') && fields.some((f) => f.centroid_geojson) && (
             <Card>
               <CardHeader title="Field" accent="Locations" />
               <Suspense fallback={<div className="h-[250px] w-full rounded-lg bg-gray-50 flex items-center justify-center text-sm text-gray-400">Loading map…</div>}>
@@ -1569,17 +1687,13 @@ export default function CustomerDetail() {
 
           <Card padding={false}>
             <div className="p-5">
-              <CardHeader
-                title="Customer"
-                accent="Fields"
-                action={
-                  <Button variant="ghost" size="sm" icon={<Plus className="w-3 h-3" />} showChevron={false} onClick={() => navigate('/fields/new')}>
-                    Add Field
-                  </Button>
-                }
-              />
+              <div className="flex justify-end">
+                <Button variant="ghost" size="sm" icon={<Plus className="w-3 h-3" />} showChevron={false} onClick={() => navigate('/fields/new')}>
+                  Add Field
+                </Button>
+              </div>
             </div>
-            {tabLoading ? (
+            {loadingSections.has('fields') ? (
               <div className="px-5 pb-5 space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -1591,7 +1705,7 @@ export default function CustomerDetail() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="phone-stack w-full text-sm">
                   <thead>
                     <tr className="border-t border-b border-gray-100">
                       <th className="px-5 py-3 text-left font-medium text-secondary">Field Name</th>
@@ -1615,17 +1729,17 @@ export default function CustomerDetail() {
                             <span className="font-medium text-nav-dark">{f.field_name}</span>
                           </div>
                         </td>
-                        <td className="px-4 py-3">{f.total_acres?.toLocaleString() || '-'}</td>
-                        <td className="px-4 py-3">
+                        <td data-label="Acres" className="px-4 py-3">{f.total_acres?.toLocaleString() || '-'}</td>
+                        <td data-label="Crop" className="px-4 py-3">
                           {f.crop_type ? (
                             <Badge variant="info">{f.crop_type}</Badge>
                           ) : '-'}
                         </td>
-                        <td className="px-4 py-3 text-secondary">{f.county || '-'}</td>
-                        <td className="px-4 py-3 text-secondary text-xs truncate max-w-[200px]">
+                        <td data-label="County" className="px-4 py-3 text-secondary">{f.county || '-'}</td>
+                        <td data-label="Legal desc." className="px-4 py-3 text-secondary text-xs truncate max-w-[200px]">
                           {f.legal_description || '-'}
                         </td>
-                        <td className="px-4 py-3">
+                        <td data-label="Status" className="px-4 py-3">
                           <Badge variant={f.is_active ? 'success' : 'default'}>
                             {f.is_active ? 'Active' : 'Inactive'}
                           </Badge>
@@ -1640,55 +1754,51 @@ export default function CustomerDetail() {
         </>
       )}
 
-      {tab === 'quotes' && !isNew && (() => {
+      {!isNew && <FoldBand section={FOLD_SECTIONS[5]} open={openSections.has('quotes')} onToggle={() => toggleSection('quotes')} />}
+      {openSections.has('quotes') && !isNew && (() => {
         const filteredQuotes = quotePlannedFilter ? quotes.filter((q) => q.is_planned) : quotes;
         return (
         <Card padding={false}>
           <div className="p-5">
-            <CardHeader
-              title="Customer"
-              accent="Quotes"
-              action={
-                <div className="flex gap-2 items-center">
-                  <button
-                    onClick={() => setQuotePlannedFilter(!quotePlannedFilter)}
-                    className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${quotePlannedFilter ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'border border-gray-200 text-secondary hover:bg-gray-50'}`}
-                  >
-                    Planned Programs
-                  </button>
-                  {quotes.length > 0 && (
-                    <button
-                      onClick={async () => {
-                        try {
-                          const lastQuote = quotes[0];
-                          const idemKey = duplicateQuoteIdem.getKey();
-                          const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('duplicate_quote', withBelowCostReason('duplicate_quote', {
-                            p_source_quote_id: lastQuote.id,
-                            p_performed_by: profile?.id as string,
-                            p_idempotency_key: idemKey,
-                          }, reason)));
-                          if (error) { toast('error', 'Failed to duplicate quote'); return; }
-                          const result = assertRpcResult<{ quote_id: string }>(data, 'duplicate_quote');
-                          duplicateQuoteIdem.resetKey();
-                          navigate(`/quotes/${result.quote_id}`);
-                        } catch (error: unknown) {
-                          if (!isBelowCostApprovalHandledError(error)) toast('error', 'Failed to duplicate quote');
-                        }
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-crx-green text-crx-green rounded-lg hover:bg-crx-green-tint"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      New from Last
-                    </button>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={() => navigate(`/quotes/new?customer_id=${id}`)}>
-                    New Quote
-                  </Button>
-                </div>
-              }
-            />
+            {/* The fold band above names this section; only its controls stay here. */}
+            <div className="flex flex-wrap justify-end gap-2 items-center">
+              <button
+                onClick={() => setQuotePlannedFilter(!quotePlannedFilter)}
+                className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${quotePlannedFilter ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'border border-gray-200 text-secondary hover:bg-gray-50'}`}
+              >
+                Planned Programs
+              </button>
+              {quotes.length > 0 && (
+                <button
+                  onClick={async () => {
+                    try {
+                      const lastQuote = quotes[0];
+                      const idemKey = duplicateQuoteIdem.getKey();
+                      const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('duplicate_quote', withBelowCostReason('duplicate_quote', {
+                        p_source_quote_id: lastQuote.id,
+                        p_performed_by: profile?.id as string,
+                        p_idempotency_key: idemKey,
+                      }, reason)));
+                      if (error) { toast('error', 'Failed to duplicate quote'); return; }
+                      const result = assertRpcResult<{ quote_id: string }>(data, 'duplicate_quote');
+                      duplicateQuoteIdem.resetKey();
+                      navigate(`/quotes/${result.quote_id}`);
+                    } catch (error: unknown) {
+                      if (!isBelowCostApprovalHandledError(error)) toast('error', 'Failed to duplicate quote');
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-crx-green text-crx-green rounded-lg hover:bg-crx-green-tint"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  New from Last
+                </button>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => navigate(`/quotes/new?customer_id=${id}`)}>
+                New Quote
+              </Button>
+            </div>
           </div>
-          {tabLoading ? (
+          {loadingSections.has('quotes') ? (
             <div className="px-5 pb-5 space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -1700,7 +1810,7 @@ export default function CustomerDetail() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="phone-stack w-full text-sm">
                 <thead>
                   <tr className="border-t border-b border-gray-100">
                     <th className="px-5 py-3 text-left font-medium text-secondary">Quote #</th>
@@ -1719,7 +1829,7 @@ export default function CustomerDetail() {
                       className="border-b border-gray-50 hover:bg-crx-green-tint cursor-pointer transition-colors"
                     >
                       <td className="px-5 py-3 font-medium text-nav-dark">{q.quote_number}</td>
-                      <td className="px-4 py-3">
+                      <td data-label="Status" className="px-4 py-3">
                         <>
                           <Badge variant={statusToBadgeVariant[q.status] || 'default'}>
                             {q.status === 'closed_by_application' ? 'Fulfilled (Applied)' : q.status === 'closed_short' ? 'Closed — Short' : q.status}
@@ -1731,10 +1841,10 @@ export default function CustomerDetail() {
                           )}
                         </>
                       </td>
-                      <td className="px-4 py-3">T{q.tier}</td>
-                      <td className="px-4 py-3 font-mono">{fmt(q.total_price)}</td>
-                      {isAdmin && <td className="px-4 py-3 font-mono text-emerald-600">{q.total_margin_pct == null ? '—' : `${q.total_margin_pct.toFixed(1)}%`}</td>}
-                      <td className="px-4 py-3 text-secondary">
+                      <td data-label="Tier" className="px-4 py-3">T{q.tier}</td>
+                      <td data-label="Total" className="px-4 py-3 font-mono">{fmt(q.total_price)}</td>
+                      {isAdmin && <td data-label="Margin" className="px-4 py-3 font-mono text-emerald-600">{q.total_margin_pct == null ? '—' : `${q.total_margin_pct.toFixed(1)}%`}</td>}
+                      <td data-label="Created" className="px-4 py-3 text-secondary">
                         {new Date(q.created_at).toLocaleDateString()}
                       </td>
                     </tr>
@@ -1747,12 +1857,11 @@ export default function CustomerDetail() {
         );
       })()}
 
-      {tab === 'orders' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[6]} open={openSections.has('orders')} onToggle={() => toggleSection('orders')} />}
+      {openSections.has('orders') && !isNew && (
         <Card padding={false}>
-          <div className="p-5">
-            <CardHeader title="Customer" accent="Orders" />
-          </div>
-          {tabLoading ? (
+          <div className="pt-5" />
+          {loadingSections.has('orders') ? (
             <div className="px-5 pb-5 space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -1764,7 +1873,7 @@ export default function CustomerDetail() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="phone-stack w-full text-sm">
                 <thead>
                   <tr className="border-t border-b border-gray-100">
                     <th className="px-5 py-3 text-left font-medium text-secondary">Order #</th>
@@ -1783,18 +1892,18 @@ export default function CustomerDetail() {
                       className="border-b border-gray-50 hover:bg-crx-green-tint cursor-pointer transition-colors"
                     >
                       <td className="px-5 py-3 font-medium text-nav-dark">{o.order_number}</td>
-                      <td className="px-4 py-3">
+                      <td data-label="Status" className="px-4 py-3">
                         <Badge variant={statusToBadgeVariant[o.status] || 'default'}>
                           {o.status.replace('_', ' ')}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3 font-mono">{fmt(o.total_price)}</td>
-                      {isAdmin && <td className="px-4 py-3 font-mono text-emerald-600">{o.total_profit == null ? '—' : fmt(o.total_profit)}</td>}
-                      <td className="px-4 py-3 text-secondary">
+                      <td data-label="Total" className="px-4 py-3 font-mono">{fmt(o.total_price)}</td>
+                      {isAdmin && <td data-label="Profit" className="px-4 py-3 font-mono text-emerald-600">{o.total_profit == null ? '—' : fmt(o.total_profit)}</td>}
+                      <td data-label="Date" className="px-4 py-3 text-secondary">
                         {new Date(o.order_date + 'T00:00:00').toLocaleDateString()}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                      <td data-label="Fulfillment" className="px-4 py-3">
+                        <div className="flex w-40 max-w-full items-center gap-2 md:w-auto">
                           <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div
                               className="h-full bg-crx-green rounded-full transition-all"
@@ -1813,13 +1922,12 @@ export default function CustomerDetail() {
         </Card>
       )}
 
-      {tab === 'deliveries' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[7]} open={openSections.has('deliveries')} onToggle={() => toggleSection('deliveries')} />}
+      {openSections.has('deliveries') && !isNew && (
         <div className="space-y-4">
           <Card padding={false}>
-            <div className="p-5">
-              <CardHeader title="Customer" accent="Deliveries" />
-            </div>
-            {tabLoading ? (
+            <div className="pt-5" />
+            {loadingSections.has('deliveries') ? (
               <div className="px-5 pb-5 space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -1831,7 +1939,7 @@ export default function CustomerDetail() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="phone-stack w-full text-sm">
                   <thead>
                     <tr className="border-t border-b border-gray-100">
                       <th className="px-5 py-3 text-left font-medium text-secondary">Delivery #</th>
@@ -1859,19 +1967,19 @@ export default function CustomerDetail() {
                               <span className="font-medium text-nav-dark">{d.delivery_number}</span>
                             </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td data-label="Status" className="px-4 py-3">
                             <Badge variant={statusToBadgeVariant[d.status] || 'default'}>
                               {d.status.replace('_', ' ')}
                             </Badge>
                           </td>
-                          <td className="px-4 py-3">{d.driver_name}</td>
-                          <td className="px-4 py-3 text-secondary">
+                          <td data-label="Driver" className="px-4 py-3">{d.driver_name}</td>
+                          <td data-label="Scheduled" className="px-4 py-3 text-secondary">
                             {parseLocalDate(d.scheduled_date).toLocaleDateString()}
                           </td>
-                          <td className="px-4 py-3 text-secondary">
+                          <td data-label="Completed" className="px-4 py-3 text-secondary">
                             {d.completed_at ? new Date(d.completed_at).toLocaleDateString() : '-'}
                           </td>
-                          <td className="px-4 py-3">
+                          <td data-label="Signature" className="px-4 py-3">
                             {/* How the completion was confirmed (completion_evidence, migration 20261022075000):
                                 a no-proof record's signer is office text, never a customer signature. */}
                             {d.completion_evidence === 'no_proof' ? (
@@ -1898,7 +2006,7 @@ export default function CustomerDetail() {
           </Card>
 
           {/* Pending Remainders for this customer */}
-          {!tabLoading && customerRemainders.length > 0 && (
+          {!loadingSections.has('deliveries') && customerRemainders.length > 0 && (
             <Card>
               <CardHeader
                 title="Pending"
@@ -1916,7 +2024,7 @@ export default function CustomerDetail() {
                 }
               />
               <div className="overflow-x-auto mt-3">
-                <table className="w-full text-sm">
+                <table className="phone-stack w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100">
                       <th className="px-4 py-2 text-left font-medium text-secondary">Product</th>
@@ -1929,9 +2037,9 @@ export default function CustomerDetail() {
                     {customerRemainders.map((r) => (
                       <tr key={r.id} className="border-b border-gray-50">
                         <td className="px-4 py-2 font-medium text-nav-dark">{r.product_name || 'Unknown'}</td>
-                        <td className="px-4 py-2 text-amber-600 font-semibold">{r.quantity_remaining}</td>
-                        <td className="px-4 py-2 text-secondary">{r.unit_size || '-'}</td>
-                        <td className="px-4 py-2">
+                        <td data-label="Qty remaining" className="px-4 py-2 text-amber-600 font-semibold">{r.quantity_remaining}</td>
+                        <td data-label="Unit" className="px-4 py-2 text-secondary">{r.unit_size || '-'}</td>
+                        <td data-label="Original delivery" className="px-4 py-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1953,9 +2061,10 @@ export default function CustomerDetail() {
       )}
 
       {/* Financials Tab — Customer 360 */}
-      {tab === 'financials' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[8]} open={openSections.has('financials')} onToggle={() => toggleSection('financials')} />}
+      {openSections.has('financials') && !isNew && (
         <div className="space-y-4">
-          {financialsLoading || tabLoading ? (
+          {financialsLoading || loadingSections.has('financials') ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-24 bg-gray-100 rounded-lg animate-pulse" />
@@ -2067,7 +2176,7 @@ export default function CustomerDetail() {
                   <div className="px-5 pb-5"><p className="text-sm text-secondary">No transactions in the last 90 days.</p></div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="phone-stack w-full text-sm">
                       <thead>
                         <tr className="border-t border-b border-gray-100">
                           <th className="px-5 py-3 text-left font-medium text-secondary">Date</th>
@@ -2083,12 +2192,12 @@ export default function CustomerDetail() {
                         {transactions.slice(-RECENT_TRANSACTIONS_SHOWN).map((txn, idx) => (
                           <tr key={idx} className="border-b border-gray-50">
                             <td className="px-5 py-3">{parseLocalDate(txn.transaction_date).toLocaleDateString()}</td>
-                            <td className="px-4 py-3 capitalize">{txn.transaction_type}</td>
-                            <td className="px-4 py-3 font-mono text-xs">{txn.reference_number}</td>
-                            <td className={`px-4 py-3 text-right ${txn.amount_cents < 0 ? 'text-red-600' : 'text-nav-dark'}`}>
+                            <td data-label="Type" className="px-4 py-3 capitalize">{txn.transaction_type}</td>
+                            <td data-label="Reference" className="px-4 py-3 font-mono text-xs">{txn.reference_number}</td>
+                            <td data-label="Amount" className={`px-4 py-3 text-right ${txn.amount_cents < 0 ? 'text-red-600' : 'text-nav-dark'}`}>
                               {fmt(txn.amount_cents / 100)}
                             </td>
-                            <td className="px-4 py-3 text-right">{fmt(txn.running_balance / 100)}</td>
+                            <td data-label="Balance" className="px-4 py-3 text-right">{fmt(txn.running_balance / 100)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2104,7 +2213,7 @@ export default function CustomerDetail() {
                     <CardHeader title="Prepay" accent="Credits" />
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="phone-stack w-full text-sm">
                       <thead>
                         <tr className="border-t border-b border-gray-100">
                           <th className="px-5 py-3 text-left font-medium text-secondary">Bucket</th>
@@ -2116,8 +2225,8 @@ export default function CustomerDetail() {
                         {prepayCredits.map((c) => (
                           <tr key={c.id} className="border-b border-gray-50">
                             <td className="px-5 py-3 font-medium text-nav-dark">{c.bucket_label}</td>
-                            <td className="px-4 py-3 text-right">{fmt(c.original_amount_cents / 100)}</td>
-                            <td className="px-4 py-3 text-right text-crx-green font-medium">{fmt(c.balance_cents / 100)}</td>
+                            <td data-label="Original" className="px-4 py-3 text-right">{fmt(c.original_amount_cents / 100)}</td>
+                            <td data-label="Remaining" className="px-4 py-3 text-right text-crx-green font-medium">{fmt(c.balance_cents / 100)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2131,13 +2240,13 @@ export default function CustomerDetail() {
       )}
 
       {/* GAP FIX #15: Purchase History Tab */}
-      {tab === 'history' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[9]} open={openSections.has('history')} onToggle={() => toggleSection('history')} />}
+      {openSections.has('history') && !isNew && (
         <Card padding={false}>
           <div className="p-5">
-            <CardHeader title="Purchase" accent="History" />
-            <p className="text-xs text-secondary mt-1">Products ordered by this customer, aggregated across all orders</p>
+            <p className="text-xs text-secondary">Products ordered by this customer, aggregated across all orders</p>
           </div>
-          {tabLoading ? (
+          {loadingSections.has('history') ? (
             <div className="px-5 pb-5 space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -2154,7 +2263,7 @@ export default function CustomerDetail() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="phone-stack w-full text-sm">
                 <thead>
                   <tr className="border-t border-b border-gray-100">
                     <th className="px-5 py-3 text-left font-medium text-secondary">Product</th>
@@ -2168,10 +2277,10 @@ export default function CustomerDetail() {
                   {history.map((h, idx) => (
                     <tr key={idx} className="border-b border-gray-50">
                       <td className="px-5 py-3 font-medium text-nav-dark">{h.product_name}</td>
-                      <td className="px-4 py-3">{h.order_count}</td>
-                      <td className="px-4 py-3">{h.total_units.toLocaleString()}</td>
-                      <td className="px-4 py-3">{h.total_delivered.toLocaleString()}</td>
-                      <td className="px-4 py-3 font-mono text-crx-green">
+                      <td data-label="Times ordered" className="px-4 py-3">{h.order_count}</td>
+                      <td data-label="Total units" className="px-4 py-3">{h.total_units.toLocaleString()}</td>
+                      <td data-label="Units delivered" className="px-4 py-3">{h.total_delivered.toLocaleString()}</td>
+                      <td data-label="Total spent" className="px-4 py-3 font-mono text-crx-green">
                         {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(h.total_spent)}
                       </td>
                     </tr>
@@ -2180,10 +2289,10 @@ export default function CustomerDetail() {
                 <tfoot>
                   <tr className="border-t border-gray-200 bg-gray-50">
                     <td className="px-5 py-3 font-semibold text-nav-dark">Total</td>
-                    <td className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.order_count, 0)}</td>
-                    <td className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_units, 0).toLocaleString()}</td>
-                    <td className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_delivered, 0).toLocaleString()}</td>
-                    <td className="px-4 py-3 font-semibold font-mono text-crx-green">
+                    <td data-label="Times ordered" className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.order_count, 0)}</td>
+                    <td data-label="Total units" className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_units, 0).toLocaleString()}</td>
+                    <td data-label="Units delivered" className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_delivered, 0).toLocaleString()}</td>
+                    <td data-label="Total spent" className="px-4 py-3 font-semibold font-mono text-crx-green">
                       {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_spent, 0))}
                     </td>
                   </tr>
@@ -2209,7 +2318,7 @@ export default function CustomerDetail() {
       />
 
       {!isNew && id && profile && (
-        <LogInteractionModal open={logInteractionOpen} onClose={() => setLogInteractionOpen(false)} customerId={id} userId={profile.id} customerName={customer.farm_name || 'customer'} onLogged={() => { setInteractionRefresh((k) => k + 1); if (tab === 'timeline') void fetchTabData('timeline'); }} />
+        <LogInteractionModal open={logInteractionOpen} onClose={() => setLogInteractionOpen(false)} customerId={id} userId={profile.id} customerName={customer.farm_name || 'customer'} onLogged={() => { setInteractionRefresh((k) => k + 1); if (openSections.has('timeline')) void fetchTabData('timeline'); }} />
       )}
 
       {!isNew && id && (

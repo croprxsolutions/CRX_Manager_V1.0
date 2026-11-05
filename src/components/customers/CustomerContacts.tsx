@@ -165,7 +165,7 @@ export default function CustomerContacts({ customerId, performedBy }: CustomerCo
 
   return <>
     <Card padding={false}>
-      <div className="p-4 sm:p-5 flex items-center justify-between gap-3"><CardHeader title="Customer" accent="Contacts" /><Button size="sm" icon={<Plus className="w-4 h-4" />} showChevron={false} onClick={() => begin()}>Add Contact</Button></div>
+      <div className="p-4 sm:p-5 flex items-center justify-end gap-3"><Button size="sm" icon={<Plus className="w-4 h-4" />} showChevron={false} onClick={() => begin()}>Add Contact</Button></div>
       <ConfirmModal
         open={Boolean(contactToDeactivate)}
         onClose={() => { if (!deactivating) setContactToDeactivate(null); }}

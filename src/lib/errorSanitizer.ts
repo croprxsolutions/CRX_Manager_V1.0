@@ -21,6 +21,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/product_setup_category_fk/, 'Choose a category from the product category list'],
   [/product_setup_name_check/, 'Enter a product name without spaces at either end'],
   [/product_setup_sku_check/, 'Enter a SKU without spaces at either end, or leave it blank'],
+  [/products_sku_unique/, 'Another product already has this SKU'],
+  [/products_container_type_check/, 'Choose a container type: Jug, Drum, Pallet, Mini-Bulk, Shuttle, Bag, Tote, Ea or Jar'],
+  [/products_active_name_unique/, 'Another active product already has this name'],
   [/product_setup_rate_check/, 'Rate Per Acre must be zero or greater'],
   [/product_setup_epa_check/, 'Enter an EPA number like 524-475 or 100-1234-5905. This checks format only'],
   [/product_setup_rei_check/, 'REI (hours) must be zero or greater'],
@@ -34,6 +37,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // The first attempt committed under this key, usually a lost reply followed by an edit.
   [/^IDEMPOTENCY_ARGUMENT_MISMATCH\b/,
    'This attempt was not saved, but an earlier attempt with different details may have saved. Check the record before entering it again'],
+  // KI-27: an admin cleared this stuck request, so the database refuses to save it now.
+  [/^IDEMPOTENCY_REQUEST_RETIRED\b/,
+   'Nothing was changed. An admin cleared this request after it got stuck. Check the record, then enter it again as a new request if it is still needed'],
   [/^IDEMPOTENCY_(?:RESULT_INVALID|RECEIPT_MISSING)\b/,
    'Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again'],
   // A completion retried under a fresh key after an earlier attempt already completed the record.
@@ -145,6 +151,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. This delivery, its invoices or the order\'s drafts changed while you were looking. Check the updated plan and try again'],
   [/^DELIVERY_ORDER_BUSY_RETRY\b/,
    'Nothing was changed. This order is being updated elsewhere. Wait a moment and retry'],
+  // void_delivery (20261107120000, KI-102): voiding the order already put this delivery's stock back.
+  [/^ORDER_VOIDED_DELIVERY_LOCKED\b/,
+   'Nothing was changed. This delivery\'s order is voided, which already put its stock back, so the delivery cannot be voided too. Fix its invoice from the invoice page if needed'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
   // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
   [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,
@@ -281,6 +290,13 @@ export function sanitizeError(error: unknown): string {
   const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG):\s*(.+)$/s)?.[1];
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;
+  }
+  // Setup save and import (20261107080000, 20261107130000): a table check refused one product; name it, then explain the check.
+  const refusedRow = message.match(/^PRODUCT_SETUP_ROW_REFUSED:\s*(.+?):\s+(.+)$/s);
+  if (refusedRow) return `Nothing was saved. ${refusedRow[1]}: ${sanitizeError(refusedRow[2])}`;
+  const setupRefusal = message.match(/^(?:PRODUCT_SETUP_STALE|PRODUCT_SETUP_INVALID|PRODUCT_SETUP_DUPLICATE_PRODUCT|PRODUCT_SETUP_ROW_SHAPE_INVALID|PRODUCT_SETUP_DUPLICATE|PRODUCT_SETUP_ROWS_REQUIRED):\s*(.+)$/s)?.[1];
+  if (setupRefusal && !CONSTRAINT_PATTERNS.some(([pattern]) => pattern.test(message))) {
+    return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }
   if (/^PRODUCT_ACTIVE_REVIEW_STALE(?::|$)/.test(message)) {
     return 'Product details changed since the review. Review the selection again.';

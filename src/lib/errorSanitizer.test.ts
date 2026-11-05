@@ -119,6 +119,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError('FIX_DELIVERY_REFUSED: A payment is applied')).toMatch(/^Nothing was changed\. Something on this delivery now blocks a fix/);
     expect(sanitizeError('FIX_DELIVERY_PREVIEW_STALE: x')).toMatch(/its invoices or the order.s drafts changed/);
     expect(sanitizeError('DELIVERY_ORDER_BUSY_RETRY')).toMatch(/being updated elsewhere/);
+    expect(sanitizeError('ORDER_VOIDED_DELIVERY_LOCKED: delivery DEL-1 belongs to a voided order'))
+      .toMatch(/^Nothing was changed\. This delivery's order is voided/);
   });
 
   it('tells the user a completed delivery is voided, not cancelled', () => {
@@ -205,6 +207,10 @@ describe('sanitizeError', () => {
     expect(intent).toContain('Nothing was changed');
     expect(intent).toContain('different, earlier request');
     expect(intent).toContain('Refresh');
+    const retired = sanitizeError({ message: 'IDEMPOTENCY_REQUEST_RETIRED: idempotency_key adjust_inventory_batch:u:1:2 belongs to a request an admin cleared; it cannot be saved' });
+    expect(retired).toContain('Nothing was changed');
+    expect(retired).toContain('An admin cleared');
+    expect(retired).not.toMatch(/adjust_inventory|IDEMPOTENCY/);
     const actor = sanitizeError('IDEMPOTENCY_ACTOR_MISMATCH');
     expect(actor).toContain('Nothing was changed');
     expect(actor).toContain('another user');
@@ -278,6 +284,18 @@ describe('sanitizeError', () => {
     expect(sanitizeError(
       'duplicate key value violates unique constraint "orders_order_number_key"'
     )).toBe('A record with this information already exists');
+  });
+
+  it('names a repeated product SKU', () => {
+    expect(sanitizeError(
+      'duplicate key value violates unique constraint "products_sku_unique"'
+    )).toBe('Another product already has this SKU');
+  });
+
+  it('names a repeated active product name', () => {
+    expect(sanitizeError(
+      'duplicate key value violates unique constraint "products_active_name_unique"'
+    )).toBe('Another active product already has this name');
   });
 
   it('sanitizes foreign key constraint violations', () => {
@@ -423,5 +441,12 @@ describe('sanitizeError', () => {
     expect(sanitizeError(42)).toBe('An unexpected error occurred');
     expect(sanitizeError({})).toBe('An unexpected error occurred');
     expect(sanitizeError([])).toBe('An unexpected error occurred');
+  });
+});
+
+describe('product setup and import refusals (20261107090000)', () => {
+  it('keeps the server text, which names the products', () => {
+    expect(sanitizeError({ message: 'PRODUCT_SETUP_DUPLICATE: the SKU or name is already used by a product or twice in this file: Chem' }))
+      .toBe('Nothing was saved. The SKU or name is already used by a product or twice in this file: Chem');
   });
 });

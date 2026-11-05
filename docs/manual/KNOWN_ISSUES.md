@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-04 for the live ledger only (see the WP-PM-11a-1 and 2026-11-04 retro-split-guard changelog notes); other evidence retains its stated dates.
+**Last verified:** 2026-11-05 for the live ledger only (see the void-delivery-order-status-guards-applied-live note); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -36,9 +36,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 58 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
-| Closed as FIXED, with proof (bottom of file and archive) | 8 |
+| Closed as FIXED, with proof (bottom of file and archive) | 10 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
@@ -415,8 +415,15 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
 ### KI-100 — An open product page learns of a lock change only on reload or a refused save
-**LOW · product UI · LOCAL CANDIDATE `20261107060000` — NOT APPLIED**
+**LOW · product UI · `20261107060000` — APPLIED LIVE 2026-11-04**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
+
+### KI-103 — Bulk product import: a row with an unknown extra field previews "ready", then the save refuses the file
+**LOW · OPEN, no fix planned · products/import · found 2026-11-05 (Sol LOW on #1486)**
+`preview_product_import` ignores unknown top-level keys on a row, but `apply_product_setup` refuses them, so such a
+file previews "ready" and then the whole save is refused with nothing written. The screen never sends extra keys,
+and keys inside `insert` or `rates` are already refused by the preview. The Check File timeout first filed under
+this number is fixed and live (archive, 2026-11-05).
 
 ---
 
@@ -434,12 +441,6 @@ Following `20261022075000` (PR #1024): old app versions are refused until reload
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
 abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test, and
 Mason's approval to narrow four older signature policies.
-
-### KI-27 — An expired uncertain request locks its dialog
-**MED · OPEN · UI/inventory · unassigned (PR #624 closed)**
-If a stock receive/adjust or vendor-bill save loses its reply and 23 hours pass, the dialog locks in that browser
-with a "do not submit again" message and no way to dismiss it (`src/hooks/useUncertainMutationIntent.ts:69`). Fix
-is an admin-only "I checked, clear this" control.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
 **MED · OPEN · database · unassigned**
@@ -461,13 +462,6 @@ invoice, five empty deliveries). Counts are older records' claims, not re-measur
 `LabelDataQuality` screen exists, data entry is not done). CRM has no data entered; 146 of 150 customers lack a
 sales rep (older counts).
 WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup checks. They stay unchanged and keep working; the list is in Mason's private Product Master review notes.
-
-### KI-31 — Field Setup and field-save loose ends
-**LOW · OPEN · UI/database · unassigned**
-After saving a boundary the page does not refresh total acres, so a later attribute-only save can revert legacy
-acres; deleting every drawn polygon of a multi-part field falls back to the old boundary
-(`src/pages/FieldSetup.tsx:572`). `save_field` reports success for a missing id (`20260729222311:80`, no `FOUND`
-check).
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
 **MED · PARTIAL · UI/database · Mason (Goal 4)**
@@ -544,33 +538,37 @@ Residual: a line completed before the migration has no record and still restores
 `requires_review` with a note to check reserved stock. Live
 read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20); nothing is corrected.
 
-### KI-100 — A spray job can leave a booking with a remainder no Partial Order can take
-**MED · OPEN (deferred from PR #1362) · database · Taha**
+### KI-100 — A spray job could leave a booking with a remainder no Partial Order can take
+**MED · FIXED: migration `20261107070000` APPLIED LIVE 2026-11-04 (ledger `20261105032430`, PR #1451) · database · found 2026-11-04 (PR #1362 review)**
 Since `20261106110000` (S02) a Partial Order must be in whole hundredths, but `_sync_quote_job_reservations`
-stores a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking leaves 9.9921875 gal,
-which no draw can take, so the booking never closes. Live impact on 2026-11-04: none (`job_product_draws` has 0 rows).
-- **Next step.** A small migration rounding job reservations to 0.01 (Sol-listed: inventory), before spray jobs
-  reserve from bookings in earnest.
+drew a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking left 9.9921875 gal,
+which no draw can take, so the booking never closed. The fix keeps a booking's job draws in whole hundredths that
+together match the real total applied, rounded once, and holds at least each draw in the shed. Live had no job draws on 2026-11-04, so no booking was stranded. Proof:
+`scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs`.
 
 ### KI-101 — Voiding a delivery on a cancelled order reopens the order
-**MED · OPEN (found 2026-11-04, KI-93 design review; live function body read) · database/lifecycle · unassigned**
-`_void_delivery_replay_impl_20261015` recomputes the order's status (`fulfilled`, `confirmed` or
-`partially_fulfilled`) and writes it under the admin override without checking whether the order was cancelled,
-so voiding a delivery of a cancelled, part-delivered order brings it back to life after the cancel already closed
-out its commissions, reservations and invoices. Admin-only. Separately, signed-in admins hold a direct UPDATE grant
-on `orders.status`, so they can move an order between allowed statuses (for example confirmed to fulfilled) with no
-delivery; no stock moves.
-- **Next step.** Its own Sol-listed PR: keep `cancelled` when voiding a delivery of a cancelled order, decide whether
-  the voided quantity's reservation is released, and consider revoking the direct `orders.status` grant.
+**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471); the grant item below is still open · database/lifecycle · found 2026-11-04 (KI-93 design review)**
+`_void_delivery_replay_impl_20261015` recomputed the order's status and wrote it under the admin override without
+checking for `cancelled`, so voiding a delivery of a cancelled, part-delivered order reopened it and put back the
+reservation the cancel had released. Reproduced 2026-11-04 on the throwaway copy. Such orders come from cancels before
+2026-07-21 (today a cancel of a part-delivered order closes the remainder and marks it fulfilled) or from the direct
+status change below. The fix keeps the order `cancelled`: the voided goods go back on the shelf, the reservation is
+not put back (a full cancel released it and nobody will deliver a cancelled order), the line keeps nothing left to
+deliver, and the stock-ledger note says so. An order cancelled through the direct status change released nothing;
+its reservation is left as it was. Live 2026-11-04: 4 cancelled orders, none with a completed delivery or
+delivered quantity. Proof: `scripts/smoke/prove-void-delivery-order-status-guards-real-schema.mjs`.
+- **Still open (needs Mason's yes: a permissions change).** Signed-in admins hold a direct UPDATE grant on
+  `orders.status`, so they can move an order between allowed statuses (for example confirmed to fulfilled, or
+  partially fulfilled to cancelled) with no delivery and no stock movement. Revoking it is its own PR.
 
 ### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice
-**MED · OPEN, TRACED NOT REPRODUCED (found 2026-11-04, KI-93 design review, Sol r2 #8) · database/inventory · unassigned**
+**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471) · database/inventory · found 2026-11-04 (KI-93 design review, Sol r2 #8)**
 `_void_order_impl_20260714` restores delivered stock but leaves the order's completed deliveries `completed`, and
-`void_delivery` checks only the delivery's own status. So voiding a fulfilled order and then one of its deliveries
-would put that delivery's stock back a second time and reopen the voided order. Live exposure 2026-11-04: 0 voided
-orders and 0 completed deliveries on voided orders.
-- **Next step.** Reproduce on the throwaway real-schema copy, then a small Sol-listed migration: `void_delivery`
-  refuses when its order is voided.
+`void_delivery` checked only the delivery's own status, so voiding a fulfilled order and then one of its deliveries
+put that stock back a second time and reopened the voided order. Reproduced 2026-11-04 on the throwaway copy (100 on
+hand, deliver 10, void the order, void the delivery: 110 on hand, order `confirmed`). The fix refuses that delivery
+void (`ORDER_VOIDED_DELIVERY_LOCKED`); nothing moves. Live 2026-11-04: 0 voided orders, 0 completed deliveries on
+voided orders. Proof: as KI-101.
 
 ## Database and release process
 
@@ -593,11 +591,6 @@ comment. Nothing is wrong today because it is unapplied.
 **LOW · OPEN · tooling/process · Mason (deploy approval)**
 `supabase/functions/_shared/sentry.ts:60` defines `validateSentryDsnOrThrow()` but nothing calls it; a missing key
 logs `[SENTRY_MISCONFIG]` and drops the alert. Failing loudly needs the key confirmed and eight function deploys.
-
-### KI-39 — Customer-facing PDF polish
-**LOW · OPEN · UI · unassigned**
-Long section notes on quote PDFs overprint the items table (`src/lib/quotePdf.ts:190-191`); the year-over-year
-"Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`).
 
 ### KI-40 — CRM Phase 5 (AI receptionist) preconditions
 **LOW · OPEN (future work) · database · unassigned**
@@ -941,6 +934,9 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 7. **KI-15, stored-profit Reports tabs** — PR #1134 merged 2026-10-27 (`cef4e3015`); `Reports.tsx` now calls `get_profitability_report` for customer, product and month groups. The PR records real-data local-app proof and paging/failure tests. Full report approval remains To-Do 10.2. Original issue and closure evidence appended to the archive.
 
 8. **KI-85, stale sweep fingerprints on quote functions** — closed 2026-11-01 by the pin-refresh change on branch `fix/refresh-quote-sweep-pins-2026-11-01`; the 2026-11-01 live sweep adjudicated all 29 predicates `ok: true`, `complete: true`.
+
+9. **KI-39, customer-facing PDF polish** — closed 2026-11-05: quote-PDF section notes wrap instead of overprinting (PR #1480); the year-end "Change" column shows green/red again (PR #1477). Both checked on a rendered PDF; original text appended to the archive.
+10. **KI-27, an expired uncertain request locked its dialog** — closed 2026-11-05 by branch `claude/uncertain-intent-admin-clear-5591c7`: an admin-only "I checked the records — clear this" control (with a confirm) appears only once the safe retry window has passed, removes that browser's expired saved request, and is logged to Sentry. Proven on the local test app (admin clears and the form works again; a sales rep and a still-retryable request show no control) and by hook and component tests.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

@@ -12,6 +12,7 @@ import {
   UNCERTAIN_MUTATION_RETRY_EXPIRED,
   useUncertainMutationIntent,
 } from '../../hooks/useUncertainMutationIntent';
+import ClearExpiredIntentButton from '../ClearExpiredIntentButton';
 import { useToast } from '../ui/Toast';
 
 import { Sentry } from '../../lib/sentry';
@@ -427,6 +428,7 @@ export default function BatchAdjustModal({ open, onClose, items, userId, onSucce
         {frozen && (
           <div className="rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-900" role="status">
             <strong>Unconfirmed batch:</strong> the last batch adjustment ({frozen.delta > 0 ? '+' : ''}{frozen.delta}, “{frozen.reason}”) may have partly gone through. Retry it unchanged — a product this batch already moved will not move again. If you have adjusted any of these products another way since, check its stock history first.
+            <ClearExpiredIntentButton intent={batchIntent} operation="adjust_inventory_batch" />
           </div>
         )}
 

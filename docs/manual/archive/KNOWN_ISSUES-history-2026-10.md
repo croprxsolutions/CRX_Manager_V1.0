@@ -7066,3 +7066,76 @@ quote-version trust-marker route intact, so these were stale fingerprints, not d
 `20261027080400` (any active rep may convert; the actor stays bound), so the sweep is clean both before and after
 that migration applies. The candidate digest was captured from a disposable PostgreSQL replica that first reproduced
 every live digest. Still open until: review, merge, and a fresh live sweep after the candidate migration is applied.
+
+### Closed sub-item 2026-11-05 — KI-39 quote PDF section notes
+
+Original text: "Long section notes on quote PDFs overprint the items table (`src/lib/quotePdf.ts:190-191`)".
+
+Closure: `src/lib/quotePdf.ts` now wraps section header notes, notes under a section's table and quote footer notes
+one line at a time, with full line spacing, and starts a new page before a line would reach the footer. A new section
+also starts on a fresh page when there is no room for its header, table heading and first row. Checked by rendering
+test quotes (short notes, long notes, a note crossing a page, long footer notes) to images before and after the fix.
+No database change. The year-end "Change" colour part of KI-39 stays open.
+
+### Closed sub-item 2026-11-05 — KI-31 stale total acres after a boundary or override save
+
+Original text: "After saving a boundary the page does not refresh total acres, so a later attribute-only save can revert legacy
+acres" (`src/pages/FieldSetup.tsx`).
+
+Fixed in `src/pages/FieldSetup.tsx` (branch `claude/fieldsetup-acres-refresh-26a603`; frontend only, no migration): after a
+successful `set_field_boundary` or `set_field_override_acres` the page copies the returned `billable_acres` into its
+`total_acres` (and `measured_acres` after a boundary), and makes that the page's clean baseline, so a later attribute-only
+save sends the stored acres. Proven on the local test app: before the fix, setting 55 acres to bill and then saving only
+the crop left `total_acres` 12 beside `override_acres` 55; after it, `total_acres` stayed 55. The rest of KI-31 stays open.
+
+### Closed sub-item 2026-11-05 — KI-31 deleting every polygon fell back to the old boundary
+
+Original text: "Deleting every drawn polygon of a multi-part field falls back to the old boundary
+(`src/pages/FieldSetup.tsx:686`)."
+
+Already fixed in code by commit `12dcf01b8` (2026-07-11): every part delete now goes through `handlePolygonsChange`,
+which clears the loaded boundary when no part is left, so `buildBoundaryGeometry` has nothing old to fall back to.
+Saving with every part deleted now sends no boundary and says "A measured boundary cannot be removed here — draw a
+replacement boundary and save." A regression test was added in `src/pages/FieldSetup.saveNavigation.test.tsx`
+("deleting every part of a saved multi-part boundary"). It fails if the clear is removed. No code or database change.
+
+### Closed 2026-11-05 — KI-39 (year-end "Change" colour; the whole entry is now closed)
+
+Original text: "The year-over-year "Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`).
+The quote-PDF notes part was fixed 2026-11-05 (see the archive)."
+
+Fixed by PR #1477 (merge `a1076c552`). The colour was set in the table's after-draw hook, after the text was already on
+the page, so it never applied. It is now set on each cell before drawing (`didParseCell`): green for zero or growth, red
+for a decline, unchanged when there is no prior-season value. A test covers it in `src/lib/yearEndSummaryPdf.test.ts`.
+Proof: a Year-End Summary rendered from test data showed +23.3% and +25.0% green, −25.0% red, "—" in the normal colour,
+and no other text changed colour. With the quote-PDF part closed by PR #1480, KI-39 is fully closed. No database change.
+
+### Closed 2026-11-05 — KI-31 Field Setup and field-save loose ends (last sub-item: save_field reported success for a missing id)
+`save_field` updated nothing for an id that matched no field, yet wrote a `field_saved` activity row and returned the id as
+if the save had worked. Migration `20261107140000_save_field_refuses_missing_field` (applied live 2026-11-05, ledger
+`20261105140110`, PR #1489) adds an `IF NOT FOUND` check: a missing id now raises `FIELD_NOT_FOUND` and writes nothing.
+The disposable PostgreSQL proof failed without the migration and passed with it; the live smoke chain (rolled back)
+expects the refusal. Two older `field_saved` activity rows that name a missing field were left as they are. With the
+stale-acres and delete-every-polygon sub-items closed earlier the same day, KI-31 is fully closed.
+
+### Closed 2026-11-05 — KI-27
+
+Closed by branch `claude/uncertain-intent-admin-clear-5591c7`. `useUncertainMutationIntent` gained `clearExpiredIntent()`, which refuses while any stored copy (IndexedDB coordinator, localStorage mirror, or this tab's acknowledgement) could still be retried or is damaged, and otherwise removes the expired request; a resolved tombstone is kept and damaged state stays locked for manual reconciliation. The shared `ClearExpiredIntentButton` shows it to admins only, only after expiry, behind a `ConfirmModal`, and logs each clear to Sentry. It is wired into every dialog that uses the hook (Quick Receive, Receiving Hub, Inventory receive/adjust/hold, Batch Adjust, Purchase Order receive, New Vendor Bill, Vendor Bill payment). Limit: the saved request is keyed to the signed-in user, so a non-admin who is locked out still needs browser storage cleared for that site.
+
+Original text:
+
+### KI-27 — An expired uncertain request locks its dialog
+**MED · OPEN · UI/inventory · unassigned (PR #624 closed)**
+If a stock receive/adjust or vendor-bill save loses its reply and 23 hours pass, the dialog locks in that browser
+with a "do not submit again" message and no way to dismiss it (`src/hooks/useUncertainMutationIntent.ts:69`). Fix
+is an admin-only "I checked, clear this" control.
+
+### Closed 2026-11-05 — KI-103 Bulk product import: a large file with per-acre rates timed out at Check File
+PR #1502 (merged 2026-11-05 12:46 PM Central, merge `48ff46a7f`): Check File sends 100 rows per request and joins
+the answers in order; a reply with the wrong row count is refused, and so is a check where rates were locked or
+unlocked between requests. In-file duplicates are still refused across the whole file first; Import stays one
+all-or-nothing save. Proved live 2026-11-05 12:52 PM Central on bundle `index-Cxon6mgH.js` (read-only: Check File
+then Cancel; the save call was blocked in the page): 500 rows that all carry a per-acre rate were checked in 5
+requests (1.6 to 2.7 s each, about 10 s in all), all ready; products, change history and supplier links unchanged
+afterwards. Before the fix, 500 such rows failed after 9.2 s on the signed-in role's 8 s statement limit. The
+unknown-extra-field quirk stays open under KI-103.

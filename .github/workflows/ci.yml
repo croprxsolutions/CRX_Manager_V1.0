@@ -443,15 +443,8 @@ jobs:
         run: npm run check:docs
 
       - name: Workflow map freshness (ignore generated date stamp)
-        shell: bash
-        run: |
-          set -euo pipefail
-          before="$(mktemp)"
-          after="$(mktemp)"
-          sed -E 's/Updated [^<]+/Updated <date>/' docs/app-workflow-map.html > "$before"
-          node scripts/generate-workflow-map.mjs
-          sed -E 's/Updated [^<]+/Updated <date>/' docs/app-workflow-map.html > "$after"
-          diff -u "$before" "$after"
+        # Same check-only call as .husky/pre-push, so the two cannot drift.
+        run: node scripts/generate-workflow-map.mjs --check
 
       - name: Build (Vite)
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}

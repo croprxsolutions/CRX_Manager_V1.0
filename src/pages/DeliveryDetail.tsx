@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react';
+import { useEffect, useRef, useState, useCallback, useLayoutEffect, type ComponentProps } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Phone, MapPin, CheckCircle2, Package, Download, WifiOff,
+  Phone, MapPin, CheckCircle2, Package, Download, WifiOff,
   Minus, Plus, Pencil, Ban, Camera, UserPlus, AlertTriangle, RefreshCw,
   PlayCircle, Lock, Zap, FileText, Mail, RotateCcw, MessageSquarePlus, Wrench, Undo2,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
+import PhoneHeader from '../components/ui/PhoneHeader';
+import SectionCard from '../components/ui/SectionCard';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import HelpTip from '../components/ui/HelpTip';
 import Button from '../components/ui/Button';
@@ -21,6 +23,7 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
+import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { downloadDeliveryPdf } from '../lib/deliveryPdf';
 import { logActivity } from '../lib/activityLogger';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
@@ -1556,9 +1559,10 @@ export default function DeliveryDetail() {
     );
   }
 
-  const fullAddress = address
-    ? [address.address_line, address.city, address.state, address.zip].filter(Boolean).join(', ')
-    : customer?.billing_address || 'No address on file';
+  const addressText = address
+    ? [address.address_line, address.city, address.state, address.zip].map((part) => part?.trim()).filter(Boolean).join(', ')
+    : customer?.billing_address?.trim() || '';
+  const fullAddress = addressText || 'No address on file';
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
 
@@ -1575,7 +1579,7 @@ export default function DeliveryDetail() {
   const hasPendingRemainders = remainders.some((r) => r.status === 'pending');
 
   // ═══════════════════════════════════════════════════════════════════════
-  // DRIVER VIEW (dark mobile UI)
+  // DRIVER VIEW (Style D phone layout)
   // ═══════════════════════════════════════════════════════════════════════
 
   // Shared by both layouts. The driver layout used to omit it, so a driver's
@@ -1596,96 +1600,105 @@ export default function DeliveryDetail() {
   );
 
   if (isDriver) {
+    const isActive = delivery.status !== 'completed' && delivery.status !== 'cancelled';
+    const canStart = delivery.status === 'scheduled' && (isAssignedDriver || isAdminOrRep);
+    const stepIndex = DRIVER_STEPS.findIndex((step) => step.status === delivery.status);
     return (
-      <div className="dark min-h-screen bg-gray-900 -m-4 sm:-m-6 p-4 sm:p-6">
-        <button
-          onClick={() => navigate('/deliveries')}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors mb-6"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back
-        </button>
-
-        <div className="space-y-4">
-          {/* Header card */}
-          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-              <h2 className="text-xl font-semibold text-white font-heading flex items-center gap-2">
-                {delivery.delivery_number}
-                {delivery.is_quick_delivery && (
-                  <Badge variant="warning" size="sm">
-                    <span className="flex items-center gap-1"><Zap className="w-3 h-3" />Quick</span>
-                  </Badge>
-                )}
-              </h2>
-              <div className="flex items-center gap-2 shrink-0">
-                {delivery.priority && delivery.priority !== 'normal' && (
-                  <Badge variant={PRIORITY_BADGE[delivery.priority] || 'default'} size="sm">
-                    {PRIORITY_LABELS[delivery.priority]}
-                  </Badge>
-                )}
-                <Badge variant={statusToBadgeVariant[delivery.status] || 'default'} size="md">
-                  {delivery.status.replace('_', ' ')}
+      // `.phone-touch` stretches each HelpTip trigger to 44px; centre its icon in that box.
+      <div className="phone-touch -m-4 sm:-m-6 min-h-screen bg-cream pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6 [&_[role=button]]:inline-flex [&_[role=button]]:items-center [&_[role=button]]:justify-center">
+        <PhoneHeader
+          title={customer?.farm_name ?? ''}
+          eyebrow={
+            <span className="flex flex-wrap items-center gap-2 text-sm text-gray-400">
+              {delivery.delivery_number}
+              {delivery.is_quick_delivery && (
+                <Badge variant="warning" size="sm">
+                  <span className="flex items-center gap-1"><Zap className="w-3 h-3" />Quick</span>
                 </Badge>
+              )}
+              {delivery.priority && delivery.priority !== 'normal' && (
+                <Badge variant={PRIORITY_BADGE[delivery.priority] || 'default'} size="sm">
+                  {PRIORITY_LABELS[delivery.priority]}
+                </Badge>
+              )}
+              <Badge variant={statusToBadgeVariant[delivery.status] || 'default'} size="sm">
+                {delivery.status.replace('_', ' ')}
+              </Badge>
+            </span>
+          }
+          back={{ label: 'Deliveries', onClick: () => navigate('/deliveries') }}
+          steps={stepIndex >= 0 ? { labels: DRIVER_STEPS.map((step) => step.label), current: stepIndex } : undefined}
+          className="sm:px-6"
+        >
+          <p className="mt-2 text-sm text-gray-300">
+            {parseLocalDate(delivery.scheduled_date).toLocaleDateString()}
+            {delivery.scheduled_time && ` at ${delivery.scheduled_time}`}
+            {delivery.delivery_window_start && delivery.delivery_window_end &&
+              ` (${delivery.delivery_window_start} - ${delivery.delivery_window_end})`}
+          </p>
+        </PhoneHeader>
+
+        <div className="space-y-4 p-4 sm:p-6">
+          {/* Take, call and navigate: one list */}
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
+            {canTakeDelivery && (
+              <button
+                type="button"
+                onClick={() => setReassignConfirmOpen(true)}
+                disabled={reassigning}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left md:hover:bg-crx-green-tint disabled:opacity-50 transition-colors"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-crx-green text-white">
+                  <UserPlus className="w-5 h-5" />
+                </span>
+                <span>
+                  <span className="block font-semibold text-nav-dark">{reassigning ? 'Reassigning...' : 'Take This Delivery'}</span>
+                  <span className="block text-sm text-secondary">Assign to yourself</span>
+                </span>
+              </button>
+            )}
+            {customer?.phone && (
+              <a
+                href={`tel:${customer.phone}`}
+                className="flex items-center gap-3 px-4 py-3 hover:bg-crx-green-tint transition-colors"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-crx-green-light text-crx-green">
+                  <Phone className="w-5 h-5" />
+                </span>
+                <span>
+                  <span className="block font-semibold text-nav-dark">Call Customer</span>
+                  <span className="block text-sm text-secondary">{customer.phone}</span>
+                </span>
+              </a>
+            )}
+            {addressText ? (
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 px-4 py-3 hover:bg-crx-green-tint transition-colors"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-crx-green-light text-crx-green">
+                  <MapPin className="w-5 h-5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-semibold text-nav-dark">Navigate to Address</span>
+                  <span className="block text-sm text-secondary">{fullAddress}</span>
+                </span>
+              </a>
+            ) : (
+              // Maps with an empty search opens nowhere useful, so there is nothing to tap.
+              <div aria-disabled="true" className="flex items-center gap-3 px-4 py-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-400">
+                  <MapPin className="w-5 h-5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-semibold text-secondary">Navigate to Address</span>
+                  <span className="block text-sm text-secondary">{fullAddress}</span>
+                </span>
               </div>
-            </div>
-            <p className="text-lg text-white font-medium">{customer?.farm_name}</p>
-            <p className="text-sm text-gray-400 mt-1">
-              {parseLocalDate(delivery.scheduled_date).toLocaleDateString()}
-              {delivery.scheduled_time && ` at ${delivery.scheduled_time}`}
-              {delivery.delivery_window_start && delivery.delivery_window_end &&
-                ` (${delivery.delivery_window_start} - ${delivery.delivery_window_end})`}
-            </p>
+            )}
           </div>
-
-          {/* Take delivery button */}
-          {canTakeDelivery && (
-            <button
-              onClick={() => setReassignConfirmOpen(true)}
-              disabled={reassigning}
-              className="flex items-center gap-4 w-full bg-gray-800 rounded-xl p-5 border border-crx-green-on-dark active:bg-gray-700 transition-colors disabled:opacity-50"
-            >
-              <div className="w-12 h-12 rounded-full bg-crx-green flex items-center justify-center shrink-0">
-                <UserPlus className="w-6 h-6 text-white" />
-              </div>
-              <div className="text-left">
-                <p className="text-white font-medium">{reassigning ? 'Reassigning...' : 'Take This Delivery'}</p>
-                <p className="text-sm text-gray-400">Assign to yourself</p>
-              </div>
-            </button>
-          )}
-
-          {/* Call customer */}
-          {customer?.phone && (
-            <a
-              href={`tel:${customer.phone}`}
-              className="flex items-center gap-4 bg-gray-800 rounded-xl p-5 border border-gray-700 active:bg-gray-700 transition-colors"
-            >
-              <div className="w-12 h-12 rounded-full bg-crx-green flex items-center justify-center shrink-0">
-                <Phone className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <p className="text-white font-medium">Call Customer</p>
-                <p className="text-sm text-gray-400">{customer.phone}</p>
-              </div>
-            </a>
-          )}
-
-          {/* Navigate */}
-          <a
-            href={mapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-4 bg-gray-800 rounded-xl p-5 border border-gray-700 active:bg-gray-700 transition-colors"
-          >
-            <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
-              <MapPin className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <p className="text-white font-medium">Navigate to Address</p>
-              <p className="text-sm text-gray-400">{fullAddress}</p>
-            </div>
-          </a>
 
           {/* RUP Compliance Warning */}
           {rupWarnings.length > 0 && (
@@ -1715,78 +1728,80 @@ export default function DeliveryDetail() {
             </div>
           )}
 
-          {/* Products */}
-          <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-            <h3 className="text-white font-semibold mb-4">Products<HelpTip text="Adjust quantities down if you couldn't deliver everything. The remaining items automatically create a follow-up delivery." className="ml-1" /></h3>
-            <div className="space-y-3">
+          {/* Products: one list; a row delivering less than planned turns amber */}
+          <section>
+            <h2 className="mb-2 flex items-center font-heading text-xl font-bold text-nav-dark">Products<HelpTip text="Adjust quantities down if you couldn't deliver everything. The remaining items automatically create a follow-up delivery." className="ml-1" /></h2>
+            <ul className="overflow-hidden rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
               {items.map((item) => {
-                const isActive = delivery.status !== 'completed' && delivery.status !== 'cancelled';
                 const currentQty = deliveryQtys[item.id] ?? item.quantity;
+                const productName = (item.product as unknown as { product_name: string })?.product_name;
+                const short = isActive
+                  ? currentQty < item.quantity
+                  : delivery.status === 'completed' && item.quantity_delivered < item.quantity;
                 return (
-                  <div key={item.id} className="flex items-center gap-3 bg-gray-700/50 rounded-lg p-4">
-                    <Package className="w-5 h-5 text-gray-400 shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-white font-medium">
-                        {(item.product as unknown as { product_name: string })?.product_name || 'Unknown'}
-                      </p>
-                      {item.product && <ProductOptionDetails product={item.product as unknown as ProductOptionPresentationModel} textClassName="text-gray-300" />}
-                      <p className="text-sm text-gray-400">
-                        {delivery.status === 'completed'
-                          ? `Delivered: ${item.quantity_delivered}/${item.quantity} ${item.unit_size || 'units'}`
-                          : `Planned: ${item.quantity} ${item.unit_size || 'units'}`}
-                      </p>
-                    </div>
+                  <li key={item.id} className={`px-4 py-3 ${short ? 'border-l-4 border-amber-500 bg-amber-50' : ''}`}>
+                    <p className="font-heading text-lg font-bold text-nav-dark">{productName || 'Unknown'}</p>
+                    {item.product && <ProductOptionDetails product={item.product as unknown as ProductOptionPresentationModel} textClassName="text-secondary" />}
+                    <p className={`text-sm ${short ? 'font-medium text-amber-800' : 'text-secondary'}`}>
+                      {delivery.status === 'completed'
+                        ? `Delivered: ${item.quantity_delivered}/${item.quantity} ${item.unit_size || 'units'}`
+                        : `Planned: ${item.quantity} ${item.unit_size || 'units'}`}
+                      {short && isActive && ' · less than planned'}
+                    </p>
                     {isActive && (
-                      <div className="flex items-center gap-1.5">
+                      <div className="mt-3 flex items-center gap-3">
                         <button
+                          type="button"
                           onClick={() => updateDeliveryQty(item.id, currentQty - 1, item.quantity)}
-                          className="w-8 h-8 rounded-lg border border-gray-600 flex items-center justify-center text-gray-400 hover:text-white hover:border-gray-400 transition-colors"
+                          aria-label={`Less ${productName || 'item'}`}
+                          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-crx-green-light text-crx-green hover:bg-crx-green-tint transition-colors"
                         >
-                          <Minus className="w-3.5 h-3.5" />
+                          <Minus className="w-6 h-6" />
                         </button>
                         <input
                           type="number"
                           value={currentQty}
                           onChange={(e) => updateDeliveryQty(item.id, parseFloat(e.target.value) || 0, item.quantity)}
-                          className="w-16 text-center px-1 py-1.5 text-sm text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark"
+                          className="h-12 w-0 min-w-0 flex-1 rounded-xl border border-gray-300 bg-white text-center font-heading text-[1.75rem]! font-bold tabular-nums text-nav-dark focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green"
                           min="0"
                           step="any"
-                          aria-label={`Quantity for ${(item.product as unknown as { product_name: string })?.product_name || 'item'}`}
+                          aria-label={`Quantity for ${productName || 'item'}`}
                         />
                         <button
+                          type="button"
                           onClick={() => updateDeliveryQty(item.id, currentQty + 1, item.quantity)}
-                          className="w-8 h-8 rounded-lg border border-gray-600 flex items-center justify-center text-gray-400 hover:text-white hover:border-gray-400 transition-colors"
+                          aria-label={`More ${productName || 'item'}`}
+                          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-crx-green-light text-crx-green hover:bg-crx-green-tint transition-colors"
                         >
-                          <Plus className="w-3.5 h-3.5" />
+                          <Plus className="w-6 h-6" />
                         </button>
                       </div>
                     )}
-                  </div>
+                  </li>
                 );
               })}
-            </div>
-          </div>
+            </ul>
+          </section>
 
           {/* How the completion was confirmed: signature, photo proof, or recorded without proof */}
-          <CompletionProofCards key={`${delivery.id}:${signedSignatureUrl ?? ''}`} delivery={delivery} signedSignatureUrl={signedSignatureUrl} signatureUrlFailed={signatureUrlFailed} dark />
-
+          <CompletionProofCards key={`${delivery.id}:${signedSignatureUrl ?? ''}`} delivery={delivery} signedSignatureUrl={signedSignatureUrl} signatureUrlFailed={signatureUrlFailed} />
 
           {/* Photo upload (driver) */}
           {canUploadPhoto && (
-            <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white font-semibold">Delivery Photos<HelpTip text="Take up to 10 photos as proof of delivery — product condition, drop location, etc. They stay on the delivery record for staff; they are not sent to the customer." className="ml-1" /></h3>
-                <span className="text-sm text-gray-400">{countOrdinaryPhotos(photos)}/{MAX_ORDINARY_DELIVERY_PHOTOS}</span>
+            <section className="rounded-xl border border-gray-200 bg-white p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="flex items-center font-heading text-xl font-bold text-nav-dark">Delivery Photos<HelpTip text="Take up to 10 photos as proof of delivery — product condition, drop location, etc. They stay on the delivery record for staff; they are not sent to the customer." className="ml-1" /></h2>
+                <span className="text-sm text-secondary">{countOrdinaryPhotos(photos)}/{MAX_ORDINARY_DELIVERY_PHOTOS}</span>
               </div>
               {photos.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
                   {photos.map((photo) => (
                     <PrivatePhoto
                       key={photo.id}
                       bucket="delivery-photos"
                       path={deliveryPhotoPath(photo)}
                       alt={photo.caption || 'Delivery photo'}
-                      className="w-full h-36 sm:h-48 object-contain rounded-lg border border-gray-600 bg-gray-800"
+                      className="w-full h-36 sm:h-48 object-contain rounded-lg border border-gray-200 bg-gray-50"
                       placeholderClassName="text-gray-500"
                     />
                   ))}
@@ -1803,49 +1818,42 @@ export default function DeliveryDetail() {
                     className="hidden"
                   />
                   <button
+                    type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploadingPhoto}
-                    className="w-full py-3 flex items-center justify-center gap-2 text-white border border-gray-600 rounded-lg active:bg-gray-700 disabled:opacity-50 transition-colors"
+                    className="w-full min-h-12 flex items-center justify-center gap-2 font-semibold text-nav-dark border border-gray-300 rounded-xl hover:bg-cream-dark disabled:opacity-50 transition-colors"
                   >
                     <Camera className="w-5 h-5" />
                     {uploadingPhoto ? 'Uploading...' : 'Add Photo'}
                   </button>
                 </>
               )}
-            </div>
+            </section>
           )}
 
-          {/* Start Delivery section — show when scheduled */}
+          {/* Not started yet: the Start button is pinned at the bottom */}
           {delivery.status === 'scheduled' && (
-            <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-              <div className="text-center py-6">
-                <Package className="w-12 h-12 text-gray-500 mx-auto mb-3" />
-                <h3 className="text-lg font-semibold text-white">Delivery Not Started</h3>
-                <p className="text-sm text-gray-400 mt-1 mb-4">
-                  Verify inventory on your truck, then start this delivery to begin.
-                </p>
-                {(isAssignedDriver || isAdminOrRep) && (
-                  <button
-                    onClick={() => setStartModalOpen(true)}
-                    className="px-6 py-3 bg-crx-green text-white text-lg font-semibold rounded-xl active:bg-crx-green-hover transition-colors flex items-center justify-center gap-2 mx-auto"
-                  >
-                    <PlayCircle className="w-6 h-6" />
-                    Start Delivery
-                    <HelpTip text="Marks this delivery as in-progress. You can now adjust quantities, capture photos, and get the customer's signature." className="ml-1" />
-                  </button>
-                )}
-              </div>
-            </div>
+            <section className="rounded-xl border border-gray-200 bg-white p-4 text-center">
+              <Package className="w-10 h-10 text-gray-400 mx-auto mb-2" />
+              <h2 className="flex items-center justify-center font-heading text-xl font-bold text-nav-dark">
+                Delivery Not Started
+                {canStart && <HelpTip text="Marks this delivery as in-progress. You can now adjust quantities, capture photos, and get the customer's signature." className="ml-1" />}
+              </h2>
+              <p className="text-sm text-secondary mt-1">
+                Verify inventory on your truck, then start this delivery to begin.
+              </p>
+            </section>
           )}
 
           {/* Issue reporting (driver, when in_progress) */}
           {delivery.status === 'in_progress' && (
-            <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 space-y-3">
-              <h3 className="text-white font-semibold">Report Issue (Optional)</h3>
+            <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+              <h2 className="font-heading text-xl font-bold text-nav-dark">Report Issue (Optional)</h2>
               <select
                 value={driverIssueType}
                 onChange={(e) => setDriverIssueType(e.target.value as DeliveryIssueType)}
-                className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark"
+                aria-label="Issue type"
+                className={DRIVER_FIELD_CLASS}
               >
                 {Object.entries(ISSUE_TYPE_LABELS).map(([key, label]) => (
                   <option key={key} value={key}>{label}</option>
@@ -1856,29 +1864,31 @@ export default function DeliveryDetail() {
                   value={driverIssueNotes}
                   onChange={(e) => setDriverIssueNotes(e.target.value)}
                   placeholder="Describe the issue..."
+                  aria-label="Issue notes"
                   rows={2}
-                  className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark resize-none"
+                  className={`${DRIVER_FIELD_CLASS} resize-none`}
                 />
               )}
-            </div>
+            </section>
           )}
 
-          {/* Complete delivery section — only when in_progress */}
+          {/* Complete delivery section — only when in_progress; the Complete button is pinned at the bottom */}
           {delivery.status === 'in_progress' && (
-            <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 space-y-4">
-              <h3 className="text-white font-semibold">Complete Delivery<HelpTip text="Finalizes the delivery. Inventory is deducted, the customer gets an email receipt, and a draft invoice is created automatically." className="ml-1" /></h3>
+            <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+              <h2 className="flex items-center font-heading text-xl font-bold text-nav-dark">Complete Delivery<HelpTip text="Finalizes the delivery. Inventory is deducted, the customer gets an email receipt, and a draft invoice is created automatically." className="ml-1" /></h2>
               <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1">Signed By</label>
+                <label htmlFor="driver-signed-by" className="block text-sm font-semibold text-nav-dark mb-1">Signed By</label>
                 <input
+                  id="driver-signed-by"
                   type="text"
                   value={signedBy}
                   onChange={(e) => setSignedBy(e.target.value)}
                   placeholder="Customer name"
-                  className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark"
+                  className={DRIVER_FIELD_CLASS}
                 />
               </div>
               <div className="flex items-center gap-1">
-              <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
                 <input
                   type="checkbox"
                   checked={usePaperTicket}
@@ -1886,7 +1896,7 @@ export default function DeliveryDetail() {
                     setUsePaperTicket(e.target.checked);
                     if (e.target.checked) setSignatureDataUrl(null);
                   }}
-                  className="w-4 h-4 rounded border-gray-600 text-crx-green-on-dark focus:ring-crx-green-on-dark bg-gray-700"
+                  className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
                 />
                 Customer signed a paper ticket (no signal at the site)
               </label>
@@ -1894,7 +1904,7 @@ export default function DeliveryDetail() {
               <HelpTip text="Use this when there was no signal at the customer and they signed a paper delivery ticket. Take a photo of the signed ticket instead of an on-screen signature." className="ml-1" />
               </div>
               {usePaperTicket ? (
-                <div className="bg-gray-700 rounded-lg p-3 space-y-2">
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
                   <input
                     ref={paperTicketInputRef}
                     type="file"
@@ -1904,28 +1914,28 @@ export default function DeliveryDetail() {
                     className="hidden"
                   />
                   {hasPaperTicketPhoto(photos) ? (
-                    <p className="flex items-center gap-2 text-sm text-green-300">
+                    <p className="flex items-center gap-2 text-sm text-crx-green">
                       <CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved
                     </p>
                   ) : (
-                    <p className="text-sm text-yellow-300">A photo of the signed paper ticket is required.</p>
+                    <p className="text-sm text-amber-800">A photo of the signed paper ticket is required.</p>
                   )}
                   <div>
-                    <label htmlFor="paper-delivered-on" className="block text-sm font-medium text-gray-400 mb-1">Delivered on (date on the ticket)</label>
+                    <label htmlFor="paper-delivered-on" className="block text-sm font-semibold text-nav-dark mb-1">Delivered on (date on the ticket)</label>
                     <input
                       id="paper-delivered-on"
                       type="date"
                       value={paperDeliveredOn}
                       max={todayInBusinessTz()}
                       onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                      className="w-full px-4 py-3 text-base text-white bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark"
+                      className={DRIVER_FIELD_CLASS}
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => paperTicketInputRef.current?.click()}
                     disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS}
-                    className="w-full py-3 flex items-center justify-center gap-2 text-white border border-gray-600 rounded-lg active:bg-gray-600 disabled:opacity-50 transition-colors"
+                    className="w-full min-h-12 flex items-center justify-center gap-2 font-semibold text-nav-dark bg-white border border-gray-300 rounded-xl hover:bg-cream-dark disabled:opacity-50 transition-colors"
                   >
                     <Camera className="w-5 h-5" />
                     {uploadingPhoto ? 'Uploading...' : 'Take Photo of Signed Ticket'}
@@ -1934,10 +1944,10 @@ export default function DeliveryDetail() {
               ) : (
                 <>
                   <div className="flex items-center gap-1 mb-1">
-                    <span className="text-sm font-medium text-gray-400">Customer Signature</span>
+                    <span className="text-sm font-semibold text-nav-dark">Customer Signature</span>
                     <HelpTip text="Have the customer sign with their finger or mouse. This saves as part of the delivery record for your files." className="ml-1" />
                   </div>
-                  <div className="bg-gray-700 rounded-lg p-3">
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <SignatureCanvas
                       onSignatureChange={setSignatureDataUrl}
                       label=""
@@ -1947,34 +1957,43 @@ export default function DeliveryDetail() {
                 </>
               )}
               {receiptEmail && (
-                <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
                   <input
                     type="checkbox"
                     checked={emailOnComplete}
                     onChange={(e) => setEmailOnComplete(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-600 text-crx-green-on-dark focus:ring-crx-green-on-dark bg-gray-700"
+                    className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
                   />
                   Email delivery receipt to customer
                   <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
                 </label>
               )}
               {!isOnline && (
-                <div className="flex items-center gap-2 p-3 bg-yellow-900/30 border border-yellow-700 rounded-lg text-yellow-300 text-sm">
+                <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
                   <WifiOff className="h-4 w-4 shrink-0" />
                   <span>No signal. A delivery can only be completed with signal; nothing is saved offline. If the customer is signing now, use a paper ticket and complete it here once you have signal.</span>
                 </div>
               )}
-              <button
-                onClick={requestComplete}
-                disabled={completing}
-                className="w-full py-4 bg-crx-green text-white text-lg font-semibold rounded-xl active:bg-crx-green-hover disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-              >
+            </section>
+          )}
+        </div>
+
+        {/* Main action, pinned above the phone's bottom navigation; in the page flow from md up */}
+        {(canStart || delivery.status === 'in_progress') && (
+          <div className="fixed inset-x-0 bottom-[calc(2.75rem+1px+env(safe-area-inset-bottom))] z-20 border-t border-gray-200 bg-cream/95 px-4 py-2 backdrop-blur md:static md:border-0 md:bg-transparent md:px-6 md:py-0 md:backdrop-blur-none">
+            {canStart ? (
+              <button type="button" onClick={() => setStartModalOpen(true)} className={DRIVER_MAIN_ACTION_CLASS}>
+                <PlayCircle className="w-6 h-6" />
+                Start Delivery
+              </button>
+            ) : (
+              <button type="button" onClick={requestComplete} disabled={completing} className={DRIVER_MAIN_ACTION_CLASS}>
                 <CheckCircle2 className="w-6 h-6" />
                 {completing ? 'Completing...' : 'Complete Delivery'}
               </button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         {completeConfirmModal}
 
@@ -2000,6 +2019,14 @@ export default function DeliveryDetail() {
   // ADMIN / SALES REP VIEW (light desktop UI)
   // ═══════════════════════════════════════════════════════════════════════
 
+  const jumpSections = [
+    ...(!editing ? [{ id: 'delivery-products', label: 'Products', count: items.length }] : []),
+    ...(delivery.status === 'in_progress' && isAdminOrRep ? [{ id: 'delivery-complete', label: 'Complete' }] : []),
+    ...(delivery.status === 'completed' && remainders.length > 0 ? [{ id: 'delivery-remaining', label: 'Remaining', count: remainders.length }] : []),
+    { id: 'delivery-photos', label: 'Photos', count: photos.length },
+    ...(relatedInvoices.length > 0 ? [{ id: 'delivery-invoices', label: 'Invoices', count: relatedInvoices.length }] : []),
+  ];
+
   return (
     <div className="space-y-4">
       <Breadcrumbs items={[
@@ -2022,7 +2049,7 @@ export default function DeliveryDetail() {
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold font-heading text-nav-dark flex items-center gap-2">
+            <h2 className="text-4xl font-bold font-heading text-nav-dark flex items-center gap-2">
               {delivery.delivery_number}
               {delivery.is_quick_delivery && (
                 <Badge variant="warning" size="sm">
@@ -2482,6 +2509,8 @@ export default function DeliveryDetail() {
         )}
       </Card>
 
+      {jumpSections.length > 2 && <SectionJumpBar sections={jumpSections} />}
+
       {/* Cancel info for cancelled deliveries */}
       {delivery.status === 'cancelled' && delivery.cancel_reason && (
         <Card>
@@ -2540,7 +2569,7 @@ export default function DeliveryDetail() {
       )}
 
       {/* How the completion was confirmed: signature, photo proof, or recorded without proof */}
-      <CompletionProofCards key={`${delivery.id}:${signedSignatureUrl ?? ''}`} delivery={delivery} signedSignatureUrl={signedSignatureUrl} signatureUrlFailed={signatureUrlFailed} dark={false} />
+      <CompletionProofCards key={`${delivery.id}:${signedSignatureUrl ?? ''}`} delivery={delivery} signedSignatureUrl={signedSignatureUrl} signatureUrlFailed={signatureUrlFailed} />
 
       {/* Inventory Warning */}
       {inventoryWarnings.length > 0 && (delivery.status === 'scheduled' || delivery.status === 'in_progress') && (
@@ -2560,8 +2589,7 @@ export default function DeliveryDetail() {
 
       {/* Products table with order context */}
       {!editing && (
-        <Card>
-          <h3 className="text-lg font-semibold font-heading text-nav-dark mb-4">Products</h3>
+        <SectionBand id="delivery-products" icon={<Package className="w-5 h-5" />} title="Products">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -2621,13 +2649,12 @@ export default function DeliveryDetail() {
               </tbody>
             </table>
           </div>
-        </Card>
+        </SectionBand>
       )}
 
       {/* Complete Delivery section — admin/sales_rep view when in_progress */}
       {delivery.status === 'in_progress' && isAdminOrRep && (
-        <Card>
-          <h3 className="text-lg font-semibold font-heading text-nav-dark mb-4">Complete Delivery</h3>
+        <SectionBand id="delivery-complete" icon={<CheckCircle2 className="w-5 h-5" />} title="Complete Delivery">
 
           {/* Quantity adjustments per item */}
           <div className="space-y-2 mb-4">
@@ -2849,25 +2876,26 @@ export default function DeliveryDetail() {
               {isPartialDelivery ? 'Complete (Partial)' : 'Complete Delivery'}
             </Button>
           </div>
-        </Card>
+        </SectionBand>
       )}
 
       {/* Remainders for completed partial deliveries */}
       {delivery.status === 'completed' && remainders.length > 0 && (
-        <Card>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold font-heading text-nav-dark">Remaining Items</h3>
-            {hasPendingRemainders && isAdminOrRep && (
-              <Button
-                size="sm"
-                icon={<RefreshCw className="w-4 h-4" />}
-                onClick={handleCreateFollowup}
-                loading={creatingFollowup}
-              >
-                Create Follow-up Delivery
-              </Button>
-            )}
-          </div>
+        <SectionBand
+          id="delivery-remaining"
+          icon={<RefreshCw className="w-5 h-5" />}
+          title="Remaining Items"
+          action={hasPendingRemainders && isAdminOrRep && (
+            <Button
+              size="sm"
+              icon={<RefreshCw className="w-4 h-4" />}
+              onClick={handleCreateFollowup}
+              loading={creatingFollowup}
+            >
+              Create Follow-up Delivery
+            </Button>
+          )}
+        >
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -2899,7 +2927,7 @@ export default function DeliveryDetail() {
               </tbody>
             </table>
           </div>
-        </Card>
+        </SectionBand>
       )}
 
       {/* Related Notes */}
@@ -2910,34 +2938,33 @@ export default function DeliveryDetail() {
       />
 
       {/* Photos section */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold font-heading text-nav-dark">
-            Delivery Photos {photos.length > 0 && `(${photos.length})`}
-          </h3>
-          {canUploadPhoto && countOrdinaryPhotos(photos) < MAX_ORDINARY_DELIVERY_PHOTOS && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handlePhotoUpload}
-                className="hidden"
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<Camera className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => fileInputRef.current?.click()}
-                loading={uploadingPhoto}
-              >
-                Upload Photo
-              </Button>
-            </>
-          )}
-        </div>
+      <SectionBand
+        id="delivery-photos"
+        icon={<Camera className="w-5 h-5" />}
+        title={`Delivery Photos${photos.length > 0 ? ` (${photos.length})` : ''}`}
+        action={canUploadPhoto && countOrdinaryPhotos(photos) < MAX_ORDINARY_DELIVERY_PHOTOS && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handlePhotoUpload}
+              className="hidden"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Camera className="w-4 h-4" />}
+              showChevron={false}
+              onClick={() => fileInputRef.current?.click()}
+              loading={uploadingPhoto}
+            >
+              Upload Photo
+            </Button>
+          </>
+        )}
+      >
         {photos.length === 0 ? (
           <p className="text-sm text-secondary text-center py-6">No photos uploaded</p>
         ) : (
@@ -2958,15 +2985,11 @@ export default function DeliveryDetail() {
             ))}
           </div>
         )}
-      </Card>
+      </SectionBand>
 
       {/* Related Invoices (cross-link via shared order) */}
       {relatedInvoices.length > 0 && (
-        <Card>
-          <div className="flex items-center gap-2 mb-3">
-            <FileText className="w-5 h-5 text-crx-green" />
-            <h3 className="font-semibold text-nav-dark">Related Invoices</h3>
-          </div>
+        <SectionBand id="delivery-invoices" icon={<FileText className="w-5 h-5" />} title="Related Invoices">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -3004,7 +3027,7 @@ export default function DeliveryDetail() {
               </tbody>
             </table>
           </div>
-        </Card>
+        </SectionBand>
       )}
 
       {/* Start Delivery Modal */}
@@ -3146,6 +3169,26 @@ export default function DeliveryDetail() {
   );
 }
 
+// Style D phone layout for the driver view.
+const DRIVER_STEPS = [
+  { status: 'scheduled', label: 'Scheduled' },
+  { status: 'in_progress', label: 'Started' },
+  { status: 'completed', label: 'Completed' },
+];
+const DRIVER_FIELD_CLASS =
+  'w-full px-4 py-3 text-base text-nav-dark bg-white border border-gray-300 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green';
+const DRIVER_MAIN_ACTION_CLASS =
+  'flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-crx-green font-heading text-xl font-bold text-white hover:bg-crx-green-hover disabled:opacity-50 transition-colors';
+
+/** The shared Style D section band with this screen's padded body. */
+function SectionBand({ children, ...band }: ComponentProps<typeof SectionCard>) {
+  return (
+    <SectionCard {...band}>
+      <div className="p-5">{children}</div>
+    </SectionCard>
+  );
+}
+
 const EVIDENCE_LABELS: Record<string, string> = {
   signature: 'On-screen signature',
   paper_ticket: 'Signed paper ticket (photo below)',
@@ -3159,28 +3202,24 @@ const UNKNOWN_EVIDENCE_LABEL = 'Recorded proof (type not shown here)';
  * card, even when the signature image cannot be loaded. The signature image appears only for a
  * signature completion (or a legacy row from before completion_evidence existed).
  */
-function CompletionProofCards({ delivery, signedSignatureUrl, signatureUrlFailed, dark }: {
+function CompletionProofCards({ delivery, signedSignatureUrl, signatureUrlFailed }: {
   delivery: Delivery;
   signedSignatureUrl: string | null;
   signatureUrlFailed: boolean;
-  dark: boolean;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const evidence = delivery.completion_evidence ?? null;
   // A voided delivery recorded without proof keeps its amber card, so that record stays visible.
   if (delivery.status !== 'completed' && !(delivery.status === 'voided' && evidence === 'no_proof')) return null;
-  const strong = dark ? 'font-medium text-white' : 'font-medium text-nav-dark';
+  const strong = 'font-medium text-nav-dark';
   const completedLine = delivery.completed_at
     ? <p>Completed: {new Date(delivery.completed_at).toLocaleString()}</p>
     : null;
 
   if (evidence === 'no_proof') {
     return (
-      <div className={dark
-        ? 'rounded-xl p-5 border border-amber-700 bg-amber-950 text-sm text-amber-200 space-y-0.5'
-        : 'rounded-xl p-5 border border-amber-300 bg-amber-50 text-sm text-amber-900 space-y-0.5'}
-      >
-        <h3 className={`flex items-center gap-2 font-semibold mb-2 ${dark ? 'text-amber-100' : 'text-lg font-heading text-amber-900'}`}>
+      <div className="rounded-xl p-5 border border-amber-300 bg-amber-50 text-sm text-amber-900 space-y-0.5">
+        <h3 className="flex items-center gap-2 font-semibold mb-2 text-lg font-heading text-amber-900">
           <AlertTriangle className="w-5 h-5 shrink-0" /> Recorded without proof
         </h3>
         <p className="font-medium">Recorded by office: no customer signature or photo.</p>
@@ -3192,10 +3231,8 @@ function CompletionProofCards({ delivery, signedSignatureUrl, signatureUrlFailed
     );
   }
 
-  const box = dark
-    ? 'bg-gray-800 rounded-xl p-5 border border-gray-700 text-sm text-gray-400'
-    : 'bg-white rounded-xl p-5 border border-gray-200 shadow-card text-sm text-secondary';
-  const title = dark ? 'text-white font-semibold mb-3' : 'text-lg font-semibold font-heading text-nav-dark mb-3';
+  const box = 'bg-white rounded-xl p-5 border border-gray-200 shadow-card text-sm text-secondary';
+  const title = 'text-lg font-semibold font-heading text-nav-dark mb-3';
 
   if (evidence && evidence !== 'signature') {
     return (
@@ -3222,12 +3259,12 @@ function CompletionProofCards({ delivery, signedSignatureUrl, signatureUrlFailed
             src={signedSignatureUrl}
             alt="Customer signature"
             onError={() => setImageFailed(true)}
-            className={dark ? 'border border-gray-600 rounded-lg max-w-xs bg-white' : 'border border-gray-200 rounded-lg max-w-xs'}
+            className="border border-gray-200 rounded-lg max-w-xs"
           />
         ) : imageUnavailable ? (
-          <p className={dark ? 'text-amber-300' : 'text-amber-700'}>The signature image could not be shown here.</p>
+          <p className="text-amber-700">The signature image could not be shown here.</p>
         ) : (
-          <p role="status" className={dark ? 'text-gray-400' : 'text-secondary'}>Loading signature...</p>
+          <p role="status" className="text-secondary">Loading signature...</p>
         )}
         <div className="space-y-0.5">
           <p>Signed by: <span className={strong}>{delivery.signed_by || '-'}</span></p>

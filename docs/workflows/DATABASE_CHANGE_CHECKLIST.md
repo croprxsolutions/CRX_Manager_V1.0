@@ -10,6 +10,7 @@ Step-by-step guide for ANY database schema change. Follow every step — skippin
 2. **Read the canonical SQL patterns** — use `docs/reference/sql-canonical-patterns.md` for SECURITY DEFINER, actor binding, idempotency, and mutation-result shapes
 3. **Check for related tables** — if you're adding a column to `orders`, think about whether `order_items`, `deliveries`, or `invoices` also need changes
 4. **Plan the migration** — write out what SQL you need before creating the file
+5. **New functions with app callers? Split database-first from the start.** One PR cannot land a migration together with `src/` code that calls its new RPCs, because `src/lib/rpcFixtureLiveDiff.test.ts` fails until those functions are live. Put the migration, its `docs/reference/migrations.d/` record, its proofs and its changelog note in a database-only PR, and name that PR's owner. Database-first works only when the migration still accepts every write the live app sends; if it refuses a write that current `src/` code still makes, land the app change that stops sending it first, or plan one coordinated cutover. Apply it and merge it first; its stamp goes stale if other migrations go live ahead of it. **When you split an existing PR, delete the migration, its record and its proofs from the app PR at split time.** The app PR keeps only the screens, the RPC callers and its changelog line. If you leave the app PR's copy in, a restamp of the database PR puts the same SQL on `main` twice.
 
 ---
 
@@ -186,6 +187,17 @@ The only sanctioned way to apply a migration to the live database:
 6. After a successful schema change, run the `regen-schema-registry` workflow against
    that same database source. Do not use stamp-only mode as a substitute for live
    introspection; the schema-aware hooks must see the new columns and constraints.
+7. **Plan one follow-up commit if the migration adds or replaces a function.** Three checks
+   compare files with the live database, so they pass before the apply and fail only after it
+   (WP-PM-10, #1486/#1494, 2026-11-05). Name this commit in the PR plan and push it right
+   after the apply, before the merge:
+   - **Smoke body pins** (`scripts/smoke/`): re-pin any smoke or prover that pins the old
+     function body, then run that smoke live.
+   - **Sweep allowlist** (`scripts/db-invariant-sweeps/allowlist.json`): run
+     `npm run db-sweeps:live`; a new or changed function a sweep flags needs a reviewed entry
+     (or a fix), never a blanket one.
+   - **Live function list** (`src/lib/rpcFixtureLiveDiff.test.ts`): a new function name needs
+     the saved list, count and md5 refreshed from live.
 
 ---
 

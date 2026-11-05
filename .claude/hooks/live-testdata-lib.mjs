@@ -970,7 +970,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["976e6060a4cb346c6b96f05f156b84da5db9df2e8e3f58ce24b98498ca0f1a29", "quote-versions-rpc-owned.sql"],
   ["7c6edab973d810b5c6e7abc34b4121376609fd82cb82f3905075e01975e29e17", "return-credit-intent-binding.sql"],
   ["e86e0b0d2f61073fce6110913bf9260a9332f92d29c295a61d1a7810345dda49", "returns-lifecycle-rpc-owned.sql"],
-  ["c1d531420c58198a15ab94eb3e805b1778c3c3a4100633f591240a58e1492f94", "save-field-actor-binding.sql"],
+  ["a4f021aef5c0e05f5413a7bd80d662d0153cb48b19e570dbe9a826aa940069aa", "save-field-actor-binding.sql"],
   ["09b24ce34cc1c13ad3939a4270a5dbef647ef0aef80cbba8861fd625edd6d0ce", "secdef-searchpath.sql"],
   ["a214ec21734991ea10daa54e7832dc9f814d41b18bb5523dcb5ea42f2f60e93b", "section9-po-ap-controls.sql"],
   ["f0bd806a01f9114345eb47a0e1523e54a9e5ef7d2e8b40dfbd47f278bfe4503b", "status-literals.sql"],

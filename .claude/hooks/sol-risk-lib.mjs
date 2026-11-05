@@ -95,29 +95,69 @@ export const SOL_RISK_COMPARE_JQ =
   "head: (if (.commits | type) == \"array\" and (.commits | length) > 0 then .commits[-1].sha else null end), " +
   "files: (if (.files | type) == \"array\" then [.files[] | {filename, previous_filename, status}] else null end)}";
 
-// Asks GitHub for base...head (the pull request's own changes, also when main has
-// moved on: "diverged") and classifies it. `gh(args)` returns stdout; each guard
-// passes its budgeted runner. Never throws: any failure is "risky".
-export function solRiskOnGitHub({ baseSha: rawBase, headSha: rawHead, repo, gh }) {
+// GitHub's base...head comparison (the pull request's own changes, also when main
+// has moved on: "diverged"): { files } or { problem }. `gh(args)` returns stdout;
+// each guard passes its budgeted runner. Never throws.
+function compareOnGitHub({ baseSha: rawBase, headSha: rawHead, repo, gh }) {
   const repoPath = ghApiRepoPath(repo);
-  if (!repoPath) return { risky: true, reason: "the pull request's repository could not be read" };
-  if (!SHA_RE.test(String(rawBase || "")) || !SHA_RE.test(String(rawHead || ""))) return { risky: true, reason: "the base or head is not a full commit id" };
+  if (!repoPath) return { problem: "the pull request's repository could not be read" };
+  if (!SHA_RE.test(String(rawBase || "")) || !SHA_RE.test(String(rawHead || ""))) return { problem: "the base or head is not a full commit id" };
   const baseSha = String(rawBase).toLowerCase();
   const headSha = String(rawHead).toLowerCase();
   let answer;
   try {
     answer = JSON.parse(String(gh(["api", `${repoPath}/compare/${baseSha}...${headSha}`, "--jq", SOL_RISK_COMPARE_JQ])));
   } catch (error) {
-    return { risky: true, reason: `GitHub's file list could not be read (${show(String(error?.message || error).split(/\r?\n/)[0])})` };
+    return { problem: `GitHub's file list could not be read (${show(String(error?.message || error).split(/\r?\n/)[0])})` };
   }
-  if (answer === null || typeof answer !== "object" || Array.isArray(answer)) return { risky: true, reason: "GitHub's comparison answer is unreadable" };
+  if (answer === null || typeof answer !== "object" || Array.isArray(answer)) return { problem: "GitHub's comparison answer is unreadable" };
   if (!["ahead", "diverged"].includes(answer.status) || !Number.isInteger(answer.ahead_by) || answer.ahead_by < 1) {
-    return { risky: true, reason: `GitHub's comparison shows no changes of this pull request's own (status ${show(answer.status)})` };
+    return { problem: `GitHub's comparison shows no changes of this pull request's own (status ${show(answer.status)})` };
   }
-  if (String(answer.head || "").toLowerCase() !== headSha) return { risky: true, reason: "GitHub's comparison does not end at the pull request's head" };
+  if (String(answer.head || "").toLowerCase() !== headSha) return { problem: "GitHub's comparison does not end at the pull request's head" };
+  return { files: answer.files };
+}
+
+// Asks GitHub for base...head and classifies it. Never throws: any failure is "risky".
+export function solRiskOnGitHub(args) {
+  const compared = compareOnGitHub(args);
+  if (compared.problem) return { risky: true, reason: compared.problem };
   try {
-    return classifySolRisk(answer.files);
+    return classifySolRisk(compared.files);
   } catch (error) {
     return { risky: true, reason: `GitHub's file list could not be classified (${show(String(error?.message || error))})` };
   }
+}
+
+// ── staging (Mason on #1363, 2026-11-04: "yes with the guard updates first") ──
+// A merge into either base is a landing on the way to production, so both merge
+// guards give staging every gate main has. The Sol proof stays bound to
+// origin/main (write-codex-push-proof.mjs), so a merge into staging needs staging
+// to already contain the main that Sol reviewed against.
+export const GATED_MERGE_BASES = Object.freeze(["main", "staging"]);
+
+// Until Mason approves the job that applies migrations to the staging database
+// (#crx-approvals, the CI/CD plan), a migration reaches production only as today:
+// a PR into main, applied live first (ship.md Step 5). null when `files` (GitHub
+// compare entries) hold no migration; otherwise why the merge is refused.
+const MIGRATIONS_DIR = "supabase/migrations/";
+export function stagingMigrationProblem(files) {
+  if (!Array.isArray(files) || files.length === 0) return "GitHub did not return a readable list of changed files";
+  if (files.length >= SOL_RISK_MAX_FILES) return `${files.length} changed files may be a truncated list`;
+  for (const entry of files) {
+    if (entry === null || typeof entry !== "object" || typeof entry.filename !== "string" || !entry.filename) return "a changed-file entry is unreadable";
+    for (const name of [entry.filename, entry.previous_filename]) {
+      if (typeof name === "string" && name.replace(/\\/g, "/").toLowerCase().startsWith(MIGRATIONS_DIR)) {
+        return `${show(name)} is a migration, and migrations do not go through staging yet: open the PR into main, ` +
+          "apply it live first and merge it there (ship.md Step 5), then merge main into staging";
+      }
+    }
+  }
+  return null;
+}
+
+// GitHub's base...head checked for migrations. Never throws: any failure refuses.
+export function stagingMigrationOnGitHub(args) {
+  const compared = compareOnGitHub(args);
+  return compared.problem ? `${compared.problem}, so it cannot be shown to carry no migration (fail closed)` : stagingMigrationProblem(compared.files);
 }

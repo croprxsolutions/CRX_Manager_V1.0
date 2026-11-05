@@ -10,7 +10,7 @@
 --   receipt). The invoice row is read FOR SHARE so its status cannot change while the rows are written.
 --   A new BEFORE INSERT OR UPDATE OF invoice_id trigger on rup_sales_records applies the same rule to a
 --   direct insert (the rup_sales_insert policy lets an active admin insert), so no path can record a sale
---   for an unposted invoice. Its function is SECURITY INVOKER and executable by no role but its owner.
+--   for an unposted invoice. Its function is SECURITY DEFINER (to lock the invoice row) and executable by no role but its owner.
 --
 -- CALLERS (live read-only 2026-11-05): only _post_invoice_impl_20260714 and
 --   _post_deleted_delivery_recovery_invoice_20260719 call it, and both set status = 'posted' before the
@@ -182,9 +182,10 @@ $function$;
 -- The same rule on the table itself, so a direct insert (the rup_sales_insert policy lets an active admin
 -- insert) cannot record a sale for an unposted invoice either. generate_rup_sales_records is the only
 -- function that inserts here (live read-only 2026-11-05); live holds 0 register rows, and UPDATE checks only
--- a changed invoice_id, so voiding a row is unaffected.
+-- a changed invoice_id, so voiding a row is unaffected. SECURITY DEFINER because FOR SHARE needs UPDATE on
+-- invoices, which authenticated lacks; only the owner can execute it, and it only reads one invoice row.
 CREATE OR REPLACE FUNCTION public.guard_rup_sales_record_posted_invoice() RETURNS trigger
-LANGUAGE plpgsql SET search_path = public, pg_temp AS $function$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
   v_invoice record;
 BEGIN
@@ -193,11 +194,14 @@ BEGIN
   END IF;
   SELECT i.invoice_number, i.status, i.deleted_at INTO v_invoice
   FROM public.invoices i
-  WHERE i.id = NEW.invoice_id;
-  IF NOT FOUND OR v_invoice.status NOT IN ('posted', 'paid', 'overdue') OR v_invoice.deleted_at IS NOT NULL THEN
+  WHERE i.id = NEW.invoice_id
+  FOR SHARE;  -- the status cannot change before this row commits
+  IF NOT FOUND OR v_invoice.status IS NULL OR v_invoice.status NOT IN ('posted', 'paid', 'overdue')
+     OR v_invoice.deleted_at IS NOT NULL THEN
     RAISE EXCEPTION 'RUP_INVOICE_NOT_POSTED: invoice % is % and not posted; RUP sales records are written only for a posted invoice',
       coalesce(v_invoice.invoice_number, coalesce(NEW.invoice_id::text, '(none)')),
-      CASE WHEN NOT FOUND THEN 'missing' WHEN v_invoice.deleted_at IS NOT NULL THEN 'deleted' ELSE v_invoice.status END;
+      CASE WHEN NOT FOUND THEN 'missing' WHEN v_invoice.deleted_at IS NOT NULL THEN 'deleted'
+        ELSE coalesce(v_invoice.status, 'without a status') END;
   END IF;
   RETURN NEW;
 END;
@@ -252,6 +256,13 @@ BEGIN
       AND a.grantee <> p.proowner
   ) THEN
     RAISE EXCEPTION 'RUP_POSTED_VERIFY: the register trigger function is executable by a role other than its owner';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    WHERE p.oid = 'public.guard_rup_sales_record_posted_invoice()'::regprocedure
+      AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
+  ) THEN
+    RAISE EXCEPTION 'RUP_POSTED_VERIFY: the register trigger function is not SECURITY DEFINER with search_path=public, pg_temp';
   END IF;
 END;
 $postflight$;

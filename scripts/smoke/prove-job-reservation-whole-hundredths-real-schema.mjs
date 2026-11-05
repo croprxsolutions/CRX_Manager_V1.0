@@ -569,6 +569,38 @@ function main() {
   bulk(id('f8'), 'c4', 100, 0.004, 0.4);
   // A lone completed job under 0.005 gal keeps 0.01, so the booking never shows no job draw after product was applied (Sol, 2026-11-05).
   bulk(id('f9'), 'c5', 1, 0.004, 0.01);
+
+  // Sol: a completed 1 gal job (kept 1.00) is later edited down to 0.1 gal. A new 1 gal job must still
+  // draw its own step (0.99), not 0.1: kept draws count as at most 0.01 above the rounded completed demand.
+  const P10 = id('fa');
+  const edA = id('a3');
+  const edB = id('a4');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+      VALUES ('${P10}', 'KI-100 Liquid edit', 'gal', 'gal', 'liquid');
+    INSERT INTO public.inventory (product_id, location) VALUES ('${P10}', 'Main Warehouse');
+    INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+      VALUES ('${Q}', '${S}', '${P10}', 3);
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      VALUES ('${edA}', 'KI100-EDA', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '10 days');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${edA}', '${P10}', 1, 'gal', false);
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);`);
+  psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${edA}';`);
+  psql(`SET session_replication_role = replica;
+    UPDATE public.job_chemicals SET quantity = 0.1 WHERE job_id = '${edA}' AND product_id = '${P10}';
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      VALUES ('${edB}', 'KI100-EDB', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '11 days');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${edB}', '${P10}', 1, 'gal', false);
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);`);
+  const drawB = scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${edB}';`);
+  assert.equal(Number(drawB), 0.99, `after a completed job was edited down, a new 1 gal job should draw 0.99, not ${drawB}`);
+  psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${edB}';`);
+  const keptB = scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${edB}';`);
+  const leftP10 = scalar(`SELECT 3 - sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P10}';`);
+  assert.equal(Number(keptB), 0.99, `the edited-down case should keep 0.99 for the new job, not ${keptB}`);
+  console.log(`[prover] completed 1 gal job edited down to 0.1: a new 1 gal job draws ${drawB}, keeps ${keptB}, booking left ${leftP10} (was 0.1 / 1.90)`);
   console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
 }
 

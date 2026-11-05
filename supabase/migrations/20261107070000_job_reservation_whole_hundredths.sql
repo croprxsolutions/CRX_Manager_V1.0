@@ -322,7 +322,7 @@ BEGIN
         v_consumed_drawn := v_consumed_drawn - v_own_drawn - v_pending_drawn;
         -- The first kept job draw on a booking is at least 0.01, so the booking guards that look for a
         -- positive job draw (convert, delete, close) still see product already applied (Sol, 2026-11-05).
-        v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn),
+        v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), LEAST(v_consumed_drawn, ROUND(v_completed_demand, 2) + 0.01)),
                                  CASE WHEN v_consumed_drawn = 0 AND v_row.demand > 0 THEN 0.01 ELSE 0 END),
                         ROUND(CEIL(v_row.demand * 100) / 100, 2),
                         ROUND(FLOOR(GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0) * 100) / 100, 2));
@@ -345,14 +345,16 @@ BEGIN
     -- demand) and the kept draws. It never counts an active sibling, so a sibling cancelled later leaves
     -- no borrowed rounding behind. A completed job's shortfall (kept draws below the rounded completed
     -- demand, e.g. it outran an older, smaller booking) is never caught up, by one job or by many small
-    -- ones each rounding up; kept draws above it are absorbed by later steps. Active siblings may
+    -- ones each rounding up; kept draws up to 0.01 above it (the rounding this sync itself leaves) are
+    -- absorbed by later steps, and any excess beyond that (a completed job edited down later) is not,
+    -- so it never hides a later job's demand (Sol HIGH, 2026-11-05). Active siblings may
     -- briefly over-reserve together; each completion re-syncs the rest (complete_job's status update
     -- fires _sync_job_holds in the same transaction), so the kept draws move by ROUND(completed demand).
     -- Never more than the job's own demand rounded up. An active job with any demand draws at least
     -- 0.01 while the booking has it: every booking guard (convert, delete, close, rollover) treats a
     -- positive job draw as the sign an active job is using the booking, so it must never round to
     -- nothing. Its completion rebuild (above) has no such floor, so the kept draws still track ROUND.
-    v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);
+    v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), LEAST(v_consumed_drawn, ROUND(v_completed_demand, 2) + 0.01)), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);
     -- >>>JOB_DRAW_HUNDREDTHS
     v_crop_pool := v_crop_pool - v_draw;
     -- Hold the FULL application demand in the shed (channels don't offset, #A).
@@ -453,7 +455,7 @@ BEGIN
   IF NOT FOUND
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_sync_quote_job_reservations') <> 1
-     OR position('v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
+     OR position('v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), LEAST(v_consumed_drawn, ROUND(v_completed_demand, 2) + 0.01)), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
      OR position('INTO v_completed_demand' IN p.prosrc) = 0
      OR position('v_hold := GREATEST(v_row.demand, v_draw);' IN p.prosrc) = 0
      OR position('IF v_row.completing THEN' IN p.prosrc) = 0

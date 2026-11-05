@@ -399,6 +399,11 @@ function main() {
   assert.equal(prod(A1, 'rate_per_acre, rate_unit, suggested_rate'), '4|oz|4 oz/A');
   assert.equal(scalar(`SELECT concat_ws('|', rate_per_acre, rate_unit, suggested_rate) FROM public.product_parents WHERE id = '${PA}';`), '4|oz|4 oz/A');
   assert.equal(prices(A1), previewed(pv.sizes[0]));
+  // An upload that resends a parent's current rates skips that parent instead of refusing the batch (20261108130000).
+  const vSame = version(PA);
+  const same = call(ADMIN, setRates([rateRow(previewRates(PA, 4, 'oz', '4 oz/A'), '4', 'oz', '4 oz/A')], 'k-r3b'));
+  assert.equal(same.changed_count, 0, JSON.stringify(same));
+  assert.equal(version(PA), vSame);
   refused(ADMIN, setRates([rateRow(pv, '5', 'oz', null)], 'k-r4'), /PRODUCT_PARENT_STALE/);
   console.log('[prover] parent rates: previewed, saved to every size at the previewed per-acre prices, stale snapshots refused');
 

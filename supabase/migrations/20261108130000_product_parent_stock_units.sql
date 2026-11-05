@@ -16,12 +16,16 @@
 -- "100 - 1" kept that spelling under a "100-1" parent (the move refusal already requires the size's
 -- normalized number to be absent or the parent's).
 --
+-- _apply_parent_rates (private; same signature, grants re-asserted) now skips a parent whose rates and sizes
+-- already match when called by set_parent_rates, so one unchanged row of a Rates-tab upload no longer refuses the
+-- whole upload; correct_parent_rates still refuses an unchanged correction (PRODUCT_RATE_CORRECTION_NO_CHANGE).
+--
 -- New: _product_parent_unit_refusal (private; no API-role EXECUTE). Re-issued: _insert_parent_size and
--- _product_size_move_refusal (both private; same signatures, grants re-asserted), and move_product_size as
--- above. No table, row or grant on an existing object changes. Live had no parents when this was written; the
+-- _product_size_move_refusal (both private; same signatures, grants re-asserted), and move_product_size and
+-- _apply_parent_rates as above. No table, row or grant on an existing object changes. Live had no parents when this was written; the
 -- preflight refuses the apply if a seed or each parent already mixes stock units.
 --
--- Rollback: re-issue _insert_parent_size, _product_size_move_refusal and move_product_size from
+-- Rollback: re-issue _insert_parent_size, _product_size_move_refusal, move_product_size and _apply_parent_rates from
 -- 20261108120000_product_parents.sql, then
 -- DROP FUNCTION public._product_parent_unit_refusal(public.product_parents, text, uuid);
 
@@ -32,7 +36,9 @@ BEGIN
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public._product_size_move_refusal(uuid,uuid)'::regprocedure) IS DISTINCT FROM '0b850586f48a49ff47122b6b1573726b'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
-       WHERE oid = 'public.move_product_size(uuid,uuid,bigint,bigint,text,text,text,jsonb,text)'::regprocedure) IS DISTINCT FROM 'aeb4c51b18b8d786b36b6afbd6dbb7ec' THEN
+       WHERE oid = 'public.move_product_size(uuid,uuid,bigint,bigint,text,text,text,jsonb,text)'::regprocedure) IS DISTINCT FROM 'aeb4c51b18b8d786b36b6afbd6dbb7ec'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
+       WHERE oid = 'public._apply_parent_rates(uuid,bigint,numeric,text,text,jsonb,boolean,text)'::regprocedure) IS DISTINCT FROM 'd52ecfc3943bd3b2403336437bea356b' THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_PARENT_HELPERS_CHANGED: re-base this on the installed bodies';
   END IF;
   -- The new check guards adds and moves; a seed or each parent that already mixes units must be fixed first.
@@ -235,11 +241,117 @@ ALTER FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, 
 REVOKE ALL ON FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, jsonb, text) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, jsonb, text) TO authenticated;
 
+CREATE OR REPLACE FUNCTION public._apply_parent_rates(p_parent_id uuid, p_expected_parent_version bigint,
+  p_rate_per_acre numeric, p_rate_unit text, p_suggested_rate text, p_expected_sizes jsonb,
+  p_correction boolean, p_reason text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_sizes uuid[];
+  v_before public.product_parents%ROWTYPE;
+  v_parent public.product_parents%ROWTYPE;
+  v_unit text := NULLIF(btrim(p_rate_unit), '');
+  v_suggested text := NULLIF(btrim(p_suggested_rate), '');
+  v_size record;
+  v_exp jsonb;
+  v_event bigint;
+  v_copy jsonb;
+  v_affected jsonb := '[]'::jsonb;
+  v_tier text;
+  v_name text;
+  v_pid uuid;
+  v_any_change boolean := false;
+BEGIN
+  IF NOT public._product_rate_value_ok(to_jsonb(p_rate_per_acre::text)) THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a rate per acre must be blank or a number of 0 or more with at most 6 decimals';
+  END IF;
+  IF length(v_unit) > 40 OR length(v_suggested) > 200 THEN
+    RAISE EXCEPTION 'PRODUCT_RATE_INVALID: the rate unit or suggested rate is too long';
+  END IF;
+  IF p_expected_sizes IS NULL OR jsonb_typeof(p_expected_sizes) <> 'array' THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_RATES_PREVIEW_REQUIRED: send every size''s preview snapshot';
+  END IF;
+  v_sizes := public._lock_product_parent(p_parent_id, p_expected_parent_version);
+  SELECT * INTO v_before FROM public.product_parents WHERE id = p_parent_id;
+  IF v_before.product_form IN ('seed', 'each') THEN v_unit := NULL; END IF;
+  IF (SELECT count(*) FROM jsonb_array_elements(p_expected_sizes)) <> cardinality(v_sizes)
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(p_expected_sizes) e
+                WHERE jsonb_typeof(e) <> 'object' OR NOT ((e->>'product_id') = ANY(v_sizes::text[]))
+                   OR jsonb_typeof(e->'pricing_version') <> 'number' OR jsonb_typeof(e->'prices') <> 'object')
+     OR (SELECT count(DISTINCT e->>'product_id') FROM jsonb_array_elements(p_expected_sizes) e) <> cardinality(v_sizes) THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_RATES_STALE: the sizes of "%" changed since the preview; preview again', v_before.name;
+  END IF;
+
+  FOR v_size IN SELECT p.id, p.product_name, p.pricing_version, p.unit_size, p.inventory_unit, p.product_form,
+                       p.rate_per_acre, p.rate_unit, p.suggested_rate
+                  FROM public.products p WHERE p.id = ANY(v_sizes) ORDER BY p.id LOOP
+    SELECT e INTO v_exp FROM jsonb_array_elements(p_expected_sizes) e WHERE e->>'product_id' = v_size.id::text;
+    IF (v_exp->>'pricing_version')::numeric IS DISTINCT FROM v_size.pricing_version
+       OR (v_exp->>'unit_size') IS DISTINCT FROM v_size.unit_size
+       OR (v_exp->>'inventory_unit') IS DISTINCT FROM v_size.inventory_unit
+       OR (v_exp->>'product_form') IS DISTINCT FROM v_size.product_form
+       OR (v_exp->>'rate_per_acre')::numeric IS DISTINCT FROM v_size.rate_per_acre
+       OR NULLIF(v_exp->>'rate_unit', '') IS DISTINCT FROM NULLIF(v_size.rate_unit, '')
+       OR NULLIF(btrim(v_exp->>'suggested_rate'), '') IS DISTINCT FROM NULLIF(btrim(v_size.suggested_rate), '') THEN
+      RAISE EXCEPTION 'PRODUCT_RATES_STALE: % changed since the preview; preview again', v_size.product_name;
+    END IF;
+    IF NOT public._product_rate_unit_ok(p_rate_per_acre,
+             CASE WHEN v_size.product_form IN ('seed', 'each') THEN v_size.inventory_unit ELSE v_unit END,
+             v_size.rate_unit, v_size.product_form, COALESCE(NULLIF(v_size.inventory_unit, ''), v_size.unit_size)) THEN
+      RAISE EXCEPTION 'PRODUCT_RATE_UNIT_INVALID: the rate unit is missing or not a known unit for %', v_size.product_name;
+    END IF;
+    v_any_change := v_any_change OR p_rate_per_acre IS DISTINCT FROM v_size.rate_per_acre
+      OR v_suggested IS DISTINCT FROM NULLIF(btrim(v_size.suggested_rate), '')
+      OR (v_size.product_form NOT IN ('seed', 'each') AND v_unit IS DISTINCT FROM NULLIF(v_size.rate_unit, ''));
+  END LOOP;
+  -- Nothing to do only when the parent and every size already hold these rates: a correction is refused, while
+  -- set_parent_rates skips the parent (an empty array adds nothing to its rows), so one unchanged row of an upload
+  -- does not refuse the others.
+  IF NOT v_any_change AND p_rate_per_acre IS NOT DISTINCT FROM v_before.rate_per_acre
+     AND v_unit IS NOT DISTINCT FROM v_before.rate_unit AND v_suggested IS NOT DISTINCT FROM v_before.suggested_rate THEN
+    IF p_correction THEN
+      RAISE EXCEPTION 'PRODUCT_RATE_CORRECTION_NO_CHANGE: the parent and every size already have these rates';
+    END IF;
+    RETURN '[]'::jsonb;
+  END IF;
+
+  UPDATE public.product_parents SET rate_per_acre = p_rate_per_acre, rate_unit = v_unit, suggested_rate = v_suggested,
+    parent_version = parent_version + 1, updated_by = auth.uid(), updated_at = now()
+  WHERE id = p_parent_id RETURNING * INTO v_parent;
+  v_event := public._next_product_parent_event_id();
+  SELECT full_name INTO v_name FROM public.profiles WHERE id = auth.uid();
+  FOREACH v_pid IN ARRAY v_sizes LOOP
+    SELECT e INTO v_exp FROM jsonb_array_elements(p_expected_sizes) e WHERE e->>'product_id' = v_pid::text;
+    v_copy := public._copy_parent_to_size(p_parent_id, v_pid, v_event, true, p_correction, false);
+    -- A unit conversion changed since the preview moves the prices but no version.
+    FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
+      IF NOT (v_exp->'prices' ? v_tier) OR (v_copy->'after'->v_tier) IS DISTINCT FROM (v_exp->'prices'->v_tier) THEN
+        RAISE EXCEPTION 'PRODUCT_RATE_PREVIEW_CHANGED: the per-acre prices changed since the preview; preview again: %',
+          v_copy->'after'->>'product_name' USING ERRCODE = 'check_violation';
+      END IF;
+    END LOOP;
+    IF p_correction THEN
+      INSERT INTO public.product_rate_events
+        (event_type, product_id, reason, before_values, after_values, changed_by, changed_by_name)
+      VALUES ('corrected', v_pid, p_reason, v_copy->'before', v_copy->'after', auth.uid(), v_name);
+    END IF;
+    v_affected := v_affected || v_copy;
+  END LOOP;
+  PERFORM public._product_parent_event(v_event, p_parent_id, CASE WHEN p_correction THEN 'rates_corrected' ELSE 'rates_set' END,
+    p_reason, NULL, public._product_parent_values(v_before), public._product_parent_values(v_parent), v_affected);
+  RETURN jsonb_build_object('parent_id', p_parent_id, 'parent_version', v_parent.parent_version,
+    'event_id', v_event, 'sizes', v_affected);
+END;
+$function$;
+ALTER FUNCTION public._apply_parent_rates(uuid, bigint, numeric, text, text, jsonb, boolean, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._apply_parent_rates(uuid, bigint, numeric, text, text, jsonb, boolean, text) FROM PUBLIC, anon, authenticated, service_role;
+
 DO $postflight$
 BEGIN
   IF has_function_privilege('authenticated', 'public._product_parent_unit_refusal(public.product_parents,text,uuid)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._insert_parent_size(public.product_parents,jsonb,text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public._product_size_move_refusal(uuid,uuid)', 'EXECUTE') THEN
+     OR has_function_privilege('authenticated', 'public._product_size_move_refusal(uuid,uuid)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._apply_parent_rates(uuid,bigint,numeric,text,text,jsonb,boolean,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_UNIT_GRANTS_WRONG';
   END IF;
   IF NOT has_function_privilege('authenticated', 'public.move_product_size(uuid,uuid,bigint,bigint,text,text,text,jsonb,text)', 'EXECUTE')

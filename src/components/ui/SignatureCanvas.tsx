@@ -23,16 +23,33 @@ export default function SignatureCanvas({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Handle high-DPI displays
-    const ratio = Math.max(window.devicePixelRatio || 1, 1);
-    canvas.width = canvas.offsetWidth * ratio;
-    canvas.height = canvas.offsetHeight * ratio;
-    canvas.getContext('2d')?.scale(ratio, ratio);
-
     const pad = new SignaturePad(canvas, {
       backgroundColor: 'rgb(255, 255, 255)',
       penColor: 'rgb(0, 0, 0)',
     });
+
+    // Match the drawing surface to the box (high-DPI aware). The box resizes when a phone
+    // rotates, so redo it then and rescale any strokes already drawn to keep the pen under the finger.
+    let sizedWidth = 0;
+    const fitToBox = () => {
+      const boxWidth = canvas.offsetWidth;
+      if (!boxWidth || boxWidth === sizedWidth) return;
+      const scale = sizedWidth ? boxWidth / sizedWidth : 1;
+      const strokes = pad.toData();
+      const ratio = Math.max(window.devicePixelRatio || 1, 1);
+      canvas.width = boxWidth * ratio;
+      canvas.height = canvas.offsetHeight * ratio;
+      canvas.getContext('2d')?.scale(ratio, ratio);
+      sizedWidth = boxWidth;
+      pad.clear();
+      if (strokes.length) {
+        pad.fromData(strokes.map((g) => ({ ...g, points: g.points.map((p) => ({ ...p, x: p.x * scale, y: p.y * scale })) })));
+        onSignatureChange(pad.toDataURL('image/png'));
+      }
+    };
+    fitToBox();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitToBox);
+    observer?.observe(canvas);
 
     pad.addEventListener('endStroke', () => {
       if (!pad.isEmpty()) {
@@ -47,6 +64,7 @@ export default function SignatureCanvas({
     padRef.current = pad;
 
     return () => {
+      observer?.disconnect();
       pad.off();
     };
   }, [disabled, onSignatureChange]);

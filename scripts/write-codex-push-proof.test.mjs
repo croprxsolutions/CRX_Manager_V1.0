@@ -1689,6 +1689,30 @@ function collisionPromptSkipsWork(prompt) {
   assert.match(one("docs/changelog.d/sub/x.md"), /not post-apply paperwork/, "post-apply: no nested folders");
   assert.match(one("docs/manual/known_issues.md"), /not post-apply paperwork/, "post-apply: paths match exactly");
   assert.match(postApplyProblem({ entries: [], readFile: read }), /changes nothing/, "post-apply: an empty commit is refused");
+  // The registry refresh's one required test edit: this PR's migration timestamp joins
+  // MIGRATIONS_AWAITING_TYPE_REGENERATION (regen-schema-registry Step 7; KI-27 retro, 2026-11-05).
+  const CONTRACTS = "src/lib/rpcContracts.test.ts";
+  const LIST = [
+    "const other = new Set<string>([", "  '20261101000000',", "]);",
+    "const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([", "  '20261107060000',", "]);",
+    "const MUTATOR_INVENTORY_EXEMPT = {};", "",
+  ].join("\n");
+  const contracts = (after, before = LIST, prMigrations = ["supabase/migrations/20261107150000_x.sql"]) => postApplyProblem({
+    entries: [{ path: CONTRACTS, oldMode: "100644", newMode: "100644" }],
+    readFile: (side) => (side === "old" ? before : after),
+    prMigrations,
+  });
+  const NEW_LINE = "  '20261107150000',\n";
+  const withLine = (line, anchor = "  '20261107060000',\n") => LIST.replace(anchor, `${anchor}${line}`);
+  const crlfText = (s) => s.replace(/\n/g, "\r\n");
+  assert.equal(contracts(withLine(NEW_LINE)), null, "post-apply: this PR's timestamp may join the awaiting-regeneration list");
+  assert.equal(contracts(crlfText(withLine(NEW_LINE)), crlfText(LIST)), null, "post-apply: CRLF files compare the same");
+  assert.match(contracts(withLine("  '20261107160000',\n")), /changed more than/, "post-apply: another migration's timestamp is refused");
+  assert.match(contracts(withLine(NEW_LINE, "  '20261101000000',\n")), /changed more than/, "post-apply: the timestamp must go in the awaiting-regeneration list");
+  assert.match(contracts(withLine(NEW_LINE).replace("{}", "{ x: 'y' }")), /changed more than/, "post-apply: any other edit is refused");
+  assert.match(contracts(LIST.replace("  '20261107060000',\n", "")), /changed more than/, "post-apply: removing an entry is refused");
+  assert.match(contracts(LIST), /changed more than/, "post-apply: an unchanged list is not this edit");
+  assert.match(contracts(withLine(NEW_LINE), LIST, []), /changed more than/, "post-apply: with no PR migrations nothing may join");
   assert.equal(allowlistRekeyProblem('{"entries":[]}', '{"entries":[]}'), null, "post-apply: an unchanged allowlist passes");
   assert.match(allowlistRekeyProblem('{"entries":[]}', '{"entries":{}}'), /no entries list/, "post-apply: entries must stay a list");
 }

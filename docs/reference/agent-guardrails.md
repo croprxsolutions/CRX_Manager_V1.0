@@ -93,7 +93,8 @@
 > `post_apply`, same `base_sha` as the source) only when HEAD is ONE ordinary commit on top of a
 > head with a clean Sol proof under 24 hours old (the original full review too), and every file it touches is a
 > regular non-executable file among: `docs/reference/migrations.d/<name>.md` for a migration the reviewed PR adds
-> and `docs/changelog.d/*.md` (edited or added; never a `README.md` or agent instruction file), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), and
+> and `docs/changelog.d/*.md` (edited or added; never a `README.md` or agent instruction file), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), `src/lib/rpcContracts.test.ts` when its
+> only change is adding the PR's own migration timestamps to `MIGRATIONS_AWAITING_TYPE_REGENERATION` (Mason, 2026-11-05), and
 > `scripts/db-invariant-sweeps/allowlist.json`, where every changed entry keeps its position, predicate and other
 > fields, keeps the signature before `#` with a NEW 12-hex hash, appends to its justification, and has a real
 > `YYYY-MM-DD` `dated` that never moves back; no entry is added or removed and nothing outside `entries` changes.
@@ -237,6 +238,8 @@
 ---
 
 ### Schema-Aware PreToolUse Hooks (`.claude/hooks/`)
+> **Deny-or-silent (2026-11-05).** A PreToolUse guard prints only a refusal (`deny`, or bash-safety's `ask`); with no objection it exits 0 and prints nothing, or only a `systemMessage` warning when it had to skip its check. It never prints `allow`, because Claude Code treats `allow` as a pre-approval that skips the normal permission prompt. A guard's exemption marker or proof therefore means "this guard stops blocking", not "pre-approved". The one deliberate exception is `unattended-autopilot.mjs`, whose armed mode exists to pre-approve.
+
 These mostly run when Claude Code tries to Write or Edit a file — they refuse the write if it violates a known bug pattern. They read `.claude/schema-registry.json` (refresh it through the `regen-schema-registry` live-introspection skill). Matcher wiring (narrowed to cut per-tool-call process spawns; every guard ALSO gates on tool name in-script, so the matcher is a performance filter, not the safety boundary): in both Claude and Codex, `migration-apply-guard.mjs`, `mcp-tool-guard.mjs`, and `live-testdata-guard.mjs` run on `mcp__.*` because they only act on MCP tools. Claude's `pr-merge-guard.mjs` runs on `Bash|PowerShell|mcp__.*`; Codex uses the separate `production-action-guard.mjs`, which remains on `*` so native file writes and patch tools cannot bypass its protected-harness checks. `review-proof-guard.mjs`, `hold-latch-guard.mjs`, and `unattended-autopilot.mjs` remain on `*` where wired because they legitimately inspect every call. The `Write|Edit|MultiEdit` rule modules below remain path-matched in both manifests (the matcher gained `MultiEdit` in PR #593, 2026-09-04).
 
 | Hook | What it blocks | Bug it prevents |

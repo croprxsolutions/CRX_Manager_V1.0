@@ -29,6 +29,14 @@
         "pricing"
       ]
     },
+    "replay_binding_batch4c": {
+      "chain": "smoke-replay-binding-batch4c.sql",
+      "container_only": true,
+      "container_prover": "prove-replay-binding-batch4c-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-replay-binding-batch4c-real-schema.mjs, never through run-smoke.mjs against the live database: duplicate_quote, create_delivery_with_items and create_followup_delivery draw customer-visible quote and delivery numbers from non-transactional sequences that a rollback does not return (the prover reports which document-number sequences the chain moved), and the chain plants [SMOKE] customers, products, orders, purchase orders, deliveries, cycle counts and blend tickets, which the LIVE-DATA GUARD refuses. Proves the twelve batch 4c functions replay a stored receipt only for the same person and the exact same request (KNOWN_ISSUES KI-10 batch 4c).",
+      "covers": ["submit_purchase_order", "cancel_purchase_order", "delete_purchase_order", "duplicate_quote", "edit_delivery", "reassign_delivery", "batch_reschedule_deliveries", "confirm_delivery", "create_delivery_with_items", "create_followup_delivery", "cancel_cycle_count", "reverse_blend_ticket_approval"],
+      "area": ["billing", "inventory", "idempotency", "security"]
+    },
     "order_replay_binding_batch4b": {
       "chain": "smoke-order-replay-binding-batch4b.sql",
       "container_only": true,
@@ -955,6 +963,19 @@
       "area": [
         "lifecycle",
         "billing"
+      ]
+    },
+    "tiers_credit_limits_admin_only": {
+      "chain": "smoke-tiers-credit-limits-admin-only.sql",
+      "description": "Migration 20261111100000 (Mason 2026-11-01, permissions): a sales rep's direct update of a customer's price tier is refused TIER_ADMIN_ONLY; a rep's save_customer that changes the credit limit is refused CREDIT_LIMIT_ADMIN_ONLY, while re-sending the unchanged tier and limit is accepted; a rep's new customer on the Settings Default Tier with no limit is accepted and one with a limit is refused; an admin changes both; a direct API update of a booking's tier is refused QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE even for an admin, while a direct update of header notes still works; a rep's direct insert of a tier-3 or already-planned booking is refused. Fails on the old bodies at A, B, D, F and G. Terminal rollback.",
+      "covers": [
+        "guard_customer_rep_edit_20261013",
+        "guard_quote_direct_tier_planned_20261107",
+        "save_customer"
+      ],
+      "area": [
+        "security",
+        "regression"
       ]
     },
     "invoice_resave_keeps_cost": {

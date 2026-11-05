@@ -915,7 +915,8 @@ export default function CycleCounts() {
 
     await runCriticalAction({
       action: async () => {
-        const key = cancelCycleCountIdem.getKey();
+        // Keyed per count: the server binds the key to the count it cancels (KI-10 batch 4c).
+        const key = cancelCycleCountIdem.getKeyFor(activeCount.id);
         const { data, error } = await supabase.rpc('cancel_cycle_count', {
           p_cycle_count_id: activeCount.id,
           p_performed_by: profile.id,
@@ -923,7 +924,7 @@ export default function CycleCounts() {
         });
         if (error) throw error;
         assertRpcResult(data, 'cancel_cycle_count');
-        cancelCycleCountIdem.resetKey();
+        cancelCycleCountIdem.resetKeyFor(activeCount.id);
       },
       toast,
       successMessage: 'Cycle count cancelled',

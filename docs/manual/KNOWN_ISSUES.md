@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 14 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
@@ -225,7 +225,15 @@ PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invo
 `update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
 `create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, applied live 2026-11-03, ledger `20261103013009`) binds
 `price_order`, `update_order_items` and `mark_inventory_row_verified` (MED, PR #1042 follow-up 3; Mason: "batch
-it"). Batch 4d (`20261111200000`, not yet applied; apply after batch 4c `20261110160000`) binds 25 records
+it"). Batch 4c (`20261110160000`, applied live 2026-11-05) binds the purchase-order, quote-copy, delivery, cycle-count
+and blend-ticket writes: `submit_purchase_order`, `cancel_purchase_order`, `delete_purchase_order`,
+`duplicate_quote`, `edit_delivery`, `reassign_delivery`, `batch_reschedule_deliveries`, `confirm_delivery`,
+`create_delivery_with_items`, `create_followup_delivery`, `cancel_cycle_count`, `reverse_blend_ticket_approval`.
+Accepted without a wrapper (reason): `void_invoice` (already binds its request); `save_purchase_order` (its bulk
+path is bound; the single save is an edit of one record); `increment_customer_prepay`, `restore_cancelled_delivery`
+and the `_section9_*` inner bodies (no app caller; only the database owner and service role can run them);
+`apply_remaining_prepayments` and `batch_apply_all_prepayments` (always refused, disabled);
+`admin_save_application_service` (admin-only edit of one setting row). Batch 4d (`20261111200000`, not yet applied; apply any time after batch 4c) binds 25 records
 functions and requires a key on each: `admin_update_profile`, `batch_approve_blend_tickets`,
 `batch_reject_blend_tickets`, `bulk_create_label_drafts`, `commit_label_draft`, `create_label_draft`,
 `create_blend_ticket`, `save_blend_ticket`, `save_blend_ticket_fields`, `dismiss_watchdog_flag`, `delete_vendor`,
@@ -233,7 +241,7 @@ functions and requires a key on each: `admin_update_profile`, `batch_approve_ble
 `supersede_customer_fact`, `save_blend_recipe`, `save_field`, `save_field_crop_history`, `save_field_geometry`,
 `save_field_polygons`, `set_application_record_lots`, `set_field_boundary`, `set_field_override_acres`.
 It also limits `save_blend_recipe` to an active admin or sales rep, as both app recipe screens already were.
-Remaining: notification RPCs and the other operations functions (batch 4e), plus batch 4c.
+Remaining: notification RPCs and the other operations functions (batch 4e).
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
 **HIGH on money paths · FIXED IN CODE 2026-11-02 (branch `claude/crx-idempotency-keys-4a3741`; live once merged) · money**
@@ -270,7 +278,7 @@ a reload and Finish it left one order and 100 gal drawn. Other screens still kee
 **Remaining risk:** for the unbound functions, a create retried with different details after a lost reply opens
 the record already created without the later edits, and an edited retry of an existing record applies the new edit
 after the old one. Neither makes a second record or moves money twice; a clear refusal needs server-side binding
-(KI-10 batches 4c/4d), not a screen change. Once batch 4d is applied, `save_field` is bound: a changed retry
+(KI-10 batches 4c/4d; batch 4c binds `edit_delivery` and `reassign_delivery`), not a screen change. Once batch 4d is applied, `save_field` is bound: a changed retry
 with the same key is refused, and nothing changes, instead of opening the field already created; after a
 refresh the new field is in the list. Field Setup shows that refusal as the raw code
 `IDEMPOTENCY_INTENT_MISMATCH` rather than the plain message in `errorSanitizer.ts` (cosmetic; follow-up). Quotes' Convert to Order
@@ -564,6 +572,17 @@ put that stock back a second time and reopened the voided order. Reproduced 2026
 hand, deliver 10, void the order, void the delivery: 110 on hand, order `confirmed`). The fix refuses that delivery
 void (`ORDER_VOIDED_DELIVERY_LOCKED`); nothing moves. Live 2026-11-04: 0 voided orders, 0 completed deliveries on
 voided orders. Proof: as KI-101.
+
+### KI-105 — A quote's price tier is not checked against the customer's assigned tier
+**LOW today, MUST before the first regular rep · PARKED 2026-11-05 · quotes/pricing · To-Do 1.6**
+Quote Builder lets any tier be picked, so a quote can be priced at a tier other than the customer's assigned one
+with no warning. A screen check (a note with "Use Tier N" and a "Quote at Tier M anyway" tick box that Save
+needs) is built on branch `claude/quote-tier-credit-status` and parked unmerged (Mason, 2026-11-05: screen only,
+then parked until the database rule exists). Only office staff and admins quote today. Before the first regular
+rep gets an account: the database must refuse a different tier from reps (admins may override). When it resumes,
+also fix Sol's two MED findings on that branch: (1) the customer's assigned tier is read once, so an admin
+changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
+quote changes the tier label without repricing its locked lines.
 
 ## Database and release process
 

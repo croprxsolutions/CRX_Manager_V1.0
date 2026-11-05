@@ -553,6 +553,34 @@ describe('useUncertainMutationIntent', () => {
     now.mockRestore();
   });
 
+  it('keeps the server token in memory when this browser refuses to store it (KI-27)', async () => {
+    let nowMs = Date.parse('2026-08-26T12:00:00Z');
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+    const options = { operation: 'adjust_inventory', userId: 'admin-ki27-full', surface: 'inventory', scope: 'inv-ki27-full' };
+    const first = renderHook(() => useUncertainMutationIntent<{ delta: number }>(options));
+    await act(async () => first.result.current.beginIntent({ delta: 1 }));
+    const key = first.result.current.getIdempotencyKey();
+    first.unmount();
+    nowMs += 24 * 60 * 60 * 1000;
+    const expired = renderHook(() => useUncertainMutationIntent<{ delta: number }>(options));
+    const realSet = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, v: string) {
+      if (k.startsWith('crx:uncertain-mutation-clear-check:')) throw new Error('QuotaExceededError');
+      return realSet.call(this, k, v);
+    });
+    clearCheck.mockResolvedValueOnce({
+      data: { safe: false, reason: 'first_check', checked_at: '2026-08-26T12:00:10+00:00', first_check_token: '1.mem' },
+      error: null,
+    });
+    await expect(expired.result.current.clearExpiredIntent(key)).rejects.toMatchObject({ reason: 'first_check' });
+    clearCheck.mockResolvedValueOnce({ data: { safe: true, reason: 'not_recorded_after_wait', checked_at: '2026-08-26T12:16:00+00:00' }, error: null });
+    await act(async () => expired.result.current.clearExpiredIntent(key));
+    expect(clearCheck).toHaveBeenLastCalledWith('check_uncertain_request_clearable', { p_request_key: key, p_first_check_token: '1.mem' });
+    setItem.mockRestore();
+    expired.unmount();
+    now.mockRestore();
+  });
+
   it('refuses to clear when IndexedDB holds a damaged record behind an expired mirror (KI-27)', async () => {
     let nowMs = Date.parse('2026-08-26T12:00:00Z');
     const now = vi.spyOn(Date, 'now').mockImplementation(() => nowMs);

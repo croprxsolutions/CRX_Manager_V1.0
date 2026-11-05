@@ -62,6 +62,8 @@ const LEGACY_SESSION_PREFIX = 'crx:uncertain-mutation:v1:';
 const ACKNOWLEDGMENT_PREFIX = 'crx:uncertain-mutation-ack:v1:';
 // The server time of the first clear check, per request key (KI-27).
 const CLEAR_CHECK_PREFIX = 'crx:uncertain-mutation-clear-check:v2:';
+// Fallback when localStorage refuses the token, so this tab's wait still counts down.
+const clearCheckTokens = new Map<string, string>();
 const DURABLE_INTENT_TAB_ID = 'crx:durable-mutation:tab-id';
 const DURABLE_INTENT_LIVE_CLAIM_PREFIX = 'crx:durable-mutation:live-claim:';
 const DURABLE_INTENT_DB = 'crx_durable_mutation_intents';
@@ -1131,9 +1133,9 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     // checks 15+ minutes apart by server time (it can no longer commit). The first
     // check's time comes back as a token the server signed; it is stored as-is.
     const checkKey = `${CLEAR_CHECK_PREFIX}${expectedIdempotencyKey}`;
-    let firstCheckToken: string | null = null;
+    let firstCheckToken: string | null = clearCheckTokens.get(checkKey) ?? null;
     try {
-      firstCheckToken = window.localStorage.getItem(checkKey);
+      firstCheckToken = window.localStorage.getItem(checkKey) ?? firstCheckToken;
     } catch {
       // Without the token the server simply starts the wait again.
     }
@@ -1145,6 +1147,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     const verdict = assertRpcResult<ClearCheckVerdict>(data, 'check_uncertain_request_clearable');
     if (verdict.safe !== true) {
       if (verdict.reason === 'first_check' && verdict.first_check_token) {
+        clearCheckTokens.set(checkKey, verdict.first_check_token);
         try {
           window.localStorage.setItem(checkKey, verdict.first_check_token);
         } catch {
@@ -1189,6 +1192,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     } finally {
       db.close();
     }
+    clearCheckTokens.delete(checkKey);
     try {
       // Another tab may have started a new request since the read above; keep its mirror.
       const current = readDurableRecord<T>(storageKey, options);

@@ -329,7 +329,10 @@ export default function NewOrder() {
       const cost = product.current_cost || 0;
 
       // As create_direct_order stores it: ROUND(quantity × price, 2), exact decimals (To-Do 1.7).
-      const line = pricedLine(pricePerUnit, cost, qty);
+      // A quantity that is not a real number (e.g. "1e309") stays non-finite, so the credit check refuses it.
+      const line = Number.isFinite(pricePerUnit * qty)
+        ? pricedLine(pricePerUnit, cost, qty)
+        : { totalPrice: pricePerUnit * qty, profit: (pricePerUnit - cost) * qty };
 
       return {
         ...item,
@@ -337,7 +340,8 @@ export default function NewOrder() {
         unit_cost: cost,
         total_price: line.totalPrice,
         profit: line.profit,
-        net_margin: line.netMargin,
+        // The database's order-line margin: from the unit price and cost, not the rounded line.
+        net_margin: pricePerUnit > 0 ? Math.round(((pricePerUnit - cost) / pricePerUnit) * 10000) / 100 : 0,
       };
     },
     [products, getTierPrice]

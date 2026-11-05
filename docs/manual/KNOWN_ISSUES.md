@@ -37,7 +37,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Status | Count |
 |---|---|
 | Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
-| Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
+| Accepted by Mason (KI-60 to KI-71, KI-79, KI-80, KI-104) | 15 |
 | Closed as FIXED, with proof (bottom of file and archive) | 13 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
@@ -748,6 +748,7 @@ Delete with a grep of every reference first; keep one copy of each helper.
 | KI-71 | Renaming/deactivating a profile named in a commission split fails closed; PWA needs two reloads after a deploy; ExcelJS tests slow on a cold cache; JobDetail save test must re-click | Deliberate / expected behaviour |
 | KI-79 | A saved quote line forgets whether its acres were typed or filled in from the section's field (`save_quote` stores the acres, not the source; Quote Builder's `acres_source` lives only in the browser). Totals stay correct. After reopening, switching a section's field leaves those lines' acres as they were and shows "This section's saved lines keep their acres. Check them against the new field." Options weighed 2026-10-23: (1) keep as is, no cost; (2) store a typed/field flag on `quote_items`: a migration plus changes to `save_quote` (a money RPC) and every quote-copy path (duplicate, versions, rollover, template), which fall back to today's warning if they drop it; (3) save each line's field link and have the server recompute acres: a large `save_quote` rewrite, highest risk | Mason chose option 1, keep as is (2026-10-23, #1060 follow-up); revisit if reps report wrong acres after switching fields |
 | KI-80 | A job line priced from a product's tier price is not re-checked when that tier price is later removed or the customer's tier changes; it is re-checked (`job_chemicals_price_required`, #1060) only when the line is next edited | Mason declined the re-check (2026-10-23, #1060 follow-up): rare case |
+| KI-104 | Invoice email: an invoice emailed before 2026-11-05 under the old clock-based retry key is not recognised as already sent, so the Invoices list's bulk Email (or the invoice page's Email) can send it once more if nobody has changed it since. From then on the shared record key (invoice, its last change, the address) stops repeats exactly | Mason, option A, 2026-11-05 (To-Do 9.6): the email service change that would also catch old sends was not approved |
 
 ---
 

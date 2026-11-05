@@ -37,6 +37,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // The first attempt committed under this key, usually a lost reply followed by an edit.
   [/^IDEMPOTENCY_ARGUMENT_MISMATCH\b/,
    'This attempt was not saved, but an earlier attempt with different details may have saved. Check the record before entering it again'],
+  // KI-27: an admin cleared this stuck request, so the database refuses to save it now.
+  [/^IDEMPOTENCY_REQUEST_RETIRED\b/,
+   'Nothing was changed. An admin cleared this request after it got stuck. Check the record, then enter it again as a new request if it is still needed'],
   [/^IDEMPOTENCY_(?:RESULT_INVALID|RECEIPT_MISSING)\b/,
    'Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again'],
   // A completion retried under a fresh key after an earlier attempt already completed the record.

@@ -40,6 +40,7 @@ import Tabs from '../components/ui/Tabs';
 import type { Inventory, InventoryPositionRow, Product, InventoryHold, Customer } from '../types';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
+import ClearExpiredIntentButton from '../components/ClearExpiredIntentButton';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
 
@@ -1942,6 +1943,7 @@ export default function InventoryPage() {
                 : holdCleanupFailed
                 ? 'This hold was recorded once. Browser cleanup failed; retry this same hold unchanged. If it stays locked after reloading, report it before creating another hold on this device.'
                 : 'This saved hold request needs reconciliation before another can be created. Retry it unchanged so stock cannot be reserved twice.'}
+              <ClearExpiredIntentButton intent={createHoldIntent} operation="create_inventory_hold" />
             </div>
           )}
           <div>
@@ -2153,6 +2155,7 @@ export default function InventoryPage() {
                 : receiveCleanupFailed
                 ? 'These goods were recorded once. Browser cleanup failed; retry this same receipt unchanged. If it stays locked after reloading, report it before recording another receipt on this device.'
                 : 'This saved receiving request needs reconciliation before another can be recorded. Retry it unchanged so stock cannot be received twice.'}
+              <ClearExpiredIntentButton intent={receivePoIntent} operation="receive_po_items" />
             </div>
           )}
           {receivePoIntent.isForeignIntentLocked ? null : receivePOsFailed ? (
@@ -2227,6 +2230,7 @@ export default function InventoryPage() {
                     : adjustCleanupFailed
                     ? 'This adjustment was recorded once. Browser cleanup failed; retry this same adjustment unchanged. If it stays locked after reloading, report it before applying another adjustment on this device.'
                     : 'This saved adjustment needs reconciliation before another can be applied. Retry it unchanged so stock cannot be adjusted twice.'}
+                  <ClearExpiredIntentButton intent={adjustIntent} operation="adjust_inventory" />
                 </div>
               )}
               {selectedRow && (

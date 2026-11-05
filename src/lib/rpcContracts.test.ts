@@ -3021,8 +3021,6 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // registry high-water passes 20261020210000 (the body never reaches the generated types).
   '_create_order_from_blend_ticket_replay_impl_20261015',
   'set_product_active', // WP-PM-3 local migration: admin-only mutator, receipt-bound through check_idempotency_intent.
-  // 20261107150000 local migration (KI-27): writes only retire receipts; the request key is its idempotency key. Prune after live type regeneration.
-  'retire_uncertain_request',
   'fix_delivery', // 20261106150000 local migration: admin-only, receipt-bound through check_idempotency_intent; prune after live type regeneration.
   // 20261102180000 (replay-binding batch 4a) re-emits this renamed body so it unposts each member
   // through the private _unpost_invoice_replay_impl_20261015; it keeps p_idempotency_key behind the

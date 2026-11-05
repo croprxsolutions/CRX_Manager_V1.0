@@ -7117,3 +7117,15 @@ if the save had worked. Migration `20261107140000_save_field_refuses_missing_fie
 The disposable PostgreSQL proof failed without the migration and passed with it; the live smoke chain (rolled back)
 expects the refusal. Two older `field_saved` activity rows that name a missing field were left as they are. With the
 stale-acres and delete-every-polygon sub-items closed earlier the same day, KI-31 is fully closed.
+
+### Closed 2026-11-05 — KI-27
+
+Closed by branch `claude/uncertain-intent-admin-clear-5591c7`. `useUncertainMutationIntent` gained `clearExpiredIntent()`, which refuses while any stored copy (IndexedDB coordinator, localStorage mirror, or this tab's acknowledgement) could still be retried or is damaged, and otherwise removes the expired request; a resolved tombstone is kept and damaged state stays locked for manual reconciliation. The shared `ClearExpiredIntentButton` shows it to admins only, only after expiry, behind a `ConfirmModal`, and logs each clear to Sentry. It is wired into every dialog that uses the hook (Quick Receive, Receiving Hub, Inventory receive/adjust/hold, Batch Adjust, Purchase Order receive, New Vendor Bill, Vendor Bill payment). Limit: the saved request is keyed to the signed-in user, so a non-admin who is locked out still needs browser storage cleared for that site.
+
+Original text:
+
+### KI-27 — An expired uncertain request locks its dialog
+**MED · OPEN · UI/inventory · unassigned (PR #624 closed)**
+If a stock receive/adjust or vendor-bill save loses its reply and 23 hours pass, the dialog locks in that browser
+with a "do not submit again" message and no way to dismiss it (`src/hooks/useUncertainMutationIntent.ts:69`). Fix
+is an admin-only "I checked, clear this" control.

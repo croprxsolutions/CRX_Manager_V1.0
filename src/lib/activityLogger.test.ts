@@ -46,7 +46,12 @@ describe('logActivity', () => {
   it('does not throw when insert fails', async () => {
     mockInsert.mockRejectedValueOnce(new Error('DB error'));
     // Should silently catch — activity logging must never break the main flow
-    await expect(logActivity({ event: 'test', description: 'desc', performedBy: 'u' })).resolves.toBeUndefined();
+    // and reports false so a caller that must be audited can refuse to proceed.
+    await expect(logActivity({ event: 'test', description: 'desc', performedBy: 'u' })).resolves.toBe(false);
+  });
+
+  it('reports true when the row is written', async () => {
+    await expect(logActivity({ event: 'test', description: 'desc', performedBy: 'u' })).resolves.toBe(true);
   });
 });
 

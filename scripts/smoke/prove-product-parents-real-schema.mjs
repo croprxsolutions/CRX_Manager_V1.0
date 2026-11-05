@@ -525,8 +525,9 @@ function main() {
   // A setup receipt saved under '<key>:insert' with the same fields never hands back that product.
   const colFields = { product_name: '[PROVER] Col 1', sku: 'CO-1', inventory_unit: 'Gal', product_form: 'liquid', category: 'Fungicide' };
   const colX = JSON.parse(ok(ADMIN, save([{ insert: colFields }], 'k-col:insert'))).rows[0].product_id;
-  as(ADMIN, create({ name: '[PROVER] Col', product_form: 'liquid', category: 'Fungicide' },
-    { product_name: '[PROVER] Col 1', sku: 'CO-1', inventory_unit: 'Gal' }, 'k-col'));
+  refused(ADMIN, create({ name: '[PROVER] Col', product_form: 'liquid', category: 'Fungicide' },
+    { product_name: '[PROVER] Col 1', sku: 'CO-1', inventory_unit: 'Gal' }, 'k-col'), /PRODUCT_SETUP_DUPLICATE/);
+  assert.equal(scalar("SELECT count(*) FROM public.product_parents WHERE name = '[PROVER] Col';"), '0');
   assert.equal(scalar(`SELECT count(*) FROM public.product_parent_members WHERE product_id = '${colX}';`), '0');
   // The emptied parent's log entry records it going inactive.
   assert.equal(scalar(`SELECT count(*) FROM public.product_parent_events WHERE parent_id = '${C.parent_id}' AND event_type = 'size_moved' AND (after_values->>'is_active')::boolean = false;`), '1');

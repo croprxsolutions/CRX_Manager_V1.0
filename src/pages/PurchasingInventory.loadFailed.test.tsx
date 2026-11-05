@@ -18,6 +18,8 @@ const H = vi.hoisted(() => ({
   failing: new Map<string, 'error' | 'nodata' | 'notlist' | 'pending'>(),
   // Every RPC name called, in order.
   rpcCalls: [] as string[],
+  // p_offset of every get_receiving_log call, in order.
+  logOffsets: [] as number[],
   toast: vi.fn(),
 }));
 
@@ -26,7 +28,7 @@ function fixedQuery(reply: { data: unknown; error: unknown; count: number | null
   const q: Record<string, unknown> = new Proxy({}, {
     get(_t, prop) {
       // 'pending' never answers: the screen stays mid-read.
-      if (prop === 'then') return (resolve: (v: unknown) => unknown) => { if (reply !== 'pending') resolve(reply); };
+      if (prop === 'then') return (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) => (reply === 'pending' ? new Promise(() => {}) : Promise.resolve(reply).then(resolve, reject));
       if (prop === 'maybeSingle' || prop === 'single') {
         if (reply === 'pending') return () => new Promise(() => {});
         return () => Promise.resolve({
@@ -53,7 +55,14 @@ vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   const client = {
     from: (table: string) => fixedQuery(replyFor(table, H.tables[table] ?? [])),
-    rpc: (name: string) => { H.rpcCalls.push(name); return fixedQuery(replyFor(name, H.functions[name] ?? [])); },
+    rpc: (name: string, args?: { p_limit?: number; p_offset?: number }) => {
+      H.rpcCalls.push(name);
+      if (name === 'get_receiving_log') H.logOffsets.push(args?.p_offset ?? 0);
+      let rows = H.functions[name] ?? [];
+      // get_receiving_log pages itself with p_limit/p_offset: answer only the asked slice.
+      if (name === 'get_receiving_log' && Array.isArray(rows)) rows = rows.slice(args?.p_offset ?? 0, (args?.p_offset ?? 0) + (args?.p_limit ?? rows.length));
+      return fixedQuery(replyFor(name, rows));
+    },
   };
   return { ...actual, supabase: client, supabaseUntyped: client };
 });
@@ -99,6 +108,7 @@ beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
   H.failing = new Map();
   H.rpcCalls = [];
+  H.logOffsets = [];
   H.tables = {};
   H.functions = { get_admin_cost_fields: {} };
 });
@@ -232,6 +242,24 @@ describe('Receiving', () => {
     fireEvent.change(screen.getByLabelText('Filter by condition'), { target: { value: 'damaged' } });
     await waitFor(() => expect(screen.queryByText('PO-1001')).not.toBeInTheDocument());
     expect(screen.queryByText('No receiving records')).not.toBeInTheDocument();
+  });
+
+  it('reads every receiving-log page: 1,000 rows then 5 all load', async () => {
+    H.functions.get_receiving_summary = { expected_today: 0, pending_receipt: 0, received_this_week: 0, received_ytd: 0, damaged_this_week: 0 };
+    H.functions.get_receiving_log = Array.from({ length: 1005 }, (_, i) => ({
+      id: `r${i}`, purchase_order_id: 'po1', po_number: 'PO-1001', vendor: 'Acme Chem', product_name: `Widget ${i}`,
+      quantity_received: 1, condition: 'good', received_at: '2026-10-20T12:00:00Z',
+    }));
+    at('/receiving?tab=log', <ReceivingLogPanel />);
+    await waitFor(() => expect(H.logOffsets.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(screen.queryByText('No receiving records')).not.toBeInTheDocument());
+    expect(screen.queryByText('The receiving log could not be loaded')).not.toBeInTheDocument();
+    // Page 1 starts at 0; the next page starts near the 1,000 mark (the read re-reads a few rows at each seam), and the read stops there.
+    expect(H.logOffsets[0]).toBe(0);
+    expect(H.logOffsets[1]).toBeGreaterThan(900);
+    expect(Math.max(...H.logOffsets)).toBeLessThan(1005);
+    // A page-2 row (index 1004) is on screen: the 5 rows past the first 1,000 loaded.
+    expect((await screen.findAllByText('Widget 1004')).length).toBeGreaterThan(0);
   });
 
   it('a failed receiving-totals read says so instead of hiding the damaged-goods alert', async () => {

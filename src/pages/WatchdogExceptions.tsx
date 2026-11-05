@@ -21,6 +21,8 @@ import {
   Eye,
 } from 'lucide-react';
 import { supabaseUntyped, assertRpcResult } from '../lib/db';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
+import { LoadFailedState } from '../components/ui/EmptyState';
 import { logActivity } from '../lib/activityLogger';
 import { useAuth } from '../contexts/AuthContext';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -77,6 +79,7 @@ export default function WatchdogExceptions() {
 
   const [flags, setFlags]                   = useState<WatchdogFlag[]>([]);
   const [loading, setLoading]               = useState(true);
+  const [loadFailed, setLoadFailed]         = useState(false);
   const [refreshing, setRefreshing]         = useState(false);
   const [showDismissed, setShowDismissed]   = useState(false);
   const [expandedTypes, setExpandedTypes]   = useState<Set<WatchdogFlagType>>(
@@ -90,17 +93,26 @@ export default function WatchdogExceptions() {
   const fetchFlags = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabaseUntyped.rpc('get_watchdog_flags', {
-        p_job_id:            null,
-        p_invoice_id:        null,
-        p_flag_type:         null,
-        p_include_dismissed: showDismissed,
-      });
+      // Every page: the server cuts a function's rows off at 1,000.
+      const { data, error } = await fetchAllRows<WatchdogFlag>((from, to) => pageWithList(supabaseUntyped
+        .rpc('get_watchdog_flags', {
+          p_job_id:            null,
+          p_invoice_id:        null,
+          p_flag_type:         null,
+          p_include_dismissed: showDismissed,
+        }, { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to)));
       if (error) throw error;
       const result = assertRpcResult<WatchdogFlag[]>(data, 'get_watchdog_flags');
       setFlags(result);
+      setLoadFailed(false);
     } catch (err) {
       Sentry.captureException(err, { tags: { page: 'WatchdogExceptions' } });
+      // No flags shown: an empty list would read as "No active watchdog flags".
+      setFlags([]);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -214,7 +226,7 @@ export default function WatchdogExceptions() {
       )}
 
       {/* Summary counts */}
-      {!loading && (
+      {!loading && !loadFailed && (
         <div className="flex items-center gap-4">
           <span className="text-sm text-secondary">
             <span className="font-semibold text-primary">{activeCount}</span> active flag
@@ -232,7 +244,11 @@ export default function WatchdogExceptions() {
       )}
 
       {/* Sections per flag type */}
-      {!loading && ALL_FLAG_TYPES.map(type => {
+      {!loading && loadFailed && (
+        <LoadFailedState title="The watchdog flags could not be loaded" onRetry={() => { void fetchFlags(); }} />
+      )}
+
+      {!loading && !loadFailed && ALL_FLAG_TYPES.map(type => {
         const typeFlags  = grouped.get(type) ?? [];
         const isExpanded = expandedTypes.has(type);
         const activeTypeCount = typeFlags.filter(f => !f.is_dismissed).length;
@@ -282,7 +298,7 @@ export default function WatchdogExceptions() {
       })}
 
       {/* Empty state */}
-      {!loading && activeCount === 0 && !showDismissed && (
+      {!loading && !loadFailed && activeCount === 0 && !showDismissed && (
         <div className="text-center py-12 text-secondary">
           <CheckCircle className="w-10 h-10 text-crx-green mx-auto mb-3 opacity-60" />
           <p className="text-sm font-medium">No active watchdog flags.</p>

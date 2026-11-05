@@ -75,7 +75,12 @@ export default function Fields() {
     // override/measured acres live on the fields table. Pull them alongside (the
     // fields_select RLS policy allows it) so the list shows the acres that actually
     // BILL — override ?? measured ?? legacy total — instead of the legacy total alone.
-    const { data, error } = await supabase.rpc('get_fields_with_geojson');
+    // Every page: the server cuts a function's rows off at 1,000.
+    const { data, error } = await fetchAllRows<FieldWithCustomer>((from, to) => pageWithList(supabase
+      .rpc('get_fields_with_geojson', undefined, { count: 'exact' })
+      .order('field_name')
+      .order('id')
+      .range(from, to)));
     if (seq !== loadSeqRef.current) return false;
 
     if (error) {

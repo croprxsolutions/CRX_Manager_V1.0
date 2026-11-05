@@ -23,7 +23,10 @@
   written under that key's lock, so a late send of the key from any tab is refused by the database
   (`IDEMPOTENCY_CROSS_OP_KEY_REUSE`) and cannot save after the clear (Sol finding). Keys that already have a receipt
   never save again while it lasts, but the next send deletes an expired receipt, so every receipt of the request
-  (expired ones included) is kept 30 days from the safe answer (Codex review finding).
+  (expired ones included) is kept 30 days from the safe answer (Codex review finding). The receipt rows are locked
+  first, so a bulk cleanup of expired receipts that skips the advisory lock (`allocate_payment` does one) either
+  finishes first or waits and then finds them renewed; a final check refuses (`CLEAR_BARRIER_MISSING`) unless every
+  key has a 30-day barrier (Codex review finding).
 - Idempotency: the request key is the call's idempotency key; `p_idempotency_key`, if sent, must equal it, and a
   repeat answers `retired` (it only renews the 30-day barrier).
 - Times come from `clock_timestamp()`, not the transaction-start `now()`, so a long-open transaction cannot
@@ -35,7 +38,8 @@
   `search_path = public, pg_temp`; EXECUTE for `authenticated` only.
 - Proof before apply, on the local test database (`crx-local-app`), every case inside a rolled-back transaction: a
   second session holding a batch row key's lock -> `in_progress` with nothing written, and `first_check` once it
-  is released. The self-seeding smoke chain `scripts/smoke/smoke-uncertain-request-clear-check.sql` passed there
+  is released; a second session deleting an expired receipt without the advisory lock (as that cleanup does) ->
+  the check waits for it, sees the receipt gone and answers `first_check`, never a stale `recorded`. The self-seeding smoke chain `scripts/smoke/smoke-uncertain-request-clear-check.sql` passed there
   (`SMOKE_PASS_ROLLBACK`): recorded -> safe; a receipt under another operation -> wait; no, forged, borrowed,
   other-row-keys and future tokens -> `first_check`; its own fresh token -> `waiting`; 5 minutes -> `waiting`,
   16 minutes -> safe with the key retired; asking again -> `retired`; a batch with one saved row -> `recorded` with

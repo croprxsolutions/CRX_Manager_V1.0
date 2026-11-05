@@ -119,9 +119,15 @@ BEGIN
       RETURN jsonb_build_object('safe', false, 'reason', 'in_progress', 'checked_at', v_now);
     END IF;
   END LOOP;
-  -- Under the locks no receipt of these keys can be added or removed until this
-  -- transaction ends. Keys with no receipt could still be saved by a request that
-  -- has not arrived yet.
+  -- Lock the receipt rows too: a bulk cleanup of expired receipts that skips the
+  -- advisory lock either finishes first (and its deletions are seen below) or waits
+  -- for this transaction and then finds the receipts renewed.
+  PERFORM 1 FROM public.idempotency_keys WHERE idempotency_key = ANY (v_keys) FOR UPDATE;
+  -- That may have waited: judge everything below by the time after the wait.
+  v_now := clock_timestamp();
+  v_now_us := (extract(epoch FROM v_now) * 1000000)::bigint;
+  -- Now no receipt of these keys can be added or removed until this transaction
+  -- ends. Keys with no receipt could still be saved by a request not yet arrived.
   SELECT array_agg(k ORDER BY k) INTO v_open FROM unnest(v_keys) k
    WHERE NOT EXISTS (SELECT 1 FROM public.idempotency_keys i WHERE i.idempotency_key = k);
 
@@ -177,6 +183,11 @@ BEGIN
   -- receipt of this request for 30 days from now.
   UPDATE public.idempotency_keys SET expires_at = v_now + interval '30 days'
    WHERE idempotency_key = ANY (v_keys) AND expires_at < v_now + interval '30 days';
+  IF EXISTS (SELECT 1 FROM unnest(v_keys) k WHERE NOT EXISTS (
+    SELECT 1 FROM public.idempotency_keys i
+     WHERE i.idempotency_key = k AND (i.expires_at IS NULL OR i.expires_at >= v_now + interval '30 days'))) THEN
+    RAISE EXCEPTION 'CLEAR_BARRIER_MISSING: a key of this request is not protected; try again';
+  END IF;
   RETURN jsonb_build_object('safe', true, 'reason', v_reason, 'checked_at', v_now,
     'retired_keys', cardinality(coalesce(v_open, '{}')));
 END;

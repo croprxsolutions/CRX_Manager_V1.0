@@ -10,8 +10,8 @@
 --      and a retry count. RLS on; active admins and sales reps may read it; no API role may write it.
 --   2. complete_delivery gains a trailing p_email_receipt boolean DEFAULT NULL. TRUE (with any proof other than
 --      no_proof, and a customer email on file) records a pending receipt after the evidence is recorded, in the
---      same transaction. NULL is today's behaviour exactly: the request fingerprint carries the new value only when
---      it is not NULL, so a completion committed before this file still replays with its saved fingerprint. A
+--      same transaction. NULL and FALSE are today's behaviour exactly: the request fingerprint carries the new value
+--      only when it is TRUE, so a completion committed before this file still replays with its saved fingerprint. A
 --      replay never records a receipt (the first commit did). start_and_complete_delivery and
 --      process_offline_action call complete_delivery without it (NULL) and are not changed.
 --   3. claim_delivery_receipts / finish_delivery_receipt (service_role only): the worker claims due rows with a
@@ -311,8 +311,8 @@ BEGIN
     'completed_at_epoch', extract(epoch FROM p_completed_at),
     'evidence', p_evidence,
     'evidence_ref', p_evidence_ref
-  ) || CASE WHEN p_email_receipt IS NULL THEN '{}'::jsonb
-            ELSE jsonb_build_object('email_receipt', p_email_receipt) END);  -- 20261108100000 (KI-25)
+  ) || CASE WHEN p_email_receipt IS TRUE THEN jsonb_build_object('email_receipt', true)
+            ELSE '{}'::jsonb END);  -- 20261108100000 (KI-25): FALSE asks for no receipt, like NULL
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'complete_delivery', v_actor, v_fingerprint);
   IF v_replay IS NOT NULL THEN
     IF jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
@@ -413,7 +413,7 @@ REVOKE ALL ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, t
 GRANT EXECUTE ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean) IS
-  'Completes a delivery with server-checked evidence (p_evidence + p_evidence_ref; 20261022075000): signature, paper_ticket, left_at_site, or (active admin only, written reason as p_evidence_ref) no_proof. Key required and bound to caller + request; a NULL p_evidence only replays a completion committed before 20261022075000. p_email_receipt TRUE records the customer receipt in delivery_receipt_queue in the same transaction (not for no_proof; 20261108100000, KI-25); NULL leaves the fingerprint as before.';
+  'Completes a delivery with server-checked evidence (p_evidence + p_evidence_ref; 20261022075000): signature, paper_ticket, left_at_site, or (active admin only, written reason as p_evidence_ref) no_proof. Key required and bound to caller + request; a NULL p_evidence only replays a completion committed before 20261022075000. p_email_receipt TRUE records the customer receipt in delivery_receipt_queue in the same transaction (not for no_proof; 20261108100000, KI-25); NULL or FALSE leaves the fingerprint as before.';
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. The worker's calls (service_role only).

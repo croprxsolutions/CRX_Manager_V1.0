@@ -309,7 +309,7 @@ function main() {
   assert.notEqual(again.status, 0, 'a second apply must refuse');
   assert.match(again.output, /PREFLIGHT_DELIVERY_RECEIPT_QUEUE_DRIFT/);
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamptz,text,text,boolean)'::regprocedure;"),
-    '44ceb2d5dc446be9a28b1cbc33e76e10');
+    'eed8da07fedbec14a198ca4f6e26c213');
   assert.equal(scalar("SELECT schedule || ' ' || command FROM cron.job WHERE jobname = 'deliver-receipt-queue';"),
     '*/2 * * * * SELECT public._wake_delivery_receipt_worker()');
   console.log('[prover] candidate applied once; a second apply refuses at the preflight; cron job scheduled');
@@ -319,7 +319,12 @@ function main() {
   assert.equal(replayLegacy.status, 0, replayLegacy.err);
   assert.equal(replayLegacy.out, legacy.out, 'a pre-migration completion must replay its saved answer');
   assert.equal(queued(0), '0');
-  // The same key with the new flag is a different request: refused, not replayed.
+  // FALSE asks for no receipt, exactly like the pre-migration request: it replays too (Luna, PR #1495).
+  const replayFalse = complete(0, { key: 'ki25-legacy-0', emailReceipt: 'false' });
+  assert.equal(replayFalse.status, 0, replayFalse.err);
+  assert.equal(replayFalse.out, legacy.out, 'a pre-migration completion retried with FALSE must replay');
+  assert.equal(queued(0), '0');
+  // The same key asking for a receipt is a different request: refused, not replayed.
   const mismatched = complete(0, { key: 'ki25-legacy-0', emailReceipt: 'true', allowFailure: true });
   assert.notEqual(mismatched.status, 0, 'a key reused with a different email choice must be refused');
   assert.equal(queued(0), '0');

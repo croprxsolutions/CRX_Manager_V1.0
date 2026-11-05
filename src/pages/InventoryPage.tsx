@@ -1,4 +1,4 @@
-import { useEffect, useState , useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState , useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Package, ArrowDownToLine, Pencil, Plus, AlertTriangle, ChevronDown, ChevronUp, Trash2, Download, FileText, TrendingUp, ShoppingCart } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -223,7 +223,7 @@ export default function InventoryPage() {
   const [adjustCleanupFailed, setAdjustCleanupFailed] = useState(false);
   const [adjustNote, setAdjustNote] = useState('');
   const [products, setProducts] = useState<PickerProduct[]>([]);
-  const inactiveProductIds = useMemo(() => new Set(products.filter((product) => !product.is_active).map((product) => product.id)), [products]);
+  const [inactiveProductIds, setInactiveProductIds] = useState<Set<string>>(() => new Set());
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [productsFailed, setProductsFailed] = useState(false);
   // True while the newest product read is in flight: the list on screen may be an older one.
@@ -507,8 +507,25 @@ export default function InventoryPage() {
     setProductsFailed(false);
   }, [toast]);
 
-  // The position RPC omits status, so load the catalog for an internal Inactive label.
-  useEffect(() => { void fetchProducts(); }, [fetchProducts]);
+  // The position RPC omits status, so read just the turned-off product ids for the Inactive label (KI-88).
+  // The full catalog loads only when a picker opens. A failed read only hides the label.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAllRows((from, to) => pageWithList(supabase
+      .from('products')
+      .select('id', { count: 'exact' })
+      .eq('is_active', false)
+      .order('id')
+      .range(from, to))).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) {
+        Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory' } });
+        return;
+      }
+      setInactiveProductIds(new Set((data || []).map((row) => (row as { id: string }).id)));
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const fetchCustomers = useCallback(async () => {
     const readId = ++customersReadRef.current;

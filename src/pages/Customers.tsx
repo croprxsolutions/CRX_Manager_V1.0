@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Upload, Download, FileText, ToggleLeft, AlertTriangle, UserPlus, UserX } from 'lucide-react';
+import { Plus, Upload, Download, FileText, ToggleLeft, UserPlus, UserX } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import DataTable, { type Column } from '../components/ui/DataTable';
@@ -18,10 +18,10 @@ import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import { sanitizeError } from '../lib/errorSanitizer';
 import { Sentry } from '../lib/sentry';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import type { Customer } from '../types';
 
-const CUSTOMER_FETCH_LIMIT = 1000;
 /** Sentinel for the "no rep assigned" option — a real rep id is never this. */
 const UNASSIGNED_REP = '__unassigned__';
 type ProfileNeed = 'missing-rep' | 'missing-phone' | 'missing-email' | 'missing-crops';
@@ -67,7 +67,6 @@ export default function Customers() {
   const [assignableRepsLoading, setAssignableRepsLoading] = useState(true);
   const [assignableRepsError, setAssignableRepsError] = useState(false);
   const [repsLoadNonce, setRepsLoadNonce] = useState(0);
-  const [truncated, setTruncated] = useState(false);
   const [loadError, setLoadError] = useState(false);
   // Only the newest read may change the list or its error state: a slow older read must not overwrite a newer one.
   const loadSeqRef = useRef(0);
@@ -81,11 +80,14 @@ export default function Customers() {
 
   const fetchCustomers = useCallback(async (options: { reportError?: boolean } = {}): Promise<boolean> => {
     const seq = ++loadSeqRef.current;
-    const { data, error, count } = await supabase
+    // Every customer, page by page: one request stops silently at the server's row cap (KI-32).
+    // A page with no list is a failed read, never "no customers".
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('customers')
       .select('*', { count: 'exact' })
       .order('farm_name')
-      .limit(CUSTOMER_FETCH_LIMIT);
+      .order('id')
+      .range(from, to)));
     if (seq !== loadSeqRef.current) return false;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_customers' } });
@@ -98,17 +100,6 @@ export default function Customers() {
       return false;
     }
     const rows = (data || []) as Customer[];
-    // A silent cap reads as "this is everyone" — say so instead of hiding it. The
-    // total count is what decides that: a full page means only that the page is
-    // full, which is equally true of a book sitting exactly on the limit and
-    // showing every customer. Fall back to the page-length test when the count is
-    // unavailable — over-warning is the safe direction, silently dropping
-    // customers is not.
-    setTruncated(
-      count === null || count === undefined
-        ? rows.length >= CUSTOMER_FETCH_LIMIT
-        : count > CUSTOMER_FETCH_LIMIT,
-    );
     setCustomers(rows);
     setLoadError(false);
     setLoading(false);
@@ -485,16 +476,6 @@ export default function Customers() {
         onClose={() => setImportModalOpen(false)}
         onSuccess={fetchCustomers}
       />
-
-      {truncated && !loadError && (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            Showing the first {CUSTOMER_FETCH_LIMIT.toLocaleString()} customers by farm name — this list is truncated.
-            Search and filters below only apply to the customers already loaded.
-          </span>
-        </div>
-      )}
 
       {!loadError && unassignedCount > 0 && repFilter !== UNASSIGNED_REP && (
         <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-secondary">

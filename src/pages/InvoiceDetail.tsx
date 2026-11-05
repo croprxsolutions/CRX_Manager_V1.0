@@ -191,6 +191,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Goal 3: no order and no delivery behind it -> charge lines only (the database refuses product
   // lines on such an invoice, migration 20261021050000). Never on the field-invoices route.
   const isFromScratch = routeArea !== 'field' && isFromScratchInvoice(invoice);
+  // Billing plan M1: a chemical sale backed by an order or a delivery also takes typed charge lines
+  // (freight, service...) beside its products (migration 20261108160000).
+  const takesCharges = isFromScratch || (routeArea !== 'field' && invoice.invoice_type === 'chemical_sale'
+    && !!(invoice.order_id || invoice.delivery_id) && !invoice.blend_ticket_id);
   const [items, setItems] = useState<LineItem[]>([]);
   const [loading, setLoading] = useState(!isNew);
   // The invoice id whose load failed: the editor is replaced by "could not be loaded" (To-Do 10.5),
@@ -1120,8 +1124,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'Please select a customer');
       return;
     }
-    if (isFromScratch) {
-      const problem = fromScratchLinesProblem(items);
+    if (takesCharges) {
+      const problem = fromScratchLinesProblem(isFromScratch ? items : items.filter((it) => !it.product_id));
       if (problem) {
         toast('error', problem);
         return;
@@ -2408,15 +2412,20 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       <Card>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-nav-dark">Line Items</h2>
-          {editable && (isFromScratch ? (
-            <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={addChargeLine}>
-              Add Charge
-            </Button>
-          ) : (
-            <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={() => setShowProductModal(true)}>
-              Add Product
-            </Button>
-          ))}
+          {editable && (
+            <div className="flex gap-2">
+              {!isFromScratch && (
+                <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={() => setShowProductModal(true)}>
+                  Add Product
+                </Button>
+              )}
+              {takesCharges && (
+                <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={addChargeLine}>
+                  Add Charge
+                </Button>
+              )}
+            </div>
+          )}
         </div>
         {editable && isFromScratch && (
           <p className="-mt-2 mb-4 text-xs text-secondary">
@@ -2448,7 +2457,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 {displayItems.map((item, idx) => (
                   <tr key={idx} className="group">
                     <td className="py-2 pr-4">
-                      {editable && (item.charge_type || (isFromScratch && !item.product_id)) ? (
+                      {editable && (item.charge_type || (takesCharges && !item.product_id)) ? (
                         <div className="flex flex-col gap-1 sm:flex-row">
                           <select
                             aria-label="Charge type"
@@ -2485,7 +2494,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       )}
                     </td>
                     <td className="py-2 pr-4">
-                      {editable && !item.billing_line_id && !item.charge_type && !(isFromScratch && !item.product_id) ? (
+                      {editable && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
                         <input
                           type="number"
                           value={item.quantity}

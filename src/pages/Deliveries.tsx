@@ -881,14 +881,23 @@ export default function Deliveries() {
       return true;
     });
   }, [deliveries, statusFilter, driverFilter, datePreset, priorityFilter, customerFilter, scheduleDate, todayStr, weekStartStr]);
-  // The in-list search; the desktop table still sorts these rows itself.
+  // The in-list search; the desktop table still sorts these rows itself. The calendar hides the
+  // search box, so there the search does not apply.
   const searched = useMemo(
-    () => applyTableSearchSort(filtered, DELIVERY_SEARCH_KEYS, listSearch, null, 'asc'),
-    [filtered, listSearch]
+    () => (viewMode === 'list' ? applyTableSearchSort(filtered, DELIVERY_SEARCH_KEYS, listSearch, null, 'asc') : filtered),
+    [filtered, listSearch, viewMode]
   );
+  // A row the search or filters hide stops being selected, so no batch action reaches it and the
+  // reschedule retry key (keyed on the selection) starts fresh.
+  useEffect(() => {
+    setSelected((prev) => {
+      const shown = new Set(searched.map((d) => d.id));
+      const next = new Set([...prev].filter((id) => shown.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [searched]);
 
   /* ─── Batch actions ─── */
-  // Only rows the search and filters show count as selected, so no batch action reaches a hidden row.
   const selectedDeliveries = searched.filter((d) => selected.has(d.id));
   const selectableShown = searched.filter((d) => SELECTABLE_STATUSES.includes(d.status));
   const allShownSelected = selectableShown.length > 0 && selectableShown.every((d) => selected.has(d.id));

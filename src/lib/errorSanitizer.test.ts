@@ -433,3 +433,10 @@ describe('sanitizeError', () => {
     expect(sanitizeError([])).toBe('An unexpected error occurred');
   });
 });
+
+describe('product setup and import refusals (20261107090000)', () => {
+  it('keeps the server text, which names the products', () => {
+    expect(sanitizeError({ message: 'PRODUCT_SETUP_DUPLICATE: the SKU or name is already used by a product or twice in this file: Chem' }))
+      .toBe('Nothing was saved. The SKU or name is already used by a product or twice in this file: Chem');
+  });
+});

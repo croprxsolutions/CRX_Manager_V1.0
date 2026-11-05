@@ -273,6 +273,8 @@ Deno.serve(async (req: Request) => {
     const resource_id = typeof rawResourceId === "string" ? rawResourceId.toLowerCase() : rawResourceId;
     // An invoice email's subject, body and attachment name are replaced below (step 6c).
     let { subject, html, attachments } = body;
+    // A PDF drawn here gets a random file id each time, so its fingerprint is taken from the saved data it is drawn from.
+    let drawnPdfSource: string | null = null;
     const isInvoiceEmail = email_type === "invoice";
 
     if (!to || !email_type || (!isInvoiceEmail && (!subject || !html))) {
@@ -354,11 +356,9 @@ Deno.serve(async (req: Request) => {
       } catch (err) {
         return jsonResponse({ error: `Company details lookup failed: ${(err as Error).message}` }, 503);
       }
-      const poPdf = drawPurchaseOrderPdf(
-        { jsPDF, autoTable },
-        buildPurchaseOrderPdfData(poGate.order, vendor, poGate.lines),
-        company,
-      );
+      const poPdfData = buildPurchaseOrderPdfData(poGate.order, vendor, poGate.lines);
+      const poPdf = drawPurchaseOrderPdf({ jsPDF, autoTable }, poPdfData, company);
+      drawnPdfSource = JSON.stringify([poPdfData, company]);
       attachments = [{ filename: purchaseOrderPdfFilename(poGate.order.po_number), content: pdfBase64(poPdf) }];
     } else {
       // 5. Customer email match — recipient is validated server-side from customer_id
@@ -697,6 +697,7 @@ Deno.serve(async (req: Request) => {
       subject = built.subject;
       html = built.html;
       attachments = [{ filename: built.filename, content: pdfBase64(drawInvoicePdf({ jsPDF, autoTable }, invoicePdfData)) }];
+      drawnPdfSource = JSON.stringify(invoicePdfData);
     }
 
     // 7. Attachment limits
@@ -893,7 +894,7 @@ Deno.serve(async (req: Request) => {
     // so two sends that differ only in their PDF never count as the same message below.
     const htmlBeforeFingerprint = html; // the final invoice check rebuilds the unfingerprinted body
     if (attachments?.length) {
-      const bytes = new TextEncoder().encode(attachments.map((a: { filename: string; content: string }) => `${a.filename}\n${a.content}`).join("\n"));
+      const bytes = new TextEncoder().encode(attachments.map((a: { filename: string; content: string }) => `${a.filename}\n${drawnPdfSource ?? a.content}`).join("\n"));
       const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
       html = `${html}\n<!-- attachments-sha256:${digest} -->`;
     }

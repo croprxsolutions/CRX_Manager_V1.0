@@ -669,3 +669,30 @@ Deno.test("an unchanged invoice is emailed once with its PDF (the attachment fin
   assertEquals(attachments.length, 1, "attachments");
   assertEquals(attachments[0].filename, "Invoice-INV-1.pdf");
 });
+
+Deno.test("the same invoice sent twice at once under two keys goes out once, though each PDF is drawn fresh", async () => {
+  const world = makeWorld(okResend);
+  const snapshot = {
+    invoice_number: "INV-1",
+    total_amount_cents: 10000,
+    paid_amount_cents: 0,
+    prepay_applied_cents: 0,
+    balance_cents: 10000,
+    lines_total_cents: 10000,
+  };
+  const results = [];
+  for (const key of ["invoice-key-a", "invoice-key-b"]) {
+    results.push(await send(world, ADMIN, {
+      to: "farmer@example.com",
+      email_type: "invoice",
+      customer_id: CUSTOMER,
+      resource_type: "invoice",
+      resource_id: INVOICE,
+      idempotency_key: key,
+      invoice_snapshot: snapshot,
+    }));
+  }
+  assertEquals(results[1].status, 200, JSON.stringify(results[1].body));
+  assertEquals(world.resendCalls.length, 1, "Resend calls (a random PDF file id must not defeat the duplicate check)");
+  assertEquals((results[1].body as { deduplicated?: boolean }).deduplicated, true, "second send deduplicated");
+});

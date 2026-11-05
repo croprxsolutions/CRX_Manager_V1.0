@@ -1,6 +1,7 @@
 -- predicate: save-field-actor-binding
 -- Fail closed unless the exact reviewed save_field body from migration
--- 20260729222311 is installed. Any body change requires a fresh security
+-- 20261107140000 (20260729222311's actor binding plus the KI-31 FIELD_NOT_FOUND
+-- check) is installed. Any body change requires a fresh security
 -- review and an intentional fingerprint update.
 
 WITH exact_signature AS (
@@ -16,5 +17,5 @@ WHERE NOT EXISTS (
   SELECT 1
   FROM exact_signature
   WHERE encode(sha256(convert_to(prosrc, 'UTF8')), 'hex') =
-        '10a53c6b4c218a3836b0a5269fc558cc214eb8741a2df6669133885919f50ff2'
+        '1db4e4fe60469c50dcb4ae5ae892fb0781919422f8624cc3626368195f1850cf'
 );

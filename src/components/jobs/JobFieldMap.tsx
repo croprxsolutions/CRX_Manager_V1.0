@@ -7,8 +7,8 @@
 // Fields with no geometry render a clear 'no boundary on file' state — never a broken map.
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, AlertCircle } from 'lucide-react';
-import Card from '../ui/Card';
+import { MapPin, AlertCircle, Map as MapIcon } from 'lucide-react';
+import SectionCard from '../ui/SectionCard';
 import CRXMap from '../map/CRXMap';
 import FieldBoundaryLayer from '../map/FieldBoundaryLayer';
 import FieldMarkerLayer from '../map/FieldMarkerLayer';
@@ -68,9 +68,11 @@ function toField(r: JobMapFieldRow): JobMapField {
 interface JobFieldMapProps {
   /** The job whose selected fields are plotted. */
   jobId: string;
+  /** Changes after each successful job load, so the always-visible map reloads after a save. */
+  refreshKey?: number;
 }
 
-export default function JobFieldMap({ jobId }: JobFieldMapProps) {
+export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [jobFields, setJobFields] = useState<JobMapField[]>([]);
@@ -133,7 +135,7 @@ export default function JobFieldMap({ jobId }: JobFieldMapProps) {
     return () => {
       cancelled = true;
     };
-  }, [jobId, toast]);
+  }, [jobId, toast, refreshKey]);
 
   const fieldsWithGeometry = useMemo(
     () => jobFields.filter((f) => f.boundary_geojson || f.centroid_geojson),
@@ -157,30 +159,31 @@ export default function JobFieldMap({ jobId }: JobFieldMapProps) {
 
   if (loading) {
     return (
-      <Card>
+      <SectionCard id="job-map" icon={<MapIcon className="w-5 h-5" />} title="Field Map">
         <p className="text-sm text-gray-500 py-10 text-center">Loading map…</p>
-      </Card>
+      </SectionCard>
     );
   }
 
   if (jobFields.length === 0) {
     return (
-      <Card>
+      <SectionCard id="job-map" icon={<MapIcon className="w-5 h-5" />} title="Field Map">
         <div className="text-center py-12 text-gray-500">
           <MapPin className="w-10 h-10 mx-auto mb-2 text-gray-300" />
           <p className="text-sm">No field locations are selected on this job.</p>
-          <p className="text-xs mt-1">Add fields on the Locations tab to see them on the map.</p>
+          <p className="text-xs mt-1">Add fields in the Fields section to see them on the map.</p>
         </div>
-      </Card>
+      </SectionCard>
     );
   }
 
   return (
-    <Card>
-      <h2 className="text-lg font-semibold text-nav-dark flex items-center gap-2 mb-3">
-        <MapPin className="w-5 h-5 text-crx-green" />
-        Field Map ({jobFields.length} location{jobFields.length === 1 ? '' : 's'})
-      </h2>
+    <SectionCard
+      id="job-map"
+      icon={<MapIcon className="w-5 h-5" />}
+      title={`Field Map (${jobFields.length} location${jobFields.length === 1 ? '' : 's'})`}
+    >
+      <div className="p-4 sm:p-5">
 
       {hasMapGeometry ? (
         <CRXMap
@@ -233,6 +236,7 @@ export default function JobFieldMap({ jobId }: JobFieldMapProps) {
           </ul>
         </div>
       )}
-    </Card>
+      </div>
+    </SectionCard>
   );
 }

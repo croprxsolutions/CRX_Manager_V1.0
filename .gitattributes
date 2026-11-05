@@ -302,3 +302,6 @@ supabase/migrations/20261029160300_document_numbers_chicago_year.sql text eol=lf
 supabase/migrations/20261029160200_chicago_payment_business_date.sql text eol=lf
 supabase/migrations/20261029160150_retire_allocate_payment_old_overload.sql text eol=lf
 supabase/migrations/20261101120000_allocate_payment_error_shows_dollars.sql text eol=lf
+
+# KI-31: the save_field body is pinned by the live-sweep fingerprint; keep it LF on every checkout.
+supabase/migrations/20261107140000_save_field_refuses_missing_field.sql text eol=lf

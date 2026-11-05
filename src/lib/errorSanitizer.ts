@@ -22,6 +22,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/product_setup_name_check/, 'Enter a product name without spaces at either end'],
   [/product_setup_sku_check/, 'Enter a SKU without spaces at either end, or leave it blank'],
   [/products_sku_unique/, 'Another product already has this SKU'],
+  [/products_container_type_check/, 'Choose a container type: Jug, Drum, Pallet, Mini-Bulk, Shuttle, Bag, Tote, Ea or Jar'],
   [/products_active_name_unique/, 'Another active product already has this name'],
   [/product_setup_rate_check/, 'Rate Per Acre must be zero or greater'],
   [/product_setup_epa_check/, 'Enter an EPA number like 524-475 or 100-1234-5905. This checks format only'],
@@ -283,10 +284,10 @@ export function sanitizeError(error: unknown): string {
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;
   }
-  // Setup workbook (20261107080000): a table check refused one product; name it, then explain the check.
+  // Setup save and import (20261107080000, 20261107130000): a table check refused one product; name it, then explain the check.
   const refusedRow = message.match(/^PRODUCT_SETUP_ROW_REFUSED:\s*(.+?):\s+(.+)$/s);
   if (refusedRow) return `Nothing was saved. ${refusedRow[1]}: ${sanitizeError(refusedRow[2])}`;
-  const setupRefusal = message.match(/^(?:PRODUCT_SETUP_STALE|PRODUCT_SETUP_INVALID|PRODUCT_SETUP_DUPLICATE_PRODUCT|PRODUCT_SETUP_ROW_SHAPE_INVALID):\s*(.+)$/s)?.[1];
+  const setupRefusal = message.match(/^(?:PRODUCT_SETUP_STALE|PRODUCT_SETUP_INVALID|PRODUCT_SETUP_DUPLICATE_PRODUCT|PRODUCT_SETUP_ROW_SHAPE_INVALID|PRODUCT_SETUP_DUPLICATE|PRODUCT_SETUP_ROWS_REQUIRED):\s*(.+)$/s)?.[1];
   if (setupRefusal && !CONSTRAINT_PATTERNS.some(([pattern]) => pattern.test(message))) {
     return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }

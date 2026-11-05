@@ -20,8 +20,11 @@ import {
   WifiOff,
   ChevronRight,
   Search,
+  SlidersHorizontal,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
+import PhoneHeader from '../components/ui/PhoneHeader';
+import SectionCard from '../components/ui/SectionCard';
 import CustomerDrawer from '../components/customers/CustomerDrawer';
 import { hasPageAccess } from '../lib/pagePermissions';
 import Modal from '../components/ui/Modal';
@@ -241,6 +244,7 @@ export default function Deliveries() {
   const [statusFilter, setStatusFilter] = useState('');
   const [driverFilter, setDriverFilter] = useState('');
   const [datePreset, setDatePreset] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState('');
   const [customerFilter, setCustomerFilter] = useState('');
   const [scheduleDate, setScheduleDate] = useState(''); // from schedule strip click
@@ -884,7 +888,11 @@ export default function Deliveries() {
   );
 
   /* ─── Batch actions ─── */
-  const selectedDeliveries = deliveries.filter((d) => selected.has(d.id));
+  // Only rows the search and filters show count as selected, so no batch action reaches a hidden row.
+  const selectedDeliveries = searched.filter((d) => selected.has(d.id));
+  const selectableShown = searched.filter((d) => SELECTABLE_STATUSES.includes(d.status));
+  const allShownSelected = selectableShown.length > 0 && selectableShown.every((d) => selected.has(d.id));
+  const activeFilterCount = [statusFilter, driverFilter, priorityFilter, customerFilter, scheduleDate || datePreset].filter(Boolean).length;
   const selectedCancellable = selectedDeliveries.filter((d) => SELECTABLE_STATUSES.includes(d.status));
 
   const toggleSelect = (id: string) => {
@@ -897,12 +905,7 @@ export default function Deliveries() {
   };
 
   const toggleAll = () => {
-    const selectable = filtered.filter((d) => SELECTABLE_STATUSES.includes(d.status));
-    if (selected.size === selectable.length && selectable.length > 0) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(selectable.map((d) => d.id)));
-    }
+    setSelected(allShownSelected ? new Set() : new Set(selectableShown.map((d) => d.id)));
   };
 
   const handleBatchCancel = async (reason: string) => {
@@ -966,10 +969,10 @@ export default function Deliveries() {
       action: async () => {
         const { generateBatchDeliveryPdf } = await import('../lib/deliveryPdf');
 
-        // Use selected deliveries, or all filtered scheduled/in_progress for today
-        const rows = selected.size > 0
+        // Use selected deliveries, or every shown scheduled/in_progress one
+        const rows = selectedDeliveries.length > 0
           ? selectedDeliveries
-          : filtered.filter((d) => d.status === 'scheduled' || d.status === 'in_progress');
+          : searched.filter((d) => d.status === 'scheduled' || d.status === 'in_progress');
 
         if (rows.length === 0) {
           throw new Error('No deliveries to include in load sheet');
@@ -1131,7 +1134,7 @@ export default function Deliveries() {
   };
 
   const handleExportCSV = () => {
-    const rows = selected.size > 0 ? selectedDeliveries : filtered;
+    const rows = selectedDeliveries.length > 0 ? selectedDeliveries : searched;
     exportToCSV(rows as unknown as Record<string, unknown>[], [
       { key: 'delivery_number', header: 'Delivery #' },
       { key: 'customer_name', header: 'Customer' },
@@ -1148,7 +1151,7 @@ export default function Deliveries() {
   const handleExportPDF = async () => {
     setExportingPdf(true);
     try {
-      const rows = selected.size > 0 ? selectedDeliveries : filtered;
+      const rows = selectedDeliveries.length > 0 ? selectedDeliveries : searched;
       await downloadReportPdf({
         title: 'Deliveries',
         subtitle: `${rows.length} delivery(ies)`,
@@ -1173,12 +1176,10 @@ export default function Deliveries() {
 
   /* ─── Driver Dashboard View ─── */
   if (isDriver) {
-    const myToday = deliveries.filter(
-      (d) => d.scheduled_date === todayStr && d.status !== 'cancelled' && d.status !== 'completed'
-    );
-    const myUpcoming = deliveries.filter(
-      (d) => d.scheduled_date > todayStr && d.status !== 'cancelled' && d.status !== 'completed'
-    );
+    // Completed, cancelled and voided deliveries are finished; only these two are still to do.
+    const isOpen = (d: DeliveryRow) => d.status === 'scheduled' || d.status === 'in_progress';
+    const myToday = deliveries.filter((d) => d.scheduled_date === todayStr && isOpen(d));
+    const myUpcoming = deliveries.filter((d) => d.scheduled_date > todayStr && isOpen(d));
     const myCompleted = deliveries.filter((d) => d.status === 'completed').slice(0, 10);
 
     const handleTakeDelivery = async (deliveryId: string) => {
@@ -1275,17 +1276,11 @@ export default function Deliveries() {
     };
 
     const driverHeader = (
-      <header className="bg-nav-dark px-4 py-4 sm:px-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            {!loadFailed && !loading && (
-              <p className="text-sm text-gray-400">
-                {deliveries.filter((d) => d.status !== 'cancelled' && d.status !== 'completed').length} active
-              </p>
-            )}
-            <h1 className="font-heading text-[2rem] font-bold leading-tight text-white">My Deliveries</h1>
-          </div>
-          {!loadFailed && canQuickDeliver && (
+      <PhoneHeader
+        title="My Deliveries"
+        eyebrow={!loadFailed && !loading ? `${deliveries.filter(isOpen).length} active` : null}
+        className="sm:px-6"
+        action={!loadFailed && canQuickDeliver && (
             <Button
               size="sm"
               variant="secondary"
@@ -1298,8 +1293,7 @@ export default function Deliveries() {
               Quick Delivery
             </Button>
           )}
-        </div>
-      </header>
+      />
     );
 
     // Still loading must not read as "no deliveries today" either.
@@ -1653,9 +1647,9 @@ export default function Deliveries() {
             onClick={handlePrintLoadSheet}
             loading={printingLoadSheet}
           >
-            {selected.size > 0 ? `Load Sheet (${selected.size})` : 'Load Sheet'}
+            {selectedDeliveries.length > 0 ? `Load Sheet (${selectedDeliveries.length})` : 'Load Sheet'}
           </Button>
-          {selected.size > 0 && (
+          {selectedDeliveries.length > 0 && (
             <>
               {selectedCancellable.length > 0 && (
                 <Button
@@ -1800,14 +1794,8 @@ export default function Deliveries() {
       )}
 
       {/* Delivery list: one search and filter bar; a table from md up, a tappable list on phones */}
-      <Card padding={false} className="phone-touch overflow-hidden">
-        <div className="flex items-center gap-3 bg-cream-dark px-4 py-3">
-          <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-crx-green text-white">
-            <Truck className="w-5 h-5" />
-          </span>
-          <h2 className="font-heading text-2xl font-bold leading-none text-nav-dark">Delivery List</h2>
-        </div>
-        <div className="space-y-4 p-4 md:p-5">
+      <SectionCard id="delivery-list" icon={<Truck className="w-5 h-5" />} title="Delivery List">
+        <div className="phone-touch space-y-4 p-4 md:p-5">
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
               <Search aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1820,7 +1808,24 @@ export default function Deliveries() {
                 className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors"
               />
             </div>
-            <div className="flex min-w-0 gap-2 items-center flex-wrap [&>select]:max-w-full">
+            <div className="flex min-w-0 gap-2 items-center flex-wrap [&_select]:max-w-full">
+              <button
+                type="button"
+                onClick={() => setFiltersOpen((open) => !open)}
+                aria-expanded={filtersOpen}
+                aria-controls="delivery-filters"
+                className="md:hidden inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-nav-dark border border-gray-200 rounded-lg hover:bg-cream-dark"
+              >
+                <SlidersHorizontal className="w-4 h-4" aria-hidden="true" />
+                Filters
+                {activeFilterCount > 0 && (
+                  <span className="rounded-full bg-crx-green px-2 text-xs font-semibold text-white">
+                    {activeFilterCount}<span className="sr-only"> active</span>
+                  </span>
+                )}
+              </button>
+              {/* On phones the dropdowns fold behind the Filters button; from md up they always show. */}
+              <div id="delivery-filters" className={`${filtersOpen ? 'contents' : 'hidden'} md:contents`}>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
@@ -1882,12 +1887,13 @@ export default function Deliveries() {
                 ))}
                 {scheduleDate && <option value="custom">{dayLabel(scheduleDate)}</option>}
               </select>
-              {filtered.some((d) => SELECTABLE_STATUSES.includes(d.status)) && (
+              </div>
+              {selectableShown.length > 0 && (
                 <button
                   onClick={toggleAll}
                   className="text-xs text-crx-green hover:underline ml-2"
                 >
-                  {selected.size > 0 ? 'Deselect All' : 'Select All'}
+                  {allShownSelected ? 'Deselect All' : 'Select All'}
                 </button>
               )}
             </div>
@@ -1968,7 +1974,7 @@ export default function Deliveries() {
             )}
           </div>
         </div>
-      </Card>
+      </SectionCard>
       </>}
 
       {/* Batch Cancel Modal */}

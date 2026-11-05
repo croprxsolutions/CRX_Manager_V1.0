@@ -35,6 +35,7 @@ const CUSTOMER = "cccccccc-0000-4000-8000-000000000001";
 const OTHER_CUSTOMER = "cccccccc-0000-4000-8000-000000000002";
 const QUOTE = "dddddddd-0000-4000-8000-000000000001";
 const OTHER_QUOTE = "dddddddd-0000-4000-8000-000000000002";
+const INVOICE = "eeeeeeee-0000-4000-8000-000000000001";
 
 interface ResendCall {
   body: Record<string, unknown>;
@@ -56,6 +57,14 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
       { id: QUOTE, customer_id: CUSTOMER, quote_number: "Q-1" },
       { id: OTHER_QUOTE, customer_id: OTHER_CUSTOMER, quote_number: "Q-2" },
     ],
+    invoices: [{
+      id: INVOICE, customer_id: CUSTOMER, invoice_number: "INV-1", invoice_type: "standard", invoice_date: "2026-11-01",
+      due_date: "2026-12-01", status: "sent", send_disposition: "normal", total_amount_cents: 10000,
+      paid_amount_cents: 0, prepay_applied_cents: 0, write_off_cents: 0, balance_cents: 10000,
+    }],
+    invoice_items: [{
+      invoice_id: INVOICE, description: "Product", quantity: 1, unit_price_cents: 10000, extended_cents: 10000, sort_order: 1,
+    }],
     email_log: [],
   };
   const resendCalls: ResendCall[] = [];
@@ -632,4 +641,31 @@ Deno.test("a pending send logged before the lock column blocks a new one of that
   assertEquals(res.status, 409);
   assertEquals(res.body.email_log_id, "legacy-pending");
   assertEquals(world.resendCalls.length, 0, "Resend calls");
+});
+
+// --- Invoice emails ----------------------------------------------------------
+
+Deno.test("an unchanged invoice is emailed once with its PDF (the attachment fingerprint must not trip the final check)", async () => {
+  const world = makeWorld(okResend);
+  const res = await send(world, ADMIN, {
+    to: "farmer@example.com",
+    email_type: "invoice",
+    customer_id: CUSTOMER,
+    resource_type: "invoice",
+    resource_id: INVOICE,
+    idempotency_key: "invoice-key-1",
+    invoice_snapshot: {
+      invoice_number: "INV-1",
+      total_amount_cents: 10000,
+      paid_amount_cents: 0,
+      prepay_applied_cents: 0,
+      balance_cents: 10000,
+      lines_total_cents: 10000,
+    },
+  });
+  assertEquals(res.status, 200, JSON.stringify(res.body));
+  assertEquals(world.resendCalls.length, 1, "Resend calls");
+  const attachments = world.resendCalls[0].body.attachments as Array<{ filename: string }>;
+  assertEquals(attachments.length, 1, "attachments");
+  assertEquals(attachments[0].filename, "Invoice-INV-1.pdf");
 });

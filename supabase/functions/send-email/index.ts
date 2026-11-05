@@ -891,6 +891,7 @@ Deno.serve(async (req: Request) => {
 
     // The stored and sent body ends with an invisible fingerprint of the attachments,
     // so two sends that differ only in their PDF never count as the same message below.
+    const htmlBeforeFingerprint = html; // the final invoice check rebuilds the unfingerprinted body
     if (attachments?.length) {
       const bytes = new TextEncoder().encode(attachments.map((a: { filename: string; content: string }) => `${a.filename}\n${a.content}`).join("\n"));
       const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -1155,7 +1156,7 @@ Deno.serve(async (req: Request) => {
         if (!rebuilt.ok) {
           finalGateRefusal = rebuilt.error;
           finalGateStatus = rebuilt.status;
-        } else if (rebuilt.subject !== subject || rebuilt.html !== html) {
+        } else if (rebuilt.subject !== subject || rebuilt.html !== htmlBeforeFingerprint) {
           finalGateRefusal = "Invoice changed before send";
         }
       }

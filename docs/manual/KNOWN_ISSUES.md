@@ -442,10 +442,15 @@ with a "do not submit again" message and no way to dismiss it (`src/hooks/useUnc
 is an admin-only "I checked, clear this" control.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
-**MED · OPEN · database · unassigned**
+**MED · OPEN · database · LOCAL CANDIDATE — NOT APPLIED**
 The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later does not
-add the job back. A detection sweep exists (`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`);
-the write-path fix is not built. Older record counted 0 missing rows live.
+add the job back. A detection sweep exists (`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`).
+Fix: `20261107160000_dispatch_sync_on_applicator_reactivation.sql` syncs a person's open jobs when they become an
+active applicator, except one whose licenses have all expired (same rule as the dispatch screen; a later license
+renewal does not re-sync, so those jobs wait for the wizard). Proof
+`prove-dispatch-sync-on-applicator-reactivation-real-schema.mjs`. Live 2026-11-05: 0 rows. Still open after it: a
+location already dispatched to someone else, or undispatched ('cancelled'), when the job was reassigned to an
+inactive person keeps that row on re-activation, because it looks the same as a deliberate split or undispatch.
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
 **LOW-MED · UNVERIFIED · inventory/process · Mason**

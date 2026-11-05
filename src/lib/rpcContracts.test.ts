@@ -3094,6 +3094,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Pruned 2026-11-03: the five WP-PM-15b trigger-only helpers of 20261105180000 (_sync_product_vendor_copy,
   //   link_new_product_vendor, prepare_product_supplier_link, sync_product_vendor_from_links,
   //   sync_product_vendor_on_vendor_rename); it applied live (ledger 20261104024012), so they left the inventory.
+  // Local candidate 20261107160000 (KI-28): prune when it applies live and the high-water moves past it.
+  _sync_job_location_dispatch_on_applicator_qualify:
+    'trigger-only dispatch-board sync (RETURNS trigger); ON CONFLICT DO NOTHING makes re-runs convergent and every API-role EXECUTE is revoked',
   _insert_commissions_for_job: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   _insert_commissions_for_order: 'internal helper; caller owns idempotency and direct EXECUTE is revoked',
   // _guard_delivery_completion_authorized is also parked with Wave A in

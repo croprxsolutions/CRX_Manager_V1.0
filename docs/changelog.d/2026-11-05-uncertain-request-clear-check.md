@@ -1,30 +1,43 @@
-## 2026-11-05 — Server check before clearing a stuck request (KI-27, database half)
+## 2026-11-05 — Server check, and retire, before clearing a stuck request (KI-27, database half)
 
 - New migration `20261107150000_uncertain_request_clear_check.sql` (record in `docs/reference/migrations.d/`):
-  read-only `check_uncertain_request_clearable(p_request_key text, p_first_check_token text DEFAULT NULL)`, plus the
-  one-row table `uncertain_request_clear_check_key` (RLS on, deny-all policy, no client grants) holding a random
-  signing key generated inside the database.
+  `retire_uncertain_request(p_request_key text, p_row_keys text[] DEFAULT NULL, p_first_check_token text DEFAULT NULL, p_idempotency_key text DEFAULT NULL)`,
+  plus the one-row table `uncertain_request_clear_check_key` (RLS on, deny-all policy, no client grants) holding a
+  random signing key generated inside the database.
   PR #1485's "clear this" button will call it before it removes anything, so a wrong device clock can no longer
-  clear a request that might still save. Answers:
-  - `recorded` (safe): the key is in `idempotency_keys` under the operation its prefix names (and this actor,
-    when the receipt records one), so the request saved. A receipt under another operation is not trusted and
-    falls through to the wait. Checked before and after the lock, so a parallel check does not look like a save.
-  - `in_progress` (refused): a transaction holds the key's `crx:idempotency:` lock, the one
-    `check_idempotency_intent` takes, so the request is being saved right now.
-  - `first_check` / `waiting` (refused): not recorded; the first check returns `first_check_token`, the server's time
-    signed for that key, and the caller must ask again 15+ minutes later with it. A missing, forged, future or
-    other-request token starts a new wait, so neither the device clock nor an invented time can shorten it. `authenticated` statements stop after 8 seconds (checked live in `pg_roles` on 2026-11-05: `authenticated` statement_timeout=8s), so by then the request can no longer commit.
-  - `not_recorded_after_wait` (safe).
+  clear a request that might still save. It looks at the request key and, for a batch, each row key the batch sent
+  (`<request key>:<row uuid>`; a batch never records its own key). Answers:
+  - `in_progress` (refused): a transaction holds the `crx:idempotency:` lock of a key that has no receipt (the lock
+    `check_idempotency_intent` and the receipt insert guard take), so something is being saved right now.
+  - `recorded` (safe): the request key is in `idempotency_keys` under the operation its prefix names, or a row key
+    is recorded (this actor, when the receipt records one). A request-key receipt under another operation is not
+    trusted and falls through to the wait.
+  - `first_check` / `waiting` (refused): nothing recorded; the first check returns `first_check_token`, the server's
+    time signed for that request and its row keys, and the caller must ask again 15+ minutes later with it. A
+    missing, forged, future or other-request token starts a new wait. `authenticated` statements stop after 8
+    seconds (checked live in `pg_roles` on 2026-11-05: `authenticated` statement_timeout=8s), so by then the request
+    can no longer commit.
+  - `not_recorded_after_wait` (safe), or `retired` (safe; an earlier safe answer already retired it).
+- Every safe answer retires each key that still has no receipt: a `retire_uncertain_request` receipt (30 days) is
+  written under that key's lock, so a late send of the key from any tab is refused by the database
+  (`IDEMPOTENCY_CROSS_OP_KEY_REUSE`) and cannot save after the clear (Sol finding). Keys that already have a receipt
+  are left alone: a resend replays or is refused.
+- Idempotency: the request key is the call's idempotency key; `p_idempotency_key`, if sent, must equal it, and a
+  repeat answers `retired` without writing.
 - Times come from `clock_timestamp()`, not the transaction-start `now()`, so a long-open transaction cannot
   shorten the wait (Sol finding).
-- Only the caller's own keys can be checked (`<operation>:<auth.uid()>:<uuid>`, the format
-  `generateIdempotencyKey` makes); `request_actor_id` is not used because older receipts leave it NULL.
-- SECURITY DEFINER because `idempotency_keys` and the signing-key table deny all direct access; `search_path = public, pg_temp`; EXECUTE
-  for `authenticated` only. No table writes, so no `p_idempotency_key` (the rule covers mutating RPCs).
-- Proof before apply, on the local test database (`crx-local-app`), every case inside a rolled-back
-  transaction: recorded -> safe; a second session holding the key's lock -> `in_progress`; no token, a forged token, another
-  request's token and a future token -> `first_check`; its own fresh token -> `waiting`; a genuine token 5 minutes
-  old -> `waiting`, 16 minutes -> safe; no client role can reach the signing-key table; another user's key and a
-  derived row key -> `REQUEST_KEY_NOT_OWNED`; signed out -> `AUTH_REQUIRED`; anon -> permission denied. The new
-  smoke chain `scripts/smoke/smoke-uncertain-request-clear-check.sql` passed there (`SMOKE_PASS_ROLLBACK`).
+- Only the caller's own keys (`<operation>:<auth.uid()>:<uuid>`, the format `generateIdempotencyKey` makes) and
+  row keys that extend them are accepted; at most 500 row keys. `request_actor_id` is not used for ownership because
+  older receipts leave it NULL.
+- SECURITY DEFINER because `idempotency_keys` and the signing-key table deny all direct access;
+  `search_path = public, pg_temp`; EXECUTE for `authenticated` only.
+- Proof before apply, on the local test database (`crx-local-app`), every case inside a rolled-back transaction: a
+  second session holding a batch row key's lock -> `in_progress` with nothing written, and `first_check` once it
+  is released. The self-seeding smoke chain `scripts/smoke/smoke-uncertain-request-clear-check.sql` passed there
+  (`SMOKE_PASS_ROLLBACK`): recorded -> safe; a receipt under another operation -> wait; no, forged, borrowed,
+  other-row-keys and future tokens -> `first_check`; its own fresh token -> `waiting`; 5 minutes -> `waiting`,
+  16 minutes -> safe with the key retired; asking again -> `retired`; a batch with one saved row -> `recorded` with
+  the base key and the unsaved row retired; a later send of a retired key -> `IDEMPOTENCY_CROSS_OP_KEY_REUSE`;
+  another user's key, a row key outside the request -> `REQUEST_KEY_NOT_OWNED`; a wrong idempotency key ->
+  `IDEMPOTENCY_KEY_MISMATCH`; signed out -> `AUTH_REQUIRED`.
 - Not verified yet: the live apply and the live smoke run.

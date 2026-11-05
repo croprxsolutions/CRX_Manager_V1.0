@@ -72,6 +72,22 @@ const ALL_FLAG_TYPES: WatchdogFlagType[] = [
   'rei_not_cleared',
 ];
 
+/** Every flag, every page: the server cuts a function's rows off at 1,000. Throws on a failed read. */
+async function readAllFlags(includeDismissed: boolean): Promise<WatchdogFlag[]> {
+  const { data, error } = await fetchAllRows<WatchdogFlag>((from, to) => pageWithList(supabaseUntyped
+    .rpc('get_watchdog_flags', {
+      p_job_id:            null,
+      p_invoice_id:        null,
+      p_flag_type:         null,
+      p_include_dismissed: includeDismissed,
+    }, { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(from, to)));
+  if (error) throw error;
+  return assertRpcResult<WatchdogFlag[]>(data, 'get_watchdog_flags');
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function WatchdogExceptions() {
@@ -93,20 +109,7 @@ export default function WatchdogExceptions() {
   const fetchFlags = useCallback(async () => {
     setLoading(true);
     try {
-      // Every page: the server cuts a function's rows off at 1,000.
-      const { data, error } = await fetchAllRows<WatchdogFlag>((from, to) => pageWithList(supabaseUntyped
-        .rpc('get_watchdog_flags', {
-          p_job_id:            null,
-          p_invoice_id:        null,
-          p_flag_type:         null,
-          p_include_dismissed: showDismissed,
-        }, { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false })
-        .range(from, to)));
-      if (error) throw error;
-      const result = assertRpcResult<WatchdogFlag[]>(data, 'get_watchdog_flags');
-      setFlags(result);
+      setFlags(await readAllFlags(showDismissed));
       setLoadFailed(false);
     } catch (err) {
       Sentry.captureException(err, { tags: { page: 'WatchdogExceptions' } });

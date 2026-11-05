@@ -201,6 +201,9 @@ vi.mock('../lib/db', async () => {
 // The signed-in role; a test may change it to re-run the reference load (a role change does).
 const authState = vi.hoisted(() => ({ role: 'admin' }));
 
+// The credit line (To-Do 1.8) has its own tests; its RPC would consume these tests' save_quote answers.
+vi.mock('../components/quotes/QuoteCustomerChecks', () => ({ QuoteCreditStatus: () => null }));
+
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: authState.role, full_name: 'Test Admin' }, role: authState.role }),
 }));

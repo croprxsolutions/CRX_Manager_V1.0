@@ -8,7 +8,8 @@
 -- saved be cleared, and the form could then send the same change again as a
 -- duplicate payment or stock change. This function lets the SERVER decide, so
 -- the device clock is never trusted:
---   * recorded     - the key is in idempotency_keys: the request saved, clear is safe.
+--   * recorded     - the key is in idempotency_keys under the operation it names (and
+--                    this actor, when the receipt records one): it saved, clear is safe.
 --   * in_progress  - a transaction holding this key's idempotency lock is running
 --                    right now (check_idempotency_intent takes the same lock): refuse.
 --   * first_check  - not recorded, not running: returns first_check_token, the
@@ -31,7 +32,8 @@
 --
 -- Read-only: no table writes, so no p_idempotency_key parameter is needed (the
 -- AGENTS.md idempotency rule covers mutating RPCs). The only side effect is a
--- try-lock that is released when the call's transaction ends.
+-- try-lock that is released when the call's transaction ends. Times come from
+-- clock_timestamp(), so a long-open transaction cannot shorten the wait.
 --
 -- SECURITY DEFINER is required because idempotency_keys and the signing-key table
 -- have RLS with deny-all policies. It never reveals another user's keys: the key
@@ -61,8 +63,10 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := auth.uid();
+  -- Wall-clock time, not now(): now() is frozen at the start of the transaction.
+  v_now timestamptz := clock_timestamp();
+  v_now_us bigint := (extract(epoch FROM v_now) * 1000000)::bigint;
   v_wait_us bigint := 15 * 60 * 1000000;
-  v_now_us bigint := (extract(epoch FROM now()) * 1000000)::bigint;
   v_key bytea;
   v_first_us bigint;
 BEGIN
@@ -77,13 +81,29 @@ BEGIN
     RAISE EXCEPTION 'REQUEST_KEY_NOT_OWNED: only your own request can be checked' USING ERRCODE = '22023';
   END IF;
 
-  -- Same lock key as check_idempotency_intent; held until a saving transaction ends.
-  IF NOT pg_try_advisory_xact_lock(hashtextextended('crx:idempotency:' || p_request_key, 0)) THEN
-    RETURN jsonb_build_object('safe', false, 'reason', 'in_progress', 'checked_at', now());
+  -- A receipt counts only for the operation the key names and, when it records
+  -- one, this actor. Any other receipt falls through to the server-timed wait.
+  IF EXISTS (
+    SELECT 1 FROM public.idempotency_keys
+     WHERE idempotency_key = p_request_key
+       AND operation = split_part(p_request_key, ':', 1)
+       AND (request_actor_id IS NULL OR request_actor_id = v_actor)
+  ) THEN
+    RETURN jsonb_build_object('safe', true, 'reason', 'recorded', 'checked_at', v_now);
   END IF;
 
-  IF EXISTS (SELECT 1 FROM public.idempotency_keys WHERE idempotency_key = p_request_key) THEN
-    RETURN jsonb_build_object('safe', true, 'reason', 'recorded', 'checked_at', now());
+  -- Same lock key as check_idempotency_intent; held until a saving transaction ends.
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('crx:idempotency:' || p_request_key, 0)) THEN
+    RETURN jsonb_build_object('safe', false, 'reason', 'in_progress', 'checked_at', v_now);
+  END IF;
+  -- Look again under the lock: a save may have committed since the first look.
+  IF EXISTS (
+    SELECT 1 FROM public.idempotency_keys
+     WHERE idempotency_key = p_request_key
+       AND operation = split_part(p_request_key, ':', 1)
+       AND (request_actor_id IS NULL OR request_actor_id = v_actor)
+  ) THEN
+    RETURN jsonb_build_object('safe', true, 'reason', 'recorded', 'checked_at', v_now);
   END IF;
 
   SELECT signing_key INTO v_key FROM public.uncertain_request_clear_check_key WHERE singleton;
@@ -98,16 +118,16 @@ BEGIN
   END IF;
 
   IF v_first_us IS NULL OR v_first_us > v_now_us THEN
-    RETURN jsonb_build_object('safe', false, 'reason', 'first_check', 'checked_at', now(),
-      'wait_until', now() + interval '15 minutes',
+    RETURN jsonb_build_object('safe', false, 'reason', 'first_check', 'checked_at', v_now,
+      'wait_until', v_now + interval '15 minutes',
       'first_check_token', v_now_us::text || '.' || encode(extensions.hmac(
         convert_to(p_request_key || '|' || v_now_us::text, 'UTF8'), v_key, 'sha256'), 'hex'));
   END IF;
   IF v_now_us < v_first_us + v_wait_us THEN
-    RETURN jsonb_build_object('safe', false, 'reason', 'waiting', 'checked_at', now(),
+    RETURN jsonb_build_object('safe', false, 'reason', 'waiting', 'checked_at', v_now,
       'wait_until', to_timestamp((v_first_us + v_wait_us) / 1000000.0));
   END IF;
-  RETURN jsonb_build_object('safe', true, 'reason', 'not_recorded_after_wait', 'checked_at', now());
+  RETURN jsonb_build_object('safe', true, 'reason', 'not_recorded_after_wait', 'checked_at', v_now);
 END;
 $function$;
 

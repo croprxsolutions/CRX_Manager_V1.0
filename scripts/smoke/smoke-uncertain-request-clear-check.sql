@@ -4,7 +4,8 @@
 -- active profile's claims) and with those claims cleared (signed out):
 --   * the installed body is 20261107150000's, only authenticated can execute it, and no
 --     client role can reach the signing-key table;
---   * a key that profile owns and that is recorded in idempotency_keys is safe ('recorded');
+--   * a key that profile owns and that is recorded in idempotency_keys under the operation it
+--     names is safe ('recorded'); a receipt under another operation is not;
 --   * an unrecorded key needs two checks 15+ minutes apart by SERVER time, carried in a token
 --     the server signed for that key: no token, a forged one, another key's token or a future
 --     one -> 'first_check'; a genuine token 5 minutes old -> 'waiting', 16 minutes -> safe;
@@ -27,7 +28,7 @@ DECLARE
   v_refused boolean;
   v_role text;
 BEGIN
-  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_fn), chr(13), '')) <> 'd212f0e853138e83f16d19a83e67bdc6' THEN
+  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_fn), chr(13), '')) <> '0508dea1a928654ab1c07d1788021d10' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: check_uncertain_request_clearable is not the body of 20261107150000';
   END IF;
   IF has_function_privilege('anon', v_fn, 'EXECUTE') OR has_function_privilege('service_role', v_fn, 'EXECUTE')
@@ -45,6 +46,8 @@ BEGIN
     FROM public.idempotency_keys k
     JOIN public.profiles p ON p.is_active
      AND k.idempotency_key ~ ('^[a-z0-9_]+:' || p.id::text || ':[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+     AND k.operation = split_part(k.idempotency_key, ':', 1)
+     AND (k.request_actor_id IS NULL OR k.request_actor_id = p.id)
    ORDER BY k.created_at DESC LIMIT 1;
   IF v_recorded IS NULL THEN
     RAISE EXCEPTION 'SMOKE_FAIL: need a recorded key of an active profile';
@@ -75,7 +78,7 @@ BEGIN
   END IF;
   v_r := public.check_uncertain_request_clearable(v_unrecorded);
   IF (v_r->>'safe')::boolean IS NOT FALSE OR v_r->>'reason' <> 'first_check'
-     OR (v_r->>'checked_at')::timestamptz <> now() OR v_r->>'first_check_token' !~ '^[0-9]+\.[0-9a-f]{64}$' THEN
+     OR (v_r->>'checked_at')::timestamptz NOT BETWEEN now() AND clock_timestamp() OR v_r->>'first_check_token' !~ '^[0-9]+\.[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a first check did not return a signed server time and refuse: %', v_r;
   END IF;
   -- Its own fresh token is genuine: asking again at once is 'waiting', not a new first check.

@@ -6,13 +6,17 @@
   signing key generated inside the database.
   PR #1485's "clear this" button will call it before it removes anything, so a wrong device clock can no longer
   clear a request that might still save. Answers:
-  - `recorded` (safe): the key is in `idempotency_keys`, so the request saved.
+  - `recorded` (safe): the key is in `idempotency_keys` under the operation its prefix names (and this actor,
+    when the receipt records one), so the request saved. A receipt under another operation is not trusted and
+    falls through to the wait. Checked before and after the lock, so a parallel check does not look like a save.
   - `in_progress` (refused): a transaction holds the key's `crx:idempotency:` lock, the one
     `check_idempotency_intent` takes, so the request is being saved right now.
   - `first_check` / `waiting` (refused): not recorded; the first check returns `first_check_token`, the server's time
     signed for that key, and the caller must ask again 15+ minutes later with it. A missing, forged, future or
     other-request token starts a new wait, so neither the device clock nor an invented time can shorten it. `authenticated` statements stop after 8 seconds (checked live in `pg_roles` on 2026-11-05: `authenticated` statement_timeout=8s), so by then the request can no longer commit.
   - `not_recorded_after_wait` (safe).
+- Times come from `clock_timestamp()`, not the transaction-start `now()`, so a long-open transaction cannot
+  shorten the wait (Sol finding).
 - Only the caller's own keys can be checked (`<operation>:<auth.uid()>:<uuid>`, the format
   `generateIdempotencyKey` makes); `request_actor_id` is not used because older receipts leave it NULL.
 - SECURITY DEFINER because `idempotency_keys` and the signing-key table deny all direct access; `search_path = public, pg_temp`; EXECUTE

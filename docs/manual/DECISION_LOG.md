@@ -50,6 +50,18 @@ The holding-cost numbers, supplier-price exposure, starting-date history, the Op
 rebates, lots and GMROI are cut. Each pre-season item is still built only on Mason's go-ahead, through its own
 PR and reviews. The count comes before any estimated dates or costs are entered.
 
+## 2026-11-05 — The post-apply carry also accepts the awaiting-type-regeneration line
+
+**Source:** Mason, 2026-11-05, answering a retro proposal to "let the quick post-apply review accept
+the routine test-list line": "Yes, do 1".
+
+**Decision.** `--carry-post-apply` also accepts `src/lib/rpcContracts.test.ts` when the only change is
+adding the PR's own migration timestamps to `MIGRATIONS_AWAITING_TYPE_REGENERATION`. The
+regen-schema-registry skill requires that edit after every apply that adds functions, so before this
+every such apply forced a second full Sol run (KI-27, PR #1493). Any other change to that file, a
+timestamp of another migration, or a line outside that list still refuses and needs the full review.
+Checked by `awaitingRegenProblem` in `scripts/write-codex-push-proof.mjs`, with no model call.
+
 ## 2026-11-04 — The post-apply records commit keeps the Sol review
 
 **Source:** Mason, 2026-11-04, in session local_6f576522, answering a retro proposal titled "Stop the

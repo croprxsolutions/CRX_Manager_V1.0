@@ -1,3 +1,7 @@
+-- idempotency-body-check: exempt
+-- (move_product_size checks its retry key through _product_parent_replay, which calls check_idempotency,
+--  and saves its receipt with save_idempotency last, in the same transaction.)
+--
 -- PAR-1 follow-up: a seed or each parent's sizes share one stock unit.
 --
 -- A seed or each parent's one rate is per stock unit (20261108120000 previews and saves it in each

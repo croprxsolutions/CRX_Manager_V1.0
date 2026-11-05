@@ -45,7 +45,7 @@ import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
 import { assertInvoiceSendDisposition } from '../lib/invoiceSendDisposition';
 import { logActivity } from '../lib/activityLogger';
-import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, invoiceEmailLogPrefix, isBulkEmailable, isEmailRateLimit, sentSinceInvoiceChanged, summarizeBulkEmail, type BulkEmailResult, type InvoiceEmailLogRow } from '../lib/invoiceBulkEmail';
+import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, invoiceEmailLogPrefix, isBulkEmailable, isEmailRateLimit, sentSinceInvoiceChanged, summarizeBulkEmail, type BulkEmailResult, type InvoiceBillTo, type InvoiceEmailLogRow } from '../lib/invoiceBulkEmail';
 
 type InvoiceRow = Invoice & { customer_name: string; salesman_name: string | null; order_number: string | null };
 
@@ -486,16 +486,19 @@ export default function Invoices() {
 
   // One invoice's printable data, read fresh. Print and Email both use it, so an emailed
   // invoice's money check matches what Print would show.
-  const loadInvoicePdfData = async (inv: InvoiceRow, options?: InvoicePrintOptions): Promise<InvoicePdfData> => {
+  // billTo: the customer row an email already read for its key, so the PDF prints exactly what the key covers.
+  const loadInvoicePdfData = async (inv: InvoiceRow, options?: InvoicePrintOptions, billTo?: InvoiceBillTo): Promise<InvoicePdfData> => {
     // Fetch customer details
     // A dropped request is a failed read too: the same refusal, not a raw network error.
     const detailsUnavailable = () => { throw new InvoiceDetailsUnavailableError(); };
-    const { data: cust, error: custError } = await supabase
-      .from('customers')
-      .select('billing_address, city, state, zip, account_number, payment_terms')
-      .eq('id', inv.customer_id)
-      .maybeSingle()
-      .then((r) => r, detailsUnavailable);
+    const { data: cust, error: custError } = billTo
+      ? { data: billTo, error: null }
+      : await supabase
+        .from('customers')
+        .select('billing_address, city, state, zip, account_number, payment_terms')
+        .eq('id', inv.customer_id)
+        .maybeSingle()
+        .then((r) => r, detailsUnavailable);
     // A failed or missing customer read refuses the PDF: printing on would send the
     // customer an invoice with a blank address block (To-Do 10.5 follow-up).
     if (custError || !cust) throw new InvoiceDetailsUnavailableError();
@@ -520,6 +523,7 @@ export default function Invoices() {
 
     return {
       ...invoiceRowPdfFields(inv),
+      ...(billTo ? { customer_name: billTo.farm_name || inv.customer_name } : {}),
       customer_address: cust.billing_address || undefined,
       customer_city: cust.city || undefined,
       customer_state: cust.state || undefined,
@@ -571,7 +575,7 @@ export default function Invoices() {
             continue;
           }
           // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
-          const pdfData = await loadInvoicePdfData(inv);
+          const pdfData = await loadInvoicePdfData(inv, undefined, cust ?? undefined);
           await assertStillSendable(inv);
           const result = await sendEmail({
             to,

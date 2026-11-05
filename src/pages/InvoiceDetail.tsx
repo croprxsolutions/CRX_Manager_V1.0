@@ -1728,7 +1728,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   };
 
   // Build PDF data object (shared by print + email)
-  const buildInvoicePdfData = async (options?: InvoicePrintOptions): Promise<InvoicePdfData> => {
+  // billTo: the customer row an email already read for its key, so the PDF prints exactly what the key covers.
+  const buildInvoicePdfData = async (options?: InvoicePrintOptions, billTo?: InvoiceBillTo): Promise<InvoicePdfData> => {
     const { data: enrichedItems, error: itemsError } = await supabase
       .from('invoice_items')
       .select(`${INVOICE_ITEM_COLUMNS}, product:products(product_name, epa_registration, product_form)`)
@@ -1742,8 +1743,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
     // The billed customer's address, read by id: the picker list leaves out inactive customers and
     // may not have loaded, so a customer missing from it would print a blank address.
-    let cust: Pick<Customer, 'billing_address' | 'city' | 'state' | 'zip' | 'account_number' | 'payment_terms'> | null = null;
-    if (invoice.customer_id) {
+    let cust: InvoiceBillTo | null = null;
+    if (billTo) {
+      cust = billTo;
+    } else if (invoice.customer_id) {
       const { data: custRow, error: custError } = await supabase
         .from('customers')
         .select('billing_address, city, state, zip, account_number, payment_terms')
@@ -1777,7 +1780,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       due_date: invoice.due_date || undefined,
       invoice_type: invoice.invoice_type || 'chemical_sale',
       status: invoice.status || 'draft',
-      customer_name: customerName,
+      customer_name: billTo?.farm_name || customerName,
       customer_address: cust?.billing_address || undefined,
       customer_city: cust?.city || undefined,
       customer_state: cust?.state || undefined,
@@ -1884,7 +1887,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     await runCriticalAction({
       action: async () => {
         // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
-        const pdfData = await buildInvoicePdfData();
+        const pdfData = await buildInvoicePdfData(undefined, billTo);
 
         const amountStr = ((invoice.balance_cents || 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
         const html = buildEmailHtml(`
@@ -1898,6 +1901,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
         const liveVersion = await assertInvoiceSendable(id!);
         if (!liveVersion) throw new Error('Could not read this invoice. Reload and try again.');
+        // The PDF above is this page's copy: never send it under a newer version's key (Luna 9.6).
+        if (liveVersion !== invoice.updated_at) throw new Error('This invoice changed since you opened it. Reload the page and email it again.');
         const version = { id: id!, updated_at: liveVersion };
         const versionKey = await invoiceEmailKey(version, cust.email!, billTo);
         if (copyKeyRef.current?.forKey !== versionKey) {

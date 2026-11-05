@@ -10,9 +10,12 @@
  *      posting keeps it.
  *   2. APPLY: the candidate applies; the private body keeps its owner, settings and owner-only ACL,
  *      and the public wrapper is untouched.
- *   3. AFTER: the transfer leaves due_date blank and posting stamps invoice date + the customer's
- *      terms: Net 15 -> +15, Net 30 -> +30, Due on receipt -> +0, on the single-invoice path and
- *      on each owner of a split. Every other invoice and line column matches the BEFORE run.
+ *   3. AFTER: the transfer stamps invoice date + the billed customer's terms and copies those terms
+ *      onto the invoice: Net 15 -> +15, Net 30 -> +30, Due on receipt -> +0, on the single-invoice
+ *      path and on each owner of a split; posting keeps both. Every other invoice and line column
+ *      matches the BEFORE run.
+ *   3b. RE-TERM: changing the customer's terms between transfer and posting changes neither the
+ *      invoice's terms nor its due date (the PDF prints the invoice's terms beside its date).
  *   4. RE-APPLY: the file refuses on its own output (source pin), changing nothing.
  *
  * Run: node scripts/smoke/prove-transfer-invoice-due-date-real-schema.mjs   (needs Docker)
@@ -217,7 +220,7 @@ const [J15, J30, JRCPT, JSPLIT] = ['e1', 'e2', 'e3', 'e4'].map((s) => `7c6c0000-
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const LIVE_IMPL_MD5 = 'a72cf3a5cff53d4024ad52b832985724';
-const NEW_IMPL_MD5 = 'a01005fb8a38cf5b23478029efd62d43';
+const NEW_IMPL_MD5 = 'd2768c5eca74f1149ff666a9f6809ba4';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data)
@@ -252,7 +255,7 @@ function seed() {
 // Transfers `job` and posts what it made (post_invoice per lone invoice, post_invoice_group per
 // split), as the admin, in a rolled-back transaction. Returns per invoice: the owner, the due date
 // right after the transfer, the posted due date minus the invoice date, and the made rows.
-function transferAndPost(job) {
+function transferAndPost(job, retermSql = '') {
   const asAdmin = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
 SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true);
 SET LOCAL ROLE authenticated;`;
@@ -260,10 +263,11 @@ SET LOCAL ROLE authenticated;`;
 ${asAdmin}
 SELECT public.transfer_job_to_invoice('${job}', '${ADMIN}', 'prover-' || gen_random_uuid()) IS NOT NULL;
 RESET ROLE;
+${retermSql}
 CREATE TEMP TABLE prover_made ON COMMIT DROP AS
-  SELECT i.id, i.invoice_group_id, i.status AS made_status, i.due_date AS made_due, i.due_date - i.invoice_date AS made_days,
+  SELECT i.id, i.invoice_group_id, i.status AS made_status, i.due_date AS made_due, i.due_date - i.invoice_date AS made_days, i.payment_terms AS made_terms,
          public._invoice_post_version(i.id) AS ver,
-         to_jsonb(i) - 'id' - 'invoice_number' - 'created_at' - 'updated_at' - 'invoice_group_id' - 'due_date' AS made_row,
+         to_jsonb(i) - 'id' - 'invoice_number' - 'created_at' - 'updated_at' - 'invoice_group_id' - 'due_date' - 'payment_terms' AS made_row,
          (SELECT jsonb_agg(to_jsonb(ii) - 'id' - 'invoice_id' - 'created_at' - 'updated_at' ORDER BY ii.sort_order, ii.description)
             FROM public.invoice_items ii WHERE ii.invoice_id = i.id) AS made_items
     FROM public.invoices i WHERE i.job_id = '${job}';
@@ -274,7 +278,7 @@ SELECT count(public.post_invoice_group(g, '${ADMIN}', v, 'prover-group-' || g))
   FROM (SELECT invoice_group_id g, jsonb_object_agg(id::text, ver) v FROM prover_made WHERE invoice_group_id IS NOT NULL GROUP BY 1) x;
 RESET ROLE;
 SELECT 'SNAP|' || jsonb_agg(jsonb_build_object(
-    'owner', i.customer_id, 'made_status', m.made_status, 'made_due', m.made_due, 'made_days', m.made_days, 'status', i.status,
+    'owner', i.customer_id, 'made_status', m.made_status, 'made_due', m.made_due, 'made_days', m.made_days, 'made_terms', m.made_terms, 'terms', i.payment_terms, 'status', i.status,
     'posted_days', i.due_date - i.invoice_date, 'split', m.invoice_group_id IS NOT NULL,
     'row', m.made_row, 'items', m.made_items)
   ORDER BY i.customer_id)::text
@@ -337,13 +341,25 @@ try {
       // An unposted invoice can be emailed (the server PDF prints a NULL due date as "On receipt"),
       // so the transfer itself must stamp the terms' date, and posting must keep it.
       assert.equal(a.made_days, a.posted_days, `AFTER: ${NAMES[a.owner]} transfer stamp (+${a.made_days}) differs from the posted date`);
+      const seededTerms = { [C15]: 'Net 15', [C30]: 'Net 30', [CRCPT]: 'Due on receipt' }[a.owner];
+      assert.equal(b.made_terms, null, 'BEFORE: the transfer already set invoice terms');
+      assert.equal(a.made_terms, seededTerms, `AFTER: ${NAMES[a.owner]} terms were not copied onto the invoice`);
+      assert.equal(a.terms, seededTerms, `AFTER: posting changed ${NAMES[a.owner]}'s invoice terms`);
       assert.equal(a.owner, b.owner);
       assert.equal(a.made_status, b.made_status, 'the transfer left a different status');
-      assert.deepEqual(a.row, b.row, `${NAMES[a.owner]}: an invoice column other than due_date changed`);
+      assert.deepEqual(a.row, b.row, `${NAMES[a.owner]}: an invoice column other than due_date or payment_terms changed`);
       assert.deepEqual(a.items, b.items, `${NAMES[a.owner]}: an invoice line changed`);
     });
   }
   console.log(`[prover] AFTER (stamped at transfer, kept by posting): ${JOBS.map((j) => days(after[j])).join(' | ')}; every other invoice and line column unchanged`);
+
+  // 3b. Re-term between transfer and posting: the invoice keeps the terms and date it was made with.
+  const reterm = transferAndPost(J15, `UPDATE public.customers SET payment_terms = 'Net 30' WHERE id = '${C15}';`);
+  assert.equal(scalar(`SELECT payment_terms FROM public.customers WHERE id = '${C15}';`), 'Net 15', 'the re-term leaked out of its rolled-back transaction');
+  assert.equal(reterm.length, 1);
+  assert.equal(reterm[0].terms, 'Net 15', 'RE-TERM: the invoice picked up the customer’s new terms');
+  assert.equal(reterm[0].posted_days, 15, 'RE-TERM: the posted due date moved with the customer’s new terms');
+  console.log('[prover] RE-TERM: customer moved Net 15 -> Net 30 after transfer; the posted invoice still says Net 15, due +15');
 
   // 4. Re-apply refuses on the source pin.
   const again = apply('candidate.sql');

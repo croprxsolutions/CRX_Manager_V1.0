@@ -301,11 +301,12 @@ can make old splits refuse to save (LOW-MED).
 **MED · PARTIAL · money · screen half unassigned**
 - Database half: candidate `20261112090000` (not yet live) makes the transfer stamp invoice date + the
   billed customer's terms instead of + 30 days, the date posting would stamp (every posting route ends in
-  `_post_invoice_impl_20260714`, which fills the due date only when blank, so the old +30 always survived).
-  Saved invoices keep their dates; on 2026-11-05 none disagreed with its customer's terms (all customers Net 30).
+  `_post_invoice_impl_20260714`, which fills the due date only when blank, so the old +30 always survived),
+  and copies those terms onto the invoice. Saved invoices keep their dates; on 2026-11-05 none disagreed with its customer's terms (all customers Net 30).
 - Still open (MED, not reachable while every customer is Net 30): the field-application screen shows Net 30 when an
   invoice has no terms of its own, and saving writes that onto the invoice, so a saved-then-posted invoice for a
-  Net 15 customer is due in 30 days. Affects every field invoice, not only transfers.
+  Net 15 customer is due in 30 days. Transfer invoices now carry their customer's terms; other field invoices
+  with blank terms are still affected.
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**

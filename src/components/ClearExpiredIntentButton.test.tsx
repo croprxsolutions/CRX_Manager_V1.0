@@ -66,10 +66,16 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     await waitFor(() => expect(mockReload).toHaveBeenCalledTimes(1));
   });
 
-  it('is hidden from non-admins', () => {
-    mockAuth.role = 'warehouse';
+  it.each([null, 'warehouse', 'entity_recipient'])('is hidden for role %s', (role) => {
+    mockAuth.role = role;
     render(<ClearExpiredIntentButton intent={lock()} operation="receive_po_items" />);
     expect(screen.queryByText(LABEL)).toBeNull();
+  });
+
+  it.each(['sales_rep', 'driver', 'applicator'])('is shown to a %s for their own stuck request', (role) => {
+    mockAuth.role = role;
+    render(<ClearExpiredIntentButton intent={lock()} operation="receive_po_items" />);
+    expect(screen.getByText(LABEL)).toBeTruthy();
   });
 
   it('is hidden while a safe retry is still possible', () => {
@@ -94,7 +100,7 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     await waitFor(() => expect(mockReload).toHaveBeenCalledTimes(1));
     expect(mockToast).not.toHaveBeenCalled();
     expect(mockCapture).toHaveBeenCalledWith(
-      'Admin cleared an expired uncertain mutation',
+      'Staff member cleared an expired uncertain mutation',
       expect.objectContaining({
         tags: { operation: 'receive_po_items', surface: 'purchase-order-detail' },
         extra: expect.objectContaining({ scope: 'po-1', idempotencyKey: 'receive_po_items:admin:key-1' }),

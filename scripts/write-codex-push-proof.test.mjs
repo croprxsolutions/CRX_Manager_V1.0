@@ -1572,7 +1572,7 @@ function collisionPromptSkipsWork(prompt) {
         writeFileSync(path.join(repo, "supabase", "migrations", "20990101000000_x.sql"), "select 1;\n");
         git("add", ".");
         git("commit", "-qm", "migration");
-        assert.equal(solReviewBase(repo, git("rev-parse", "HEAD"), movedMain), movedMain, "review base: a migration branch keeps origin/main, so it still must merge main first");
+        assert.equal(solReviewBase(repo, git("rev-parse", "HEAD"), movedMain), branchHead, "review base: a migration branch is also reviewed from the fork point; the apply gate later needs a main merge plus carry-forward");
         // The proof the fork-point review mints passes the merge gate's base check.
         const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
         const forkProof = { codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: branchHead, timestamp: new Date().toISOString() };

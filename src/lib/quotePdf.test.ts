@@ -186,6 +186,44 @@ describe('generateQuotePdf', () => {
     const doc = await generateQuotePdf(data);
     expect(doc).toBe(mockDoc);
   });
+
+  it('wraps a long section note onto its own lines and a new page, never into the footer', async () => {
+    const noteLines = Array.from({ length: 60 }, (_, i) => `note line ${i}`);
+    mockDoc.splitTextToSize.mockImplementation((text: string) =>
+      text === 'LONG NOTE' ? noteLines : [text]);
+    try {
+      await generateQuotePdf(makeQuoteData({
+        sections: [{ ...makeQuoteData().sections[0], section_notes: 'LONG NOTE' }],
+      }));
+    } finally {
+      mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
+    }
+
+    const drawn = mockDoc.text.mock.calls.filter((c) => noteLines.includes(c[0] as string));
+    expect(drawn.map((c) => c[0])).toEqual(noteLines);
+    expect(drawn.every((c) => (c[2] as number) < 792 - 50)).toBe(true);
+    expect(mockDoc.addPage).toHaveBeenCalled();
+    // Lines go down the page, restarting near the top only after the page break
+    const ys = drawn.map((c) => c[2] as number);
+    expect(ys.filter((y, i) => i > 0 && y < ys[i - 1])).toHaveLength(1);
+  });
+
+  it('spaces section header note lines a full line apart and starts the table below them', async () => {
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    mockDoc.splitTextToSize.mockImplementation((text: string) =>
+      text === 'LONG HDR' ? ['hdr 1', 'hdr 2', 'hdr 3'] : [text]);
+    try {
+      await generateQuotePdf(makeQuoteData({
+        sections: [{ ...makeQuoteData().sections[0], section_header_notes: 'LONG HDR' }],
+      }));
+    } finally {
+      mockDoc.splitTextToSize.mockImplementation((text: string) => [text]);
+    }
+    const ys = mockDoc.text.mock.calls.filter((c) => String(c[0]).startsWith('hdr ')).map((c) => c[2] as number);
+    expect(ys).toHaveLength(3);
+    expect([ys[1] - ys[0], ys[2] - ys[1]]).toEqual([11, 11]);
+    expect(autoTable.mock.calls[0][1].startY).toBeGreaterThan(ys[2]);
+  });
 });
 
 describe('downloadQuotePdf', () => {

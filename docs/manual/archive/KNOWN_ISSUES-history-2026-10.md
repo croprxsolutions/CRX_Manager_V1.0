@@ -7067,6 +7067,16 @@ quote-version trust-marker route intact, so these were stale fingerprints, not d
 that migration applies. The candidate digest was captured from a disposable PostgreSQL replica that first reproduced
 every live digest. Still open until: review, merge, and a fresh live sweep after the candidate migration is applied.
 
+### Closed sub-item 2026-11-05 — KI-39 quote PDF section notes
+
+Original text: "Long section notes on quote PDFs overprint the items table (`src/lib/quotePdf.ts:190-191`)".
+
+Closure: `src/lib/quotePdf.ts` now wraps section header notes, notes under a section's table and quote footer notes
+one line at a time, with full line spacing, and starts a new page before a line would reach the footer. A new section
+also starts on a fresh page when there is no room for its header, table heading and first row. Checked by rendering
+test quotes (short notes, long notes, a note crossing a page, long footer notes) to images before and after the fix.
+No database change. The year-end "Change" colour part of KI-39 stays open.
+
 ### Closed sub-item 2026-11-05 — KI-31 stale total acres after a boundary or override save
 
 Original text: "After saving a boundary the page does not refresh total acres, so a later attribute-only save can revert legacy

@@ -168,4 +168,53 @@ describe('ActionQueue', () => {
       expect(screen.getByText('(2)')).toBeInTheDocument();
     });
   });
+
+  it('shows the true group count from the server, not the 10 examples it sent (H36)', async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => ({
+      id: `inv-${i}`, primary_text: `INV-${i}`, secondary_text: 'Farm', days_overdue: 3, amount_cents: 100,
+    }));
+    mockRpc.mockResolvedValue({ data: { overdue_invoices: ten, counts: { overdue_invoices: 37 } }, error: null });
+
+    renderQueue();
+    expect(await screen.findByText('Overdue Invoices (37)')).toBeInTheDocument();
+    // 5 rows shown expanded, the rest counted from the true total.
+    expect(screen.getByText('+32 more items')).toBeInTheDocument();
+    expect(mockRpc).toHaveBeenCalledWith('get_dashboard_action_items', { p_limit: 10 });
+  });
+
+  it('a dismissed item comes off the true count', async () => {
+    mockRpc.mockResolvedValue({
+      data: {
+        overdue_invoices: [
+          { id: 'inv-1', primary_text: 'INV-001', secondary_text: 'Farm', days_overdue: 3, amount_cents: 100 },
+        ],
+        counts: { overdue_invoices: 12 },
+      },
+      error: null,
+    });
+    renderQueue();
+    expect(await screen.findByText('Overdue Invoices (12)')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Dismiss for today'));
+    // The only loaded example is dismissed, so the group leaves the queue.
+    await waitFor(() => expect(screen.queryByText(/Overdue Invoices/)).not.toBeInTheDocument());
+  });
+
+  it('without a server count, a full group of 10 is shown as 10+, never as a complete 10', async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => ({ id: `d-${i}`, primary_text: `DEL-${i}`, secondary_text: 'Farm' }));
+    mockRpc.mockResolvedValue({ data: { overdue_deliveries: ten }, error: null });
+    renderQueue();
+    expect(await screen.findByText(/Deliveries \(10\+\)$/)).toBeInTheDocument();
+    expect(screen.getByText('5+ more items')).toBeInTheDocument();
+  });
+
+  it('a failed read says the queue could not be loaded, never All Clear, and Try again reloads', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'network down' } });
+    renderQueue();
+    expect(await screen.findByText('The action queue could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText(/All Clear/)).not.toBeInTheDocument();
+
+    mockRpc.mockResolvedValueOnce({ data: { overdue_invoices: [], counts: { overdue_invoices: 0 } }, error: null });
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+    expect(await screen.findByText(/All Clear/)).toBeInTheDocument();
+  });
 });

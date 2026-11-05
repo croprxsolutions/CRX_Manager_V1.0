@@ -38,6 +38,7 @@ import { logActivity } from '../lib/activityLogger';
 import { runCriticalAction } from '../lib/criticalAction';
 import { retryGenericInvoiceCutover } from '../lib/genericInvoiceCutoverRetry';
 import { Sentry } from '../lib/sentry';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
@@ -190,6 +191,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Goal 3: no order and no delivery behind it -> charge lines only (the database refuses product
   // lines on such an invoice, migration 20261021050000). Never on the field-invoices route.
   const isFromScratch = routeArea !== 'field' && isFromScratchInvoice(invoice);
+  // Billing plan M1: a chemical sale backed by an order or a delivery also takes typed charge lines
+  // (freight, service...) beside its products (migration 20261108160000).
+  const takesCharges = isFromScratch || (routeArea !== 'field' && invoice.invoice_type === 'chemical_sale'
+    && !!(invoice.order_id || invoice.delivery_id) && !invoice.blend_ticket_id);
   const [items, setItems] = useState<LineItem[]>([]);
   const [loading, setLoading] = useState(!isNew);
   // The invoice id whose load failed: the editor is replaced by "could not be loaded" (To-Do 10.5),
@@ -478,15 +483,21 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       const [custRes, salesRes] = await Promise.all([
         // email + billing address feed Email and the printed invoice (buildInvoicePdfData, handleEmail);
         // assigned_tier prices each product added below (addProduct); save_invoice stores the sent price as-is.
-        supabase.from('customers').select('id, farm_name, payment_terms, email, billing_address, city, state, zip, account_number, assigned_tier').eq('is_active', true).order('farm_name').limit(500),
+        // Every active customer, page by page (Goal 4 M29): a 500-row cap left later names unpickable.
+        fetchAllRows((from, to) => pageWithList(supabase.from('customers').select('id, farm_name, payment_terms, email, billing_address, city, state, zip, account_number, assigned_tier', { count: 'exact' }).eq('is_active', true).order('farm_name').order('id').range(from, to))),
         // PR-07 follow-up: profile_public_view exposes only id/full_name/role/is_active.
         supabase.from('profile_public_view').select('id, full_name').in('role', ['admin', 'sales_rep']).eq('is_active', true).order('full_name'),
       ]);
-      if (custRes.data) setCustomers(custRes.data as Customer[]);
+      if (custRes.error) {
+        Sentry.captureException(custRes.error, { tags: { source: 'fetch', action: 'load_invoice_customer_picker' } });
+        toast('error', 'The customer list could not be loaded. Reload to pick a customer.');
+      } else {
+        setCustomers((custRes.data ?? []) as Customer[]);
+      }
       if (salesRes.data) setSalespeople(salesRes.data as { id: string; full_name: string }[]);
     };
     fetchRef();
-  }, []);
+  }, [toast]);
 
   // Throws when a read the editor depends on fails or answers with no list; fetchInvoice below
   // turns that into the failed state.
@@ -938,7 +949,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Add product as line item
   const addProduct = async (product: Product) => {
     // save_invoice stores the price sent, so the customer's tier must be known before pricing.
-    // The picker list holds only active customers (capped) and may not have loaded yet, so a
+    // The picker list holds only active customers and may not have loaded yet, so a
     // customer missing from it is read by id; if the tier cannot be read, refuse rather than
     // fall back to tier 1.
     let tier = 1;
@@ -1117,8 +1128,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'Please select a customer');
       return;
     }
-    if (isFromScratch) {
-      const problem = fromScratchLinesProblem(items);
+    if (takesCharges) {
+      const problem = fromScratchLinesProblem(isFromScratch ? items : items.filter((it) => !it.product_id));
       if (problem) {
         toast('error', problem);
         return;
@@ -1723,8 +1734,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     const printedTotalCents = invoice.total_amount_cents ?? items.reduce((s, i) => s + i.extended_cents, 0);
     assertInvoiceLinesLoaded(itemsError, enrichedItems, printedTotalCents);
 
-    // The billed customer's address, read by id: the picker list ignores its read error, leaves out
-    // inactive customers and stops at 500, so a customer missing from it printed a blank address.
+    // The billed customer's address, read by id: the picker list leaves out inactive customers and
+    // may not have loaded, so a customer missing from it would print a blank address.
     let cust: Pick<Customer, 'billing_address' | 'city' | 'state' | 'zip' | 'account_number' | 'payment_terms'> | null = null;
     if (invoice.customer_id) {
       const { data: custRow, error: custError } = await supabase
@@ -1840,8 +1851,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
   const sendInvoiceEmail = async () => {
     if (!profile) return;
-    // Read the billed customer by id: the picker list skips inactive customers and stops at 500,
-    // so a customer missing from it would read as "no email on file".
+    // Read the billed customer by id: the picker list skips inactive customers and may not have
+    // loaded, so a customer missing from it would read as "no email on file".
     let custEmail: string | null = null;
     if (invoice.customer_id) {
       const read = await supabase
@@ -2396,15 +2407,20 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       <Card>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-nav-dark">Line Items</h2>
-          {editable && (isFromScratch ? (
-            <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={addChargeLine}>
-              Add Charge
-            </Button>
-          ) : (
-            <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={() => setShowProductModal(true)}>
-              Add Product
-            </Button>
-          ))}
+          {editable && (
+            <div className="flex gap-2">
+              {!isFromScratch && (
+                <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={() => setShowProductModal(true)}>
+                  Add Product
+                </Button>
+              )}
+              {takesCharges && (
+                <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={addChargeLine}>
+                  Add Charge
+                </Button>
+              )}
+            </div>
+          )}
         </div>
         {editable && isFromScratch && (
           <p className="-mt-2 mb-4 text-xs text-secondary">
@@ -2436,7 +2452,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 {displayItems.map((item, idx) => (
                   <tr key={idx} className="group">
                     <td className="py-2 pr-4">
-                      {editable && (item.charge_type || (isFromScratch && !item.product_id)) ? (
+                      {editable && (item.charge_type || (takesCharges && !item.product_id)) ? (
                         <div className="flex flex-col gap-1 sm:flex-row">
                           <select
                             aria-label="Charge type"
@@ -2473,7 +2489,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       )}
                     </td>
                     <td className="py-2 pr-4">
-                      {editable && !item.billing_line_id && !item.charge_type && !(isFromScratch && !item.product_id) ? (
+                      {editable && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
                         <input
                           type="number"
                           value={item.quantity}

@@ -237,4 +237,51 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
     expect(mockRpc.mock.calls.filter(([name]) => name === 'set_field_boundary')).toHaveLength(1);
     expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
   });
+
+  it('sends the acres an override save stored', async () => {
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field') return Promise.resolve({ data: true, error: null });
+      if (name === 'set_field_override_acres') return Promise.resolve({ data: { override_acres: 55, billable_acres: 55 }, error: null });
+      return Promise.resolve({ data: [], error: null });
+    });
+    const router = createMemoryRouter([{ path: '/fields/:id', element: <FieldSetup /> }], { initialEntries: ['/fields/field-1'] });
+    render(<RouterProvider router={router} />);
+    fireEvent.change(await screen.findByLabelText(/Acres to bill/), { target: { value: '55' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
+
+    fireEvent.change(screen.getByDisplayValue('Select crop...'), { target: { value: 'corn' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(2));
+    expect(saveFieldCalls()[1][1].p_field_payload).toMatchObject({ crop_type: 'corn', total_acres: 55 });
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'set_field_override_acres')).toHaveLength(1);
+  });
+
+  it('leaves with no prompt after a save that synced acres and changed a billing split', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'field_billing_defaults') {
+        return chain(table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 } : null);
+      }
+      const self = chain(null);
+      const splits = Promise.resolve({ data: [{ customer_id: 'customer-1', customer: { farm_name: 'Test Farm' }, split_pct: 100, is_primary: true, notes: null, price_override_cents: null, pricing_note: null }], error: null });
+      self.then = splits.then.bind(splits);
+      return self;
+    });
+    const router = createMemoryRouter(
+      [{ path: '/fields/:id', element: <FieldSetup /> }, { path: '/other', element: <div>Other page</div> }],
+      { initialEntries: ['/fields/field-1'] },
+    );
+    render(<RouterProvider router={router} />);
+    fireEvent.change(await screen.findByPlaceholderText('e.g. Prepaid rate, Landlord rate'), { target: { value: 'Landlord rate' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Draw boundary' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
+    expect(saveFieldCalls()[0][1].p_billing_defaults).toMatchObject([{ pricing_note: 'Landlord rate' }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 50)); // let the post-save dirty check settle first
+    await router.navigate('/other');
+    expect(router.state.location.pathname).toBe('/other');
+    expect(await screen.findByText('Other page')).toBeInTheDocument();
+    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+  });
 });

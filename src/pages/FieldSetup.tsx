@@ -254,6 +254,7 @@ function FieldSetupPage() {
   const loadedFieldRef = useRef<typeof field | null>(null);
   const loadedSplitsRef = useRef<typeof billingSplits | null>(null);
   const skipUnsavedPromptRef = useRef(false);
+  const adoptSavedBaselineRef = useRef(false);
   const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   // Post-create navigation happens via this state so it fires on a render where
   // isDirty=false has committed — see the comment at the setter in handleSave.
@@ -267,6 +268,13 @@ function FieldSetupPage() {
 
   useEffect(() => {
     if (!initialLoadDone.current) return;
+    if (adoptSavedBaselineRef.current) {
+      // A save just synced acres back into the form: what is on screen is the new clean state.
+      adoptSavedBaselineRef.current = false;
+      loadedFieldRef.current = field;
+      loadedSplitsRef.current = billingSplits;
+      return;
+    }
     if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current) return;
     setIsDirty(true);
   }, [field, billingSplits]);
@@ -743,9 +751,8 @@ function FieldSetupPage() {
         }
 
         if (savedAcres) {
-          // Also the new clean baseline, so the dirty check does not flag the synced acres as an edit.
-          loadedFieldRef.current = { ...field, ...savedAcres };
-          setField(loadedFieldRef.current);
+          adoptSavedBaselineRef.current = true; // the synced acres are saved, not an edit
+          setField((f) => ({ ...f, ...savedAcres }));
         }
         setIsDirty(false);
         if (isNew) {

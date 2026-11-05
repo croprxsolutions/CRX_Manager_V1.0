@@ -98,13 +98,12 @@ export function parseCsvRecords(text: string): CsvRecord[] {
     const ch = src[i];
     if (quoted) {
       if (ch === '"' && src[i + 1] === '"') { cell += '"'; i += 1; }
-      else if (ch === '"') { quoted = false; closedAt = Math.min(closedAt, cell.length); }
-      // min: a second quoted part after a closed one ("" "Chem") keeps the first close, so it reads as malformed.
+      else if (ch === '"') { quoted = false; closedAt = cell.length; }
       else {
         if (ch === '\n' || (ch === '\r' && src[i + 1] !== '\n')) line += 1;
         cell += ch;
       }
-    } else if (ch === '"' && cell.trim() === '') { quoted = true; cell = ''; }
+    } else if (ch === '"' && cell.trim() === '' && closedAt === Infinity) { quoted = true; cell = ''; }
     // A quote that opens a value (after spaces, too) starts a quoted value; one inside a value is kept as text.
     else if (ch === ',') endCell();
     else if (ch === '\n' || ch === '\r') {

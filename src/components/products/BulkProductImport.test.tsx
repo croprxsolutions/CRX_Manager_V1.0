@@ -84,6 +84,8 @@ describe('CSV reader', () => {
     expect(csvRecordProblem(spaced, 2)).toBeUndefined();
     const [, twoQuoted] = parseCsvRecords('product_name,notes\n"" "Chem",n\n');
     expect(csvRecordProblem(twoQuoted, 2)).toMatch(/Text follows a closing quote/);
+    const [, blankThenQuoted] = parseCsvRecords('product_name,notes\nChem," " "x"\n');
+    expect(csvRecordProblem(blankThenQuoted, 2)).toMatch(/Text follows a closing quote/);
     expect(spaced.cells[0].trim()).toBe('2,4-D');
   });
 });

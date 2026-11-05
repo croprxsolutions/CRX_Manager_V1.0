@@ -26,11 +26,11 @@ describe('ReceivingHubPanel confirmed receipt', () => {
     globalThis.indexedDB = new IDBFactory();
     mocks.from.mockImplementation(() => {
       const chain: Record<string, unknown> = {};
-      for (const method of ['select', 'in', 'order', 'limit']) chain[method] = () => chain;
+      for (const method of ['select', 'in', 'order', 'range']) chain[method] = () => chain;
       const result = Promise.resolve({ data: [{
         id: 'po-a', po_number: 'PO-A', vendor: 'Vendor A', status: 'submitted', expected_delivery_date: null,
         items: [{ id: 'line-a', product_id: 'product-a', product_name: 'Product A', quantity_ordered: 3, quantity_received: receiptCommitted ? 3 : 0, unit_size: 'GAL' }],
-      }], error: null });
+      }], error: null, count: 1 });
       chain.then = result.then.bind(result);
       return chain;
     });

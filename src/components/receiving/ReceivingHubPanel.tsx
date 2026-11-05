@@ -7,6 +7,7 @@ import Modal from '../ui/Modal';
 import { SkeletonCard } from '../ui/Skeleton';
 import EmptyState, { LoadFailedState } from '../ui/EmptyState';
 import { supabase, assertRpcResult } from '../../lib/db';
+import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { runCriticalAction } from '../../lib/criticalAction';
 import { Sentry } from '../../lib/sentry';
 import { useToast } from '../ui/Toast';
@@ -113,12 +114,15 @@ export default function ReceivingHubPanel() {
       setLoading(true);
       setLoadError(false);
       try {
-        const poRes = await supabase
+        // Every open PO, read page by page (Goal 4): a fixed cap hid the oldest-due POs past it.
+        const poRes = await fetchAllRows((from, to) => pageWithList(supabase
           .from('purchase_orders')
-          .select('id, po_number, vendor, status, expected_delivery_date, items:purchase_order_items(id, product_name, product_id, quantity_ordered, quantity_received, unit_size)')
+          .select('id, po_number, vendor, status, expected_delivery_date, items:purchase_order_items(id, product_name, product_id, quantity_ordered, quantity_received, unit_size)', { count: 'exact' })
           .in('status', ['submitted', 'partially_received'])
           .order('expected_delivery_date', { ascending: true, nullsFirst: false })
-          .limit(500);
+          .order('id')
+          .order('id', { referencedTable: 'purchase_order_items' })
+          .range(from, to)));
         // A failed PO load must NOT look like "nothing on order" — surface it.
         // (Codex P2: poRes.data || [] below would silently swallow an RLS/drift
         // error and render an empty board.)

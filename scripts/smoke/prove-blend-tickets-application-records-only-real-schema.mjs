@@ -29,6 +29,10 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NAME = process.env.CRX_PROVER_REUSE_CONTAINER || `crx-bt-appl-only-${process.pid}-${Date.now().toString(36)}`;
 const REUSE = Boolean(process.env.CRX_PROVER_REUSE_CONTAINER);
+// Only a throwaway container this prover made may be reused: the seed switches triggers off.
+if (REUSE && !/^crx-bt-appl-only-\d+-[a-z0-9]+$/.test(NAME)) {
+  throw new Error(`CRX_PROVER_REUSE_CONTAINER must name a container this prover created (crx-bt-appl-only-...), not ${NAME}`);
+}
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -290,7 +294,7 @@ const key = () => `pv93-${RUN}-${(keyN += 1)}`;
 const AS_ADMIN = `SELECT set_config('request.jwt.claim.sub', '${U.ADMIN}', false);`;
 const ok = (call, what) => `IF NOT (${call}::jsonb ->> 'success')::boolean THEN RAISE EXCEPTION '${what} answered success=false'; END IF;`;
 const appRecord = (t) => `PERFORM public.create_application_record_from_blend_ticket('${t}', '${U.ADMIN}', '${key()}');`;
-const createOrderCall = (t, k) => `public.create_order_from_blend_ticket('${t}', 'PV93${RUN}-N${(keyN += 1)}', DATE '2026-11-02', NULL, '${U.ADMIN}', '${k}')`;
+const createOrderCall = (t, k, num = `PV93${RUN}-N${(keyN += 1)}`) => `public.create_order_from_blend_ticket('${t}', '${num}', DATE '2026-11-02', NULL, '${U.ADMIN}', '${k}')`;
 const linkCall = (t, k) => `public.link_blend_ticket_to_order('${t}', '${ORDER}', NULL, '${U.ADMIN}', '${k}')`;
 const unlinkCall = (t, k) => `public.unlink_blend_ticket_from_order('${t}', '${U.ADMIN}', '${k}')`;
 const reverse = (t) => `PERFORM public.reverse_application_record((SELECT id FROM public.application_records WHERE source_type = 'blend_ticket' AND source_id = '${t}' LIMIT 1), '${key()}');`;
@@ -362,15 +366,20 @@ function chain(file) {
       INSERT INTO public.customers (id, farm_name, assigned_tier, is_active) VALUES ('${id('c2')}', '[PROVER] Second Farm ${RUN}', 1, true);
       INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) SELECT 'gal', 128, 'liquid'
         WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = 'gal');
-      UPDATE public.commissions SET order_date = current_date - 1 WHERE order_date IS NULL OR order_date >= current_date;  -- dated before any Chicago payment date; also a reused container's older seed
+      -- Prover commissions only (also a reused container's older seed): dated before any Chicago payment date.
+      UPDATE public.commissions SET order_date = current_date - 1
+       WHERE (order_date IS NULL OR order_date >= current_date)
+         AND customer_id IN (SELECT id FROM public.customers WHERE farm_name LIKE '[PROVER]%');
       INSERT INTO public.commissions (id, customer_id, order_id, order_date, status, commission_amount) VALUES ('${id('c9')}', '${CUST}', '${ORDER}', current_date - 1, 'pending', 10);
-      UPDATE public.commission_earned_state_ledger SET order_date = current_date - 1 WHERE order_date >= current_date;
+      UPDATE public.commission_earned_state_ledger SET order_date = current_date - 1
+       WHERE order_date >= current_date AND recipient_name = '[PROVER]';
       -- The chain pays it to the first active admin, so that admin earned it.
       INSERT INTO public.commission_earned_state_ledger (commission_id, event_kind, effective_at, recipient_id, recipient_group_key,
           recipient_name, source_type, source_number, customer_name, order_date, amount_cents, is_earned)
         SELECT c.id, 'baseline', now() - interval '1 day', a.id, a.id::text, '[PROVER]', 'order', 'PV93', '[PROVER]', current_date - 1, 1000, true
           FROM public.commissions c, (SELECT id FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY created_at LIMIT 1) a
-         WHERE c.status = 'pending' AND NOT EXISTS (SELECT 1 FROM public.commission_earned_state_ledger s WHERE s.commission_id = c.id);
+         WHERE c.status = 'pending' AND c.customer_id IN (SELECT id FROM public.customers WHERE farm_name LIKE '[PROVER]%')
+           AND NOT EXISTS (SELECT 1 FROM public.commission_earned_state_ledger s WHERE s.commission_id = c.id);
       SET session_replication_role = origin;`, { user: 'supabase_admin' });
     chainSeeded = true;
   }
@@ -404,8 +413,8 @@ async function main() {
     console.log(`[prover] BEFORE: one 10 gal ticket's order delivered and the ticket also got an application record (on hand ${onHand(base)} -> ${onHand(bug.stock)})`);
 
     // Saved successes, committed, for the replay checks: F made an order then was unlinked; G was linked then unlinked.
-    Object.assign(KEYS, { createF: key(), unlinkF: key(), linkG: key(), unlinkG: key() });
-    commit(`${ok(createOrderCall(T.F, KEYS.createF), 'order')} ${ok(unlinkCall(T.F, KEYS.unlinkF), 'unlink')}
+    Object.assign(KEYS, { createF: key(), createFNumber: `PV93${RUN}-F`, unlinkF: key(), linkG: key(), unlinkG: key() });
+    commit(`${ok(createOrderCall(T.F, KEYS.createF, KEYS.createFNumber), 'order')} ${ok(unlinkCall(T.F, KEYS.unlinkF), 'unlink')}
       ${ok(linkCall(T.G, KEYS.linkG), 'link')} ${ok(unlinkCall(T.G, KEYS.unlinkG), 'unlink')}`);
     console.log('[prover] BEFORE: committed a successful create-order + Unlink (ticket F) and link + Unlink (ticket G), keeping their retry receipts');
     const before = chain(CHAIN);
@@ -442,7 +451,7 @@ async function main() {
 
   // 2. An exact replay of a success saved before the change refuses too, instead of answering the old success.
   if (KEYS.createF) {
-    for (const [label, call] of [['create order', createOrderCall(T.F, KEYS.createF)], ['Unlink', unlinkCall(T.F, KEYS.unlinkF)],
+    for (const [label, call] of [['create order', createOrderCall(T.F, KEYS.createF, KEYS.createFNumber)], ['Unlink', unlinkCall(T.F, KEYS.unlinkF)],
       ['link', linkCall(T.G, KEYS.linkG)], ['Unlink', unlinkCall(T.G, KEYS.unlinkG)]]) {
       const r = committedCall(call);
       assert.match(r.error, DISABLED, `2: replay of a saved ${label} success: ${r.error}`);

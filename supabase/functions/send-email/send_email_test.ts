@@ -340,15 +340,26 @@ Deno.test("a provider that never answers stops the request in time and blocks a 
   }
 });
 
-Deno.test("an error reply that is not JSON marks the email failed, and a retry may send it", async () => {
-  const world = makeWorld(() => Promise.resolve(new Response("<html>Bad gateway</html>", { status: 502 })));
+Deno.test("a refused request (4xx) marks the email failed, and a retry may send it", async () => {
+  const world = makeWorld(() =>
+    Promise.resolve(new Response(JSON.stringify({ message: "Invalid `to` field" }), { status: 422 }))
+  );
   const res = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`));
   assertEquals(res.status, 502);
   assertEquals(world.tables.email_log[0].status, "failed");
-  assert(String(world.tables.email_log[0].error_message).includes("Email provider replied 502"), "error message");
+  assertEquals(world.tables.email_log[0].error_message, "Invalid `to` field");
   const retry = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`));
   assertEquals(retry.status, 502);
   assertEquals(world.resendCalls.length, 2, "Resend calls");
+});
+
+Deno.test("a gateway error (5xx, not JSON) stays pending: the email may have gone out", async () => {
+  const world = makeWorld(() => Promise.resolve(new Response("<html>Bad gateway</html>", { status: 502 })));
+  const res = await send(world, ADMIN, quoteEmail(QUOTE));
+  assertEquals(res.status, 504);
+  assertEquals(res.body.needs_reconciliation, true);
+  assertEquals(world.tables.email_log[0].status, "pending");
+  assert(String(world.tables.email_log[0].error_message).startsWith("Email provider replied 502"), "error message");
 });
 
 Deno.test("an OK reply that cannot be read stays pending, not sent and not failed", async () => {

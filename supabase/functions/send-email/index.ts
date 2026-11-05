@@ -1059,9 +1059,9 @@ Deno.serve(async (req: Request) => {
 
     // The call to Resend gives up after RESEND_TIMEOUT_MS, so a slow reply can no
     // longer hold the request until the platform kills it (PR #1302 review,
-    // finding 4). Only a reply that says the send failed marks the row 'failed'
-    // (Resend never stores a failed request, so a retry is safe). No answer, a
-    // dropped connection or an unreadable success may mean the customer already
+    // finding 4). Only a 4xx reply (the request was refused) marks the row
+    // 'failed', so a retry may send it. No answer, a dropped connection, a 5xx
+    // reply or an unreadable success may mean the customer already
     // has the email, so the row stays 'pending' with the reason written on it:
     // the pending check above then refuses a re-send under the same key until
     // someone checks Resend and settles the row.
@@ -1093,6 +1093,10 @@ Deno.serve(async (req: Request) => {
       if (resendResp.ok && !success) {
         outcomeUnknown = true;
         errorMessage = `Email provider accepted the request but its reply was unreadable: ${resendText.slice(0, 200)}`;
+      } else if (resendResp.status >= 500) {
+        // A server or gateway error does not prove the email was not sent.
+        outcomeUnknown = true;
+        errorMessage = `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`;
       } else if (!success) {
         errorMessage = typeof resendResult?.message === "string"
           ? resendResult.message

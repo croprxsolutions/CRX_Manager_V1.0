@@ -32,8 +32,8 @@ describe('Stage B2 Product presentation adoption', () => {
 
   it('keeps the JobDetail action header wrapped at phone width', () => {
     const source = readFileSync(resolve(root, 'src/pages/JobDetail.tsx'), 'utf8');
-    expect(source).toContain('flex flex-col gap-4 sm:flex-row sm:items-center');
-    expect(source).toContain('flex flex-wrap items-center gap-2 sm:justify-end');
+    expect(source).toContain('flex flex-col gap-3 md:flex-row md:items-start md:justify-between');
+    expect(source).toContain('flex flex-wrap items-center gap-2 md:justify-end');
   });
 
   it.each([

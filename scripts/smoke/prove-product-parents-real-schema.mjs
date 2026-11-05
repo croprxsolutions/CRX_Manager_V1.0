@@ -25,8 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const NAME = process.env.CRX_PROVER_REUSE_CONTAINER || `crx-parents-${process.pid}-${Date.now().toString(36)}`;
-const REUSE = Boolean(process.env.CRX_PROVER_REUSE_CONTAINER);
+const NAME = `crx-parents-${process.pid}-${Date.now().toString(36)}`;
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -471,6 +470,14 @@ function main() {
   // Every size carries its parent's EPA number, or none does.
   const G = call(ADMIN, create({ name: '[PROVER] Gnoepa', product_form: 'liquid', category: 'Fungicide' },
     { product_name: '[PROVER] Gnoepa 1', sku: 'GN-1', inventory_unit: 'Gal' }, 'k-create-g'));
+  // A setup receipt saved under '<key>:insert' with the same fields never hands back that product.
+  const colFields = { product_name: '[PROVER] Col 1', sku: 'CO-1', inventory_unit: 'Gal', product_form: 'liquid', category: 'Fungicide' };
+  const colX = JSON.parse(ok(ADMIN, save([{ insert: colFields }], 'k-col:insert'))).rows[0].product_id;
+  as(ADMIN, create({ name: '[PROVER] Col', product_form: 'liquid', category: 'Fungicide' },
+    { product_name: '[PROVER] Col 1', sku: 'CO-1', inventory_unit: 'Gal' }, 'k-col'));
+  assert.equal(scalar(`SELECT count(*) FROM public.product_parent_members WHERE product_id = '${colX}';`), '0');
+  // The emptied parent's log entry records it going inactive.
+  assert.equal(scalar(`SELECT count(*) FROM public.product_parent_events WHERE parent_id = '${C.parent_id}' AND event_type = 'size_moved' AND (after_values->>'is_active')::boolean = false;`), '1');
   assert.match(mp(A2, G.parent_id).refusal, /PRODUCT_PARENT_EPA_MISMATCH: .*no EPA number/);
   refused(ADMIN, addSize(G.parent_id, G.parent_version, { product_name: '[PROVER] Gnoepa 2', sku: 'GN-2', inventory_unit: 'Gal',
     epa_registration: '300-1' }, 'k-g-add'), /PRODUCT_PARENT_EPA_MISMATCH: .*no EPA number/);
@@ -510,4 +517,4 @@ function main() {
   console.log('PRODUCT_PARENTS_PROOF_PASS');
 }
 try { main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

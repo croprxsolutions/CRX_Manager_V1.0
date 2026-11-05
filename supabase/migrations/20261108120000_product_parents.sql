@@ -351,7 +351,7 @@ $function$;
 ALTER FUNCTION public._normalized_category_timing(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._normalized_category_timing(text) FROM PUBLIC, anon, authenticated, service_role;
 -- normalize_product_category runs as the signed-in user (an admin's direct product save or insert).
-GRANT EXECUTE ON FUNCTION public._normalized_category_timing(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public._normalized_category_timing(text) TO authenticated, service_role;
 
 -- Same behaviour as before; the table now lives in _normalized_category_timing.
 CREATE OR REPLACE FUNCTION public.normalize_product_category()
@@ -709,7 +709,10 @@ BEGIN
   IF public._normalize_epa_registration(p_size->>'epa_registration') IS NULL AND p_parent.generic_epa_registration IS NOT NULL THEN
     v_fields := v_fields || jsonb_build_object('epa_registration', p_parent.generic_epa_registration);
   END IF;
-  v_saved := public.apply_product_setup(jsonb_build_array(jsonb_build_object('insert', v_fields)), auth.uid(), p_key || ':insert');
+  -- A fresh key: a retry is answered by the caller's own receipt before it gets here, so no setup
+  -- receipt (for example one an admin saved under '<key>:insert') can hand back an existing product.
+  v_saved := public.apply_product_setup(jsonb_build_array(jsonb_build_object('insert', v_fields)), auth.uid(),
+    'product_parent_size:' || gen_random_uuid()::text);
   RETURN (v_saved->'rows'->0->>'product_id')::uuid;
 END;
 $function$;
@@ -1308,7 +1311,8 @@ BEGIN
     jsonb_build_object('from_parent_id', v_from), jsonb_build_object('to_parent_id', p_to_parent_id), jsonb_build_array(v_copy));
   -- The old parent's log records the move too.
   PERFORM public._product_parent_event(NULL, v_from, 'size_moved', v_reason, v_evidence,
-    jsonb_build_object('from_parent_id', v_from, 'product_id', p_product_id), jsonb_build_object('to_parent_id', p_to_parent_id),
+    jsonb_build_object('from_parent_id', v_from, 'product_id', p_product_id, 'is_active', true),
+    jsonb_build_object('to_parent_id', p_to_parent_id, 'is_active', v_from_left > 0),
     jsonb_build_array(v_copy));
   SELECT parent_version INTO v_to_version FROM public.product_parents WHERE id = p_to_parent_id;
   v_receipt := jsonb_build_object('product_id', p_product_id, 'from_parent_id', v_from, 'to_parent_id', p_to_parent_id,

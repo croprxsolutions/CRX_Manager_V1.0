@@ -355,11 +355,12 @@ Deno.test("a retry that claims a failed row logged before the lock gives it the 
   const world = makeWorld(okResend);
   world.tables.email_log.push({
     id: "old-failed", idempotency_key: `quote:quote:${QUOTE}:old-key`, send_lock_key: null,
-    email_type: "quote", customer_id: CUSTOMER, status: "failed",
+    email_type: "quote", customer_id: CUSTOMER, status: "failed", created_by: REP,
   });
   assertEquals((await send(world, ADMIN, quoteEmail(QUOTE, "old-key"))).status, 200);
   assertEquals(world.tables.email_log.length, 1, "the failed row was reused");
   assertEquals(world.tables.email_log[0].send_lock_key, quoteLock);
+  assertEquals(world.tables.email_log[0].created_by, ADMIN, "the retry counts toward the hourly limit of whoever sent it");
 });
 
 // --- Two retries at the same moment (item 3) ---------------------------------
@@ -552,6 +553,19 @@ Deno.test("a send of the same email confirmed after the early check stops this o
   assertEquals(replay.status, 200);
   assertEquals(replay.body.deduplicated, true);
   assertEquals(world.resendCalls.length, 0, "Resend calls after replay");
+});
+
+Deno.test("a corrected email sent again two seconds later goes out", async () => {
+  const world = makeWorld(okResend);
+  world.tables.email_log.push({
+    id: "sent-2s", idempotency_key: "first-click-key", send_lock_key: quoteLock,
+    email_type: "quote", customer_id: CUSTOMER, status: "sent", resend_message_id: "re_0",
+    created_at: new Date(Date.now() - 2000).toISOString(),
+  });
+  const res = await send(world, ADMIN, quoteEmail(QUOTE, "corrected-key"));
+  assertEquals(res.status, 200);
+  assertEquals(res.body.deduplicated, undefined);
+  assertEquals(world.resendCalls.length, 1, "Resend calls");
 });
 
 Deno.test("an earlier confirmed send of the same email does not block a new one", async () => {

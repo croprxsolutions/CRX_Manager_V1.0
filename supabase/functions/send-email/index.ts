@@ -883,9 +883,12 @@ Deno.serve(async (req: Request) => {
       return unconfirmedSend(data?.[0]?.id ?? null);
     };
 
-    // A send of this email that settles between the early check and this request
-    // taking the lock is found by the re-check below. 5s covers clock skew.
-    const lockCheckFrom = new Date(Date.now() - 5000).toISOString();
+    // A send of this email that STARTS after this check, and is confirmed before this
+    // request takes the lock, is found by the re-check below. Each attempt stamps
+    // created_at from this clock just before its row is written; the 1s margin
+    // covers that gap and clock skew. A send that started earlier is a separate
+    // send (a corrected quote mailed again) and is never deduplicated.
+    const lockCheckFrom = new Date(Date.now() - 1000).toISOString();
     // Early check; the unique index above is what holds when two arrive together.
     // It also sees pending rows logged before send_lock_key existed (scoped keys
     // begin with type + record).
@@ -926,8 +929,9 @@ Deno.serve(async (req: Request) => {
           subject,
           html_body: html,
           attachment_name: attachments?.[0]?.filename || null,
-          // This attempt's time: the re-check below reads it.
+          // This attempt's time and sender: the re-check and the hourly limit read them.
           created_at: new Date().toISOString(),
+          created_by: caller.id,
         })
         .eq("id", emailLogId)
         .in("status", ["failed", "bounced"])
@@ -972,6 +976,7 @@ Deno.serve(async (req: Request) => {
           idempotency_key: storedIdempotencyKey,
           send_lock_key: sendLockKey,
           created_by: caller.id,
+          created_at: new Date().toISOString(),
         })
         .select("id")
         .single();

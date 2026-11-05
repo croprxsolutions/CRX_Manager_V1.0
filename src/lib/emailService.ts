@@ -98,6 +98,7 @@ export async function sendEmail(params: SendEmailParams): Promise<SendEmailResul
   if (sessionError) throw new Error(`Auth session error: ${sessionError.message}`);
   if (!session) throw new Error('Not authenticated');
 
+  // Once the request leaves, the server may send the email even if no answer comes back.
   const resp = await fetch(
     `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-email`,
     {
@@ -109,13 +110,15 @@ export async function sendEmail(params: SendEmailParams): Promise<SendEmailResul
       },
       body: JSON.stringify(params),
     },
-  );
+  ).catch((err: unknown) => {
+    throw new EmailUnconfirmedError(`Lost the connection to the email service; this email may have been sent (${err instanceof Error ? err.message : String(err)})`);
+  });
 
   let result: Record<string, unknown>;
   try {
     result = await resp.json();
   } catch {
-    throw new Error(`Email service returned invalid response (HTTP ${resp.status})`);
+    throw new EmailUnconfirmedError(`Email service returned an unreadable response (HTTP ${resp.status}); this email may have been sent`);
   }
   if (!resp.ok) {
     const message = (result.error as string) || 'Email send failed';

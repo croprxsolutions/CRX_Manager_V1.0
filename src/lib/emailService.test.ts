@@ -186,7 +186,17 @@ describe('sendEmail', () => {
       json: async () => { throw new SyntaxError('Unexpected token'); },
     });
 
-    await expect(sendEmail(validParams)).rejects.toThrow('Email service returned invalid response (HTTP 200)');
+    const err = await sendEmail(validParams).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EmailUnconfirmedError);
+    expect(String(err)).toContain('unreadable response (HTTP 200)');
+  });
+
+  it('a dropped connection is unconfirmed, not failed: the server may have sent it', async () => {
+    mockGetSession.mockResolvedValue(mockSession);
+    mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
+    const err = await sendEmail(validParams).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EmailUnconfirmedError);
+    expect(String(err)).toContain('Failed to fetch');
   });
 
   it('includes attachments in the request body (statements still attach the app PDF)', async () => {

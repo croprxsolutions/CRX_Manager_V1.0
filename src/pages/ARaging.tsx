@@ -54,7 +54,7 @@ function statementKey(customerId: string, start: string, end: string): string {
 function sendProblemsNote(failed: number, unconfirmed: number): string {
   const failedNote = failed > 0 ? ` — ${failed} FAILED to send` : '';
   const unconfirmedNote = unconfirmed > 0
-    ? `, ${unconfirmed} not confirmed (may have reached the customer — check the email log before resending)`
+    ? `${failed > 0 ? ',' : ' —'} ${unconfirmed} not confirmed (may have reached the customer — check the email log before resending)`
     : '';
   return failedNote + unconfirmedNote;
 }

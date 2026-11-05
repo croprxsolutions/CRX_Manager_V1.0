@@ -73,7 +73,7 @@ export default function SignatureCanvas({
       <canvas
         ref={canvasRef}
         style={{ width, height }}
-        className="border border-gray-200 rounded-lg cursor-crosshair touch-none w-full max-w-full"
+        className="border border-gray-200 rounded-lg cursor-crosshair touch-none w-full"
       />
     </div>
   );

@@ -31,6 +31,8 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261108120000_product_parents.sql');
+// PAR-1's own follow-ups, installed right after the candidate.
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20261108130000_product_parent_stock_units.sql')];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -150,7 +152,8 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  for (const file of all.slice(at + 1)) {
+  for (const [i, file] of FOLLOW_UPS.entries()) assert.equal(all[at + 1 + i], file, `${path.basename(file)} must follow the candidate`);
+  for (const file of all.slice(at + 1 + FOLLOW_UPS.length)) {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
@@ -228,7 +231,7 @@ function seed() {
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
     -- Live's factors (read 2026-11-03); the schema baseline carries no unit rows.
     INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Gal', 128, 'liquid'), ('oz', 1, 'liquid'), ('Pt', 16, 'liquid'), ('Lb', 16, 'dry');
-    INSERT INTO public.product_form_units (product_form, unit) VALUES ('seed', 'Lb');
+    INSERT INTO public.product_form_units (product_form, unit) VALUES ('seed', 'Lb'), ('seed', 'Unit');
     INSERT INTO public.products (id, product_name, sku, category, epa_registration, product_form, inventory_unit, is_active, tier1_price)
     VALUES ('${EXISTING}', '[PROVER] Existing Herb', 'EX-1', 'Herbicide', '524-475', 'liquid', 'Gal', true, 40.00),
            ('${OLD}', '[PROVER] Old Thing', 'EX-2', 'Herbicide', NULL, 'liquid', 'Gal', false, 10.00);`);
@@ -289,6 +292,12 @@ function main() {
   const installed = apply('cand.sql');
   assert.equal(installed.status, 0, installed.output);
   ledger(path.basename(CANDIDATE, '.sql'));
+  for (const file of FOLLOW_UPS) {
+    stageText('follow.sql', lf(file));
+    const followed = apply('follow.sql');
+    assert.equal(followed.status, 0, followed.output);
+    ledger(path.basename(file, '.sql'));
+  }
   assert.equal(scalar(`SELECT public._product_setup_fingerprint(p) FROM public.products p WHERE id = '${EXISTING}';`), fpBefore,
     "an ungrouped product's Setup-tab fingerprint must not change");
   assert.equal(scalar(PRODUCTS_MD5), productsBefore, 'install changed a product');
@@ -488,6 +497,15 @@ function main() {
     suggested_rate: null, sizes: ps.sizes }], 'k-r-seed'));
   assert.equal(prod(S.product_id, 'rate_per_acre, rate_unit'), '30|Lb');
   assert.equal(prices(S.product_id), previewed(ps.sizes[0]));
+  // A seed parent's sizes share one stock unit: its one rate is per stock unit.
+  refused(ADMIN, addSize(S.parent_id, version(S.parent_id), { product_name: '[PROVER] Sigma 80K', sku: 'SG-80K', inventory_unit: 'Unit' }, 'k-s-unit'),
+    /PRODUCT_PARENT_UNIT_MISMATCH: every size of "\[PROVER\] Sigma Seed" is stocked in Lb/);
+  const S2 = call(ADMIN, addSize(S.parent_id, version(S.parent_id), { product_name: '[PROVER] Sigma 25 Lb', sku: 'SG-25', inventory_unit: 'Lb', unit_size: '25' }, 'k-s-lb')).product_id;
+  assert.equal(prod(S2, 'rate_per_acre'), '30', 'a same-unit size takes the parent rate');
+  const T = call(ADMIN, create({ name: '[PROVER] Tau Seed', product_form: 'seed', category: 'Seed' },
+    { product_name: '[PROVER] Tau 80K', sku: 'TA-80K', inventory_unit: 'Unit' }, 'k-create-t'));
+  assert.match(mp(S2, T.parent_id).refusal, /PRODUCT_PARENT_UNIT_MISMATCH: every size of "\[PROVER\] Tau Seed" is stocked in Unit/);
+  console.log('[prover] a seed parent refuses adding or moving in a size stocked in a different unit');
   // Every size carries its parent's EPA number, or none does.
   const G = call(ADMIN, create({ name: '[PROVER] Gnoepa', product_form: 'liquid', category: 'Fungicide' },
     { product_name: '[PROVER] Gnoepa 1', sku: 'GN-1', inventory_unit: 'Gal' }, 'k-create-g'));

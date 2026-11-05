@@ -7066,3 +7066,14 @@ quote-version trust-marker route intact, so these were stale fingerprints, not d
 `20261027080400` (any active rep may convert; the actor stays bound), so the sweep is clean both before and after
 that migration applies. The candidate digest was captured from a disposable PostgreSQL replica that first reproduced
 every live digest. Still open until: review, merge, and a fresh live sweep after the candidate migration is applied.
+
+### Closed 2026-11-05 — KI-39 year-end "Change" colour (KI-39 stays open for the quote-PDF item)
+
+Fixed on branch `claude/yearend-pdf-change-colour-9a0e82`. The colour was set in the table's after-draw hook, after the
+text was already on the page, so it never showed. It is now set on the cell before drawing (green for zero or growth,
+red for a decline, unchanged when there is no prior-season value). A rendered PDF showed the colours and no other text
+changed colour.
+
+Original text (from the KI-39 entry):
+
+the year-over-year "Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`).

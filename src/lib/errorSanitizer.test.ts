@@ -119,6 +119,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError('FIX_DELIVERY_REFUSED: A payment is applied')).toMatch(/^Nothing was changed\. Something on this delivery now blocks a fix/);
     expect(sanitizeError('FIX_DELIVERY_PREVIEW_STALE: x')).toMatch(/its invoices or the order.s drafts changed/);
     expect(sanitizeError('DELIVERY_ORDER_BUSY_RETRY')).toMatch(/being updated elsewhere/);
+    expect(sanitizeError('ORDER_VOIDED_DELIVERY_LOCKED: delivery DEL-1 belongs to a voided order'))
+      .toMatch(/^Nothing was changed\. This delivery's order is voided/);
   });
 
   it('tells the user a completed delivery is voided, not cancelled', () => {

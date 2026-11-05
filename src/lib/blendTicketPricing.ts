@@ -65,7 +65,7 @@ export function getBlendQuotePriceChoices(error: unknown): BlendQuotePriceChoice
  */
 export function blendQuotePriceSaveErrorMessage(error: unknown): string | null {
   if (rpcCodeDetail(error, RpcErrorCodes.BLEND_TICKET_QUOTE_PRICE_LOCKED) !== null) {
-    return 'This ticket has already been billed or linked to an order, so its prices can no longer be picked.';
+    return 'This ticket has already been billed, so its prices can no longer be picked.';
   }
   if (rpcCodeDetail(error, RpcErrorCodes.BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE) !== null) {
     return 'That price is no longer on this ticket\'s quote for this product. Reload the ticket and try again.';

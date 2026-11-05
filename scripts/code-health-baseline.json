@@ -187,7 +187,6 @@
       "complexity QuickReceivePanel": 1,
       "complexity QuickReceivePanel > submitQuickReceive": 1,
       "complexity QuickReceivePanel > handleConfirmReceive": 1,
-      "max-depth QuickReceivePanel > handleConfirmReceive": 1,
       "max-lines": 1,
       "complexity QuickReceivePanel > map": 1
     },
@@ -284,19 +283,8 @@
       "complexity mapFieldInvoiceRow": 1
     },
     "src/lib/invoicePdf.ts": {
-      "complexity mapInvoicePdfItem": 1,
-      "complexity buildInvoicePdfDataFromRow": 1,
-      "max-lines-per-function generateInvoicePdf": 1,
-      "complexity generateInvoicePdf": 1,
       "max-lines-per-function generateLegacyInvoicePdf": 1,
-      "complexity generateLegacyInvoicePdf": 1,
-      "max-lines": 1,
-      "max-lines-per-function drawFieldApplicationLayout": 1,
-      "max-params drawFieldApplicationLayout": 1,
-      "complexity drawFieldApplicationLayout": 1,
-      "complexity drawFieldApplicationLayout > rows": 1,
-      "max-params drawChemicalSaleLayout": 1,
-      "max-params drawMiscChargeLayout": 1
+      "complexity generateLegacyInvoicePdf": 1
     },
     "src/lib/jobListPrint.ts": {
       "complexity jobPrintCellValue": 1
@@ -400,7 +388,6 @@
       "complexity BlendTicketDetail": 1,
       "max-lines-per-function BlendTicketDetail > loadTicketData": 1,
       "complexity BlendTicketDetail > loadTicketData": 1,
-      "max-depth BlendTicketDetail > loadTicketData": 2,
       "max-lines": 1,
       "complexity BlendTicketDetail > map": 1
     },
@@ -667,8 +654,8 @@
       "max-lines-per-function OrderDetail": 1,
       "complexity OrderDetail": 1,
       "complexity OrderDetail > fetchOrder": 1,
-      "complexity OrderDetail > executeStatusChange > action": 1,
-      "max-lines": 1
+      "max-lines": 1,
+      "complexity OrderDetail > executeStatusChange > action": 1
     },
     "src/pages/Orders.tsx": {
       "max-lines-per-function Orders": 1,
@@ -686,16 +673,16 @@
       "max-params pricingPreviewRow": 1,
       "max-lines-per-function ProductDetail": 1,
       "complexity ProductDetail": 1,
-      "complexity ProductDetail > handleSave": 1,
       "max-lines": 1,
+      "complexity ProductDetail > handleSave": 1,
       "complexity ProductDetail > handleCreateEpaDraft": 1
     },
     "src/pages/Products.tsx": {
       "max-lines-per-function Products": 1,
       "complexity Products": 1,
+      "max-lines": 1,
       "complexity Products > handleBulkSave": 1,
-      "max-depth Products > handleBulkSave": 4,
-      "max-lines": 1
+      "max-depth Products > handleBulkSave": 4
     },
     "src/pages/PurchaseOrderDetail.tsx": {
       "max-lines-per-function PurchaseOrderDetail": 1,
@@ -758,8 +745,8 @@
       "max-lines-per-function SettingsPage": 1,
       "complexity SettingsPage": 1,
       "complexity SettingsPage > handleCreateUser": 1,
-      "max-depth SettingsPage > handleCreateUser": 2,
-      "max-lines": 1
+      "max-lines": 1,
+      "max-depth SettingsPage > handleCreateUser": 2
     },
     "src/pages/SupplierPricing.tsx": {
       "max-lines-per-function SupplierPricing": 1,

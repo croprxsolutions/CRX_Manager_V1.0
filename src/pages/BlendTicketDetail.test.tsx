@@ -835,127 +835,35 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     });
   });
 
-  it('blocks link and create-order actions for an unbilled unlinked ticket with an active invoice', async () => {
-    const matchedProduct = {
-      ...baseProduct,
-      product_id: 'prod-1',
-      product: { id: 'prod-1', is_active: true },
-    };
-    mockFrom.mockReset();
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
-      if (table === 'blend_ticket_products') return buildChain({ data: [matchedProduct], error: null });
-      if (table === 'invoices') return buildChain({ data: [{ id: 'invoice-1' }], error: null });
-      return buildChain({ data: [], error: null });
-    });
-
-    renderTicket();
-
-    expect(await screen.findByText('This blend ticket has an active invoice. Void or cancel that invoice before creating or linking an order.')).toBeInTheDocument();
-    const linkButton = screen.getByRole('button', { name: 'Link to Existing Order' });
-    const createOrderButton = screen.getByRole('button', { name: 'Create Order from Ticket' });
-    expect(linkButton).toBeDisabled();
-    expect(createOrderButton).toBeDisabled();
-
-    fireEvent.click(linkButton);
-    fireEvent.click(createOrderButton);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(mockRpc.mock.calls.some(([name]) => name === 'link_blend_ticket_to_order')).toBe(false);
-    expect(mockRpc.mock.calls.some(([name]) => name === 'create_order_from_blend_ticket')).toBe(false);
-  });
-
-  // Replay-binding batch 2 (20261016140000): an edited retry under a key whose first attempt already
-  // created the order is refused as IDEMPOTENCY_INTENT_MISMATCH, with that order's receipt in the
-  // DETAIL. The screen opens it instead of letting the next click create a second order.
-  async function createOrderWith(rpcError: { message: string; details?: string }) {
+  // KI-93 (owner decision 2026-11-04): tickets are recorded through application records and billed
+  // with a direct invoice. The ticket-to-order functions refuse, so no screen path may offer them.
+  it('offers no order linkage: no Link, Create Order or Unlink control, even on a legacy linked ticket', async () => {
     const matchedProduct = { ...baseProduct, product_id: 'prod-1', product: { id: 'prod-1', is_active: true } };
-    mockFrom.mockReset();
+    for (const ticket of [baseTicket, { ...baseTicket, order_link_status: 'linked' }]) {
+      mockFrom.mockReset();
+      mockFrom.mockImplementation((table: string) => {
+        if (table === 'blend_tickets') return buildChain({ data: ticket, error: null });
+        if (table === 'blend_ticket_products') return buildChain({ data: [matchedProduct], error: null });
+        return buildChain({ data: [], error: null });
+      });
+      const { unmount } = renderTicket();
+      await screen.findByRole('heading', { name: 'BT-2001' });
+      expect(screen.queryByText('Order Linkage')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /link to existing order|create order|unlink from order/i })).not.toBeInTheDocument();
+      expect(mockFrom.mock.calls.some(([table]) => table === 'blend_ticket_to_order_items')).toBe(false);
+      expect(mockRpc.mock.calls.some(([name]) => /^(create_order_from|link|unlink)_blend_ticket/.test(String(name)))).toBe(false);
+      unmount();
+    }
+  });
+
+  it('shows the payment status in the ticket header', async () => {
     mockFrom.mockImplementation((table: string) => {
-      if (table === 'blend_tickets') return buildChain({ data: baseTicket, error: null });
-      if (table === 'blend_ticket_products') return buildChain({ data: [matchedProduct], error: null });
-      if (table === 'unit_conversions') return buildChain({ data: unitConversions, error: null });
+      if (table === 'blend_tickets') return buildChain({ data: { ...baseTicket, payment_status: 'no_charge' }, error: null });
       return buildChain({ data: [], error: null });
     });
-    mockRpc.mockImplementation((name: string) => {
-      if (name === 'generate_order_number') return Promise.resolve({ data: 'ORD-9001', error: null });
-      if (name === 'create_order_from_blend_ticket') return Promise.resolve({ data: null, error: rpcError });
-      return Promise.resolve({ data: null, error: null });
-    });
     renderTicket();
-    fireEvent.click(await screen.findByRole('button', { name: 'Create Order from Ticket' }));
-    const submit = await screen.findByRole('button', { name: 'Create Order' });
-    await waitFor(() => expect(submit).toBeEnabled());
-    fireEvent.click(submit);
-    await waitFor(() => {
-      expect(mockRpc.mock.calls.some(([name]) => name === 'create_order_from_blend_ticket')).toBe(true);
-    });
-  }
-
-  it('opens the order an earlier attempt already created when the retry is refused as another request', async () => {
-    await createOrderWith({
-      message: 'IDEMPOTENCY_INTENT_MISMATCH',
-      details: JSON.stringify({
-        operation: 'create_order_from_blend_ticket',
-        result: { success: true, order_id: 'order-77', order_number: 'ORD-77' },
-      }),
-    });
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-77'));
-    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('already created this order'));
-    expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
-    expect(mockResetKeyFor).toHaveBeenCalled();
-  });
-
-  it('opens nothing on an actor refusal, which carries no receipt', async () => {
-    await createOrderWith({ message: 'IDEMPOTENCY_ACTOR_MISMATCH' });
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'IDEMPOTENCY_ACTOR_MISMATCH'));
-    expect(mockNavigate).not.toHaveBeenCalled();
-    expect(mockResetKeyFor).toHaveBeenCalled();
-  });
-
-  it('keeps the retry key on a receipt refusal, since an earlier attempt may have committed', async () => {
-    await createOrderWith({ message: 'IDEMPOTENCY_RECEIPT_MISSING' });
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'IDEMPOTENCY_RECEIPT_MISSING'));
-    expect(mockNavigate).not.toHaveBeenCalled();
-    expect(mockResetKey).not.toHaveBeenCalled();
-    expect(mockResetKeyFor).not.toHaveBeenCalled();
-  });
-
-  it('blocks unlink for an unbilled linked ticket with an active invoice', async () => {
-    const linkedTicket = { ...baseTicket, order_link_status: 'linked', payment_status: 'unbilled' };
-    mockFrom.mockReset();
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'blend_tickets') return buildChain({ data: linkedTicket, error: null });
-      if (table === 'invoices') return buildChain({ data: [{ id: 'invoice-1' }], error: null });
-      if (table === 'blend_ticket_to_order_items') {
-        return buildChain({
-          data: [{
-            id: 'link-1',
-            blend_ticket_id: 'tk-1',
-            order_id: 'order-1',
-            order_item_id: 'item-1',
-            quantity_applied: 1,
-            order: {
-              id: 'order-1',
-              order_number: 'ORD-1',
-              status: 'confirmed',
-              customer_id: 'cust-1',
-              total_price: 1,
-            },
-          }],
-          error: null,
-        });
-      }
-      return buildChain({ data: [], error: null });
-    });
-
-    renderTicket();
-
-    const unlinkButton = await screen.findByRole('button', { name: 'Unlink from Order' });
-    expect(unlinkButton).toBeDisabled();
-    expect(unlinkButton).toHaveAttribute('title', 'Active invoices must be voided or cancelled before unlinking');
-    fireEvent.click(unlinkButton);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(mockRpc.mock.calls.some(([name]) => name === 'unlink_blend_ticket_from_order')).toBe(false);
+    await screen.findByRole('heading', { name: 'BT-2001' });
+    expect(screen.getByText('no charge')).toBeInTheDocument();
   });
 
   it('keeps the ticket usable when one image cannot be signed', async () => {
@@ -984,47 +892,6 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     expect(screen.getByAltText('Ticket 2')).toHaveAttribute('src', 'http://test/signed-2');
   });
 
-  it('blocks unlink for a linked ticket with an application record', async () => {
-    const linkedTicket = { ...baseTicket, order_link_status: 'linked', payment_status: 'unbilled' };
-    mockFrom.mockReset();
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'blend_tickets') return buildChain({ data: linkedTicket, error: null });
-      if (table === 'application_records') return buildChain({ data: [{ id: 'app-1' }], error: null });
-      if (table === 'blend_ticket_to_order_items') {
-        return buildChain({
-          data: [{
-            id: 'link-1',
-            blend_ticket_id: 'tk-1',
-            order_id: 'order-1',
-            order_item_id: 'item-1',
-            quantity_applied: 1,
-            order: {
-              id: 'order-1',
-              order_number: 'ORD-1',
-              status: 'confirmed',
-              customer_id: 'cust-1',
-              total_price: 1,
-            },
-          }],
-          error: null,
-        });
-      }
-      return buildChain({ data: [], error: null });
-    });
-
-    renderTicket();
-
-    const unlinkButton = await screen.findByRole('button', { name: 'Unlink from Order' });
-    expect(unlinkButton).toBeDisabled();
-    expect(unlinkButton).toHaveAttribute(
-      'title',
-      'Application records must be reversed or removed before unlinking',
-    );
-    fireEvent.click(unlinkButton);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(mockRpc.mock.calls.some(([name]) => name === 'unlink_blend_ticket_from_order')).toBe(false);
-  });
-
   it('blocks direct invoice creation for a linked unbilled ticket', async () => {
     const linkedTicket = { ...baseTicket, order_link_status: 'linked', payment_status: 'unbilled' };
     mockFrom.mockReset();
@@ -1036,7 +903,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
 
     renderTicket();
 
-    expect(await screen.findByText('This blend ticket is linked to a sales order. Bill through the order path instead of creating a direct invoice.')).toBeInTheDocument();
+    expect(await screen.findByText('This blend ticket is still marked as linked to a sales order from before order linking was switched off. Ask an admin to clear it before creating an invoice.')).toBeInTheDocument();
     const createInvoiceButton = screen.getByRole('button', { name: 'Create Invoice' });
     expect(createInvoiceButton).toBeDisabled();
     fireEvent.click(createInvoiceButton);
@@ -1218,7 +1085,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     fireEvent.click(within(picker).getByRole('button', { name: 'Save price' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error',
-      'This ticket has already been billed or linked to an order, so its prices can no longer be picked.',
+      'This ticket has already been billed, so its prices can no longer be picked.',
     ));
     expect(screen.getByRole('dialog', { name: 'Pick the quoted price' })).toBeInTheDocument();
     expect(mockResetKeyFor).not.toHaveBeenCalled();

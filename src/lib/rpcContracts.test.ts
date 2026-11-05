@@ -1651,6 +1651,12 @@ const IDEMPOTENCY_BODY_EXEMPT: Record<
   string,
   'verified-live' | 'natural' | 'gap' | 'non-mutating' | 'table-unique' | 'receipt-unique' | 'delegated'
 > = {
+  // KI-93 (owner decision 2026-11-04): migration 20261107050000 makes these three ticket-to-order
+  // functions always raise BLEND_TICKET_ORDERS_DISABLED before touching any row, so they mutate
+  // nothing and have no replay to cache. The parameter stays for the unchanged signature.
+  create_order_from_blend_ticket: 'non-mutating',
+  link_blend_ticket_to_order: 'non-mutating',
+  unlink_blend_ticket_from_order: 'non-mutating',
   // The batch boundary binds actor + ordered invoice IDs through the private
   // lifecycle claim/complete helpers and gives every post_invoice child a
   // deterministic indexed key. The generic detector does not parse those

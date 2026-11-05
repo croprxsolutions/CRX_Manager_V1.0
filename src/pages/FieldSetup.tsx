@@ -254,6 +254,8 @@ function FieldSetupPage() {
   const loadedFieldRef = useRef<typeof field | null>(null);
   const loadedSplitsRef = useRef<typeof billingSplits | null>(null);
   const skipUnsavedPromptRef = useRef(false);
+  // Set by a save that synced acres: what that save sent (null for a new field, which reloads after create).
+  const adoptSavedBaselineRef = useRef<{ field: typeof field; splits: typeof billingSplits } | null | false>(false);
   const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   // Post-create navigation happens via this state so it fires on a render where
   // isDirty=false has committed — see the comment at the setter in handleSave.
@@ -267,6 +269,18 @@ function FieldSetupPage() {
 
   useEffect(() => {
     if (!initialLoadDone.current) return;
+    const sent = adoptSavedBaselineRef.current;
+    if (sent !== false) {
+      // A save just synced acres back into the form: that is the new clean state, unless the
+      // user changed something while the save was in flight.
+      adoptSavedBaselineRef.current = false;
+      loadedFieldRef.current = field;
+      loadedSplitsRef.current = billingSplits;
+      const editedMidSave = sent !== null && (billingSplits !== sent.splits
+        || (Object.keys(field) as Array<keyof typeof field>).some((k) => k !== 'total_acres' && k !== 'measured_acres' && field[k] !== sent.field[k]));
+      if (editedMidSave) setIsDirty(true);
+      return;
+    }
     if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current) return;
     setIsDirty(true);
   }, [field, billingSplits]);
@@ -584,9 +598,7 @@ function FieldSetupPage() {
         state: field.state || 'IL',
         // Send the loaded (server-authoritative) total_acres — never a client preview/estimate,
         // so we can never persist a value the acreage RPC would reject. The acreage RPCs own the
-        // precise total_acres when geometry/override change. KNOWN FOLLOW-UP (for the live-UI
-        // gate): after a successful boundary/override save, sync local total_acres/measured from
-        // the RPC result so a same-page attribute-only re-save can't revert to this loaded value.
+        // precise total_acres when geometry/override change; a successful one syncs it back below.
         total_acres: field.total_acres ?? null,
         fsa_farm_number: field.fsa_farm_number || null,
         fsa_tract_number: field.fsa_tract_number || null,
@@ -663,6 +675,9 @@ function FieldSetupPage() {
         // The field record is saved; now persist its acreage. Track whether any acreage RPC
         // fails so we don't report a misleading success or clear the dirty flag.
         let persistError = false;
+        // The acres the acreage RPCs just stored, so a later attribute-only save on this page
+        // sends them back instead of the total_acres loaded at the start (KI-31).
+        let acresPatch: Partial<Field> | null = null;
 
         // Persist the boundary via the server-authoritative acreage RPC (measures + 0.1–5000
         // band + field_polygons sync + audit). Only when the geometry was drawn/changed this
@@ -679,7 +694,8 @@ function FieldSetupPage() {
                 p_idempotency_key: boundaryIdemKey,
               });
               if (bErr) throw bErr;
-              assertRpcResult(bData, 'set_field_boundary');
+              const boundary = assertRpcResult<{ measured_acres: number; billable_acres: number }>(bData, 'set_field_boundary');
+              acresPatch = { measured_acres: boundary.measured_acres, total_acres: boundary.billable_acres };
               saveFieldBoundaryIdem.resetKey();
               loadedHadBoundaryRef.current = true; // a newly persisted boundary cannot be removed in this editor
               setHasSavedBoundary(true);
@@ -713,7 +729,8 @@ function FieldSetupPage() {
               p_idempotency_key: ovIdemKey,
             });
             if (oErr) throw oErr;
-            assertRpcResult(oData, 'set_field_override_acres');
+            const override = assertRpcResult<{ billable_acres: number }>(oData, 'set_field_override_acres');
+            acresPatch = { ...acresPatch, total_acres: override.billable_acres };
             saveFieldOverrideIdem.resetKey();
             loadedOverrideRef.current = field.override_acres ?? null;
           } catch (ovError) {
@@ -725,7 +742,9 @@ function FieldSetupPage() {
           }
         }
 
+        const savedAcres = acresPatch;
         if (persistError) {
+          if (savedAcres) setField((f) => ({ ...f, ...savedAcres }));
           // An existing field stays dirty so the user retries. A brand-new field moves to the created
           // record so a retry edits it: Stay on /fields/new would create a second field, so the real
           // unsaved-changes prompt must not stop this move. That page reloads from the database.
@@ -737,6 +756,10 @@ function FieldSetupPage() {
           return;
         }
 
+        if (savedAcres) {
+          adoptSavedBaselineRef.current = isNew ? null : { field, splits: billingSplits }; // the synced acres are saved, not an edit
+          setField((f) => ({ ...f, ...savedAcres }));
+        }
         setIsDirty(false);
         if (isNew) {
           toast('success', 'Field created');

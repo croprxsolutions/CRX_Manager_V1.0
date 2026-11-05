@@ -84,7 +84,7 @@ Every inventory change creates an `inventory_transactions` record. Here are all 
 | Type | When used | Effect on quantity_available |
 |------|-----------|------------------------------|
 | `received` | PO items are received | + (increases stock) |
-| `booked` | An order is created and its lines are pre-booked, by every order-creation path except quick delivery: quote conversion, direct order, rush order, bulk import, blend-ticket order and booking draw-down. Inventory holds write no ledger row | No change to quantity_available (adds to quantity_prebooked) |
+| `booked` | An order is created and its lines are pre-booked, by every order-creation path except quick delivery: quote conversion, direct order, rush order, bulk import and booking draw-down (blend tickets no longer make orders: KI-93, `20261107050000`). Inventory holds write no ledger row | No change to quantity_available (adds to quantity_prebooked) |
 | `delivered` | Delivery is completed | - (decreases stock) |
 | `returned` | Customer return is received back | + (increases stock, if restocked) |
 | `adjusted` | Manual inventory adjustment or cycle count variance | +/- (can go either direction) — **see caveat below** |
@@ -130,6 +130,10 @@ Every inventory change creates an `inventory_transactions` record. Here are all 
   `reverse_receiving_record` / the `receiving_records` delete trigger subtract
   the full reversed quantity so the ledger always equals the applied change; a
   negative snapshot is surfaced for reconciliation rather than silently clamped.
+
+### Blend tickets take stock through application records only (KI-93, `20261107050000`)
+
+A blend ticket's products leave stock through its application record (`job_applied`), once: a second application record for the same ticket is refused, and `reverse_application_record` puts the stock back. Creating an order from a ticket, linking a ticket to an order and Unlink refuse `BLEND_TICKET_ORDERS_DISABLED`, and a table guard refuses any link row, so a ticket can no longer take stock out a second time through an order delivery. Bill the ticket with a direct invoice. An ordinary order typed for the same products is a separate sale; the database cannot tell, so the office must not do it.
 
 ### Critical rule: All inventory math happens in the database, NOT in React.
 

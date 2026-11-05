@@ -523,11 +523,14 @@ A retired product with a negative balance in the position report was checked by 
 The accepted-quote and live-order warning case was checked by hand only.
 
 ### KI-93 — One blend ticket can deduct its stock twice
-**MED · OPEN (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · unassigned (after the cycle-count freeze lands)**
+**MED · FIX READY — `20261107050000_blend_tickets_application_records_only.sql`, not yet applied (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · Claude**
 A blend ticket can produce both an application record (`create_application_record_from_blend_ticket`, which
 deducts stock as `job_applied`) and an order (`create_order_from_blend_ticket`, whose delivery deducts again).
-Neither checks for the other, and same-operation retry protection does not cover the cross-path case. Fix: each
-path refuses when the ticket already went down the other one, inside PostgreSQL.
+Neither checks for the other, and same-operation retry protection does not cover the cross-path case. Five designs
+that kept both paths were broken (parked 2026-11-04). Fix (Mason, 2026-11-04): blend tickets go through
+application records only. Create order from ticket, link and Unlink refuse `BLEND_TICKET_ORDERS_DISABLED`, a table
+guard refuses every link row, and the ticket screen no longer offers them. Left open by design: an ordinary order
+typed for the same products is a separate sale the database cannot tell apart.
 
 ### KI-94 — Voiding a delivery can put back more reserved stock than completion took
 **LOW-MED · FIXED 2026-11-04 (migration `20261106230000` applied live, ledger `20261104202037`; residual below) · database/inventory · Claude**
@@ -548,6 +551,26 @@ stores a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a
 which no draw can take, so the booking never closes. Live impact on 2026-11-04: none (`job_product_draws` has 0 rows).
 - **Next step.** A small migration rounding job reservations to 0.01 (Sol-listed: inventory), before spray jobs
   reserve from bookings in earnest.
+
+### KI-101 — Voiding a delivery on a cancelled order reopens the order
+**MED · OPEN (found 2026-11-04, KI-93 design review; live function body read) · database/lifecycle · unassigned**
+`_void_delivery_replay_impl_20261015` recomputes the order's status (`fulfilled`, `confirmed` or
+`partially_fulfilled`) and writes it under the admin override without checking whether the order was cancelled,
+so voiding a delivery of a cancelled, part-delivered order brings it back to life after the cancel already closed
+out its commissions, reservations and invoices. Admin-only. Separately, signed-in admins hold a direct UPDATE grant
+on `orders.status`, so they can move an order between allowed statuses (for example confirmed to fulfilled) with no
+delivery; no stock moves.
+- **Next step.** Its own Sol-listed PR: keep `cancelled` when voiding a delivery of a cancelled order, decide whether
+  the voided quantity's reservation is released, and consider revoking the direct `orders.status` grant.
+
+### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice
+**MED · OPEN, TRACED NOT REPRODUCED (found 2026-11-04, KI-93 design review, Sol r2 #8) · database/inventory · unassigned**
+`_void_order_impl_20260714` restores delivered stock but leaves the order's completed deliveries `completed`, and
+`void_delivery` checks only the delivery's own status. So voiding a fulfilled order and then one of its deliveries
+would put that delivery's stock back a second time and reopen the voided order. Live exposure 2026-11-04: 0 voided
+orders and 0 completed deliveries on voided orders.
+- **Next step.** Reproduce on the throwaway real-schema copy, then a small Sol-listed migration: `void_delivery`
+  refuses when its order is voided.
 
 ## Database and release process
 

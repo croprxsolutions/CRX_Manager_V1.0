@@ -45,7 +45,7 @@ describe('getBlendQuotePriceChoices', () => {
 describe('blendQuotePriceSaveErrorMessage', () => {
   it('turns every refusal the setter can raise into plain English', () => {
     const cases: Array<[string, RegExp]> = [
-      ['BLEND_TICKET_QUOTE_PRICE_LOCKED: only an unbilled blend ticket', /already been billed or linked/],
+      ['BLEND_TICKET_QUOTE_PRICE_LOCKED: only an unbilled blend ticket', /already been billed, so/],
       ['BLEND_TICKET_QUOTE_PRICE_INVALID_CHOICE: that price is not on this ticket\'s quote', /no longer on this ticket's quote/],
       ['BLEND_TICKET_PRODUCT_NOT_FOUND', /line no longer exists/],
       ['SALESMAN_SCOPE_DENIED', /belongs to another sales rep/],

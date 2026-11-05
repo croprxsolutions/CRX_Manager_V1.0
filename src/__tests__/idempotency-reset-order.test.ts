@@ -188,7 +188,7 @@ const ALLOWED_REASONS: Record<string, Reason[]> = {
   // call site. These four stay pinned below for their OTHER sites; 'recovery' excuses only the
   // binding-rejection reset, which classify() verifies on its own line.
   // KI-11: linking to another order retires the previous attempt's key ('supersede').
-  'src/pages/BlendTicketDetail.tsx': ['recovery', 'supersede'],
+  'src/pages/BlendTicketDetail.tsx': ['recovery'],  // 'supersede' went with the link flow (KI-93)
   'src/pages/NewOrder.tsx': ['recovery'],
   'src/pages/QuoteBuilder.tsx': ['recovery'],
   // Replay-binding batch 3a (20261019200000): complete_delivery's intent/actor recovery reset

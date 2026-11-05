@@ -1678,15 +1678,11 @@ export default function CustomerDetail() {
 
           <Card padding={false}>
             <div className="p-5">
-              <CardHeader
-                title="Customer"
-                accent="Fields"
-                action={
-                  <Button variant="ghost" size="sm" icon={<Plus className="w-3 h-3" />} showChevron={false} onClick={() => navigate('/fields/new')}>
-                    Add Field
-                  </Button>
-                }
-              />
+              <div className="flex justify-end">
+                <Button variant="ghost" size="sm" icon={<Plus className="w-3 h-3" />} showChevron={false} onClick={() => navigate('/fields/new')}>
+                  Add Field
+                </Button>
+              </div>
             </div>
             {loadingSections.has('fields') ? (
               <div className="px-5 pb-5 space-y-3">
@@ -1755,48 +1751,43 @@ export default function CustomerDetail() {
         return (
         <Card padding={false}>
           <div className="p-5">
-            <CardHeader
-              title="Customer"
-              accent="Quotes"
-              action={
-                <div className="flex gap-2 items-center">
-                  <button
-                    onClick={() => setQuotePlannedFilter(!quotePlannedFilter)}
-                    className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${quotePlannedFilter ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'border border-gray-200 text-secondary hover:bg-gray-50'}`}
-                  >
-                    Planned Programs
-                  </button>
-                  {quotes.length > 0 && (
-                    <button
-                      onClick={async () => {
-                        try {
-                          const lastQuote = quotes[0];
-                          const idemKey = duplicateQuoteIdem.getKey();
-                          const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('duplicate_quote', withBelowCostReason('duplicate_quote', {
-                            p_source_quote_id: lastQuote.id,
-                            p_performed_by: profile?.id as string,
-                            p_idempotency_key: idemKey,
-                          }, reason)));
-                          if (error) { toast('error', 'Failed to duplicate quote'); return; }
-                          const result = assertRpcResult<{ quote_id: string }>(data, 'duplicate_quote');
-                          duplicateQuoteIdem.resetKey();
-                          navigate(`/quotes/${result.quote_id}`);
-                        } catch (error: unknown) {
-                          if (!isBelowCostApprovalHandledError(error)) toast('error', 'Failed to duplicate quote');
-                        }
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-crx-green text-crx-green rounded-lg hover:bg-crx-green-tint"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      New from Last
-                    </button>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={() => navigate(`/quotes/new?customer_id=${id}`)}>
-                    New Quote
-                  </Button>
-                </div>
-              }
-            />
+            {/* The fold band above names this section; only its controls stay here. */}
+            <div className="flex flex-wrap justify-end gap-2 items-center">
+              <button
+                onClick={() => setQuotePlannedFilter(!quotePlannedFilter)}
+                className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${quotePlannedFilter ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'border border-gray-200 text-secondary hover:bg-gray-50'}`}
+              >
+                Planned Programs
+              </button>
+              {quotes.length > 0 && (
+                <button
+                  onClick={async () => {
+                    try {
+                      const lastQuote = quotes[0];
+                      const idemKey = duplicateQuoteIdem.getKey();
+                      const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('duplicate_quote', withBelowCostReason('duplicate_quote', {
+                        p_source_quote_id: lastQuote.id,
+                        p_performed_by: profile?.id as string,
+                        p_idempotency_key: idemKey,
+                      }, reason)));
+                      if (error) { toast('error', 'Failed to duplicate quote'); return; }
+                      const result = assertRpcResult<{ quote_id: string }>(data, 'duplicate_quote');
+                      duplicateQuoteIdem.resetKey();
+                      navigate(`/quotes/${result.quote_id}`);
+                    } catch (error: unknown) {
+                      if (!isBelowCostApprovalHandledError(error)) toast('error', 'Failed to duplicate quote');
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-crx-green text-crx-green rounded-lg hover:bg-crx-green-tint"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  New from Last
+                </button>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => navigate(`/quotes/new?customer_id=${id}`)}>
+                New Quote
+              </Button>
+            </div>
           </div>
           {loadingSections.has('quotes') ? (
             <div className="px-5 pb-5 space-y-3">
@@ -1860,9 +1851,7 @@ export default function CustomerDetail() {
       {!isNew && <FoldBand section={FOLD_SECTIONS[6]} open={openSections.has('orders')} onToggle={() => toggleSection('orders')} />}
       {openSections.has('orders') && !isNew && (
         <Card padding={false}>
-          <div className="p-5">
-            <CardHeader title="Customer" accent="Orders" />
-          </div>
+          <div className="pt-5" />
           {loadingSections.has('orders') ? (
             <div className="px-5 pb-5 space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -1928,9 +1917,7 @@ export default function CustomerDetail() {
       {openSections.has('deliveries') && !isNew && (
         <div className="space-y-4">
           <Card padding={false}>
-            <div className="p-5">
-              <CardHeader title="Customer" accent="Deliveries" />
-            </div>
+            <div className="pt-5" />
             {loadingSections.has('deliveries') ? (
               <div className="px-5 pb-5 space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
@@ -2248,8 +2235,7 @@ export default function CustomerDetail() {
       {openSections.has('history') && !isNew && (
         <Card padding={false}>
           <div className="p-5">
-            <CardHeader title="Purchase" accent="History" />
-            <p className="text-xs text-secondary mt-1">Products ordered by this customer, aggregated across all orders</p>
+            <p className="text-xs text-secondary">Products ordered by this customer, aggregated across all orders</p>
           </div>
           {loadingSections.has('history') ? (
             <div className="px-5 pb-5 space-y-3">

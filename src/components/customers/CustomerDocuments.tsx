@@ -344,8 +344,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
       </Card>
 
       <Card padding={false}>
-        <div className="flex items-center justify-between gap-3 p-4 sm:p-5">
-          <CardHeader title="Customer" accent="Documents" />
+        <div className="flex items-center justify-end gap-3 p-4 sm:p-5">
           <Button type="button" variant="ghost" size="sm" icon={<RefreshCw className="h-4 w-4" />} showChevron={false} onClick={() => void loadDocuments()} className="min-h-11">Refresh</Button>
         </div>
         {loading ? (

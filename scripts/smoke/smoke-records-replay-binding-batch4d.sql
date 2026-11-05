@@ -288,6 +288,18 @@ BEGIN
       IF SQLERRM LIKE 'IDEMPOTENCY_ACTOR_MISMATCH%' THEN RAISE EXCEPTION 'SMOKE_FAIL: % checked receipt before role',v_op; END IF;
     END;
   END LOOP;
+  -- An applicator cannot create a recipe through the RPC (the app limits it to admin/sales).
+  BEGIN
+    PERFORM public.save_blend_recipe(NULL,'[SMOKE] applicator recipe '||v_suffix,'generic','[]'::jsonb,NULL,NULL,NULL,'smk-4d-recipe-role-'||v_suffix);
+    RAISE EXCEPTION 'SMOKE_FAIL: save_blend_recipe accepted an applicator';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'INSUFFICIENT_ROLE%' THEN RAISE EXCEPTION 'SMOKE_FAIL: save_blend_recipe applicator gave %',SQLERRM; END IF;
+  END;
+  IF EXISTS(SELECT 1 FROM public.blend_recipes WHERE name='[SMOKE] applicator recipe '||v_suffix)
+    OR EXISTS(SELECT 1 FROM public.idempotency_keys WHERE idempotency_key='smk-4d-recipe-role-'||v_suffix) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: refused applicator recipe left a row';
+  END IF;
   RAISE NOTICE 'REAL_4D_PATHS_PASS';
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';
 END

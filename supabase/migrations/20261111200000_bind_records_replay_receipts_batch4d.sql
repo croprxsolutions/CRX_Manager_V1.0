@@ -21,103 +21,103 @@
 -- pinned PREPAY_BULK_APPLY_DISABLED raise makes the call unreachable. Re-enabling that body
 -- without a key makes the inner call fail closed. _complete_job_replay_impl_20261015 only
 -- mentions start_job in an error string; it is not a live internal call.
--- caller-analysis: admin_update_profile: src/pages/SettingsPage.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: admin_update_profile :: src/pages/SettingsPage.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: admin_update_profile: p_idempotency_key only.
 -- pre-lookup-checks: admin_update_profile: PERFORM require_admin();.
 -- receipt-less-return: admin_update_profile returns an error object for inactive admin, invalid role, or missing user; no receipt is written.
--- caller-analysis: batch_approve_blend_tickets: src/pages/BlendTickets.tsx, src/pages/BlendTicketDetail.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: batch_approve_blend_tickets :: src/pages/BlendTickets.tsx, src/pages/BlendTicketDetail.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: batch_approve_blend_tickets: p_idempotency_key only.
 -- pre-lookup-checks: batch_approve_blend_tickets: v_actor := auth.uid(); IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_approved_by IS NOT NULL AND p_approved_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_actor AND is_active = true AND role IN ('a.
 -- receipt-less-return: batch_approve_blend_tickets has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: batch_reject_blend_tickets: src/pages/BlendTickets.tsx, src/pages/BlendTicketDetail.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: batch_reject_blend_tickets :: src/pages/BlendTickets.tsx, src/pages/BlendTicketDetail.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: batch_reject_blend_tickets: p_idempotency_key only.
 -- pre-lookup-checks: batch_reject_blend_tickets: v_actor := auth.uid(); IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_rejected_by IS NOT NULL AND p_rejected_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_actor AND is_active = true AND role IN ('a.
 -- receipt-less-return: batch_reject_blend_tickets has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: bulk_create_label_drafts: no direct src/ or Edge Function RPC call found; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: bulk_create_label_drafts :: no direct src/ or Edge Function RPC call found; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: bulk_create_label_drafts: p_idempotency_key only.
 -- pre-lookup-checks: bulk_create_label_drafts: IF NOT EXISTS ( SELECT 1 FROM profiles WHERE id = v_user_id AND role = 'admin' AND is_active = true ) THEN RAISE EXCEPTION 'PERMISSION_DENIED: admin role required'; END IF;.
 -- receipt-less-return: bulk_create_label_drafts has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: commit_label_draft: src/pages/LabelReview.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: commit_label_draft :: src/pages/LabelReview.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: commit_label_draft: p_idempotency_key only.
 -- pre-lookup-checks: commit_label_draft: -- Auth gate IF NOT EXISTS ( SELECT 1 FROM profiles WHERE id = v_user_id AND role = 'admin' AND is_active = true ) THEN RAISE EXCEPTION 'PERMISSION_DENIED: admin role required'; END IF; -- Validate decision IF p_decision NOT IN ('accepted', 'edited', 'rejected') THEN RAISE EXCEPTION 'INVALID_DECISIO.
 -- receipt-less-return: commit_label_draft has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: create_label_draft: src/pages/ProductDetail.tsx, src/pages/LabelReview.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: create_label_draft :: src/pages/ProductDetail.tsx, src/pages/LabelReview.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: create_label_draft: p_idempotency_key only.
 -- pre-lookup-checks: create_label_draft: -- Auth gate: admin only IF NOT EXISTS ( SELECT 1 FROM profiles WHERE id = v_user_id AND role = 'admin' AND is_active = true ) THEN RAISE EXCEPTION 'PERMISSION_DENIED: admin role required'; END IF; -- A new draft is never created already-decided: clamp to a reviewable status so a row can't -- enter .
 -- receipt-less-return: create_label_draft has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: create_blend_ticket: src/components/blendtickets/ManualTicketCreate.tsx, src/components/blendtickets/BulkTicketUpload.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: create_blend_ticket :: src/components/blendtickets/ManualTicketCreate.tsx, src/components/blendtickets/BulkTicketUpload.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: create_blend_ticket: p_idempotency_key; p_performed_by proven equal to actor or NULL before lookup.
 -- pre-lookup-checks: create_blend_ticket: IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; IF NOT (public.is_admin() OR public.is_sales_rep()) THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE: active admin or sales.
 -- receipt-less-return: create_blend_ticket has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: save_blend_ticket: src/pages/BlendTicketDetail.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: save_blend_ticket :: src/pages/BlendTicketDetail.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: save_blend_ticket: p_idempotency_key; p_performed_by proven equal to actor or NULL before lookup.
 -- pre-lookup-checks: save_blend_ticket: IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; IF NOT EXISTS ( SELECT 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales.
 -- receipt-less-return: save_blend_ticket has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: save_blend_ticket_fields: src/pages/BlendTicketDetail.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: save_blend_ticket_fields :: src/pages/BlendTicketDetail.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: save_blend_ticket_fields: p_idempotency_key; p_performed_by proven equal to actor or NULL before lookup.
 -- pre-lookup-checks: save_blend_ticket_fields: v_actor := auth.uid(); IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_actor AND is_active = true AND role IN (.
 -- receipt-less-return: save_blend_ticket_fields has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: dismiss_watchdog_flag: src/components/watchdog/WatchdogFlagBanner.tsx, src/pages/WatchdogExceptions.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: dismiss_watchdog_flag :: src/components/watchdog/WatchdogFlagBanner.tsx, src/pages/WatchdogExceptions.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: dismiss_watchdog_flag: p_idempotency_key; p_performed_by proven equal to actor or NULL before lookup.
 -- pre-lookup-checks: dismiss_watchdog_flag: -- Resolve actor (canonical pattern: bind auth.uid first, then validate) v_actor := auth.uid(); IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED: must be authenticated to dismiss watchdog flags'; END IF; IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEP.
 -- receipt-less-return: dismiss_watchdog_flag has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: delete_vendor: src/pages/Vendors.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: delete_vendor :: src/pages/Vendors.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: delete_vendor: p_idempotency_key only.
 -- pre-lookup-checks: delete_vendor: v_actor := auth.uid(); IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; SELECT role INTO v_actor_role FROM profiles WHERE id = v_actor AND is_active = true; IF v_actor_role IS NULL OR v_actor_role <> 'admin' THEN RAISE EXCEPTION 'NOT_AUTHORIZED: only admins can delete vendors'; END I.
 -- receipt-less-return: delete_vendor has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: reactivate_vendor: src/pages/Vendors.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: reactivate_vendor :: src/pages/Vendors.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: reactivate_vendor: p_idempotency_key only.
 -- pre-lookup-checks: reactivate_vendor: v_actor := auth.uid(); IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; SELECT role INTO v_actor_role FROM profiles WHERE id = v_actor AND is_active = true; IF v_actor_role IS NULL OR v_actor_role <> 'admin' THEN RAISE EXCEPTION 'NOT_AUTHORIZED: only admins can reactivate vendors'; E.
 -- receipt-less-return: reactivate_vendor has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: save_vendor: src/pages/Vendors.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: save_vendor :: src/pages/Vendors.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: save_vendor: p_idempotency_key only.
 -- pre-lookup-checks: save_vendor: v_actor := auth.uid(); IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; SELECT role INTO v_actor_role FROM profiles WHERE id = v_actor AND is_active = true; IF v_actor_role IS NULL OR v_actor_role <> 'admin' THEN RAISE EXCEPTION 'NOT_AUTHORIZED: only admins can manage vendors'; END I.
 -- receipt-less-return: save_vendor has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: link_fields_to_parent: src/pages/Fields.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: link_fields_to_parent :: src/pages/Fields.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: link_fields_to_parent: p_idempotency_key only.
 -- pre-lookup-checks: link_fields_to_parent: PERFORM require_admin_or_sales_rep();.
 -- receipt-less-return: link_fields_to_parent has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: unlink_field_from_parent: no direct src/ or Edge Function RPC call found; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: unlink_field_from_parent :: no direct src/ or Edge Function RPC call found; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: unlink_field_from_parent: p_idempotency_key only.
 -- pre-lookup-checks: unlink_field_from_parent: PERFORM require_admin_or_sales_rep();.
 -- receipt-less-return: unlink_field_from_parent has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: review_customer_fact: src/components/customers/CustomerFacts.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: review_customer_fact :: src/components/customers/CustomerFacts.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: review_customer_fact: p_idempotency_key only.
 -- pre-lookup-checks: review_customer_fact: IF p_verdict NOT IN ('verified', 'rejected') THEN RAISE EXCEPTION 'FACT_VERDICT_INVALID'; END IF; SELECT * INTO v_fact FROM public.customer_facts WHERE id = p_fact_id FOR UPDATE; IF NOT FOUND THEN RAISE EXCEPTION 'FACT_NOT_FOUND'; END IF; IF NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = a.
 -- receipt-less-return: review_customer_fact has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: supersede_customer_fact: src/components/customers/CustomerFacts.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: supersede_customer_fact :: src/components/customers/CustomerFacts.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: supersede_customer_fact: p_idempotency_key only.
 -- pre-lookup-checks: supersede_customer_fact: IF (p_value_text IS NULL) = (p_value_json IS NULL) OR (p_value_text IS NOT NULL AND btrim(p_value_text) = '') OR (p_value_json IS NOT NULL AND jsonb_typeof(p_value_json) NOT IN ('object', 'array')) OR (p_confidence IS NOT NULL AND p_confidence NOT BETWEEN 0 AND 1) THEN RAISE EXCEPTION 'FACT_VALUE_IN.
 -- receipt-less-return: supersede_customer_fact has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: save_blend_recipe: src/pages/BlendRecipes.tsx, src/pages/JobDetail.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: save_blend_recipe :: src/pages/BlendRecipes.tsx and src/pages/JobDetail.tsx, both reachable only by admin and sales_rep; wrapper retains authenticated/service_role EXECUTE and adds an active admin/sales_rep check the pinned body lacked (an applicator could create a priced recipe directly).
 -- fingerprint-exclusions: save_blend_recipe: p_idempotency_key only.
 -- pre-lookup-checks: save_blend_recipe: IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_name IS NULL OR p_name = '' THEN RAISE EXCEPTION 'NAME_REQUIRED'; END IF; IF p_recipe_type NOT IN ('generic', 'crop_specific') THEN RAISE EXCEPTION 'RECIPE_TYPE_INVALID'; END IF; IF p_items IS NULL OR jsonb_typeof(p_items) <> 'arr.
 -- receipt-less-return: save_blend_recipe has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: save_field: src/components/fields/BulkFieldImport.tsx, src/pages/FieldSetup.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: save_field :: src/components/fields/BulkFieldImport.tsx, src/pages/FieldSetup.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: save_field: p_idempotency_key; p_performed_by proven equal to actor or NULL before lookup.
 -- pre-lookup-checks: save_field: v_actor := auth.uid(); IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; PERFORM require_admin_or_sales_rep();.
 -- receipt-less-return: save_field has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: save_field_crop_history: src/pages/FieldDashboard.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: save_field_crop_history :: src/pages/FieldDashboard.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: save_field_crop_history: p_idempotency_key; p_performed_by proven equal to actor or NULL before lookup.
 -- pre-lookup-checks: save_field_crop_history: -- strict-actor (canonical) -------------------------------------------------- v_actor := auth.uid(); IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; IF NOT EXIST.
 -- receipt-less-return: save_field_crop_history has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: save_field_geometry: no direct src/ or Edge Function RPC call found; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: save_field_geometry :: no direct src/ or Edge Function RPC call found; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: save_field_geometry: p_idempotency_key only.
 -- pre-lookup-checks: save_field_geometry: PERFORM require_admin_or_sales_rep();.
 -- receipt-less-return: save_field_geometry has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: save_field_polygons: no direct src/ or Edge Function RPC call found; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: save_field_polygons :: no direct src/ or Edge Function RPC call found; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: save_field_polygons: p_idempotency_key only.
 -- pre-lookup-checks: save_field_polygons: PERFORM require_admin_or_sales_rep();.
 -- receipt-less-return: save_field_polygons has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: set_application_record_lots: src/lib/lotRpc.ts; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: set_application_record_lots :: src/lib/lotRpc.ts; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: set_application_record_lots: p_idempotency_key; p_performed_by proven equal to actor or NULL before lookup.
 -- pre-lookup-checks: set_application_record_lots: -- strict-actor (bind auth.uid(); reject a spoofed p_performed_by) IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; -- in-body role gate (the real gate — the EXECU.
 -- receipt-less-return: set_application_record_lots has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: set_field_boundary: src/components/fields/BulkFieldImport.tsx, src/pages/FieldSetup.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: set_field_boundary :: src/components/fields/BulkFieldImport.tsx, src/pages/FieldSetup.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: set_field_boundary: p_idempotency_key; p_performed_by proven equal to actor or NULL before lookup.
 -- pre-lookup-checks: set_field_boundary: -- 1) strict-actor + role gate (source-verifiable inline binding + the project role helper) IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; PERFORM require_admin_.
 -- receipt-less-return: set_field_boundary has no reachable keyed success without a receipt in its pinned body.
--- caller-analysis: set_field_override_acres: src/components/fields/BulkFieldImport.tsx, src/pages/FieldSetup.tsx; wrapper retains authenticated/service_role EXECUTE.
+-- caller-analysis: set_field_override_acres :: src/components/fields/BulkFieldImport.tsx, src/pages/FieldSetup.tsx; wrapper retains authenticated/service_role EXECUTE.
 -- fingerprint-exclusions: set_field_override_acres: p_idempotency_key; p_performed_by proven equal to actor or NULL before lookup.
 -- pre-lookup-checks: set_field_override_acres: IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF; IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF; PERFORM require_admin_or_sales_rep(); -- validate at STORED precision (numeric(10,2)): NULL clears; otherwise must.
 -- receipt-less-return: set_field_override_acres has no reachable keyed success without a receipt in its pinned body.
@@ -1244,6 +1244,11 @@ BEGIN
     RAISE EXCEPTION 'ITEMS_INVALID';
   END IF;
   END;
+  -- Added (Sol HIGH): the pinned body lets any signed-in user create a recipe and set its
+  -- prices; both app save paths (Blend Recipes page, job "save as recipe") are admin/sales only.
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')) THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE';
+  END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object('actor_id', v_actor, 'p_recipe_id', p_recipe_id, 'p_name', p_name, 'p_recipe_type', p_recipe_type, 'p_items', p_items, 'p_description', p_description, 'p_crop_type', p_crop_type, 'p_timing', p_timing));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'save_blend_recipe', v_actor, v_fingerprint);
   v_result := public._save_blend_recipe_replay_impl_20261015(p_recipe_id, p_name, p_recipe_type, p_items, p_description, p_crop_type, p_timing, p_idempotency_key);

@@ -33,7 +33,7 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
       setConfirmOpen(false);
       toast('success', 'Saved request cleared. This form can be used again.');
     } catch {
-      toast('error', 'Could not clear the saved request. Reload the page and try again.');
+      toast('error', 'Could not clear this saved request: it may still be retryable, or its saved data is damaged. Reload the page; if it stays locked, report it.');
     } finally {
       setClearing(false);
     }

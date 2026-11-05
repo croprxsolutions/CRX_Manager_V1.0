@@ -1072,11 +1072,14 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   // store this tab can reach. It refuses while any copy could still be retried.
   const clearExpiredIntent = useCallback(async () => {
     if (!options || !storageKey) throw new Error('DURABLE_MUTATION_INTENT_IDENTITY_MISSING');
-    const isLive = (record: DurableMutationIntentRecord<T> | null) =>
-      record?.status === 'pending' && Date.now() < record.retryNotAfterMs;
+    // Only an intact request past its deadline is clearable. Damaged state
+    // (__reconciliation_required__) proves nothing about its deadline, so it stays locked.
+    const isClearable = (record: DurableMutationIntentRecord<T> | null) => !record
+      || record.status === 'resolved'
+      || (record.surface !== '__reconciliation_required__' && Date.now() >= record.retryNotAfterMs);
     const mirror = readDurableRecord<T>(storageKey, options);
     const attempt = readAcknowledgmentRecord<T>(acknowledgmentKey, options);
-    if (isLive(mirror) || isLive(attempt)) throw new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT);
+    if (!isClearable(mirror) || !isClearable(attempt)) throw new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT);
     const db = await openDurableIntentDb();
     try {
       await new Promise<void>((resolve, reject) => {
@@ -1088,10 +1091,10 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
           const stored = request.result as { record?: unknown } | undefined;
           if (!stored) return;
           const candidate = stored.record as Partial<DurableMutationIntentRecord<T>> | undefined;
-          const record = candidate && isValidRecord(candidate, options) ? candidate : null;
+          const record = candidate && isValidRecord(candidate, options) ? candidate : blockedDurableRecord(options);
           // A resolved tombstone never locks anything; keep it as receipt proof.
-          if (record?.status === 'resolved') return;
-          if (isLive(record)) {
+          if (record.status === 'resolved') return;
+          if (!isClearable(record)) {
             refused = true;
             return;
           }
@@ -1114,7 +1117,11 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
       db.close();
     }
     try {
-      if (mirror?.status !== 'resolved') window.localStorage.removeItem(storageKey);
+      // Another tab may have started a new request since the read above; keep its mirror.
+      const current = readDurableRecord<T>(storageKey, options);
+      if (current && current.status !== 'resolved' && current.requestVersion === mirror?.requestVersion) {
+        window.localStorage.removeItem(storageKey);
+      }
       if (acknowledgmentKey) window.sessionStorage.removeItem(acknowledgmentKey);
     } catch {
       throw new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');

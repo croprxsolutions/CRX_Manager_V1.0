@@ -453,6 +453,40 @@ describe('useUncertainMutationIntent', () => {
     now.mockRestore();
   });
 
+  it('refuses to clear when IndexedDB holds a damaged record behind an expired mirror (KI-27)', async () => {
+    let nowMs = Date.parse('2026-08-26T12:00:00Z');
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+    const options = {
+      operation: 'record_vendor_payment',
+      userId: 'admin-ki27-damaged',
+      surface: 'vendor-bill-detail',
+      scope: 'bill-ki27-damaged',
+    };
+    const storageKey = `crx:uncertain-mutation:v4:${JSON.stringify([options.operation, options.userId])}`;
+    const first = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    await act(async () => first.result.current.beginIntent({ amount: 9000 }));
+    first.unmount();
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open('crx_durable_mutation_intents', 1);
+      open.onsuccess = () => {
+        const tx = open.result.transaction('intents', 'readwrite');
+        tx.objectStore('intents').put({ storageKey, record: { version: 4, status: 'pending' } });
+        tx.oncomplete = () => { open.result.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+      open.onerror = () => reject(open.error);
+    });
+
+    nowMs += 23 * 60 * 60 * 1000;
+    const expired = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    expect(expired.result.current.isRetryExpired).toBe(true);
+    await expect(expired.result.current.clearExpiredIntent()).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    expect(expired.result.current.isIntentLocked).toBe(true);
+    expect(window.localStorage.getItem(storageKey)).not.toBeNull();
+    expired.unmount();
+    now.mockRestore();
+  });
+
   it('fails closed for a legacy durable record that has no retry deadline', () => {
     const options = {
       operation: 'receive_po_items',

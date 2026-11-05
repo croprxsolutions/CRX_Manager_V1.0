@@ -617,7 +617,13 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   eq((guardSource.match(/\.risky\b/g) || []).length, 2, "`.risky` is read in exactly two places: the allow decision and the earlier-proof check");
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
-  ok(/import \{ solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
+  ok(/import \{ GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
+  // staging gets every main gate, and refuses a migration (Mason on #1363, 2026-11-04).
+  ok(/if \(!GATED_MERGE_BASES\.includes\(base\)\) return;/.test(gateRequestSource), "only main and staging merges are gated, from the shared list");
+  ok(/if \(base === "staging"\) \{\s*const migration = stagingMigrationOnGitHub\(\{ baseSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(migration\) deny\(/.test(gateRequestSource),
+    "a merge into staging is refused when GitHub's comparison carries a migration, spending the hard-gate budget");
+  ok(gateRequestSource.indexOf("stagingMigrationOnGitHub(") < gateRequestSource.indexOf("pullRequestReviewBlocked(pr)"),
+    "the staging migration refusal runs before any allow point");
   ok(!/docs\/changelog\.d|docs\/workflows/.test(guardSource), "no path list is forked into the guard itself");
 }
 

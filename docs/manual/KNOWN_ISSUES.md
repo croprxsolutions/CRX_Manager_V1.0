@@ -415,7 +415,7 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
 ### KI-100 — An open product page learns of a lock change only on reload or a refused save
-**LOW · product UI · LOCAL CANDIDATE `20261107060000` — NOT APPLIED**
+**LOW · product UI · `20261107060000` — APPLIED LIVE 2026-11-04**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
 
 ---
@@ -544,13 +544,13 @@ Residual: a line completed before the migration has no record and still restores
 `requires_review` with a note to check reserved stock. Live
 read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20); nothing is corrected.
 
-### KI-100 — A spray job can leave a booking with a remainder no Partial Order can take
-**MED · OPEN (deferred from PR #1362) · database · Taha**
+### KI-100 — A spray job could leave a booking with a remainder no Partial Order can take
+**MED · FIXED: migration `20261107070000` APPLIED LIVE 2026-11-04 (ledger `20261105032430`, PR #1451) · database · found 2026-11-04 (PR #1362 review)**
 Since `20261106110000` (S02) a Partial Order must be in whole hundredths, but `_sync_quote_job_reservations`
-stores a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking leaves 9.9921875 gal,
-which no draw can take, so the booking never closes. Live impact on 2026-11-04: none (`job_product_draws` has 0 rows).
-- **Next step.** A small migration rounding job reservations to 0.01 (Sol-listed: inventory), before spray jobs
-  reserve from bookings in earnest.
+drew a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking left 9.9921875 gal,
+which no draw can take, so the booking never closed. The fix keeps a booking's job draws in whole hundredths that
+together match the real total applied, rounded once, and holds at least each draw in the shed. Live had no job draws on 2026-11-04, so no booking was stranded. Proof:
+`scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs`.
 
 ### KI-101 — Voiding a delivery on a cancelled order reopens the order
 **MED · OPEN (found 2026-11-04, KI-93 design review; live function body read) · database/lifecycle · unassigned**

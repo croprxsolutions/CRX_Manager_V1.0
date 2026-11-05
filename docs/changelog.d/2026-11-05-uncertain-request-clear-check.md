@@ -24,7 +24,9 @@
   rows the browser never knew about, sends from other tabs, and expired receipts (the check runs before an expired
   receipt is removed). A row's receipt insert takes its batch's lock shared, so a retire waits for an in-flight row
   and a row sent during a retire waits and is then refused. Every saving RPC writes its receipt in the same
-  transaction as its work, so the refusal rolls the work back (Sol findings).
+  transaction as its work, so the refusal rolls the work back (Sol findings). A retry that finds a live receipt of
+  the key is left to the existing replay handling, so a saved request still replays; `allocate_payment`'s
+  claim-row replay included (Codex review finding).
 - Idempotency: the request key is the call's idempotency key and its `retired_uncertain_requests` row is the
   receipt; `p_idempotency_key`, if sent, must equal it, and a repeat answers `retired` without writing.
 - Times come from `clock_timestamp()`, not the transaction-start `now()`, so a long-open transaction cannot
@@ -40,7 +42,9 @@
   -> safe; a receipt under another operation -> wait; no, forged, borrowed and future tokens -> `first_check`; its
   own fresh token -> `waiting`; 5 minutes -> `waiting`, 16 minutes -> safe; asking again -> `retired`; a batch with a
   row saved under `adjust_inventory` -> `recorded`, under another operation -> wait; then a late save of the request,
-  of an unknown row under it and of the expired key -> `IDEMPOTENCY_REQUEST_RETIRED`, while an unrelated key saves;
+  of an unknown row under it and of the expired key -> `IDEMPOTENCY_REQUEST_RETIRED`, while an unrelated key saves,
+  a retired saved payment's claim-row retry is skipped quietly so it can replay, and a retired saved request's retry
+  -> `IDEMPOTENCY_CONCURRENT_REPLAY_RETRY`;
   another user's key or a row key -> `REQUEST_KEY_NOT_OWNED`; a wrong idempotency key -> `IDEMPOTENCY_KEY_MISMATCH`;
   signed out -> `AUTH_REQUIRED`.
 - Not verified yet: the live apply and the live smoke run.

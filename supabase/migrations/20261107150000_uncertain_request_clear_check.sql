@@ -93,15 +93,21 @@ BEGIN
     hashtextextended('crx:idempotency:' || NEW.idempotency_key, 0)
   );
 
-  -- KI-27: a retired request, or a batch row under one, never saves. A row takes its
-  -- batch's lock shared, so this waits for (or blocks) retire_uncertain_request,
-  -- which holds that lock exclusively. Checked before any expired receipt is removed.
+  -- KI-27: a retired request, or a batch row under one, never saves new work. A row
+  -- takes its batch's lock shared, so this waits for (or blocks)
+  -- retire_uncertain_request, which holds that lock exclusively. Checked before any
+  -- expired receipt is removed. A live receipt of the key is left to the replay
+  -- handling below (allocate_payment's claim-row replay included): that saves nothing.
   v_parent := substring(NEW.idempotency_key FROM
     '^([a-z0-9_]+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
   IF v_parent IS NOT NULL THEN
     PERFORM pg_advisory_xact_lock_shared(hashtextextended('crx:idempotency:' || v_parent, 0));
   END IF;
-  IF EXISTS (
+  IF NOT EXISTS (
+    SELECT 1 FROM public.idempotency_keys
+     WHERE idempotency_key = NEW.idempotency_key
+       AND (expires_at < now()) IS NOT TRUE
+  ) AND EXISTS (
     SELECT 1 FROM public.retired_uncertain_requests r
      WHERE r.request_key = NEW.idempotency_key OR r.request_key = v_parent
   ) THEN

@@ -16,7 +16,9 @@
 --     another operation does not count;
 --   * after a safe answer the database refuses any later save of the request key, of
 --     any row under it (known or not), and of an expired one
---     (IDEMPOTENCY_REQUEST_RETIRED); an unrelated key still saves;
+--     (IDEMPOTENCY_REQUEST_RETIRED); an unrelated key still saves, and a retry of a
+--     retired request that still has a live receipt keeps its replay handling
+--     (allocate_payment's claim-row replay included);
 --   * a non-admin (when one exists), another user's key, a row key, a wrong idempotency
 --     key and a signed-out session are refused.
 -- The 'in_progress' answer and the wait of a row save behind a retire need two sessions,
@@ -33,6 +35,7 @@ DECLARE
   v_unrecorded text;
   v_batch text;
   v_batch_foreign text;
+  v_payment text;
   v_signing bytea;
   v_tok_5 text;
   v_tok_16 text;
@@ -47,7 +50,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: retire_uncertain_request is not the body of 20261107150000';
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._guard_idempotency_key_insert()'::regprocedure), chr(13), ''))
-     <> 'dc8f53f52365ff2f28d9c126dd9bb41d' THEN
+     <> '2c85eb6f59909cbc120c5242045d5334' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: _guard_idempotency_key_insert is not the body of 20261107150000';
   END IF;
   IF has_function_privilege('anon', v_fn, 'EXECUTE') OR has_function_privilege('service_role', v_fn, 'EXECUTE')
@@ -72,11 +75,13 @@ BEGIN
   v_unrecorded := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
   v_batch := 'adjust_inventory_batch:' || v_actor || ':' || gen_random_uuid();
   v_batch_foreign := 'adjust_inventory_batch:' || v_actor || ':' || gen_random_uuid();
+  v_payment := 'allocate_payment:' || v_actor || ':' || gen_random_uuid();
   INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
   VALUES (v_recorded, 'save_vendor', '{"smoke": true}', v_actor, 'smoke'),
          (v_foreign, 'save_customer', '{"smoke": true}', v_actor, 'smoke'),
          (v_batch || ':' || gen_random_uuid(), 'adjust_inventory', '{"smoke": true}', v_actor, 'smoke'),
-         (v_batch_foreign || ':' || gen_random_uuid(), 'save_vendor', '{"smoke": true}', v_actor, 'smoke');
+         (v_batch_foreign || ':' || gen_random_uuid(), 'save_vendor', '{"smoke": true}', v_actor, 'smoke'),
+         (v_payment, 'allocate_payment', '{"smoke": true}', v_actor, 'smoke');
   INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint, created_at, expires_at)
   VALUES (v_expired, 'save_vendor', '{"smoke": true}', v_actor, 'smoke', now() - interval '25 hours', now() - interval '1 hour');
 
@@ -119,6 +124,10 @@ BEGIN
   v_r := public.retire_uncertain_request(v_recorded, p_idempotency_key => v_recorded);
   IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a recorded key was not safe: %', v_r;
+  END IF;
+  v_r := public.retire_uncertain_request(v_payment);
+  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a recorded payment was not safe: %', v_r;
   END IF;
   v_r := public.retire_uncertain_request(v_expired);
   IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' THEN
@@ -230,6 +239,26 @@ BEGIN
   END LOOP;
   INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
   VALUES ('save_vendor:' || v_actor || ':' || gen_random_uuid(), 'save_vendor', '{"smoke": true}', v_actor, 'smoke');
+  -- A retry of a retired request whose receipt is still live keeps its replay handling:
+  -- allocate_payment's claim row is skipped quietly so it can read its saved answer, and
+  -- any other operation is told to retry and read it. Neither saves anything.
+  INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
+  VALUES (v_payment, 'allocate_payment', '{"_contract": "allocate_payment_v1", "request": {}, "response": null}', v_actor, 'smoke');
+  IF (SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = v_payment AND result = '{"smoke": true}') <> 1
+     OR (SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key = v_payment) <> 1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a payment retry changed the saved payment receipt';
+  END IF;
+  v_refused := false;
+  BEGIN
+    INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
+    VALUES (v_recorded, 'save_vendor', '{"late": true}', v_actor, 'late');
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'IDEMPOTENCY_CONCURRENT_REPLAY_RETRY%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: a retry of a retired, saved request lost its replay: % %', SQLSTATE, SQLERRM;
+    END IF;
+    v_refused := true;
+  END;
+  IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a retired, saved request was saved again'; END IF;
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: retire_uncertain_request';
 END $$;

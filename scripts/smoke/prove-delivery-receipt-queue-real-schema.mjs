@@ -432,11 +432,19 @@ function main() {
 
   // Settled without sending: another delivery_completed email sent (scoped or legacy key) or pending; the worker's
   // own rows do not count; no email now; delivery no longer completed.
-  log(`delivery_completed:delivery:${D(2)}:receipt-queue/${id('55')}/attempt-1`, 'sent');
+  log(`delivery-receipt-queue:${id('55')}:attempt-1`, 'sent');
   fresh(2);
   const own = claim();
   assert.equal(own.length, 1, "the worker's own email rows do not settle the receipt");
   finish(own[0], 'retry');
+  // A send before the receipt was owed (before this completion) does not settle it.
+  psql(`UPDATE public.delivery_receipt_queue SET created_at = now() + interval '1 minute' WHERE delivery_id = '${D(2)}';`);
+  log(`delivery_completed:delivery:${D(2)}:office-before-completion`, 'sent');
+  fresh(2);
+  const early = claim();
+  assert.equal(early.length, 1, 'a confirmation sent before the receipt was owed does not settle it');
+  finish(early[0], 'retry');
+  psql(`UPDATE public.delivery_receipt_queue SET created_at = now() - interval '1 minute' WHERE delivery_id = '${D(2)}';`);
   log(`delivery_completed:delivery:${D(2)}:delivery-resend-${D(2)}-1730000000000`, 'sent');
   fresh(2); assert.equal(claim().length, 0); assert.equal(row(2, 'status'), 'sent_elsewhere');
   seedDelivery(7); assert.equal(complete(7, { emailReceipt: 'true' }).status, 0);
@@ -459,7 +467,7 @@ function main() {
   due(9);
   const k1 = claim('ki25-claim-recheck-1');
   assert.equal(k1.length, 1);
-  psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}';`);
+  psql(`UPDATE public.customers SET email = ' KI25-Farm@example.invalid ' WHERE id = '${CUST}';`);
   assert.deepEqual(claim('ki25-claim-recheck-1').map((c) => [c.id, c.claim_token, c.attempt, c.to]),
     [[k1[0].id, k1[0].claim_token, 1, 'ki25-farm@example.invalid']], 'a retried claim keeps its address');
   psql(`UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
@@ -470,7 +478,15 @@ function main() {
   assert.equal(claim('ki25-claim-recheck-2').length, 1);
   psql(`SET session_replication_role = replica; UPDATE public.deliveries SET status = 'cancelled' WHERE id = '${D(9)}';`);
   assert.equal(claim('ki25-claim-recheck-2').length, 0); assert.equal(row(9, 'status'), 'cancelled');
-  console.log('[prover] a retried claim keeps its address and re-checks sent-elsewhere and voided deliveries');
+  // The customer's email changed since the claim: the retried claim does not send to the old address.
+  seedDelivery(20); assert.equal(complete(20, { emailReceipt: 'true' }).status, 0);
+  due(20);
+  assert.equal(claim('ki25-claim-recheck-3').length, 1);
+  psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}';`);
+  assert.equal(claim('ki25-claim-recheck-3').length, 0);
+  psql(`UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
+  assert.match(row(20, "status || ' ' || last_error"), /^needs_check The customer's email changed/);
+  console.log('[prover] a retried claim keeps its address, re-checks sent-elsewhere and voided deliveries, and stops on a changed email');
 
   // A finish key is bound to its receipt, claim and outcome: reusing it elsewhere is refused, not answered.
   seedDelivery(10); assert.equal(complete(10, { emailReceipt: 'true' }).status, 0);
@@ -512,13 +528,13 @@ function main() {
   // attempt (outcome unknown) is retried under the provider's duplicate guard.
   seedDelivery(15); assert.equal(complete(15, { emailReceipt: 'true' }).status, 0);
   const q15 = row(15, 'id');
-  log(`delivery_completed:delivery:${D(15)}:receipt-queue/${q15}/attempt-1`, 'pending');
+  log(`delivery-receipt-queue:${q15}:attempt-1`, 'pending');
   due(15);
   const o1 = claim();
   assert.equal(o1.length, 1, "the receipt's own pending attempt does not settle it");
   finish(o1[0], 'retry');
   psql(`UPDATE public.email_log SET status = 'sent', resend_message_id = 'msg-own'
-    WHERE idempotency_key = 'delivery_completed:delivery:${D(15)}:receipt-queue/${q15}/attempt-1';`);
+    WHERE idempotency_key = 'delivery-receipt-queue:${q15}:attempt-1';`);
   due(15); assert.equal(claim().length, 0);
   assert.equal(row(15, "status || ' ' || resend_message_id || ' ' || sent_to"), 'sent msg-own ki25-farm@example.invalid');
   console.log("[prover] the receipt's own logged send is recorded sent, not sent twice");
@@ -542,7 +558,9 @@ function main() {
   assert.equal(s1.length, 1);
   assert.match(sendRow(`delivery_completed:delivery:${D(17)}:office-1`).stderr, /DELIVERY_RECEIPT_SENDING/);
   assert.match(sendRow(null).stderr, /DELIVERY_RECEIPT_SENDING/);
-  assert.equal(sendRow(`delivery_completed:delivery:${D(17)}:receipt-queue/${s1[0].id}/attempt-1`).status, 0, "the worker's own row is allowed");
+  assert.equal(sendRow(`delivery-receipt-queue:${s1[0].id}:attempt-1`).status, 0, "the worker's own row is allowed");
+  assert.match(sendRow(`delivery_completed:delivery:${D(17)}:receipt-queue/${s1[0].id}/attempt-1`).stderr, /DELIVERY_RECEIPT_SENDING/,
+    "a staff send shaped like the old worker key is refused");
   assert.equal(sendRow(`delivery_completed:delivery:${D(16)}:office-1`, CUST_NOEMAIL).status, 0, 'another delivery is not blocked');
   // A send blocked by a live claim is allowed once the claim settles.
   assert.equal(finish(s1[0], 'sent', `NULL, 'msg-s', 'ki25-farm@example.invalid'`).out, 'sent');

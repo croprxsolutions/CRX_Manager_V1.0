@@ -27,6 +27,9 @@
 --      (attempt_to), and claims nothing new. A finish key is bound to its receipt, token, outcome and proof.
 --      A row whose delivery now belongs to another customer goes to needs_check; a row whose own earlier
 --      attempt is logged sent (its finish was lost) is recorded sent, never sent again.
+--      The worker logs its sends as key 'delivery-receipt-queue:<queue id>:attempt-<n>' with created_by NULL.
+--      send-email cannot write that (it scopes every key as '<email_type>:<resource>:<key>' and sets created_by),
+--      so no staff send can pass as the worker's.
 --   3b. _delivery_receipt_send_lock (trigger on email_log): while the worker holds a live claim on a receipt,
 --      any other delivery_completed send for that delivery (or, with no key, that customer) is refused at its
 --      pre-send log row. Both sides lock the queue row, so a claim and an office send never both pass.
@@ -491,7 +494,8 @@ BEGIN
     SELECT e.recipient_email, e.resend_message_id INTO v_log_to, v_log_msg
       FROM public.email_log e
      WHERE e.email_type = 'delivery_completed' AND e.status = 'sent'
-       AND left(e.idempotency_key, length(v_scoped) + 51) = v_scoped || 'receipt-queue/' || v_row.id::text || '/'
+       AND left(e.idempotency_key, 60) = 'delivery-receipt-queue:' || v_row.id::text || ':'
+       AND e.created_by IS NULL
      ORDER BY e.created_at DESC
      LIMIT 1;
     IF FOUND THEN
@@ -504,7 +508,7 @@ BEGIN
 
     -- Any other delivery_completed email for this delivery (the office's Email Confirmation, or a phone send):
     -- send-email scopes keys as 'delivery_completed:delivery:<id>:<key>'; older rows used the bare app keys.
-    -- The worker's own rows ('...:receipt-queue/...') are handled above.
+    -- Only sends since the receipt was owed: an earlier one did not carry this completion.
     SELECT CASE WHEN bool_or(e.status = 'sent') THEN 'sent'
                 WHEN bool_or(e.status = 'pending') THEN 'pending' END
       INTO v_other
@@ -513,7 +517,7 @@ BEGIN
        AND (left(e.idempotency_key, length(v_scoped)) = v_scoped
             OR e.idempotency_key = 'delivery-completed-' || v_row.delivery_id::text
             OR left(e.idempotency_key, 53) = 'delivery-resend-' || v_row.delivery_id::text || '-')
-       AND left(e.idempotency_key, length(v_scoped) + 14) IS DISTINCT FROM v_scoped || 'receipt-queue/';
+       AND e.created_at >= v_row.created_at;
     IF v_other = 'sent' THEN
       UPDATE public.delivery_receipt_queue
          SET status = 'sent_elsewhere', claim_token = NULL, claimed_at = NULL, last_error = NULL
@@ -536,6 +540,7 @@ BEGIN
                   AND e.created_at >= v_row.created_at - interval '1 day'
                   AND (e.idempotency_key IS NULL
                        OR (left(e.idempotency_key, 28) <> 'delivery_completed:delivery:'
+                           AND NOT (left(e.idempotency_key, 23) = 'delivery-receipt-queue:' AND e.created_by IS NULL)
                            AND e.idempotency_key !~ '^delivery-(completed|resend)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'))) THEN
       UPDATE public.delivery_receipt_queue
          SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
@@ -545,6 +550,15 @@ BEGIN
     END IF;
 
     IF v_replay THEN
+      -- The address this claim fixed must still be the customer's; a corrected or removed one is not sent to.
+      IF NOT EXISTS (SELECT 1 FROM public.customers c WHERE c.id = v_row.customer_id
+                      AND lower(btrim(COALESCE(c.email, ''))) = lower(v_row.attempt_to)) THEN
+        UPDATE public.delivery_receipt_queue
+           SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
+               last_error = 'The customer''s email changed while the receipt was being sent; check whether it went out.'
+         WHERE id = v_row.id;
+        CONTINUE;
+      END IF;
       v_out := v_out || jsonb_build_array(jsonb_build_object(
         'id', v_row.id, 'claim_token', v_row.claim_token, 'delivery_id', v_row.delivery_id,
         'customer_id', v_row.customer_id, 'requested_by', v_row.requested_by, 'attempt', v_row.attempts,
@@ -703,7 +717,7 @@ DECLARE
 BEGIN
   IF NEW.email_type IS DISTINCT FROM 'delivery_completed' OR NEW.status IS DISTINCT FROM 'pending'
      OR (TG_OP = 'UPDATE' AND OLD.status = 'pending')
-     OR position(':receipt-queue/' IN COALESCE(NEW.idempotency_key, '')) > 0 THEN  -- not a new send, or the worker's own
+     OR (left(NEW.idempotency_key, 23) = 'delivery-receipt-queue:' AND NEW.created_by IS NULL) THEN  -- not a new send, or the worker's own
     RETURN NEW;
   END IF;
   IF left(NEW.idempotency_key, 28) = 'delivery_completed:delivery:'

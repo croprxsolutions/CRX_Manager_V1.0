@@ -140,6 +140,8 @@ const RATE_LIMIT_PER_HOUR = 50;
 
 // How long to wait for the email provider before marking the send failed.
 const RESEND_TIMEOUT_MS = 30_000;
+// Resend's documented error replies for a request it refused (nothing sent).
+const RESEND_REFUSAL_STATUSES = new Set([400, 401, 403, 404, 405, 409, 422, 429]);
 
 // jsPDF's data URI is "data:application/pdf;filename=...;base64,<data>".
 function pdfBase64(doc: { output: (type: "datauristring") => string }): string {
@@ -815,21 +817,28 @@ Deno.serve(async (req: Request) => {
     //     email_log row to status='pending' BEFORE calling Resend. If this
     //     write fails, we DON'T send — otherwise the customer could receive
     //     an email with no audit record and no idempotency replay marker.
-    // Another request holds this email: if it already finished sending, report
-    // that send as this one's result; otherwise it is still in progress.
+    // Another request holds this email. If it already sent it to this customer,
+    // report that send as this one's result; if it already failed, say so; while
+    // it is pending, it may still be sending.
     const alreadyInProgress = async () => {
-      const { data: holder } = await adminClient
+      const { data: holder, error: holderErr } = await adminClient
         .from("email_log")
-        .select("id, status, resend_message_id")
+        .select("id, status, resend_message_id, customer_id")
         .eq("idempotency_key", scopedIdempotencyKey!)
-        .maybeSingle<{ id: string; status: string; resend_message_id: string | null }>();
-      if (holder?.status === "sent") {
+        .maybeSingle<{ id: string; status: string; resend_message_id: string | null; customer_id: string | null }>();
+      if (holderErr) {
+        return jsonResponse({ error: `Another send of this email is under way, and checking it failed: ${holderErr.message}` }, 503);
+      }
+      if (holder?.status === "sent" && holder.customer_id === (customer_id ?? null)) {
         return jsonResponse({
           success: true,
           email_log_id: holder.id,
           resend_message_id: holder.resend_message_id,
           deduplicated: true,
         });
+      }
+      if (holder?.status === "failed") {
+        return jsonResponse({ error: "Another send of this email just failed. Send it again.", email_log_id: holder.id }, 409);
       }
       return jsonResponse({
         success: false,
@@ -838,6 +847,34 @@ Deno.serve(async (req: Request) => {
         needs_reconciliation: true,
       }, 409);
     };
+
+    // An earlier send of this same email whose outcome is unknown blocks a new one
+    // under ANY key: some screens make a new key on every click, and the customer
+    // may already have the first. Scoped keys begin with type + record.
+    // shortcut: two first sends with different keys in the same instant can both pass; a partial unique index would close it.
+    {
+      const recordKeyPrefix = `${email_type}:${recordRef}:`.replace(/[\\%_]/g, (c) => "\\" + c);
+      const { data: unsettled, error: unsettledErr } = await adminClient
+        .from("email_log")
+        .select("id")
+        .eq("status", "pending")
+        .eq("email_type", email_type)
+        .like("idempotency_key", `${recordKeyPrefix}%`)
+        .limit(1);
+      if (unsettledErr) {
+        return jsonResponse({ error: `Pending-send check failed: ${unsettledErr.message}` }, 503);
+      }
+      if (unsettled && unsettled.length > 0) {
+        return jsonResponse({
+          success: false,
+          error: "An earlier send of this email has not been confirmed and may have reached the customer. " +
+            "Check Resend, then mark that email_log row 'sent' or 'failed' before sending again.",
+          email_log_id: unsettled[0].id,
+          needs_reconciliation: true,
+        }, 409);
+      }
+    }
+
     if (emailLogId) {
       // Existing failed row from a prior attempt — reset it to pending and
       // record THIS attempt's content, so the log shows what was actually sent.
@@ -1077,9 +1114,9 @@ Deno.serve(async (req: Request) => {
 
     // The call to Resend gives up after RESEND_TIMEOUT_MS, so a slow reply can no
     // longer hold the request until the platform kills it (PR #1302 review,
-    // finding 4). Only a 4xx reply (the request was refused) marks the row
-    // 'failed', so a retry may send it. No answer, a dropped connection, a 5xx
-    // reply or an unreadable success may mean the customer already
+    // finding 4). Only a documented refusal marks the row 'failed', so a retry
+    // may send it. No answer, a dropped connection, a 408 or 5xx reply or an
+    // unreadable success may mean the customer already
     // has the email, so the row stays 'pending' with the reason written on it:
     // the pending check above then refuses a re-send under the same key until
     // someone checks Resend and settles the row.
@@ -1111,9 +1148,9 @@ Deno.serve(async (req: Request) => {
       if (resendResp.ok && !success) {
         outcomeUnknown = true;
         errorMessage = `Email provider accepted the request but its reply was unreadable: ${resendText.slice(0, 200)}`;
-      } else if (resendResp.status < 400 || resendResp.status >= 500) {
-        // Only a 4xx refusal proves the email was not sent; a server or gateway
-        // error, or any other unexpected reply, does not.
+      } else if (!RESEND_REFUSAL_STATUSES.has(resendResp.status)) {
+        // Only Resend's documented refusals prove the email was not sent; a
+        // timeout (408), a server or gateway error, or anything else does not.
         outcomeUnknown = true;
         errorMessage = `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`;
       } else if (!success) {

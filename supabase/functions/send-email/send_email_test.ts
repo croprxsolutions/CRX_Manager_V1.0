@@ -73,6 +73,13 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
       const cell = row[col] == null ? null : String(row[col]);
       if (op === "eq" && cell !== value) return false;
       if (op === "gte" && (cell == null || cell < value)) return false;
+      if (op === "like") {
+        const pattern = value.replace(/\\(.)|([%_])|([^\\%_]+)/g, (_m, esc, wild, lit) =>
+          esc ? esc.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          : wild ? (wild === "%" ? ".*" : ".")
+          : lit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+        if (cell == null || !new RegExp(`^${pattern}$`, "s").test(cell)) return false;
+      }
       if (op === "in") {
         const list = value.slice(1, -1).match(/"(?:[^"\\]|\\.)*"|[^,]+/g)?.map((v) => v.replace(/^"|"$/g, "")) ?? [];
         if (cell == null || !list.includes(cell)) return false;
@@ -99,7 +106,7 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
         body: await req.json(),
       };
       resendCalls.push(call);
-      return resend(call, init?.signal ?? null);
+      return world.resend(call, init?.signal ?? null);
     }
     if (url.pathname === "/auth/v1/user") {
       const token = (req.headers.get("authorization") ?? "").replace("Bearer ", "");
@@ -140,7 +147,8 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
     throw new Error(`fake database: unexpected ${req.method} ${req.url}`);
   }
 
-  return { tables, resendCalls, fakeFetch };
+  const world = { tables, resendCalls, resend, fakeFetch };
+  return world;
 }
 
 const okResend = () => Promise.resolve(new Response(JSON.stringify({ id: "re_1" }), { status: 200 }));
@@ -279,13 +287,15 @@ Deno.test("two retries of the same failed email at the same moment send it once"
     await gate;
     return new Response(JSON.stringify({ id: "re_retry" }), { status: 200 });
   });
-  // Hold the first send at Resend until the second request, having lost the
-  // claim, has looked up who holds the row.
+  // Hold the first send at Resend until the second request has been stopped:
+  // either by the unconfirmed-send check finding the claimed row or, having lost the
+  // claim, by looking up who holds the row.
   const realFakeFetch = world.fakeFetch;
   world.fakeFetch = async (input, init) => {
     const res = await realFakeFetch(input, init);
     const url = new Request(input, init).url;
-    if (url.includes("/email_log?select=id%2Cstatus%2Cresend_message_id&")) release();
+    if (url.includes("/email_log?select=id%2Cstatus%2Cresend_message_id%2Ccustomer_id&")) release();
+    if (url.includes("/email_log?select=id&status=eq.pending") && (await res.clone().json()).length > 0) release();
     return res;
   };
   const key = `quote-${QUOTE}`;
@@ -298,8 +308,7 @@ Deno.test("two retries of the same failed email at the same moment send it once"
     send(world, ADMIN, quoteEmail(QUOTE, key)),
   ]);
   assertEquals(results.map((r) => r.status).sort(), [200, 409]);
-  assertEquals(results.find((r) => r.status === 409)!.body.error,
-    "Another send of this email is already in progress. Wait a minute, then check whether it was sent.");
+  assertEquals(results.find((r) => r.status === 409)!.body.needs_reconciliation, true);
   assertEquals(world.resendCalls.length, 1, "Resend calls");
   assertEquals(world.tables.email_log[0].status, "sent");
 });
@@ -347,7 +356,18 @@ Deno.test("a provider that never answers stops the request in time and blocks a 
     const retry = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`));
     assertEquals(retry.status, 409);
     assertEquals(retry.body.needs_reconciliation, true);
-    assertEquals(world.resendCalls.length, 1, "Resend calls");
+    // A screen that makes a new key on every click is held back too.
+    const newClick = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}-${Date.now()}`));
+    assertEquals(newClick.status, 409);
+    assertEquals(newClick.body.needs_reconciliation, true);
+    assertEquals(newClick.body.email_log_id, row.id);
+    // Another quote for the same customer is a different email and still goes.
+    const otherQuote = "dddddddd-0000-4000-8000-000000000009";
+    world.tables.quotes.push({ id: otherQuote, customer_id: CUSTOMER, quote_number: "Q-9" });
+    AbortSignal.timeout = realTimeout;
+    world.resend = okResend;
+    assertEquals((await send(world, ADMIN, quoteEmail(otherQuote, `quote-${otherQuote}`))).status, 200);
+    assertEquals(world.resendCalls.length, 2, "Resend calls");
   } finally {
     AbortSignal.timeout = realTimeout;
   }
@@ -373,6 +393,13 @@ Deno.test("a gateway error (5xx, not JSON) stays pending: the email may have gon
   assertEquals(res.body.needs_reconciliation, true);
   assertEquals(world.tables.email_log[0].status, "pending");
   assert(String(world.tables.email_log[0].error_message).startsWith("Email provider replied 502"), "error message");
+});
+
+Deno.test("a 408 reply is not a refusal: the email stays pending", async () => {
+  const world = makeWorld(() => Promise.resolve(new Response(JSON.stringify({ message: "Request Timeout" }), { status: 408 })));
+  const res = await send(world, ADMIN, quoteEmail(QUOTE));
+  assertEquals(res.status, 504);
+  assertEquals(world.tables.email_log[0].status, "pending");
 });
 
 Deno.test("an OK reply that cannot be read stays pending, not sent and not failed", async () => {

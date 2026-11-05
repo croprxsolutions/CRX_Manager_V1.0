@@ -37,6 +37,7 @@ BEGIN
      OR to_regprocedure('public._product_rate_value_ok(jsonb)') IS NULL
      OR to_regprocedure('public._product_rate_value(jsonb)') IS NULL
      OR to_regprocedure('public._product_rate_unit_ok(numeric,text,text,text,text)') IS NULL
+     OR to_regprocedure('public.normalize_rate_unit(text)') IS NULL
      OR to_regclass('public.product_rate_lock') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_SETUP_WORKBOOK_DEPENDENCY_MISSING';
   END IF;
@@ -218,6 +219,7 @@ DECLARE
   v_product public.products%ROWTYPE;
   v_stale text[] := ARRAY[]::text[];
   v_invalid text[] := ARRAY[]::text[];
+  v_bad_unit text[] := ARRAY[]::text[];
   v_name text;
   v_version_before bigint;
   v_version_after bigint;
@@ -295,6 +297,15 @@ BEGIN
                          ELSE EXISTS (SELECT 1 FROM jsonb_array_elements(c.value) t
                                       WHERE jsonb_typeof(t) <> 'string') END)) THEN
       v_invalid := v_invalid || v_product.product_name;
+    -- A label maximum the field screens cannot compare would hide an over-label application. Judged only
+    -- when the row sets the maximum or its unit, so an older product's unrelated edit still saves.
+    ELSIF (v_changes ? 'max_label_rate' OR v_changes ? 'max_label_rate_unit')
+          AND (CASE WHEN v_changes ? 'max_label_rate' THEN NULLIF(btrim(v_changes->>'max_label_rate'), '') IS NOT NULL
+                ELSE v_product.max_label_rate IS NOT NULL END)
+          AND COALESCE(public.normalize_rate_unit(CASE WHEN v_changes ? 'max_label_rate_unit'
+                THEN v_changes->>'max_label_rate_unit' ELSE v_product.max_label_rate_unit END), '')
+              NOT IN ('oz', 'pt', 'qt', 'gal', 'lb', 'ton', 'g', 'kg', 'l', 'ml') THEN
+      v_bad_unit := v_bad_unit || v_product.product_name;
     END IF;
   END LOOP;
   IF cardinality(v_stale) > 0 THEN
@@ -304,6 +315,10 @@ BEGIN
   IF cardinality(v_invalid) > 0 THEN
     RAISE EXCEPTION 'PRODUCT_SETUP_INVALID: a value has the wrong type (yes/no, whole number, decimal, or a container size above 0): %',
       array_to_string(v_invalid[1:20], ', ');
+  END IF;
+  IF cardinality(v_bad_unit) > 0 THEN
+    RAISE EXCEPTION 'PRODUCT_SETUP_INVALID: a maximum label rate needs a unit of oz, pt, qt, gal, lb, ton, g, kg, l or ml (per acre): %',
+      array_to_string(v_bad_unit[1:20], ', ');
   END IF;
 
   BEGIN

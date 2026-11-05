@@ -39,6 +39,7 @@ BEGIN
      OR to_regprocedure('public.preview_product_rate_correction(uuid,numeric,text)') IS NULL
      OR to_regprocedure('public._product_rate_value_ok(jsonb)') IS NULL
      OR to_regprocedure('public._product_rate_value(jsonb)') IS NULL
+     OR to_regprocedure('public.normalize_rate_unit(text)') IS NULL
      OR to_regprocedure('public.check_idempotency(text,text)') IS NULL
      OR to_regprocedure('public.save_idempotency(text,text,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_IMPORT_DEPENDENCY_MISSING';
@@ -68,6 +69,7 @@ DECLARE
   v_row jsonb;
   v_f jsonb;
   v_invalid text[] := ARRAY[]::text[];
+  v_bad_unit text[] := ARRAY[]::text[];
   v_dupes text[];
   v_product public.products%ROWTYPE;
   v_rate_rows jsonb := '[]'::jsonb;
@@ -144,11 +146,20 @@ BEGIN
                                 OR EXISTS (SELECT 1 FROM unnest(c_tiers) t
                                            WHERE jsonb_typeof(v_row->'expected_prices'->t) NOT IN ('number', 'null')))) THEN
       v_invalid := v_invalid || COALESCE(NULLIF(btrim(v_f->>'product_name'), ''), '(no name)');
+    -- Same rule as the Setup tab's save: a label maximum the field screens cannot compare would hide an over-label application.
+    ELSIF NULLIF(btrim(v_f->>'max_label_rate'), '') IS NOT NULL
+          AND COALESCE(public.normalize_rate_unit(v_f->>'max_label_rate_unit'), '')
+              NOT IN ('oz', 'pt', 'qt', 'gal', 'lb', 'ton', 'g', 'kg', 'l', 'ml') THEN
+      v_bad_unit := v_bad_unit || btrim(v_f->>'product_name');
     END IF;
   END LOOP;
   IF cardinality(v_invalid) > 0 THEN
     RAISE EXCEPTION 'PRODUCT_SETUP_INVALID: a value has the wrong type (name required; yes/no, whole number, decimal, a container size above 0, or a rate of 0 or more with at most 6 decimals): %',
       array_to_string(v_invalid[1:20], ', ');
+  END IF;
+  IF cardinality(v_bad_unit) > 0 THEN
+    RAISE EXCEPTION 'PRODUCT_SETUP_INVALID: a maximum label rate needs a unit of oz, pt, qt, gal, lb, ton, g, kg, l or ml (per acre): %',
+      array_to_string(v_bad_unit[1:20], ', ');
   END IF;
 
   -- The advisory lock above keeps this duplicate check true until the inserts commit.

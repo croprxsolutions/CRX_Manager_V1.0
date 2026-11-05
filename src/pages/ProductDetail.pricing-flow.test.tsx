@@ -116,6 +116,7 @@ vi.mock('../lib/db', async () => {
   const { sanitizeError } = await vi.importActual<typeof import('../lib/errorSanitizer')>(
     '../lib/errorSanitizer',
   );
+  const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   const supabase = {
     from: vi.fn((table: string) => chainable(
       table === 'products'
@@ -140,6 +141,9 @@ vi.mock('../lib/db', async () => {
       if (result.error) throw result.error;
     }),
     sanitizeError,
+    // The real token matchers: the page reads a rate-lock refusal through them.
+    hasRpcCode: actual.hasRpcCode,
+    RpcErrorCodes: actual.RpcErrorCodes,
   };
 });
 
@@ -212,6 +216,18 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
 
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
+const { mockLoadRateLock } = vi.hoisted(() => ({ mockLoadRateLock: vi.fn() }));
+vi.mock('../lib/productRateLock', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productRateLock')>()),
+  loadProductRateLock: mockLoadRateLock,
+}));
+const ratesOpen = { is_locked: false, changed_by_name: null, changed_at: '2026-11-03T00:00:00Z', reason: null };
+// The correction window has its own tests; here it only reports a saved correction.
+vi.mock('../components/products/ProductRateCorrectionModal', () => ({
+  default: ({ open, onCorrected }: { open: boolean; onCorrected: () => void }) =>
+    open ? <button type="button" onClick={onCorrected}>Finish correction</button> : null,
+}));
+
 import ProductDetail from './ProductDetail';
 
 /** Answers the source-and-reason prompt a product-page price change opens before its preview. */
@@ -228,6 +244,7 @@ describe('ProductDetail governed pricing flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApprovePricing.mockResolvedValue(undefined);
+    mockLoadRateLock.mockResolvedValue(ratesOpen);
     routeProductId = product.id;
     routeState = null;
     productLoadResults = [];
@@ -918,6 +935,35 @@ describe('ProductDetail governed pricing flow', () => {
       expect(screen.queryByText(/Editing is locked until the latest values load/i)).not.toBeInTheDocument();
     });
     expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
+  });
+
+  it('opens rate fields while rates are open, and locks them behind Correct rates while locked', async () => {
+    const { unmount } = render(<ProductDetail />);
+    await waitFor(() => expect(screen.getByLabelText('Rate Per Acre')).toBeEnabled());
+    expect(screen.queryByTestId('product-rates-locked')).toBeNull();
+    unmount();
+
+    mockLoadRateLock.mockResolvedValue({ ...ratesOpen, is_locked: true, changed_by_name: 'Other Admin', reason: 'season' });
+    render(<ProductDetail />);
+    const banner = await screen.findByTestId('product-rates-locked');
+    expect(banner).toHaveTextContent('Rates are locked.');
+    expect(within(banner).getByRole('button', { name: 'Correct rates' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Rate Per Acre')).toBeDisabled();
+
+    // A correction bumps pricing_version, so the cost-basis workspace reloads with the product.
+    await waitFor(() => expect(mockGetCostBasisWorkspace).toHaveBeenCalled());
+    const workspaceLoads = mockGetCostBasisWorkspace.mock.calls.length;
+    fireEvent.click(within(banner).getByRole('button', { name: 'Correct rates' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    await waitFor(() => expect(mockGetCostBasisWorkspace.mock.calls.length).toBeGreaterThan(workspaceLoads));
+
+    // If that reload fails, editing stays locked and Reload Product stays offered.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Finish correction' })).toBeNull());
+    fireEvent.click(within(banner).getByRole('button', { name: 'Correct rates' }));
+    productLoadResults.push({ data: null, error: new Error('reload failed') });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    expect(await screen.findByText(/Editing is locked until the latest values load/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload Product' })).toBeInTheDocument();
   });
 
   it('opens the folded section that holds a refused field', async () => {

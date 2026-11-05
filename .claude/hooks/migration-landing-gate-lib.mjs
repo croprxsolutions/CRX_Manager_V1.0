@@ -167,7 +167,10 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   const number = pr?.number ? `#${pr.number}` : "the pull request";
   if (String(pr?.state || "").toUpperCase() !== "OPEN") return refuse(`${number} is not open.`);
-  if (String(pr?.baseRefName || "").toLowerCase() !== "main") return refuse(`${number} does not target main.`);
+  // Migrations do not go through staging yet (sol-risk-lib.mjs stagingMigrationProblem).
+  if (String(pr?.baseRefName || "").toLowerCase() !== "main") {
+    return refuse(`${number} does not target main. A migration is applied live only from a PR into main, never one into staging or another branch (ship.md Step 5).`);
+  }
   if (String(pr?.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
     return refuse(`${number}'s head on GitHub (${String(pr?.headRefOid || "?").slice(0, 12)}) is not this checkout's HEAD (${head.slice(0, 12)}) — push, or pull, so the reviewed commit is the one applied.`);
   }

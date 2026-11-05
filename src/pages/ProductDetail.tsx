@@ -19,11 +19,13 @@ import ProductVendorsSection from '../components/products/ProductVendorsSection'
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
 import ProductStockCard from '../components/products/ProductStockCard';
+import ProductRateCorrectionModal from '../components/products/ProductRateCorrectionModal';
+import { loadProductRateLock, PRODUCT_RATE_KEYS, rateLockSummary } from '../lib/productRateLock';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
-import { sanitizeError, assertRpcResult, checkMutationResult, supabase, supabaseUntyped } from '../lib/db';
+import { sanitizeError, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from '../lib/db';
 import { localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
@@ -32,7 +34,7 @@ import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, PRODUCT_FOR
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { usePhoneSections } from '../hooks/usePhoneSections';
-import type { CostHistory, EpaLookupResult, Product, UnitConversion } from '../types';
+import type { CostHistory, EpaLookupResult, Product, ProductRateLock, UnitConversion } from '../types';
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
@@ -97,8 +99,9 @@ function nonpricingProductPayload(product: Partial<Product>, persisted?: Product
   ]);
   // Send these only when edited here, so a page left open never re-saves an old value over one
   // changed elsewhere: the vendor by WP-PM-15 (preferred vendor's copy), the rest by Label Review's commit.
+  // Rates too: a stale rate resent while rates are locked would refuse a details-only save.
   if (persisted) {
-    for (const field of PRODUCT_FIELDS_WRITTEN_ELSEWHERE) {
+    for (const field of [...PRODUCT_FIELDS_WRITTEN_ELSEWHERE, ...PRODUCT_RATE_KEYS]) {
       if (payload[field] === (persisted[field] ?? null)) delete payload[field];
     }
   }
@@ -216,6 +219,21 @@ export default function ProductDetail() {
   const { role, profile } = useAuth();
   const isNew = id === 'new';
   const isAdmin = role === 'admin';
+  const [rateLock, setRateLock] = useState<ProductRateLock | null>(null);
+  const [correctingRates, setCorrectingRates] = useState(false);
+  const [rateLockFailed, setRateLockFailed] = useState(false);
+  // Until the lock is known, rates stay read-only: a save that changed them could be refused.
+  const ratesLocked = rateLock?.is_locked !== false;
+  const loadRateLock = useCallback(() => {
+    setRateLockFailed(false);
+    loadProductRateLock().then(setRateLock).catch((error: unknown) => {
+      Sentry.captureException(error);
+      // An older "open" may be out of date: back to read-only.
+      setRateLock(null);
+      setRateLockFailed(true);
+    });
+  }, []);
+  useEffect(loadRateLock, [loadRateLock]);
   // WP-PM-6b: a Duplicate arrives with its source's copied fields; a fresh create arrives flagged to prompt for prices.
   const routeState = useLocation().state as { duplicateFrom?: DuplicateProductSource; justCreated?: boolean } | null;
   const duplicateSource = isNew ? routeState?.duplicateFrom : undefined;
@@ -770,6 +788,14 @@ export default function ProductDetail() {
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_product' } });
       toast('error', sanitizeError(err));
+      if (hasRpcCode(err, RpcErrorCodes.PRODUCT_RATES_LOCKED)) {
+        // Rates were locked meanwhile: put the saved rates back so the rest of the edit can save.
+        // Forget the stale open lock first, so a failed refresh still leaves the rates read-only.
+        setRateLock(null);
+        loadRateLock();
+        setProduct((current) => ({ ...current, rate_per_acre: persistedProduct?.rate_per_acre ?? null,
+          rate_unit: persistedProduct?.rate_unit ?? null, suggested_rate: persistedProduct?.suggested_rate ?? null }));
+      }
       revealPhoneSection(pricingChanged(product, persistedProduct, pricingMoneyDrafts) ? 'pricing' : 'information');
     } finally {
       setSaving(false);
@@ -1601,13 +1627,30 @@ export default function ProductDetail() {
             <div className="border-t border-gray-100 pt-4 mt-4">
               <p className="text-xs font-semibold text-secondary uppercase tracking-wide">Application Rates</p>
               <p className="text-xs text-gray-500 mt-0.5 mb-3">Per-acre application information</p>
+              {rateLockFailed && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" role="alert">
+                  <span>Couldn&apos;t check whether rates are locked, so rates are read-only for now.</span>
+                  <Button size="sm" variant="secondary" onClick={loadRateLock}>Retry</Button>
+                </div>
+              )}
+              {ratesLocked && rateLock && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" data-testid="product-rates-locked">
+                  <span>Rates are locked. {rateLockSummary(rateLock)}</span>
+                  {isAdmin && !isNew && persistedProduct && (
+                    <Button size="sm" variant="secondary" onClick={() => setCorrectingRates(true)} disabled={isDirty}
+                      title={isDirty ? 'Save or discard your other changes first' : undefined}>
+                      Correct rates
+                    </Button>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin} />
+                  <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin || ratesLocked} />
                   <p className="mt-1 text-xs text-secondary">Free text shown on quote lines and the quote PDF, such as a rate range. Not used in any calculation.</p>
                 </div>
                 <div>
-                  <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin} />
+                  <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin || ratesLocked} />
                   <p className="mt-1 text-xs text-secondary">The product's default rate, in the Rate Unit. Zero or more.</p>
                 </div>
                 <div>
@@ -1616,7 +1659,7 @@ export default function ProductDetail() {
                     id="product-rate-unit"
                     value={product.rate_unit || ''}
                     onChange={(e) => update('rate_unit', e.target.value)}
-                    disabled={!isAdmin}
+                    disabled={!isAdmin || ratesLocked}
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                   >
                     <option value="">-- Select --</option>
@@ -2089,6 +2132,23 @@ export default function ProductDetail() {
         onSubmit={(value) => void submitPricingReview(value)}
       />
 
+      {correctingRates && persistedProduct && (
+        <ProductRateCorrectionModal
+          open
+          product={persistedProduct}
+          profileId={profile?.id ?? ''}
+          unitOptions={rateUnitOptionsForProduct(unitConversions, persistedProduct.product_form, persistedProduct.inventory_unit).map((uc) => uc.unit)}
+          onClose={() => setCorrectingRates(false)}
+          // A correction bumps pricing_version, so reload the cost-basis workspace and histories too;
+          // the window stays over the form until then, so no edit is lost to the reload.
+          // Until the product reloads, edits stay blocked and Reload Product stays offered.
+          onCorrected={() => {
+            setPricingReloadRequired(true);
+            loadRateLock();
+            void handlePricingReload().then(() => setCorrectingRates(false));
+          }}
+        />
+      )}
       <UnsavedChangesModal
         open={blocker.state === 'blocked'}
         onStay={() => blocker.reset?.()}

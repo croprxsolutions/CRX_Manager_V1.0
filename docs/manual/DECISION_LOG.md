@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-04 — Blend tickets go through application records only (KI-93)
+
+**Decision:** a blend ticket is recorded with an application record and billed with a direct invoice; creating an order from a ticket, linking a ticket to an order and Unlink are switched off (Mason, 2026-11-04).
+**Why:** one ticket could take its products out of stock twice (application record and order delivery); five designs that kept both paths were broken by reopen, edit, move, Unlink and void paths. Live had 0 blend tickets.
+**What this forbids/implies:** `20261107050000` makes the three order-path RPCs refuse `BLEND_TICKET_ORDERS_DISABLED` and a table guard refuses every link row. Never restore the old bodies or drop the guard without first building the "one-way paths" design (KI-93 design notes, option 2); someone typing an ordinary order for the same products is a business rule, not detectable.
+
 ## 2026-11-04 — Claude hooks run the same in Cursor; no Cursor-only hook file
 
 **Source:** Mason, 2026-11-04, asking to set up Cursor to work on CRX alongside Claude and Codex, with the rule

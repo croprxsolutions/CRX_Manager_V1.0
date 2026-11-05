@@ -66,7 +66,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
-import { solRiskOnGitHub } from "./sol-risk-lib.mjs";
+import { GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub } from "./sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
@@ -504,7 +504,12 @@ function gateRequest(request) {
   if (base === "master" || base === "production") {
     deny(`PR MERGE GATE: merges into protected branch "${base}" are always blocked.`);
   }
-  if (base !== "main") return; // ordinary feature-branch merges are not production landings
+  // Ordinary feature-branch merges are not production landings; staging is (sol-risk-lib.mjs).
+  if (!GATED_MERGE_BASES.includes(base)) return;
+  if (base === "staging") {
+    const migration = stagingMigrationOnGitHub({ baseSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
+    if (migration) deny(`PR MERGE GATE: this merge into staging is refused: ${migration}.`);
+  }
 
   // ── no merging over an unresolved objection ────────────────────────────────
   // Mason removed main's required-approval rule on 2026-09-02, so a MISSING
@@ -562,7 +567,7 @@ function gateRequest(request) {
   // carry it — the REST endpoint and connector tools — are therefore denied.
   if (String(request.matchHeadCommit || "").toLowerCase() !== String(pr.headRefOid || "").toLowerCase()) {
     deny(
-      `PR MERGE GATE: an agent merge into main must pin the exact head this gate checked — add ` +
+      `PR MERGE GATE: an agent merge into ${base} must pin the exact head this gate checked — add ` +
       `\`--match-head-commit ${pr.headRefOid}\` to \`gh pr merge\` (got ${request.matchHeadCommit ? `\`${String(request.matchHeadCommit).slice(0, 12)}\`` : "none"}). ` +
       "Without it, a commit pushed between this check and GitHub's merge would land unreviewed. The REST " +
       "merge endpoint and connector merge tools cannot carry the pin; use `gh pr merge`."
@@ -570,7 +575,7 @@ function gateRequest(request) {
   }
   if (request.auto) {
     deny(
-      "PR MERGE GATE: `--auto` is not allowed into main — auto-merge lands the PR later, after this gate " +
+      `PR MERGE GATE: \`--auto\` is not allowed into ${base} — auto-merge lands the PR later, after this gate ` +
       "has run, so commits pushed in the meantime would merge without an exact-head Sol proof. Wait for the checks, then merge immediately with `gh pr merge <n> --squash`."
     );
   }
@@ -662,7 +667,7 @@ function gateRequest(request) {
   }
 
   deny(
-    `PR MERGE GATE: this merge into main needs a clean gpt-6-sol/high Codex proof because ${risk.reason} ` +
+    `PR MERGE GATE: this merge into ${base} needs a clean gpt-6-sol/high Codex proof because ${risk.reason} ` +
     `(docs/reference/sol-required-paths.md; Mason, 2026-10-30). None was found.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +

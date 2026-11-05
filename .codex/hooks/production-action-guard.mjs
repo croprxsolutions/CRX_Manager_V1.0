@@ -65,7 +65,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
-import { solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
+import { GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 
@@ -691,7 +691,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   if (base === "master" || base === "production") {
     return denied(`CODEX PRODUCTION GATE: merges to protected branch ${base} remain blocked.`);
   }
-  if (base !== "main") return { blocked: false };
+  if (!GATED_MERGE_BASES.includes(base)) return { blocked: false };
   if (!pullRequest.baseRefOid) {
     return denied(
       "CODEX PRODUCTION GATE: GitHub did not report this pull request's current base commit (baseRefOid), " +
@@ -707,6 +707,15 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   // pipeline, the risky-diff classification and the exact-SHA proof. Codex round
   // 6 found this; PR #502 established the class. See codexAppAdvisory().
 
+  if (base === "staging") {
+    const migration = stagingMigrationOnGitHub({
+      baseSha: pullRequest.baseRefOid,
+      headSha: pullRequest.headRefOid,
+      repo: request.repo,
+      gh: (args) => runGh(args, repoDir),
+    });
+    if (migration) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${migration}.`);
+  }
   // Main's PR #560 migrated this gate from "no approval" to "an active
   // objection", matching the Claude side. Taking main's predicate: the denial
   // text below already describes CHANGES_REQUESTED, so keeping !approved here
@@ -730,7 +739,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   // 2026-09-26). Routes that cannot carry it — REST and connector merges — deny.
   if (String(request.matchHeadCommit || "").toLowerCase() !== String(pullRequest.headRefOid || "").toLowerCase()) {
     return denied(
-      `CODEX PRODUCTION GATE: an agent merge into main must pin the exact head this gate checked — add ` +
+      `CODEX PRODUCTION GATE: an agent merge into ${base} must pin the exact head this gate checked — add ` +
       `\`--match-head-commit ${pullRequest.headRefOid}\` to \`gh pr merge\`. Without it, a commit pushed between ` +
       "this check and GitHub's merge would land unreviewed. The REST merge endpoint and connector merge tools " +
       "cannot carry the pin; use `gh pr merge`."
@@ -738,7 +747,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   }
   if (request.auto) {
     return denied(
-      "CODEX PRODUCTION GATE: `--auto` is not allowed into main — auto-merge lands the PR after this gate has " +
+      `CODEX PRODUCTION GATE: \`--auto\` is not allowed into ${base} — auto-merge lands the PR after this gate has ` +
       "run, so commits pushed in the meantime would merge without an exact-head Sol proof. Wait for the " +
       "checks, then merge immediately."
     );

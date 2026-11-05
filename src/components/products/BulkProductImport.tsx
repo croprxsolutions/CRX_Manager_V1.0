@@ -9,8 +9,10 @@ import { Sentry } from '../../lib/sentry';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { EPA_REGISTRATION_PATTERN } from '../../lib/productBrands';
 import { listProductCategories } from '../../lib/productSetup';
+import { loadProductRateLock } from '../../lib/productRateLock';
 import {
   buildProductInsert,
+  importRowSetsRates,
   isProductImportStringField,
   isRetiredPricingColumn,
   normalizeProductImportHeader,
@@ -65,15 +67,22 @@ function validateImportRow(
       if (!trimmed) return;
       const number = Number(trimmed);
       const valid = !/^0[xob]/i.test(trimmed) && Number.isFinite(number)
-        && (field !== 'container_size' || number > 0) && (field !== 'rate_per_acre' || number >= 0);
+        && (field !== 'container_size' || number > 0)
+        // The database's rate rule, checked on the typed text; past 15 digits a JS number would round it.
+        && (field !== 'rate_per_acre' || (/^[0-9]{1,12}(\.[0-9]{1,6})?$/.test(trimmed)
+          && trimmed.replace('.', '').replace(/^0+/, '').length <= 15));
       if (valid) product[field] = number;
       else numberError = field === 'container_size'
         ? 'Container size must be a number greater than 0.'
-        : 'Rate Per Acre must be a number of zero or greater.';
+        : 'Rate Per Acre must be a number of zero or greater, with at most 6 decimals.';
     }
   });
   const error = !product.product_name?.trim() ? 'Missing product name'
     : numberError
+      // The database refuses a rate without a unit, except on seed and each, which take the stock unit.
+      || (product.rate_per_acre !== undefined && !product.rate_unit
+        && !['seed', 'each'].includes(product.product_form?.trim().toLowerCase() ?? '')
+        ? 'A rate per acre needs a rate unit, except on seed and each products.' : null)
       || (product.category && !allowedCategories.has(product.category.trim()) ? 'Choose an active category from the list.' : null)
       || (product.epa_registration && !EPA_REGISTRATION_PATTERN.test(product.epa_registration.trim())
         ? 'EPA number must look like 524-475 or 100-1234-5905. This checks format only.' : null);
@@ -233,6 +242,43 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const handleUpload = async () => {
     if (!validation || validation.valid.length === 0) return;
     setUploading(true);
+
+    // While rates are locked every row with a rate would be refused one by one, leaving half a file
+    // imported, so check once and import nothing. A file that sets rates then saves in one insert, so
+    // a lock switched on mid-upload refuses the whole file instead of leaving it partial.
+    const rated = validation.valid.filter(importRowSetsRates).length;
+    if (rated > 0) {
+      let locked: boolean;
+      try {
+        locked = (await loadProductRateLock()).is_locked;
+      } catch (error) {
+        Sentry.captureException(error);
+        locked = true;
+      }
+      if (locked) {
+        toast('error', `Nothing was imported: ${rated} row${rated === 1 ? ' sets' : 's set'} a rate, and rates are locked or could not be checked. Remove the rate columns, or ask an admin to unlock rates.`);
+        setUploading(false);
+        return;
+      }
+      // Every row has the same keys; defaultToNull: false leaves an omitted value on its column default, as a one-row insert does.
+      const result = await supabase.from('products')
+        .insert(validation.valid.map(buildProductInsert), { defaultToNull: false }).select('id');
+      try {
+        checkMutationResult(result, 'Insert products');
+      } catch (e) {
+        Sentry.captureException(e instanceof Error ? e : new Error(String(e)), { extra: { context: 'Failed to insert rated product file' } });
+        const error = `Nothing was imported: ${sanitizeError(e)}`;
+        setUploadResults({ success: 0, failed: validation.valid.length, errors: [error] });
+        toast('error', error);
+        setUploading(false);
+        return;
+      }
+      setUploadResults({ success: validation.valid.length, failed: 0, errors: [] });
+      setUploading(false);
+      toast('success', `Successfully imported ${validation.valid.length} product(s)`);
+      onSuccess();
+      return;
+    }
 
     let success = 0;
     let failed = 0;

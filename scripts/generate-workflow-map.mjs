@@ -12,7 +12,8 @@
  * content (lifecycle SVGs, problem descriptions, CSS) is preserved.
  *
  * Run manually : node scripts/generate-workflow-map.mjs
- * CI check     : regenerated in CI and compared after normalizing the date stamp
+ * Check only   : node scripts/generate-workflow-map.mjs --check (CI and pre-push) — never
+ *                writes; exits 1 when the committed map is stale, ignoring the date stamp
  * Date stamp   : changes only when the rest of the map changes; an unchanged map is not rewritten
  * Pre-commit   : never auto-runs or stages this file; callers stage it explicitly
  */
@@ -22,6 +23,7 @@ import { join, extname, relative } from 'path';
 
 const ROOT = process.cwd();
 const HTML_OUT = join(ROOT, 'docs', 'app-workflow-map.html');
+const CHECK_ONLY = process.argv.includes('--check');
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -893,6 +895,10 @@ function main() {
   if (html.replace(/\r\n/g, '\n') === before.replace(/\r\n/g, '\n')) {
     console.log('✅ docs/app-workflow-map.html unchanged (date kept)');
     return;
+  }
+  if (CHECK_ONLY) {
+    console.error('❌ docs/app-workflow-map.html is out of date. Run `npm run generate-map` and commit the result.');
+    process.exit(1);
   }
   if (oldDate) html = html.replace(` · Updated ${oldDate}</span>`, ` · Updated ${today}</span>`);
   writeFileSync(HTML_OUT, html, 'utf8');

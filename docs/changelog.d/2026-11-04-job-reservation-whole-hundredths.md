@@ -1,0 +1,16 @@
+## 2026-11-04 — A spray job no longer leaves a booking remainder no Partial Order can take (KI-100)
+
+- Migration `20261107070000_job_reservation_whole_hundredths.sql`, applied live 2026-11-04 9:24 PM Central
+  (ledger `20261105032430`, PR #1451; record in
+  `docs/reference/migrations.d/`). Since S02 (`20261106110000`) a Partial Order must be in whole
+  hundredths, but a spray job that reserves product from a booking drew an unrounded unit conversion
+  from it: 1 fl oz from a 10 gal booking drew 0.0078125 gal and left 9.9921875 gal, so the booking
+  could never close. A booking's job draws are now whole hundredths and together match the real
+  total its jobs applied, rounded once (so many small jobs never add up to more), and a job's hold on
+  shed stock is at least its draw. The jobs status trigger (`_trg_release_job_holds_on_lifecycle`) is
+  re-emitted to mark the one job completing, so its kept draw is worked out on its own, whatever order
+  jobs finish in. Live had no job draws, so no existing booking changes; the migration
+  refuses to apply if a finished job has kept an unrounded draw by then.
+- New proof `scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs` (before and after
+  in a disposable database).
+- `KNOWN_ISSUES.md`: KI-100 recorded and fixed by this migration.

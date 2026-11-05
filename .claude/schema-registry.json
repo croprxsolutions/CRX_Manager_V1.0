@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-04",
+    "generated_at": "2026-11-05",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261104220928",
+    "migrations_high_water": "20261105032430",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -502,6 +502,9 @@
       "20261106150000_fix_delivery_one_screen",
       "20261106230000_void_delivery_restores_exact_reservation",
       "20261106233000_void_delivery_flags_legacy_reservation",
+      "20261107050000_blend_tickets_application_records_only",
+      "20261107060000_product_rate_lock",
+      "20261107070000_job_reservation_whole_hundredths",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1485,6 +1488,9 @@
     "product_form_units",
     "product_info_change_set_rows",
     "product_margin_floor_changes",
+    "product_rate_correction_passes",
+    "product_rate_events",
+    "product_rate_lock",
     "product_use_timing_options",
     "profile_public_directory",
     "purchase_order_import_intents",
@@ -2552,6 +2558,16 @@
       ],
       "constraints": [
         "product_label_drafts_status_check"
+      ]
+    },
+    "product_rate_events.event_type": {
+      "values": [
+        "locked",
+        "unlocked",
+        "corrected"
+      ],
+      "constraints": [
+        "product_rate_events_event_type_check"
       ]
     },
     "product_supplier_links.comparison_status": {
@@ -4177,6 +4193,24 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "product_rate_events",
+      "constraint": "product_rate_events_check",
+      "def": "CHECK (((event_type = 'corrected'::text) = (product_id IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rate_events",
+      "constraint": "product_rate_events_reason_check",
+      "def": "CHECK ((btrim(reason) <> ''::text))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rate_lock",
+      "constraint": "product_rate_lock_id_check",
+      "def": "CHECK (id)",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
       "table": "product_supplier_links",
       "constraint": "product_supplier_links_comparable_shape",
       "def": "CHECK (((comparison_status <> 'comparable'::text) OR ((link_status = 'confirmed'::text) AND (inventory_units_per_supplier_unit IS NOT NULL) AND (NULLIF(btrim(conversion_unit), ''::text) IS NOT NULL))))",
@@ -4262,14 +4296,32 @@
     },
     {
       "table": "products",
+      "constraint": "products_tier1_price_per_acre_whole_cents_chk",
+      "def": "CHECK (((tier1_price_per_acre >= (0)::numeric) AND (tier1_price_per_acre < 'Infinity'::numeric) AND (tier1_price_per_acre = round(tier1_price_per_acre, 2))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "products",
       "constraint": "products_tier1_price_whole_cents_chk",
       "def": "CHECK (((tier1_price IS NULL) OR ((tier1_price = round(tier1_price, 2)) AND (tier1_price > '-Infinity'::numeric) AND (tier1_price < 'Infinity'::numeric))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
       "table": "products",
+      "constraint": "products_tier2_price_per_acre_whole_cents_chk",
+      "def": "CHECK (((tier2_price_per_acre >= (0)::numeric) AND (tier2_price_per_acre < 'Infinity'::numeric) AND (tier2_price_per_acre = round(tier2_price_per_acre, 2))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "products",
       "constraint": "products_tier2_price_whole_cents_chk",
       "def": "CHECK (((tier2_price IS NULL) OR ((tier2_price = round(tier2_price, 2)) AND (tier2_price > '-Infinity'::numeric) AND (tier2_price < 'Infinity'::numeric))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "products",
+      "constraint": "products_tier3_price_per_acre_whole_cents_chk",
+      "def": "CHECK (((tier3_price_per_acre >= (0)::numeric) AND (tier3_price_per_acre < 'Infinity'::numeric) AND (tier3_price_per_acre = round(tier3_price_per_acre, 2))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6155,6 +6207,32 @@
       "with_default": [
         "created_at",
         "updated_at"
+      ]
+    },
+    "product_rate_correction_passes": {
+      "no_default": [
+        "txid",
+        "product_id"
+      ],
+      "with_default": []
+    },
+    "product_rate_events": {
+      "no_default": [
+        "event_type",
+        "reason",
+        "changed_by"
+      ],
+      "with_default": [
+        "id",
+        "changed_at"
+      ]
+    },
+    "product_rate_lock": {
+      "no_default": [],
+      "with_default": [
+        "id",
+        "is_locked",
+        "changed_at"
       ]
     },
     "product_supplier_links": {
@@ -8636,6 +8714,29 @@
       "set_reason",
       "created_at",
       "updated_at"
+    ],
+    "product_rate_correction_passes": [
+      "txid",
+      "product_id"
+    ],
+    "product_rate_events": [
+      "id",
+      "event_type",
+      "product_id",
+      "reason",
+      "before_values",
+      "after_values",
+      "changed_by",
+      "changed_by_name",
+      "changed_at"
+    ],
+    "product_rate_lock": [
+      "id",
+      "is_locked",
+      "changed_by",
+      "changed_by_name",
+      "changed_at",
+      "reason"
     ],
     "product_supplier_links": [
       "id",

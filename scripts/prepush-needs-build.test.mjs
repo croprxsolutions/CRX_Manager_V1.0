@@ -4,12 +4,17 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { needsAppBuild } from './prepush-needs-build.mjs';
+import { needsAppBuild, needsMapCheck } from './prepush-needs-build.mjs';
 import { tempDir } from './lib/test-temp-dir.mjs';
 
 assert.equal(needsAppBuild(['scripts/a.mjs', 'docs/x.md', 'supabase/migrations/1_x.sql']), false);
 for (const file of ['src/App.tsx', 'public/sw.js', 'index.html', 'vite.config.ts', 'tsconfig.app.json', 'package-lock.json', 'vercel.json']) {
   assert.equal(needsAppBuild([file]), true, `${file} must trigger the build`);
+}
+
+assert.equal(needsMapCheck(['scripts/a.mjs', 'docs/x.md', 'public/sw.js', 'package.json']), false);
+for (const file of ['src/pages/Jobs.tsx', 'docs/app-workflow-map.html', 'docs/reference/rpc-functions.md', 'scripts/generate-workflow-map.mjs']) {
+  assert.equal(needsMapCheck([file]), true, `${file} must trigger the map check`);
 }
 
 const verdict = (stdin) => spawnSync(process.execPath, ['scripts/prepush-needs-build.mjs'], { input: stdin, encoding: 'utf8' }).stdout.trim();
@@ -41,4 +46,4 @@ try {
   rmSync(repo, { recursive: true, force: true });
 }
 
-console.log('PASS - pre-push skips the type check and build only when no app file changed.');
+console.log('PASS - pre-push skips the build and the map check only when none of their inputs changed.');

@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-04 for the live ledger only (see the 2026-11-04 retro-split-guard changelog note); other evidence retains its stated dates.
+**Last verified:** 2026-11-04 for the live ledger only (see the WP-PM-11a-1 and 2026-11-04 retro-split-guard changelog notes); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -40,6 +40,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
+| WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
@@ -413,6 +414,10 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 `p_payment_date` after today in Central time (`PAYMENT_DATE_IN_FUTURE`), so a payment can no longer make a customer
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
+### KI-100 — An open product page learns of a lock change only on reload or a refused save
+**LOW · product UI · `20261107060000` — APPLIED LIVE 2026-11-04**
+If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
+
 ---
 
 ## Inventory and deliveries
@@ -518,11 +523,14 @@ A retired product with a negative balance in the position report was checked by 
 The accepted-quote and live-order warning case was checked by hand only.
 
 ### KI-93 — One blend ticket can deduct its stock twice
-**MED · OPEN (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · unassigned (after the cycle-count freeze lands)**
+**MED · FIXED 2026-11-04 (`20261107050000` applied live, ledger `20261105014219`; PR #1459) (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · Claude**
 A blend ticket can produce both an application record (`create_application_record_from_blend_ticket`, which
 deducts stock as `job_applied`) and an order (`create_order_from_blend_ticket`, whose delivery deducts again).
-Neither checks for the other, and same-operation retry protection does not cover the cross-path case. Fix: each
-path refuses when the ticket already went down the other one, inside PostgreSQL.
+Neither checks for the other, and same-operation retry protection does not cover the cross-path case. Five designs
+that kept both paths were broken (parked 2026-11-04). Fix (Mason, 2026-11-04): blend tickets go through
+application records only. Create order from ticket, link and Unlink refuse `BLEND_TICKET_ORDERS_DISABLED`, a table
+guard refuses every link row, and the ticket screen no longer offers them. Left open by design: an ordinary order
+typed for the same products is a separate sale the database cannot tell apart.
 
 ### KI-94 — Voiding a delivery can put back more reserved stock than completion took
 **LOW-MED · FIXED 2026-11-04 (migration `20261106230000` applied live, ledger `20261104202037`; residual below) · database/inventory · Claude**
@@ -536,13 +544,33 @@ Residual: a line completed before the migration has no record and still restores
 `requires_review` with a note to check reserved stock. Live
 read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20); nothing is corrected.
 
-### KI-100 — A spray job can leave a booking with a remainder no Partial Order can take
-**MED · OPEN (deferred from PR #1362) · database · Taha**
+### KI-100 — A spray job could leave a booking with a remainder no Partial Order can take
+**MED · FIXED: migration `20261107070000` APPLIED LIVE 2026-11-04 (ledger `20261105032430`, PR #1451) · database · found 2026-11-04 (PR #1362 review)**
 Since `20261106110000` (S02) a Partial Order must be in whole hundredths, but `_sync_quote_job_reservations`
-stores a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking leaves 9.9921875 gal,
-which no draw can take, so the booking never closes. Live impact on 2026-11-04: none (`job_product_draws` has 0 rows).
-- **Next step.** A small migration rounding job reservations to 0.01 (Sol-listed: inventory), before spray jobs
-  reserve from bookings in earnest.
+drew a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking left 9.9921875 gal,
+which no draw can take, so the booking never closed. The fix keeps a booking's job draws in whole hundredths that
+together match the real total applied, rounded once, and holds at least each draw in the shed. Live had no job draws on 2026-11-04, so no booking was stranded. Proof:
+`scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs`.
+
+### KI-101 — Voiding a delivery on a cancelled order reopens the order
+**MED · OPEN (found 2026-11-04, KI-93 design review; live function body read) · database/lifecycle · unassigned**
+`_void_delivery_replay_impl_20261015` recomputes the order's status (`fulfilled`, `confirmed` or
+`partially_fulfilled`) and writes it under the admin override without checking whether the order was cancelled,
+so voiding a delivery of a cancelled, part-delivered order brings it back to life after the cancel already closed
+out its commissions, reservations and invoices. Admin-only. Separately, signed-in admins hold a direct UPDATE grant
+on `orders.status`, so they can move an order between allowed statuses (for example confirmed to fulfilled) with no
+delivery; no stock moves.
+- **Next step.** Its own Sol-listed PR: keep `cancelled` when voiding a delivery of a cancelled order, decide whether
+  the voided quantity's reservation is released, and consider revoking the direct `orders.status` grant.
+
+### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice
+**MED · OPEN, TRACED NOT REPRODUCED (found 2026-11-04, KI-93 design review, Sol r2 #8) · database/inventory · unassigned**
+`_void_order_impl_20260714` restores delivered stock but leaves the order's completed deliveries `completed`, and
+`void_delivery` checks only the delivery's own status. So voiding a fulfilled order and then one of its deliveries
+would put that delivery's stock back a second time and reopen the voided order. Live exposure 2026-11-04: 0 voided
+orders and 0 completed deliveries on voided orders.
+- **Next step.** Reproduce on the throwaway real-schema copy, then a small Sol-listed migration: `void_delivery`
+  refuses when its order is voided.
 
 ## Database and release process
 

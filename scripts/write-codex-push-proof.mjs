@@ -1262,8 +1262,8 @@ export function evaluateSolPreflight({
   // peer's fetch can move it past this branch. A clean review of a head that
   // lacks its base can neither merge (GitHub: BEHIND) nor be carried forward, so
   // it would be paid for again (#1075 paid five times, 2026-10-23). The caller
-  // passes solReviewBase(), so this only fires for a migration branch or a
-  // branch with several split points from main.
+  // passes solReviewBase(), so this only fires for a branch with several split
+  // points from main.
   if (headContainsBase === false) {
     problems.push(
       "this branch does not contain the latest main this checkout knows about (origin/main). Run " +
@@ -1880,16 +1880,16 @@ export function cleanMainMergeParent(root, headSha, baseSha) {
 // commit where HEAD left main. origin/main is shared by every worktree, so a peer's
 // fetch moves it past a branch that was current a minute ago (re-merges with no
 // conflict, 2026-11-02). The fork point gives the same origin/main...HEAD diff and a
-// base the head contains, which is all proofValidForMerge needs. A branch adding a
-// migration keeps origin/main: the apply gate wants Sol bound to the PR's exact base.
+// base the head contains, which is all proofValidForMerge needs. A migration branch
+// gets the same base (Mason, 2026-11-04: #1442 lost three Sol runs to peer merges):
+// its live apply still needs the PR's exact base, reached by a main merge plus
+// --carry-forward, whose collision check covers main's new database files.
 // Returns mainSha (so the pre-flight refuses as before) when it cannot tell.
 export function solReviewBase(root, headSha, mainSha) {
   if (!CARRY_SHA_RE.test(String(headSha || "")) || !CARRY_SHA_RE.test(String(mainSha || ""))) return mainSha;
   if (gitOk(["merge-base", "--is-ancestor", mainSha, headSha], root)) return mainSha;
   const forks = runGit(["merge-base", "--all", headSha, mainSha], { cwd: root }).split(/\s+/).filter(Boolean);
-  if (forks.length !== 1 || !CARRY_SHA_RE.test(forks[0])) return mainSha;
-  const migrations = runGit(["diff", "--name-only", forks[0], headSha, "--", "supabase/migrations/"], { cwd: root, fallback: null });
-  return migrations === "" ? forks[0] : mainSha;
+  return forks.length === 1 && CARRY_SHA_RE.test(forks[0]) ? forks[0] : mainSha;
 }
 
 // Everything the carry needs from Git, checked. Returns { problem } or the facts.

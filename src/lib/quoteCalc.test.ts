@@ -227,11 +227,12 @@ describe('recalcItem', () => {
     expect(result.total_price).toBe(750);
     expect(result.profit).toBe(450);
   });
-  it('prices a seed line with a blank rate unit as save_quote does (1 oz); the catalog reads it per stock Lb', () => {
+  it('prices a seed line with a blank rate unit per stock Lb', () => {
     const product = makeProduct({ product_form: 'seed', inventory_unit: 'Lb', unit_size: 'Ea', tier1_price: 12.5, rate_per_acre: 2, rate_unit: '' });
     const result = recalcItem(makeItem({ actual_rate: 2, rate_unit: '', acres: 10 }), product, 1, conversions);
-    expect(result.total_units_needed).toBe(1.25);
-    expect(result.total_price).toBe(15.63);
+    expect(result.total_units_needed).toBe(20);
+    expect(result.price_per_acre).toBe(25);
+    expect(result.total_price).toBe(250);
     expect(catalogPricePerAcre(product, 1, conversions)).toBe(25);
   });
   it('calculates correctly for liquid product: 32 fl oz/acre on 100 acres at $20/gal', () => {

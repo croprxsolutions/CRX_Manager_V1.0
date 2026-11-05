@@ -139,9 +139,8 @@ gaps are accepted in KI-78.
 the invoice is posted, so a rep can add restricted-use-pesticide register rows for a draft. PR #927 hid register
 reads from reps but explicitly left this function unchanged. Fix: `20261108140000_rup_records_require_posted_invoice`
 refuses any invoice that is not posted, paid or overdue (`RUP_INVOICE_NOT_POSTED`); posting still writes the rows.
-Proof: `scripts/smoke/prove-rup-records-require-posted-invoice-real-schema.mjs`. Still open after it, admin only:
-the live `rup_sales_insert` policy (read 2026-11-05) lets an active admin insert register rows directly for any
-invoice; closing it means dropping that policy and the table INSERT grant, a permission change for Mason to approve.
+Proof: `scripts/smoke/prove-rup-records-require-posted-invoice-real-schema.mjs`. A new trigger on `rup_sales_records` applies the same
+rule to a direct insert, which the admin-only `rup_sales_insert` policy allows.
 
 ### KI-06 — Financial audit log can point at hard-deleted records
 **HIGH (per older record) · UNVERIFIED · database/money · Mason (migration decision)**

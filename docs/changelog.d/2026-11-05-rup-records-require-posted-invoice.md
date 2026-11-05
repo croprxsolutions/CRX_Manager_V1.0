@@ -4,6 +4,9 @@
   `generate_rup_sales_records` now refuses an invoice that is not posted (status other than `posted`, `paid` or
   `overdue`, or deleted) with `RUP_INVOICE_NOT_POSTED: invoice <number> is <status> and not posted`. Before, any
   active admin or sales rep could call it directly and write restricted-use-pesticide register rows for a draft.
+- A new trigger on `rup_sales_records` applies the same rule to a direct insert (the `rup_sales_insert` policy lets an
+  active admin insert), so no path can record a sale for an unposted invoice. Only `generate_rup_sales_records` inserts
+  there (live read-only 2026-11-05) and live holds 0 register rows.
 - The invoice row is read `FOR SHARE`, so it cannot be unposted while its rows are written. A refused call writes
   nothing (no register row, no idempotency receipt).
 - Unchanged: the role gate, the idempotency replay, every other line of the body, SECURITY DEFINER,

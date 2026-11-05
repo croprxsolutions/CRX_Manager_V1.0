@@ -8,6 +8,8 @@
 --   S1  an active admin, AS ROLE authenticated, calls it on a [SMOKE] draft
 --       chemical_sale invoice with one RUP line -> RUP_INVOICE_NOT_POSTED,
 --       and no register row or idempotency receipt is written.
+--   S1b the same admin's direct INSERT into rup_sales_records for the draft
+--       is refused by the table trigger with RUP_INVOICE_NOT_POSTED.
 --   S2  post_invoice AS ROLE authenticated (the real path) posts the same
 --       invoice and writes exactly 1 compliant register row.
 --   S3  a direct call on the now-posted invoice returns 0 (dedup), proving a
@@ -62,6 +64,13 @@ BEGIN
   IF v_grants IS DISTINCT FROM 'authenticated:EXECUTE,postgres:EXECUTE,service_role:EXECUTE' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: S0 grants changed: %', v_grants;
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgrelid = 'public.rup_sales_records'::regclass
+      AND tgname = 'trg_rup_sales_record_posted_invoice' AND tgenabled = 'O'
+  ) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: S0 the rup_sales_records posted-invoice trigger is missing or disabled';
+  END IF;
 
   -- Fixtures: a draft chemical_sale invoice with one RUP line and a valid licence.
   INSERT INTO customers (farm_name)
@@ -111,6 +120,24 @@ BEGIN
   IF v_n <> 0 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: S1 the refused call left an idempotency receipt';
   END IF;
+
+  -- S1b. A direct insert (the admin-only rup_sales_insert policy) for the draft is refused by the table trigger.
+  BEGIN
+    SET LOCAL ROLE authenticated;
+    INSERT INTO public.rup_sales_records (invoice_id, order_id, customer_id, product_id, sale_date, product_name,
+      quantity, unit, unit_price_cents, total_cents, buyer_name, buyer_certification_number, compliance_status,
+      season, created_by)
+    VALUES (v_invoice, v_order, v_customer, v_product, CURRENT_DATE, '[SMOKE] RUP Product ' || v_suffix,
+      10, 'gal', 500, 5000, '[SMOKE] RUP Posted Farm ' || v_suffix, v_lic_num, 'compliant',
+      EXTRACT(YEAR FROM CURRENT_DATE)::int, v_admin);
+    RAISE EXCEPTION 'SMOKE_FAIL: S1b a direct insert for the draft was let through';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'RUP_INVOICE_NOT_POSTED: invoice SMK-RUPP-INV-% is draft%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: S1b expected RUP_INVOICE_NOT_POSTED for a direct insert, got % (%)', SQLERRM, SQLSTATE;
+    END IF;
+  END;
+  RESET ROLE;
 
   -- S2. The real posting path still writes the row.
   v_version := public._invoice_post_version(v_invoice);

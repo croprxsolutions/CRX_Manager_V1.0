@@ -14,7 +14,8 @@
  *           register row; a second call writes nothing; an admin's direct call on a posted, paid or overdue
  *           invoice with no rows writes one; a driver is still refused by the role
  *           gate; an unknown invoice still returns 0; an idempotent replay still returns its receipt; a refused
- *           call leaves no receipt. A drifted body aborts the candidate; re-applying it is harmless; grants,
+ *           call leaves no receipt; the new table trigger refuses an admin's direct insert for the draft and
+ *           allows it for a posted invoice. A drifted body aborts the candidate; re-applying it is harmless; grants,
  *           SECURITY DEFINER and search_path are unchanged.
  *
  * Run: node scripts/smoke/prove-rup-records-require-posted-invoice-real-schema.mjs   (needs local Docker image)
@@ -375,6 +376,19 @@ ROLLBACK;`, allowFailure: true });
     expect(scenario([{ key: label, as: U.ADMIN, call: GEN() }], fixture), { [label]: NOT_POSTED(status), rows: /^ok\|0:$/ });
   }
   console.log('[prover] AFTER: voided, cancelled, unposted and deleted invoices are refused');
+
+  // AFTER: the table trigger refuses a direct insert (the admin-only rup_sales_insert policy) for an unposted
+  // invoice and allows it for a posted one.
+  const INSERT_ROW = `INSERT INTO public.rup_sales_records (invoice_id, order_id, customer_id, product_id, sale_date, product_name,
+      quantity, unit, unit_price_cents, total_cents, buyer_name, buyer_certification_number, compliance_status, season, created_by)
+    VALUES ('${invId}', '${ORDER}', '${CUSTOMER}', '${PRODUCT}', current_date, '[PROVER] KI05 RUP', 10, 'GL', 1000, 10000,
+      '[PROVER] KI05 Farm', 'PROVER-LIC-05', 'compliant', 2026, '${U.ADMIN}'); v := 'inserted';`;
+  expect(scenario([{ key: 'admin insert on draft', as: U.ADMIN, stmt: INSERT_ROW }]),
+    { 'admin insert on draft': NOT_POSTED('draft'), rows: /^ok\|0:$/ });
+  expect(scenario([{ key: 'admin insert on posted', as: U.ADMIN, stmt: INSERT_ROW }],
+    ownerSet(`UPDATE public.invoices SET status = 'posted', posted_at = now(), posted_by = '${U.ADMIN}' WHERE id = '${invId}';`)),
+  { 'admin insert on posted': /^ok\|inserted$/, rows: /^ok\|1:compliant\/PROVER-LIC-05\/false$/ });
+  console.log('[prover] AFTER: an admin\'s direct insert is refused for the draft and allowed for a posted invoice');
 
   // AFTER: the real posting path still writes its row, once.
   expect(scenario([...POST, { key: 'second call', as: U.REP, call: GEN() }]),

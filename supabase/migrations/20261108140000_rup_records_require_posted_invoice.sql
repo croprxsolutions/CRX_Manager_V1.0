@@ -8,6 +8,9 @@
 --   posted (status posted, paid or overdue, and not deleted) with RUP_INVOICE_NOT_POSTED, naming the
 --   invoice number and its status. Nothing is written for a refused call (no register row, no idempotency
 --   receipt). The invoice row is read FOR SHARE so its status cannot change while the rows are written.
+--   A new BEFORE INSERT OR UPDATE OF invoice_id trigger on rup_sales_records applies the same rule to a
+--   direct insert (the rup_sales_insert policy lets an active admin insert), so no path can record a sale
+--   for an unposted invoice. Its function is SECURITY INVOKER and executable by no role but its owner.
 --
 -- CALLERS (live read-only 2026-11-05): only _post_invoice_impl_20260714 and
 --   _post_deleted_delivery_recovery_invoice_20260719 call it, and both set status = 'posted' before the
@@ -16,10 +19,12 @@
 --
 -- NOT CHANGED: the role gate, the idempotency replay, every other line of the body, the return value,
 --   SECURITY DEFINER, search_path = public, pg_temp and the grants (CREATE OR REPLACE keeps the ACL:
---   authenticated, postgres, service_role; no PUBLIC or anon). No table, column, row or permission changes.
+--   authenticated, postgres, service_role; no PUBLIC or anon), the rup_sales_records policies and grants.
+--   No table, column or row changes (live holds 0 register rows).
 --
 -- ROLLBACK (its own reviewed migration): re-emit generate_rup_sales_records from
---   20260707040000_generate_rup_sales_records_role_gate.sql.
+--   20260707040000_generate_rup_sales_records_role_gate.sql and drop trg_rup_sales_record_posted_invoice
+--   and guard_rup_sales_record_posted_invoice().
 --
 -- ORDERING: apply after 20260707040000 (the live body this file pins).
 
@@ -174,6 +179,34 @@ BEGIN
 END;
 $function$;
 
+-- The same rule on the table itself, so a direct insert (the rup_sales_insert policy lets an active admin
+-- insert) cannot record a sale for an unposted invoice either. generate_rup_sales_records is the only
+-- function that inserts here (live read-only 2026-11-05); live holds 0 register rows, and UPDATE checks only
+-- a changed invoice_id, so voiding a row is unaffected.
+CREATE OR REPLACE FUNCTION public.guard_rup_sales_record_posted_invoice() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_invoice record;
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.invoice_id IS NOT DISTINCT FROM OLD.invoice_id THEN
+    RETURN NEW;
+  END IF;
+  SELECT i.invoice_number, i.status, i.deleted_at INTO v_invoice
+  FROM public.invoices i
+  WHERE i.id = NEW.invoice_id;
+  IF NOT FOUND OR v_invoice.status NOT IN ('posted', 'paid', 'overdue') OR v_invoice.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'RUP_INVOICE_NOT_POSTED: invoice % is % and not posted; RUP sales records are written only for a posted invoice',
+      coalesce(v_invoice.invoice_number, coalesce(NEW.invoice_id::text, '(none)')),
+      CASE WHEN NOT FOUND THEN 'missing' WHEN v_invoice.deleted_at IS NOT NULL THEN 'deleted' ELSE v_invoice.status END;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public.guard_rup_sales_record_posted_invoice() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_rup_sales_record_posted_invoice() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+CREATE OR REPLACE TRIGGER trg_rup_sales_record_posted_invoice BEFORE INSERT OR UPDATE OF invoice_id ON public.rup_sales_records
+  FOR EACH ROW EXECUTE FUNCTION public.guard_rup_sales_record_posted_invoice();
+
 DO $postflight$
 DECLARE
   v_proc record;
@@ -202,6 +235,23 @@ BEGIN
   WHERE p.oid = 'public.generate_rup_sales_records(uuid,text)'::regprocedure;
   IF v_grants IS DISTINCT FROM 'authenticated:EXECUTE,postgres:EXECUTE,service_role:EXECUTE' THEN
     RAISE EXCEPTION 'RUP_POSTED_VERIFY: grants changed (%)', v_grants;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
+    WHERE t.tgrelid = 'public.rup_sales_records'::regclass
+      AND t.tgname = 'trg_rup_sales_record_posted_invoice'
+      AND t.tgenabled = 'O'
+      AND t.tgfoid = 'public.guard_rup_sales_record_posted_invoice()'::regprocedure
+  ) THEN
+    RAISE EXCEPTION 'RUP_POSTED_VERIFY: the register table trigger is missing or disabled';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+    WHERE p.oid = 'public.guard_rup_sales_record_posted_invoice()'::regprocedure
+      AND a.grantee <> p.proowner
+  ) THEN
+    RAISE EXCEPTION 'RUP_POSTED_VERIFY: the register trigger function is executable by a role other than its owner';
   END IF;
 END;
 $postflight$;

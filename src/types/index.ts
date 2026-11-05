@@ -475,7 +475,9 @@ export interface ProductVendor {
 export interface ProductChangeHistoryEntry {
   id: number;
   product_id: string;
-  change_type: 'created' | 'updated';
+  /** parent_copy: a field a parent write copied onto this size (PAR-1); parent_event_id names the write. */
+  change_type: 'created' | 'updated' | 'parent_copy';
+  parent_event_id?: number | null;
   field_name: string | null;
   old_value: string | null;
   new_value: string | null;

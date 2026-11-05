@@ -3036,6 +3036,16 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // required-key public wrapper. Prune once the registry high-water passes 20261102200000.
   '_manual_inventory_add_replay_impl_20261015',
   '_complete_job_replay_impl_20261015',
+  // 20261108120000 (PAR-1) local migration: admin-only parent writers; each replays through
+  // _product_parent_replay (check_idempotency + actor/fingerprint match) and saves its receipt.
+  // Prune after live type regeneration.
+  'add_product_size',
+  'correct_parent_rates',
+  'correct_product_parent_identity',
+  'create_product_with_parent',
+  'move_product_size',
+  'set_parent_rates',
+  'update_product_parent',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3085,6 +3095,16 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Local candidate 20261107060000 (WP-PM-11a-1): internal helper behind the two rate writers.
   _write_product_rates:
     'internal rate writer (20261107060000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',
+  // Local candidate 20261108120000 (PAR-1): private helpers behind the keyed parent writers, and the
+  // trigger-only history writer it re-issues. Prune once that migration is live and below the high-water.
+  _apply_parent_rates: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
+  _copy_parent_to_size: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
+  _insert_parent_size: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
+  _product_parent_event: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
+  _product_parent_replay:
+    'idempotency infrastructure helper (20261108120000): locks the key and replays through check_idempotency with an actor and fingerprint match; every API-role EXECUTE is revoked',
+  write_product_change_history:
+    'trigger-only history writer re-issued by 20261108120000 (PAR-1); it runs inside the calling product write and is never an RPC',
   // Pruned on the 2026-08-11 merge of origin/main, per the standing rule below that a
   // dead exemption silently pre-suppresses any future RPC reusing the name:
   //   _guard_job_commission_split_immutable remains parked with Wave A under

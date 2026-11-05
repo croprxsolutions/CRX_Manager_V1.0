@@ -1,5 +1,5 @@
 -- Written 2026-11-04. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261107030000_job_reservation_whole_hundredths.md.
+-- docs/reference/migrations.d/20261107070000_job_reservation_whole_hundredths.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (KI-100, follow-up to S02 20261106110000): a Partial Order must be in whole hundredths, but a
@@ -64,6 +64,9 @@ SET LOCAL lock_timeout = '5s';
 -- commits, so no unrounded draw can land between the precision check and the new body. Every sync
 -- first takes its quote FOR UPDATE, so EXCLUSIVE on quotes (same order: quotes, then draws) also waits
 -- for an old-body sync that holds its quote but has not written a draw yet (Luna HIGH, 2026-11-05).
+-- jobs comes first (the lock CREATE TRIGGER needs anyway), in the order a completion takes them
+-- (jobs, then its quote, then draws), so a completion in flight cannot deadlock the apply (Sol MED).
+LOCK TABLE public.jobs IN SHARE ROW EXCLUSIVE MODE;
 LOCK TABLE public.quotes IN EXCLUSIVE MODE;
 LOCK TABLE public.job_product_draws IN SHARE ROW EXCLUSIVE MODE;
 
@@ -262,7 +265,7 @@ BEGIN
         WHERE quote_id = p_quote_id AND product_id = v_row.product_id;
 
         v_crop_pool := GREATEST(v_booking - v_order_drawn - v_consumed_drawn, 0);
-        -- JOB_DRAW_HUNDREDTHS<<< (20261107030000, KI-100) A booking and its Partial Orders are in whole
+        -- JOB_DRAW_HUNDREDTHS<<< (20261107070000, KI-100) A booking and its Partial Orders are in whole
         -- hundredths (20261106110000), so the booking's job draws are too: an unrounded unit conversion
         -- (1 fl oz = 0.0078125 gal) would leave a remainder no Partial Order can take. Each active job
         -- draws against the booking's completed and invoiced job demand only, rounded to 0.01, so many

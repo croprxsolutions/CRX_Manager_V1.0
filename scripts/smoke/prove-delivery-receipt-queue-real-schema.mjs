@@ -650,6 +650,16 @@ function main() {
   // pg_net's worker moves a queued call to net._http_response once tried (here: no network, so it fails).
   const posts = () => scalar('SELECT (SELECT count(*) FROM net.http_request_queue) + (SELECT count(*) FROM net._http_response);');
   psql("UPDATE public.delivery_receipt_queue SET next_attempt_at = now() + interval '1 day' WHERE status = 'pending';");
+  // A receipt the sender has not handled for an hour goes to the office list (the timer moves it, sender on or off).
+  seedDelivery(26); assert.equal(complete(26, { emailReceipt: 'true' }).status, 0);
+  seedDelivery(27); assert.equal(complete(27, { emailReceipt: 'true' }).status, 0);
+  due(27); assert.equal(claim().length, 1);
+  psql(`UPDATE public.delivery_receipt_queue SET claimed_at = now() - interval '2 hours' WHERE delivery_id = '${D(27)}';`);
+  psql(`UPDATE public.delivery_receipt_queue SET next_attempt_at = now() - interval '2 hours' WHERE delivery_id = '${D(26)}';`);
+  psql('SELECT public._wake_delivery_receipt_worker();');
+  assert.match(row(26, "status || ' ' || last_error"), /^needs_check The receipt sender has not handled/);
+  assert.match(row(27, "status || ' ' || COALESCE(claim_token::text, '-') || ' ' || last_error"), /^needs_check - The receipt sender has not handled/);
+  console.log('[prover] a receipt the sender has not handled for an hour goes to the office list');
   psql(`DELETE FROM vault.secrets WHERE name IN ('delivery_receipt_worker_url', 'delivery_receipt_worker_secret');
     DELETE FROM net.http_request_queue; DELETE FROM net._http_response;`);
   psql('SELECT public._wake_delivery_receipt_worker();'); assert.equal(posts(), '0');

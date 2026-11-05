@@ -3069,6 +3069,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // KI-25 receipt queue (20261110130000).
   _enqueue_delivery_receipt:
     'internal helper called only by complete_delivery after its required-key replay binding; inserts ON CONFLICT (delivery_id) DO NOTHING; every API-role EXECUTE (incl. service_role) is revoked',
+  _wake_delivery_receipt_worker:
+    'pg_cron timer only (no caller input): moves receipts unhandled for an hour to needs_check, a state-based update that is safe to repeat; every API-role EXECUTE (incl. service_role) is revoked',
   _close_undelivered_order_remainder_20260718:
     'preserved internal cancel-remainder impl (Phase 1a closeout); the required-key public cancel_order wrapper owns idempotency and every application-role EXECUTE is revoked',
   _post_deleted_delivery_recovery_invoice_20260719:

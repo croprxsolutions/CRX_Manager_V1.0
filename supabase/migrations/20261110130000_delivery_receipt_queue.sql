@@ -47,6 +47,7 @@
 --      (needs_check), cannot be deleted, so a
 --      hard delete of its delivery is refused instead of erasing it. A retry whose address differs from the
 --      earlier attempt goes to needs_check (one provider key per receipt). A finish key binds its detail too.
+--   3d. The timer also moves a receipt the sender has not handled for an hour (pending and overdue, or claimed and--      not finished) to needs_check, so a switched-off or failing sender cannot hold the send lock for ever.
 --   4. pg_net is enabled and a pg_cron job (every 2 minutes) runs _wake_delivery_receipt_worker(), which posts to
 --      the worker only when a row is due AND both Vault secrets delivery_receipt_worker_url and
 --      delivery_receipt_worker_secret exist. Neither is created here: until they are stored (a separate approved
@@ -814,6 +815,13 @@ DECLARE
   v_url text;
   v_secret text;
 BEGIN
+  -- A receipt the sender has not handled for an hour (switched off, or failing before it claims) goes to the office
+  -- list, so no row holds the send lock with nobody sending. An attempt may have gone out: the office checks first.
+  UPDATE public.delivery_receipt_queue q
+     SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
+         last_error = 'The receipt sender has not handled this receipt for over an hour; check whether the customer got it, and send it by hand if not.'
+   WHERE (q.status = 'pending' AND q.next_attempt_at < now() - interval '1 hour')
+      OR (q.status = 'sending' AND q.claimed_at < now() - interval '1 hour');
   IF NOT EXISTS (SELECT 1 FROM public.delivery_receipt_queue q
                   WHERE (q.status = 'pending' AND q.next_attempt_at <= now())
                      OR (q.status = 'sending' AND q.claimed_at < now() - interval '10 minutes')) THEN

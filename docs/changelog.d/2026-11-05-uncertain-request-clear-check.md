@@ -52,4 +52,5 @@
   -> `IDEMPOTENCY_CONCURRENT_REPLAY_RETRY`;
   another user's key or a row key -> `REQUEST_KEY_NOT_OWNED`; a wrong idempotency key -> `IDEMPOTENCY_KEY_MISMATCH`;
   signed out -> `AUTH_REQUIRED`.
-- Not verified yet: the live apply and the live smoke run.
+- Applied live 2026-11-05 (ledger version `20261105162551`); the live smoke run passed and rolled back,
+  and all 31 live sweeps passed.

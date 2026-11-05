@@ -128,17 +128,13 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
   const [setupSaved, setSetupSaved] = useState<string[] | null>(null);
   const [ratesSaved, setRatesSaved] = useState<number | null>(null);
   // Scoped to the whole save payload: an exact retry reuses its key, a revised file gets a new one.
-  const setupKey = useIdempotencyKey('apply_product_setup', profileId, JSON.stringify(setup?.changes ?? null));
-  const ratesKey = useIdempotencyKey('set_product_rates', profileId, JSON.stringify([rates?.rows ?? null, rates?.preview ?? null]));
-  // Any save in this modal session refreshes the Products table on close, even after a later upload.
-  const anySaved = useRef(false);
+  const setupKey = useIdempotencyKey('apply_product_setup', profileId, JSON.stringify(setup?.changes));
+  const ratesKey = useIdempotencyKey('set_product_rates', profileId, JSON.stringify([rates?.rows, rates?.preview]));
 
   const reset = () => {
     setSetup(null); setRates(null); setSetupSaved(null); setRatesSaved(null); setFileName('');
   };
   const close = () => {
-    if (anySaved.current) onSaved();
-    anySaved.current = false;
     reset();
     onClose();
   };
@@ -189,7 +185,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
     try {
       const saved = await applyProductSetup({ rows: setup.changes, performedBy: profileId, idempotencyKey: setupKey.getKey() });
       setupKey.resetKey();
-      anySaved.current = true;
+      onSaved();
       setSetupSaved(saved.rows.map((row) => row.product_name));
       toast('success', `Saved setup changes to ${saved.changed_count} products`);
       // Rates not yet saved: carry over this save's own version moves and show their preview again.
@@ -210,7 +206,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
     try {
       const saved = await saveProductRates({ preview: rates.preview, rows: rates.rows, performedBy: profileId, idempotencyKey: ratesKey.getKey() });
       ratesKey.resetKey();
-      anySaved.current = true;
+      onSaved();
       setRatesSaved(saved.changed_count);
       toast('success', `Saved rates for ${saved.changed_count} products`);
     } catch (error) {

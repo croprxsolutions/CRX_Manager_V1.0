@@ -1079,8 +1079,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_dashboard_action_items(p_limit integer)#bcf3a996bde4",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "get_dashboard_action_items(p_limit integer)#f72f983abc02",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-05 for 20261109120000 (Goal 4 H36): the new body keeps every row, filter, order and limit and adds only a count(*) per action group under a \"counts\" key; no cost, profit or margin field is read or returned. Post-apply key computed on the replayed scratch database, where unchanged allowlisted functions reproduce their live keys; it shows until that migration is applied.",
       "dated": "2026-11-02"
     },
     {

@@ -23,7 +23,7 @@ import { requireGroupVersions, requirePostVersion } from '../lib/invoicePostVers
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
-import { invoiceEmailKey, wasInvoiceSentSinceLastChange } from '../lib/invoiceBulkEmail';
+import { invoiceEmailKey } from '../lib/invoiceBulkEmail';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
@@ -1883,12 +1883,6 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         const liveVersion = await assertInvoiceSendable(id!);
         if (!liveVersion) throw new Error('Could not read this invoice. Reload and try again.');
         const version = { id: id!, updated_at: liveVersion };
-        // The same rule as the list's bulk Email: this version already went to this address
-        // (from either screen) asks first; a deliberate extra copy gets its own key.
-        if (!resend && await wasInvoiceSentSinceLastChange(version, cust.email!)) {
-          setResendTo(cust.email!);
-          return 'ask' as const;
-        }
         const result = await sendEmail({
           to: cust.email!,
           subject: `Invoice ${invoice.invoice_number || ''} from Crop RX Solutions`,
@@ -1902,15 +1896,18 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         });
 
         if (!result.success) throw new Error(result.error || 'Failed to send email');
-        // The same version and address sent at the same moment from the list: the server sent it once.
-        if (result.deduplicated) return 'already' as const;
+        // This version already went to this address (from either screen), so the server sent nothing:
+        // ask before mailing a deliberate extra copy, which gets its own key.
+        if (result.deduplicated) {
+          setResendTo(cust.email!);
+          return 'ask' as const;
+        }
         logActivity({ event: 'invoice_emailed', description: `Invoice ${invoice.invoice_number} emailed to ${cust.email}`, performedBy: profile.id, entityType: 'invoice', entityId: id, customerId: invoice.customer_id });
         return 'sent' as const;
       },
       toast,
       onSuccess: (outcome) => {
         if (outcome === 'sent') toast('success', `Invoice emailed to ${cust.email}`);
-        if (outcome === 'already') toast('info', `This invoice was already emailed to ${cust.email}; not sent again.`);
       },
       sentryTag: 'email_invoice',
     });

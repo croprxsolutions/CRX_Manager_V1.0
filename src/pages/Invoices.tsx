@@ -45,7 +45,7 @@ import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
 import { assertInvoiceSendDisposition } from '../lib/invoiceSendDisposition';
 import { logActivity } from '../lib/activityLogger';
-import { invoiceEmailKey, isBulkEmailable, isEmailRateLimit, summarizeBulkEmail, wasInvoiceSentSinceLastChange, type BulkEmailResult } from '../lib/invoiceBulkEmail';
+import { invoiceEmailKey, isBulkEmailable, isEmailRateLimit, summarizeBulkEmail, type BulkEmailResult } from '../lib/invoiceBulkEmail';
 
 type InvoiceRow = Invoice & { customer_name: string; salesman_name: string | null; order_number: string | null };
 
@@ -560,10 +560,6 @@ export default function Invoices() {
           // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
           const pdfData = await loadInvoicePdfData(inv);
           await assertStillSendable(inv);
-          if (await wasInvoiceSentSinceLastChange(inv, to)) {
-            results.push({ ...base, outcome: 'already_sent', detail: `Already emailed to ${to}; not sent again` });
-            continue;
-          }
           const result = await sendEmail({
             to,
             subject: `Invoice ${inv.invoice_number} from Crop RX Solutions`,
@@ -577,7 +573,8 @@ export default function Invoices() {
           });
           if (!result.success) throw new Error(result.error || 'Failed to send email');
           if (result.deduplicated) {
-            results.push({ ...base, outcome: 'already_sent', detail: 'Already emailed; not sent again' });
+            // The same key already went (from either screen): the server sent nothing new.
+            results.push({ ...base, outcome: 'already_sent', detail: `Already emailed to ${to}; not sent again` });
           } else {
             results.push({ ...base, outcome: 'sent', detail: to });
             logActivity({ event: 'invoice_emailed', description: `Invoice ${inv.invoice_number} emailed to ${to}`, performedBy: profile.id, entityType: 'invoice', entityId: inv.id, customerId: inv.customer_id });

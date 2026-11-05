@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./db', () => ({ supabase: {} }));
 
-import { invoiceEmailKey, isBulkEmailable, isEmailRateLimit, sentSinceLastChange, summarizeBulkEmail, type BulkEmailResult } from './invoiceBulkEmail';
+import { invoiceEmailKey, isBulkEmailable, isEmailRateLimit, summarizeBulkEmail, type BulkEmailResult } from './invoiceBulkEmail';
 
 const r = (outcome: BulkEmailResult['outcome']): BulkEmailResult => ({ invoiceId: outcome, invoiceNumber: 'X', customerName: 'C', outcome });
 
@@ -29,15 +29,6 @@ describe('invoiceBulkEmail', () => {
   it('recognises the server hourly limit', () => {
     expect(isEmailRateLimit('Rate limit: 50 emails/hour exceeded for this user. Try again later.')).toBe(true);
     expect(isEmailRateLimit('Failed to send email')).toBe(false);
-  });
-
-  it('finds an earlier send of this version to this address, from any screen', () => {
-    const changed = '2026-11-05T10:00:00Z';
-    const log = [{ recipient_email: 'A@x.com', created_at: '2026-11-05T11:00:00Z' }];
-    expect(sentSinceLastChange(log, 'a@x.com', changed)).toBe(true);
-    expect(sentSinceLastChange(log, 'new@x.com', changed)).toBe(false);
-    expect(sentSinceLastChange(log, 'a@x.com', '2026-11-05T12:00:00Z')).toBe(false);
-    expect(sentSinceLastChange([], 'a@x.com', changed)).toBe(false);
   });
 
   it('makes a partial failure visible', () => {

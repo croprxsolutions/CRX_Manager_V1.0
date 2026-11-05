@@ -1,7 +1,6 @@
 // Invoice email (To-Do 9.6 bulk, 9.8 record key). The list's bulk Email and the invoice page's
-// Email button share these rules: which invoices can go, each send's retry key, and whether this
-// version already went to this address.
-import { supabase } from './db';
+// Email button share these rules: which invoices can go and each send's retry key. The server
+// dedupes that key exactly, so it alone decides whether this version already went to this address.
 
 export type BulkEmailOutcome = 'sent' | 'already_sent' | 'failed' | 'skipped';
 
@@ -30,32 +29,6 @@ export async function invoiceEmailKey(inv: { id: string; updated_at: string }, t
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(to.trim().toLowerCase()));
   const code = Array.from(new Uint8Array(digest).slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
   return `invoice-email-${inv.id}-v${inv.updated_at}-to-${code}`;
-}
-
-/** An invoice email already sent to this address since the invoice last changed. */
-export function sentSinceLastChange(
-  log: { recipient_email: string | null; created_at: string | null }[],
-  to: string,
-  updatedAt: string,
-): boolean {
-  const changed = Date.parse(updatedAt);
-  return log.some((l) => (l.recipient_email ?? '').trim().toLowerCase() === to.trim().toLowerCase()
-    && Date.parse(l.created_at ?? '') >= changed);
-}
-
-/**
- * Reads the email log for this invoice: every key the server accepts for it names the invoice
- * id (scoped keys and older unscoped ones alike), whichever screen sent it.
- */
-export async function wasInvoiceSentSinceLastChange(inv: { id: string; updated_at: string }, to: string): Promise<boolean> {
-  const { data: log, error } = await supabase
-    .from('email_log')
-    .select('recipient_email, created_at')
-    .eq('email_type', 'invoice')
-    .eq('status', 'sent')
-    .like('idempotency_key', `%${inv.id}%`);
-  if (error) throw error;
-  return sentSinceLastChange(log ?? [], to, inv.updated_at);
 }
 
 /** The server's hourly cap (50 per user): later sends in the batch would be refused too. */

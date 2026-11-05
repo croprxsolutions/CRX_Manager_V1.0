@@ -15,6 +15,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const PREFIX = 'crx-save-field-actor-proof-';
 const CONTAINER = `${PREFIX}${process.pid}-${Date.now().toString(36)}`.toLowerCase();
 const MIGRATION = path.join(ROOT, 'supabase', 'migrations', '20260729222311_bind_save_field_actor.sql');
+// Applied on top of MIGRATION, exactly as live: it pins MIGRATION's body, then refuses a missing id (KI-31).
+const MISSING_FIELD_MIGRATION = path.join(ROOT, 'supabase', 'migrations', '20261107140000_save_field_refuses_missing_field.sql');
 const SMOKE = path.join(ROOT, 'scripts', 'smoke', 'smoke-save-field-actor-binding.sql');
 const PASS_TOKEN = 'SMOKE_PASS_ROLLBACK';
 
@@ -42,7 +44,7 @@ function psql(sql, { allowFailure = false } = {}) {
 }
 
 function assertInputs() {
-  for (const file of [MIGRATION, SMOKE]) {
+  for (const file of [MIGRATION, MISSING_FIELD_MIGRATION, SMOKE]) {
     assert.ok(existsSync(file), `missing checked-in proof input: ${file}`);
   }
   const migration = readFileSync(MIGRATION, 'utf8');
@@ -55,12 +57,17 @@ function assertInputs() {
   ]) {
     assert.ok(migration.includes(marker), `migration marker missing: ${marker}`);
   }
+  assert.ok(
+    readFileSync(MISSING_FIELD_MIGRATION, 'utf8').includes("IF NOT FOUND THEN RAISE EXCEPTION 'FIELD_NOT_FOUND'; END IF;"),
+    'missing-field migration marker missing',
+  );
   for (const marker of [
     PASS_TOKEN,
     'accepted forged actor',
     'same-actor replay',
     'nullable-actor update',
     'truthful field activities',
+    'success for a missing field id',
   ]) {
     assert.ok(smoke.includes(marker), `smoke marker missing: ${marker}`);
   }
@@ -167,13 +174,18 @@ try {
   startContainer();
   installMinimumSchema();
   psql(readFileSync(MIGRATION, 'utf8'));
+  // The live apply runs in one transaction; SET LOCAL in the file needs one too.
+  psql(`BEGIN;
+${readFileSync(MISSING_FIELD_MIGRATION, 'utf8')}
+COMMIT;
+`);
 
   const smoke = psql(readFileSync(SMOKE, 'utf8'), { allowFailure: true });
   const output = `${smoke.stdout || ''}\n${smoke.stderr || ''}`;
   assert.notEqual(smoke.status, 0, 'rollback smoke unexpectedly committed');
   assert.match(output, new RegExp(PASS_TOKEN), output);
 
-  console.log('SAVE_FIELD_ACTOR_BINDING_PROOF_PASS');
+  console.log('SAVE_FIELD_ACTOR_BINDING_PROOF_PASS (with the KI-31 missing-field refusal)');
 } finally {
   if (CONTAINER.startsWith(PREFIX)) {
     docker(['rm', '--force', CONTAINER], { allowFailure: true });

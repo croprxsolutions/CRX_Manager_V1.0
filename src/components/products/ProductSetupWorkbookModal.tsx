@@ -127,14 +127,18 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
   const [rates, setRates] = useState<{ rows: RateUploadRow[]; preview: RatePreview | null } | null>(null);
   const [setupSaved, setSetupSaved] = useState<string[] | null>(null);
   const [ratesSaved, setRatesSaved] = useState<number | null>(null);
-  const setupKey = useIdempotencyKey('apply_product_setup', profileId, JSON.stringify([fileName, setup?.changes.map((c) => c.product_id)]));
-  const ratesKey = useIdempotencyKey('set_product_rates', profileId, JSON.stringify([fileName, rates?.rows.map((r) => r.product_id)]));
+  // Scoped to the whole save payload: an exact retry reuses its key, a revised file gets a new one.
+  const setupKey = useIdempotencyKey('apply_product_setup', profileId, JSON.stringify(setup?.changes ?? null));
+  const ratesKey = useIdempotencyKey('set_product_rates', profileId, JSON.stringify([rates?.rows ?? null, rates?.preview ?? null]));
+  // Any save in this modal session refreshes the Products table on close, even after a later upload.
+  const anySaved = useRef(false);
 
   const reset = () => {
     setSetup(null); setRates(null); setSetupSaved(null); setRatesSaved(null); setFileName('');
   };
   const close = () => {
-    if (setupSaved || ratesSaved != null) onSaved();
+    if (anySaved.current) onSaved();
+    anySaved.current = false;
     reset();
     onClose();
   };
@@ -185,6 +189,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
     try {
       const saved = await applyProductSetup({ rows: setup.changes, performedBy: profileId, idempotencyKey: setupKey.getKey() });
       setupKey.resetKey();
+      anySaved.current = true;
       setSetupSaved(saved.rows.map((row) => row.product_name));
       toast('success', `Saved setup changes to ${saved.changed_count} products`);
       // Rates not yet saved: carry over this save's own version moves and show their preview again.
@@ -205,6 +210,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
     try {
       const saved = await saveProductRates({ preview: rates.preview, rows: rates.rows, performedBy: profileId, idempotencyKey: ratesKey.getKey() });
       ratesKey.resetKey();
+      anySaved.current = true;
       setRatesSaved(saved.changed_count);
       toast('success', `Saved rates for ${saved.changed_count} products`);
     } catch (error) {

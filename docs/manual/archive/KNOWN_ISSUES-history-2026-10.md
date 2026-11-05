@@ -7087,3 +7087,14 @@ successful `set_field_boundary` or `set_field_override_acres` the page copies th
 `total_acres` (and `measured_acres` after a boundary), and makes that the page's clean baseline, so a later attribute-only
 save sends the stored acres. Proven on the local test app: before the fix, setting 55 acres to bill and then saving only
 the crop left `total_acres` 12 beside `override_acres` 55; after it, `total_acres` stayed 55. The rest of KI-31 stays open.
+
+### Closed sub-item 2026-11-05 — KI-31 deleting every polygon fell back to the old boundary
+
+Original text: "Deleting every drawn polygon of a multi-part field falls back to the old boundary
+(`src/pages/FieldSetup.tsx:686`)."
+
+Already fixed in code by commit `12dcf01b8` (2026-07-11): every part delete now goes through `handlePolygonsChange`,
+which clears the loaded boundary when no part is left, so `buildBoundaryGeometry` has nothing old to fall back to.
+Saving with every part deleted now sends no boundary and says "A measured boundary cannot be removed here — draw a
+replacement boundary and save." A regression test was added in `src/pages/FieldSetup.saveNavigation.test.tsx`
+("deleting every part of a saved multi-part boundary"). It fails if the clear is removed. No code or database change.

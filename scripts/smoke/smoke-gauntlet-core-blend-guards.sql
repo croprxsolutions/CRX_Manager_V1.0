@@ -20,6 +20,7 @@ DECLARE
   v_inventory_unit2 text;
   v_commission uuid;
   v_commission_amount numeric;
+  v_commission_recipient uuid;
   v_payment uuid := gen_random_uuid();
   v_po uuid := gen_random_uuid();
   v_po_item_over uuid := gen_random_uuid();
@@ -121,10 +122,16 @@ BEGIN
      )
    ORDER BY c.created_at
    LIMIT 1;
+  -- The batch is paid to the commission's current earned recipient, as the settlement guard requires.
+  SELECT s.recipient_id INTO v_commission_recipient
+    FROM public.commission_earned_state_ledger s
+   WHERE s.commission_id = v_commission
+   ORDER BY s.effective_at DESC, s.id DESC
+   LIMIT 1;
 
   IF v_admin IS NULL OR v_sales IS NULL OR v_sales2 IS NULL OR v_applicator IS NULL
      OR v_customer IS NULL OR v_customer2 IS NULL OR v_field IS NULL
-     OR v_product IS NULL OR v_commission IS NULL THEN
+     OR v_product IS NULL OR v_commission IS NULL OR v_commission_recipient IS NULL THEN
     RAISE EXCEPTION 'SMOKE_FAIL(setup): required active role/customer/product/unbatched commission fixture missing';
   END IF;
 
@@ -228,7 +235,7 @@ BEGIN
     id, payment_number, recipient_id, total_amount, status,
     payment_date, created_by, notes
   ) VALUES (
-    v_payment, '[E2E]-GAUNTLET-' || left(v_payment::text, 8), v_admin,
+    v_payment, '[E2E]-GAUNTLET-' || left(v_payment::text, 8), v_commission_recipient,
     v_commission_amount + 1, 'unposted', current_date, v_admin,
     '[E2E] rollback-only gauntlet'
   );

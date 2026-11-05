@@ -1,6 +1,6 @@
 -- ============================================================================
 -- SMOKE TEST (rolled back by design) for
--- 20261110100000_bind_money_inventory_replay_receipts_batch4c.
+-- 20261110160000_bind_money_inventory_replay_receipts_batch4c.
 --
 -- CONTAINER ONLY: run through scripts/smoke/prove-replay-binding-batch4c-real-schema.mjs, never
 -- against the live database. duplicate_quote, create_delivery_with_items and

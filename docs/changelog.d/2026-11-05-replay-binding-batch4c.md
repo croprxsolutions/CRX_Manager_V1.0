@@ -1,6 +1,6 @@
 ## 2026-11-05 — replay-binding batch 4c: purchase orders, quote copies, deliveries, cycle counts, blend tickets (KI-10)
 
-- New migration `20261110100000_bind_money_inventory_replay_receipts_batch4c.sql` (not yet applied): twelve
+- New migration `20261110160000_bind_money_inventory_replay_receipts_batch4c.sql` (not yet applied): twelve
   functions now hand back a saved retry answer only to the same person for the exact same request —
   `submit_purchase_order`, `cancel_purchase_order`, `delete_purchase_order`, `duplicate_quote`,
   `edit_delivery`, `reassign_delivery`, `batch_reschedule_deliveries`, `confirm_delivery`,

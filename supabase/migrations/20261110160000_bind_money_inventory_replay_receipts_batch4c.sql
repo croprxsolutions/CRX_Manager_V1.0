@@ -1,5 +1,5 @@
 -- Written 2026-11-05. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261110100000_bind_money_inventory_replay_receipts_batch4c.md.
+-- docs/reference/migrations.d/20261110160000_bind_money_inventory_replay_receipts_batch4c.md.
 --
 -- WHAT: batch 4c of the system-wide idempotency replay-binding fix (KNOWN_ISSUES.md KI-10, "live
 --   functions replay a saved result matched on the retry key alone"). This cut binds the twelve

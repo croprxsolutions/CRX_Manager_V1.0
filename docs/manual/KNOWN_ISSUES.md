@@ -231,7 +231,7 @@ PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invo
 `update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
 `create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, applied live 2026-11-03, ledger `20261103013009`) binds
 `price_order`, `update_order_items` and `mark_inventory_row_verified` (MED, PR #1042 follow-up 3; Mason: "batch
-it"). Batch 4c (`20261110100000`, not yet applied) binds the purchase-order, quote-copy, delivery, cycle-count
+it"). Batch 4c (`20261110160000`, not yet applied) binds the purchase-order, quote-copy, delivery, cycle-count
 and blend-ticket writes: `submit_purchase_order`, `cancel_purchase_order`, `delete_purchase_order`,
 `duplicate_quote`, `edit_delivery`, `reassign_delivery`, `batch_reschedule_deliveries`, `confirm_delivery`,
 `create_delivery_with_items`, `create_followup_delivery`, `cancel_cycle_count`, `reverse_blend_ticket_approval`.

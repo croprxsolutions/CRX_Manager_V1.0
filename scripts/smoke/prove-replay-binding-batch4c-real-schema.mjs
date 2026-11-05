@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Full-chain proof for the 20261110100000 candidate: the twelve batch 4c functions
+ * Full-chain proof for the 20261110160000 candidate: the twelve batch 4c functions
  * (submit/cancel/delete_purchase_order, duplicate_quote, edit/reassign/confirm_delivery,
  * batch_reschedule_deliveries, create_delivery_with_items, create_followup_delivery,
  * cancel_cycle_count, reverse_blend_ticket_approval) replay a stored idempotency receipt only for the
@@ -44,7 +44,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261110100000_bind_money_inventory_replay_receipts_batch4c.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261110160000_bind_money_inventory_replay_receipts_batch4c.sql');
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

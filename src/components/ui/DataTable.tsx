@@ -59,11 +59,49 @@ const subscribePhone = (onChange: () => void) => {
 // One layout at a time, so a long list is never rendered twice. No matchMedia (tests) = desktop.
 const isPhoneNow = () => typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
 
+/** The phone row renderer while the screen is phone-width, and the columns its sort select offers. */
+function usePhoneLayout<T>(mobileRow: ((row: T) => ReactNode) | undefined, columns: Column<T>[]) {
+  const isPhone = useSyncExternalStore(subscribePhone, isPhoneNow, () => false);
+  const phoneRow = isPhone ? mobileRow : undefined;
+  return { phoneRow, sortableColumns: phoneRow ? columns.filter((col) => col.sortable) : [] };
+}
+
+/** The phone list has no column headers, so its sort lives in a select. Renders nothing without sortable columns. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function PhoneSortSelect<T extends Record<string, any>>({ columns, sortKey, sortDir, onChange }: {
+  columns: Column<T>[];
+  sortKey: string | null;
+  sortDir: SortDir;
+  onChange: (next: { key: string | null; dir: SortDir }) => void;
+}) {
+  if (columns.length === 0) return null;
+  return (
+    <select
+      value={sortKey ? `${sortKey}:${sortDir}` : ''}
+      onChange={(e) => {
+        const [key, dir] = e.target.value.split(':');
+        onChange(key ? { key, dir: dir as SortDir } : { key: null, dir: 'asc' });
+      }}
+      aria-label="Sort by"
+      className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+    >
+      <option value="">Sort: as listed</option>
+      {columns.flatMap((col) => {
+        const label = typeof col.header === 'string' ? col.header : col.key;
+        return [
+          <option key={`${col.key}:asc`} value={`${col.key}:asc`}>{label} ↑</option>,
+          <option key={`${col.key}:desc`} value={`${col.key}:desc`}>{label} ↓</option>,
+        ];
+      })}
+    </select>
+  );
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default function DataTable<T extends Record<string, any>>({
   data,
   columns,
-  searchable = false,
+  searchable,
   searchPlaceholder = 'Search...',
   searchKeys = [],
   onRowClick,
@@ -71,8 +109,8 @@ export default function DataTable<T extends Record<string, any>>({
   emptyDescription,
   emptyAction,
   filters,
-  loading = false,
-  loadError = false,
+  loading,
+  loadError,
   onRetry,
   searchValue,
   onSearchChange,
@@ -80,7 +118,7 @@ export default function DataTable<T extends Record<string, any>>({
   onSortChange,
   mobileRow,
 }: DataTableProps<T>) {
-  const isPhone = useSyncExternalStore(subscribePhone, isPhoneNow, () => false);
+  const { phoneRow, sortableColumns } = usePhoneLayout(mobileRow, columns);
   // Internal fallback state — used only when the caller doesn't control it.
   const [searchInner, setSearchInner] = useState('');
   const [sortKeyInner, setSortKeyInner] = useState<string | null>(null);
@@ -113,9 +151,6 @@ export default function DataTable<T extends Record<string, any>>({
     setSort(sortKey === key ? { key, dir: nextDir } : { key, dir: 'asc' });
   };
 
-  const phoneList = Boolean(mobileRow) && isPhone;
-  // The phone list has no column headers, so its sort lives in a select.
-  const sortableColumns = phoneList ? columns.filter((col) => col.sortable) : [];
 
   return (
     <div>
@@ -137,26 +172,7 @@ export default function DataTable<T extends Record<string, any>>({
             </div>
           )}
           {filters && <div className="flex gap-2 flex-wrap">{filters}</div>}
-          {sortableColumns.length > 0 && (
-            <select
-              value={sortKey ? `${sortKey}:${sortDir}` : ''}
-              onChange={(e) => {
-                const [key, dir] = e.target.value.split(':');
-                setSort(key ? { key, dir: dir as SortDir } : { key: null, dir: 'asc' });
-              }}
-              aria-label="Sort by"
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-            >
-              <option value="">Sort: as listed</option>
-              {sortableColumns.flatMap((col) => {
-                const label = typeof col.header === 'string' ? col.header : col.key;
-                return [
-                  <option key={`${col.key}:asc`} value={`${col.key}:asc`}>{label} ↑</option>,
-                  <option key={`${col.key}:desc`} value={`${col.key}:desc`}>{label} ↓</option>,
-                ];
-              })}
-            </select>
-          )}
+          <PhoneSortSelect columns={sortableColumns} sortKey={sortKey} sortDir={sortDir} onChange={setSort} />
         </div>
       )}
 
@@ -174,10 +190,10 @@ export default function DataTable<T extends Record<string, any>>({
           description={emptyDescription}
           action={emptyAction}
         />
-      ) : mobileRow && phoneList ? (
+      ) : phoneRow ? (
         <ul className="overflow-hidden rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
           {filtered.map((row, idx) => (
-            <li key={idx}>{mobileRow(row)}</li>
+            <li key={idx}>{phoneRow(row)}</li>
           ))}
         </ul>
       ) : (

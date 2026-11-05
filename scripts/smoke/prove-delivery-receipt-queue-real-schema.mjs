@@ -398,6 +398,7 @@ function main() {
   assert.equal(c2.attempt, 2);
   assert.match(finish(c2, 'sent').err, /RECEIPT_SENT_PROOF_REQUIRED/);
   assert.equal(finish({ ...c2, claim_token: id('99') }, 'sent', "NULL, 'msg-1', 'x@example.invalid'").out, 'stale');
+  assert.match(finish(c2, 'sent', "NULL, 'msg-1', 'other@example.invalid'").err, /RECEIPT_SENT_TO_MISMATCH/);
   assert.equal(finish(c2, 'sent', "NULL, 'msg-1', 'ki25-farm@example.invalid'").out, 'sent');
   assert.equal(row(1, "status || ' ' || resend_message_id || ' ' || sent_to || ' ' || (sent_at IS NOT NULL) || ' ' || (claim_token IS NULL)"),
     'sent msg-1 ki25-farm@example.invalid true true');
@@ -484,6 +485,20 @@ function main() {
   assert.equal(finish(fa, 'sent', "NULL, 'msg-a', 'ki25-farm@example.invalid', 'ki25-finish-bound'").out, 'sent');
   assert.equal(finish(fb, 'sent', "NULL, 'msg-b', 'ki25-farm@example.invalid', 'ki25-finish-b'").out, 'sent');
   console.log('[prover] a finish key reused for another receipt or outcome is refused');
+
+  // A retried claim only answers while its lease holds; after that the row belongs to a fresh claim, which
+  // runs the 23-hour check (a replay past it could send outside the provider's duplicate guard).
+  seedDelivery(13); assert.equal(complete(13, { emailReceipt: 'true' }).status, 0);
+  due(13);
+  const e1 = claim('ki25-claim-expired');
+  assert.equal(e1.length, 1);
+  psql(`UPDATE public.delivery_receipt_queue SET claimed_at = now() - interval '11 minutes',
+    first_attempt_at = now() - interval '23 hours 5 minutes' WHERE id = '${e1[0].id}';`);
+  assert.equal(claim('ki25-claim-expired').length, 0, 'an expired claim is not replayed');
+  assert.equal(row(13, 'status'), 'sending');
+  assert.equal(claim().length, 0);
+  assert.match(row(13, "status || ' ' || last_error"), /^needs_check .*Stopped retrying/);
+  console.log('[prover] a retried claim past its lease returns nothing; the fresh claim stops it at 23 hours');
 
   // A delivery confirmation with no key (send-email allows it) names no delivery: one sent to this customer
   // around the receipt may be it, so the receipt goes to the office list instead of sending. Runs last: the

@@ -23,7 +23,7 @@
 --      confirmation without a delivery reference (no key, or an unscoped one) reached this customer since the
 --      day before the receipt was owed (needs_check: it may be this receipt); the customer has no email now
 --      (needs_check); or a retry would fall outside the email provider's 24-hour duplicate guard (needs_check).
---      A retried claim (same key) re-runs the first three checks, returns the address that claim fixed
+--      A retried claim (same key), only while its 10-minute lease holds, re-runs the first three checks, returns the address that claim fixed
 --      (attempt_to), and claims nothing new. A finish key is bound to its receipt, token and outcome.
 --   4. pg_net is enabled and a pg_cron job (every 2 minutes) runs _wake_delivery_receipt_worker(), which posts to
 --      the worker only when a row is due AND both Vault secrets delivery_receipt_worker_url and
@@ -444,13 +444,14 @@ BEGIN
   END IF;
   -- A retry with the same key (its answer was lost) re-checks the receipts that call claimed and still holds,
   -- returns them with the same tokens and the address that claim fixed, and claims nothing new.
+  -- Only while the lease holds: after 10 minutes a fresh claim may take the row, and the 23-hour check runs there.
   -- Only ids and tokens are saved in idempotency_keys, never the customer email.
   v_saved := public.check_idempotency(p_idempotency_key, 'claim_delivery_receipts');
   v_replay := v_saved IS NOT NULL;
   FOR v_row IN
     SELECT * FROM public.delivery_receipt_queue q
      WHERE CASE WHEN v_replay
-                THEN q.status = 'sending'
+                THEN q.status = 'sending' AND q.claimed_at >= now() - interval '10 minutes'
                      AND EXISTS (SELECT 1 FROM jsonb_to_recordset(v_saved) AS s(id uuid, claim_token uuid)
                                   WHERE s.id = q.id AND s.claim_token = q.claim_token)
                 ELSE (q.status = 'pending' AND q.next_attempt_at <= now())
@@ -608,6 +609,12 @@ BEGIN
       RAISE EXCEPTION 'IDEMPOTENCY_KEY_REUSED: this key finished a different receipt or outcome' USING ERRCODE = '22023';
     END IF;
     RETURN v_saved ->> 'status';
+  END IF;
+  -- A sent receipt must have gone to the address this claim fixed.
+  IF p_outcome = 'sent' AND EXISTS (SELECT 1 FROM public.delivery_receipt_queue q
+                                     WHERE q.id = p_id AND q.claim_token = p_claim_token AND q.status = 'sending'
+                                       AND lower(q.attempt_to) IS DISTINCT FROM lower(btrim(p_sent_to))) THEN
+    RAISE EXCEPTION 'RECEIPT_SENT_TO_MISMATCH: the receipt was claimed for a different address' USING ERRCODE = '22023';
   END IF;
   UPDATE public.delivery_receipt_queue q
      SET status = CASE

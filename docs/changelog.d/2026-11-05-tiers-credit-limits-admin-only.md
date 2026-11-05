@@ -7,7 +7,7 @@
   `CREDIT_LIMIT_ADMIN_ONLY`) through the API, `save_customer` and Bulk Customer Import. A rep's new
   customer starts on the Settings Default Tier with no limit. Its trigger now also fires on those two
   columns; before, a direct update of just the tier never reached it.
-- A booking's tier and planned flag change only through `save_quote`: a direct API update of either
+- A booking's tier and planned flag change only through `save_quote`: a direct API update of either, or a direct insert of a booking off tier 1 or already planned,
   is refused (`QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE`), admins included. The screens' direct status and
   soft-delete updates don't touch them.
 - Customer screen: Pricing Tier and Credit Limit are read-only for a sales rep, with a one-line note.

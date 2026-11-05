@@ -1,5 +1,5 @@
 -- Written 2026-11-05. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261109110000_tiers_credit_limits_admin_only.md.
+-- docs/reference/migrations.d/20261111100000_tiers_credit_limits_admin_only.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (permissions; Mason's decision 2026-11-01, Taha's lane item 4, 2026-11-03):
@@ -10,7 +10,8 @@
 --      A rep's new customer starts on the Settings Default Tier with no credit limit; an admin
 --      changes either afterwards. Re-sending an unchanged tier or limit is not a change.
 --   2. A booking's tier and planned flag change only through save_quote (permission matrix W05).
---      A new trigger refuses a direct API update of quotes.tier or quotes.is_planned
+--      A new trigger refuses a direct API update of quotes.tier or quotes.is_planned, and a direct
+--      API insert of a booking off tier 1 or already planned (the column defaults)
 --      (QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE), for admins too. The SECURITY DEFINER functions that set
 --      them (save_quote's implementation, restore-version, auto-expire) run as the owner and are
 --      unaffected. The screen's direct status and soft-delete updates don't touch these columns.
@@ -151,8 +152,12 @@ CREATE FUNCTION public.guard_quote_direct_tier_planned_20261107()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
+  -- A direct insert must take the column defaults (tier 1, not planned); save_quote sets the rest.
   IF current_user IN ('authenticated', 'anon')
-     AND (NEW.tier IS DISTINCT FROM OLD.tier OR NEW.is_planned IS DISTINCT FROM OLD.is_planned) THEN
+     AND (CASE WHEN TG_OP = 'INSERT'
+               THEN NEW.tier IS DISTINCT FROM 1 OR NEW.is_planned IS DISTINCT FROM false
+               ELSE NEW.tier IS DISTINCT FROM OLD.tier OR NEW.is_planned IS DISTINCT FROM OLD.is_planned
+          END) THEN
     RAISE EXCEPTION 'QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE: a booking''s tier and planned flag change only by saving the quote';
   END IF;
   RETURN NEW;
@@ -164,7 +169,7 @@ $function$
 REVOKE ALL ON FUNCTION public.guard_quote_direct_tier_planned_20261107() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER quotes_guard_direct_tier_planned_20261107
-  BEFORE UPDATE OF tier, is_planned ON public.quotes
+  BEFORE INSERT OR UPDATE OF tier, is_planned ON public.quotes
   FOR EACH ROW EXECUTE FUNCTION public.guard_quote_direct_tier_planned_20261107();
 
 DO $postflight$
@@ -191,9 +196,10 @@ BEGIN
           WHERE t.tgrelid = 'public.customers'::regclass AND t.tgname = 'customers_guard_rep_edit_20261013'
             AND t.tgfoid = p.oid AND t.tgenabled = 'O')
         IS DISTINCT FROM 'CREATE TRIGGER customers_guard_rep_edit_20261013 BEFORE INSERT OR UPDATE OF assigned_sales_rep, default_commission_split, is_active, prepay_balance_cents, assigned_tier, credit_limit_cents ON public.customers FOR EACH ROW EXECUTE FUNCTION guard_customer_rep_edit_20261013()'
-     OR NOT EXISTS (SELECT 1 FROM pg_trigger t
-                     WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_guard_direct_tier_planned_20261107'
-                       AND t.tgfoid = q.oid AND t.tgenabled = 'O') THEN
+     OR (SELECT pg_get_triggerdef(t.oid) FROM pg_trigger t
+          WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_guard_direct_tier_planned_20261107'
+            AND t.tgfoid = q.oid AND t.tgenabled = 'O')
+        IS DISTINCT FROM 'CREATE TRIGGER quotes_guard_direct_tier_planned_20261107 BEFORE INSERT OR UPDATE OF tier, is_planned ON public.quotes FOR EACH ROW EXECUTE FUNCTION guard_quote_direct_tier_planned_20261107()' THEN
     RAISE EXCEPTION 'POSTFLIGHT: a guard lost its change, owner, mode, search_path, grants or trigger';
   END IF;
 END

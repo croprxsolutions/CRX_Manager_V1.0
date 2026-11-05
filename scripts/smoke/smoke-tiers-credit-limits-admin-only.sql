@@ -10,6 +10,8 @@
 --   E  An admin changes the tier and the credit limit
 --   F  A direct API update of a booking's tier is refused QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE, even
 --      for an admin; a direct update that doesn't touch tier or the planned flag still works
+--   G  A rep's direct API insert of a booking off tier 1, or already planned, is refused
+--      QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -112,6 +114,26 @@ BEGIN
     UPDATE quotes SET header_notes = 'smoke note' WHERE id = v_q;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (F) a direct update without tier or planned flag was refused: ' || SQLERRM || ';';
+  END;
+  RESET ROLE;
+
+  -- G: back as the rep (the admin block above switched the claims).
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    INSERT INTO quotes (quote_number, customer_id, status, tier, created_by, salesman_id)
+      VALUES ('SMK-TIER-G1-' || v_suffix, v_c1, 'draft', 3, v_rep, v_rep);
+    v_fails := v_fails || ' (G) a rep inserted a tier-3 booking directly;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE%' THEN v_fails := v_fails || ' (G) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+  BEGIN
+    INSERT INTO quotes (quote_number, customer_id, status, tier, is_planned, created_by, salesman_id)
+      VALUES ('SMK-TIER-G2-' || v_suffix, v_c1, 'draft', 1, true, v_rep, v_rep);
+    v_fails := v_fails || ' (G) a rep inserted a planned booking directly;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE%' THEN v_fails := v_fails || ' (G) wrong refusal: ' || SQLERRM || ';'; END IF;
   END;
   RESET ROLE;
 

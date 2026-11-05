@@ -349,6 +349,8 @@ LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
 $function$;
 ALTER FUNCTION public._normalized_category_timing(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._normalized_category_timing(text) FROM PUBLIC, anon, authenticated, service_role;
+-- normalize_product_category runs as the signed-in user (an admin's direct product save or insert).
+GRANT EXECUTE ON FUNCTION public._normalized_category_timing(text) TO authenticated;
 
 -- Same behaviour as before; the table now lives in _normalized_category_timing.
 CREATE OR REPLACE FUNCTION public.normalize_product_category()
@@ -592,7 +594,7 @@ REVOKE ALL ON FUNCTION public._product_parent_values(public.product_parents) FRO
 -- The next log entry's number, taken before the size copies that reference it.
 CREATE FUNCTION public._next_product_parent_event_id() RETURNS bigint
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-  SELECT nextval('public.product_parent_events_id_seq'::regclass);
+  SELECT nextval(pg_get_serial_sequence('public.product_parent_events', 'id'));
 $function$;
 ALTER FUNCTION public._next_product_parent_event_id() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._next_product_parent_event_id() FROM PUBLIC, anon, authenticated, service_role;
@@ -1217,19 +1219,29 @@ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $f
 DECLARE
   v_from uuid;
   v_to public.product_parents%ROWTYPE;
+  v_refusal text;
+  v_prices jsonb;
 BEGIN
   PERFORM public._product_parent_require_admin();
   SELECT parent_id INTO v_from FROM public.product_parent_members WHERE product_id = p_product_id;
   SELECT * INTO v_to FROM public.product_parents WHERE id = p_to_parent_id;
+  v_refusal := public._product_size_move_refusal(p_product_id, p_to_parent_id);
+  -- The per-acre prices the destination's rates would save (only for an allowed move).
+  IF v_refusal IS NULL THEN
+    v_prices := public.preview_product_rate_correction(p_product_id, v_to.rate_per_acre, v_to.rate_unit);
+  END IF;
   RETURN jsonb_build_object(
-    'refusal', public._product_size_move_refusal(p_product_id, p_to_parent_id),
+    'refusal', v_refusal,
+    'prices', v_prices->'after', 'before_prices', v_prices->'before',
     'from_parent_id', v_from,
     'from_parent_version', (SELECT parent_version FROM public.product_parents WHERE id = v_from),
     'to_parent_id', p_to_parent_id, 'to_parent_version', v_to.parent_version,
     'size_fingerprint', public._product_size_fingerprint(p_product_id),
     'before', public._product_size_values(p_product_id),
     'after', jsonb_build_object('category', v_to.category, 'use_timings', to_jsonb(v_to.use_timings),
-      'rate_per_acre', v_to.rate_per_acre::text, 'rate_unit', v_to.rate_unit, 'suggested_rate', v_to.suggested_rate),
+      'rate_per_acre', v_to.rate_per_acre::text, 'rate_unit', v_to.rate_unit, 'suggested_rate', v_to.suggested_rate,
+      'epa_registration', COALESCE((SELECT public._normalize_epa_registration(p.epa_registration) FROM public.products p
+                                     WHERE p.id = p_product_id), v_to.generic_epa_registration)),
     'rates_locked', COALESCE((SELECT is_locked FROM public.product_rate_lock WHERE id), true));
 END;
 $function$;
@@ -1285,7 +1297,10 @@ BEGIN
   -- A parent left with no sizes is kept, inactive.
   IF v_from_left = 0 THEN UPDATE public.product_parents SET is_active = false WHERE id = v_from; END IF;
   v_event := public._next_product_parent_event_id();
-  v_copy := public._copy_parent_to_size(p_to_parent_id, p_product_id, v_event, true, false, false);
+  -- A size with no EPA number takes the new parent's, as an added size does.
+  v_copy := public._copy_parent_to_size(p_to_parent_id, p_product_id, v_event, true, false,
+    (SELECT public._normalize_epa_registration(p.epa_registration) IS NULL AND pp.generic_epa_registration IS NOT NULL
+       FROM public.products p, public.product_parents pp WHERE p.id = p_product_id AND pp.id = p_to_parent_id));
   PERFORM public._product_parent_event(v_event, p_to_parent_id, 'size_moved', v_reason, v_evidence,
     jsonb_build_object('from_parent_id', v_from), jsonb_build_object('to_parent_id', p_to_parent_id), jsonb_build_array(v_copy));
   -- The old parent's log records the move too.

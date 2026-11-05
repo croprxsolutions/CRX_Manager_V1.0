@@ -257,7 +257,8 @@ const fromPreview = (rows, p) => rows.map((r, i) => (r.rates ? { ...r, expected_
 const count = () => scalar('SELECT count(*) FROM public.products;');
 const field = (name, cols) => scalar(`SELECT concat_ws('|', ${cols}) FROM public.products WHERE product_name = '${name.replaceAll("'", "''")}';`);
 // The amount exactly as returned, refused unless whole cents.
-const cents = (v) => { assert.match(String(v), /^[0-9]+([.][0-9]{1,2})?$/, `${v} is not whole cents`); return Number(v).toFixed(2); };
+// String padding, not Number: a large amount keeps its exact cents.
+const cents = (v) => { assert.match(String(v), /^[0-9]+([.][0-9]{1,2})?$/, `${v} is not whole cents`); const [i, f = ''] = String(v).split('.'); return `${i}.${f.padEnd(2, '0')}`; };
 const TIERS = ['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'];
 
 const PA_NAME = '[PROVER] Alpha 4L';
@@ -298,6 +299,14 @@ function main() {
   ownerOk(`UPDATE public.products SET category = 'Utility', use_timings = '{}' WHERE id = '${EXISTING}';`);
   assert.equal(prod(EXISTING, 'category'), 'Other');
   ownerOk(`UPDATE public.products SET category = 'Herbicide' WHERE id = '${EXISTING}';`);
+  // The alias trigger runs as the signed-in user: an admin's direct product save and insert (the
+  // product form, bulk import) must still pass through it.
+  ok(ADMIN, `UPDATE public.products SET category = 'Post Emergence' WHERE id = '${EXISTING}';`);
+  assert.equal(prod(EXISTING, 'category, use_timing'), 'Herbicide|Post-Emergence');
+  ok(ADMIN, `INSERT INTO public.products (product_name, sku, category, product_form, inventory_unit, is_active)
+    VALUES ('[PROVER] Direct Insert', 'EX-3', 'Utility', 'liquid', 'Gal', true);`);
+  assert.equal(field('[PROVER] Direct Insert', 'category'), 'Other');
+  console.log('[prover] an admin browser session still saves and inserts products through the alias trigger');
   console.log('[prover] the category alias trigger still maps old names and their timing');
 
   // Access.
@@ -347,6 +356,8 @@ function main() {
   ownerRefused(`UPDATE public.products SET use_timing = 'Pre-Emerge' WHERE id = '${A1}';`, /PRODUCT_PARENT_VALUE: use timing/);
   ownerRefused(`UPDATE public.products SET category = 'Post Emergence' WHERE id = '${A1}';`, /PRODUCT_PARENT_VALUE: use timing/);
   ownerRefused(`UPDATE public.products SET epa_registration = '100-3' WHERE id = '${A1}';`, /PRODUCT_PARENT_VALUE: EPA number/);
+  // A saved size's form is already fixed by the unit guard, so a size always keeps its parent's form.
+  ownerRefused(`UPDATE public.products SET product_form = 'dry' WHERE id = '${A1}';`, /can't change on a saved product/);
   ownerOk(`UPDATE public.products SET category = category, use_timings = use_timings, use_timing = use_timing, rate_per_acre = rate_per_acre,
     suggested_rate = suggested_rate, epa_registration = '100-1', notes = 'resent' WHERE id = '${A1}';`);
   console.log('[prover] a grouped size refuses its own category, timings, EPA number and rates, naming the parent; unchanged resends pass');
@@ -445,6 +456,19 @@ function main() {
   assert.equal(call(ADMIN, move(C.product_id, B.parent_id, mc, 'k-m3')).from_parent_inactive, true);
   assert.equal(scalar(`SELECT is_active FROM public.product_parents WHERE id = '${C.parent_id}';`), 'f');
   assert.equal(scalar(`SELECT count(*) FROM public.product_parent_events WHERE event_type = 'size_moved' AND parent_id IN ('${C.parent_id}', '${B.parent_id}') AND evidence = 'label photo';`), '3');
+  // A size with no EPA number takes the new parent's; the preview shows it and the per-acre prices.
+  const E = call(ADMIN, create({ name: '[PROVER] Epsilon', product_form: 'liquid', category: 'Fungicide', generic_epa_registration: '200-1' },
+    { product_name: '[PROVER] Epsilon 1', sku: 'EP-1', inventory_unit: 'Gal' }, 'k-create-e'));
+  const F = call(ADMIN, create({ name: '[PROVER] Phi', product_form: 'liquid', category: 'Fungicide' },
+    { product_name: '[PROVER] Phi 1', sku: 'PH-1', inventory_unit: 'Gal' }, 'k-create-f'));
+  const mf = mp(F.product_id, E.parent_id);
+  assert.equal(mf.refusal, null);
+  assert.equal(mf.after.epa_registration, '200-1');
+  assert.ok(mf.prices && typeof mf.prices === 'object' && 'tier1_price_per_acre' in mf.prices, JSON.stringify(mf));
+  assert.equal(mp(A1, D.parent_id).prices, null);
+  call(ADMIN, move(F.product_id, E.parent_id, mf, 'k-m4'));
+  assert.equal(prod(F.product_id, 'epa_registration'), '200-1');
+  console.log('[prover] a moved size with no EPA number takes the new parent\'s; the move preview shows the EPA number and per-acre prices');
   console.log('[prover] a size moves with reason and evidence; locked rate, form and fill-source problems refused; stale downloads refused; an emptied parent goes inactive');
 
   // Identity correction.

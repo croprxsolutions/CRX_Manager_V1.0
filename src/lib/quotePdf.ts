@@ -166,6 +166,21 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   }
 
   // ─── Sections with tables ─────────────────────────────────
+  // Wrapped note, one line at a time so a long note continues on a new page
+  // instead of printing over the footer area.
+  const pageBottom = doc.internal.pageSize.getHeight() - 50;
+  const drawNote = (text: string, lineHeight: number, indent = 4) => {
+    for (const line of doc.splitTextToSize(text, pageW - margin * 2 - indent * 2) as string[]) {
+      if (y + lineHeight > pageBottom) {
+        doc.addPage();
+        y = 40;
+      }
+      doc.text(line, margin + indent, y + lineHeight - 6);
+      y += lineHeight;
+    }
+    y += 4;
+  };
+
   for (const section of data.sections) {
     // Section header
     doc.setFillColor(...CRX_GREEN);
@@ -181,9 +196,7 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
       doc.setFontSize(9);
       doc.setFont('helvetica', 'italic');
       doc.setTextColor(...GRAY);
-      const headerNoteLines = doc.splitTextToSize(section.section_header_notes, pageW - margin * 2 - 8);
-      doc.text(headerNoteLines, margin + 4, y + 4);
-      y += headerNoteLines.length * 4 + 8;
+      drawNote(section.section_header_notes, 11);
     }
 
     const activeCols = (columns || DEFAULT_PDF_COLUMNS).filter((c) => PDF_COLUMN_DEFS[c]);
@@ -227,14 +240,13 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
       doc.setFontSize(8);
       doc.setTextColor(...GRAY);
       doc.setFont('helvetica', 'italic');
-      doc.text(section.section_notes, margin + 4, y + 4);
-      y += 14;
+      drawNote(section.section_notes, 10);
     }
 
     y += 10;
 
-    // Check for page break
-    if (y > 700) {
+    // Check for page break: the next section needs room for its header, table heading and a row
+    if (y > pageBottom - 80) {
       doc.addPage();
       y = 40;
     }
@@ -266,9 +278,7 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
     doc.setFontSize(9);
     doc.setTextColor(...GRAY);
     doc.setFont('helvetica', 'normal');
-    const lines = doc.splitTextToSize(data.footer_notes, pageW - margin * 2);
-    doc.text(lines, margin, y);
-    y += lines.length * 12 + 10;
+    drawNote(data.footer_notes, 12, 0);
   }
 
   // ─── Footer bar ───────────────────────────────────────────

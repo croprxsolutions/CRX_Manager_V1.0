@@ -7066,3 +7066,13 @@ quote-version trust-marker route intact, so these were stale fingerprints, not d
 `20261027080400` (any active rep may convert; the actor stays bound), so the sweep is clean both before and after
 that migration applies. The candidate digest was captured from a disposable PostgreSQL replica that first reproduced
 every live digest. Still open until: review, merge, and a fresh live sweep after the candidate migration is applied.
+
+### Closed sub-item 2026-11-05 — KI-39 quote PDF section notes
+
+Original text: "Long section notes on quote PDFs overprint the items table (`src/lib/quotePdf.ts:190-191`)".
+
+Closure: `src/lib/quotePdf.ts` now wraps section header notes, notes under a section's table and quote footer notes
+one line at a time, with full line spacing, and starts a new page before a line would reach the footer. A new section
+also starts on a fresh page when there is no room for its header, table heading and first row. Checked by rendering
+test quotes (short notes, long notes, a note crossing a page, long footer notes) to images before and after the fix.
+No database change. The year-end "Change" colour part of KI-39 stays open.

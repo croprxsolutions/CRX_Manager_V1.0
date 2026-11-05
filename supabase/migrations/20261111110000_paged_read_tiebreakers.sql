@@ -15,11 +15,12 @@
 --
 -- Safety: the preflight refuses unless each live body is exactly the one read from live on 2026-11-05
 -- (md5 below, carriage returns removed); the postflight checks each new body and that owner, grants,
--- security mode, settings, return type and volatility did not move.
+-- security mode, settings, return type, volatility and argument defaults did not move.
 
 CREATE TEMP TABLE paged_read_tiebreakers_attrs ON COMMIT DROP AS
 SELECT p.oid AS fn_oid, p.oid::regprocedure::text AS sig, pg_get_userbyid(p.proowner) AS owner,
        p.proacl::text AS acl, p.proconfig, p.prorettype, p.provolatile, p.prosecdef,
+       pg_get_function_arguments(p.oid) AS args,
        pg_current_xact_id()::text AS transaction_id
   FROM pg_proc p
  WHERE p.oid IN (
@@ -193,6 +194,7 @@ BEGIN
   FOR v_fn IN
     SELECT a.sig, md5(replace(p.prosrc, chr(13), '')) AS body_md5, pg_get_userbyid(p.proowner) AS owner,
            p.proacl::text AS acl, p.proconfig, p.prorettype, p.provolatile, p.prosecdef,
+           pg_get_function_arguments(p.oid) AS args, a.args AS was_args,
            a.owner AS was_owner, a.acl AS was_acl, a.proconfig AS was_config, a.prorettype AS was_rettype,
            a.provolatile AS was_volatile, a.prosecdef AS was_secdef, a.transaction_id
       FROM pg_temp.paged_read_tiebreakers_attrs a JOIN pg_proc p ON p.oid = a.fn_oid
@@ -208,6 +210,7 @@ BEGIN
        OR v_fn.prorettype IS DISTINCT FROM v_fn.was_rettype
        OR v_fn.provolatile IS DISTINCT FROM v_fn.was_volatile
        OR v_fn.prosecdef IS DISTINCT FROM v_fn.was_secdef
+       OR v_fn.args IS DISTINCT FROM v_fn.was_args
        OR NOT v_fn.prosecdef THEN
       RAISE EXCEPTION 'POSTFLIGHT_FAIL: % is not the expected body/attributes (md5 %)', v_fn.sig, v_fn.body_md5;
     END IF;

@@ -1057,21 +1057,17 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // A slow or broken reply ends as 'failed', never stuck on 'pending' (PR #1302
-    // review, finding 4). The email may still have gone out, so Resend gets an
-    // idempotency key made of this log row's id and a fingerprint of the email: a
-    // retry of the same email reuses the row and Resend returns the first send
-    // instead of mailing it twice (it keeps keys 24 hours and never stores a failed
-    // request); a retry whose content changed is a different email and is sent.
-    // shortcut: past Resend's 24 hours a retry of a timed-out send can arrive twice; the error says to check first.
-    const resendPayload = JSON.stringify(resendBody);
-    const payloadDigest = Array.from(
-      new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(resendPayload))),
-      (b) => b.toString(16).padStart(2, "0"),
-    ).join("");
-    const resendIdempotencyKey = `${emailLogId}:${payloadDigest}`;
+    // The call to Resend gives up after RESEND_TIMEOUT_MS, so a slow reply can no
+    // longer hold the request until the platform kills it (PR #1302 review,
+    // finding 4). Only a reply that says the send failed marks the row 'failed'
+    // (Resend never stores a failed request, so a retry is safe). No answer, a
+    // dropped connection or an unreadable success may mean the customer already
+    // has the email, so the row stays 'pending' with the reason written on it:
+    // the pending check above then refuses a re-send under the same key until
+    // someone checks Resend and settles the row.
     let resendStatus = 0;
     let success = false;
+    let outcomeUnknown = false;
     let resendMessageId: string | null = null;
     let errorMessage: string | null = null;
     try {
@@ -1080,38 +1076,46 @@ Deno.serve(async (req: Request) => {
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${resendApiKey}`,
-          "Idempotency-Key": resendIdempotencyKey,
         },
-        body: resendPayload,
+        body: JSON.stringify(resendBody),
         signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
       });
       resendStatus = resendResp.status;
       const resendText = await resendResp.text();
-      let resendResult: { id?: string; message?: string } | null = null;
+      let resendResult: { id?: unknown; message?: unknown } | null = null;
       try {
         resendResult = JSON.parse(resendText);
       } catch {
         resendResult = null;
       }
       success = resendResp.ok && typeof resendResult?.id === "string";
-      resendMessageId = resendResult?.id ?? null;
-      errorMessage = success
-        ? null
-        : (resendResult?.message || `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`);
+      resendMessageId = success ? resendResult!.id as string : null;
+      if (resendResp.ok && !success) {
+        outcomeUnknown = true;
+        errorMessage = `Email provider accepted the request but its reply was unreadable: ${resendText.slice(0, 200)}`;
+      } else if (!success) {
+        errorMessage = typeof resendResult?.message === "string"
+          ? resendResult.message
+          : `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`;
+      }
     } catch (err) {
+      outcomeUnknown = true;
       errorMessage = (err as Error)?.name === "TimeoutError"
-        ? `Email provider did not answer within ${RESEND_TIMEOUT_MS / 1000} seconds. It may still have been sent; check the email log before sending again.`
+        ? `Email provider did not answer within ${RESEND_TIMEOUT_MS / 1000} seconds`
         : `Email provider request failed: ${(err as Error)?.message ?? String(err)}`;
     }
+    if (outcomeUnknown) {
+      errorMessage += ". It may still have been sent: check Resend, then mark this email_log row 'sent' or 'failed' before sending again.";
+    }
 
-    // 12. Update the pending row to sent/failed. Even if this update fails,
-    //     the pending row exists for idempotency replay — durability is
-    //     already achieved.
+    // 12. Update the pending row to sent/failed (or leave it pending, with the
+    //     reason, when the outcome is unknown). Even if this update fails, the
+    //     pending row exists for idempotency replay — durability is already achieved.
     const { error: postUpdateErr } = await adminClient
       .from("email_log")
       .update({
         resend_message_id: resendMessageId,
-        status: success ? "sent" : "failed",
+        status: success ? "sent" : outcomeUnknown ? "pending" : "failed",
         error_message: errorMessage,
       })
       .eq("id", emailLogId);
@@ -1141,7 +1145,8 @@ Deno.serve(async (req: Request) => {
         success: false,
         error: errorMessage,
         email_log_id: emailLogId,
-      }, 502);
+        ...(outcomeUnknown ? { needs_reconciliation: true } : {}),
+      }, outcomeUnknown ? 504 : 502);
     }
 
     return jsonResponse({

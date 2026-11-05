@@ -37,7 +37,6 @@ const QUOTE = "dddddddd-0000-4000-8000-000000000001";
 const OTHER_QUOTE = "dddddddd-0000-4000-8000-000000000002";
 
 interface ResendCall {
-  idempotencyKey: string | null;
   body: Record<string, unknown>;
 }
 
@@ -97,7 +96,6 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
     const url = new URL(req.url);
     if (url.host === "api.resend.com") {
       const call = {
-        idempotencyKey: req.headers.get("idempotency-key"),
         body: await req.json(),
       };
       resendCalls.push(call);
@@ -147,23 +145,26 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
 
 const okResend = () => Promise.resolve(new Response(JSON.stringify({ id: "re_1" }), { status: 200 }));
 
+// Every fetch in this file goes to the world the running test set up, and never
+// to the real network (the test run is also given no network permission).
+let currentWorld: ReturnType<typeof makeWorld> | null = null;
+globalThis.fetch = ((input: Request | URL | string, init?: RequestInit) => {
+  if (!currentWorld) throw new Error("fetch outside a test world");
+  return currentWorld.fakeFetch(input, init);
+}) as typeof fetch;
+
 async function send(
   world: ReturnType<typeof makeWorld>,
   caller: string,
   body: Record<string, unknown>,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = world.fakeFetch as typeof fetch;
-  try {
-    const res = await handler!(new Request("http://edge.test/send-email", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${caller}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }));
-    return { status: res.status, body: await res.json() };
-  } finally {
-    globalThis.fetch = realFetch;
-  }
+  currentWorld = world;
+  const res = await handler!(new Request("http://edge.test/send-email", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${caller}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }));
+  return { status: res.status, body: await res.json() };
 }
 
 const statementEmail = {
@@ -306,7 +307,7 @@ Deno.test("two first sends with the same key at the same moment send it once", a
 
 // --- A slow or broken email provider (item 4) --------------------------------
 
-Deno.test("a provider that never answers ends as failed, not pending, and a retry reuses the provider key only for the same content", async () => {
+Deno.test("a provider that never answers stops the request in time and blocks a blind re-send", async () => {
   const realTimeout = AbortSignal.timeout;
   const askedMs: number[] = [];
   AbortSignal.timeout = (ms: number) => {
@@ -316,38 +317,43 @@ Deno.test("a provider that never answers ends as failed, not pending, and a retr
   try {
     const world = makeWorld((_call, signal) =>
       new Promise((_resolve, reject) => {
+        if (signal?.aborted) return reject(signal.reason);
         signal?.addEventListener("abort", () => reject(signal.reason));
       })
     );
     const first = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`));
-    assertEquals(first.status, 502);
-    assert(String(first.body.error).startsWith("Email provider did not answer within 30 seconds"), String(first.body.error));
+    assertEquals(first.status, 504);
+    assertEquals(first.body.needs_reconciliation, true);
+    assert(String(first.body.error).startsWith("Email provider did not answer within 30 seconds. It may still have been sent"), String(first.body.error));
     assertEquals(askedMs, [30_000]);
     const row = world.tables.email_log[0];
-    assertEquals(row.status, "failed");
-    const firstKey = String(world.resendCalls[0].idempotencyKey);
-    assert(/^log-\d+:[0-9a-f]{64}$/.test(firstKey) && firstKey.startsWith(`${row.id}:`), `Resend key ${firstKey}`);
+    assertEquals(row.status, "pending", "unknown outcome stays pending");
+    assert(String(row.error_message).startsWith("Email provider did not answer"), "the reason is written on the row");
 
+    // It may have reached the customer, so the same email is not sent again until someone checks.
     const retry = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`));
-    assertEquals(retry.status, 502);
-    assertEquals(world.tables.email_log.length, 1, "the retry reuses the failed row");
-    assertEquals(world.resendCalls[1].idempotencyKey, firstKey, "the same email retried sends the same provider key");
-
-    // Corrected content is a different email: a new provider key, so Resend sends it.
-    const changed = await send(world, ADMIN, { ...quoteEmail(QUOTE, `quote-${QUOTE}`), html: "<p>Your corrected quote.</p>" });
-    assertEquals(changed.status, 502);
-    assertEquals(world.tables.email_log.length, 1, "still one row");
-    const changedKey = String(world.resendCalls[2].idempotencyKey);
-    assert(changedKey.startsWith(`${row.id}:`) && changedKey !== firstKey, `changed-content key ${changedKey}`);
+    assertEquals(retry.status, 409);
+    assertEquals(retry.body.needs_reconciliation, true);
+    assertEquals(world.resendCalls.length, 1, "Resend calls");
   } finally {
     AbortSignal.timeout = realTimeout;
   }
 });
 
-Deno.test("a reply that is not JSON ends as failed, not pending", async () => {
+Deno.test("an error reply that is not JSON marks the email failed, and a retry may send it", async () => {
   const world = makeWorld(() => Promise.resolve(new Response("<html>Bad gateway</html>", { status: 502 })));
-  const res = await send(world, ADMIN, quoteEmail(QUOTE));
+  const res = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`));
   assertEquals(res.status, 502);
   assertEquals(world.tables.email_log[0].status, "failed");
   assert(String(world.tables.email_log[0].error_message).includes("Email provider replied 502"), "error message");
+  const retry = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`));
+  assertEquals(retry.status, 502);
+  assertEquals(world.resendCalls.length, 2, "Resend calls");
+});
+
+Deno.test("an OK reply that cannot be read stays pending, not sent and not failed", async () => {
+  const world = makeWorld(() => Promise.resolve(new Response("OK", { status: 200 })));
+  const res = await send(world, ADMIN, quoteEmail(QUOTE));
+  assertEquals(res.status, 504);
+  assertEquals(world.tables.email_log[0].status, "pending");
 });

@@ -33,12 +33,9 @@ BEGIN
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_index i
-    JOIN pg_class c ON c.oid = i.indexrelid
-    WHERE c.relname = 'email_log_one_pending_send'
-      AND i.indrelid = 'public.email_log'::regclass
-      AND i.indisunique
-      AND pg_get_indexdef(i.indexrelid) LIKE '%(send_lock_key)%'
-      AND pg_get_expr(i.indpred, i.indrelid) LIKE '%pending%'
+    WHERE i.indexrelid = to_regclass('public.email_log_one_pending_send')
+      AND pg_get_indexdef(i.indexrelid) =
+        'CREATE UNIQUE INDEX email_log_one_pending_send ON public.email_log USING btree (send_lock_key) WHERE ((status = ''pending''::text) AND (send_lock_key IS NOT NULL))'
   ) THEN
     RAISE EXCEPTION 'email_log_one_pending_send is missing or not the partial unique index on send_lock_key';
   END IF;

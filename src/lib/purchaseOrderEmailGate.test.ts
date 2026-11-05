@@ -141,7 +141,8 @@ const source = readFileSync('supabase/functions/send-email/index.ts', 'utf8').re
 describe('send-email purchase order wiring', () => {
   it('limits purchase_order emails to admins', () => {
     expect(source).toContain('admin: ALL_EMAIL_TYPES,');
-    expect(source).toContain('sales_rep: CUSTOMER_EMAIL_TYPES,');
+    // Reps get the customer types minus the admin-only ones (A/R reminders).
+    expect(source).toContain('sales_rep: new Set([...CUSTOMER_EMAIL_TYPES].filter((t) => !ADMIN_ONLY_CUSTOMER_EMAIL_TYPES.has(t))),');
     expect(source).toContain('driver: new Set(["delivery_completed"]),');
     const customerTypes = source.slice(source.indexOf('const CUSTOMER_EMAIL_TYPES'), source.indexOf(']);', source.indexOf('const CUSTOMER_EMAIL_TYPES')));
     expect(customerTypes).not.toContain('purchase_order');

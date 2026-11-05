@@ -36,7 +36,7 @@ const COLUMN_ALIASES: Record<ProductImportColumn, string[]> = {
   notes: ['description', 'comments', 'note'],
 };
 
-export const normalizeProductImportHeader = (header: string) => header
+const normalizeProductImportHeader = (header: string) => header
   .toLowerCase()
   .trim()
   .replace(/[^a-z0-9]+/g, '_')
@@ -157,7 +157,7 @@ function canonical(value: string, allowed: readonly string[]): string {
 export function buildProductImportRow(
   cells: readonly string[], mapping: ColumnMapping, row: number, categories: readonly string[],
 ): ProductImportRow {
-  const raw: Partial<Record<ProductImportColumn, string>> = {};
+  const raw: RawImportRow = {};
   Object.entries(mapping.byIndex).forEach(([i, col]) => {
     const v = (cells[Number(i)] ?? '').trim();
     if (v) raw[col] = v;
@@ -184,8 +184,20 @@ export function buildProductImportRow(
   insert.signal_word = fix('signal_word', SIGNAL_WORDS);
   for (const k of Object.keys(insert) as (keyof ProductImportInsert)[]) if (insert[k] === undefined) delete insert[k];
 
+  // Every parser runs, so a valid field is kept even on a refused row; the first refusal is reported.
+  const numberError = parseImportNumbers(raw, insert);
+  const rupError = parseImportRup(raw.is_rup, insert);
+  const error = (insert.product_name ? undefined : 'Missing product name.') ?? numberError ?? rupError;
+  const { rates, error: rateError } = importRates(raw, insert.product_form);
+  const firstError = error ?? rateError;
+  return { row, insert, ...(rates ? { rates } : {}), fixes, ...(firstError ? { error: firstError } : {}) };
+}
+
+type RawImportRow = Partial<Record<ProductImportColumn, string>>;
+
+/** Copies the numeric setup fields onto the insert; returns the first refusal. */
+function parseImportNumbers(raw: RawImportRow, insert: ProductImportInsert): string | undefined {
   let error: string | undefined;
-  if (!insert.product_name) error = 'Missing product name.';
   if (raw.container_size !== undefined) {
     if (!DECIMAL.test(raw.container_size) || Number(raw.container_size) <= 0) error ??= 'Container size must be a number greater than 0.';
     else insert.container_size = raw.container_size;
@@ -200,22 +212,27 @@ export function buildProductImportRow(
     if (!/^[0-9]{1,9}$/.test(v)) error ??= `${col === 'rei_hours' ? 'REI hours' : 'PHI days'} must be a whole number.`;
     else insert[col] = Number(v);
   }
-  if (raw.is_rup !== undefined) {
-    const v = raw.is_rup.toLowerCase();
-    if (['yes', 'y', 'true', '1'].includes(v)) insert.is_rup = true;
-    else if (['no', 'n', 'false', '0'].includes(v)) insert.is_rup = false;
-    else error ??= 'RUP must be yes or no.';
-  }
+  return error;
+}
+
+function parseImportRup(value: string | undefined, insert: ProductImportInsert): string | undefined {
+  if (value === undefined) return undefined;
+  const v = value.toLowerCase();
+  if (['yes', 'y', 'true', '1'].includes(v)) insert.is_rup = true;
+  else if (['no', 'n', 'false', '0'].includes(v)) insert.is_rup = false;
+  else return 'RUP must be yes or no.';
+  return undefined;
+}
+
+function importRates(raw: RawImportRow, productForm: string | undefined): { rates?: ProductImportRates; error?: string } {
   // A seed or each product's rate unit is its stock unit, so a unit alone there is not a rate.
-  const seedOrEach = ['seed', 'each'].includes(insert.product_form ?? '');
-  let rates: ProductImportRates | undefined;
-  if (raw.rate_per_acre !== undefined || raw.suggested_rate !== undefined || (raw.rate_unit !== undefined && !seedOrEach)) {
-    if (raw.rate_per_acre !== undefined && !DECIMAL.test(raw.rate_per_acre)) {
-      error ??= 'Rate per acre must be a number of 0 or more, with at most 6 decimals.';
-    }
-    rates = { rate_per_acre: raw.rate_per_acre ?? null, rate_unit: raw.rate_unit ?? null, suggested_rate: raw.suggested_rate ?? null };
+  const seedOrEach = ['seed', 'each'].includes(productForm ?? '');
+  if (raw.rate_per_acre === undefined && raw.suggested_rate === undefined && (raw.rate_unit === undefined || seedOrEach)) return {};
+  const rates = { rate_per_acre: raw.rate_per_acre ?? null, rate_unit: raw.rate_unit ?? null, suggested_rate: raw.suggested_rate ?? null };
+  if (raw.rate_per_acre !== undefined && !DECIMAL.test(raw.rate_per_acre)) {
+    return { rates, error: 'Rate per acre must be a number of 0 or more, with at most 6 decimals.' };
   }
-  return { row, insert, ...(rates ? { rates } : {}), fixes, ...(error ? { error } : {}) };
+  return { rates };
 }
 
 /** A refusal from the preview or save, without its code token and the product name it repeats. */

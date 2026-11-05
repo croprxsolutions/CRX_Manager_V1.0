@@ -63,6 +63,88 @@ function skipReason(r: Row): string | null {
   return null;
 }
 
+function ImportPreview({ rows, ready, skipped, ratesLocked, ignored }: {
+  rows: Row[]; ready: number; skipped: number; ratesLocked: boolean; ignored: string[];
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="p-4 bg-green-50 border border-green-100 rounded-lg">
+          <div className="flex items-center gap-2 mb-1">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+            <span className="text-sm font-medium text-secondary">Ready to Import</span>
+          </div>
+          <p className="text-2xl font-semibold text-green-600">{ready}</p>
+        </div>
+        <div className="p-4 bg-red-50 border border-red-100 rounded-lg">
+          <div className="flex items-center gap-2 mb-1">
+            <AlertCircle className="w-5 h-5 text-red-600" />
+            <span className="text-sm font-medium text-secondary">Skipped</span>
+          </div>
+          <p className="text-2xl font-semibold text-red-600">{skipped}</p>
+          <p className="text-xs text-secondary mt-1">Errors and duplicates; nothing from these rows saves</p>
+        </div>
+      </div>
+      {ratesLocked && (
+        <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+          <Lock className="w-4 h-4" /> Rates are locked. Rows that set a rate are skipped; remove the rate columns or ask an admin to unlock rates.
+        </p>
+      )}
+      {ignored.length > 0 && (
+        <p className="text-xs text-amber-700">Columns not recognised, ignored: {ignored.join(', ')}</p>
+      )}
+      <div className="max-h-96 overflow-auto rounded-lg border border-gray-200">
+        <table className="w-full text-xs">
+          <thead className="sticky top-0 bg-gray-50 text-left text-secondary">
+            <tr>
+              <th className="p-2">Row</th>
+              <th className="p-2">Product</th>
+              <th className="p-2">Result</th>
+              <th className="p-2">Rate</th>
+              <th className="p-2 text-right">Per acre (T1 / T2 / T3)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => <ImportPreviewRow key={r.row} r={r} />)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function importStage(rows: Row[] | null, imported: number | null): 'choose' | 'preview' | 'done' {
+  if (imported !== null) return 'done';
+  return rows ? 'preview' : 'choose';
+}
+
+function ImportPreviewRow({ r }: { r: Row }) {
+  const why = skipReason(r);
+  const after = r.preview?.after;
+  return (
+    <tr className="border-t border-gray-100 align-top">
+      <td className="p-2 text-gray-500">{r.row}</td>
+      <td className="p-2">
+        <p className="font-medium text-nav-dark">{r.insert.product_name || '(no name)'}</p>
+        {r.insert.sku && <p className="text-gray-500">SKU {r.insert.sku}</p>}
+        {r.fixes.map((f) => <p key={f} className="text-gray-500">Fixed {f}</p>)}
+      </td>
+      <td className={`p-2 ${why ? 'text-red-700' : 'text-green-700'}`}>
+        {why ?? 'Ready'}
+        {!why && r.preview?.epa_matches.length ? (
+          <p className="text-gray-500">Same EPA number as {r.preview.epa_matches.map((m) => m.product_name).join(', ')} (another size is fine)</p>
+        ) : null}
+      </td>
+      <td className="p-2">{after?.rate_per_acre != null ? `${after.rate_per_acre} ${after.rate_unit ?? ''}` : '—'}</td>
+      <td className="p-2 text-right whitespace-nowrap">
+        {after?.rate_per_acre != null
+          ? `${money(after.tier1_price_per_acre)} / ${money(after.tier2_price_per_acre)} / ${money(after.tier3_price_per_acre)}`
+          : '—'}
+      </td>
+    </tr>
+  );
+}
+
 export default function BulkProductImport({ open, onClose, onSuccess }: BulkProductImportProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
@@ -157,8 +239,9 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
     }
   };
 
-  const ready = rows?.filter((r) => skipReason(r) === null) ?? [];
-  const skipped = rows?.filter((r) => skipReason(r) !== null) ?? [];
+  const stage = importStage(rows, imported);
+  const ready = (rows ?? []).filter((r) => skipReason(r) === null);
+  const skipped = (rows ?? []).filter((r) => skipReason(r) !== null);
 
   const handleImport = async () => {
     if (ready.length === 0) return;
@@ -193,7 +276,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   return (
     <Modal open={open} onClose={handleClose} title="Bulk Product" accent="Import" maxWidth="max-w-4xl">
       <div className="space-y-4">
-        {!rows && imported === null && (
+        {stage === 'choose' && (
           <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
             <h4 className="text-sm font-medium text-nav-dark mb-2 flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-blue-600" />
@@ -218,7 +301,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
           </div>
         )}
 
-        {!rows && imported === null && (
+        {stage === 'choose' && (
           <div>
             <label className="block text-sm font-medium text-secondary mb-2">Select File</label>
             <input
@@ -237,78 +320,11 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
           </div>
         )}
 
-        {rows && imported === null && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-4 bg-green-50 border border-green-100 rounded-lg">
-                <div className="flex items-center gap-2 mb-1">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                  <span className="text-sm font-medium text-secondary">Ready to Import</span>
-                </div>
-                <p className="text-2xl font-semibold text-green-600">{ready.length}</p>
-              </div>
-              <div className="p-4 bg-red-50 border border-red-100 rounded-lg">
-                <div className="flex items-center gap-2 mb-1">
-                  <AlertCircle className="w-5 h-5 text-red-600" />
-                  <span className="text-sm font-medium text-secondary">Skipped</span>
-                </div>
-                <p className="text-2xl font-semibold text-red-600">{skipped.length}</p>
-                <p className="text-xs text-secondary mt-1">Errors and duplicates; nothing from these rows saves</p>
-              </div>
-            </div>
-            {ratesLocked && (
-              <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                <Lock className="w-4 h-4" /> Rates are locked. Rows that set a rate are skipped; remove the rate columns or ask an admin to unlock rates.
-              </p>
-            )}
-            {ignored.length > 0 && (
-              <p className="text-xs text-amber-700">Columns not recognised, ignored: {ignored.join(', ')}</p>
-            )}
-            <div className="max-h-96 overflow-auto rounded-lg border border-gray-200">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-gray-50 text-left text-secondary">
-                  <tr>
-                    <th className="p-2">Row</th>
-                    <th className="p-2">Product</th>
-                    <th className="p-2">Result</th>
-                    <th className="p-2">Rate</th>
-                    <th className="p-2 text-right">Per acre (T1 / T2 / T3)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => {
-                    const why = skipReason(r);
-                    const after = r.preview?.after;
-                    return (
-                      <tr key={r.row} className="border-t border-gray-100 align-top">
-                        <td className="p-2 text-gray-500">{r.row}</td>
-                        <td className="p-2">
-                          <p className="font-medium text-nav-dark">{r.insert.product_name || '(no name)'}</p>
-                          {r.insert.sku && <p className="text-gray-500">SKU {r.insert.sku}</p>}
-                          {r.fixes.map((f) => <p key={f} className="text-gray-500">Fixed {f}</p>)}
-                        </td>
-                        <td className={`p-2 ${why ? 'text-red-700' : 'text-green-700'}`}>
-                          {why ?? 'Ready'}
-                          {!why && r.preview?.epa_matches.length ? (
-                            <p className="text-gray-500">Same EPA number as {r.preview.epa_matches.map((m) => m.product_name).join(', ')} (another size is fine)</p>
-                          ) : null}
-                        </td>
-                        <td className="p-2">{after?.rate_per_acre != null ? `${after.rate_per_acre} ${after.rate_unit ?? ''}` : '—'}</td>
-                        <td className="p-2 text-right whitespace-nowrap">
-                          {after?.rate_per_acre != null
-                            ? `${money(after.tier1_price_per_acre)} / ${money(after.tier2_price_per_acre)} / ${money(after.tier3_price_per_acre)}`
-                            : '—'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        {stage === 'preview' && rows && (
+          <ImportPreview rows={rows} ready={ready.length} skipped={skipped.length} ratesLocked={ratesLocked} ignored={ignored} />
         )}
 
-        {imported !== null && (
+        {stage === 'done' && (
           <div className="p-4 bg-green-50 border border-green-100 rounded-lg text-center" role="status">
             <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-2" />
             <h4 className="text-sm font-medium text-nav-dark mb-1">Import Complete</h4>
@@ -318,14 +334,14 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" onClick={handleClose}>
-            {imported !== null ? 'Close' : 'Cancel'}
+            {stage === 'done' ? 'Close' : 'Cancel'}
           </Button>
-          {!rows && imported === null && (
+          {stage === 'choose' && (
             <Button icon={<Upload className="w-4 h-4" />} onClick={handleParse} disabled={!file || parsing} loading={parsing}>
               {parsing ? 'Checking...' : 'Check File'}
             </Button>
           )}
-          {rows && imported === null && (
+          {stage === 'preview' && rows && (
             <>
               <Button variant="secondary" onClick={reset}>Choose Different File</Button>
               <Button onClick={handleImport} disabled={ready.length === 0 || saving} loading={saving}>

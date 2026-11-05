@@ -9,11 +9,11 @@ import {
   Calendar,
   Droplets,
   FileText,
-  Clock,
   Download,
   ChevronDown,
   ChevronUp,
   ChevronRight,
+  Search,
 } from 'lucide-react';
 import SectionCard from '../components/ui/SectionCard';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
@@ -208,7 +208,7 @@ export default function FieldDashboard() {
             </InfoRow>
           </dl>
         </div>
-        <OverviewTab summary={season_summary} activity={recent_activity} />
+        <OverviewTab summary={season_summary} />
         {children.length > 0 && (
           <SubHeading title={`Sub-fields (${children.length})`}>
             <ul className="divide-y divide-gray-100">
@@ -290,13 +290,7 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 
 /* ─── Overview section ──────────────────────────────────────────── */
 
-function OverviewTab({
-  summary,
-  activity,
-}: {
-  summary: FieldDashboardResponse['season_summary'];
-  activity: FieldActivityEntry[];
-}) {
+function OverviewTab({ summary }: { summary: FieldDashboardResponse['season_summary'] }) {
   const stats = [
     { label: 'Applications', value: summary.total_applications },
     { label: 'Acres Treated', value: summary.total_acres_treated.toLocaleString() },
@@ -304,39 +298,16 @@ function OverviewTab({
   ];
 
   return (
-    <>
-      <SubHeading title={`Season ${summary.season} Summary`}>
-        <dl className="grid grid-cols-3 divide-x divide-gray-100 px-1 pb-3">
-          {stats.map(({ label, value }) => (
-            <div key={label} className="px-3 py-1">
-              <dd className="font-heading text-3xl font-bold leading-tight text-nav-dark tabular-nums">{value}</dd>
-              <dt className="text-xs font-medium text-secondary">{label}</dt>
-            </div>
-          ))}
-        </dl>
-      </SubHeading>
-
-      <SubHeading title="Recent Activity">
-        {activity.length === 0 ? (
-          <p className="px-4 pb-3 text-sm text-secondary">No activity recorded for this field yet.</p>
-        ) : (
-          <ul className="divide-y divide-gray-100">
-            {activity.map((entry) => (
-              <li key={entry.id} className="flex items-start gap-3 px-4 py-2">
-                <Clock className="mt-0.5 w-4 h-4 shrink-0 text-secondary" aria-hidden="true" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-nav-dark">{entry.description}</p>
-                  <p className="text-xs text-secondary">
-                    {entry.performed_by_name} &middot;{' '}
-                    {formatLocalDate(new Date(entry.created_at))}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </SubHeading>
-    </>
+    <SubHeading title={`Season ${summary.season} Summary`}>
+      <dl className="grid grid-cols-3 divide-x divide-gray-100 px-1 pb-3">
+        {stats.map(({ label, value }) => (
+          <div key={label} className="px-3 py-1">
+            <dd className="font-heading text-3xl font-bold leading-tight text-nav-dark tabular-nums">{value}</dd>
+            <dt className="text-xs font-medium text-secondary">{label}</dt>
+          </div>
+        ))}
+      </dl>
+    </SubHeading>
   );
 }
 
@@ -662,6 +633,11 @@ function CropHistoryTab({
   const [saving, setSaving] = useState(false);
   const [editingSeason, setEditingSeason] = useState<number | null>(null);
   const [form, setForm] = useState<CropForm>(blankCropForm);
+  const [phoneSearch, setPhoneSearch] = useState('');
+  const needle = phoneSearch.trim().toLowerCase();
+  const phoneHistory = needle
+    ? history.filter((r) => [r.crop_type, r.variety, r.notes].some((v) => v?.toLowerCase().includes(needle)))
+    : history;
 
   const cur = currentSeasonYear();
   const existingSeasons = new Set(history.map((h) => h.season));
@@ -803,14 +779,27 @@ function CropHistoryTab({
         </dl>
       )}
       {/* Phones: one list, a row per season. */}
-      {history.length === 0 ? (
+      {history.length > 0 && (
+        <div className="relative border-t border-gray-100 px-4 py-2 md:hidden">
+          <Search className="absolute left-7 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" aria-hidden="true" />
+          <input
+            type="search"
+            value={phoneSearch}
+            onChange={(e) => setPhoneSearch(e.target.value)}
+            placeholder="Search crop history…"
+            aria-label="Search crop history"
+            className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-base text-nav-dark placeholder:text-gray-500"
+          />
+        </div>
+      )}
+      {phoneHistory.length === 0 ? (
         <div className="px-4 py-6 text-center md:hidden">
-          <p className="font-semibold text-nav-dark">No crop history</p>
-          <p className="text-sm text-secondary">{emptyDescription}</p>
+          <p className="font-semibold text-nav-dark">{history.length === 0 ? 'No crop history' : 'No matching seasons'}</p>
+          {history.length === 0 && <p className="text-sm text-secondary">{emptyDescription}</p>}
         </div>
       ) : (
         <ul className="border-t border-gray-100 divide-y divide-gray-100 md:hidden">
-          {history.map((r) => (
+          {phoneHistory.map((r) => (
             <li key={r.id} className="flex items-start justify-between gap-3 px-4 py-2.5">
               <div className="min-w-0">
                 <p className="font-semibold text-nav-dark">

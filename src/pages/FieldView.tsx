@@ -644,7 +644,7 @@ export default function FieldView() {
     return (
       <div
         key={card.job_id}
-        className={`transition-colors ${expanded ? 'border-l-4 border-crx-green bg-white' : 'bg-white'}`}
+        className="bg-white"
       >
         {/* Card header — the always-visible summary row (tap to expand). */}
         <button
@@ -881,6 +881,7 @@ export default function FieldView() {
       {/* Header — title + view toggle. Touch-friendly; sized for a phone width. */}
       <PhoneHeader
         title="My Day"
+        className="sticky top-14 z-20 md:top-16"
         eyebrow={parseLocalDate(today).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
         action={
           <div className="inline-flex shrink-0 rounded-lg bg-white/10 p-0.5">

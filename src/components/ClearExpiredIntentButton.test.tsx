@@ -45,6 +45,23 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    document.body.inert = false;
+  });
+
+  it('blocks the whole page from the clear until the reload, even while Sentry is slow', async () => {
+    let finishFlush: (ok: boolean) => void = () => {};
+    mockFlush.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finishFlush = resolve; }));
+    const intent = lock();
+    render(<ClearExpiredIntentButton intent={intent} operation="record_vendor_payment" />);
+    fireEvent.click(screen.getByText(LABEL));
+    expect(document.body.inert).toBeFalsy();
+    fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
+    await waitFor(() => expect(mockFlush).toHaveBeenCalled());
+    // Recovered form values must not be resubmittable before the reload lands.
+    expect(document.body.inert).toBe(true);
+    expect(mockReload).not.toHaveBeenCalled();
+    finishFlush(true);
+    await waitFor(() => expect(mockReload).toHaveBeenCalledTimes(1));
   });
 
   it('is hidden from non-admins', () => {
@@ -113,6 +130,7 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.any(String)));
     expect(mockReload).not.toHaveBeenCalled();
     expect(mockCapture).not.toHaveBeenCalled();
+    expect(document.body.inert).toBeFalsy();
   });
 
   it('explains a server refusal as a warning and does not reload (KI-27)', async () => {

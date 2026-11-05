@@ -58,6 +58,9 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
       setClearing(false);
       return;
     }
+    // The clear unlocks the screen, but it may still hold the recovered form values:
+    // block every click and key until the reload, or they could be resent under a new key.
+    document.body.inert = true;
     try {
       Sentry.captureMessage('Admin cleared an expired uncertain mutation', {
         level: 'info',

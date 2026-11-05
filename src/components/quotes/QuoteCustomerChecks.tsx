@@ -11,15 +11,18 @@ import { Sentry } from '../../lib/sentry';
 export function QuoteCreditStatus({ customerId }: { customerId: string }) {
   // Tagged with its customer so a switch never shows the previous customer's status, even for one render.
   const [result, setResult] = useState<{ customerId: string; status: { over: boolean; text: string } | 'error' } | null>(null);
-  // Re-read when the app comes back into view, so an invoice posted meanwhile shows before Convert.
+  // Re-read when the app comes back into view and once a minute while it stays open, so an invoice
+  // posted meanwhile shows before Convert.
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     const onVisible = () => { if (document.visibilityState === 'visible') setRefresh((n) => n + 1); };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
+    const timer = window.setInterval(onVisible, 60_000);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
+      window.clearInterval(timer);
     };
   }, []);
   useEffect(() => {

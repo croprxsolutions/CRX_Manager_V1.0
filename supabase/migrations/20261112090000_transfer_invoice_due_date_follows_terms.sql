@@ -1,5 +1,6 @@
 -- Transfer-created field invoices follow the customer's payment terms (KI-14).
--- ROUTINE: one function body replacement; no table, grant, policy or data change.
+-- ROUTINE: two private function body replacements; no table, policy or data change, and each
+-- body's REVOKE/GRANT re-states its live owner-only ACL unchanged.
 --
 -- _transfer_job_to_invoice_intent_impl_20260908 (the private body behind
 -- transfer_job_to_invoice) stamped every new invoice's due_date as the Chicago date + 30 days,
@@ -8,25 +9,42 @@
 -- so that +30 always survived. Both inserts (the multi-owner split and the single invoice) now
 -- stamp invoice_date + parse_payment_terms_days(that invoice's customer's terms), the date
 -- posting itself would stamp: Net 15 -> +15, Net 30 or blank -> +30, due on receipt -> +0.
--- They also copy those terms onto the invoice (payment_terms, blank stays NULL), so a later
--- change to the customer's terms cannot make the PDF print new terms beside the old date, and
--- the invoice screens recognize the date as the terms' stamp rather than a custom date. The date is stamped at transfer, not left NULL,
+-- They also copy those terms onto the invoice's payment_terms (blank customer terms freeze as
+-- 'Net 30', the 30 days the date already uses), so a later change to the customer's terms cannot
+-- make the PDF print new terms beside the old date, and the invoice screens recognize the date as
+-- the terms' stamp rather than a custom date. The date is stamped at transfer, not left NULL,
 -- because an unposted invoice can be emailed and the server PDF prints a NULL due date as
--- "On receipt". Saving terms on either invoice screen clears due_date, so posting re-derives it.
--- Nothing else in the body changes.
+-- "On receipt". Saving terms on the invoice screens clears due_date, so posting re-derives it
+-- from the saved terms. Nothing else in the transfer body changes.
+--
+-- Second body: _update_field_app_invoice_billing_replay_impl_20261015 (behind
+-- update_field_app_invoice_billing, the field-application screen's save) writes ONE payment_terms
+-- and due_date to every invoice id it is given. A split transfer now gives each owner its own
+-- terms, so a save of such a group would silently move every owner to one owner's terms. The body
+-- now locks the ids and refuses with SPLIT_INVOICE_TERMS_DIFFER when their saved terms differ,
+-- before any write; everything else is byte-identical. Live 2026-11-05: every customer is Net 30
+-- or blank, so no group can hold different terms yet. Editing mixed terms on that screen is a
+-- frontend follow-up (KI-14).
+--
+-- Out of scope (pre-existing, KNOWN_ISSUES KI-14): parse_payment_terms_days, which posting already
+-- uses for every invoice, reads the first number in the terms ('2/10 Net 30' -> 2 days); no live
+-- customer has such terms. The shared parser and all existing invoice rows are untouched.
 -- Already-saved invoices keep their due dates (live 2026-11-05: one transfer invoice, matching
 -- its customer's terms).
 --
--- Rollback: re-create the private body from
--- 20261104190000_job_invoice_lines_keep_job_unit.sql (md5 a72cf3a5cff53d4024ad52b832985724)
--- under this function's name, then re-run the REVOKE/GRANT below.
+-- Rollback: re-create the transfer body from 20261104190000_job_invoice_lines_keep_job_unit.sql
+-- (md5 a72cf3a5cff53d4024ad52b832985724) and the billing body from
+-- 20260625150000_invoice_header_footer_discount.sql (md5 34695e4be9724bf46dc5e962f8f0e478) under
+-- their private names, then re-run the REVOKE/GRANT pairs below.
 -- caller-analysis: _transfer_job_to_invoice_intent_impl_20260908 :: REVOKE/GRANT keep its ACL exactly as live (postgres only); its one caller is the postgres-owned SECURITY DEFINER wrapper transfer_job_to_invoice, which the owner EXECUTE grant still covers
+-- caller-analysis: _update_field_app_invoice_billing_replay_impl_20261015 :: REVOKE/GRANT keep its ACL exactly as live (postgres only); its one caller is the postgres-owned SECURITY DEFINER wrapper update_field_app_invoice_billing, which the owner EXECUTE grant still covers
 
 SET LOCAL lock_timeout = '5s';
 
 DO $preflight$
 DECLARE
   v_impl oid := to_regprocedure('public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)');
+  v_billing oid := to_regprocedure('public._update_field_app_invoice_billing_replay_impl_20261015(uuid[],text,text,text,date,text,text,jsonb,uuid,text)');
 BEGIN
   IF v_impl IS NULL
      OR (SELECT md5(p.prosrc) FROM pg_proc p WHERE p.oid = v_impl) IS DISTINCT FROM 'a72cf3a5cff53d4024ad52b832985724'
@@ -38,6 +56,17 @@ BEGIN
           AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]
      ) THEN
     RAISE EXCEPTION 'TRANSFER_DUE_DATE_SOURCE_DRIFT: the private transfer body, owner, settings or ACL is not the reviewed live version';
+  END IF;
+  IF v_billing IS NULL
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_proc p
+        WHERE p.oid = v_billing AND p.prosecdef
+          AND md5(p.prosrc) = '34695e4be9724bf46dc5e962f8f0e478'
+          AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
+          AND pg_get_userbyid(p.proowner) = 'postgres'
+          AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]
+     ) THEN
+    RAISE EXCEPTION 'TRANSFER_DUE_DATE_SOURCE_DRIFT: the private billing-save body, owner, settings or ACL is not the reviewed live version';
   END IF;
 END $preflight$;
 
@@ -274,8 +303,8 @@ BEGIN
         v_invoice_number, v_owner_ids[v_oidx], 'field_application', 'draft',
         (now() AT TIME ZONE 'America/Chicago')::date,
         (now() AT TIME ZONE 'America/Chicago')::date
-          + parse_payment_terms_days((SELECT c.payment_terms FROM customers c WHERE c.id = v_owner_ids[v_oidx])),  -- KI-14: the owner's terms, as posting would stamp
-        (SELECT NULLIF(btrim(c.payment_terms), '') FROM customers c WHERE c.id = v_owner_ids[v_oidx]),  -- KI-14: snapshot the terms the date came from
+          + parse_payment_terms_days((SELECT COALESCE(NULLIF(btrim(c.payment_terms), ''), 'Net 30') FROM customers c WHERE c.id = v_owner_ids[v_oidx])),  -- KI-14: the owner's terms, as posting would stamp
+        (SELECT COALESCE(NULLIF(btrim(c.payment_terms), ''), 'Net 30') FROM customers c WHERE c.id = v_owner_ids[v_oidx]),  -- KI-14: snapshot the terms the date came from
         0, 0, 0, 0,
         COALESCE(v_member_field_names, v_field_names), v_crop_type, v_member_acres, v_applicator_name, v_vehicle_name,
         v_job.job_date, v_job.notes,
@@ -510,8 +539,8 @@ BEGIN
     v_invoice_number, v_job.customer_id, 'field_application', 'draft',
     (now() AT TIME ZONE 'America/Chicago')::date,
     (now() AT TIME ZONE 'America/Chicago')::date
-      + parse_payment_terms_days((SELECT c.payment_terms FROM customers c WHERE c.id = v_job.customer_id)),  -- KI-14: the customer's terms, as posting would stamp
-    (SELECT NULLIF(btrim(c.payment_terms), '') FROM customers c WHERE c.id = v_job.customer_id),  -- KI-14: snapshot the terms the date came from
+      + parse_payment_terms_days((SELECT COALESCE(NULLIF(btrim(c.payment_terms), ''), 'Net 30') FROM customers c WHERE c.id = v_job.customer_id)),  -- KI-14: the customer's terms, as posting would stamp
+    (SELECT COALESCE(NULLIF(btrim(c.payment_terms), ''), 'Net 30') FROM customers c WHERE c.id = v_job.customer_id),  -- KI-14: snapshot the terms the date came from
     COALESCE(v_job.total_price_cents, 0), 0, 0, 0,
     v_field_names, v_crop_type, v_total_acres, v_applicator_name, v_vehicle_name,
     v_job.job_date, v_job.notes,
@@ -781,8 +810,129 @@ BEGIN
        AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
        AND pg_get_userbyid(p.proowner) = 'postgres'
        AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]
-       AND md5(p.prosrc) = 'd2768c5eca74f1149ff666a9f6809ba4'
+       AND md5(p.prosrc) = '709f96c457d50bf01e81fea59cd58cbb'
   ) THEN
     RAISE EXCEPTION 'TRANSFER_DUE_DATE_POSTFLIGHT: the new private transfer body, owner, settings or ACL did not land as reviewed';
   END IF;
 END $postflight$;
+
+-- Second body: the field-application billing save refuses a split group whose saved terms differ.
+CREATE OR REPLACE FUNCTION public._update_field_app_invoice_billing_replay_impl_20261015(
+  p_invoice_ids        uuid[],
+  p_purchase_order_ref text DEFAULT NULL,
+  p_payment_terms      text DEFAULT NULL,
+  p_header_notes       text DEFAULT NULL,
+  p_due_date           date DEFAULT NULL,
+  p_footer_notes       text DEFAULT NULL,
+  p_internal_notes     text DEFAULT NULL,
+  -- Per-invoice discount map: { "<invoice_id>": { "amount_cents": <bigint>, "date": "<YYYY-MM-DD|null>" }, ... }
+  -- Any id absent from the map keeps amount 0 / date NULL (the column defaults).
+  p_discounts          jsonb DEFAULT '{}'::jsonb,
+  p_performed_by       uuid DEFAULT NULL,
+  p_idempotency_key    text DEFAULT NULL
+)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_actor    uuid := auth.uid();
+  v_expected int;
+  v_updated  int;
+  v_existing jsonb;
+  v_result   jsonb;
+  v_disc     jsonb := COALESCE(p_discounts, '{}'::jsonb);
+  v_id       uuid;
+  v_amount   bigint;
+BEGIN
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  IF p_performed_by IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'p_performed_by does not match the authenticated user';
+  END IF;
+  IF NOT (is_admin() OR is_sales_rep()) THEN
+    RAISE EXCEPTION 'Not authorized: admin or sales role required to save invoice billing details';
+  END IF;
+
+  v_expected := COALESCE(array_length(p_invoice_ids, 1), 0);
+  IF v_expected = 0 THEN
+    RAISE EXCEPTION 'At least one invoice id is required';
+  END IF;
+
+  -- Validate any supplied discount amounts up-front (non-negative; matches the
+  -- column CHECK). A blank/absent entry leaves the column at 0 (off).
+  FOR v_id, v_amount IN
+    SELECT key::uuid, COALESCE((value->>'amount_cents')::bigint, 0)
+      FROM jsonb_each(v_disc)
+  LOOP
+    IF v_amount < 0 THEN
+      RAISE EXCEPTION 'Discount Earned cannot be negative for invoice %', v_id;
+    END IF;
+  END LOOP;
+
+  IF p_idempotency_key IS NOT NULL THEN
+    SELECT result INTO v_existing FROM idempotency_keys
+     WHERE idempotency_key = p_idempotency_key AND operation = 'update_field_app_invoice_billing';
+    IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  END IF;
+
+  -- KI-14: a split transfer gives each owner its own payment terms, and this save writes one
+  -- payment_terms and due_date to every id. Lock the ids, then refuse a group whose saved terms
+  -- differ rather than silently moving every owner to one owner's terms.
+  PERFORM 1 FROM invoices WHERE id = ANY(p_invoice_ids) ORDER BY id FOR UPDATE;
+  IF (SELECT count(*) FROM (SELECT DISTINCT payment_terms FROM invoices WHERE id = ANY(p_invoice_ids)) d) > 1 THEN
+    RAISE EXCEPTION 'SPLIT_INVOICE_TERMS_DIFFER: these split invoices have different payment terms, so they cannot be saved together with one set of terms';
+  END IF;
+
+  -- Header fields apply uniformly; the discount is resolved per-invoice from the
+  -- map (absent id -> 0 / NULL). Only editable field-application invoices.
+  UPDATE invoices i SET
+    purchase_order_ref    = p_purchase_order_ref,
+    payment_terms         = p_payment_terms,
+    header_notes          = p_header_notes,
+    due_date              = p_due_date,
+    footer_notes          = p_footer_notes,
+    internal_notes        = p_internal_notes,
+    discount_earned_cents = COALESCE((v_disc -> i.id::text ->> 'amount_cents')::bigint, 0),
+    discount_date         = (v_disc -> i.id::text ->> 'date')::date,
+    updated_at            = now()
+  WHERE i.id = ANY(p_invoice_ids)
+    AND i.invoice_type = 'field_application'
+    AND i.status IN ('draft', 'unposted');
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+
+  IF v_updated <> v_expected THEN
+    RAISE EXCEPTION 'Invoice billing update affected % of % invoice(s) — some are not editable field-application invoices', v_updated, v_expected;
+  END IF;
+
+  v_result := jsonb_build_object('updated', v_updated);
+
+  IF p_idempotency_key IS NOT NULL THEN
+    INSERT INTO idempotency_keys (idempotency_key, operation, result)
+    VALUES (p_idempotency_key, 'update_field_app_invoice_billing', v_result);
+  END IF;
+
+  RETURN v_result;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._update_field_app_invoice_billing_replay_impl_20261015(uuid[], text, text, text, date, text, text, jsonb, uuid, text)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public._update_field_app_invoice_billing_replay_impl_20261015(uuid[], text, text, text, date, text, text, jsonb, uuid, text)
+  TO postgres;
+
+DO $postflight_billing$
+DECLARE
+  v_impl oid := to_regprocedure('public._update_field_app_invoice_billing_replay_impl_20261015(uuid[],text,text,text,date,text,text,jsonb,uuid,text)');
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+     WHERE p.oid = v_impl AND p.prosecdef
+       AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
+       AND pg_get_userbyid(p.proowner) = 'postgres'
+       AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]
+       AND md5(p.prosrc) = '4a69fc9cce1e5f742239627b242e1de1'
+  ) THEN
+    RAISE EXCEPTION 'TRANSFER_DUE_DATE_POSTFLIGHT: the new private billing-save body, owner, settings or ACL did not land as reviewed';
+  END IF;
+END $postflight_billing$;

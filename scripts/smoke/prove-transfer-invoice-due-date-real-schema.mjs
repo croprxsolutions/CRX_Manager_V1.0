@@ -213,14 +213,17 @@ function buildContainer() {
 }
 
 const ADMIN = '7c6c0000-0000-4000-8000-0000000000a1';
-const [C15, C30, CRCPT] = ['c1', 'c2', 'c3'].map((s) => `7c6c0000-0000-4000-8000-0000000000${s}`);
+const [C15, C30, CRCPT, CBLANK] = ['c1', 'c2', 'c3', 'c4'].map((s) => `7c6c0000-0000-4000-8000-0000000000${s}`);
 const PROD = '7c6c0000-0000-4000-8000-0000000000d1';
-const [F15, F30, FRCPT, FSPLIT] = ['f1', 'f2', 'f3', 'f4'].map((s) => `7c6c0000-0000-4000-8000-0000000000${s}`);
-const [J15, J30, JRCPT, JSPLIT] = ['e1', 'e2', 'e3', 'e4'].map((s) => `7c6c0000-0000-4000-8000-0000000000${s}`);
+const [F15, F30, FRCPT, FSPLIT, FBLANK] = ['f1', 'f2', 'f3', 'f4', 'f5'].map((s) => `7c6c0000-0000-4000-8000-0000000000${s}`);
+const [J15, J30, JRCPT, JSPLIT, JBLANK] = ['e1', 'e2', 'e3', 'e4', 'e5'].map((s) => `7c6c0000-0000-4000-8000-0000000000${s}`);
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const LIVE_IMPL_MD5 = 'a72cf3a5cff53d4024ad52b832985724';
-const NEW_IMPL_MD5 = 'd2768c5eca74f1149ff666a9f6809ba4';
+const NEW_IMPL_MD5 = '709f96c457d50bf01e81fea59cd58cbb';
+const BILLING = 'public._update_field_app_invoice_billing_replay_impl_20261015(uuid[],text,text,text,date,text,text,jsonb,uuid,text)';
+const LIVE_BILLING_MD5 = '34695e4be9724bf46dc5e962f8f0e478';
+const NEW_BILLING_MD5 = '4a69fc9cce1e5f742239627b242e1de1';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data)
@@ -230,26 +233,29 @@ function seed() {
     INSERT INTO public.customers (id, farm_name, is_active, payment_terms) VALUES
       ('${C15}', '[PROVER] Net 15 Farm', true, 'Net 15'),
       ('${C30}', '[PROVER] Net 30 Farm', true, 'Net 30'),
-      ('${CRCPT}', '[PROVER] Receipt Farm', true, 'Due on receipt');
+      ('${CRCPT}', '[PROVER] Receipt Farm', true, 'Due on receipt'),
+      ('${CBLANK}', '[PROVER] Blank Terms Farm', true, NULL);
     INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form, container_unit, current_cost, is_active) VALUES
       ('${PROD}', '[PROVER] Herbicide', 'Gal', 'Gal', 'liquid', 'Gal', 1.00, true);
     INSERT INTO public.fields (id, customer_id, field_name, crop_type) VALUES
       ('${F15}', '${C15}', '[PROVER] A', 'corn'), ('${F30}', '${C30}', '[PROVER] B', 'corn'),
-      ('${FRCPT}', '${CRCPT}', '[PROVER] C', 'corn'), ('${FSPLIT}', '${C15}', '[PROVER] D', 'soy');
+      ('${FRCPT}', '${CRCPT}', '[PROVER] C', 'corn'), ('${FSPLIT}', '${C15}', '[PROVER] D', 'soy'),
+      ('${FBLANK}', '${CBLANK}', '[PROVER] E', 'corn');
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary) VALUES
       ('${FSPLIT}', '${C15}', 60, true), ('${FSPLIT}', '${CRCPT}', 40, false);
     INSERT INTO public.jobs (id, job_number, customer_id, status, job_date) VALUES
       ('${J15}', 'PROVER-DUE-15', '${C15}', 'completed', CURRENT_DATE),
       ('${J30}', 'PROVER-DUE-30', '${C30}', 'completed', CURRENT_DATE),
       ('${JRCPT}', 'PROVER-DUE-0', '${CRCPT}', 'completed', CURRENT_DATE),
-      ('${JSPLIT}', 'PROVER-DUE-SPLIT', '${C15}', 'completed', CURRENT_DATE);
+      ('${JSPLIT}', 'PROVER-DUE-SPLIT', '${C15}', 'completed', CURRENT_DATE),
+      ('${JBLANK}', 'PROVER-DUE-BLANK', '${CBLANK}', 'completed', CURRENT_DATE);
     INSERT INTO public.job_fields (job_id, field_id, acres_to_treat) VALUES
-      ('${J15}', '${F15}', 10), ('${J30}', '${F30}', 10), ('${JRCPT}', '${FRCPT}', 10), ('${JSPLIT}', '${FSPLIT}', 25);
+      ('${J15}', '${F15}', 10), ('${J30}', '${F30}', 10), ('${JRCPT}', '${FRCPT}', 10), ('${JSPLIT}', '${FSPLIT}', 25), ('${JBLANK}', '${FBLANK}', 10);
     INSERT INTO public.job_chemicals (job_id, product_id, unit, rate_unit, quantity, price_per_unit_cents, cost_per_unit_cents, rate_per_acre) VALUES
-      ${[J15, J30, JRCPT, JSPLIT].map((j) => `('${j}', '${PROD}', 'Gal', 'gal/ac', 20, 2500, 1800, 2)`).join(',\n      ')};
+      ${[J15, J30, JRCPT, JSPLIT, JBLANK].map((j) => `('${j}', '${PROD}', 'Gal', 'gal/ac', 20, 2500, 1800, 2)`).join(',\n      ')};
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
-  assert.equal(scalar(`SELECT count(*) FROM public.job_chemicals WHERE product_id = '${PROD}';`), '4');
-  console.log('[prover] seeded Net 15, Net 30 and Due on receipt customers, one completed job each, and a 60/40 split job (Net 15 + Due on receipt)');
+  assert.equal(scalar(`SELECT count(*) FROM public.job_chemicals WHERE product_id = '${PROD}';`), '5');
+  console.log('[prover] seeded Net 15, Net 30, Due on receipt and blank-terms customers, one completed job each, and a 60/40 split job (Net 15 + Due on receipt)');
 }
 
 // Transfers `job` and posts what it made (post_invoice per lone invoice, post_invoice_group per
@@ -292,15 +298,48 @@ ROLLBACK;
   for (const inv of snap) assert.equal(inv.status, 'posted', `${job}: an invoice did not post`);
   return snap;
 }
-const NAMES = { [C15]: 'Net 15', [C30]: 'Net 30', [CRCPT]: 'Receipt' };
+const NAMES = { [C15]: 'Net 15', [C30]: 'Net 30', [CRCPT]: 'Receipt', [CBLANK]: 'Blank' };
+
+// Transfers `job`, then saves every invoice it made through the field-application screen's billing
+// RPC (one terms value for all ids, as the group editor sends), in a rolled-back transaction.
+// Returns 'ok' or the refusal message.
+function transferAndSave(job) {
+  const r = docker([...psqlArgs(), '-A', '-t'], { input: `BEGIN;
+SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true);
+SET LOCAL ROLE authenticated;
+SELECT public.transfer_job_to_invoice('${job}', '${ADMIN}', 'prover-' || gen_random_uuid()) IS NOT NULL;
+DO $save$
+BEGIN
+  PERFORM public.update_field_app_invoice_billing(
+    p_invoice_ids => (SELECT array_agg(id) FROM public.invoices WHERE job_id = '${job}'),
+    p_payment_terms => 'Net 15', p_performed_by => '${ADMIN}'::uuid,
+    p_idempotency_key => 'prover-save-' || gen_random_uuid());
+  RAISE NOTICE 'SAVE|ok';
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'SAVE|%', SQLERRM;
+END $save$;
+ROLLBACK;
+`, allowFailure: true });
+  assert.equal(r.status, 0, `transfer+save of ${job} failed:
+${r.stderr}`);
+  const m = /SAVE\|(.*)/.exec(`${r.stdout}
+${r.stderr}`);
+  assert.ok(m, `transfer+save of ${job} printed no result:
+${r.stdout}
+${r.stderr}`);
+  return m[1].trim();
+}
+const billingState = () => scalar(`SELECT md5(prosrc) || '|' || prosecdef || '|' || array_to_string(proconfig, ';') || '|' || pg_get_userbyid(proowner) || '|' || proacl::text FROM pg_proc WHERE oid = '${BILLING}'::regprocedure;`);
 const days = (snap) => snap.map((i) => `${NAMES[i.owner]}=+${i.posted_days}`).join(', ');
 const implState = () => scalar(`SELECT md5(prosrc) || '|' || prosecdef || '|' || array_to_string(proconfig, ';') || '|' || pg_get_userbyid(proowner) || '|' || proacl::text FROM pg_proc WHERE oid = '${IMPL}'::regprocedure;`);
 const wrapperState = () => scalar(`SELECT md5(prosrc) || '|' || proacl::text FROM pg_proc WHERE oid = '${WRAPPER}'::regprocedure;`);
-const JOBS = [J15, J30, JRCPT, JSPLIT];
+const JOBS = [J15, J30, JRCPT, JSPLIT, JBLANK];
 
 try {
   buildContainer();
   assert.equal(implState(), `${LIVE_IMPL_MD5}|true|search_path=public, pg_temp|postgres|{postgres=X/postgres}`, 'replayed private body is not the live one');
+  assert.equal(billingState(), `${LIVE_BILLING_MD5}|true|search_path=public, pg_temp|postgres|{postgres=X/postgres}`, 'replayed billing-save body is not the live one');
   const wrapperBefore = wrapperState();
   seed();
 
@@ -315,6 +354,9 @@ try {
   assert.equal(before[JSPLIT].length, 2, 'the split job did not bill two owners');
   assert.ok(before[JSPLIT].every((i) => i.split), 'the split job did not make a group');
   console.log(`[prover] BEFORE: ${JOBS.map((j) => days(before[j])).join(' | ')}`);
+  // The group save overwrote every owner with one terms value (all NULL before, so it never refused).
+  assert.equal(transferAndSave(JSPLIT), 'ok', 'BEFORE: the split group save did not go through');
+  console.log('[prover] BEFORE: saving the split group writes one set of terms over both owners');
 
   // 2. Apply.
   const candidate = lf(CANDIDATE);
@@ -325,7 +367,9 @@ try {
   assert.equal(wrapperState(), wrapperBefore, 'the public wrapper changed');
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(scalar(`SELECT has_function_privilege('${role}', '${IMPL}', 'EXECUTE');`), 'f', `${role} can call the private body`);
+    assert.equal(scalar(`SELECT has_function_privilege('${role}', '${BILLING}', 'EXECUTE');`), 'f', `${role} can call the private billing body`);
   }
+  assert.equal(billingState(), `${NEW_BILLING_MD5}|true|search_path=public, pg_temp|postgres|{postgres=X/postgres}`, 'billing-save body, settings, owner or ACL is not as reviewed');
   console.log('[prover] APPLY: new body pinned; owner-only ACL and the public wrapper unchanged');
 
   // 3. After: the transfer stamps the owner's terms, posting keeps them; nothing else moves.
@@ -334,6 +378,7 @@ try {
   assert.equal(days(after[J30]), 'Net 30=+30');
   assert.equal(days(after[JRCPT]), 'Receipt=+0');
   assert.equal(days(after[JSPLIT]), 'Net 15=+15, Receipt=+0');
+  assert.equal(days(after[JBLANK]), 'Blank=+30');
   for (const j of JOBS) {
     assert.equal(after[j].length, before[j].length, 'invoice count changed');
     after[j].forEach((a, i) => {
@@ -341,7 +386,7 @@ try {
       // An unposted invoice can be emailed (the server PDF prints a NULL due date as "On receipt"),
       // so the transfer itself must stamp the terms' date, and posting must keep it.
       assert.equal(a.made_days, a.posted_days, `AFTER: ${NAMES[a.owner]} transfer stamp (+${a.made_days}) differs from the posted date`);
-      const seededTerms = { [C15]: 'Net 15', [C30]: 'Net 30', [CRCPT]: 'Due on receipt' }[a.owner];
+      const seededTerms = { [C15]: 'Net 15', [C30]: 'Net 30', [CRCPT]: 'Due on receipt', [CBLANK]: 'Net 30' }[a.owner];
       assert.equal(b.made_terms, null, 'BEFORE: the transfer already set invoice terms');
       assert.equal(a.made_terms, seededTerms, `AFTER: ${NAMES[a.owner]} terms were not copied onto the invoice`);
       assert.equal(a.terms, seededTerms, `AFTER: posting changed ${NAMES[a.owner]}'s invoice terms`);
@@ -360,6 +405,12 @@ try {
   assert.equal(reterm[0].terms, 'Net 15', 'RE-TERM: the invoice picked up the customer’s new terms');
   assert.equal(reterm[0].posted_days, 15, 'RE-TERM: the posted due date moved with the customer’s new terms');
   console.log('[prover] RE-TERM: customer moved Net 15 -> Net 30 after transfer; the posted invoice still says Net 15, due +15');
+
+  // 3c. The group save now refuses a split whose owners hold different terms; a lone invoice still saves.
+  assert.match(transferAndSave(JSPLIT), /^SPLIT_INVOICE_TERMS_DIFFER/, 'AFTER: the split group save did not refuse different terms');
+  assert.equal(transferAndSave(J30), 'ok', 'AFTER: a single invoice save was refused');
+  assert.equal(transferAndSave(JBLANK), 'ok', 'AFTER: a blank-terms invoice save was refused');
+  console.log('[prover] SAVE: split with different terms refused (SPLIT_INVOICE_TERMS_DIFFER); single invoices still save');
 
   // 4. Re-apply refuses on the source pin.
   const again = apply('candidate.sql');

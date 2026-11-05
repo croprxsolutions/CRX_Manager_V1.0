@@ -302,11 +302,16 @@ can make old splits refuse to save (LOW-MED).
 - Database half: candidate `20261112090000` (not yet live) makes the transfer stamp invoice date + the
   billed customer's terms instead of + 30 days, the date posting would stamp (every posting route ends in
   `_post_invoice_impl_20260714`, which fills the due date only when blank, so the old +30 always survived),
-  and copies those terms onto the invoice. Saved invoices keep their dates; on 2026-11-05 none disagreed with its customer's terms (all customers Net 30).
+  and copies those terms onto the invoice (blank customer terms become `Net 30`). The same migration makes the
+  field-application billing save refuse a split whose owners hold different terms, instead of overwriting them. Saved invoices keep their dates; on 2026-11-05 none disagreed with its customer's terms (all customers Net 30).
 - Still open (MED, not reachable while every customer is Net 30): the field-application screen shows Net 30 when an
   invoice has no terms of its own, and saving writes that onto the invoice, so a saved-then-posted invoice for a
   Net 15 customer is due in 30 days. Transfer invoices now carry their customer's terms; other field invoices
   with blank terms are still affected.
+- Still open (MED, screen): a split whose owners hold different terms cannot be saved from the field-application
+  screen (the save sends one set of terms; the database now refuses it). The screen needs per-owner terms.
+- Still open (MED, not reachable today): `parse_payment_terms_days` reads the first number, so `2/10 Net 30` is due in
+  2 days on every posting route; no live customer has discount terms.
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**

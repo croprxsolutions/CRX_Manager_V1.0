@@ -3037,6 +3037,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // required-key public wrapper. Prune once the registry high-water passes 20261102200000.
   '_manual_inventory_add_replay_impl_20261015',
   '_complete_job_replay_impl_20261015',
+  // 20261112090000 (KI-14) re-emits the field-app billing body to refuse a split with different terms; it keeps
+  // p_idempotency_key behind its required-key public wrapper. Prune once the registry high-water passes 20261112090000.
+  '_update_field_app_invoice_billing_replay_impl_20261015',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their

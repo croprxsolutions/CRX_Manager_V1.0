@@ -272,6 +272,11 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // kept the public literal the wrapper binds. 20261106230000 (KI-94) re-emits it only to restore exactly the
   // reservation completion took; changing the literal would orphan every existing receipt.
   _void_delivery_replay_impl_20261015: ['void_delivery'],
+  // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live
+  // update_field_app_invoice_billing body to this name, so it kept the public literal the wrapper binds.
+  // 20261112090000 (KI-14) re-emits it only to refuse a split whose owners hold different terms;
+  // changing the literal would orphan every existing receipt.
+  _update_field_app_invoice_billing_replay_impl_20261015: ['update_field_app_invoice_billing'],
   // Direct EXECUTE is revoked (postgres-only after batch 3b). Migration 20260714222000 renamed the
   // live void_order body to this name with ALTER FUNCTION ... RENAME TO, so it kept the public
   // void_order literal, and the public wrapper binds that same receipt. Batch 3b (20261019235000)

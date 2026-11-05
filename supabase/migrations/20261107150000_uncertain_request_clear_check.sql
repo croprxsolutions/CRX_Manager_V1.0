@@ -10,9 +10,9 @@
 -- payment or stock change. This function lets the SERVER decide, so the device clock
 -- is never trusted. It looks at the request key and, for a batch, every row key the
 -- batch sent (a batch saves each row under "<request key>:<row uuid>"):
---   * in_progress  - a transaction holding the idempotency lock of a key with no
---                    receipt is running right now (check_idempotency_intent and the
---                    receipt insert guard take the same lock): refuse.
+--   * in_progress  - a transaction holding the idempotency lock of one of the keys
+--                    is running right now (check_idempotency_intent and the receipt
+--                    insert guard take the same lock): refuse; ask again shortly.
 --   * recorded     - the request key is recorded under the operation it names, or a
 --                    row key is recorded (this actor, when the receipt records one):
 --                    something saved, clear is safe.
@@ -28,9 +28,10 @@
 -- Every safe answer RETIRES each key that still has no receipt: it writes a
 -- 'retire_uncertain_request' receipt under that key's lock, so any later send of the
 -- key, from any tab, is refused by the database (IDEMPOTENCY_CROSS_OP_KEY_REUSE) and
--- cannot save after the clear. Retire receipts last 30 days, far beyond any retry.
--- A key that already has a receipt never saves again (a resend replays it or is
--- refused), so it is left as it is.
+-- cannot save after the clear. A key that already has a receipt never saves again
+-- while that receipt lasts (a resend replays it or is refused), but the next send
+-- deletes an expired receipt, so each of the request's receipts is kept for 30 days
+-- from the safe answer. Retire receipts also last 30 days, far beyond any retry.
 --
 -- The first check's time travels in the browser as a token signed with a random key
 -- that never leaves the database (uncertain_request_clear_check_key), bound to the
@@ -42,7 +43,7 @@
 --
 -- Idempotency: the request key is this call's idempotency key. p_idempotency_key, if
 -- sent, must equal it; a repeat after a safe answer finds its own retire receipt and
--- answers 'retired' without writing. Times come from clock_timestamp(), so a
+-- answers 'retired' (it only renews the 30-day barrier). Times come from clock_timestamp(), so a
 -- long-open transaction cannot shorten the wait.
 --
 -- SECURITY DEFINER is required because idempotency_keys and the signing-key table have
@@ -110,21 +111,18 @@ BEGIN
   v_keys := ARRAY[p_request_key] || ARRAY(SELECT DISTINCT r FROM unnest(p_row_keys) r ORDER BY r);
   v_rows := array_to_string(v_keys[2:], ',');
 
-  -- Keys with no receipt at all could still be saved by a request that has not
-  -- finished (or not yet arrived). A key that has any receipt never saves again: a
-  -- resend replays it or is refused as IDEMPOTENCY_CROSS_OP_KEY_REUSE.
-  SELECT array_agg(k ORDER BY k) INTO v_open FROM unnest(v_keys) k
-   WHERE NOT EXISTS (SELECT 1 FROM public.idempotency_keys i WHERE i.idempotency_key = k);
-  -- Same lock key as check_idempotency_intent and the receipt insert guard; held
-  -- until a saving transaction ends. Busy means a save is running right now.
-  FOREACH v_k IN ARRAY coalesce(v_open, '{}') LOOP
+  -- Lock every key: the same lock check_idempotency_intent and the receipt insert
+  -- guard take, held until a saving transaction ends. Busy means a save (or a
+  -- resend removing an expired receipt) is running right now; ask again shortly.
+  FOREACH v_k IN ARRAY v_keys LOOP
     IF NOT pg_try_advisory_xact_lock(hashtextextended('crx:idempotency:' || v_k, 0)) THEN
       RETURN jsonb_build_object('safe', false, 'reason', 'in_progress', 'checked_at', v_now);
     END IF;
   END LOOP;
-  -- Look again under the locks: a save may have committed since the first look.
-  -- No receipt can now be added to these keys until this transaction ends.
-  SELECT array_agg(k ORDER BY k) INTO v_open FROM unnest(coalesce(v_open, '{}')) k
+  -- Under the locks no receipt of these keys can be added or removed until this
+  -- transaction ends. Keys with no receipt could still be saved by a request that
+  -- has not arrived yet.
+  SELECT array_agg(k ORDER BY k) INTO v_open FROM unnest(v_keys) k
    WHERE NOT EXISTS (SELECT 1 FROM public.idempotency_keys i WHERE i.idempotency_key = k);
 
   IF EXISTS (
@@ -174,6 +172,11 @@ BEGIN
          jsonb_build_object('retired_at', v_now, 'request_key', p_request_key),
          v_actor, 'retired', v_now + interval '30 days'
     FROM unnest(coalesce(v_open, '{}')) k;
+  -- A key that has a receipt never saves again while the receipt lasts (a resend
+  -- replays it or is refused), but the next send deletes an expired one; keep every
+  -- receipt of this request for 30 days from now.
+  UPDATE public.idempotency_keys SET expires_at = v_now + interval '30 days'
+   WHERE idempotency_key = ANY (v_keys) AND expires_at < v_now + interval '30 days';
   RETURN jsonb_build_object('safe', true, 'reason', v_reason, 'checked_at', v_now,
     'retired_keys', cardinality(coalesce(v_open, '{}')));
 END;

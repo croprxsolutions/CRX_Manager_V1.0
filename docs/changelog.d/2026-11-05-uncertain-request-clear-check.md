@@ -7,8 +7,9 @@
   PR #1485's "clear this" button will call it before it removes anything, so a wrong device clock can no longer
   clear a request that might still save. It looks at the request key and, for a batch, each row key the batch sent
   (`<request key>:<row uuid>`; a batch never records its own key). Answers:
-  - `in_progress` (refused): a transaction holds the `crx:idempotency:` lock of a key that has no receipt (the lock
-    `check_idempotency_intent` and the receipt insert guard take), so something is being saved right now.
+  - `in_progress` (refused): a transaction holds the `crx:idempotency:` lock of one of the keys (the lock
+    `check_idempotency_intent` and the receipt insert guard take), so something is being saved, or an expired
+    receipt removed, right now; ask again shortly.
   - `recorded` (safe): the request key is in `idempotency_keys` under the operation its prefix names, or a row key
     is recorded (this actor, when the receipt records one). A request-key receipt under another operation is not
     trusted and falls through to the wait.
@@ -21,9 +22,10 @@
 - Every safe answer retires each key that still has no receipt: a `retire_uncertain_request` receipt (30 days) is
   written under that key's lock, so a late send of the key from any tab is refused by the database
   (`IDEMPOTENCY_CROSS_OP_KEY_REUSE`) and cannot save after the clear (Sol finding). Keys that already have a receipt
-  are left alone: a resend replays or is refused.
+  never save again while it lasts, but the next send deletes an expired receipt, so every receipt of the request
+  (expired ones included) is kept 30 days from the safe answer (Codex review finding).
 - Idempotency: the request key is the call's idempotency key; `p_idempotency_key`, if sent, must equal it, and a
-  repeat answers `retired` without writing.
+  repeat answers `retired` (it only renews the 30-day barrier).
 - Times come from `clock_timestamp()`, not the transaction-start `now()`, so a long-open transaction cannot
   shorten the wait (Sol finding).
 - Only the caller's own keys (`<operation>:<auth.uid()>:<uuid>`, the format `generateIdempotencyKey` makes) and
@@ -37,7 +39,8 @@
   (`SMOKE_PASS_ROLLBACK`): recorded -> safe; a receipt under another operation -> wait; no, forged, borrowed,
   other-row-keys and future tokens -> `first_check`; its own fresh token -> `waiting`; 5 minutes -> `waiting`,
   16 minutes -> safe with the key retired; asking again -> `retired`; a batch with one saved row -> `recorded` with
-  the base key and the unsaved row retired; a later send of a retired key -> `IDEMPOTENCY_CROSS_OP_KEY_REUSE`;
+  the base key and the unsaved row retired; an expired receipt -> `recorded` and kept 30 more days, so a later send
+  of it -> `IDEMPOTENCY_CONCURRENT_REPLAY_RETRY`; a later send of a retired key -> `IDEMPOTENCY_CROSS_OP_KEY_REUSE`;
   another user's key, a row key outside the request -> `REQUEST_KEY_NOT_OWNED`; a wrong idempotency key ->
   `IDEMPOTENCY_KEY_MISMATCH`; signed out -> `AUTH_REQUIRED`.
 - Not verified yet: the live apply and the live smoke run.

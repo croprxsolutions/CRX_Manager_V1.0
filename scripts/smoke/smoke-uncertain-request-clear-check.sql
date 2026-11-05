@@ -14,6 +14,8 @@
 --   * a safe answer retires every key that had no receipt: a later send of that key is
 --     refused (IDEMPOTENCY_CROSS_OP_KEY_REUSE), and asking again answers 'retired';
 --   * a batch whose row key is recorded is 'recorded', and its unrecorded rows retire;
+--   * an EXPIRED receipt still counts as saved, and the safe answer keeps it 30 more days,
+--     so a later send replays instead of deleting it and saving again;
 --   * another user's key, a row key outside the request, a wrong idempotency key and a
 --     signed-out session are refused.
 -- The 'in_progress' answer needs a second session holding a key's lock, so it is proven
@@ -23,6 +25,7 @@ DECLARE
   v_fn regprocedure := 'public.retire_uncertain_request(text,text[],text,text)'::regprocedure;
   v_actor uuid;
   v_recorded text;
+  v_expired text;
   v_foreign text;
   v_unrecorded text;
   v_batch text;
@@ -39,7 +42,7 @@ DECLARE
   v_refused boolean;
   v_role text;
 BEGIN
-  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_fn), chr(13), '')) <> '2bd1d44924b096acef97cbf7a039fb68' THEN
+  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_fn), chr(13), '')) <> '9c3a7352730fcf66567ac63fc995d3c0' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: retire_uncertain_request is not the body of 20261107150000';
   END IF;
   IF has_function_privilege('anon', v_fn, 'EXECUTE') OR has_function_privilege('service_role', v_fn, 'EXECUTE')
@@ -58,6 +61,7 @@ BEGIN
   -- Seeded receipts (rolled back): a saved request, a request key used by another
   -- operation, and a batch with one saved row and one unsent row.
   v_recorded := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
+  v_expired := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
   v_foreign := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
   v_unrecorded := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
   v_batch := 'adjust_inventory_batch:' || v_actor || ':' || gen_random_uuid();
@@ -67,6 +71,8 @@ BEGIN
   VALUES (v_recorded, 'save_vendor', '{"smoke": true}', v_actor, 'smoke'),
          (v_foreign, 'save_customer', '{"smoke": true}', v_actor, 'smoke'),
          (v_row_saved, 'adjust_inventory', '{"smoke": true}', v_actor, 'smoke');
+  INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint, created_at, expires_at)
+  VALUES (v_expired, 'save_vendor', '{"smoke": true}', v_actor, 'smoke', now() - interval '25 hours', now() - interval '1 hour');
 
   -- Tokens signed here exactly as the function signs them (postgres can read the key; clients cannot).
   SELECT string_agg(us::text || '.' || encode(extensions.hmac(convert_to(k || '|' || us::text || '|' || rows, 'UTF8'), v_signing, 'sha256'), 'hex'), ',' ORDER BY n)
@@ -91,6 +97,10 @@ BEGIN
   v_r := public.retire_uncertain_request(v_recorded, p_idempotency_key => v_recorded);
   IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' OR (v_r->>'retired_keys')::int <> 0 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a recorded key was not safe: %', v_r;
+  END IF;
+  v_r := public.retire_uncertain_request(v_expired);
+  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' OR (v_r->>'retired_keys')::int <> 0 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: an expired receipt was not counted as saved: %', v_r;
   END IF;
   v_r := public.retire_uncertain_request(v_foreign);
   IF (v_r->>'safe')::boolean IS NOT FALSE OR v_r->>'reason' <> 'first_check' THEN
@@ -188,6 +198,20 @@ BEGIN
 
   -- A late send of a retired key, by any path, is refused by the database.
   EXECUTE 'RESET ROLE';
+  IF (SELECT expires_at FROM public.idempotency_keys WHERE idempotency_key = v_expired) < now() + interval '29 days' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the expired receipt was not kept for 30 more days';
+  END IF;
+  v_refused := false;
+  BEGIN
+    INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
+    VALUES (v_expired, 'save_vendor', '{"late": true}', v_actor, 'late');
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'IDEMPOTENCY_CONCURRENT_REPLAY_RETRY%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: a late send of a kept receipt failed oddly: % %', SQLSTATE, SQLERRM;
+    END IF;
+    v_refused := true;
+  END;
+  IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a kept receipt was replaced by a late send'; END IF;
   FOREACH v_bad IN ARRAY ARRAY[v_unrecorded, v_row_open] LOOP
     v_refused := false;
     BEGIN

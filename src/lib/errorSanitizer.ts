@@ -21,6 +21,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/product_setup_category_fk/, 'Choose a category from the product category list'],
   [/product_setup_name_check/, 'Enter a product name without spaces at either end'],
   [/product_setup_sku_check/, 'Enter a SKU without spaces at either end, or leave it blank'],
+  [/products_sku_unique/, 'Another product already has this SKU'],
   [/product_setup_rate_check/, 'Rate Per Acre must be zero or greater'],
   [/product_setup_epa_check/, 'Enter an EPA number like 524-475 or 100-1234-5905. This checks format only'],
   [/product_setup_rei_check/, 'REI (hours) must be zero or greater'],

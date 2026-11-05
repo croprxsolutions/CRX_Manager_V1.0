@@ -15,9 +15,12 @@
 --   * Duplicates are refused: a SKU any product already has (case and spaces ignored), a name an active
 --     product already has, or the same SKU or name twice in one file. The same EPA number under another
 --     name is an allowed variant (the same chemical in another size). Inserts take a transaction
---     advisory lock, so two imports cannot both add the same SKU. Only spaces at either end and case
---     are ignored, and the product page and Setup-tab renames do not take this lock: a table-wide
---     unique SKU index is a separate follow-up.
+--     advisory lock, so two imports cannot both add the same name. Only spaces at either end and case
+--     are ignored. The product page and Setup-tab renames do not take this lock, so an active name
+--     they save at the same moment can still repeat; a SKU cannot (next point).
+--   * New unique index products_sku_unique on lower(btrim(sku)) for non-blank SKUs: no two products,
+--     active or not, share a SKU from any screen. Live had no duplicate SKU on 2026-11-05 (3 blank
+--     SKUs, which the index ignores); the preflight refuses the apply if one appeared since.
 --   * A row's vendor text links a vendor as the product page's insert does (link_new_product_vendor).
 --   * The screen previews at most 500 rows (preview_product_import's cap), so an import is 500 rows.
 -- New:
@@ -25,7 +28,7 @@
 --     rates, set_product_rates) inside a subtransaction that is always rolled back, and reports the
 --     refusal or the resulting rate and tier 1-3 per-acre prices, plus duplicate and same-EPA matches.
 --     Nothing it does is kept.
--- No existing row is changed. Grants: EXECUTE on apply_product_setup (unchanged) and
+-- No existing row is changed; the one new index is products_sku_unique. Grants: EXECUTE on apply_product_setup (unchanged) and
 -- preview_product_import to authenticated; the renamed body has no API-role grant.
 
 SET LOCAL lock_timeout = '10s';
@@ -44,8 +47,19 @@ BEGIN
      OR to_regprocedure('public.save_idempotency(text,text,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_IMPORT_DEPENDENCY_MISSING';
   END IF;
+  IF to_regclass('public.products_sku_unique') IS NOT NULL THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRODUCT_SKU_INDEX_EXISTS';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.products WHERE NULLIF(btrim(sku), '') IS NOT NULL
+             GROUP BY lower(btrim(sku)) HAVING count(*) > 1) THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRODUCT_DUPLICATE_SKU: two products share a SKU; fix it before applying';
+  END IF;
 END;
 $preflight$;
+
+-- No two products share a SKU, from any screen (the import's duplicate check alone covers only imports).
+CREATE UNIQUE INDEX products_sku_unique ON public.products (lower(btrim(sku)))
+  WHERE NULLIF(btrim(sku), '') IS NOT NULL;
 
 ALTER FUNCTION public.apply_product_setup(jsonb, uuid, text) RENAME TO _apply_product_setup_update;
 REVOKE ALL ON FUNCTION public._apply_product_setup_update(jsonb, uuid, text)
@@ -214,7 +228,11 @@ BEGIN
             'prices', v_row->'expected_prices'));
       END IF;
     END LOOP;
-  EXCEPTION WHEN OTHERS THEN
+  EXCEPTION
+    WHEN unique_violation THEN
+      RAISE EXCEPTION 'PRODUCT_SETUP_DUPLICATE: the SKU or name is already used by a product or twice in this file: %',
+        btrim(v_f->>'product_name') USING ERRCODE = SQLSTATE;
+    WHEN OTHERS THEN
     -- Name the product the table's own checks refused; nothing is saved.
     RAISE EXCEPTION 'PRODUCT_SETUP_ROW_REFUSED: %: %', btrim(v_f->>'product_name'), SQLERRM USING ERRCODE = SQLSTATE;
   END;
@@ -252,6 +270,7 @@ DECLARE
   v_prices jsonb;
   v_after jsonb;
   v_error text;
+  v_in_file_dupe boolean;
   v_results jsonb := '[]'::jsonb;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
@@ -271,7 +290,16 @@ BEGIN
     v_error := NULL;
     v_saved := NULL;
     v_prices := NULL;
+    v_in_file_dupe := (SELECT count(*) > 1 FROM jsonb_array_elements(p_rows) o
+                       WHERE lower(btrim(o->'insert'->>'product_name')) = lower(btrim(v_f->>'product_name'))
+                          OR (NULLIF(btrim(v_f->>'sku'), '') IS NOT NULL
+                              AND lower(btrim(o->'insert'->>'sku')) = lower(btrim(v_f->>'sku'))));
+    -- The save refuses the whole file for a repeat, so the preview refuses each repeated row too.
+    IF v_in_file_dupe THEN
+      v_error := 'PRODUCT_SETUP_DUPLICATE: the same SKU or name appears twice in this file: ' || btrim(v_f->>'product_name');
+    END IF;
     -- PL/pgSQL variables keep their values when a subtransaction rolls back; the rows do not.
+    IF v_error IS NULL THEN
     BEGIN
       v_saved := public.apply_product_setup(jsonb_build_array(jsonb_build_object('insert', v_f)), v_actor,
         'preview:' || gen_random_uuid());
@@ -287,6 +315,7 @@ BEGIN
       WHEN SQLSTATE 'CRXPV' THEN NULL;
       WHEN OTHERS THEN v_error := SQLERRM;
     END;
+    END IF;
     -- Then the exact save the import makes, with the prices just previewed, so a refusal shows here first.
     IF v_error IS NULL AND v_row ? 'rates' THEN
       BEGIN
@@ -315,10 +344,7 @@ BEGIN
                         FROM public.products p WHERE NULLIF(btrim(v_f->>'epa_registration'), '') IS NOT NULL
                          AND btrim(p.epa_registration) = btrim(v_f->>'epa_registration')
                          AND lower(btrim(p.product_name)) <> lower(btrim(v_f->>'product_name'))),
-      'in_file_duplicate', (SELECT count(*) > 1 FROM jsonb_array_elements(p_rows) o
-                             WHERE lower(btrim(o->'insert'->>'product_name')) = lower(btrim(v_f->>'product_name'))
-                                OR (NULLIF(btrim(v_f->>'sku'), '') IS NOT NULL
-                                    AND lower(btrim(o->'insert'->>'sku')) = lower(btrim(v_f->>'sku')))));
+      'in_file_duplicate', v_in_file_dupe);
   END LOOP;
   RETURN jsonb_build_object(
     'rates_locked', COALESCE((SELECT is_locked FROM public.product_rate_lock WHERE id), true),
@@ -331,6 +357,9 @@ GRANT EXECUTE ON FUNCTION public.preview_product_import(jsonb) TO authenticated;
 
 DO $postflight$
 BEGIN
+  IF to_regclass('public.products_sku_unique') IS NULL THEN
+    RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_SKU_INDEX_MISSING';
+  END IF;
   IF has_function_privilege('anon', 'public.apply_product_setup(jsonb,uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.preview_product_import(jsonb)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._apply_product_setup_update(jsonb,uuid,text)', 'EXECUTE')

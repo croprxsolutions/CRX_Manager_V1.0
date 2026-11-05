@@ -341,8 +341,12 @@ function main() {
   refused(ADMIN, save([good[4], { product_id: EXISTING, setup_fingerprint: 'x', changes: { sku: 'Z' } }], 'k-mix'), /PRODUCT_SETUP_ROW_SHAPE_INVALID/);
   refused(ADMIN, `SELECT public.apply_product_setup('${q([good[4]])}'::jsonb, '${ADMIN}', NULL);`, /IDEMPOTENCY_KEY_REQUIRED/);
   refused(ADMIN, save([good[4], good[4]], 'k-twice'), /PRODUCT_SETUP_DUPLICATE/);
+  // The preview refuses each repeated row too, so it never shows Ready for a file the save refuses.
+  preview([good[4], good[4]]).rows.forEach((r) => { assert.equal(r.status, 'refused'); assert.match(r.error, /appears twice/); });
+  // The SKU index holds for the product page's own insert, which takes no import lock.
+  refused(ADMIN, `INSERT INTO public.products (product_name, sku, category, product_form, inventory_unit) VALUES ('[PROVER] Page Dup', 'ex-1', 'Herbicide', 'liquid', 'Gal');`, /products_sku_unique/);
   assert.equal(count(), before);
-  console.log('[prover] a bad row refuses the whole file by name; moved prices, missing prices, direct rate or price columns, mixed modes and in-file duplicates are refused');
+  console.log('[prover] a bad row refuses the whole file by name; moved prices, missing prices, direct rate or price columns, mixed modes and in-file duplicates are refused (in the preview too); the product page cannot repeat a SKU');
 
   // Save the confirmed rows from the preview.
   const confirmed = fromPreview(good, p);

@@ -24,7 +24,12 @@
 --      day before the receipt was owed (needs_check: it may be this receipt); the customer has no email now
 --      (needs_check); or a retry would fall outside the email provider's 24-hour duplicate guard (needs_check).
 --      A retried claim (same key), only while its 10-minute lease holds, re-runs the first three checks, returns the address that claim fixed
---      (attempt_to), and claims nothing new. A finish key is bound to its receipt, token and outcome.
+--      (attempt_to), and claims nothing new. A finish key is bound to its receipt, token, outcome and proof.
+--      A row whose delivery now belongs to another customer goes to needs_check; a row whose own earlier
+--      attempt is logged sent (its finish was lost) is recorded sent, never sent again.
+--   3b. _delivery_receipt_send_lock (trigger on email_log): while the worker holds a live claim on a receipt,
+--      any other delivery_completed send for that delivery (or, with no key, that customer) is refused at its
+--      pre-send log row. Both sides lock the queue row, so a claim and an office send never both pass.
 --   4. pg_net is enabled and a pg_cron job (every 2 minutes) runs _wake_delivery_receipt_worker(), which posts to
 --      the worker only when a row is due AND both Vault secrets delivery_receipt_worker_url and
 --      delivery_receipt_worker_secret exist. Neither is created here: until they are stored (a separate approved
@@ -89,6 +94,7 @@ BEGIN
      OR to_regproc('public.finish_delivery_receipt') IS NOT NULL
      OR to_regproc('public._enqueue_delivery_receipt') IS NOT NULL
      OR to_regproc('public._wake_delivery_receipt_worker') IS NOT NULL
+     OR to_regproc('public._delivery_receipt_send_lock') IS NOT NULL
      OR EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'deliver-receipt-queue') THEN
     RAISE EXCEPTION 'PREFLIGHT_DELIVERY_RECEIPT_QUEUE_DRIFT: an object this file creates already exists';
   END IF;
@@ -438,6 +444,9 @@ DECLARE
   v_scoped text;
   v_saved jsonb;
   v_replay boolean;
+  v_customer uuid;
+  v_log_to text;
+  v_log_msg text;
 BEGIN
   IF p_limit IS NULL OR p_limit < 1 OR p_limit > 50 THEN
     RAISE EXCEPTION 'CLAIM_LIMIT_INVALID: p_limit must be 1 to 50' USING ERRCODE = '22023';
@@ -460,19 +469,42 @@ BEGIN
      LIMIT CASE WHEN v_replay THEN 50 ELSE p_limit END
      FOR UPDATE SKIP LOCKED
   LOOP
-    IF NOT EXISTS (SELECT 1 FROM public.deliveries d
-                    WHERE d.id = v_row.delivery_id AND d.status = 'completed' AND d.deleted_at IS NULL) THEN
+    SELECT d.customer_id INTO v_customer FROM public.deliveries d
+     WHERE d.id = v_row.delivery_id AND d.status = 'completed' AND d.deleted_at IS NULL;
+    IF NOT FOUND THEN
       UPDATE public.delivery_receipt_queue
          SET status = 'cancelled', claim_token = NULL, claimed_at = NULL,
              last_error = 'The delivery is no longer completed; no receipt was sent.'
        WHERE id = v_row.id;
       CONTINUE;
     END IF;
+    IF v_customer IS DISTINCT FROM v_row.customer_id THEN
+      UPDATE public.delivery_receipt_queue
+         SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
+             last_error = 'The delivery now belongs to another customer; check who should get the receipt.'
+       WHERE id = v_row.id;
+      CONTINUE;
+    END IF;
+
+    v_scoped := 'delivery_completed:delivery:' || v_row.delivery_id::text || ':';
+    -- This receipt's own earlier attempt is logged sent (its finish was lost): record it, never send again.
+    SELECT e.recipient_email, e.resend_message_id INTO v_log_to, v_log_msg
+      FROM public.email_log e
+     WHERE e.email_type = 'delivery_completed' AND e.status = 'sent'
+       AND left(e.idempotency_key, length(v_scoped) + 51) = v_scoped || 'receipt-queue/' || v_row.id::text || '/'
+     ORDER BY e.created_at DESC
+     LIMIT 1;
+    IF FOUND THEN
+      UPDATE public.delivery_receipt_queue
+         SET status = 'sent', claim_token = NULL, claimed_at = NULL, last_error = NULL, sent_at = now(),
+             sent_to = left(v_log_to, 320), resend_message_id = left(v_log_msg, 200)
+       WHERE id = v_row.id;
+      CONTINUE;
+    END IF;
 
     -- Any other delivery_completed email for this delivery (the office's Email Confirmation, or a phone send):
     -- send-email scopes keys as 'delivery_completed:delivery:<id>:<key>'; older rows used the bare app keys.
-    -- The worker's own rows ('...:receipt-queue/...') are not counted.
-    v_scoped := 'delivery_completed:delivery:' || v_row.delivery_id::text || ':';
+    -- The worker's own rows ('...:receipt-queue/...') are handled above.
     SELECT CASE WHEN bool_or(e.status = 'sent') THEN 'sent'
                 WHEN bool_or(e.status = 'pending') THEN 'pending' END
       INTO v_other
@@ -503,7 +535,8 @@ BEGIN
                   AND e.status IN ('sent', 'pending')
                   AND e.created_at >= v_row.created_at - interval '1 day'
                   AND (e.idempotency_key IS NULL
-                       OR left(e.idempotency_key, 28) <> 'delivery_completed:delivery:')) THEN
+                       OR (left(e.idempotency_key, 28) <> 'delivery_completed:delivery:'
+                           AND e.idempotency_key !~ '^delivery-(completed|resend)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'))) THEN
       UPDATE public.delivery_receipt_queue
          SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
              last_error = 'A delivery confirmation without a delivery reference went to this customer; check whether it was this receipt.'
@@ -605,7 +638,9 @@ BEGIN
   IF v_saved IS NOT NULL THEN
     IF v_saved ->> 'id' IS DISTINCT FROM p_id::text
        OR v_saved ->> 'claim_token' IS DISTINCT FROM p_claim_token::text
-       OR v_saved ->> 'outcome' IS DISTINCT FROM p_outcome THEN
+       OR v_saved ->> 'outcome' IS DISTINCT FROM p_outcome
+       OR v_saved ->> 'resend_message_id' IS DISTINCT FROM p_resend_message_id
+       OR v_saved ->> 'sent_to' IS DISTINCT FROM p_sent_to THEN
       RAISE EXCEPTION 'IDEMPOTENCY_KEY_REUSED: this key finished a different receipt or outcome' USING ERRCODE = '22023';
     END IF;
     RETURN v_saved ->> 'status';
@@ -641,7 +676,8 @@ BEGIN
   -- No row: the lease expired and another run owns (or finished) this receipt. Nothing changes.
   v_status := COALESCE(v_status, 'stale');
   IF p_idempotency_key IS NOT NULL THEN
-    PERFORM public.save_idempotency(p_idempotency_key, 'finish_delivery_receipt', jsonb_build_object('id', p_id, 'claim_token', p_claim_token, 'outcome', p_outcome, 'status', v_status));
+    PERFORM public.save_idempotency(p_idempotency_key, 'finish_delivery_receipt', jsonb_build_object('id', p_id, 'claim_token', p_claim_token, 'outcome', p_outcome,
+      'resend_message_id', p_resend_message_id, 'sent_to', p_sent_to, 'status', v_status));
   END IF;
   RETURN v_status;
 END;
@@ -651,6 +687,49 @@ REVOKE ALL ON FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, te
 GRANT EXECUTE ON FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text, text) TO service_role;
 COMMENT ON FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text, text) IS
   'KI-25 worker (service_role only): records one claimed receipt''s outcome (sent / retry / check) against its claim token; returns the new status, or stale when the claim was lost.';
+
+-- ---------------------------------------------------------------------------------------------
+-- 4b. One sender at a time: another delivery_completed send waits for, and is refused by, a live claim.
+-- ---------------------------------------------------------------------------------------------
+CREATE FUNCTION public._delivery_receipt_send_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_delivery uuid;
+  v_busy boolean;
+BEGIN
+  IF NEW.email_type IS DISTINCT FROM 'delivery_completed' OR NEW.status IS DISTINCT FROM 'pending'
+     OR (TG_OP = 'UPDATE' AND OLD.status = 'pending')
+     OR position(':receipt-queue/' IN COALESCE(NEW.idempotency_key, '')) > 0 THEN  -- not a new send, or the worker's own
+    RETURN NEW;
+  END IF;
+  IF left(NEW.idempotency_key, 28) = 'delivery_completed:delivery:'
+     AND substr(NEW.idempotency_key, 29, 37) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:$' THEN
+    v_delivery := substr(NEW.idempotency_key, 29, 36)::uuid;
+  ELSIF NEW.idempotency_key IS NOT NULL THEN
+    RETURN NEW;  -- an unscoped key: the claim's own check sends that receipt to the office list
+  END IF;
+  -- FOR UPDATE waits for a claim in progress (it holds the row), then reads the row as that claim left it.
+  SELECT COALESCE(bool_or(s.status = 'sending' AND s.claimed_at >= now() - interval '10 minutes'), false) INTO v_busy
+    FROM (SELECT q.status, q.claimed_at FROM public.delivery_receipt_queue q
+           WHERE CASE WHEN v_delivery IS NOT NULL THEN q.delivery_id = v_delivery
+                      ELSE q.customer_id = NEW.customer_id END
+           FOR UPDATE) s;
+  IF v_busy THEN
+    RAISE EXCEPTION 'DELIVERY_RECEIPT_SENDING: this delivery''s receipt is being emailed now; check the log in a few minutes before sending again';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public._delivery_receipt_send_lock() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._delivery_receipt_send_lock() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER delivery_receipt_send_lock BEFORE INSERT OR UPDATE OF status ON public.email_log
+  FOR EACH ROW EXECUTE FUNCTION public._delivery_receipt_send_lock();
+COMMENT ON FUNCTION public._delivery_receipt_send_lock() IS
+  'KI-25 (trigger on email_log): refuses a new delivery_completed send while the receipt worker holds a live claim on that delivery''s receipt (no key: that customer''s), so the two never both email it.';
 
 -- ---------------------------------------------------------------------------------------------
 -- 5. The timer: wake the worker every 2 minutes, only when a receipt is due and the worker is configured.
@@ -717,7 +796,12 @@ BEGIN
       RAISE EXCEPTION 'POSTFLIGHT: % must be service_role only', v_name;
     END IF;
   END LOOP;
-  FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()'] LOOP
+  IF (SELECT count(*) FROM pg_trigger
+       WHERE tgrelid = 'public.email_log'::regclass AND tgname = 'delivery_receipt_send_lock' AND tgenabled = 'O'
+         AND tgfoid = 'public._delivery_receipt_send_lock()'::regprocedure) <> 1 THEN
+    RAISE EXCEPTION 'POSTFLIGHT: the email_log send lock trigger is missing';
+  END IF;
+  FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()', '_delivery_receipt_send_lock()'] LOOP
     IF has_function_privilege('authenticated', ('public.' || v_name)::regprocedure, 'EXECUTE')
        OR has_function_privilege('anon', ('public.' || v_name)::regprocedure, 'EXECUTE')
        OR has_function_privilege('service_role', ('public.' || v_name)::regprocedure, 'EXECUTE') THEN
@@ -737,7 +821,7 @@ BEGIN
          AND schedule = '*/2 * * * *' AND command = 'SELECT public._wake_delivery_receipt_worker()') <> 1 THEN
     RAISE EXCEPTION 'POSTFLIGHT: the deliver-receipt-queue job is missing or not the expected postgres job';
   END IF;
-  FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()',
+  FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()', '_delivery_receipt_send_lock()',
                                 'claim_delivery_receipts(integer, text)', 'finish_delivery_receipt(uuid, uuid, text, text, text, text, text)'] LOOP
     SELECT * INTO p FROM pg_proc WHERE oid = ('public.' || v_name)::regprocedure;
     IF NOT p.prosecdef OR p.proowner <> 'postgres'::regrole

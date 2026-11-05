@@ -466,12 +466,14 @@ WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup chec
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
 **MED · PARTIAL · UI/database · Mason (Goal 4)**
 Most lists now page through every row (PRs #959, #1017, #1048). The order, job and purchase-order pickers now search
-the database, and cycle-count locations read every row (PR #1048). Still capped: Customers (1000), Jobs (500),
-Crop Programs (500), Dispatch Board (500); a Jobs `.or(id.in)` URL-size risk; the blend-ticket scanner Edge
-Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk
-PO Import products (open PRs #1018/#1021 at the time), Label Data Quality, Product Detail choice lists, bulk import
-name matching, and the Field Customer Assignment dropdown. A customer-name search looks through only the first 50
-matching customers (alphabetical) without saying so. Past a cap, a record cannot be chosen.
+the database, and cycle-count locations read every row (PR #1048). The Customers and Jobs lists now read every row,
+the Jobs Applicators/Customers filters match their job-id lists on the rows read (no URL-size risk), and the order and job
+pickers match a customer name in the database instead of only the first 50 matching names (2026-11-05). Crop
+Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Still
+capped: Dispatch Board (500, waits on KI-28 work, issue #1497); the blend-ticket scanner Edge Function (needs a
+deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
+Label Data Quality, Product Detail choice lists, bulk import name matching, and the Field Customer Assignment
+dropdown. Past a cap, a record cannot be chosen.
 
 ---
 

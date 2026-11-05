@@ -1,0 +1,629 @@
+#!/usr/bin/env node
+/**
+ * Real-schema proof for KI-100 (20261107070000). Builds the checked-in schema baseline in a
+ * network-disabled PostgreSQL container and replays migrations up to the candidate. With invented
+ * rows, a spray job on a 10 gal booking that applies 1 fl oz (0.0078125 gal) is synced BEFORE the
+ * candidate: its draw is 0.0078125 and the booking is left with 9.9921875 gal, more decimals than
+ * the live Partial Order rule (20261106110000) accepts, so the booking can never close. AFTER the
+ * candidate the same sync draws 0.01 and leaves 9.99 (whole hundredths, which a Partial Order can
+ * take); the job's shed hold is at least that draw (0.01), and an active demand under 0.005 gal
+ * still draws 0.01, as does the first completed job, so every booking guard still sees it. The candidate refuses to apply over a completed job that
+ * keeps an unrounded draw. Each active job draws against completed demand only, so many small jobs,
+ * out-of-order completions and a cancelled active sibling never pile up rounding in the kept draws.
+ *
+ * Run: node scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs   (needs local Docker image)
+ * Prints JOB_RESERVATION_HUNDREDTHS_PROOF_PASS on success.
+ */
+import assert from 'node:assert/strict';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const NAME = `crx-job-draw-hundredths-${process.pid}-${Date.now().toString(36)}`;
+const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
+const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
+const BASELINE = path.join(ROOT, 'supabase', 'baselines');
+const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
+const CANDIDATE = path.join(MIGRATIONS, '20261107070000_job_reservation_whole_hundredths.sql');
+const PARKED = new Set([
+  '20260914100700_customer_document_bytes_server_only.sql',
+  '20261015230000_staff_photo_storage_access.sql',
+  '20261016030000_staff_photo_buckets_private.sql',
+]);
+// PR #889's data migrations and DATA-11 rewrite live rows this disposable database does not have
+// (DATA-11 also needs a live admin approver); they are recorded in the ledger (as live has them)
+// instead of replayed.
+const LEDGER_ONLY = new Set([
+  '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
+  '20261007150200_release_reservations_of_deleted_spring_orders.sql',
+  '20261105170000_data11_preferred_vendor_links.sql',
+]);
+// A later or parked file that (re)defines anything the candidate creates or relies on.
+const TOUCHED = /(_sync_quote_job_reservations|job_product_draws)/i;
+// The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
+// request.jwt.claims ->> 'sub'. Install live's exact body.
+const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
+  + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
+  + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
+  + '  )::uuid\n';
+const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
+
+function docker(args, options = {}) {
+  const r = spawnSync('docker', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...options });
+  if (r.error || (!options.allowFailure && r.status !== 0)) throw new Error(`${r.error?.message ?? ''}\n${r.stderr || r.stdout}`.trim());
+  return r;
+}
+function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U', user, '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1']; }
+function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
+function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
+function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
+function stageText(name, text) {
+  const staged = path.join(tmpdir(), `${NAME}-${name}`);
+  writeFileSync(staged, text, 'utf8');
+  try { docker(['cp', staged, `${NAME}:/tmp/${name}`]); } finally {
+    try { unlinkSync(staged); } catch (e) { if (e.code !== 'ENOENT') console.error(`could not remove ${staged}: ${e.message}`); }
+  }
+}
+function apply(name) {
+  const r = docker([...psqlArgs(), '-1', '-f', `/tmp/${name}`], { allowFailure: true });
+  return { status: r.status, output: `${r.stdout}\n${r.stderr}` };
+}
+function wait(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function ready() {
+  for (let i = 0; i < 120; i += 1) {
+    if (docker(['exec', NAME, 'pg_isready', '-U', 'postgres'], { allowFailure: true }).status === 0) return;
+    wait(500);
+  }
+  throw new Error('disposable PostgreSQL did not become ready');
+}
+function ledger(stem) {
+  psql(`INSERT INTO supabase_migrations.schema_migrations (version, name, statements)
+    SELECT '${stem.slice(0, 14)}', '${stem}', ARRAY[]::text[]
+     WHERE NOT EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations WHERE name = '${stem}')
+    ON CONFLICT (version) DO NOTHING;`);
+  assert.equal(scalar(`SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${stem}';`), '1', `${stem} is not in the ledger`);
+}
+function restoreLiveCrLfCloseRemainder() {
+  const source = lf(path.join(MIGRATIONS, '20260721014858_20260721010000_govern_invoice_order_money_lifecycle.sql'));
+  const needle = 'CREATE FUNCTION public._close_undelivered_order_remainder_20260718(';
+  assert.equal(source.split(needle).length - 1, 1, 'close-remainder definition is ambiguous');
+  const start = source.indexOf(needle);
+  const tag = /\$([A-Za-z_]*)\$/.exec(source.slice(start));
+  const bodyStart = start + tag.index + tag[0].length;
+  const bodyEnd = source.indexOf(tag[0], bodyStart);
+  const body = source.slice(bodyStart, bodyEnd).replace(/\n/g, '\r\n');
+  assert.equal(body.length, 15910, 'close-remainder live CRLF body length drifted');
+  psql(`CREATE OR REPLACE FUNCTION public._close_undelivered_order_remainder_20260718(p_order_id uuid, p_actor uuid)
+    RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
+    AS $live_crlf_close$${body}$live_crlf_close$;`);
+}
+// 20261104150000 (WP-PM-9, live) pins three live function bodies that the historical LF replay
+// does not reproduce; install them exactly as PM-9's own prover does, right before that file.
+const FORMS_SEED_EACH = '20261104150000_product_forms_seed_each.sql';
+const LIVE_BODY_MD5 = {
+  'public.field_app_priced_quantity(numeric,text,text,text)': 'bc91a52577840973f18f1710e47edf2b',
+  'public.convert_to_gl_lb(numeric,text,text)': 'ce9265521821c09b0cf74de45afb375b',
+  'public.validate_product_units()': '83a51c58c83cd83bea760bd117410a38',
+};
+
+function bodyFrom(file, expression) {
+  const match = expression.exec(readFileSync(path.join(MIGRATIONS, file), 'utf8'));
+  assert.ok(match, `${file} no longer contains its pinned function body`);
+  return match[1];
+}
+function restoreLiveBodies() {
+  // Historical replay uses LF staging; validate_product_units had CRLF in live prosrc.
+  const validate = bodyFrom('20260211000000_unit_tracking_pricing_overhaul.sql',
+    /CREATE OR REPLACE FUNCTION validate_product_units\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/)
+    .replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');  // same bytes on an LF or CRLF checkout
+  const field = bodyFrom('20260630180000_field_app_pricing_unit_fix.sql',
+    /CREATE OR REPLACE FUNCTION public.field_app_priced_quantity\([\s\S]*?AS \$fapq\$([\s\S]*?)\$fapq\$;/);
+  const seededConvert = bodyFrom(FORMS_SEED_EACH,
+    /CREATE OR REPLACE FUNCTION public.convert_to_gl_lb\([\s\S]*?AS \$function\$([\s\S]*?)\$function\$;/).replaceAll('\r\n', '\n');
+  const seedArm = "  IF lower(coalesce(p_product_form, '')) IN ('seed','each') THEN RETURN QUERY SELECT NULL::numeric, NULL::text; RETURN; END IF;\n";
+  assert.equal(seededConvert.split(seedArm).length - 1, 1);
+  const convert = seededConvert.replace(seedArm, '');
+  psql(`CREATE OR REPLACE FUNCTION public.validate_product_units() RETURNS trigger LANGUAGE plpgsql
+    SET search_path = public, pg_temp AS $live_validate$${validate}$live_validate$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.field_app_priced_quantity(
+      p_applied_qty numeric, p_rate_unit text, p_inventory_unit text, p_product_form text)
+    RETURNS numeric LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp
+    AS $live_field$${field}$live_field$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.convert_to_gl_lb(
+      p_total_applied numeric, p_rate_unit text, p_product_form text)
+    RETURNS TABLE(converted_value numeric, converted_unit text) LANGUAGE plpgsql IMMUTABLE
+    SET search_path = public AS $live_convert$${convert}$live_convert$;`);
+  for (const [signature, expected] of Object.entries(LIVE_BODY_MD5)) {
+    assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = '${signature}'::regprocedure;`),
+      expected, `${signature} is not the pinned live body before the candidate`);
+  }
+}
+function plan() {
+  const r = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs'], { cwd: ROOT, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(r.stderr);
+  const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
+  const at = all.indexOf(CANDIDATE);
+  assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
+  for (const file of all.slice(at + 1)) {
+    assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
+  }
+  const before = all.slice(0, at);
+  for (const name of PARKED) {
+    const file = before.find((f) => path.basename(f) === name);
+    assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
+    assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
+  }
+  return before;
+}
+function installLiveAuthUid() {
+  psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
+  assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
+}
+function buildContainer() {
+  docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  ready();
+  wait(1500);
+  for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+  if (schema.status !== 0) throw new Error(schema.stderr.toString());
+  psql('\\i /tmp/20260727174805_extensions.sql'); psql(schema.stdout.toString());
+  // storage.objects carries metadata and a (bucket_id, name) key, and postgres may read it, as live
+  // has them: 20261022075000 (replayed before the candidate) checks that shape in its preflight.
+  psql(`CREATE SCHEMA IF NOT EXISTS storage;
+    CREATE TABLE IF NOT EXISTS storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false, file_size_limit bigint, allowed_mime_types text[]);
+    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name));
+    CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
+    CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
+    GRANT USAGE ON SCHEMA storage TO postgres;
+    GRANT ALL ON storage.objects, storage.buckets TO postgres;`, { user: 'supabase_admin' });
+  psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
+  for (const name of ['20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) psql(`\\i /tmp/${name}`, { user: name.includes('overlay') ? 'supabase_admin' : 'postgres' });
+  const files = plan();
+  let replayed = 0;
+  for (const [i, file] of files.entries()) {
+    const base = path.basename(file);
+    if (PARKED.has(base)) continue;
+    for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
+    if (LEDGER_ONLY.has(base)) continue;
+    if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
+    // Batch 2's preflight pins live's auth.uid() body, which live had when batch 2 was applied.
+    if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
+    if (base === FORMS_SEED_EACH) restoreLiveBodies();
+    if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') {
+      psql(`UPDATE public.warehouses SET is_active = true WHERE name = 'Main Warehouse';
+        INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
+        WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse');`);
+    }
+    const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
+    if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
+    ledger(path.basename(file, '.sql'));
+    replayed += 1;
+  }
+  installLiveAuthUid();
+  console.log(`[prover] replayed ${replayed} post-baseline migrations before the candidate (skipped: ${[...PARKED].join(', ')}; ledger only: ${[...LEDGER_ONLY].join(', ')})`);
+}
+
+
+const id = (n) => `6c000000-0000-4000-8000-${n.padStart(12, '0')}`;
+const C = id('c1');
+const P = id('f1');
+const Q = id('e1');
+const J = id('11');
+const S = id('51');
+const U = id('a1');
+
+// Invented rows only, written with triggers and foreign keys off: the proof is about what the sync
+// writes, not how a quote or job is saved.
+function seed() {
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.customers (id, farm_name) VALUES ('${C}', 'KI-100 Farm');
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+      VALUES ('${P}', 'KI-100 Liquid', 'gal', 'gal', 'liquid');
+    INSERT INTO public.inventory (product_id, location)
+      VALUES ('${P}', 'Main Warehouse');
+    INSERT INTO public.quotes (id, quote_number, customer_id, created_by, status, is_planned)
+      VALUES ('${Q}', 'KI100-Q', '${C}', '${U}', 'sent', true);
+    INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+      VALUES ('${Q}', '${S}', '${P}', 10);
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by)
+      VALUES ('${J}', 'KI100-J', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${J}', '${P}', 1, 'fl oz', false);`);
+}
+
+const DRAWN = `SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${J}' AND product_id = '${P}';`;
+const LEFT = `SELECT 10 - COALESCE((SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}'), 0);`;
+const HOLD = `SELECT quantity FROM public.inventory_holds WHERE hold_type = 'job' AND source_id = '${J}' AND is_active;`;
+// The invented actor has no profile row, so the sync runs with foreign keys off like the seed.
+const sync = () => psql(`SET session_replication_role = replica; SELECT public._sync_quote_job_reservations('${Q}', NULL);`);
+const scaleOf = (v) => scalar(`SELECT scale(trim_scale((${v})::numeric));`);
+
+function main() {
+  buildContainer();
+  seed();
+
+  // BEFORE the candidate: the live body strands an unreachable remainder.
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._sync_quote_job_reservations(uuid,uuid)'::regprocedure;`),
+    '04ee0476248f3619d20df7a4e5e9a760', 'the replayed sync is not the live body the candidate pins');
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._trg_release_job_holds_on_lifecycle()'::regprocedure;`),
+    'fa4998d94017f33d58045e8c4ecb6445', 'the replayed lifecycle trigger is not the live body the candidate pins');
+  sync();
+  assert.equal(Number(scalar(DRAWN)), 0.0078125, 'before: 1 fl oz should draw 0.0078125 gal');
+  const leftBefore = scalar(LEFT);
+  assert.equal(Number(leftBefore), 9.9921875, 'before: the booking should have 9.9921875 gal left');
+  assert.ok(Number(scaleOf(leftBefore)) > 2, 'before: the remainder should need more than 2 decimals');
+  console.log(`[prover] BEFORE: job draw ${scalar(DRAWN)} gal, booking left ${leftBefore} gal (no Partial Order can take it)`);
+
+  // A completed job keeps its draw (the sync never rebuilds it), so the candidate refuses to apply
+  // over a kept unrounded draw.
+  stageText('candidate.sql', lf(CANDIDATE));
+  psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${J}';`);
+  const refused = apply('candidate.sql');
+  assert.notEqual(refused.status, 0, 'the candidate must refuse a kept draw finer than 0.01');
+  assert.match(refused.output, /PREFLIGHT_KEPT_JOB_DRAW_NOT_HUNDREDTHS/);
+  psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'scheduled' WHERE id = '${J}';`);
+  console.log('[prover] a completed job keeping an unrounded draw: the candidate refuses to apply');
+  // An active job's unrounded draw is refused too (it would wait for its next sync); reconcile it.
+  assert.match(apply('candidate.sql').output, /PREFLIGHT_KEPT_JOB_DRAW_NOT_HUNDREDTHS/, 'an active unrounded draw must be refused');
+  psql(`SET session_replication_role = replica; DELETE FROM public.job_product_draws WHERE job_id = '${J}';`);
+  console.log('[prover] an active job with an unrounded draw: refused too, until it is reconciled');
+
+  // Apply the candidate as one transaction (its preflight checks that).
+  const r = apply('candidate.sql');
+  assert.equal(r.status, 0, `candidate failed to apply:\n${r.output}`);
+  // From here on the real jobs triggers (the lifecycle sync and the completing marker) fire on every
+  // status update even with replication role replica, as they do in production; the explicit syncs
+  // below are the same convergent rebuild run again.
+  const TRIGGERS_ON = 'ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_release_job_holds_on_lifecycle; ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_mark_job_completing;';
+  psql(TRIGGERS_ON);
+
+  // AFTER: the same sync draws whole hundredths and leaves a remainder a Partial Order can take.
+  sync();
+  assert.equal(scalar(DRAWN), '0.01', 'after: 1 fl oz should draw 0.01 gal');
+  const leftAfter = scalar(LEFT);
+  assert.equal(Number(leftAfter), 9.99, 'after: the booking should have 9.99 gal left');
+  assert.ok(Number(scaleOf(leftAfter)) <= 2, 'after: the remainder should be whole hundredths');
+  assert.equal(Number(scalar(HOLD)), 0.01, 'after: the shed hold should be at least the draw the booking gave up');
+  console.log(`[prover] AFTER: job draw ${scalar(DRAWN)} gal, booking left ${leftAfter} gal, shed hold ${scalar(HOLD)} gal`);
+
+  // An active demand under half a hundredth still draws 0.01, so every booking guard that looks for a
+  // positive job draw (convert, delete, close, rollover) still sees the active job (Sol, 2026-11-05).
+  psql(`SET session_replication_role = replica; UPDATE public.job_chemicals SET quantity = 0.5 WHERE job_id = '${J}';`);
+  sync();
+  assert.equal(scalar(DRAWN), '0.01', 'after: an active 0.5 fl oz (0.0039 gal) job should still draw 0.01');
+  assert.equal(Number(scalar(HOLD)), 0.01, 'after: the hold should cover that draw');
+  console.log('[prover] AFTER: an active demand under 0.005 gal still draws 0.01 (visible to every booking guard); hold 0.01');
+
+  // A signed-in caller cannot pass another user as the actor; its own id and a system call still sync.
+  const actorProbe = scalar(`SET session_replication_role = replica;
+    SET "request.jwt.claims" = '{"sub":"${U}","role":"authenticated"}';
+    CREATE TEMP TABLE actor_probe (n int, r text);
+    DO $p$ BEGIN PERFORM public._sync_quote_job_reservations('${Q}', '${id('a2')}'); INSERT INTO actor_probe VALUES (1, 'other ran');
+      EXCEPTION WHEN insufficient_privilege THEN INSERT INTO actor_probe VALUES (1, SQLERRM); END $p$;
+    DO $p$ BEGIN PERFORM public._sync_quote_job_reservations('${Q}', '${U}'); INSERT INTO actor_probe VALUES (2, 'own ran'); END $p$;
+    SELECT string_agg(r, ';' ORDER BY n) FROM actor_probe;`);
+  assert.equal(actorProbe, 'ACTOR_MISMATCH;own ran', `actor binding: got ${actorProbe}`);
+  sync();
+  console.log('[prover] a signed-in caller passing another actor is refused (ACTOR_MISMATCH); its own id and a system call still sync');
+
+  // Many small jobs completed one after another: the booking's draws track the real total applied,
+  // rounded once, instead of adding up one rounding per job (8 x 0.01 = 0.08 for 0.0625 applied).
+  psql(`SET session_replication_role = replica; UPDATE public.job_chemicals SET quantity = 1 WHERE job_id = '${J}';`);
+  for (let n = 1; n <= 8; n += 1) {
+    const jobN = n === 1 ? J : id(`2${n}`);
+    if (n > 1) {
+      psql(`SET session_replication_role = replica;
+        INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by)
+          VALUES ('${jobN}', 'KI100-J${n}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}');
+        INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+          VALUES ('${jobN}', '${P}', 1, 'fl oz', false);`);
+    }
+    sync();
+    // While active, the job draws at least 0.01 so every booking guard sees it; completion rebuilds it to its step.
+    assert.ok(Number(scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE job_id = '${jobN}';`)) >= 0.01, `active job ${n} should draw at least 0.01`);
+    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${jobN}';`);
+    const total = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
+    const expected = Math.round(n * 0.0078125 * 100) / 100;
+    assert.equal(Number(total), expected, `after ${n} completed jobs the booking should have drawn ${expected} gal, not ${total}`);
+    assert.ok(Number(scaleOf(scalar(LEFT))) <= 2, `after ${n} jobs the remainder should be whole hundredths`);
+  }
+  console.log(`[prover] AFTER: 8 jobs of 1 fl oz completed one by one drew ${scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}';`)} gal for 0.0625 gal applied`);
+  // Small jobs ahead of a larger sibling: they complete, the sibling is cancelled. Their kept draws
+  // must still match what they applied, rounded once (12 x 1 fl oz = 0.09375 -> 0.09), not one
+  // rounded-up 0.01 each (0.10) that the sibling's demand had covered.
+  const big = id('31');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      VALUES ('${big}', 'KI100-BIG', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '1 day');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${big}', '${P}', 1, 'gal', false);`);
+  const smalls = [41, 42, 43, 44].map((n) => id(String(n)));
+  for (const [i, jobN] of smalls.entries()) {
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        VALUES ('${jobN}', 'KI100-S${i}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() - interval '1 day');
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        VALUES ('${jobN}', '${P}', 1, 'fl oz', false);`);
+  }
+  sync();
+  // One at a time, each followed by the sync complete_job's status update fires.
+  for (const jobN of smalls) {
+    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${jobN}';`);
+    sync();
+  }
+  psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'cancelled' WHERE id = '${big}';`);
+  sync();
+  const kept = scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
+  assert.equal(Number(kept), 0.09, `12 completed jobs of 1 fl oz should keep 0.09 gal of draws, not ${kept}`);
+  console.log(`[prover] AFTER: 4 more small jobs completed ahead of a cancelled 1 gal sibling keep ${kept} gal for 0.09375 gal applied`);
+
+  // Out of order, three times over: two 0.5 fl oz jobs, the LATER one completes and the earlier one
+  // is cancelled. The later job's step can leave at most 0.01 kept over the rounded real total, and
+  // later syncs draw nothing until the real total catches up, so it never piles up.
+  for (let k = 0; k < 3; k += 1) {
+    const early = id(`5${k}`);
+    const late = id(`6${k}`);
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        VALUES ('${early}', 'KI100-E${k}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '2 days'),
+               ('${late}', 'KI100-L${k}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '3 days');
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        VALUES ('${early}', '${P}', 0.5, 'fl oz', false), ('${late}', '${P}', 0.5, 'fl oz', false);`);
+    sync();
+    psql(`SET session_replication_role = replica;
+      UPDATE public.jobs SET status = 'completed' WHERE id = '${late}';
+      UPDATE public.jobs SET status = 'cancelled' WHERE id = '${early}';`);
+    sync();
+    const keptNow = Number(scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`));
+    const applied = 0.09375 + (k + 1) * 0.00390625;
+    assert.ok(keptNow <= Math.round(applied * 100) / 100 + 0.01 + 1e-9,
+      `out of order round ${k + 1}: kept ${keptNow} gal is more than 0.01 over the rounded ${applied} gal applied`);
+  }
+  // A completed job whose demand outran its booking, then the booking is raised: a new 1 gal job
+  // draws its own 1.00, not the old job's shortfall.
+  const over = id('71');
+  const fresh = id('72');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by)
+      VALUES ('${over}', 'KI100-OVER', '${C}', DATE '2026-11-04', '${Q}', 'completed', '${U}');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${over}', '${P}', 15, 'gal', false);
+    UPDATE public.quote_items SET total_units_needed = 30 WHERE quote_id = '${Q}';
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by)
+      VALUES ('${fresh}', 'KI100-NEW', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${fresh}', '${P}', 1, 'gal', false);`);
+  sync();
+  const freshDraw = scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${fresh}';`);
+  assert.equal(Number(freshDraw), 1, `a 1 gal job should draw 1.00 gal, not ${freshDraw}`);
+  console.log(`[prover] AFTER: after a completed job outran its booking, a new 1 gal job draws ${freshDraw} gal, not the old shortfall`);
+  console.log(`[prover] AFTER: 3 out-of-order completions with a cancelled earlier sibling keep ${scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND job_id <> '${fresh}';`)} gal for 0.10546875 gal applied (never more than 0.01 over)`);
+  // Luna: three rounds on a fresh product, each with a new pair of active jobs, A then B in FIFO order
+  // (0.004/0.004, then 0.010/0.002, then 0.018/0.002 gal). B completes and A is cancelled each round.
+  // A running-total share let B borrow A's rounding every round (0.03 kept for 0.008 applied); the
+  // kept draws must stay within 0.01 of the rounded completed demand.
+  const P2 = id('f2');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+      VALUES ('${P2}', 'KI-100 Liquid 2', 'gal', 'gal', 'liquid');
+    INSERT INTO public.inventory (product_id, location) VALUES ('${P2}', 'Main Warehouse');
+    INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+      VALUES ('${Q}', '${S}', '${P2}', 10);`);
+  const keptP2 = () => Number(scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P2}';`));
+  let completedP2 = 0;
+  for (const [k, [qa, qb]] of [[0.004, 0.004], [0.010, 0.002], [0.018, 0.002]].entries()) {
+    const a = id(`8${k}`);
+    const b = id(`9${k}`);
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        VALUES ('${a}', 'KI100-A${k}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '4 days'),
+               ('${b}', 'KI100-B${k}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '5 days');
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        VALUES ('${a}', '${P2}', ${qa}, 'gal', false), ('${b}', '${P2}', ${qb}, 'gal', false);`);
+    sync();
+    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${b}';`);
+    sync();
+    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'cancelled' WHERE id = '${a}';`);
+    sync();
+    completedP2 += qb;
+    const keptNow = keptP2();
+    assert.ok(keptNow <= Math.round(completedP2 * 100) / 100 + 0.01 + 1e-9,
+      `Luna round ${k + 1}: kept ${keptNow} gal is more than 0.01 over the rounded ${completedP2} gal applied`);
+    assert.ok(Number(scaleOf(keptNow)) <= 2, `Luna round ${k + 1}: kept draws should be whole hundredths`);
+  }
+  console.log(`[prover] AFTER: Luna's 3 rounds (B completes, A cancelled) keep ${keptP2()} gal for ${completedP2.toFixed(3)} gal applied`);
+  // Codex: a 15 gal job outruns a 10 gal booking (draws the 10 left) and completes; the booking is
+  // raised to 20 gal; then 20 jobs of 1 fl oz complete one by one. The old shortfall must not make
+  // each small job round up to 0.01 (0.20 gal for 0.15625 applied): they keep 0.16 and leave 9.84.
+  const P3 = id('f3');
+  const outrun = id('a0');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+      VALUES ('${P3}', 'KI-100 Liquid 3', 'gal', 'gal', 'liquid');
+    INSERT INTO public.inventory (product_id, location) VALUES ('${P3}', 'Main Warehouse');
+    INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+      VALUES ('${Q}', '${S}', '${P3}', 10);
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      VALUES ('${outrun}', 'KI100-OUTRUN', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '6 days');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${outrun}', '${P3}', 15, 'gal', false);
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);
+    UPDATE public.jobs SET status = 'completed' WHERE id = '${outrun}';
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);
+    UPDATE public.quote_items SET total_units_needed = 20 WHERE quote_id = '${Q}' AND product_id = '${P3}';`);
+  assert.equal(Number(scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${outrun}';`)), 10,
+    'the 15 gal job should keep the 10 gal its booking had');
+  for (let n = 0; n < 20; n += 1) {
+    const small = id(`b${String(n).padStart(2, '0')}`);
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        VALUES ('${small}', 'KI100-T${n}', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '7 days');
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        VALUES ('${small}', '${P3}', 1, 'fl oz', false);
+      SELECT public._sync_quote_job_reservations('${Q}', NULL);
+      UPDATE public.jobs SET status = 'completed' WHERE id = '${small}';
+      SELECT public._sync_quote_job_reservations('${Q}', NULL);`);
+  }
+  const smallKept = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P3}' AND job_id <> '${outrun}';`);
+  assert.equal(Number(smallKept), 0.16, `20 jobs of 1 fl oz after an old shortfall should keep 0.16 gal, not ${smallKept}`);
+  const leftP3 = scalar(`SELECT 20 - sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P3}';`);
+  assert.equal(Number(leftP3), 9.84, `the raised booking should have 9.84 gal left, not ${leftP3}`);
+  console.log(`[prover] AFTER: after a 15 gal job outran a 10 gal booking raised to 20, 20 jobs of 1 fl oz keep ${smallKept} gal for 0.15625 applied and leave ${leftP3} gal`);
+
+  // Codex: 100 jobs of 1 fl oz (0.78125 gal) on a 0.80 gal booking, the LATER jobs completing first.
+  // While active, the first 80 each round up to 0.01 and use the whole pool, so the last 20 draw 0.
+  // Completing a job one at a time and calling the sync directly (no lifecycle trigger, so no
+  // completing mark: the previous behaviour) freezes those 0s. Through the real lifecycle trigger,
+  // each completing job is rebuilt as its own step, so the kept draws stay within 0.01 of the
+  // rounded completed demand after every completion and end at 0.78.
+  const lastFirst = (P, prefix, viaTrigger) => {
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+        VALUES ('${P}', 'KI-100 Liquid ${prefix}', 'gal', 'gal', 'liquid');
+      INSERT INTO public.inventory (product_id, location) VALUES ('${P}', 'Main Warehouse');
+      INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+        VALUES ('${Q}', '${S}', '${P}', 0.80);
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        SELECT ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid, 'KI100-${prefix}-' || n, '${C}',
+               DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '8 days' + n * interval '1 minute'
+          FROM generate_series(1, 100) n;
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        SELECT ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid, '${P}', 1, 'fl oz', false
+          FROM generate_series(1, 100) n;
+      SELECT public._sync_quote_job_reservations('${Q}', NULL);
+      DO $last_first$
+      DECLARE
+        v_kept numeric;
+        v_applied numeric;
+      BEGIN
+        FOR n IN REVERSE 100..1 LOOP
+          UPDATE public.jobs SET status = 'completed'
+           WHERE id = ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid;
+          IF NOT ${viaTrigger} THEN
+            PERFORM public._sync_quote_job_reservations('${Q}', NULL);
+          ELSIF COALESCE(current_setting('crx.job_completing', true), '') <> ''
+             OR COALESCE(current_setting('crx.jobs_completing_pending', true), '') <> '' THEN
+            RAISE EXCEPTION 'the completing mark leaked past its trigger';
+          END IF;
+          SELECT COALESCE(sum(d.quantity_drawn), 0) INTO v_kept
+            FROM public.job_product_draws d JOIN public.jobs j ON j.id = d.job_id
+           WHERE d.quote_id = '${Q}' AND d.product_id = '${P}' AND j.status = 'completed';
+          v_applied := (101 - n) * 0.0078125;
+          IF ${viaTrigger} AND abs(v_kept - round(v_applied, 2)) > 0.01 THEN
+            RAISE EXCEPTION 'after % completions kept % gal, more than 0.01 off the rounded % gal applied', 101 - n, v_kept, v_applied;
+          END IF;
+        END LOOP;
+      END
+      $last_first$;`);
+    return scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
+  };
+  psql('ALTER TABLE public.jobs ENABLE TRIGGER trg_release_job_holds_on_lifecycle; ALTER TABLE public.jobs ENABLE TRIGGER trg_mark_job_completing;');
+  const keptDirect = lastFirst(id('f4'), 'd0', false);
+  // Without the rebuild a completed job keeps whatever it drew while active, so the kept total drifts off the rounded demand.
+  assert.ok(Math.abs(Number(keptDirect) - 0.78) > 0.01, `without the completing mark the last-first case should drift off 0.78, kept ${keptDirect}`);
+  console.log(`[prover] Codex last-first, sync called directly (no completing mark): kept ${keptDirect} gal for 0.78125 applied`);
+  psql(TRIGGERS_ON);
+  const keptTrigger = lastFirst(id('f5'), 'e0', true);
+  assert.equal(Number(keptTrigger), 0.78, `through the lifecycle trigger the last-first case should keep 0.78 gal, not ${keptTrigger}`);
+  console.log(`[prover] Codex last-first, through the lifecycle trigger: kept ${keptTrigger} gal for 0.78125 applied, within 0.01 after every completion`);
+
+  // Several sibling jobs completed in ONE statement: every row's BEFORE trigger lists its job as
+  // pending before any AFTER trigger runs, and each completion's rebuild leaves the other pending
+  // jobs out of its base, so the statement keeps what completing them one at a time would; both
+  // marks are gone once the statement ends. Luna: two 0.006 gal jobs (each a provisional 0.01)
+  // otherwise each kept 0 for 0.012 applied.
+  const bulk = (P, prefix, count, qty, expected) => {
+    psql(`SET session_replication_role = replica;
+      INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+        VALUES ('${P}', 'KI-100 Liquid ${prefix}', 'gal', 'gal', 'liquid');
+      INSERT INTO public.inventory (product_id, location) VALUES ('${P}', 'Main Warehouse');
+      INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+        VALUES ('${Q}', '${S}', '${P}', 10);
+      INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+        SELECT ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid, 'KI100-${prefix}-' || n, '${C}',
+               DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '9 days' + n * interval '1 minute'
+          FROM generate_series(1, ${count}) n;
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+        SELECT ('6c000000-0000-4000-8000-${prefix}' || lpad(n::text, 10, '0'))::uuid, '${P}', ${qty}, 'gal', false
+          FROM generate_series(1, ${count}) n;
+      SELECT public._sync_quote_job_reservations('${Q}', NULL);
+      DO $bulk$
+      BEGIN
+        UPDATE public.jobs SET status = 'completed'
+         WHERE quote_id = '${Q}' AND id::text LIKE '6c000000-0000-4000-8000-${prefix}%';
+        IF COALESCE(current_setting('crx.job_completing', true), '') <> ''
+           OR COALESCE(current_setting('crx.jobs_completing_pending', true), '') <> '' THEN
+          RAISE EXCEPTION 'a completing mark leaked past the statement';
+        END IF;
+      END
+      $bulk$;`);
+    const kept = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
+    assert.equal(Number(kept), expected, `${count} jobs of ${qty} gal completed in one statement should keep ${expected} gal, not ${kept}`);
+    console.log(`[prover] ${count} jobs of ${qty} gal completed in one statement keep ${kept} gal for ${(count * qty).toFixed(3)} applied; no mark leaks`);
+  };
+  bulk(id('f6'), 'c2', 2, 0.004, 0.01);
+  bulk(id('f7'), 'c3', 2, 0.006, 0.01);
+  bulk(id('f8'), 'c4', 100, 0.004, 0.4);
+  // A lone completed job under 0.005 gal keeps 0.01, so the booking never shows no job draw after product was applied (Sol, 2026-11-05).
+  bulk(id('f9'), 'c5', 1, 0.004, 0.01);
+
+  // Sol: a completed 1 gal job (kept 1.00) is later edited down to 0.1 gal. A new 1 gal job must still
+  // draw its own step (0.99), not 0.1: kept draws count as at most 0.01 above the rounded completed demand.
+  const P10 = id('fa');
+  const edA = id('a3');
+  const edB = id('a4');
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form)
+      VALUES ('${P10}', 'KI-100 Liquid edit', 'gal', 'gal', 'liquid');
+    INSERT INTO public.inventory (product_id, location) VALUES ('${P10}', 'Main Warehouse');
+    INSERT INTO public.quote_items (quote_id, section_id, product_id, total_units_needed)
+      VALUES ('${Q}', '${S}', '${P10}', 3);
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      VALUES ('${edA}', 'KI100-EDA', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '10 days');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${edA}', '${P10}', 1, 'gal', false);
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);`);
+  psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${edA}';`);
+  psql(`SET session_replication_role = replica;
+    UPDATE public.job_chemicals SET quantity = 0.1 WHERE job_id = '${edA}' AND product_id = '${P10}';
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      VALUES ('${edB}', 'KI100-EDB', '${C}', DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '11 days');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      VALUES ('${edB}', '${P10}', 1, 'gal', false);
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);`);
+  const drawB = scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${edB}';`);
+  assert.equal(Number(drawB), 1, `after a completed job was edited down, a new 1 gal job should draw 1.00, not ${drawB}`);
+  psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${edB}';`);
+  const keptB = scalar(`SELECT quantity_drawn FROM public.job_product_draws WHERE job_id = '${edB}';`);
+  const leftP10 = scalar(`SELECT 3 - sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P10}';`);
+  assert.equal(Number(keptB), 1, `the edited-down case should keep 1.00 for the new job, not ${keptB}`);
+  console.log(`[prover] completed 1 gal job edited down to 0.1: a new 1 gal job draws ${drawB}, keeps ${keptB}, booking left ${leftP10} (was 0.1 / 1.90)`);
+  // Codex P2: then 90 jobs of 0.01 gal complete one by one. The edited job's excess must not erase them.
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, quote_id, status, created_by, created_at)
+      SELECT ('6c000000-0000-4000-8000-c6' || lpad(n::text, 10, '0'))::uuid, 'KI100-c6-' || n, '${C}',
+             DATE '2026-11-04', '${Q}', 'scheduled', '${U}', now() + interval '12 days' + n * interval '1 minute'
+        FROM generate_series(1, 90) n;
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, customer_supplied)
+      SELECT ('6c000000-0000-4000-8000-c6' || lpad(n::text, 10, '0'))::uuid, '${P10}', 0.01, 'gal', false
+        FROM generate_series(1, 90) n;
+    SELECT public._sync_quote_job_reservations('${Q}', NULL);
+    DO $tiny$
+    BEGIN
+      FOR n IN 1..90 LOOP
+        UPDATE public.jobs SET status = 'completed' WHERE id = ('6c000000-0000-4000-8000-c6' || lpad(n::text, 10, '0'))::uuid;
+      END LOOP;
+    END
+    $tiny$;`);
+  const tinyKept = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P10}' AND job_id::text LIKE '6c000000-0000-4000-8000-c6%';`);
+  const leftTiny = scalar(`SELECT 3 - sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P10}';`);
+  assert.equal(Number(tinyKept), 0.9, `90 jobs of 0.01 gal after the edited job should keep 0.90, not ${tinyKept}`);
+  console.log(`[prover] then 90 jobs of 0.01 gal completed one by one keep ${tinyKept} gal, booking left ${leftTiny}`);
+  console.log('JOB_RESERVATION_HUNDREDTHS_PROOF_PASS');
+}
+
+try { main(); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

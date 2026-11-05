@@ -11,6 +11,9 @@ export type DurableMutationIntentOptions<T> = {
   surface: string;
   scope?: string;
   getIntentIdentity?: (intent: T) => unknown;
+  // Keys the request was actually sent under when it is not sent under its own key
+  // (a batch sends each row as "<key>:<row id>"); the clear check covers and retires them.
+  getSentRequestKeys?: (intent: T, idempotencyKey: string) => string[];
 };
 
 type DurableMutationIntentRecord<T> = {
@@ -100,7 +103,14 @@ export class UncertainClearNotYetError extends Error {
   }
 }
 
-type ClearCheckVerdict = { safe: boolean; reason: string; checked_at: string; wait_until?: string; first_check_token?: string };
+type ClearCheckVerdict = {
+  safe: boolean;
+  reason: string;
+  checked_at: string;
+  wait_until?: string;
+  first_check_token?: string;
+  retired_keys?: number;
+};
 export const UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE =
   'The safe automatic retry window expired. Do not submit this mutation again. Verify the authoritative record and reconcile it manually.';
 export const UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE =
@@ -1139,12 +1149,21 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     } catch {
       // Without the token the server simply starts the wait again.
     }
-    const { data, error } = await supabase.rpc('check_uncertain_request_clearable', {
+    // A safe answer also retires every key the request could still be sent under, so a
+    // late copy from any tab is refused by the database after this clear.
+    const pending = [mirror, attempt].find((record) => record?.status === 'pending'
+      && record.idempotencyKey === expectedIdempotencyKey);
+    const rowKeys = pending && options.getSentRequestKeys
+      ? options.getSentRequestKeys(pending.intent, expectedIdempotencyKey)
+      : [];
+    const { data, error } = await supabase.rpc('retire_uncertain_request', {
       p_request_key: expectedIdempotencyKey,
+      p_idempotency_key: expectedIdempotencyKey,
+      ...(rowKeys.length > 0 ? { p_row_keys: rowKeys } : {}),
       ...(firstCheckToken ? { p_first_check_token: firstCheckToken } : {}),
     });
     if (error) throw error;
-    const verdict = assertRpcResult<ClearCheckVerdict>(data, 'check_uncertain_request_clearable');
+    const verdict = assertRpcResult<ClearCheckVerdict>(data, 'retire_uncertain_request');
     if (verdict.safe !== true) {
       if (verdict.reason === 'first_check' && verdict.first_check_token) {
         clearCheckTokens.set(checkKey, verdict.first_check_token);

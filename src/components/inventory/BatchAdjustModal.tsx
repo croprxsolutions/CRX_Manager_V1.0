@@ -163,6 +163,8 @@ export default function BatchAdjustModal({ open, onClose, items, userId, onSucce
       p_reason: intent.reason,
       p_performed_by: intent.performedBy,
     }),
+    // Each row is sent under its own key, never the batch key.
+    getSentRequestKeys: (intent, batchKey) => intent.rows.map((row) => batchRowIdempotencyKey(batchKey, row.inventoryId)),
   });
   const frozen = batchIntent.isIntentResolved ? null : batchIntent.unresolvedIntent;
 

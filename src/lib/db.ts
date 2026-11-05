@@ -472,7 +472,7 @@ export const RpcErrorCodes = {
   VENDOR_IS_PREFERRED: 'VENDOR_IS_PREFERRED',
   SUPPLIER_LINK_NOT_FOUND: 'SUPPLIER_LINK_NOT_FOUND',
   VENDOR_NOT_FOUND: 'VENDOR_NOT_FOUND',
-  // check_uncertain_request_clearable (20261107150000_uncertain_request_clear_check, KI-27).
+  // retire_uncertain_request (20261107150000_uncertain_request_clear_check, KI-27).
   REQUEST_KEY_NOT_OWNED: 'REQUEST_KEY_NOT_OWNED',
 } as const;
 

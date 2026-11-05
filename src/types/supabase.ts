@@ -13143,10 +13143,6 @@ export type Database = {
         Returns: undefined
       }
       check_remainder_reminders: { Args: never; Returns: Json }
-      check_uncertain_request_clearable: {
-        Args: { p_first_check_token?: string; p_request_key: string }
-        Returns: Json
-      }
       check_unpriced_orders: { Args: never; Returns: Json }
       cleanup_rate_limits: { Args: never; Returns: undefined }
       close_accounting_period: {
@@ -15318,6 +15314,15 @@ export type Database = {
           p_idempotency_key?: string
           p_inventory_id: string
           p_performed_by?: string
+        }
+        Returns: Json
+      }
+      retire_uncertain_request: {
+        Args: {
+          p_first_check_token?: string
+          p_idempotency_key?: string
+          p_request_key: string
+          p_row_keys?: string[]
         }
         Returns: Json
       }

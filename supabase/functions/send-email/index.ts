@@ -760,6 +760,9 @@ Deno.serve(async (req: Request) => {
     // A send without a key is still stored under its type + record, so the
     // unconfirmed-send check below can see it.
     const storedIdempotencyKey = scopedIdempotencyKey ?? `${email_type}:${recordRef}:auto-${crypto.randomUUID()}`;
+    // Names this email; the database allows one pending row per value
+    // (email_log_one_pending_send, migration 20261110110000).
+    const sendLockKey = `${email_type}:${recordRef}:${customer_id ?? "none"}`;
 
     if (scopedIdempotencyKey) {
       const { data: keyRows, error: existingErr } = await adminClient
@@ -858,8 +861,31 @@ Deno.serve(async (req: Request) => {
 
     // An earlier send of this same email whose outcome is unknown blocks a new one
     // under ANY key: some screens make a new key on every click, and the customer
-    // may already have the first. Scoped keys begin with type + record.
-    // shortcut: two first sends with different keys in the same instant can both pass; a partial unique index would close it.
+    // may already have the first.
+    const unconfirmedSend = (heldBy: string | null) => jsonResponse({
+      success: false,
+      error: "An earlier send of this email has not been confirmed and may have reached the customer. " +
+        "Check Resend, then mark that email_log row 'sent' or 'failed' before sending again.",
+      email_log_id: heldBy,
+      needs_reconciliation: true,
+    }, 409);
+    // The database refused a second pending row for this email: a send that
+    // started at the same instant holds it.
+    const isLockConflict = (err: { code?: string; message?: string } | null) =>
+      err?.code === "23505" && (err.message ?? "").includes("email_log_one_pending_send");
+    const lockHolder = async () => {
+      const { data } = await adminClient
+        .from("email_log")
+        .select("id")
+        .eq("send_lock_key", sendLockKey)
+        .eq("status", "pending")
+        .limit(1);
+      return unconfirmedSend(data?.[0]?.id ?? null);
+    };
+
+    // Early check; the unique index above is what holds when two arrive together.
+    // It also sees pending rows logged before send_lock_key existed (scoped keys
+    // begin with type + record).
     {
       const recordKeyPrefix = `${email_type}:${recordRef}:`.replace(/[\\%_]/g, (c) => "\\" + c);
       const unsettledQuery = adminClient
@@ -876,13 +902,7 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: `Pending-send check failed: ${unsettledErr.message}` }, 503);
       }
       if (unsettled && unsettled.length > 0) {
-        return jsonResponse({
-          success: false,
-          error: "An earlier send of this email has not been confirmed and may have reached the customer. " +
-            "Check Resend, then mark that email_log row 'sent' or 'failed' before sending again.",
-          email_log_id: unsettled[0].id,
-          needs_reconciliation: true,
-        }, 409);
+        return unconfirmedSend(unsettled[0].id);
       }
     }
 
@@ -898,6 +918,7 @@ Deno.serve(async (req: Request) => {
           resend_message_id: null,
           error_message: null,
           idempotency_key: scopedIdempotencyKey,
+          send_lock_key: sendLockKey,
           recipient_email: to,
           subject,
           html_body: html,
@@ -909,6 +930,9 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
       if (!updateErr && !claimedRow) {
         return await alreadyInProgress();
+      }
+      if (isLockConflict(updateErr)) {
+        return await lockHolder();
       }
       if (updateErr) {
         await captureEdgeException(
@@ -941,10 +965,14 @@ Deno.serve(async (req: Request) => {
           status: "pending",
           error_message: null,
           idempotency_key: storedIdempotencyKey,
+          send_lock_key: sendLockKey,
           created_by: caller.id,
         })
         .select("id")
         .single();
+      if (isLockConflict(insertErr)) {
+        return await lockHolder();
+      }
       // email_log.idempotency_key is unique: a first send racing this one already holds the key.
       if (insertErr?.code === "23505") {
         return await alreadyInProgress();

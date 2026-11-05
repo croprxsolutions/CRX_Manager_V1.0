@@ -124,14 +124,21 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
       }
       return reply(found, req);
     }
+    // email_log_one_pending_send: one pending row per send_lock_key (NULL never clashes).
+    const lockClash = (row: Row, self?: Row) =>
+      table === "email_log" && row.status === "pending" && row.send_lock_key != null &&
+      rows.some((r) => r !== self && r.status === "pending" && r.send_lock_key === row.send_lock_key);
+    const unique = (name: string) =>
+      json({ code: "23505", message: `duplicate key value violates unique constraint "${name}"`, details: null, hint: null }, 409);
     if (req.method === "POST") {
       const body = await req.json();
       const inserted: Row[] = [];
       for (const row of Array.isArray(body) ? body : [body]) {
         if (table === "email_log" && row.idempotency_key != null &&
           rows.some((r) => r.idempotency_key === row.idempotency_key)) {
-          return json({ code: "23505", message: "duplicate key value violates unique constraint", details: null, hint: null }, 409);
+          return unique("email_log_idempotency_key_key");
         }
+        if (lockClash(row)) return unique("email_log_one_pending_send");
         const saved = { id: `log-${nextId++}`, created_at: new Date().toISOString(), ...row };
         rows.push(saved);
         inserted.push(saved);
@@ -141,6 +148,7 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
     if (req.method === "PATCH") {
       const patch = await req.json();
       const updated = rows.filter((row) => matches(row, url.searchParams));
+      if (updated.some((row) => lockClash({ ...row, ...patch }, row))) return unique("email_log_one_pending_send");
       for (const row of updated) Object.assign(row, patch);
       if ((req.headers.get("prefer") ?? "").includes("return=representation")) return reply(updated, req);
       return new Response(null, { status: 204 });
@@ -289,6 +297,60 @@ Deno.test("a retry spelling the customer and record ids in capitals still dedupe
   assertEquals(res.status, 200);
   assertEquals(res.body.deduplicated, true);
   assertEquals(world.resendCalls.length, 1, "Resend calls");
+});
+
+// --- The database lock: one pending send per email ---------------------------
+
+const quoteLock = `quote:quote:${QUOTE}:${CUSTOMER}`;
+
+Deno.test("the database lock refuses a send the early check cannot see", async () => {
+  const world = makeWorld(okResend);
+  // Pending under a key the early check does not recognise, but naming the same email.
+  world.tables.email_log.push({
+    id: "held-1", idempotency_key: "other-format-key", send_lock_key: quoteLock,
+    email_type: "quote", customer_id: CUSTOMER, status: "pending",
+  });
+  const res = await send(world, ADMIN, quoteEmail(QUOTE, "fresh-key"));
+  assertEquals(res.status, 409);
+  assertEquals(res.body.needs_reconciliation, true);
+  assertEquals(res.body.email_log_id, "held-1");
+  assertEquals(world.resendCalls.length, 0, "Resend calls");
+});
+
+Deno.test("a retry of a failed send is refused while the same email is held by another pending row", async () => {
+  const world = makeWorld(okResend);
+  world.tables.email_log.push(
+    {
+      id: "failed-1", idempotency_key: `quote:quote:${QUOTE}:retry-key`, send_lock_key: quoteLock,
+      email_type: "quote", customer_id: CUSTOMER, status: "failed",
+    },
+    {
+      id: "held-2", idempotency_key: "other-format-key", send_lock_key: quoteLock,
+      email_type: "quote", customer_id: CUSTOMER, status: "pending",
+    },
+  );
+  const res = await send(world, ADMIN, quoteEmail(QUOTE, "retry-key"));
+  assertEquals(res.status, 409);
+  assertEquals(res.body.email_log_id, "held-2");
+  assertEquals(world.tables.email_log[0].status, "failed", "failed row left as it was");
+  assertEquals(world.resendCalls.length, 0, "Resend calls");
+});
+
+Deno.test("every new pending row names its email in send_lock_key", async () => {
+  const world = makeWorld(okResend);
+  assertEquals((await send(world, ADMIN, quoteEmail(QUOTE.toUpperCase(), "lock-key"))).status, 200);
+  assertEquals(world.tables.email_log[0].send_lock_key, quoteLock);
+});
+
+Deno.test("a retry that claims a failed row logged before the lock gives it the lock key", async () => {
+  const world = makeWorld(okResend);
+  world.tables.email_log.push({
+    id: "old-failed", idempotency_key: `quote:quote:${QUOTE}:old-key`, send_lock_key: null,
+    email_type: "quote", customer_id: CUSTOMER, status: "failed",
+  });
+  assertEquals((await send(world, ADMIN, quoteEmail(QUOTE, "old-key"))).status, 200);
+  assertEquals(world.tables.email_log.length, 1, "the failed row was reused");
+  assertEquals(world.tables.email_log[0].send_lock_key, quoteLock);
 });
 
 // --- Two retries at the same moment (item 3) ---------------------------------

@@ -2,7 +2,7 @@
 -- ROLLED-BACK smoke: price tiers and credit limits are admin-only; a booking's tier and planned
 -- flag change only through save_quote
 -- ----------------------------------------------------------------------------
--- Migration 20261109110000_tiers_credit_limits_admin_only.
+-- Migration 20261111100000_tiers_credit_limits_admin_only.
 --   A  A rep's direct update of a customer's tier is refused TIER_ADMIN_ONLY
 --   B  A rep's save_customer that changes the credit limit is refused CREDIT_LIMIT_ADMIN_ONLY
 --   C  A rep's save_customer that re-sends the unchanged tier and limit is accepted

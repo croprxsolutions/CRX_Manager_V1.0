@@ -84,7 +84,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Admin-only since 2026-10-14 (migration 20261027080200).
   [/^COMMISSION_SPLIT_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's default commission split"],
-  // Admin-only since 2026-11-01 (migration 20261109110000).
+  // Admin-only since 2026-11-01 (migration 20261111100000).
   [/^TIER_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's price tier"],
   [/^CREDIT_LIMIT_ADMIN_ONLY\b/i,

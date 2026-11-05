@@ -13,14 +13,16 @@
 --   1) NEW trigger on profiles: when a profile BECOMES an active applicator (it was not one before the
 --      update), each location of that person's open jobs (scheduled / in_progress, not deleted) is put on
 --      their board: a location with no dispatch row gets one, written exactly as the field-insert trigger
---      writes it; a location whose row is 'cancelled' AND held by this person is re-dispatched to them.
---      Rows held by anyone else (a wizard split), active rows and completed rows are never touched, so a
---      repeat of the update changes nothing. A person whose tracked active licenses have ALL expired is
+--      writes it; a location held for this person by (2) ('cancelled', theirs, dispatched_by NULL) is
+--      re-dispatched to them. Rows held by anyone else (a wizard split), active rows, completed rows and
+--      rows a dispatcher undispatched (they keep dispatched_by) are never touched, so a repeat of the
+--      update changes nothing. A person whose tracked active licenses have ALL expired is
 --      skipped, the same rule dispatch_job_locations enforces (no license on file = allowed); those jobs
 --      stay for the Dispatch Board wizard and its admin license override.
 --   2) _sync_job_location_dispatch_on_applicator_change: reassigning an open job to someone who does not
 --      qualify now hands every ACTIVE location row to the new assignee as 'cancelled' (off every board),
---      instead of leaving the old holders working it. (1) re-dispatches them once that person qualifies.
+--      with dispatched_by NULL and dispatched_at = now (nobody dispatched it to them yet), instead of
+--      leaving the old holders working it. (1) re-dispatches them once that person qualifies.
 --      A qualifying reassignment already overwrote every location; this is the same scope.
 --   3) Both existing triggers read the assignee's profile row with FOR SHARE (locked by id). A concurrent
 --      reactivation then either commits first and is seen, or waits for this job's transaction to commit,
@@ -30,12 +32,13 @@
 --   the live bodies are still exactly those).
 --
 -- ACCEPTED LIMITS (KNOWN_ISSUES KI-28):
---   - A location the dispatcher deliberately undispatched from a person, on that person's own open job, is
---     re-dispatched to them if they are later deactivated and re-activated: it reads exactly like a
---     location held for them by (2).
 --   - An applicator skipped for expired licenses is not re-synced when a license is renewed.
---   - Saving one of a person's jobs at the exact instant that person is re-activated can deadlock; Postgres
---     cancels one of the two saves with an error and the user saves again. No data is left half-written.
+--   - Editing one of a person's jobs (save_job: job row, then its locations) at the exact instant that person
+--     is re-activated can deadlock; Postgres cancels one of the two saves with an error and the user saves
+--     again. No data is left half-written. A reassignment overlapping a reactivation does not deadlock
+--     (the reactivation only locks jobs already committed to that person); the proof runs both orders.
+--   - The "held" marker is dispatched_by NULL. Live 2026-11-05 has no row with a NULL dispatched_by; a
+--     trigger-written row can only get one if its job has no creator.
 --
 -- NOT CHANGED: dispatch_job_locations, undispatch_job_locations, every table, column, row and existing grant
 --   (CREATE OR REPLACE keeps the two existing functions' grants). Live read-only 2026-11-05: 0 open-job
@@ -144,7 +147,8 @@ BEGIN
         dispatch_status = 'dispatched',
         dispatched_by   = EXCLUDED.dispatched_by
   WHERE job_location_dispatches.dispatch_status = 'cancelled'
-    AND job_location_dispatches.applicator_id = NEW.id;
+    AND job_location_dispatches.applicator_id = NEW.id
+    AND job_location_dispatches.dispatched_by IS NULL;  -- held for them by step 2, not undispatched
 
   RETURN NEW;
 END;
@@ -202,10 +206,15 @@ BEGIN
     -- KI-28: the job is no longer the old holders'. Every active location goes to the new assignee as
     -- 'cancelled' (off every board), the same scope a qualifying reassignment overwrites below; the
     -- reactivation sync re-dispatches them once this person qualifies.
+    -- dispatched_by NULL marks the row "held for this assignee" (nobody dispatched it to them), which is
+    -- what the reactivation sync re-dispatches; a row a dispatcher undispatched keeps its dispatcher and
+    -- stays cancelled. dispatched_at becomes the moment it was held.
     UPDATE job_location_dispatches
        SET applicator_id   = NEW.applicator_id,
            crew_id         = NULL,
            dispatch_status = 'cancelled',
+           dispatched_by   = NULL,
+           dispatched_at   = now(),
            updated_at      = now()
      WHERE job_id = NEW.id
        AND dispatch_status = 'dispatched';

@@ -257,7 +257,7 @@ function seed() {
     INSERT INTO public.customers (id, farm_name) VALUES ('${CUSTOMER()}', '[PROVER] KI28 Farm ${PHASE}');
     INSERT INTO public.fields (id, customer_id, field_name)
       SELECT ('28000000-000${PHASE}-4000-8000-' || lpad('f' || n, 12, '0'))::uuid, '${CUSTOMER()}', '[PROVER] KI28 field ' || n
-        FROM generate_series(1, 12) n;`);
+        FROM generate_series(1, 14) n;`);
   const job = (k, applicator, status, fields, extra = '') => `
     INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by)
       VALUES ('${J(k)}', 'PROVER-KI28-${PHASE}-${k}', '${CUSTOMER()}', current_date, '${status}', '${P(applicator)}', '${ADMIN()}');
@@ -307,8 +307,8 @@ function psqlAsync(sql) {
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // One-location jobs created inside the concurrency checks (kept out of boards()).
 const RACE = (n) => ({ job: id(`d${6 + n}`), field: id(`e${6 + n}1`), fieldId: FIELD(10 + n) });
-const raceJob = (n) => `INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by)
-    VALUES ('${RACE(n).job}', 'PROVER-KI28-${PHASE}-race${n}', '${CUSTOMER()}', current_date, 'scheduled', '${P('A')}', '${ADMIN()}');
+const raceJob = (n, who = 'A') => `INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by)
+    VALUES ('${RACE(n).job}', 'PROVER-KI28-${PHASE}-race${n}', '${CUSTOMER()}', current_date, 'scheduled', '${P(who)}', '${ADMIN()}');
   INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${RACE(n).field}', '${RACE(n).job}', '${RACE(n).fieldId}');`;
 const raceBoard = (n) => scalar(`SELECT coalesce(string_agg(coalesce(CASE d.applicator_id WHEN '${P('A')}' THEN 'A' ELSE d.applicator_id::text END
     || '/' || d.dispatch_status, 'none'), ' '), '') FROM public.job_fields jf LEFT JOIN public.job_location_dispatches d ON d.job_field_id = jf.id
@@ -363,7 +363,8 @@ async function main() {
   PHASE += 1;
   seed();
   // AFTER: the reassignment to inactive A takes the moved job off B's board, held for A as cancelled.
-  const seededAfter = { ...seededBase, moved: '1=A/cancelled/admin 2=A/cancelled/admin' };
+  // Held rows name nobody as dispatcher ('-'): nobody dispatched them to A.
+  const seededAfter = { ...seededBase, moved: '1=A/cancelled/- 2=A/cancelled/-' };
   assert.deepEqual(boards(), seededAfter, 'AFTER seed: same starting state, except B no longer holds the moved job');
   assert.equal(sweepRows(), '6');
   const splitBefore = SPLIT_ROW();
@@ -387,6 +388,17 @@ async function main() {
   assert.deepEqual(boards(), activated, 'deactivate then re-activate: still exactly one row per location, unchanged');
   assert.equal(dispatchRows(), '5');
   console.log('[prover] retry (same key), a second save, and off/on again add nothing: still one row per location');
+
+  // A location the dispatcher undispatched from A stays undispatched through A's off/on (Sol round 2 HIGH).
+  const undispatched = asAdmin(`SELECT public.undispatch_job_locations(p_job_field_ids => ARRAY['${JF('open', 1)}']::uuid[],
+    p_performed_by => '${ADMIN()}', p_idempotency_key => 'ki28-undispatch-${PHASE}')::text;`);
+  assert.match(undispatched.stdout, /"undispatched": ?1/, undispatched.stdout + undispatched.stderr);
+  updateProfile('A', 'new_is_active => false', `ki28-undispatch-off-${PHASE}`);
+  updateProfile('A', 'new_is_active => true', `ki28-undispatch-on-${PHASE}`);
+  assert.equal(board('open'), '1=A/cancelled/admin 2=A/dispatched/admin 3=B/dispatched/admin',
+    'a deliberate undispatch is not undone by re-activation');
+  assert.equal(dispatchRows(), '5');
+  console.log('[prover] a location the dispatcher undispatched stays off the board through deactivate/re-activate');
 
   // Expired license: X's re-activation does not auto-dispatch (same rule as dispatch_job_locations).
   updateProfile('X', 'new_is_active => true', `ki28-expired-${PHASE}`);
@@ -423,6 +435,27 @@ async function main() {
   assert.equal(r2.code, 0, r2.output);
   assert.equal(raceBoard(2), 'A/dispatched', 'a reactivation during an uncommitted job save still puts that job on the board');
   console.log(`[prover] concurrency: job saved during a reactivation waited ${waited1} ms, reactivation during a job save waited ${waited2} ms; both reached the board`);
+
+  // Reassignment overlapping a reactivation (Sol round 2 MED): no deadlock in either order, and A ends up holding it.
+  psql(`${raceJob(3, 'B')}\n${raceJob(4, 'B')}`);  // B is active: both are dispatched to B
+  const reassign = (n) => `UPDATE public.jobs SET applicator_id = '${P('A')}' WHERE id = '${RACE(n).job}';`;
+  // 3) Reactivation open first; the reassignment waits for it, then sees A active.
+  updateProfile('A', 'new_is_active => false', `ki28-race3-off-${PHASE}`);
+  const reactivating3 = psqlAsync(`BEGIN;\n${claims(ADMIN())}\nUPDATE public.profiles SET is_active = true WHERE id = '${P('A')}';\nSELECT pg_sleep(3);\nCOMMIT;\n`);
+  await pause(1500);
+  psql(reassign(3));
+  const r3 = await reactivating3;
+  assert.equal(r3.code, 0, r3.output);
+  assert.equal(raceBoard(3), 'A/dispatched', 'a reassignment during an uncommitted reactivation dispatches to A');
+  // 4) Reassignment open first; the reactivation waits for it, then re-dispatches the row held for A.
+  updateProfile('A', 'new_is_active => false', `ki28-race4-off-${PHASE}`);
+  const reassigning4 = psqlAsync(`BEGIN;\n${reassign(4)}\nSELECT pg_sleep(3);\nCOMMIT;\n`);
+  await pause(1500);
+  updateProfile('A', 'new_is_active => true', `ki28-race4-on-${PHASE}`);
+  const r4 = await reassigning4;
+  assert.equal(r4.code, 0, r4.output);
+  assert.equal(raceBoard(4), 'A/dispatched', 'a reactivation during an uncommitted reassignment re-dispatches the held row to A');
+  console.log('[prover] concurrency: a reassignment and a reactivation overlap in both orders without a deadlock; A holds the job');
   console.log('KI28_DISPATCH_SYNC_PROOF_PASS');
 }
 

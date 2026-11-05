@@ -1,5 +1,7 @@
 -- KI-27: server-side check before an admin clears a stuck "uncertain" request
 -- from their own browser (PR #1485's "I checked the records - clear this").
+-- Any active profile may call it, for its own keys only: the answer reveals
+-- nothing new and authorizes nothing, so the admin-only limit stays in the screen.
 --
 -- Why: the browser judged that a stuck request had expired with the device's own
 -- clock. A clock that jumped forward could let a request that is still being
@@ -23,9 +25,11 @@
 -- (receipts expire after 24 hours), so the screen must still say "check the records".
 --
 -- p_first_checked_at must be a checked_at value this function returned earlier.
--- Carrying it in the browser is not a hole: the clear only removes saved data
--- from that same admin's browser storage, which they can already do by hand;
--- this check protects against a wrong clock, not against the admin.
+-- Carrying it in the browser is not a hole, and a forged old value gains nothing:
+-- the answer authorizes no server action. It only lets that same user's browser
+-- drop its own saved copy, which they can already delete by hand, and anyone who
+-- can call the API directly can already send a second request under a new key.
+-- This check protects an honest admin against a wrong clock, not against the admin.
 --
 -- Read-only: no table writes, so no p_idempotency_key parameter is needed (the
 -- AGENTS.md idempotency rule covers mutating RPCs). The only side effect is a

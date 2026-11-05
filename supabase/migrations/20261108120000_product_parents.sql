@@ -133,6 +133,7 @@ CREATE TABLE public.product_parent_members (
   fill_source_product_id uuid REFERENCES public.products(id) ON DELETE RESTRICT,
   added_by uuid NOT NULL,
   added_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (fill_source_product_id IS NULL OR size_role = 'fixed_tote')
 );
 ALTER TABLE public.product_parent_members OWNER TO postgres;
@@ -698,10 +699,11 @@ BEGIN
   IF p_size ? 'product_form' AND (p_size->>'product_form') IS DISTINCT FROM p_parent.product_form THEN
     RAISE EXCEPTION 'PRODUCT_PARENT_FORM_MISMATCH: every size of "%" is %', p_parent.name, p_parent.product_form;
   END IF;
-  IF public._normalize_epa_registration(p_size->>'epa_registration') IS NOT NULL
-     AND p_parent.generic_epa_registration IS NOT NULL
-     AND public._normalize_epa_registration(p_size->>'epa_registration') <> p_parent.generic_epa_registration THEN
-    RAISE EXCEPTION 'PRODUCT_PARENT_EPA_MISMATCH: "%" has EPA number %', p_parent.name, p_parent.generic_epa_registration;
+  -- Every size carries its parent's EPA number, or none does (build sheet §4.1).
+  IF public._normalize_epa_registration(p_size->>'epa_registration') IS DISTINCT FROM p_parent.generic_epa_registration
+     AND public._normalize_epa_registration(p_size->>'epa_registration') IS NOT NULL THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_EPA_MISMATCH: "%" has %', p_parent.name,
+      COALESCE('EPA number ' || p_parent.generic_epa_registration, 'no EPA number; set it on the parent first');
   END IF;
   v_fields := (p_size - 'size_role') || jsonb_build_object('product_form', p_parent.product_form, 'category', p_parent.category);
   IF public._normalize_epa_registration(p_size->>'epa_registration') IS NULL AND p_parent.generic_epa_registration IS NOT NULL THEN
@@ -1187,9 +1189,10 @@ BEGIN
   IF v_size.product_form IS DISTINCT FROM v_to.product_form THEN
     RETURN format('PRODUCT_PARENT_FORM_MISMATCH: every size of "%s" is %s', v_to.name, v_to.product_form);
   END IF;
-  IF public._normalize_epa_registration(v_size.epa_registration) IS NOT NULL AND v_to.generic_epa_registration IS NOT NULL
-     AND public._normalize_epa_registration(v_size.epa_registration) <> v_to.generic_epa_registration THEN
-    RETURN format('PRODUCT_PARENT_EPA_MISMATCH: "%s" has EPA number %s', v_to.name, v_to.generic_epa_registration);
+  IF public._normalize_epa_registration(v_size.epa_registration) IS DISTINCT FROM v_to.generic_epa_registration
+     AND public._normalize_epa_registration(v_size.epa_registration) IS NOT NULL THEN
+    RETURN format('PRODUCT_PARENT_EPA_MISMATCH: "%s" has %s', v_to.name,
+      COALESCE('EPA number ' || v_to.generic_epa_registration, 'no EPA number; set it on the parent first'));
   END IF;
   IF EXISTS (SELECT 1 FROM public.product_parent_members t WHERE t.fill_source_product_id = p_product_id) THEN
     RETURN 'PRODUCT_PARENT_FILL_SOURCE_IN_USE: a tote is filled from this bulk size; change the tote''s fill source first';
@@ -1290,7 +1293,7 @@ BEGIN
   v_refusal := public._product_size_move_refusal(p_product_id, p_to_parent_id);
   IF v_refusal IS NOT NULL THEN RAISE EXCEPTION '%', v_refusal; END IF;
 
-  UPDATE public.product_parent_members SET parent_id = p_to_parent_id WHERE product_id = p_product_id;
+  UPDATE public.product_parent_members SET parent_id = p_to_parent_id, updated_at = now() WHERE product_id = p_product_id;
   UPDATE public.product_parents SET parent_version = parent_version + 1, updated_by = v_actor, updated_at = now()
    WHERE id IN (v_from, p_to_parent_id);
   SELECT count(*) INTO v_from_left FROM public.product_parent_members WHERE parent_id = v_from;

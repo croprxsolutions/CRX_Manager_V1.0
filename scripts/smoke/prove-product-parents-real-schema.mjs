@@ -424,7 +424,7 @@ function main() {
   console.log('[prover] a parent category change asks to clear timings, then copies to every size with one parent_copy entry each');
 
   // Move a misgrouped size.
-  const B = call(ADMIN, create({ name: '[PROVER] Beta', product_form: 'liquid', category: 'Fungicide' },
+  const B = call(ADMIN, create({ name: '[PROVER] Beta', product_form: 'liquid', category: 'Fungicide', generic_epa_registration: '100-1' },
     { product_name: '[PROVER] Beta 2.5', sku: 'BE-25', inventory_unit: 'Gal' }, 'k-create-b'));
   const D = call(ADMIN, create({ name: '[PROVER] Delta Dry', product_form: 'dry', category: 'Fungicide' },
     { product_name: '[PROVER] Delta 50 Lb', sku: 'DE-50', inventory_unit: 'Lb' }, 'k-create-d'));
@@ -468,6 +468,14 @@ function main() {
   assert.equal(mp(A1, D.parent_id).prices, null);
   call(ADMIN, move(F.product_id, E.parent_id, mf, 'k-m4'));
   assert.equal(prod(F.product_id, 'epa_registration'), '200-1');
+  // Every size carries its parent's EPA number, or none does.
+  const G = call(ADMIN, create({ name: '[PROVER] Gnoepa', product_form: 'liquid', category: 'Fungicide' },
+    { product_name: '[PROVER] Gnoepa 1', sku: 'GN-1', inventory_unit: 'Gal' }, 'k-create-g'));
+  assert.match(mp(A2, G.parent_id).refusal, /PRODUCT_PARENT_EPA_MISMATCH: .*no EPA number/);
+  refused(ADMIN, addSize(G.parent_id, G.parent_version, { product_name: '[PROVER] Gnoepa 2', sku: 'GN-2', inventory_unit: 'Gal',
+    epa_registration: '300-1' }, 'k-g-add'), /PRODUCT_PARENT_EPA_MISMATCH: .*no EPA number/);
+  refused(ADMIN, create({ name: '[PROVER] Zeta', product_form: 'liquid' },
+    { product_name: '[PROVER] Zeta 1', sku: 'ZE-1', inventory_unit: 'Gal', epa_registration: '300-1' }, 'k-create-z'), /PRODUCT_PARENT_EPA_MISMATCH/);
   console.log('[prover] a moved size with no EPA number takes the new parent\'s; the move preview shows the EPA number and per-acre prices');
   console.log('[prover] a size moves with reason and evidence; locked rate, form and fill-source problems refused; stale downloads refused; an emptied parent goes inactive');
 

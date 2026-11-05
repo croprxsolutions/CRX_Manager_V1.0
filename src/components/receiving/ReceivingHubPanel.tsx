@@ -18,6 +18,7 @@ import {
 } from '../../hooks/useUncertainMutationIntent';
 import { getIdempotencyMismatchResult } from '../../lib/idempotency';
 import type { InventoryPositionRow } from '../../types';
+import ClearExpiredIntentButton from '../ClearExpiredIntentButton';
 
 // F5 — Receiving Hub: "To-Ship for inbound". Search a product and see every open
 // purchase-order line for it across vendors (ordered − received), with a
@@ -478,6 +479,7 @@ export default function ReceivingHubPanel() {
                 : receiveCleanupFailed
                 ? 'These goods were recorded once. Browser cleanup failed; retry this same receipt unchanged. If it stays locked after reloading, report it before recording another receipt on this device.'
                 : 'This saved receiving request needs reconciliation before another can be recorded. Retry it unchanged so stock cannot be received twice.'}
+              <ClearExpiredIntentButton intent={receiveIntent} operation="receive_po_items" />
             </div>
           )}
           <p className="text-sm text-secondary">

@@ -36,9 +36,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 58 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
-| Closed as FIXED, with proof (bottom of file and archive) | 9 |
+| Closed as FIXED, with proof (bottom of file and archive) | 10 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
@@ -418,19 +418,12 @@ unrebuildable on a current-date report. Neither payment screen sends a date. Pro
 **LOW · product UI · `20261107060000` — APPLIED LIVE 2026-11-04**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
 
-### KI-103 — Bulk product import: a large file with per-acre rates times out at Check File
-**MED · OPEN · products/import · `20261107130000` live, PR #1494 · found 2026-11-05 (WP-PM-10 follow-up) · unassigned**
-Measured on live 2026-11-05 ~10:30 AM Central through Products → Import Products → Check File (read-only
-preview; nothing saved, checked afterwards): 500 rows without rates took 4.7 s; 250 rows that all carry a
-per-acre rate took 5.2 s; 500 such rows failed after 9.2 s with "canceling statement due to statement timeout"
-(the signed-in role's limit is 8 s). A rate row costs about 20 ms, so the limit is near 390 rate rows. Nothing
-is saved; the workaround is to split the file. The Import save of a large rate file is unmeasured (measuring it
-writes). Fix options: the screen checks the file in chunks (the whole-file duplicate check must still cover every
-row), or a lower row cap for rate files.
-Also known, no fix planned (Sol LOW on #1486): `preview_product_import` ignores unknown top-level keys on a row,
-but `apply_product_setup` refuses them, so such a file previews "ready" and then the whole save is refused with
-nothing written. The screen never sends extra keys, and keys inside `insert` or `rates` are already refused by
-the preview.
+### KI-103 — Bulk product import: a row with an unknown extra field previews "ready", then the save refuses the file
+**LOW · OPEN, no fix planned · products/import · found 2026-11-05 (Sol LOW on #1486)**
+`preview_product_import` ignores unknown top-level keys on a row, but `apply_product_setup` refuses them, so such a
+file previews "ready" and then the whole save is refused with nothing written. The screen never sends extra keys,
+and keys inside `insert` or `rates` are already refused by the preview. The Check File timeout first filed under
+this number is fixed and live (archive, 2026-11-05).
 
 ---
 
@@ -448,12 +441,6 @@ Following `20261022075000` (PR #1024): old app versions are refused until reload
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
 abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test, and
 Mason's approval to narrow four older signature policies.
-
-### KI-27 — An expired uncertain request locks its dialog
-**MED · OPEN · UI/inventory · unassigned (PR #624 closed)**
-If a stock receive/adjust or vendor-bill save loses its reply and 23 hours pass, the dialog locks in that browser
-with a "do not submit again" message and no way to dismiss it (`src/hooks/useUncertainMutationIntent.ts:69`). Fix
-is an admin-only "I checked, clear this" control.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
 **MED · OPEN · database · unassigned**
@@ -949,6 +936,7 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 8. **KI-85, stale sweep fingerprints on quote functions** — closed 2026-11-01 by the pin-refresh change on branch `fix/refresh-quote-sweep-pins-2026-11-01`; the 2026-11-01 live sweep adjudicated all 29 predicates `ok: true`, `complete: true`.
 
 9. **KI-39, customer-facing PDF polish** — closed 2026-11-05: quote-PDF section notes wrap instead of overprinting (PR #1480); the year-end "Change" column shows green/red again (PR #1477). Both checked on a rendered PDF; original text appended to the archive.
+10. **KI-27, an expired uncertain request locked its dialog** — closed 2026-11-05 by branch `claude/uncertain-intent-admin-clear-5591c7`: an admin-only "I checked the records — clear this" control (with a confirm) appears only once the safe retry window has passed, removes that browser's expired saved request, and is logged to Sentry. Proven on the local test app (admin clears and the form works again; a sales rep and a still-retryable request show no control) and by hook and component tests.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

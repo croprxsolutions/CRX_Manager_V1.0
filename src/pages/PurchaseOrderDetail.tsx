@@ -47,6 +47,7 @@ import { getIdempotencyMismatchResult } from '../lib/idempotency';
 import { ProductOptionDetails, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { PRODUCT_COLUMNS, PURCHASE_ORDER_COLUMNS, PURCHASE_ORDER_ITEM_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
+import ClearExpiredIntentButton from '../components/ClearExpiredIntentButton';
 
 const COST_CHANGE_SOURCE_LABEL: Record<PurchaseOrderCostChangeSource, string> = {
   entered: 'Entered on the PO',
@@ -1965,6 +1966,7 @@ export default function PurchaseOrderDetail() {
                   : receiveCleanupFailed
                   ? 'These goods were recorded once. Browser cleanup failed; retry this same receipt unchanged. If it stays locked after reloading, report it before receiving another shipment on this device.'
                   : 'This saved receiving request needs reconciliation before another can be submitted. Retry this exact receipt unchanged.'}
+                <ClearExpiredIntentButton intent={receiveIntent} operation="receive_po_items" />
               </div>
             )}
             <div className="bg-gray-50 rounded-xl p-4">

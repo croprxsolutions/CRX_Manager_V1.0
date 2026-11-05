@@ -1,7 +1,10 @@
 // Tests for sol-risk-lib.mjs: which pull requests still need Sol (Mason, 2026-10-30).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { classifySolRisk, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES } from "./sol-risk-lib.mjs";
+import {
+  classifySolRisk, GATED_MERGE_BASES, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES,
+  stagingMigrationOnGitHub, stagingMigrationProblem,
+} from "./sol-risk-lib.mjs";
 
 let passed = 0;
 const check = (name, fn) => { fn(); passed += 1; console.log(`ok - ${name}`); };
@@ -67,6 +70,28 @@ check("GitHub failures and mismatched comparisons need Sol", () => {
     assert.equal(ask(out).risky, true);
   }
   assert.equal(ask(answer(), { headSha: "short" }).risky, true);
+});
+
+// staging (Mason on #1363, 2026-11-04: "yes with the guard updates first").
+check("main and staging are the merge bases every gate covers", () => {
+  assert.deepEqual([...GATED_MERGE_BASES], ["main", "staging"]);
+});
+check("a migration file cannot merge into staging", () => {
+  assert.equal(stagingMigrationProblem([file("src/lib/units.ts"), file("supabase/functions/send-email/index.ts")]), null);
+  assert.match(stagingMigrationProblem([file("supabase/migrations/20261107000000_x.sql", { status: "added" })]), /into main/);
+  assert.match(stagingMigrationProblem([file("Supabase\\Migrations\\x.sql")]), /into main/);
+  assert.match(stagingMigrationProblem([file("docs/x.sql", { status: "renamed", previous_filename: "supabase/migrations/x.sql" })]), /into main/);
+});
+check("an unreadable or possibly truncated list cannot merge into staging", () => {
+  const many = Array.from({ length: SOL_RISK_MAX_FILES }, (_, i) => file(`src/f${i}.ts`));
+  for (const files of [null, [], [null], [{ status: "added" }], many]) assert.ok(stagingMigrationProblem(files));
+});
+check("the staging migration check reads base...head and fails closed", () => {
+  const askStaging = (stdout) => stagingMigrationOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "o/r",
+    gh: () => { if (stdout instanceof Error) throw stdout; return stdout; } });
+  assert.equal(askStaging(answer()), null);
+  assert.ok(askStaging(answer({ files: [file("supabase/migrations/a.sql", { status: "added" })] })));
+  for (const out of [new Error("boom"), "not json", answer({ head: "c".repeat(40) }), answer({ status: "behind" })]) assert.ok(askStaging(out));
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

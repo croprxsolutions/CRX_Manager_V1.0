@@ -18,7 +18,7 @@ import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import { sanitizeError } from '../lib/errorSanitizer';
 import { Sentry } from '../lib/sentry';
-import { fetchAllRows } from '../lib/pagedRead';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import type { Customer } from '../types';
 
@@ -81,12 +81,13 @@ export default function Customers() {
   const fetchCustomers = useCallback(async (options: { reportError?: boolean } = {}): Promise<boolean> => {
     const seq = ++loadSeqRef.current;
     // Every customer, page by page: one request stops silently at the server's row cap (KI-32).
-    const { data, error } = await fetchAllRows((from, to) => supabase
+    // A page with no list is a failed read, never "no customers".
+    const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase
       .from('customers')
       .select('*', { count: 'exact' })
       .order('farm_name')
       .order('id')
-      .range(from, to));
+      .range(from, to)));
     if (seq !== loadSeqRef.current) return false;
     if (error) {
       Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_customers' } });

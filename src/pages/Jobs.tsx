@@ -15,9 +15,8 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
 import { JOB_COLUMNS } from '../lib/costFields';
-import { fetchAllRows } from '../lib/pagedRead';
+import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { chunkIds } from '../lib/dispatchDisplay';
-import { newestFirst } from '../lib/customerNameSearch';
 import { logActivity } from '../lib/activityLogger';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
@@ -484,19 +483,19 @@ export default function Jobs() {
       return query;
     };
     type JobsQuery = ReturnType<typeof baseQuery>;
+    type FilterRow = { id?: unknown; applicator_id?: unknown; customer_id?: unknown };
     // The Applicators and Customers filters each match a column OR a list of job ids.
-    // A long id list would overflow the request URL, so each filter becomes one
-    // `.or()` per chunk of ids, and the list is the union of every chunk's read.
-    // 80 UUIDs is ~3 KB, so both filters together stay well under an 8 KB request line.
-    const ID_CHUNK = 80;
-    let applicatorFilters: Array<(q: JobsQuery) => JobsQuery> = [(q) => q];
-    let customerFilters: Array<(q: JobsQuery) => JobsQuery> = [(q) => q];
+    // A column-only match runs on the server. A job-id list could overflow the request
+    // URL (KI-32), so that filter runs here on the rows read instead: the list reads
+    // every job matching the other filters anyway, so this costs no extra request.
+    const serverFilters: Array<(q: JobsQuery) => JobsQuery> = [];
+    const localFilters: Array<(row: FilterRow) => boolean> = [];
     // U13 (Codex R2 #2): the Applicators filter must match jobs assigned via
     // EITHER the legacy whole-job applicator_id OR an ACTIVE per-location
     // dispatch — filtering only jobs.applicator_id would drop a job whose
     // selected applicator appears solely through the dispatch wizard. Pull the
-    // matching dispatch job_ids first (single indexed query), then OR them in
-    // SERVER-side — same pattern as the customer-share filter below.
+    // matching dispatch job_ids first, then match either one (same pattern as the
+    // customer-share filter below).
     if (applied.applicatorIds.length > 0) {
       // Every matching dispatch, page by page; a failed read stops the load
       // rather than quietly dropping dispatched jobs (Goal 4 N4).
@@ -518,15 +517,18 @@ export default function Jobs() {
         return;
       }
       const dispJobIds = [...new Set(((dispJobs || []) as { job_id: string }[]).map((d) => d.job_id))];
-      const appList = applied.applicatorIds.join(',');
-      applicatorFilters = dispJobIds.length > 0
-        ? chunkIds(dispJobIds, ID_CHUNK).map((chunk) => (q: JobsQuery) => q.or(`applicator_id.in.(${appList}),id.in.(${chunk.join(',')})`))
-        : [(q) => q.in('applicator_id', applied.applicatorIds)];
+      if (dispJobIds.length > 0) {
+        const apps = new Set<unknown>(applied.applicatorIds);
+        const dispatched = new Set<unknown>(dispJobIds);
+        localFilters.push((row) => apps.has(row.applicator_id) || dispatched.has(row.id));
+      } else {
+        serverFilters.push((q) => q.in('applicator_id', applied.applicatorIds));
+      }
     }
-    // Customer filter is applied SERVER-side and matches
+    // The Customers filter matches
     // the primary jobs.customer_id OR any job carrying a per-field share for one of
     // the selected customers — so an older job billed to a share customer isn't
-    // truncated away (Codex). Pull the share job_ids first, then OR them in.
+    // dropped (Codex). Pull the share job_ids first, then match either one.
     if (applied.customerIds.length > 0) {
       // Every matching share, page by page; a failed read stops the load (Goal 4 N5).
       const { data: shareJobs, error: shareError } = await fetchAllRows((from, to) => supabase
@@ -546,40 +548,26 @@ export default function Jobs() {
         return;
       }
       const shareJobIds = [...new Set(((shareJobs || []) as { job_id: string }[]).map((s) => s.job_id))];
-      const custList = applied.customerIds.join(',');
-      customerFilters = shareJobIds.length > 0
-        ? chunkIds(shareJobIds, ID_CHUNK).map((chunk) => (q: JobsQuery) => q.or(`customer_id.in.(${custList}),id.in.(${chunk.join(',')})`))
-        : [(q) => q.in('customer_id', applied.customerIds)];
+      if (shareJobIds.length > 0) {
+        const custs = new Set<unknown>(applied.customerIds);
+        const shared = new Set<unknown>(shareJobIds);
+        localFilters.push((row) => custs.has(row.customer_id) || shared.has(row.id));
+      } else {
+        serverFilters.push((q) => q.in('customer_id', applied.customerIds));
+      }
     }
 
-    let data: unknown[] | null = [];
-    let error: unknown = null;
-    const seen = new Set<unknown>();
-    for (const byApplicator of applicatorFilters) {
-      for (const byCustomer of customerFilters) {
-        const read = await fetchAllRows((from, to) => byCustomer(byApplicator(baseQuery({ count: 'exact' })))
-          .order('job_date', { ascending: false })
-          .order('id')
-          .range(from, to));
-        if (superseded()) return;
-        if (read.error || !Array.isArray(read.data)) {
-          error = read.error;
-          data = null;
-          break;
-        }
-        // A job matching two chunks (its applicator and an id) is kept once.
-        for (const row of read.data as Array<{ id?: unknown }>) {
-          if (seen.has(row.id)) continue;
-          seen.add(row.id);
-          data.push(row);
-        }
-      }
-      if (data === null) break;
-    }
-    if (data && applicatorFilters.length * customerFilters.length > 1) {
-      // The server's order (`job_date DESC, id`) across the merged reads.
-      (data as Array<{ id: string } & Record<string, unknown>>).sort((a, b) => newestFirst(a, b, 'job_date'));
-    }
+    const read = await fetchAllRows((from, to) => pageWithList(
+      serverFilters.reduce((q, filter) => filter(q), baseQuery({ count: 'exact' }))
+        .order('job_date', { ascending: false })
+        .order('id')
+        .range(from, to),
+    ));
+    if (superseded()) return;
+    const { error } = read;
+    const data = Array.isArray(read.data)
+      ? (read.data as FilterRow[]).filter((row) => localFilters.every((keep) => keep(row)))
+      : null;
 
     // No list is not "No jobs found": treat it as a failed read.
     if (error || !Array.isArray(data)) {
@@ -622,11 +610,15 @@ export default function Jobs() {
     )];
     const nameMap: Record<string, string> = {};
     if (profileIds.length > 0) {
-      const { data: profs } = await supabase
+      // In chunks and paged: the list now holds every job, so the ids can be many (KI-32).
+      const { data: profs } = await fetchAllRowsForIds(profileIds, (chunk, from, to) => supabase
         .from('profile_public_view')
-        .select('id, full_name')
-        .in('id', profileIds);
-      (profs || []).forEach((a: { id: string | null; full_name: string | null }) => { if (a.id) nameMap[a.id] = a.full_name ?? ''; });
+        .select('id, full_name', { count: 'exact' })
+        .in('id', chunk)
+        .order('id')
+        .range(from, to));
+      if (superseded()) return;
+      ((profs || []) as Array<{ id: string | null; full_name: string | null }>).forEach((a: { id: string | null; full_name: string | null }) => { if (a.id) nameMap[a.id] = a.full_name ?? ''; });
     }
 
     // U13 (#15-21/#111): resolve crew names for the per-location dispatch
@@ -637,8 +629,14 @@ export default function Jobs() {
     )];
     const crewNameMap: Record<string, string> = {};
     if (dispatchCrewIds.length > 0) {
-      const { data: crewRows } = await supabase.from('ground_crews').select('id, name').in('id', dispatchCrewIds);
-      (crewRows || []).forEach((c: { id: string; name: string }) => { crewNameMap[c.id] = c.name; });
+      const { data: crewRows } = await fetchAllRowsForIds(dispatchCrewIds, (chunk, from, to) => supabase
+        .from('ground_crews')
+        .select('id, name', { count: 'exact' })
+        .in('id', chunk)
+        .order('id')
+        .range(from, to));
+      if (superseded()) return;
+      ((crewRows || []) as Array<{ id: string; name: string }>).forEach((c: { id: string; name: string }) => { crewNameMap[c.id] = c.name; });
     }
 
     // Field-app FIX 2 (Wave 2a security): resolve each job's BILLED customers via the
@@ -650,32 +648,31 @@ export default function Jobs() {
     const jobIds = [...new Set(raw.map((j) => j.id).filter(Boolean) as string[])];
     const billedByJob = new Map<string, JobCustomerSummary[]>();
     if (jobIds.length > 0) {
-      try {
-        type BilledRow = { job_id: string | null; farm_name: string | null; account_number: string | null };
-        const billedRows: BilledRow[] = [];
-        // 100 jobs per call keeps each reply (one row per billed customer) under the
-        // server's 1,000-row cap now that the list holds every job (KI-32).
-        for (const chunk of chunkIds(jobIds, 100)) {
-          const { data: billed, error: billedErr } = await supabase.rpc('get_jobs_billed_customers', { p_job_ids: chunk });
+      type BilledRow = { job_id: string | null; farm_name: string | null; account_number: string | null };
+      const billedRows: BilledRow[] = [];
+      // The list now holds every job (KI-32): 100 jobs per call, each reply paged past the
+      // server's row cap. A failed batch falls back to the primary customer for its jobs only.
+      for (const chunk of chunkIds(jobIds, 100)) {
+        try {
+          const { data: billed, error: billedErr } = await fetchAllRows((from, to) => supabase
+            .rpc('get_jobs_billed_customers', { p_job_ids: chunk }, { count: 'exact' })
+            .range(from, to));
           if (billedErr) throw billedErr;
-          const rows = assertRpcResult<BilledRow[]>(billed, 'get_jobs_billed_customers');
-          // A full reply may have been cut at the cap: report it rather than drop names silently.
-          if (rows.length >= 1000) throw new Error('get_jobs_billed_customers reply reached the 1,000-row cap');
-          for (const row of rows) billedRows.push(row);
+          for (const row of assertRpcResult<BilledRow[]>(billed, 'get_jobs_billed_customers')) billedRows.push(row);
+        } catch (billedErr) {
+          // Non-fatal: these jobs still render with the primary-customer fallback below.
+          Sentry.captureException(billedErr, { tags: { source: 'fetch', action: 'load_jobs_billed_customers' } });
         }
-        if (superseded()) return;
-        billedRows.forEach((b) => {
-          if (!b.job_id) return;
-          const list = billedByJob.get(b.job_id) ?? [];
-          // RPC already orders primary-first then by farm_name, and emits one row per
-          // (job, customer) — just preserve that order.
-          list.push({ customer_name: b.farm_name || 'Unknown', account_number: b.account_number ?? null });
-          billedByJob.set(b.job_id, list);
-        });
-      } catch (billedErr) {
-        // Non-fatal: the list still renders with the primary-customer fallback below.
-        Sentry.captureException(billedErr, { tags: { source: 'fetch', action: 'load_jobs_billed_customers' } });
       }
+      if (superseded()) return;
+      billedRows.forEach((b) => {
+        if (!b.job_id) return;
+        const list = billedByJob.get(b.job_id) ?? [];
+        // RPC already orders primary-first then by farm_name, and emits one row per
+        // (job, customer) — just preserve that order.
+        list.push({ customer_name: b.farm_name || 'Unknown', account_number: b.account_number ?? null });
+        billedByJob.set(b.job_id, list);
+      });
     }
 
     const rows: JobRow[] = raw.map((j) => {

@@ -477,7 +477,7 @@ WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup chec
 **MED · PARTIAL · UI/database · Mason (Goal 4)**
 Most lists now page through every row (PRs #959, #1017, #1048). The order, job and purchase-order pickers now search
 the database, and cycle-count locations read every row (PR #1048). The Customers and Jobs lists now read every row,
-the Jobs Applicators/Customers filters send their job ids in chunks of 200 (no URL-size risk), and the order and job
+the Jobs Applicators/Customers filters match their job-id lists on the rows read (no URL-size risk), and the order and job
 pickers match a customer name in the database instead of only the first 50 matching names (2026-11-05). Crop
 Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Still
 capped: Dispatch Board (500, waits on KI-28 work, issue #1497); the blend-ticket scanner Edge Function (needs a

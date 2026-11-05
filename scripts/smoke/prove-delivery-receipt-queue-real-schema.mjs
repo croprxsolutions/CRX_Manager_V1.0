@@ -476,6 +476,8 @@ function main() {
   assert.equal(claim('ki25-claim-recheck-2').length, 0);
   // It was claimed (the send may have gone out), so the office checks instead of "cancelled, nothing sent".
   assert.match(row(9, "status || ' ' || last_error"), /^needs_check The delivery is no longer completed, but an earlier send/);
+  // That office follow-up cannot be deleted (directly or by a delete of its voided delivery cascading to it).
+  assert.match(psql(`DELETE FROM public.delivery_receipt_queue WHERE delivery_id = '${D(9)}';`, { allowFailure: true }).stderr, /DELIVERY_RECEIPT_OWED/);
   // The customer's email changed since the claim: the retried claim does not send to the old address.
   seedDelivery(20); assert.equal(complete(20, { emailReceipt: 'true' }).status, 0);
   due(20);

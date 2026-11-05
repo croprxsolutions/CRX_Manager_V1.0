@@ -1,5 +1,5 @@
 -- Written 2026-11-05. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261108100000_delivery_receipt_queue.md.
+-- docs/reference/migrations.d/20261110130000_delivery_receipt_queue.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (KI-25): a customer receipt owed after a delivery completion is recorded in the database, in the same
@@ -43,7 +43,8 @@
 --      the queue rows, so it waits for a claim in progress. Accepted limit: a confirmation the office started just
 --      before the completion committed (its log row predates the owed receipt) and that finished before the claim
 --      is not detected, so the customer may get two; a duplicate is preferred to a lost receipt (Mason, 2026-11-05).
---   3c. _delivery_receipt_keep_owed (trigger on delivery_receipt_queue): an owed receipt cannot be deleted, so a
+--   3c. _delivery_receipt_keep_owed (trigger on delivery_receipt_queue): an owed receipt, or one on the office list
+--      (needs_check), cannot be deleted, so a
 --      hard delete of its delivery is refused instead of erasing it. A retry whose address differs from the
 --      earlier attempt goes to needs_check (one provider key per receipt). A finish key binds its detail too.
 --   4. pg_net is enabled and a pg_cron job (every 2 minutes) runs _wake_delivery_receipt_worker(), which posts to
@@ -780,8 +781,8 @@ LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
-  IF OLD.status IN ('pending', 'sending') THEN
-    RAISE EXCEPTION 'DELIVERY_RECEIPT_OWED: this delivery''s receipt is still being emailed; void the delivery instead of deleting it, or wait until the receipt settles';
+  IF OLD.status IN ('pending', 'sending', 'needs_check') THEN
+    RAISE EXCEPTION 'DELIVERY_RECEIPT_OWED: this delivery''s receipt is still being emailed or is waiting for the office to check it; void the delivery instead of deleting it, or settle the receipt first';
   END IF;
   RETURN OLD;
 END;
@@ -791,7 +792,7 @@ REVOKE ALL ON FUNCTION public._delivery_receipt_keep_owed() FROM PUBLIC, anon, a
 CREATE TRIGGER delivery_receipt_keep_owed BEFORE DELETE ON public.delivery_receipt_queue
   FOR EACH ROW EXECUTE FUNCTION public._delivery_receipt_keep_owed();
 COMMENT ON FUNCTION public._delivery_receipt_keep_owed() IS
-  'KI-25 (trigger on delivery_receipt_queue): an owed receipt (pending or sending) cannot be deleted, so a hard delete of its delivery is refused instead of erasing it.';
+  'KI-25 (trigger on delivery_receipt_queue): an owed receipt (pending or sending) or one waiting for the office (needs_check) cannot be deleted, so a hard delete of its delivery is refused instead of erasing it.';
 COMMENT ON FUNCTION public._delivery_receipt_send_lock() IS
   'KI-25 (trigger on email_log): while a delivery receipt is owed, refuses any other new delivery_completed send for that delivery or customer, so only the receipt worker sends it; and refuses API users writing the worker''s own log rows.';
 

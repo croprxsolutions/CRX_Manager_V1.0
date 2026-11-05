@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import type { LockedRequestDetails } from '../hooks/useUncertainMutationIntent';
+import { UncertainClearNotYetError, type LockedRequestDetails } from '../hooks/useUncertainMutationIntent';
 import { logActivity } from '../lib/activityLogger';
 import { Sentry } from '../lib/sentry';
 import ConfirmModal from './ui/ConfirmModal';
@@ -45,7 +45,15 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
     }
     try {
       await intent.clearExpiredIntent(request.idempotencyKey);
-    } catch {
+    } catch (err) {
+      if (err instanceof UncertainClearNotYetError) {
+        toast('warning', err.reason === 'in_progress'
+          ? 'This request is being saved right now, so nothing was cleared. Wait a minute, reload the page and check the record again.'
+          : `The server cannot yet confirm this request is finished, so nothing was cleared. Try again after ${err.waitUntil ? new Date(err.waitUntil).toLocaleTimeString() : '15 minutes'}.`);
+        setClearing(false);
+        setConfirmOpen(false);
+        return;
+      }
       toast('error', 'Could not clear this saved request: it may still be retryable, or its saved data is damaged. Reload the page; if it stays locked, report it.');
       setClearing(false);
       return;
@@ -84,7 +92,7 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
         onClose={() => setConfirmOpen(false)}
         onConfirm={() => void handleClear()}
         title="Clear the expired saved request?"
-        message={`This request was saved ${savedAt} on the ${screen} screen${record}. If that time looks wrong, this device's clock may be off: do not clear it. First check that real record (the bill, payment, receipt or stock count) to see whether this request was saved. Clearing only removes the stuck request from this browser and reloads the page with an empty form; it does not change any records. If it was not saved, enter it again afterwards.`}
+        message={`This request was saved ${savedAt} on the ${screen} screen${record}. If that time looks wrong, this device's clock may be off: do not clear it. First check that real record (the bill, payment, receipt or stock count) to see whether this request was saved. The server checks first: if it has no record of this request, it asks you to try again 15 minutes later. Clearing only removes the stuck request from this browser and reloads the page with an empty form; it does not change any records. If it was not saved, enter it again afterwards.`}
         confirmLabel="Clear it"
         variant="warning"
         loading={clearing}

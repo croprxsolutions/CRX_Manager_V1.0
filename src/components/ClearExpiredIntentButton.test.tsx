@@ -16,6 +16,7 @@ vi.mock('../lib/activityLogger', () => ({ logActivity: mockLog }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureMessage: mockCapture, flush: mockFlush } }));
 
 import ClearExpiredIntentButton from './ClearExpiredIntentButton';
+import { UncertainClearNotYetError } from '../hooks/useUncertainMutationIntent';
 
 const LABEL = 'I checked the records — clear this';
 
@@ -110,6 +111,22 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     fireEvent.click(screen.getByText(LABEL));
     fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.any(String)));
+    expect(mockReload).not.toHaveBeenCalled();
+    expect(mockCapture).not.toHaveBeenCalled();
+  });
+
+  it('explains a server refusal as a warning and does not reload (KI-27)', async () => {
+    const intent = lock();
+    intent.clearExpiredIntent
+      .mockRejectedValueOnce(new UncertainClearNotYetError('in_progress', null))
+      .mockRejectedValueOnce(new UncertainClearNotYetError('first_check', '2026-11-05T12:15:00Z'));
+    render(<ClearExpiredIntentButton intent={intent} operation="receive_po_items" />);
+    fireEvent.click(screen.getByText(LABEL));
+    fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('being saved right now')));
+    fireEvent.click(screen.getByText(LABEL));
+    fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenLastCalledWith('warning', expect.stringContaining('cannot yet confirm')));
     expect(mockReload).not.toHaveBeenCalled();
     expect(mockCapture).not.toHaveBeenCalled();
   });

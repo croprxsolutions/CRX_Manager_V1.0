@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { assertRpcResult, supabase } from '../lib/db';
 import { generateIdempotencyKey, isDefinitiveRpcRejection } from '../lib/idempotency';
 import { useLatestRef } from './useLatestRef';
 
@@ -59,6 +60,8 @@ function hasKnownRetryDeadline(record: LockedRequestDetails) {
 const DURABLE_INTENT_PREFIX = 'crx:uncertain-mutation:v4:';
 const LEGACY_SESSION_PREFIX = 'crx:uncertain-mutation:v1:';
 const ACKNOWLEDGMENT_PREFIX = 'crx:uncertain-mutation-ack:v1:';
+// The server time of the first clear check, per request key (KI-27).
+const CLEAR_CHECK_PREFIX = 'crx:uncertain-mutation-clear-check:v1:';
 const DURABLE_INTENT_TAB_ID = 'crx:durable-mutation:tab-id';
 const DURABLE_INTENT_LIVE_CLAIM_PREFIX = 'crx:durable-mutation:live-claim:';
 const DURABLE_INTENT_DB = 'crx_durable_mutation_intents';
@@ -80,6 +83,22 @@ const DURABLE_INTENT_LIVE_CLAIM_TTL_MS = 15 * 60 * 1000;
 const DURABLE_INTENT_LIVE_CLAIM_HEARTBEAT_MS = 60 * 1000;
 export const UNCERTAIN_MUTATION_RETRY_EXPIRED = 'DURABLE_MUTATION_INTENT_RETRY_EXPIRED';
 export const UNCERTAIN_MUTATION_INTENT_CONFLICT = 'DURABLE_MUTATION_INTENT_CONFLICT';
+export const UNCERTAIN_MUTATION_CLEAR_NOT_YET = 'DURABLE_MUTATION_INTENT_CLEAR_NOT_YET';
+
+// KI-27: the server refused a clear because the request might still save.
+// reason is the server's ('in_progress', 'first_check' or 'waiting'); waitUntil is
+// the server time after which a second check can succeed, when it gave one.
+export class UncertainClearNotYetError extends Error {
+  readonly reason: string;
+  readonly waitUntil: string | null;
+  constructor(reason: string, waitUntil: string | null) {
+    super(UNCERTAIN_MUTATION_CLEAR_NOT_YET);
+    this.reason = reason;
+    this.waitUntil = waitUntil;
+  }
+}
+
+type ClearCheckVerdict = { safe: boolean; reason: string; checked_at: string; wait_until?: string };
 export const UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE =
   'The safe automatic retry window expired. Do not submit this mutation again. Verify the authoritative record and reconcile it manually.';
 export const UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE =
@@ -1095,9 +1114,9 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   const clearExpiredIntent = useCallback(async (expectedIdempotencyKey: string) => {
     if (!options || !storageKey) throw new Error('DURABLE_MUTATION_INTENT_IDENTITY_MISSING');
     // Only an intact request past a known deadline is clearable; damaged or
-    // legacy state proves nothing about its deadline, so it stays locked.
-    // shortcut: expiry trusts this device's clock (as the retry refusal already does);
-    // the confirm shows the saved time so staff can spot a wrong clock.
+    // legacy state proves nothing about its deadline, so it stays locked. This
+    // device's clock only decides when to offer the clear; the server check below
+    // decides whether the request could still save.
     const isClearable = (record: DurableMutationIntentRecord<T> | null) => !record
       || record.status === 'resolved'
       || (record.idempotencyKey === expectedIdempotencyKey
@@ -1108,6 +1127,31 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     const mirror = readDurableRecord<T>(storageKey, options);
     const attempt = readAcknowledgmentRecord<T>(acknowledgmentKey, options);
     if (!isClearable(mirror) || !isClearable(attempt)) throw new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT);
+    // Safe only when the server says the request saved, or it was unsaved on two
+    // checks 15+ minutes apart by server time (it can no longer commit).
+    const checkKey = `${CLEAR_CHECK_PREFIX}${expectedIdempotencyKey}`;
+    let firstCheckedAt: string | null = null;
+    try {
+      firstCheckedAt = window.localStorage.getItem(checkKey);
+    } catch {
+      // Without the first check's time the server simply starts the wait again.
+    }
+    const { data, error } = await supabase.rpc('check_uncertain_request_clearable', {
+      p_request_key: expectedIdempotencyKey,
+      ...(firstCheckedAt ? { p_first_checked_at: firstCheckedAt } : {}),
+    });
+    if (error) throw error;
+    const verdict = assertRpcResult<ClearCheckVerdict>(data, 'check_uncertain_request_clearable');
+    if (verdict.safe !== true) {
+      if (verdict.reason === 'first_check') {
+        try {
+          window.localStorage.setItem(checkKey, verdict.checked_at);
+        } catch {
+          // The next try starts the wait again.
+        }
+      }
+      throw new UncertainClearNotYetError(verdict.reason, verdict.wait_until ?? null);
+    }
     const db = await openDurableIntentDb();
     try {
       await new Promise<void>((resolve, reject) => {
@@ -1151,6 +1195,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
         window.localStorage.removeItem(storageKey);
       }
       if (acknowledgmentKey) window.sessionStorage.removeItem(acknowledgmentKey);
+      window.localStorage.removeItem(checkKey);
     } catch {
       throw new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
     }

@@ -1,13 +1,30 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { useUncertainMutationIntent } from './useUncertainMutationIntent';
+
+// KI-27: the server check the clear makes before it removes anything.
+const { clearCheck } = vi.hoisted(() => ({
+  clearCheck: vi.fn(async (_name: string, _args: Record<string, unknown>) => ({
+    data: { safe: true, reason: 'recorded', checked_at: '2026-08-27T11:00:00+00:00' } as unknown,
+    error: null as unknown,
+  })),
+}));
+vi.mock('../lib/db', () => ({
+  supabase: { rpc: clearCheck },
+  assertRpcResult: (data: unknown, name: string) => {
+    if (data === null || data === undefined) throw new Error(`${name} returned no data`);
+    return data;
+  },
+}));
+
+import { UncertainClearNotYetError, useUncertainMutationIntent } from './useUncertainMutationIntent';
 
 describe('useUncertainMutationIntent', () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     window.localStorage.clear();
     globalThis.indexedDB = new IDBFactory();
+    clearCheck.mockClear();
   });
 
   it('keeps the first payload frozen until an exact retry succeeds', async () => {
@@ -465,6 +482,73 @@ describe('useUncertainMutationIntent', () => {
     await act(async () => expired.result.current.beginIntent({ amount: 4200 }));
     expect(expired.result.current.unresolvedIntent).toEqual({ amount: 4200 });
     expect(expired.result.current.getIdempotencyKey()).not.toBe(originalKey);
+    expired.unmount();
+    now.mockRestore();
+  });
+
+  it('refuses to clear while the server says the request could still save, whatever this clock says (KI-27)', async () => {
+    let nowMs = Date.parse('2026-08-26T12:00:00Z');
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+    const options = {
+      operation: 'record_vendor_payment',
+      userId: 'admin-ki27-server',
+      surface: 'vendor-bill-detail',
+      scope: 'bill-ki27-server',
+    };
+    const storageKey = `crx:uncertain-mutation:v4:${JSON.stringify([options.operation, options.userId])}`;
+    const checkKey = (key: string) => `crx:uncertain-mutation-clear-check:v1:${key}`;
+    const first = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    await act(async () => first.result.current.beginIntent({ amount: 9000 }));
+    const originalKey = first.result.current.getIdempotencyKey();
+    first.unmount();
+
+    // The device clock jumps a week ahead seconds after the request: it looks expired here.
+    nowMs += 7 * 24 * 60 * 60 * 1000;
+    const expired = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    expect(expired.result.current.clearableExpiredRequest?.idempotencyKey).toBe(originalKey);
+
+    // Still saving on the server: refused, nothing stored, nothing cleared.
+    clearCheck.mockResolvedValueOnce({ data: { safe: false, reason: 'in_progress', checked_at: '2026-08-26T12:00:05+00:00' }, error: null });
+    const inProgress = expired.result.current.clearExpiredIntent(originalKey);
+    await expect(inProgress).rejects.toBeInstanceOf(UncertainClearNotYetError);
+    await expect(inProgress).rejects.toMatchObject({ reason: 'in_progress', waitUntil: null });
+    expect(window.localStorage.getItem(checkKey(originalKey))).toBeNull();
+    expect(clearCheck).toHaveBeenLastCalledWith('check_uncertain_request_clearable', { p_request_key: originalKey });
+
+    // Not recorded: the server starts its own 15-minute wait and the clear keeps the server's time.
+    clearCheck.mockResolvedValueOnce({
+      data: { safe: false, reason: 'first_check', checked_at: '2026-08-26T12:00:10+00:00', wait_until: '2026-08-26T12:15:10+00:00' },
+      error: null,
+    });
+    await expect(expired.result.current.clearExpiredIntent(originalKey))
+      .rejects.toMatchObject({ reason: 'first_check', waitUntil: '2026-08-26T12:15:10+00:00' });
+    expect(window.localStorage.getItem(checkKey(originalKey))).toBe('2026-08-26T12:00:10+00:00');
+
+    // Asked again too soon by server time: the stored server time is sent, the device clock is not.
+    clearCheck.mockResolvedValueOnce({
+      data: { safe: false, reason: 'waiting', checked_at: '2026-08-26T12:05:00+00:00', wait_until: '2026-08-26T12:15:10+00:00' },
+      error: null,
+    });
+    await expect(expired.result.current.clearExpiredIntent(originalKey)).rejects.toMatchObject({ reason: 'waiting' });
+    expect(clearCheck).toHaveBeenLastCalledWith('check_uncertain_request_clearable', {
+      p_request_key: originalKey,
+      p_first_checked_at: '2026-08-26T12:00:10+00:00',
+    });
+    expect(window.localStorage.getItem(checkKey(originalKey))).toBe('2026-08-26T12:00:10+00:00');
+
+    // A failed server call never clears.
+    clearCheck.mockResolvedValueOnce({ data: null, error: new Error('network down') });
+    await expect(expired.result.current.clearExpiredIntent(originalKey)).rejects.toThrow('network down');
+    expect(expired.result.current.isIntentLocked).toBe(true);
+    expect(window.localStorage.getItem(storageKey)).toContain(originalKey);
+    expect(expired.result.current.getUnresolvedIntent()).toEqual({ amount: 9000 });
+
+    // The server says it is safe: cleared, and the stored check time goes with it.
+    clearCheck.mockResolvedValueOnce({ data: { safe: true, reason: 'not_recorded_after_wait', checked_at: '2026-08-26T12:16:00+00:00' }, error: null });
+    await act(async () => expired.result.current.clearExpiredIntent(originalKey));
+    expect(expired.result.current.isIntentLocked).toBe(false);
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
+    expect(window.localStorage.getItem(checkKey(originalKey))).toBeNull();
     expired.unmount();
     now.mockRestore();
   });

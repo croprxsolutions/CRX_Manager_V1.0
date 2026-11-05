@@ -36,6 +36,8 @@ DECLARE
   v_items uuid[] := '{}'::uuid[];
   v_order uuid;
   v_item uuid;
+  v_fixture_order uuid;
+  v_fixture_delivery uuid;
   v_i integer;
   v_invoice uuid;
   v_ids uuid[];
@@ -100,7 +102,8 @@ BEGIN
   RETURNING id INTO v_own_field;
 
   -- Five orders, one line each except order 3 (two lines): 1 every line allocated; 2 unallocated
-  -- (invoiced, then split, for the replay step); 3 only its second line allocated; 4 allocated, for
+  -- (invoiced, then split, for the replay step; a zero-quantity line, since create_invoice_from_order
+  -- can no longer bill a product line: it refuses any delivery, and the cap refuses none); 3 only its second line allocated; 4 allocated, for
   -- the split path; 5 allocated, then cancelled.
   FOR v_i IN 1..5 LOOP
     INSERT INTO public.orders (order_number, customer_id, order_date, status, booking_draw, salesman_id)
@@ -112,7 +115,8 @@ BEGIN
       quantity_delivered, quantity_remaining, sort_order
     ) VALUES (
       v_order, v_product, '[E2E] field split line ' || v_i, 10, 5,
-      2, 20, 10, 50, 0, 2, 1
+      CASE WHEN v_i = 2 THEN 0 ELSE 2 END, CASE WHEN v_i = 2 THEN 0 ELSE 20 END, CASE WHEN v_i = 2 THEN 0 ELSE 10 END, 50,
+      0, CASE WHEN v_i = 2 THEN 0 ELSE 2 END, 1
     ) RETURNING id INTO v_item;
     IF v_i = 3 THEN
       -- The first line stays unallocated; the second is split onto the field.
@@ -131,6 +135,23 @@ BEGIN
     END IF;
     v_orders := v_orders || v_order;
     v_items := v_items || v_item;
+  END LOOP;
+
+  -- Completed deliveries for the orders this chain bills: an invoice is capped at what was delivered
+  -- (20261029160000). Direct, under the completion marker, so no automatic invoice is drafted first.
+  FOREACH v_fixture_order IN ARRAY ARRAY[v_orders[4]] LOOP
+    INSERT INTO public.deliveries (delivery_number, order_id, customer_id, scheduled_date, status, created_by)
+    SELECT 'E2E-FS-' || right(v_fixture_order::text, 8) || '-' || v_suffix, o.id, o.customer_id, CURRENT_DATE, 'scheduled', v_admin
+      FROM public.orders o WHERE o.id = v_fixture_order
+    RETURNING id INTO v_fixture_delivery;
+    INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
+    SELECT v_fixture_delivery, oi.id, oi.product_id, oi.total_units_needed, oi.total_units_needed, 'GL'
+      FROM public.order_items oi WHERE oi.order_id = v_fixture_order;
+    PERFORM set_config('crx.delivery_completion_evidence', v_fixture_delivery::text, true);
+    PERFORM set_config('app.admin_override', 'true', true);
+    UPDATE public.deliveries SET status = 'completed', signed_by = 'E2E Signer' WHERE id = v_fixture_delivery;
+    PERFORM set_config('app.admin_override', 'false', true);
+    UPDATE public.order_items SET quantity_delivered = total_units_needed, quantity_remaining = 0 WHERE order_id = v_fixture_order;
   END LOOP;
 
   -- 1. An order split across fields is refused before anything is written. FAIL-FIRST: before
@@ -236,7 +257,7 @@ BEGIN
   END IF;
 
   -- 5. The terminal-order test still runs first: a cancelled allocated order is terminal.
-  UPDATE public.orders SET status = 'cancelled' WHERE id = v_orders[5];
+  PERFORM public.cancel_order(v_orders[5], v_admin, 'e2e-field-split-cancel-' || v_suffix);
   BEGIN
     PERFORM public.create_invoice_from_order(v_orders[5], NULL, 'chemical_sale', 'e2e-field-split-cancelled-' || v_suffix);
     RAISE EXCEPTION 'SMOKE_FAIL: a cancelled order invoiced';

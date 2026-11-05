@@ -146,8 +146,8 @@ BEGIN
   VALUES (v_delivery, v_line1, v_product, 4, 4, 'GL'), (v_delivery, v_line2, v_product, 1, 1, 'GL');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery;
   v_res := public.complete_delivery(
-    v_delivery, '[E2E] Split Return Receiver', v_admin,
-    NULL, NULL, NULL, 'e2e-split-return-complete-' || v_suffix, now()
+    v_delivery, 'No proof — recorded by office', v_admin,
+    NULL, NULL, NULL, 'e2e-split-return-complete-' || v_suffix, now(), 'no_proof', 'Rolled-back smoke fixture'
   );
   IF v_res->>'delivery_id' IS DISTINCT FROM v_delivery::text THEN
     RAISE EXCEPTION 'SMOKE_SETUP: complete_delivery returned an unexpected receipt: %', v_res;
@@ -507,8 +507,8 @@ BEGIN
   VALUES (v_delivery2, v_line3, v_product, 2, 2, 'GL');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery2;
   PERFORM public.complete_delivery(
-    v_delivery2, '[E2E] Split Return Receiver', v_admin,
-    NULL, NULL, NULL, 'e2e-split-return-complete-2-' || v_suffix, now()
+    v_delivery2, 'No proof — recorded by office', v_admin,
+    NULL, NULL, NULL, 'e2e-split-return-complete-2-' || v_suffix, now(), 'no_proof', 'Rolled-back smoke fixture'
   );
   IF EXISTS (SELECT 1 FROM public.invoices WHERE order_id = v_order2 AND status IN ('posted', 'overdue', 'paid')) THEN
     RAISE EXCEPTION 'SMOKE_SETUP: the second split order already has a posted invoice';
@@ -551,8 +551,8 @@ BEGIN
   VALUES (v_delivery3, v_line4, v_product, 2, 2, 'GL');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery3;
   PERFORM public.complete_delivery(
-    v_delivery3, '[E2E] Split Return Receiver', v_admin,
-    NULL, NULL, NULL, 'e2e-split-return-complete-3-' || v_suffix, now()
+    v_delivery3, 'No proof — recorded by office', v_admin,
+    NULL, NULL, NULL, 'e2e-split-return-complete-3-' || v_suffix, now(), 'no_proof', 'Rolled-back smoke fixture'
   );
   IF NOT EXISTS (SELECT 1 FROM public.invoices WHERE order_id = v_order3 AND invoice_group_id IS NOT NULL) THEN
     PERFORM public.create_split_invoices_from_order(v_order3, NULL, 'chemical_sale', 'e2e-split-return-split-3-' || v_suffix);

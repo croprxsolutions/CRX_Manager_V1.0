@@ -163,7 +163,12 @@ DECLARE
   v_hold numeric;
 BEGIN
   v_actor := COALESCE(p_actor, auth.uid());
-  -- JOB_DRAW_HUNDREDTHS<<< The job whose completion fired this sync, if any, and the jobs completed by
+  -- JOB_DRAW_HUNDREDTHS<<< A signed-in caller can only act as itself; every caller passes auth.uid(),
+  -- and system calls (no auth.uid()) keep their explicit actor (RLS reviewer, 2026-11-05).
+  IF p_actor IS NOT NULL AND auth.uid() IS NOT NULL AND p_actor IS DISTINCT FROM auth.uid() THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH' USING ERRCODE = '42501';
+  END IF;
+  -- The job whose completion fired this sync, if any, and the jobs completed by
   -- the same statement whose own completion sync has not run yet. Only the jobs triggers set them
   -- (transaction-local; each completion clears its own entries after its sync).
   v_completing := NULLIF(current_setting('crx.job_completing', true), '')::uuid;

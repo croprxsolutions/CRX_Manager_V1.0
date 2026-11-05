@@ -297,6 +297,18 @@ function main() {
   assert.equal(Number(scalar(HOLD)), 0.01, 'after: the hold should cover that draw');
   console.log('[prover] AFTER: an active demand under 0.005 gal still draws 0.01 (visible to every booking guard); hold 0.01');
 
+  // A signed-in caller cannot pass another user as the actor; its own id and a system call still sync.
+  const actorProbe = scalar(`SET session_replication_role = replica;
+    SET "request.jwt.claims" = '{"sub":"${U}","role":"authenticated"}';
+    CREATE TEMP TABLE actor_probe (n int, r text);
+    DO $p$ BEGIN PERFORM public._sync_quote_job_reservations('${Q}', '${id('a2')}'); INSERT INTO actor_probe VALUES (1, 'other ran');
+      EXCEPTION WHEN insufficient_privilege THEN INSERT INTO actor_probe VALUES (1, SQLERRM); END $p$;
+    DO $p$ BEGIN PERFORM public._sync_quote_job_reservations('${Q}', '${U}'); INSERT INTO actor_probe VALUES (2, 'own ran'); END $p$;
+    SELECT string_agg(r, ';' ORDER BY n) FROM actor_probe;`);
+  assert.equal(actorProbe, 'ACTOR_MISMATCH;own ran', `actor binding: got ${actorProbe}`);
+  sync();
+  console.log('[prover] a signed-in caller passing another actor is refused (ACTOR_MISMATCH); its own id and a system call still sync');
+
   // Many small jobs completed one after another: the booking's draws track the real total applied,
   // rounded once, instead of adding up one rounding per job (8 x 0.01 = 0.08 for 0.0625 applied).
   psql(`SET session_replication_role = replica; UPDATE public.job_chemicals SET quantity = 1 WHERE job_id = '${J}';`);

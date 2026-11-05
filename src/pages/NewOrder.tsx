@@ -36,7 +36,7 @@ import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult
 import { fetchAllRows } from '../lib/pagedRead';
 import { fetchOpenBookings, type OpenBooking } from '../lib/openBookings';
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
-import { getQuoteTierPrice, isTierPriceMissing } from '../lib/quoteCalc';
+import { exactRound2, getQuoteTierPrice, isTierPriceMissing, pricedLine } from '../lib/quoteCalc';
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
@@ -328,17 +328,20 @@ export default function NewOrder() {
       const qty = item.quantity || 0;
       const cost = product.current_cost || 0;
 
-      const totalPrice = pricePerUnit * qty;
-      const profit = (pricePerUnit - cost) * qty;
-      const netMargin = totalPrice > 0 ? (profit / totalPrice) * 100 : 0;
+      // As create_direct_order stores it: ROUND(quantity × price, 2), exact decimals (To-Do 1.7).
+      // A quantity that is not a real number (e.g. "1e309") stays non-finite, so the credit check refuses it.
+      const line = Number.isFinite(pricePerUnit * qty)
+        ? pricedLine(pricePerUnit, cost, qty)
+        : { totalPrice: pricePerUnit * qty, profit: (pricePerUnit - cost) * qty };
 
       return {
         ...item,
         price_per_unit: pricePerUnit,
         unit_cost: cost,
-        total_price: Math.round(totalPrice * 100) / 100,
-        profit: Math.round(profit * 100) / 100,
-        net_margin: Math.round(netMargin * 100) / 100,
+        total_price: line.totalPrice,
+        profit: line.profit,
+        // The database's order-line margin: from the unit price and cost, not the rounded line.
+        net_margin: pricePerUnit > 0 ? exactRound2([Number((pricePerUnit - cost).toFixed(6)), 100], [pricePerUnit]) : 0,
       };
     },
     [products, getTierPrice]
@@ -748,8 +751,9 @@ export default function NewOrder() {
 
   // Order totals
   const validItems = items.filter((i) => i.product_id && i.quantity > 0);
-  const orderTotal = validItems.reduce((sum, i) => sum + i.total_price, 0);
-  const orderProfit = validItems.reduce((sum, i) => sum + i.profit, 0);
+  // Summed in whole cents: each line is already exact to the cent.
+  const orderTotal = validItems.reduce((cents, i) => cents + Math.round(i.total_price * 100), 0) / 100;
+  const orderProfit = validItems.reduce((cents, i) => cents + Math.round(i.profit * 100), 0) / 100;
   const orderMargin = orderTotal > 0 ? (orderProfit / orderTotal) * 100 : 0;
 
   if (loading) {

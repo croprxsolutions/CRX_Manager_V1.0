@@ -66,8 +66,8 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     await waitFor(() => expect(mockReload).toHaveBeenCalledTimes(1));
   });
 
-  it('is hidden when no one is signed in', () => {
-    mockAuth.role = null;
+  it.each([null, 'warehouse', 'entity_recipient'])('is hidden for role %s', (role) => {
+    mockAuth.role = role;
     render(<ClearExpiredIntentButton intent={lock()} operation="receive_po_items" />);
     expect(screen.queryByText(LABEL)).toBeNull();
   });

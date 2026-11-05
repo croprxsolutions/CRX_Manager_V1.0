@@ -11,6 +11,9 @@ type ExpiredIntentLock = {
   clearExpiredIntent: (expectedIdempotencyKey: string) => Promise<void>;
 };
 
+// The staff roles retire_uncertain_request accepts (20261107160000).
+const CLEAR_ROLES: readonly string[] = ['admin', 'sales_rep', 'driver', 'applicator'];
+
 // KI-27: the only way out of an expired uncertain-mutation lock in this browser.
 export default function ClearExpiredIntentButton({ intent, operation }: {
   intent: ExpiredIntentLock;
@@ -24,7 +27,7 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
   const request = intent.clearableExpiredRequest;
   // Any signed-in staff member: the lock lives only in this browser, under the sender's own login,
   // and the server accepts only their own request keys.
-  if (!role || !profile || !request) return null;
+  if (!role || !CLEAR_ROLES.includes(role) || !profile || !request) return null;
 
   const savedAt = new Date(request.createdAtMs).toLocaleString();
   const screen = request.surface.replace(/-/g, ' ');

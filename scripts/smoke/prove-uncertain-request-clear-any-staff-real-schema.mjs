@@ -21,11 +21,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const NAME = process.env.CRX_PROVER_REUSE_CONTAINER || `crx-clear-any-staff-${process.pid}-${Date.now().toString(36)}`;
-const REUSE = Boolean(process.env.CRX_PROVER_REUSE_CONTAINER);  // a kept container still before the candidate
+const NAME = `crx-clear-any-staff-${process.pid}-${Date.now().toString(36)}`;
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
-// Reuse only this prover's own throwaway containers, never a development or other database.
-if (REUSE && !/^crx-clear-any-staff-\d+-[a-z0-9]+$/.test(NAME)) throw new Error(`CRX_PROVER_REUSE_CONTAINER must name a container this prover created (crx-clear-any-staff-*), got ${NAME}`);
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
@@ -253,7 +250,7 @@ const settings = () => scalar(`SELECT prosecdef::text || ' ' || array_to_string(
   FROM pg_proc WHERE oid = '${FN}'::regprocedure;`);
 
 function main() {
-  if (!REUSE) buildContainer();
+  buildContainer();  // always a fresh sealed container: no reuse of any existing database
   assert.equal(md5(), '482ac2199575547aac2899e6621d9168', "before the candidate the body must be 20261107150000's");
   seed();
   const settingsBefore = settings();
@@ -288,4 +285,4 @@ function main() {
 }
 
 try { main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

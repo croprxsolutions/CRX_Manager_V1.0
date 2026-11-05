@@ -18,6 +18,8 @@ import {
   CalendarDays,
   PanelRightOpen,
   WifiOff,
+  ChevronRight,
+  Search,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import CustomerDrawer from '../components/customers/CustomerDrawer';
@@ -26,7 +28,9 @@ import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
+import SectionJumpBar from '../components/ui/SectionJumpBar';
 import DataTable, { type Column } from '../components/ui/DataTable';
+import { applyTableSearchSort } from '../lib/tableSearchSort';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -91,6 +95,12 @@ const dayLabel = (d: string) => {
   const dt = parseLocalDate(d);
   return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 };
+
+const DELIVERY_SEARCH_KEYS = ['delivery_number', 'customer_name', 'driver_name', 'farm_group_name'];
+
+// Style D driver list: one white list per group, gray-100 dividers.
+const DRIVER_SECTION_TITLE = 'mb-2 font-heading text-xl font-bold text-nav-dark';
+const DRIVER_LIST = 'overflow-hidden rounded-xl border border-gray-200 bg-white divide-y divide-gray-100';
 
 const priorityBadge = (p: string) => {
   const map: Record<string, { variant: 'default' | 'warning' | 'error' | 'info'; label: string }> = {
@@ -279,6 +289,7 @@ export default function Deliveries() {
 
   /* Driver-specific: unassigned deliveries they can claim */
   const [unassigned, setUnassigned] = useState<DeliveryRow[]>([]);
+  const [listSearch, setListSearch] = useState('');
 
   const canCreate = role === 'admin' || role === 'sales_rep';
   const canQuickDeliver = role === 'admin' || role === 'sales_rep';
@@ -866,6 +877,11 @@ export default function Deliveries() {
       return true;
     });
   }, [deliveries, statusFilter, driverFilter, datePreset, priorityFilter, customerFilter, scheduleDate, todayStr, weekStartStr]);
+  // The in-list search; the desktop table still sorts these rows itself.
+  const searched = useMemo(
+    () => applyTableSearchSort(filtered, DELIVERY_SEARCH_KEYS, listSearch, null, 'asc'),
+    [filtered, listSearch]
+  );
 
   /* ─── Batch actions ─── */
   const selectedDeliveries = deliveries.filter((d) => selected.has(d.id));
@@ -1193,176 +1209,213 @@ export default function Deliveries() {
       });
     };
 
-    const DriverCard = ({ d }: { d: DeliveryRow }) => (
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => navigate(`/deliveries/${d.id}`)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/deliveries/${d.id}`); } }}
-        className="bg-gray-800 rounded-xl p-4 space-y-2 cursor-pointer active:bg-gray-700 transition-colors"
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <span className="text-white font-semibold">{d.delivery_number}</span>
-            {shortageDeliveryIds.has(d.id) && (
-              <span title="Inventory shortage"><AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" /></span>
+    const DriverRow = ({ d }: { d: DeliveryRow }) => {
+      const short = shortageDeliveryIds.has(d.id);
+      return (
+        <li className={short ? 'border-l-4 border-amber-500 bg-amber-50' : ''}>
+          <button
+            type="button"
+            onClick={() => navigate(`/deliveries/${d.id}`)}
+            className="flex w-full items-center gap-3 px-4 py-3 text-left md:hover:bg-crx-green-tint transition-colors"
+          >
+            <span className="min-w-0 flex-1 space-y-0.5">
+              <span className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-sm text-secondary">
+                  <span>{d.delivery_number}</span>
+                  {short && (
+                    <span title="Inventory shortage"><AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" /></span>
+                  )}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  {d.completion_evidence === 'no_proof' && <NoProofLabel />}
+                  <Badge variant={statusToBadgeVariant[d.status] || 'default'}>{d.status.replace('_', ' ')}</Badge>
+                </span>
+              </span>
+              <span className="block font-heading text-lg font-bold text-nav-dark">{d.customer_name}</span>
+              {d.farm_group_name && (
+                <span className="flex items-center gap-1 text-xs text-blue-700">
+                  <Users className="w-3 h-3 shrink-0" />
+                  {d.farm_group_name}
+                </span>
+              )}
+              {(d as unknown as Record<string, unknown>).delivery_address ? (
+                <span className="flex items-center gap-2 text-xs text-secondary">
+                  <MapPin className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{String((d as unknown as Record<string, unknown>).delivery_address)}</span>
+                </span>
+              ) : null}
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-secondary">
+                <span className="flex items-center gap-1">
+                  <Calendar className="w-3 h-3" />
+                  {parseLocalDate(d.scheduled_date).toLocaleDateString()}
+                </span>
+                {d.delivery_window_start && (
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {d.delivery_window_start}{d.delivery_window_end ? ` - ${d.delivery_window_end}` : ''}
+                  </span>
+                )}
+                <span>{d.item_count} items</span>
+              </span>
+              {d.priority && d.priority !== 'normal' && (
+                <span className="block pt-1">{priorityBadge(d.priority)}</span>
+              )}
+              {short && <span className="block text-sm font-medium text-amber-800">Warehouse stock is short for this load</span>}
+              {d.status === 'scheduled' && (
+                <span className="block text-sm font-semibold text-crx-green">Tap to start delivery</span>
+              )}
+              {d.status === 'in_progress' && (
+                <span className="block text-sm font-semibold text-nav-dark">Ready to complete</span>
+              )}
+            </span>
+            <ChevronRight className="w-5 h-5 shrink-0 text-gray-400" aria-hidden="true" />
+          </button>
+        </li>
+      );
+    };
+
+    const driverHeader = (
+      <header className="bg-nav-dark px-4 py-4 sm:px-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            {!loadFailed && !loading && (
+              <p className="text-sm text-gray-400">
+                {deliveries.filter((d) => d.status !== 'cancelled' && d.status !== 'completed').length} active
+              </p>
             )}
+            <h1 className="font-heading text-[2rem] font-bold leading-tight text-white">My Deliveries</h1>
           </div>
-          <span className="inline-flex items-center gap-1.5">
-            {d.completion_evidence === 'no_proof' && <NoProofLabel />}
-            <Badge variant={statusToBadgeVariant[d.status] || 'default'}>{d.status.replace('_', ' ')}</Badge>
-          </span>
-        </div>
-        <p className="text-gray-300 text-sm">{d.customer_name}</p>
-        {d.farm_group_name && (
-          <div className="flex items-center gap-1">
-            <Users className="w-3 h-3 text-blue-400 shrink-0" />
-            <span className="text-xs text-blue-400">{d.farm_group_name}</span>
-          </div>
-        )}
-        {(d as unknown as Record<string, unknown>).delivery_address ? (
-          <div className="flex items-center gap-2 text-gray-400 text-xs">
-            <MapPin className="w-3 h-3" />
-            <span className="truncate">{String((d as unknown as Record<string, unknown>).delivery_address)}</span>
-          </div>
-        ) : null}
-        <div className="flex items-center justify-between text-xs text-gray-400">
-          <div className="flex items-center gap-1">
-            <Calendar className="w-3 h-3" />
-            <span>{parseLocalDate(d.scheduled_date).toLocaleDateString()}</span>
-          </div>
-          {d.delivery_window_start && (
-            <div className="flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              <span>{d.delivery_window_start}{d.delivery_window_end ? ` - ${d.delivery_window_end}` : ''}</span>
-            </div>
+          {!loadFailed && canQuickDeliver && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Zap className="w-4 h-4" />}
+              onClick={() => {
+                setQuickDeliveryInitialCustomerId(undefined);
+                setQuickDeliveryOpen(true);
+              }}
+            >
+              Quick Delivery
+            </Button>
           )}
-          <span>{d.item_count} items</span>
         </div>
-        {d.priority && d.priority !== 'normal' && (
-          <div className="pt-1">{priorityBadge(d.priority)}</div>
-        )}
-        {d.status === 'scheduled' && (
-          <p className="text-xs text-emerald-400 font-medium pt-1">Tap to start delivery &rarr;</p>
-        )}
-        {d.status === 'in_progress' && (
-          <p className="text-xs text-amber-400 font-medium pt-1">Ready to complete &rarr;</p>
-        )}
-      </div>
+      </header>
     );
 
-    // A failed load must never read as "no deliveries assigned to you".
-    if (loadFailed) {
+    // Still loading must not read as "no deliveries today" either.
+    if (loading) {
       return (
-        <div className="space-y-6 bg-gray-900 -m-4 sm:-m-6 p-4 sm:p-6 min-h-screen">
-          <h2 className="text-xl font-bold text-white">My Deliveries</h2>
-          <p role="alert" className="rounded-xl bg-red-950 border border-red-800 px-4 py-6 text-center text-sm text-red-200">
-            Your deliveries could not be loaded. Reload to try again.
-          </p>
+        <div className="-m-4 sm:-m-6 min-h-screen bg-cream">
+          {driverHeader}
+          <div className="space-y-3 p-4 sm:p-6">
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
         </div>
       );
     }
 
-    return (
-      <div className="space-y-6 bg-gray-900 -m-4 sm:-m-6 p-4 sm:p-6 min-h-screen">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-white">My Deliveries</h2>
-          <div className="flex items-center gap-2">
-            {canQuickDeliver && (
-              <Button
-                size="sm"
-                variant="secondary"
-                icon={<Zap className="w-4 h-4" />}
-                onClick={() => {
-                  setQuickDeliveryInitialCustomerId(undefined);
-                  setQuickDeliveryOpen(true);
-                }}
-              >
-                Quick Delivery
-              </Button>
-            )}
-            <Badge variant="info">{deliveries.filter((d) => d.status !== 'cancelled' && d.status !== 'completed').length} Active</Badge>
+    // A failed load must never read as "no deliveries assigned to you".
+    if (loadFailed) {
+      return (
+        <div className="-m-4 sm:-m-6 min-h-screen bg-cream">
+          {driverHeader}
+          <div className="p-4 sm:p-6">
+            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center text-sm text-red-700">
+              Your deliveries could not be loaded. Reload to try again.
+            </p>
           </div>
         </div>
+      );
+    }
 
-        {shortageCheckFailed && (
-          <p role="alert" className="rounded-xl bg-amber-950 border border-amber-800 px-4 py-3 text-sm text-amber-200">
-            Stock shortage warnings could not be checked, so a missing warning does not mean there is enough stock. Reload to try again.
-          </p>
-        )}
+    const jumpSections = [
+      { id: 'my-today', label: 'Today', count: myToday.length },
+      ...(myUpcoming.length > 0 ? [{ id: 'my-upcoming', label: 'Upcoming', count: myUpcoming.length }] : []),
+      ...(myCompleted.length > 0 ? [{ id: 'my-completed', label: 'Completed', count: myCompleted.length }] : []),
+      ...(unassigned.length > 0 ? [{ id: 'my-available', label: 'Available', count: unassigned.length }] : []),
+    ];
 
-        {/* Today */}
-        <div>
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Today</h2>
-          {myToday.length === 0 ? (
-            <p className="text-gray-500 text-sm">No deliveries scheduled for today.</p>
-          ) : (
-            <div className="space-y-3">
-              {myToday.map((d) => <DriverCard key={d.id} d={d} />)}
-            </div>
+    return (
+      <div className="phone-touch -m-4 sm:-m-6 min-h-screen bg-cream">
+        {driverHeader}
+
+        <div className="space-y-4 p-4 sm:p-6">
+          {jumpSections.length > 1 && <SectionJumpBar sections={jumpSections} ariaLabel="Jump to deliveries" />}
+
+          {shortageCheckFailed && (
+            <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Stock shortage warnings could not be checked, so a missing warning does not mean there is enough stock. Reload to try again.
+            </p>
+          )}
+
+          {/* Today */}
+          <section id="my-today" className="scroll-mt-32">
+            <h2 className={DRIVER_SECTION_TITLE}>Today</h2>
+            {myToday.length === 0 ? (
+              <p className="text-sm text-secondary">No deliveries scheduled for today.</p>
+            ) : (
+              <ul className={DRIVER_LIST}>
+                {myToday.map((d) => <DriverRow key={d.id} d={d} />)}
+              </ul>
+            )}
+          </section>
+
+          {/* Upcoming */}
+          {myUpcoming.length > 0 && (
+            <section id="my-upcoming" className="scroll-mt-32">
+              <h2 className={DRIVER_SECTION_TITLE}>Upcoming</h2>
+              <ul className={DRIVER_LIST}>
+                {myUpcoming.map((d) => <DriverRow key={d.id} d={d} />)}
+              </ul>
+            </section>
+          )}
+
+          {/* Completed */}
+          {myCompleted.length > 0 && (
+            <section id="my-completed" className="scroll-mt-32">
+              <h2 className={DRIVER_SECTION_TITLE}>Recently Completed</h2>
+              <ul className={DRIVER_LIST}>
+                {myCompleted.map((d) => <DriverRow key={d.id} d={d} />)}
+              </ul>
+            </section>
+          )}
+
+          {/* Available (unassigned) */}
+          {unassigned.length > 0 && (
+            <section id="my-available" className="scroll-mt-32">
+              <h2 className={DRIVER_SECTION_TITLE}>Available Deliveries</h2>
+              <ul className={DRIVER_LIST}>
+                {unassigned.map((d) => (
+                  <li key={d.id} className="space-y-1 px-4 py-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm text-secondary">{d.delivery_number}</span>
+                      <Badge variant="warning">Unassigned</Badge>
+                    </div>
+                    <p className="font-heading text-lg font-bold text-nav-dark">{d.customer_name}</p>
+                    {d.farm_group_name && (
+                      <div className="flex items-center gap-1 text-xs text-blue-700">
+                        <Users className="w-3 h-3 shrink-0" />
+                        <span>{d.farm_group_name}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 text-xs text-secondary">
+                      <Calendar className="w-3 h-3" />
+                      <span>{parseLocalDate(d.scheduled_date).toLocaleDateString()}</span>
+                    </div>
+                    <Button
+                      onClick={(e) => { e.stopPropagation(); handleTakeDelivery(d.id); }}
+                      className="w-full mt-2"
+                    >
+                      Take This Delivery
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
         </div>
-
-        {/* Upcoming */}
-        {myUpcoming.length > 0 && (
-          <div>
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Upcoming</h2>
-            <div className="space-y-3">
-              {myUpcoming.map((d) => <DriverCard key={d.id} d={d} />)}
-            </div>
-          </div>
-        )}
-
-        {/* Completed */}
-        {myCompleted.length > 0 && (
-          <div>
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Recently Completed</h2>
-            <div className="space-y-3">
-              {myCompleted.map((d) => <DriverCard key={d.id} d={d} />)}
-            </div>
-          </div>
-        )}
-
-        {/* Available (unassigned) */}
-        {unassigned.length > 0 && (
-          <div>
-            <h2 className="text-sm font-semibold text-amber-400 uppercase tracking-wider mb-3">
-              Available Deliveries
-            </h2>
-            <div className="space-y-3">
-              {unassigned.map((d) => (
-                <div
-                  key={d.id}
-                  className="bg-gray-800 border border-amber-700/30 rounded-xl p-4 space-y-2"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-white font-semibold">{d.delivery_number}</span>
-                    <Badge variant="warning">Unassigned</Badge>
-                  </div>
-                  <p className="text-gray-300 text-sm">{d.customer_name}</p>
-                  {d.farm_group_name && (
-                    <div className="flex items-center gap-1">
-                      <Users className="w-3 h-3 text-blue-400 shrink-0" />
-                      <span className="text-xs text-blue-400">{d.farm_group_name}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 text-gray-400 text-xs">
-                    <Calendar className="w-3 h-3" />
-                    <span>{parseLocalDate(d.scheduled_date).toLocaleDateString()}</span>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={(e) => { e.stopPropagation(); handleTakeDelivery(d.id); }}
-                    className="w-full mt-2"
-                  >
-                    Take This Delivery
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Quick Delivery Modal */}
         <QuickDeliveryModal
@@ -1375,21 +1428,47 @@ export default function Deliveries() {
   }
 
   /* ─── Admin / Sales Rep View ─── */
+  // Shared by the desktop table and the phone list.
+  const selectBox = (row: DeliveryRow) =>
+    SELECTABLE_STATUSES.includes(row.status) ? (
+      <input
+        type="checkbox"
+        checked={selected.has(row.id)}
+        onChange={(e) => { e.stopPropagation(); toggleSelect(row.id); }}
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`Select ${row.delivery_number}`}
+        className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+      />
+    ) : null;
+
+  const completeAction = (row: DeliveryRow) =>
+    row.status === 'in_progress' || row.status === 'scheduled' ? (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          completeIdem.resetKey();
+          const dialogGen = bumpCompleteDialogGen();
+          setCompleteTarget(row);
+          setSignedBy('');
+          setDeliveredOnDate(businessToday());
+          resetCompleteEvidence();
+          void loadTicketPhotos(row.id, dialogGen);
+        }}
+        title={row.status === 'scheduled' ? 'Mark this delivery delivered' : 'Mark this delivery complete'}
+        aria-label={`Mark delivery ${row.delivery_number} ${row.status === 'scheduled' ? 'delivered' : 'complete'}`}
+        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-crx-green border border-crx-green/30 hover:bg-crx-green-light transition-colors"
+      >
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        {row.status === 'scheduled' ? 'Mark Delivered' : 'Complete'}
+      </button>
+    ) : null;
+
   const columns: Column<DeliveryRow>[] = [
     {
       key: 'id',
       header: '',
       className: 'w-10',
-      render: (row) =>
-        SELECTABLE_STATUSES.includes(row.status) ? (
-          <input
-            type="checkbox"
-            checked={selected.has(row.id)}
-            onChange={(e) => { e.stopPropagation(); toggleSelect(row.id); }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-          />
-        ) : null,
+      render: selectBox,
     },
     {
       key: 'delivery_number',
@@ -1487,27 +1566,7 @@ export default function Deliveries() {
     {
       key: 'actions',
       header: '',
-      render: (row) =>
-        row.status === 'in_progress' || row.status === 'scheduled' ? (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              completeIdem.resetKey();
-              const dialogGen = bumpCompleteDialogGen();
-              setCompleteTarget(row);
-              setSignedBy('');
-              setDeliveredOnDate(businessToday());
-              resetCompleteEvidence();
-              void loadTicketPhotos(row.id, dialogGen);
-            }}
-            title={row.status === 'scheduled' ? 'Mark this delivery delivered' : 'Mark this delivery complete'}
-            aria-label={`Mark delivery ${row.delivery_number} ${row.status === 'scheduled' ? 'delivered' : 'complete'}`}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-crx-green border border-crx-green/30 hover:bg-crx-green-light transition-colors"
-          >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            {row.status === 'scheduled' ? 'Mark Delivered' : 'Complete'}
-          </button>
-        ) : null,
+      render: completeAction,
     },
   ];
 
@@ -1740,98 +1799,174 @@ export default function Deliveries() {
         </div>
       )}
 
-      {/* Data Table */}
-      <Card padding={false}>
-        <div className="p-5">
-          <DataTable<DeliveryRow>
-            data={filtered}
-            columns={columns}
-            searchable
-            searchPlaceholder="Search deliveries..."
-            searchKeys={['delivery_number', 'customer_name', 'driver_name', 'farm_group_name']}
-            onRowClick={(row) => navigate(`/deliveries/${row.id}`)}
-            emptyTitle="No deliveries scheduled"
-            emptyDescription="Deliveries are created from orders. Open an order and click 'Schedule Delivery' to get started."
-            emptyAction={
-              <Button icon={<Truck className="w-4 h-4" />} showChevron onClick={() => navigate('/orders')}>
-                View Orders
-              </Button>
-            }
-            loading={loading}
-            filters={
-              <div className="flex gap-2 items-center flex-wrap">
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  aria-label="Filter by delivery status"
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+      {/* Delivery list: one search and filter bar; a table from md up, a tappable list on phones */}
+      <Card padding={false} className="phone-touch overflow-hidden">
+        <div className="flex items-center gap-3 bg-cream-dark px-4 py-3">
+          <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-crx-green text-white">
+            <Truck className="w-5 h-5" />
+          </span>
+          <h2 className="font-heading text-2xl font-bold leading-none text-nav-dark">Delivery List</h2>
+        </div>
+        <div className="space-y-4 p-4 md:p-5">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={listSearch}
+                onChange={(e) => setListSearch(e.target.value)}
+                placeholder="Search deliveries..."
+                aria-label="Search deliveries"
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors"
+              />
+            </div>
+            <div className="flex min-w-0 gap-2 items-center flex-wrap [&>select]:max-w-full">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label="Filter by delivery status"
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              >
+                <option value="">All Statuses</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="voided">Voided</option>
+              </select>
+              <select
+                value={driverFilter}
+                onChange={(e) => setDriverFilter(e.target.value)}
+                aria-label="Filter by driver"
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              >
+                <option value="">All Drivers</option>
+                {drivers.map((d) => (
+                  <option key={d.id} value={d.id}>{d.full_name}</option>
+                ))}
+              </select>
+              <select
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+                aria-label="Filter by priority"
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              >
+                <option value="">All Priorities</option>
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+              <select
+                value={customerFilter}
+                onChange={(e) => setCustomerFilter(e.target.value)}
+                aria-label="Filter by customer"
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              >
+                <option value="">All Customers</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.farm_name}</option>
+                ))}
+              </select>
+              <select
+                value={scheduleDate ? 'custom' : datePreset}
+                onChange={(e) => {
+                  setScheduleDate('');
+                  setDatePreset(e.target.value === 'custom' ? '' : e.target.value);
+                }}
+                aria-label="Filter by date range"
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              >
+                {DATE_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+                {scheduleDate && <option value="custom">{dayLabel(scheduleDate)}</option>}
+              </select>
+              {filtered.some((d) => SELECTABLE_STATUSES.includes(d.status)) && (
+                <button
+                  onClick={toggleAll}
+                  className="text-xs text-crx-green hover:underline ml-2"
                 >
-                  <option value="">All Statuses</option>
-                  <option value="scheduled">Scheduled</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                  <option value="voided">Voided</option>
-                </select>
-                <select
-                  value={driverFilter}
-                  onChange={(e) => setDriverFilter(e.target.value)}
-                  aria-label="Filter by driver"
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                >
-                  <option value="">All Drivers</option>
-                  {drivers.map((d) => (
-                    <option key={d.id} value={d.id}>{d.full_name}</option>
-                  ))}
-                </select>
-                <select
-                  value={priorityFilter}
-                  onChange={(e) => setPriorityFilter(e.target.value)}
-                  aria-label="Filter by priority"
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                >
-                  <option value="">All Priorities</option>
-                  <option value="low">Low</option>
-                  <option value="normal">Normal</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
-                </select>
-                <select
-                  value={customerFilter}
-                  onChange={(e) => setCustomerFilter(e.target.value)}
-                  aria-label="Filter by customer"
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                >
-                  <option value="">All Customers</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>{c.farm_name}</option>
-                  ))}
-                </select>
-                <select
-                  value={scheduleDate ? 'custom' : datePreset}
-                  onChange={(e) => {
-                    setScheduleDate('');
-                    setDatePreset(e.target.value === 'custom' ? '' : e.target.value);
-                  }}
-                  aria-label="Filter by date range"
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                >
-                  {DATE_PRESETS.map((p) => (
-                    <option key={p.value} value={p.value}>{p.label}</option>
-                  ))}
-                  {scheduleDate && <option value="custom">{dayLabel(scheduleDate)}</option>}
-                </select>
-                {filtered.some((d) => SELECTABLE_STATUSES.includes(d.status)) && (
-                  <button
-                    onClick={toggleAll}
-                    className="text-xs text-crx-green hover:underline ml-2"
-                  >
-                    {selected.size > 0 ? 'Deselect All' : 'Select All'}
-                  </button>
-                )}
-              </div>
-            }
-          />
+                  {selected.size > 0 ? 'Deselect All' : 'Select All'}
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="hidden md:block">
+            <DataTable<DeliveryRow>
+              data={searched}
+              columns={columns}
+              onRowClick={(row) => navigate(`/deliveries/${row.id}`)}
+              emptyTitle={deliveries.length > 0 ? 'No deliveries match your search or filters' : 'No deliveries scheduled'}
+              emptyDescription={deliveries.length > 0 ? undefined : "Deliveries are created from orders. Open an order and click 'Schedule Delivery' to get started."}
+              emptyAction={deliveries.length > 0 ? undefined : (
+                <Button icon={<Truck className="w-4 h-4" />} showChevron onClick={() => navigate('/orders')}>
+                  View Orders
+                </Button>
+              )}
+              loading={loading}
+            />
+          </div>
+          <div className="md:hidden">
+            {searched.length === 0 ? (
+              deliveries.length > 0 ? (
+                <p className="py-8 text-center font-semibold text-nav-dark">No deliveries match your search or filters</p>
+              ) : (
+                <div className="py-8 text-center">
+                  <p className="font-semibold text-nav-dark">No deliveries scheduled</p>
+                  <p className="mt-1 text-sm text-secondary">Deliveries are created from orders. Open an order and click &apos;Schedule Delivery&apos; to get started.</p>
+                  <Button className="mt-4" icon={<Truck className="w-4 h-4" />} showChevron onClick={() => navigate('/orders')}>
+                    View Orders
+                  </Button>
+                </div>
+              )
+            ) : (
+              <ul className="-mx-4 border-y border-gray-100 divide-y divide-gray-100">
+                {searched.map((row) => {
+                  const short = shortageDeliveryIds.has(row.id);
+                  const action = completeAction(row);
+                  return (
+                    <li key={row.id} className={`px-4 py-3 ${short ? 'border-l-4 border-amber-500 bg-amber-50' : ''}`}>
+                      <div className="flex items-center gap-1">
+                        {/* A 44px tap area around the small checkbox; a spacer keeps rows aligned without one. */}
+                        {SELECTABLE_STATUSES.includes(row.status)
+                          ? <label className="-ml-3 flex h-11 w-11 shrink-0 items-center justify-center">{selectBox(row)}</label>
+                          : <span aria-hidden="true" className="-ml-3 w-11 shrink-0" />}
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/deliveries/${row.id}`)}
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        >
+                          <span className="min-w-0 flex-1 space-y-0.5">
+                            <span className="flex items-center gap-1.5 text-sm text-secondary">
+                              <span>{row.delivery_number}</span>
+                              {short && (
+                                <span title="Inventory shortage"><AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" /></span>
+                              )}
+                            </span>
+                            <span className="block truncate font-heading text-lg font-bold text-nav-dark">{row.customer_name}</span>
+                            <span className="block text-xs text-secondary">
+                              {parseLocalDate(row.scheduled_date).toLocaleDateString()}
+                              {row.delivery_window_start && ` ${row.delivery_window_start}${row.delivery_window_end ? '-' + row.delivery_window_end : ''}`}
+                              {' · '}<span className={!row.assigned_driver ? 'font-medium text-amber-800' : ''}>{row.driver_name}</span> · {row.item_count} items
+                            </span>
+                            <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                              <Badge variant={statusToBadgeVariant[row.status] || 'default'}>{row.status.replace('_', ' ')}</Badge>
+                              {row.priority && row.priority !== 'normal' && priorityBadge(row.priority)}
+                              {row.completion_evidence === 'no_proof' && <NoProofLabel />}
+                            </span>
+                            {short && <span className="block text-sm font-medium text-amber-800">Warehouse stock is short for this load</span>}
+                          </span>
+                          <ChevronRight className="w-5 h-5 shrink-0 text-gray-400" aria-hidden="true" />
+                        </button>
+                      </div>
+                      {action && <div className="mt-2">{action}</div>}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </div>
       </Card>
       </>}

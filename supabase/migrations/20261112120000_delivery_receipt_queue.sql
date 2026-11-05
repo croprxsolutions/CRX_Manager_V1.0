@@ -1,5 +1,5 @@
 -- Written 2026-11-05. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261110130000_delivery_receipt_queue.md.
+-- docs/reference/migrations.d/20261112120000_delivery_receipt_queue.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (KI-25): a customer receipt owed after a delivery completion is recorded in the database, in the same

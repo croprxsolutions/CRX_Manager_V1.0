@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for KI-25 (20261110130000): a customer receipt owed after a delivery completion is recorded in
+ * Real-schema proof for KI-25 (20261112120000): a customer receipt owed after a delivery completion is recorded in
  * the database in the same transaction, and the service_role worker calls send it at most once per claim.
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays migrations up to the
  * candidate, completes one delivery with today's call (key K), applies the candidate (a second apply refuses),
@@ -31,7 +31,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261110130000_delivery_receipt_queue.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261112120000_delivery_receipt_queue.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

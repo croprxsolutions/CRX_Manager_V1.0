@@ -1,6 +1,6 @@
 ## 2026-11-05 — Any staff member can clear their own stuck request (KI-27 follow-up, database half)
 
-- New migration `20261107160000_uncertain_request_clear_any_staff.sql` (record in `docs/reference/migrations.d/`).
+- New migration `20261108170000_uncertain_request_clear_any_staff.sql` (record in `docs/reference/migrations.d/`).
   Mason's decision (2026-11-05): a sales rep, driver or applicator whose request got stuck had no way out inside
   the app, because a stuck request lives only in the sender's own browser under their own login, so an admin
   can never clear someone else's. `retire_uncertain_request` now accepts any active profile with a staff role

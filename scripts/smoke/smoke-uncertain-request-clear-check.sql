@@ -1,10 +1,10 @@
--- Smoke chain: retire_uncertain_request (REQUIRES 20261107160000).
+-- Smoke chain: retire_uncertain_request (REQUIRES 20261108170000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so the receipts it seeds and the
 -- retired-request rows the function writes are all rolled back. It needs one active
 -- admin profile: every receipt it reads it seeds itself. Proves, as a real signed-in
 -- session (role authenticated with that profile's claims) and with those claims cleared:
 --   * the installed bodies (the function and the receipt insert guard) are
---     20261107160000's and 20261107150000's, only authenticated can execute the function, and no client role
+--     20261108170000's and 20261107150000's, only authenticated can execute the function, and no client role
 --     can reach the signing-key or retired-request tables;
 --   * a request key recorded under the operation it names is safe ('recorded'), even
 --     when the receipt has expired; a receipt under another operation is not;
@@ -51,7 +51,7 @@ DECLARE
   v_role text;
 BEGIN
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_fn), chr(13), '')) <> 'addf6df43b0e9d23c91e88dba315a1d0' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: retire_uncertain_request is not the body of 20261107160000';
+    RAISE EXCEPTION 'SMOKE_FAIL: retire_uncertain_request is not the body of 20261108170000';
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._guard_idempotency_key_insert()'::regprocedure), chr(13), ''))
      <> 'a9e47f3ea8b2b5b76b15ed1d745a8140' THEN
@@ -106,7 +106,7 @@ BEGIN
   v_tok_future := split_part(v_bad, ',', 3);
   v_tok_other := split_part(v_bad, ',', 4);
 
-  -- A signed-in non-admin staff member is answered for their own key (20261107160000);
+  -- A signed-in non-admin staff member is answered for their own key (20261108170000);
   -- an unrecorded key only starts the wait, so nothing is written. Another user's key
   -- is still refused.
   IF v_other IS NOT NULL THEN

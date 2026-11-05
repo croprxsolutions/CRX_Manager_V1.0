@@ -54,6 +54,9 @@ describe('CSV reader', () => {
   it('drops blank lines and keeps a last row without a newline', () => {
     expect(parseCsv('a,b\n\n1,2\n , \n3,4')).toEqual([['a', 'b'], ['1', '2'], ['3', '4']]);
   });
+  it('refuses an unclosed quote instead of swallowing later rows', () => {
+    expect(() => parseCsv('product_name,notes\nA,"open note\nB,x\n')).toThrow(/never closed/);
+  });
   it('round-trips through its own writer', () => {
     const rows = [['a', 'b,c'], ['line\nbreak', 'say "hi"']];
     expect(parseCsv(toCsv(rows))).toEqual(rows);

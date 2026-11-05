@@ -44,7 +44,12 @@ interface PreviewResult {
 interface Row extends ProductImportRow { preview?: PreviewResult }
 
 const MAX_ROWS = 500;
-const money = (v: number | null) => (v == null ? '—' : `$${Number(v).toFixed(2)}`);
+// Per-acre prices are whole cents in the database (a CHECK), so pad the digits as sent; never round a float.
+const money = (v: number | null) => {
+  if (v == null) return '—';
+  const [whole, frac = ''] = String(v).split('.');
+  return `$${whole}.${frac.padEnd(2, '0')}`;
+};
 
 /** Why a row will not be imported, or null when it is ready. */
 function skipReason(r: Row): string | null {
@@ -74,7 +79,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const previewSeq = useRef(0);
   const [previewId, setPreviewId] = useState('');
 
-  const reset = () => { setFile(null); setRows(null); setIgnored([]); setImported(null); };
+  const reset = () => { setFile(null); setRows(null); setIgnored([]); setImported(null); setRatesLocked(false); };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -106,6 +111,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const handleParse = async () => {
     if (!file) return;
     setParsing(true);
+    setRatesLocked(false);
     try {
       const [headers = [], ...data] = parseCsv(await file.text());
       const pricingHeaders = headers.filter(isRetiredPricingColumn);

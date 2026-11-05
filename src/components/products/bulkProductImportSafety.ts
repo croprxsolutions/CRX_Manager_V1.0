@@ -70,7 +70,7 @@ export function isRetiredPricingColumn(header: string): boolean {
     || /^(?:price|margin)_(?:tier_?)?[123]$/.test(normalized);
 }
 
-/** RFC 4180 CSV: quoted fields may hold commas, doubled quotes and line breaks. A leading BOM is dropped. */
+/** RFC 4180 CSV: quoted fields may hold commas, doubled quotes and line breaks. A leading BOM is dropped; an unclosed quote throws. */
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -90,6 +90,8 @@ export function parseCsv(text: string): string[][] {
       row.push(cell); rows.push(row); row = []; cell = '';
     } else cell += ch;
   }
+  // An unclosed quote would swallow every later line into one cell, dropping those rows unseen.
+  if (quoted) throw new Error('A quoted value is never closed (a " is missing). Fix the file and try again.');
   if (cell !== '' || row.length > 0) { row.push(cell); rows.push(row); }
   return rows.filter((r) => r.some((c) => c.trim() !== ''));
 }

@@ -410,6 +410,49 @@ describe('useUncertainMutationIntent', () => {
     now.mockRestore();
   });
 
+  it('refuses to clear a retryable request and clears it only after the window expires (KI-27)', async () => {
+    let nowMs = Date.parse('2026-08-26T12:00:00Z');
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+    const options = {
+      operation: 'record_vendor_payment',
+      userId: 'admin-ki27',
+      surface: 'vendor-bill-detail',
+      scope: 'bill-ki27',
+    };
+    const storageKey = `crx:uncertain-mutation:v4:${JSON.stringify([options.operation, options.userId])}`;
+    const first = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    await act(async () => first.result.current.beginIntent({ amount: 9000 }));
+    const originalKey = first.result.current.getIdempotencyKey();
+
+    await expect(first.result.current.clearExpiredIntent()).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    expect(first.result.current.isIntentLocked).toBe(true);
+    expect(first.result.current.getIdempotencyKey()).toBe(originalKey);
+
+    // The local mirror alone must not decide: IndexedDB still holds a retryable request.
+    window.localStorage.removeItem(storageKey);
+    window.sessionStorage.clear();
+    first.unmount();
+    const mirrorless = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    await expect(mirrorless.result.current.clearExpiredIntent()).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    expect(await mirrorless.result.current.beginIntent({ amount: 9000 })).toEqual({ amount: 9000 });
+    expect(mirrorless.result.current.getIdempotencyKey()).toBe(originalKey);
+    mirrorless.unmount();
+
+    nowMs += 23 * 60 * 60 * 1000;
+    const expired = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    expect(expired.result.current.isRetryExpired).toBe(true);
+    await act(async () => expired.result.current.clearExpiredIntent());
+    expect(expired.result.current.isIntentLocked).toBe(false);
+    expect(expired.result.current.isRetryExpired).toBe(false);
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
+
+    await act(async () => expired.result.current.beginIntent({ amount: 4200 }));
+    expect(expired.result.current.unresolvedIntent).toEqual({ amount: 4200 });
+    expect(expired.result.current.getIdempotencyKey()).not.toBe(originalKey);
+    expired.unmount();
+    now.mockRestore();
+  });
+
   it('fails closed for a legacy durable record that has no retry deadline', () => {
     const options = {
       operation: 'receive_po_items',

@@ -1066,6 +1066,64 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     }
   }, [acknowledgmentKey, applyRecord, options, storageKey]);
 
+  // KI-27: once the safe retry window has passed, the saved request can never be
+  // retried and would lock this operation in this browser forever. After staff
+  // verify the authoritative record, this drops the expired request from every
+  // store this tab can reach. It refuses while any copy could still be retried.
+  const clearExpiredIntent = useCallback(async () => {
+    if (!options || !storageKey) throw new Error('DURABLE_MUTATION_INTENT_IDENTITY_MISSING');
+    const isLive = (record: DurableMutationIntentRecord<T> | null) =>
+      record?.status === 'pending' && Date.now() < record.retryNotAfterMs;
+    const mirror = readDurableRecord<T>(storageKey, options);
+    const attempt = readAcknowledgmentRecord<T>(acknowledgmentKey, options);
+    if (isLive(mirror) || isLive(attempt)) throw new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT);
+    const db = await openDurableIntentDb();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(DURABLE_INTENT_STORE, 'readwrite');
+        const store = transaction.objectStore(DURABLE_INTENT_STORE);
+        const request = store.get(storageKey);
+        let refused = false;
+        request.onsuccess = () => {
+          const stored = request.result as { record?: unknown } | undefined;
+          if (!stored) return;
+          const candidate = stored.record as Partial<DurableMutationIntentRecord<T>> | undefined;
+          const record = candidate && isValidRecord(candidate, options) ? candidate : null;
+          // A resolved tombstone never locks anything; keep it as receipt proof.
+          if (record?.status === 'resolved') return;
+          if (isLive(record)) {
+            refused = true;
+            return;
+          }
+          store.delete(storageKey);
+        };
+        request.onerror = () => reject(
+          request.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'),
+        );
+        transaction.oncomplete = () => (refused
+          ? reject(new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT))
+          : resolve());
+        transaction.onerror = () => reject(
+          transaction.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'),
+        );
+        transaction.onabort = () => reject(
+          transaction.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'),
+        );
+      });
+    } finally {
+      db.close();
+    }
+    try {
+      if (mirror?.status !== 'resolved') window.localStorage.removeItem(storageKey);
+      if (acknowledgmentKey) window.sessionStorage.removeItem(acknowledgmentKey);
+    } catch {
+      throw new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
+    }
+    attemptRecordRef.current = null;
+    persistedAcknowledgmentIdentityRef.current = null;
+    applyRecord(readDurableRecord<T>(storageKey, options));
+  }, [acknowledgmentKey, applyRecord, options, storageKey]);
+
   // Same value as `unresolvedIntent`, read from the ref instead of state.
   // `unresolvedIntent` is React state, so a caller that awaits classifyFailure()
   // and then reads it in the SAME tick still sees the render-time value — which
@@ -1094,6 +1152,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     getIdempotencyKey,
     resolveIntent,
     classifyFailure,
+    clearExpiredIntent,
     unresolvedIntent,
     getUnresolvedIntent,
     getPendingIdempotencyKey,

@@ -21,6 +21,26 @@ PUSH_REFS_EOF
   exit 1
 fi
 
+# The workflow map is generated from src/; CI fails a stale one (2026-11-04 retro, PR #1459).
+# --check never writes the tracked map.
+if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --map)" = "check" ]; then
+  echo ""
+  echo "Checking the workflow map is up to date..."
+  # The check reads the working tree; an uncommitted map would pass here but not in CI.
+  if ! git diff --quiet HEAD -- docs/app-workflow-map.html; then
+    echo ""
+    echo "❌ docs/app-workflow-map.html has uncommitted changes — push blocked."
+    echo "Commit the regenerated map, then push again."
+    exit 1
+  fi
+  if ! node scripts/generate-workflow-map.mjs --check 2>&1; then
+    echo ""
+    echo "❌ WORKFLOW MAP OUT OF DATE — push blocked."
+    echo "Run npm run generate-map, commit docs/app-workflow-map.html, then push again."
+    exit 1
+  fi
+fi
+
 # Type check, code health and build read only app files; CI builds every PR regardless.
 if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs)" = "skip" ]; then
   echo ""

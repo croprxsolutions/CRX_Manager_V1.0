@@ -1,5 +1,5 @@
 -- Written 2026-11-05. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261108140000_rup_records_require_posted_invoice.md.
+-- docs/reference/migrations.d/20261110140000_rup_records_require_posted_invoice.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (KI-05): generate_rup_sales_records checked the caller's role (active admin or sales_rep) but not

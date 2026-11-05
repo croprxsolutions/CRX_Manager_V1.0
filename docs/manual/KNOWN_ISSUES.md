@@ -137,7 +137,7 @@ gaps are accepted in KI-78.
 **MED · FIX WRITTEN, NOT YET LIVE · security/money · Claude**
 `generate_rup_sales_records` (live body `20260707040000`, re-read 2026-11-05) checks the caller's role but not that
 the invoice is posted, so a rep can add restricted-use-pesticide register rows for a draft. PR #927 hid register
-reads from reps but explicitly left this function unchanged. Fix: `20261108140000_rup_records_require_posted_invoice`
+reads from reps but explicitly left this function unchanged. Fix: `20261110140000_rup_records_require_posted_invoice`
 refuses any invoice that is not posted, paid or overdue (`RUP_INVOICE_NOT_POSTED`); posting still writes the rows.
 Proof: `scripts/smoke/prove-rup-records-require-posted-invoice-real-schema.mjs`. A new trigger on `rup_sales_records` applies the same
 rule to a direct insert, which the admin-only `rup_sales_insert` policy allows.

@@ -1,6 +1,6 @@
 -- ============================================================================
 -- SMOKE TEST (rolled back by design): generate_rup_sales_records requires a
--- posted invoice (KI-05, migration 20261108140000).
+-- posted invoice (KI-05, migration 20261110140000).
 -- ----------------------------------------------------------------------------
 -- Run AFTER the migration is applied; before it, S1 FAILs (the draft is let
 -- through).
@@ -55,7 +55,7 @@ BEGIN
     WHERE oid = 'public.generate_rup_sales_records(uuid,text)'::regprocedure
       AND prosrc LIKE '%RUP_INVOICE_NOT_POSTED%'
   ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: S0 generate_rup_sales_records has no RUP_INVOICE_NOT_POSTED check - migration 20261108140000 not applied';
+    RAISE EXCEPTION 'SMOKE_FAIL: S0 generate_rup_sales_records has no RUP_INVOICE_NOT_POSTED check - migration 20261110140000 not applied';
   END IF;
   SELECT string_agg(a.grantee::regrole::text || ':' || a.privilege_type, ',' ORDER BY a.grantee::regrole::text)
   INTO v_grants

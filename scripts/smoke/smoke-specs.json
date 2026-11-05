@@ -1325,7 +1325,7 @@
     "generate_rup_sales_records": {
       "chain": "smoke-rup-records-require-posted-invoice.sql",
       "container_prover": "prove-rup-records-require-posted-invoice-real-schema.mjs",
-      "description": "KI-05 (REQUIRES 20261108140000): the live body carries the RUP_INVOICE_NOT_POSTED check and the grants are unchanged; an active admin calling it directly on a [SMOKE] draft invoice with an RUP line is refused RUP_INVOICE_NOT_POSTED and nothing is written (no register row, no idempotency receipt), and the same admin's direct insert into rup_sales_records for the draft is refused by the new table trigger; post_invoice as the signed-in admin still posts the same invoice and writes exactly one compliant register row; a direct call on the posted invoice is let through and returns 0 (dedup).",
+      "description": "KI-05 (REQUIRES 20261110140000): the live body carries the RUP_INVOICE_NOT_POSTED check and the grants are unchanged; an active admin calling it directly on a [SMOKE] draft invoice with an RUP line is refused RUP_INVOICE_NOT_POSTED and nothing is written (no register row, no idempotency receipt), and the same admin's direct insert into rup_sales_records for the draft is refused by the new table trigger; post_invoice as the signed-in admin still posts the same invoice and writes exactly one compliant register row; a direct call on the posted invoice is let through and returns 0 (dedup).",
       "covers": [
         "generate_rup_sales_records",
         "post_invoice"

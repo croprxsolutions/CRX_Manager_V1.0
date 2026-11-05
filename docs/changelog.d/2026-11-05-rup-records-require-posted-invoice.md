@@ -1,6 +1,6 @@
 ## 2026-11-05 — RUP register rows only for a posted invoice (KI-05)
 
-- New migration `20261108140000_rup_records_require_posted_invoice.sql` (record in `docs/reference/migrations.d/`):
+- New migration `20261110140000_rup_records_require_posted_invoice.sql` (record in `docs/reference/migrations.d/`):
   `generate_rup_sales_records` now refuses an invoice that is not posted (status other than `posted`, `paid` or
   `overdue`, or deleted) with `RUP_INVOICE_NOT_POSTED: invoice <number> is <status> and not posted`. Before, any
   active admin or sales rep could call it directly and write restricted-use-pesticide register rows for a draft.

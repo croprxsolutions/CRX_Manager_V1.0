@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for KI-05 (20261108140000_rup_records_require_posted_invoice): restricted-use-pesticide
+ * Real-schema proof for KI-05 (20261110140000_rup_records_require_posted_invoice): restricted-use-pesticide
  * register rows are written only for a posted invoice.
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container and replays every ordered
@@ -35,7 +35,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261108140000_rup_records_require_posted_invoice.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261110140000_rup_records_require_posted_invoice.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

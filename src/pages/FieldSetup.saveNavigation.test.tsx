@@ -284,4 +284,29 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
     expect(await screen.findByText('Other page')).toBeInTheDocument();
     expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
   });
+
+  it('keeps an edit made while the save was in flight unsaved', async () => {
+    let finishBoundary: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field') return Promise.resolve({ data: true, error: null });
+      if (name === 'set_field_boundary') return new Promise((resolve) => { finishBoundary = resolve; });
+      return Promise.resolve({ data: [], error: null });
+    });
+    const router = createMemoryRouter(
+      [{ path: '/fields/:id', element: <FieldSetup /> }, { path: '/other', element: <div>Other page</div> }],
+      { initialEntries: ['/fields/field-1'] },
+    );
+    render(<RouterProvider router={router} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Draw boundary' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_field_boundary', expect.anything()));
+    fireEvent.change(screen.getByDisplayValue('Select crop...'), { target: { value: 'corn' } });
+    finishBoundary({ data: { measured_acres: 40, billable_acres: 40 }, error: null });
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await router.navigate('/other');
+    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/fields/field-1');
+  });
 });

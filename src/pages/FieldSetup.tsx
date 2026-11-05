@@ -254,7 +254,8 @@ function FieldSetupPage() {
   const loadedFieldRef = useRef<typeof field | null>(null);
   const loadedSplitsRef = useRef<typeof billingSplits | null>(null);
   const skipUnsavedPromptRef = useRef(false);
-  const adoptSavedBaselineRef = useRef(false);
+  // Set by a save that synced acres: what that save sent (null for a new field, which reloads after create).
+  const adoptSavedBaselineRef = useRef<{ field: typeof field; splits: typeof billingSplits } | null | false>(false);
   const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   // Post-create navigation happens via this state so it fires on a render where
   // isDirty=false has committed — see the comment at the setter in handleSave.
@@ -268,11 +269,16 @@ function FieldSetupPage() {
 
   useEffect(() => {
     if (!initialLoadDone.current) return;
-    if (adoptSavedBaselineRef.current) {
-      // A save just synced acres back into the form: what is on screen is the new clean state.
+    const sent = adoptSavedBaselineRef.current;
+    if (sent !== false) {
+      // A save just synced acres back into the form: that is the new clean state, unless the
+      // user changed something while the save was in flight.
       adoptSavedBaselineRef.current = false;
       loadedFieldRef.current = field;
       loadedSplitsRef.current = billingSplits;
+      const editedMidSave = sent !== null && (billingSplits !== sent.splits
+        || (Object.keys(field) as Array<keyof typeof field>).some((k) => k !== 'total_acres' && k !== 'measured_acres' && field[k] !== sent.field[k]));
+      if (editedMidSave) setIsDirty(true);
       return;
     }
     if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current) return;
@@ -751,7 +757,7 @@ function FieldSetupPage() {
         }
 
         if (savedAcres) {
-          adoptSavedBaselineRef.current = true; // the synced acres are saved, not an edit
+          adoptSavedBaselineRef.current = isNew ? null : { field, splits: billingSplits }; // the synced acres are saved, not an edit
           setField((f) => ({ ...f, ...savedAcres }));
         }
         setIsDirty(false);

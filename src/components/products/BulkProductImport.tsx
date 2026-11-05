@@ -19,6 +19,7 @@ import {
   isRetiredPricingColumn,
   mapProductImportHeaders,
   parseCsvRecords,
+  refuseInFileDuplicates,
   type ProductImportRow,
 } from './bulkProductImportSafety';
 
@@ -278,7 +279,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         return;
       }
       const categories = (await listProductCategories()).filter((c) => c.is_active).map((c) => c.name);
-      const built: Row[] = data.map(({ cells, line }) => buildProductImportRow(cells, mapping, line, categories));
+      const built: Row[] = refuseInFileDuplicates(data.map(({ cells, line }) => buildProductImportRow(cells, mapping, line, categories)));
       const checkable = built.filter((r) => !r.error);
       if (checkable.length > 0) {
         const { data: res, error } = await supabase.rpc('preview_product_import', {

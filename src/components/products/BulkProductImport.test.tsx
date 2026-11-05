@@ -56,6 +56,10 @@ describe('CSV reader', () => {
   it('drops blank lines and keeps a last row without a newline', () => {
     expect(parseCsv('a,b\n\n1,2\n , \n3,4')).toEqual([['a', 'b'], ['1', '2'], ['3', '4']]);
   });
+  it('keeps a quote inside an unquoted value as text, so it cannot swallow the next row', () => {
+    expect(parseCsv('product_name,notes\nA,Hello "bad\nB,another " note\n'))
+      .toEqual([['product_name', 'notes'], ['A', 'Hello "bad'], ['B', 'another " note']]);
+  });
   it('refuses an unclosed quote instead of swallowing later rows', () => {
     expect(() => parseCsv('product_name,notes\nA,"open note\nB,x\n')).toThrow(/never closed/);
   });
@@ -140,6 +144,10 @@ describe('row building', () => {
   ])('refuses a bad value before the database sees it: %j', (headers, cells, why) => {
     expect(build(headers, cells).error).toMatch(why);
   });
+  it('cleans a database permission message instead of showing the table name', () => {
+    expect(importRefusalReason('PRODUCT_SETUP_ROW_REFUSED: Chem: permission denied for table products', 'Chem'))
+      .toBe('You do not have permission to perform this action');
+  });
   it('strips the refusal code and the repeated product name', () => {
     expect(importRefusalReason('PRODUCT_SETUP_ROW_REFUSED: Chem: PRODUCT_SETUP_INVALID: EPA number must look like 524-475', 'Chem'))
       .toBe('EPA number must look like 524-475');
@@ -167,6 +175,15 @@ describe('BulkProductImport screen', () => {
     await upload('product_name,supplier_cost\nAtrazine,12.34');
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/pricing columns are not allowed.*supplier_cost/i)));
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('skips both rows that share a SKU, even when one of them has another mistake', async () => {
+    rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
+    render(<BulkProductImport {...props} />);
+    await upload('product_name,sku,rup\nCorrect Product,SKU-1,maybe\nWrong Product,sku-1 ,no\nOther,SKU-2,no\n');
+    expect(await screen.findByText('This name or SKU appears more than once in the file: skipped.')).toBeInTheDocument();
+    expect(screen.getByText('RUP must be yes or no.')).toBeInTheDocument();
+    expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [{ insert: { product_name: 'Other', sku: 'SKU-2', is_rup: false } }] });
   });
 
   it('refuses two columns that mean the same thing', async () => {

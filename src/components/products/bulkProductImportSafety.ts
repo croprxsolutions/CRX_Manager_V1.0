@@ -93,7 +93,8 @@ export function parseCsvRecords(text: string): { cells: string[]; line: number }
         if (ch === '\n' || (ch === '\r' && src[i + 1] !== '\n')) line += 1;
         cell += ch;
       }
-    } else if (ch === '"') quoted = true;
+    } else if (ch === '"' && cell === '') quoted = true;
+    // A quote inside an unquoted value is kept as text, so it cannot swallow the next row.
     else if (ch === ',') { row.push(cell); cell = ''; }
     else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && src[i + 1] === '\n') i += 1;
@@ -259,6 +260,22 @@ function importRates(raw: RawImportRow, productForm: string | undefined, invento
   return { rates };
 }
 
+/**
+ * Refuses every row whose name or SKU is on another row of the file, even a row already refused for another
+ * reason: the preview only sees the rows it is sent, so it cannot tell which of two clashing rows was meant.
+ */
+export function refuseInFileDuplicates<T extends ProductImportRow>(rows: T[]): T[] {
+  const keys = (r: T) => [['name', r.insert.product_name], ['sku', r.insert.sku]]
+    .filter(([, v]) => v?.trim())
+    .map(([k, v]) => `${k}:${v!.trim().toLowerCase()}`);
+  const seen = new Map<string, number>();
+  rows.forEach((r) => keys(r).forEach((k) => seen.set(k, (seen.get(k) ?? 0) + 1)));
+  rows.forEach((r) => {
+    if (!r.error && keys(r).some((k) => seen.get(k)! > 1)) r.error = 'This name or SKU appears more than once in the file: skipped.';
+  });
+  return rows;
+}
+
 /** A refusal from the preview or save, without its code token and the product name it repeats. */
 export function importRefusalReason(error: string, productName: string): string {
   let text = error.trim();
@@ -269,7 +286,8 @@ export function importRefusalReason(error: string, productName: string): string 
     text = unnamed;
   }
   // A table check reads as the product page words it; the EPA check's own text is just "EPA number".
-  if (/constraint "/.test(text)) return sanitizeError(text);
+  const clean = sanitizeError(text);
+  if (clean !== text) return clean;
   if (text === 'EPA number') return 'Enter a valid EPA number, like 524-475 or 100-1234-5905';
   if (productName && text.endsWith(`: ${productName}`)) text = text.slice(0, -productName.length - 2);
   return text.charAt(0).toUpperCase() + text.slice(1);

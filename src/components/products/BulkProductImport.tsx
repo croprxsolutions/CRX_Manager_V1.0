@@ -45,6 +45,30 @@ interface PreviewResult {
 interface Row extends ProductImportRow { preview?: PreviewResult }
 
 const MAX_ROWS = 500;
+// Live allows 8 s per request and a rate row takes ~20 ms to check, so 500 rate rows in one request timed out (KI-103).
+const PREVIEW_BATCH = 100;
+
+/** Checks rows a batch at a time, in order. In-file duplicates are refused across the whole file before this. */
+async function previewInBatches(rows: Row[]): Promise<{ rates_locked: boolean; rows: PreviewResult[] }> {
+  const out: PreviewResult[] = [];
+  let locked: boolean | undefined;
+  for (let i = 0; i < rows.length; i += PREVIEW_BATCH) {
+    const batch = rows.slice(i, i + PREVIEW_BATCH);
+    const { data, error } = await supabase.rpc('preview_product_import', {
+      p_rows: batch.map(({ insert, rates }) => (rates ? { insert, rates } : { insert })) as unknown as Json,
+    });
+    if (error) throw error;
+    const res = assertRpcResult<{ rates_locked: boolean; rows: PreviewResult[] }>(data, 'preview_product_import');
+    if (res.rows?.length !== batch.length) throw new Error('The check returned a different number of rows than it was sent.');
+    // Earlier batches' rows were checked under the other lock state, so the preview would mix the two.
+    if (locked !== undefined && locked !== res.rates_locked) {
+      throw new Error('Rates were locked or unlocked while the file was being checked. Check the file again.');
+    }
+    out.push(...res.rows);
+    locked = res.rates_locked;
+  }
+  return { rates_locked: locked ?? false, rows: out };
+}
 // Per-acre prices are whole cents in the database (a CHECK), so pad the digits as sent; never round a float.
 const money = (v: number | null) => {
   if (v == null) return '—';
@@ -282,11 +306,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       const built: Row[] = refuseInFileDuplicates(data.map(({ cells, line }) => buildProductImportRow(cells, mapping, line, categories)));
       const checkable = built.filter((r) => !r.error);
       if (checkable.length > 0) {
-        const { data: res, error } = await supabase.rpc('preview_product_import', {
-          p_rows: checkable.map(({ insert, rates }) => (rates ? { insert, rates } : { insert })) as unknown as Json,
-        });
-        if (error) throw error;
-        const preview = assertRpcResult<{ rates_locked: boolean; rows: PreviewResult[] }>(res, 'preview_product_import');
+        const preview = await previewInBatches(checkable);
         if (gen !== generation.current) return;
         checkable.forEach((r, i) => { r.preview = preview.rows[i]; });
         setRatesLocked(preview.rates_locked);

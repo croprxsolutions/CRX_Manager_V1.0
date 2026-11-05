@@ -37,9 +37,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // The first attempt committed under this key, usually a lost reply followed by an edit.
   [/^IDEMPOTENCY_ARGUMENT_MISMATCH\b/,
    'This attempt was not saved, but an earlier attempt with different details may have saved. Check the record before entering it again'],
-  // KI-27: an admin cleared this stuck request, so the database refuses to save it now.
+  // KI-27: this stuck request was cleared, so the database refuses to save it now.
   [/^IDEMPOTENCY_REQUEST_RETIRED\b/,
-   'Nothing was changed. An admin cleared this request after it got stuck. Check the record, then enter it again as a new request if it is still needed'],
+   'Nothing was changed. This request was cleared after it got stuck. Check the record, then enter it again as a new request if it is still needed'],
   [/^IDEMPOTENCY_(?:RESULT_INVALID|RECEIPT_MISSING)\b/,
    'Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again'],
   // A completion retried under a fresh key after an earlier attempt already completed the record.
@@ -233,13 +233,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'An internal error occurred. Please try again.'],
 ];
 
-// The exact reasons 20261010120000 writes after `DELIVERY_INVOICE_EXCEEDS_DELIVERED: `.
+// The exact reasons 20261010120000 (and 20261108160000, typed charge lines) write after `DELIVERY_INVOICE_EXCEEDS_DELIVERED: `.
 const DOC_NUMBER = String.raw`[A-Za-z0-9][A-Za-z0-9-]{0,40}`;
 const QUANTITY = String.raw`\d{1,12}(?:\.\d{1,8})?`;
 const DELIVERY_CAP_REASONS: Array<{ shape: RegExp; labelGroup?: number }> = [
   { shape: new RegExp(`^invoice ${DOC_NUMBER} bills ${QUANTITY} of (.{1,120}), but delivery ${DOC_NUMBER} allows ${QUANTITY}$`), labelGroup: 1 },
   { shape: new RegExp(`^invoice ${DOC_NUMBER} bills (.{1,120}) from an order line delivery ${DOC_NUMBER} did not carry$`), labelGroup: 1 },
-  { shape: new RegExp(`^invoice ${DOC_NUMBER} has a line with no product or a negative quantity; a delivery invoice bills only the products delivery ${DOC_NUMBER} delivered$`) },
+  { shape: new RegExp(`^invoice ${DOC_NUMBER} has a line with no product and no charge type, or a negative quantity; a delivery invoice bills the products delivery ${DOC_NUMBER} delivered, plus typed charges \\(freight, application fee, service, other\\)$`) },
   { shape: new RegExp(`^invoice ${DOC_NUMBER} cannot be posted before delivery ${DOC_NUMBER} is completed$`) },
   { shape: new RegExp(`^invoice ${DOC_NUMBER} names a delivery that does not exist$`) },
 ];
@@ -350,6 +350,10 @@ export function sanitizeError(error: unknown): string {
   // shapes the database writes, with plain document numbers, quantities and a product label that
   // carries no identifier; anything else gets the generic sentence.
   const deliveryCapDetail = deliveryCapReason(message);
+  if (deliveryCapDetail?.includes(' has a line with no product and no charge type')) {
+    return 'Nothing was changed. Every line on this invoice needs a product, or a charge type (freight, application fee, service or other), and no quantity can be negative'
+      + ` (${deliveryCapDetail.split(' has a line')[0]})`;
+  }
   if (deliveryCapDetail?.includes(' cannot be posted before delivery ')) {
     return `Nothing was posted. This invoice is for one delivery, so it can be posted only after that delivery is completed (${deliveryCapDetail})`;
   }

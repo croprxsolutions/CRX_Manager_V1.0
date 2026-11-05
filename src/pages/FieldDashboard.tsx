@@ -633,11 +633,6 @@ function CropHistoryTab({
   const [saving, setSaving] = useState(false);
   const [editingSeason, setEditingSeason] = useState<number | null>(null);
   const [form, setForm] = useState<CropForm>(blankCropForm);
-  const [phoneSearch, setPhoneSearch] = useState('');
-  const needle = phoneSearch.trim().toLowerCase();
-  const phoneHistory = needle
-    ? history.filter((r) => [r.crop_type, r.variety, r.notes].some((v) => v?.toLowerCase().includes(needle)))
-    : history;
 
   const cur = currentSeasonYear();
   const existingSeasons = new Set(history.map((h) => h.season));
@@ -779,55 +774,7 @@ function CropHistoryTab({
         </dl>
       )}
       {/* Phones: one list, a row per season. */}
-      {history.length > 0 && (
-        <div className="relative border-t border-gray-100 px-4 py-2 md:hidden">
-          <Search className="absolute left-7 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" aria-hidden="true" />
-          <input
-            type="search"
-            value={phoneSearch}
-            onChange={(e) => setPhoneSearch(e.target.value)}
-            placeholder="Search crop history…"
-            aria-label="Search crop history"
-            className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-base text-nav-dark placeholder:text-gray-500"
-          />
-        </div>
-      )}
-      {phoneHistory.length === 0 ? (
-        <div className="px-4 py-6 text-center md:hidden">
-          <p className="font-semibold text-nav-dark">{history.length === 0 ? 'No crop history' : 'No matching seasons'}</p>
-          {history.length === 0 && <p className="text-sm text-secondary">{emptyDescription}</p>}
-        </div>
-      ) : (
-        <ul className="border-t border-gray-100 divide-y divide-gray-100 md:hidden">
-          {phoneHistory.map((r) => (
-            <li key={r.id} className="flex items-start justify-between gap-3 px-4 py-2.5">
-              <div className="min-w-0">
-                <p className="font-semibold text-nav-dark">
-                  {r.season - 1}–{r.season} <span className="font-normal">· {r.crop_type}{r.variety ? ` (${r.variety})` : ''}</span>
-                </p>
-                <p className="text-xs text-secondary">
-                  {[
-                    r.planting_date && `Planted ${r.planting_date}`,
-                    r.harvest_date && `Harvested ${r.harvest_date}`,
-                    r.yield_per_acre != null && `${r.yield_per_acre.toLocaleString()} ${r.yield_unit || ''}/ac`,
-                    r.notes,
-                  ].filter(Boolean).join(' · ') || '—'}
-                </p>
-              </div>
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => openEdit(r)}
-                  className="shrink-0 rounded-lg p-2 text-secondary hover:bg-gray-100 hover:text-nav-dark"
-                  aria-label={`Edit ${r.season - 1}–${r.season} crop history`}
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      <CropHistoryPhoneList history={history} emptyDescription={emptyDescription} onEdit={canEdit ? openEdit : undefined} />
       <div className="hidden md:block px-4 py-3">
         <DataTable<CropHistoryRecord>
           columns={columns}
@@ -934,5 +881,72 @@ function CropHistoryTab({
         </Modal>
       )}
     </SectionCard>
+  );
+}
+
+/** Phones: one list, a row per season, with its own search (the desktop table has one built in). */
+function CropHistoryPhoneList({ history, emptyDescription, onEdit }: {
+  history: CropHistoryRecord[];
+  emptyDescription: string;
+  onEdit?: (r: CropHistoryRecord) => void;
+}) {
+  const [phoneSearch, setPhoneSearch] = useState('');
+  const needle = phoneSearch.trim().toLowerCase();
+  const phoneHistory = needle
+    ? history.filter((r) => [r.crop_type, r.variety, r.notes].some((v) => v?.toLowerCase().includes(needle)))
+    : history;
+
+  return (
+    <>
+      {history.length > 0 && (
+        <div className="relative border-t border-gray-100 px-4 py-2 md:hidden">
+          <Search className="absolute left-7 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" aria-hidden="true" />
+          <input
+            type="search"
+            value={phoneSearch}
+            onChange={(e) => setPhoneSearch(e.target.value)}
+            placeholder="Search crop history…"
+            aria-label="Search crop history"
+            className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-base text-nav-dark placeholder:text-gray-500"
+          />
+        </div>
+      )}
+      {phoneHistory.length === 0 ? (
+        <div className="px-4 py-6 text-center md:hidden">
+          <p className="font-semibold text-nav-dark">{history.length === 0 ? 'No crop history' : 'No matching seasons'}</p>
+          {history.length === 0 && <p className="text-sm text-secondary">{emptyDescription}</p>}
+        </div>
+      ) : (
+        <ul className="border-t border-gray-100 divide-y divide-gray-100 md:hidden">
+          {phoneHistory.map((r) => (
+            <li key={r.id} className="flex items-start justify-between gap-3 px-4 py-2.5">
+              <div className="min-w-0">
+                <p className="font-semibold text-nav-dark">
+                  {r.season - 1}–{r.season} <span className="font-normal">· {r.crop_type}{r.variety ? ` (${r.variety})` : ''}</span>
+                </p>
+                <p className="text-xs text-secondary">
+                  {[
+                    r.planting_date && `Planted ${r.planting_date}`,
+                    r.harvest_date && `Harvested ${r.harvest_date}`,
+                    r.yield_per_acre != null && `${r.yield_per_acre.toLocaleString()} ${r.yield_unit || ''}/ac`,
+                    r.notes,
+                  ].filter(Boolean).join(' · ') || '—'}
+                </p>
+              </div>
+              {onEdit && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(r)}
+                  className="shrink-0 rounded-lg p-2 text-secondary hover:bg-gray-100 hover:text-nav-dark"
+                  aria-label={`Edit ${r.season - 1}–${r.season} crop history`}
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

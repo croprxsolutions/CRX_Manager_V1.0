@@ -6,7 +6,7 @@
 // a direct profiles embed). Downloads use short-lived signed URLs (private bucket).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Paperclip, Download, Trash2, Upload, FileText } from 'lucide-react';
-import Card from '../ui/Card';
+import SectionCard from '../ui/SectionCard';
 import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
 import { useToast } from '../ui/Toast';
@@ -177,13 +177,11 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
   };
 
   return (
-    <Card>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-nav-dark flex items-center gap-2">
-          <Paperclip className="w-5 h-5 text-crx-green" />
-          Attached Log Files ({attachments.length})
-        </h2>
-        {canEdit && (
+    <SectionCard
+      id="job-logs"
+      icon={<Paperclip className="w-5 h-5" />}
+      title={`Attached Log Files (${attachments.length})`}
+      action={canEdit && (
           <>
             <input
               ref={fileInputRef}
@@ -194,18 +192,19 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
               aria-label="Attach log files"
               accept={ATTACHMENT_ACCEPT}
             />
-            <Button
+            <Button icon={<Upload className="w-4 h-4" />}
               variant="secondary"
               onClick={() => fileInputRef.current?.click()}
               loading={uploading}
               showChevron={false}
             >
-              <Upload className="w-4 h-4 mr-1.5" />
+              
               Attach Files
             </Button>
           </>
         )}
-      </div>
+    >
+      <div className="p-4 sm:p-5">
 
       {loading ? (
         <p className="text-sm text-gray-500 py-6 text-center">Loading attachments…</p>
@@ -221,7 +220,7 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="phone-stack w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 border-b">
                 <th className="py-2 pr-3 font-medium">File</th>
@@ -242,12 +241,12 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
                       </span>
                     </span>
                   </td>
-                  <td className="py-2 px-3 text-gray-600 whitespace-nowrap">{formatFileSize(a.file_size)}</td>
-                  <td className="py-2 px-3 text-gray-600 whitespace-nowrap">{formatUploadedAt(a.uploaded_at)}</td>
-                  <td className="py-2 px-3 text-gray-600 whitespace-nowrap">
+                  <td data-label="Size" className="py-2 px-3 text-gray-600 whitespace-nowrap">{formatFileSize(a.file_size)}</td>
+                  <td data-label="Uploaded" className="py-2 px-3 text-gray-600 whitespace-nowrap">{formatUploadedAt(a.uploaded_at)}</td>
+                  <td data-label="By" className="py-2 px-3 text-gray-600 whitespace-nowrap">
                     {a.uploaded_by ? uploaderNames[a.uploaded_by] || '…' : '—'}
                   </td>
-                  <td className="py-2 pl-3">
+                  <td data-label="Actions" className="py-2 pl-3">
                     <div className="flex items-center justify-end gap-1">
                       <button
                         type="button"
@@ -289,6 +288,7 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
         confirmLabel="Delete"
         variant="danger"
       />
-    </Card>
+      </div>
+    </SectionCard>
   );
 }

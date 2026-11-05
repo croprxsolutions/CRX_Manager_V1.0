@@ -553,7 +553,7 @@ together match the real total applied, rounded once, and holds at least each dra
 `scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs`.
 
 ### KI-101 — Voiding a delivery on a cancelled order reopens the order
-**MED · FIX IN REVIEW: migration `20261107120000` (NOT APPLIED) · database/lifecycle · found 2026-11-04 (KI-93 design review)**
+**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471); the grant item below is still open · database/lifecycle · found 2026-11-04 (KI-93 design review)**
 `_void_delivery_replay_impl_20261015` recomputed the order's status and wrote it under the admin override without
 checking for `cancelled`, so voiding a delivery of a cancelled, part-delivered order reopened it and put back the
 reservation the cancel had released. Reproduced 2026-11-04 on the throwaway copy. Such orders come from cancels before
@@ -568,7 +568,7 @@ delivered quantity. Proof: `scripts/smoke/prove-void-delivery-order-status-guard
   partially fulfilled to cancelled) with no delivery and no stock movement. Revoking it is its own PR.
 
 ### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice
-**MED · FIX IN REVIEW: migration `20261107120000` (NOT APPLIED) · database/inventory · found 2026-11-04 (KI-93 design review, Sol r2 #8)**
+**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471) · database/inventory · found 2026-11-04 (KI-93 design review, Sol r2 #8)**
 `_void_order_impl_20260714` restores delivered stock but leaves the order's completed deliveries `completed`, and
 `void_delivery` checked only the delivery's own status, so voiding a fulfilled order and then one of its deliveries
 put that stock back a second time and reopened the voided order. Reproduced 2026-11-04 on the throwaway copy (100 on

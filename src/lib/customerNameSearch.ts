@@ -1,34 +1,42 @@
-import { supabase } from './db';
-import { excludedIdList } from './recordSearch';
-
-// How many matching customers a by-name search of orders or jobs looks through.
-// A broader name ("Farm") reaches the rest by typing more or by the record's number.
-const CUSTOMER_NAME_MATCH_LIMIT = 50;
+type SearchReply = { data: unknown; error: unknown };
+type DatedRow = { id: string } & Record<string, unknown>;
 
 /**
- * `.or()` terms that match a record by its own number or its customer's farm name.
- * PostgREST cannot OR across a join, so the matching customers are looked up
- * first and the record is matched on `customer_id`. `pattern` comes from
- * `ilikeOrPattern`. Inactive customers count: their orders and jobs still exist.
+ * Search orders or jobs by their own number OR their customer's farm name.
+ * PostgREST cannot OR across a join, so this runs two reads and merges them:
+ * one matching the number, one matching the customer's name through an inner
+ * join (`customer:customers!inner(...)` filtered with `referencedTable`). The
+ * database does the name match, so every matching customer counts (KI-32: the
+ * old lookup kept only the first 50 customer names). `read` builds each read,
+ * already ordered newest first by `dateColumn` then `id` and limited to `limit`;
+ * the merge keeps that order, so the top `limit` of the union is exact.
+ * Inactive customers count: their orders and jobs still exist.
  */
-export async function numberOrCustomerNameTerms(
-  numberColumn: string,
-  pattern: string,
-  /** The page's own customer, when the search is limited to one: only that name is matched. */
-  customerId?: string | null,
-): Promise<{ terms: string | null; error: unknown }> {
-  let query = supabase
-    .from('customers')
-    .select('id')
-    .or(`farm_name.ilike.${pattern}`);
-  if (customerId) query = query.eq('id', customerId);
-  const { data, error } = await query
-    .order('farm_name')
-    .order('id')
-    .limit(CUSTOMER_NAME_MATCH_LIMIT);
-  if (error) return { terms: null, error };
-  const ids = ((data || []) as { id: string }[]).map((c) => c.id);
-  const terms = [`${numberColumn}.ilike.${pattern}`];
-  if (ids.length) terms.push(`customer_id.in.${excludedIdList(ids)}`);
-  return { terms: terms.join(','), error: null };
+export async function searchByNumberOrCustomerName(
+  read: (match: 'number' | 'customer') => PromiseLike<SearchReply>,
+  dateColumn: string,
+  limit: number,
+): Promise<SearchReply> {
+  const [byNumber, byName] = await Promise.all([read('number'), read('customer')]);
+  const error = byNumber.error ?? byName.error;
+  if (error) return { data: null, error };
+  if (!Array.isArray(byNumber.data) || !Array.isArray(byName.data)) {
+    return { data: null, error: new Error('Search returned no list') };
+  }
+  const rows = new Map<string, DatedRow>();
+  for (const row of [...byNumber.data, ...byName.data] as DatedRow[]) rows.set(row.id, row);
+  const merged = [...rows.values()].sort((a, b) => newestFirst(a, b, dateColumn));
+  return { data: merged.slice(0, limit), error: null };
+}
+
+// Postgres `ORDER BY <date> DESC, id`: a NULL date sorts first in a DESC sort.
+function newestFirst(a: DatedRow, b: DatedRow, dateColumn: string): number {
+  const ad = a[dateColumn] == null ? null : String(a[dateColumn]);
+  const bd = b[dateColumn] == null ? null : String(b[dateColumn]);
+  if (ad !== bd) {
+    if (ad === null) return -1;
+    if (bd === null) return 1;
+    return ad < bd ? 1 : -1;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }

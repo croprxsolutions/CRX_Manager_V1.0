@@ -310,8 +310,11 @@ const rateRow = (e, rate, unit, suggested) => ({ product_id: e.product_id, rate_
   suggested_rate: suggested, expected: { rate_per_acre: e.rate_per_acre, rate_unit: e.rate_unit,
     suggested_rate: e.suggested_rate, pricing_version: e.pricing_version, unit_size: e.unit_size,
     inventory_unit: e.inventory_unit, product_form: e.product_form } });
-const previewRates = (rows, uid = ADMIN) =>
-  JSON.parse(ok(uid, `SELECT public.preview_product_rates('${JSON.stringify(rows).replaceAll("'", "''")}'::jsonb);`));
+// `raw` keeps each number as the database's own text, so a fractional cent cannot parse into whole cents.
+const previewRates = (rows, uid = ADMIN) => {
+  const text = ok(uid, `SELECT public.preview_product_rates('${JSON.stringify(rows).replaceAll("'", "''")}'::jsonb);`);
+  return { ...JSON.parse(text), raw: JSON.parse(text, (k, v, c) => (typeof v === 'number' ? c.source : v)) };
+};
 // The save: the previewed after-prices become each row's expected.prices, as the screen does.
 const saveFromPreview = (rows, preview) => rows.map((r) => {
   const p = preview.rows.find((x) => x.product_id === r.product_id);
@@ -352,7 +355,7 @@ function main() {
   const preview = previewRates(rows);
   assert.equal(preview.rows.filter((r) => r.status === 'change').length, 20);
   for (const b of BATCH) {
-    const p = preview.rows.find((r) => r.product_id === b.id);
+    const p = preview.raw.rows.find((r) => r.product_id === b.id);
     assert.equal(p.before.tier1_price_per_acre, null);
     assert.equal(exactCents(p.after.tier1_price_per_acre), cents(perAcre(b.t1, b.rate10)), `tier 1 preview for ${b.id}`);
     assert.equal(exactCents(p.after.tier2_price_per_acre), cents(perAcre(b.t2, b.rate10)), `tier 2 preview for ${b.id}`);

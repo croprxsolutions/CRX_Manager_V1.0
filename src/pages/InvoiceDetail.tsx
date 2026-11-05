@@ -23,7 +23,7 @@ import { requireGroupVersions, requirePostVersion } from '../lib/invoicePostVers
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
-import { invoiceEmailKey } from '../lib/invoiceBulkEmail';
+import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, type InvoiceBillTo } from '../lib/invoiceBulkEmail';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
@@ -1851,10 +1851,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     // Read the billed customer by id: the picker list skips inactive customers and stops at 500,
     // so a customer missing from it would read as "no email on file".
     let custEmail: string | null = null;
+    let billTo: InvoiceBillTo = {};
     if (invoice.customer_id) {
       const read = await supabase
         .from('customers')
-        .select('email')
+        .select(INVOICE_BILL_TO_COLUMNS)
         .eq('id', invoice.customer_id)
         .maybeSingle()
         .then((r) => r, () => null);
@@ -1863,6 +1864,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         return;
       }
       custEmail = read.data.email;
+      billTo = read.data;
     }
     const cust = { email: custEmail };
     if (!cust.email) {
@@ -1895,7 +1897,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           customer_id: invoice.customer_id!,
           resource_type: 'invoice',
           resource_id: id,
-          idempotency_key: resend ? `invoice-email-${id}-copy-${Date.now()}` : await invoiceEmailKey(version, cust.email!),
+          idempotency_key: resend ? `invoice-email-${id}-copy-${Date.now()}` : await invoiceEmailKey(version, cust.email!, billTo),
           invoice_snapshot: invoiceEmailSnapshot(pdfData),
         });
 

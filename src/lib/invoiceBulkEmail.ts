@@ -19,14 +19,29 @@ export function isBulkEmailable(inv: { status?: string | null; send_disposition?
     && !inv.deleted_at;
 }
 
+/** The customer columns the emailed PDF prints (bill-to), read with the address at send time. */
+export const INVOICE_BILL_TO_COLUMNS = 'email, farm_name, billing_address, city, state, zip, account_number, payment_terms';
+
+export interface InvoiceBillTo {
+  farm_name?: string | null;
+  billing_address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  account_number?: string | null;
+  payment_terms?: string | null;
+}
+
 /**
  * The retry key comes from the record (To-Do 9.8): the invoice id, the time it last changed,
- * and a short code for the address. Both screens use it, so the server never mails the same
- * version to the same address twice; an edit, a payment or a corrected address sends again.
- * The address is hashed so a long one cannot push the key past the server's 256 characters.
+ * and a short code for the address and the bill-to details the PDF prints. Both screens use it,
+ * so the server never mails the same version to the same address twice; an edit, a payment,
+ * a corrected bill-to or a new address sends again. Hashed so the key stays within 256 characters.
  */
-export async function invoiceEmailKey(inv: { id: string; updated_at: string }, to: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(to.trim().toLowerCase()));
+export async function invoiceEmailKey(inv: { id: string; updated_at: string }, to: string, billTo: InvoiceBillTo): Promise<string> {
+  const printed = [to.trim().toLowerCase(), billTo.farm_name, billTo.billing_address, billTo.city, billTo.state, billTo.zip, billTo.account_number, billTo.payment_terms]
+    .map((v) => v ?? '');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(printed)));
   const code = Array.from(new Uint8Array(digest).slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
   return `invoice-email-${inv.id}-v${inv.updated_at}-to-${code}`;
 }

@@ -45,7 +45,7 @@ import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
 import { assertInvoiceSendDisposition } from '../lib/invoiceSendDisposition';
 import { logActivity } from '../lib/activityLogger';
-import { invoiceEmailKey, isBulkEmailable, isEmailRateLimit, summarizeBulkEmail, type BulkEmailResult } from '../lib/invoiceBulkEmail';
+import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, isBulkEmailable, isEmailRateLimit, summarizeBulkEmail, type BulkEmailResult } from '../lib/invoiceBulkEmail';
 
 type InvoiceRow = Invoice & { customer_name: string; salesman_name: string | null; order_number: string | null };
 
@@ -545,10 +545,10 @@ export default function Invoices() {
       for (const [index, inv] of targets.entries()) {
         const base = { invoiceId: inv.id, invoiceNumber: inv.invoice_number, customerName: inv.customer_name };
         try {
-          // Read the address right before each send, so a change made mid-batch is used.
+          // Read the address and bill-to right before each send, so a change made mid-batch is used.
           const { data: cust, error: custError } = await supabase
             .from('customers')
-            .select('email')
+            .select(INVOICE_BILL_TO_COLUMNS)
             .eq('id', inv.customer_id)
             .maybeSingle();
           if (custError) throw custError;
@@ -568,7 +568,7 @@ export default function Invoices() {
             customer_id: inv.customer_id,
             resource_type: 'invoice',
             resource_id: inv.id,
-            idempotency_key: await invoiceEmailKey(inv, to),
+            idempotency_key: await invoiceEmailKey(inv, to, cust ?? {}),
             invoice_snapshot: invoiceEmailSnapshot(pdfData),
           });
           if (!result.success) throw new Error(result.error || 'Failed to send email');
@@ -598,8 +598,8 @@ export default function Invoices() {
     setSelected((prev) => {
       const next = new Set(prev);
       for (const r of results) {
-        if (r.outcome === 'failed' || r.outcome === 'skipped') next.add(r.invoiceId);
-        else next.delete(r.invoiceId);
+        // A row unticked during the run stays unticked, even if it failed.
+        if (r.outcome === 'sent' || r.outcome === 'already_sent') next.delete(r.invoiceId);
       }
       return next;
     });

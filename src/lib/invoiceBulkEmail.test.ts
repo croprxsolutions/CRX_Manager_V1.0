@@ -15,15 +15,17 @@ describe('invoiceBulkEmail', () => {
     expect(isBulkEmailable({ status: 'posted', deleted_at: '2026-11-01' })).toBe(false);
   });
 
-  it('keys a send on the invoice, its last change and the address, never the clock', async () => {
+  it('keys a send on the invoice, its last change, the address and the printed bill-to, never the clock', async () => {
     const inv = { id: 'abc', updated_at: '2026-11-05T10:00:00Z' };
-    const key = await invoiceEmailKey(inv, 'a@x.com');
-    expect(await invoiceEmailKey({ ...inv }, ' A@X.com ')).toBe(key);
+    const billTo = { farm_name: 'Test Farm', billing_address: '1 Old Rd', city: 'Town', state: 'IA', zip: '50000', account_number: null, payment_terms: 'net30' };
+    const key = await invoiceEmailKey(inv, 'a@x.com', billTo);
+    expect(await invoiceEmailKey({ ...inv }, ' A@X.com ', { ...billTo })).toBe(key);
     expect(key).toContain('abc');
-    expect(await invoiceEmailKey({ ...inv, updated_at: '2026-11-06T10:00:00Z' }, 'a@x.com')).not.toBe(key);
-    expect(await invoiceEmailKey(inv, 'new@x.com')).not.toBe(key);
+    expect(await invoiceEmailKey({ ...inv, updated_at: '2026-11-06T10:00:00Z' }, 'a@x.com', billTo)).not.toBe(key);
+    expect(await invoiceEmailKey(inv, 'new@x.com', billTo)).not.toBe(key);
+    expect(await invoiceEmailKey(inv, 'a@x.com', { ...billTo, billing_address: '2 New Rd' })).not.toBe(key);
     // A very long address still fits the server's 256-character key limit.
-    expect((await invoiceEmailKey({ id: '13864024-12b7-4fbe-8d94-b875f01154e7', updated_at: '2026-07-20T12:24:36.790378+00:00' }, `${'a'.repeat(240)}@x.com`)).length).toBeLessThanOrEqual(256);
+    expect((await invoiceEmailKey({ id: '13864024-12b7-4fbe-8d94-b875f01154e7', updated_at: '2026-07-20T12:24:36.790378+00:00' }, `${'a'.repeat(240)}@x.com`, billTo)).length).toBeLessThanOrEqual(256);
   });
 
   it('recognises the server hourly limit', () => {

@@ -70,6 +70,15 @@ function pricesReadExactly(p: PerAcre | null): boolean {
     .every((v) => v == null || Math.abs(v) < 1e13);
 }
 
+/** The page closes the window itself after a save, so clear the finished import whenever it closes. */
+function useResetOnClose(open: boolean, reset: () => void) {
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (!open) reset();
+  }
+}
+
 function ImportPreview({ rows, ready, skipped, ratesLocked, ignored }: {
   rows: Row[]; ready: number; skipped: number; ratesLocked: boolean; ignored: string[];
 }) {
@@ -169,6 +178,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const [previewId, setPreviewId] = useState('');
 
   const reset = () => { setFile(null); setRows(null); setIgnored([]); setImported(null); setRatesLocked(false); };
+  useResetOnClose(open, reset);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];

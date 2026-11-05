@@ -209,7 +209,7 @@ describe('BulkProductImport screen', () => {
         okRow(),
       ] }, error: null }
       : { data: { inserted_count: 1, rows: [] }, error: null }));
-    render(<BulkProductImport {...props} />);
+    const { rerender } = render(<BulkProductImport {...props} />);
     await upload('product_name,rate_per_acre,rate_unit\nRated,1,oz\nPlain,,\n');
     expect(await screen.findByText(/Rates are locked\. Rows that set a rate are skipped/)).toBeInTheDocument();
     expect(screen.getByText(/^Rates are locked; an admin can correct/)).toBeInTheDocument();
@@ -217,5 +217,10 @@ describe('BulkProductImport screen', () => {
     expect(await screen.findByText('Import Complete')).toBeInTheDocument();
     expect(rpc.mock.calls.find(([n]) => n === 'apply_product_setup')?.[1].p_rows).toEqual([{ insert: { product_name: 'Plain' } }]);
     expect(props.onSuccess).toHaveBeenCalled();
+    // The page closes the window on success; reopening starts a new import.
+    rerender(<BulkProductImport {...props} open={false} />);
+    rerender(<BulkProductImport {...props} />);
+    expect(screen.queryByText('Import Complete')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Select File')).toBeInTheDocument();
   });
 });

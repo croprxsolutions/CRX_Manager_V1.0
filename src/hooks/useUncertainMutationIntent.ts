@@ -41,6 +41,21 @@ type LegacyDurableMutationIntentCandidate<T> = {
   retryNotAfterMs?: number;
 };
 
+// What staff need to identify a locked request before clearing it (KI-27).
+export type LockedRequestDetails = {
+  surface: string;
+  scope: string;
+  idempotencyKey: string;
+  createdAtMs: number;
+  retryNotAfterMs: number;
+};
+
+// A legacy or damaged request has no known deadline (stored as 0), so it is
+// never treated as expired and never clearable.
+function hasKnownRetryDeadline(record: LockedRequestDetails) {
+  return record.surface !== '__reconciliation_required__' && record.retryNotAfterMs > record.createdAtMs;
+}
+
 const DURABLE_INTENT_PREFIX = 'crx:uncertain-mutation:v4:';
 const LEGACY_SESSION_PREFIX = 'crx:uncertain-mutation:v1:';
 const ACKNOWLEDGMENT_PREFIX = 'crx:uncertain-mutation-ack:v1:';
@@ -719,6 +734,9 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   const [retryNotAfterMs, setRetryNotAfterMs] = useState<number | null>(
     initialPending ? initialVisible.retryNotAfterMs : null,
   );
+  const [lockedRequest, setLockedRequest] = useState<DurableMutationIntentRecord<T> | null>(
+    initialPending ? initialVisible : null,
+  );
   const [, setExpiryRevision] = useState(0);
 
   const applyRecord = useCallback((record: DurableMutationIntentRecord<T> | null) => {
@@ -741,6 +759,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     setHasUnresolvedRecord(pending);
     setIsForeignIntentLocked(Boolean(pending && !owned));
     setRetryNotAfterMs(pending ? visible.retryNotAfterMs : null);
+    setLockedRequest(pending ? visible : null);
   }, [scope, surface]);
 
   const activateCurrentIdentity = useCallback((force = false) => {
@@ -1072,11 +1091,13 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   // store this tab can reach. It refuses while any copy could still be retried.
   const clearExpiredIntent = useCallback(async () => {
     if (!options || !storageKey) throw new Error('DURABLE_MUTATION_INTENT_IDENTITY_MISSING');
-    // Only an intact request past its deadline is clearable. Damaged state
-    // (__reconciliation_required__) proves nothing about its deadline, so it stays locked.
+    // Only an intact request past a known deadline is clearable; damaged or
+    // legacy state proves nothing about its deadline, so it stays locked.
+    // shortcut: expiry trusts this device's clock (as the retry refusal already does);
+    // the confirm shows the saved time so staff can spot a wrong clock.
     const isClearable = (record: DurableMutationIntentRecord<T> | null) => !record
       || record.status === 'resolved'
-      || (record.surface !== '__reconciliation_required__' && Date.now() >= record.retryNotAfterMs);
+      || (hasKnownRetryDeadline(record) && Date.now() >= record.retryNotAfterMs);
     const mirror = readDurableRecord<T>(storageKey, options);
     const attempt = readAcknowledgmentRecord<T>(acknowledgmentKey, options);
     if (!isClearable(mirror) || !isClearable(attempt)) throw new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT);
@@ -1169,5 +1190,18 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     isForeignIntentLocked,
     // eslint-disable-next-line react-hooks/purity -- the retryNotAfterMs effect above re-renders exactly when the window expires, so this clock read cannot go stale
     isRetryExpired: retryNotAfterMs !== null && Date.now() >= retryNotAfterMs,
+    // Set only when an admin may clear the locked request: its known deadline has passed.
+    clearableExpiredRequest: lockedRequest
+      && hasKnownRetryDeadline(lockedRequest)
+      // eslint-disable-next-line react-hooks/purity -- same expiry re-render as isRetryExpired
+      && Date.now() >= lockedRequest.retryNotAfterMs
+      ? {
+        surface: lockedRequest.surface,
+        scope: lockedRequest.scope,
+        idempotencyKey: lockedRequest.idempotencyKey,
+        createdAtMs: lockedRequest.createdAtMs,
+        retryNotAfterMs: lockedRequest.retryNotAfterMs,
+      } satisfies LockedRequestDetails
+      : null,
   };
 }

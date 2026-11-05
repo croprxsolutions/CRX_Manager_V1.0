@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import type { LockedRequestDetails } from '../hooks/useUncertainMutationIntent';
 import { Sentry } from '../lib/sentry';
 import ConfirmModal from './ui/ConfirmModal';
 import { useToast } from './ui/Toast';
 
 type ExpiredIntentLock = {
-  isIntentLocked: boolean;
-  isRetryExpired: boolean;
+  clearableExpiredRequest: LockedRequestDetails | null;
   clearExpiredIntent: () => Promise<void>;
 };
 
@@ -20,7 +20,12 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
 
-  if (role !== 'admin' || !intent.isIntentLocked || !intent.isRetryExpired) return null;
+  const request = intent.clearableExpiredRequest;
+  if (role !== 'admin' || !request) return null;
+
+  const savedAt = new Date(request.createdAtMs).toLocaleString();
+  const screen = request.surface.replace(/-/g, ' ');
+  const record = request.scope ? ` for record ${request.scope}` : '';
 
   const handleClear = async () => {
     setClearing(true);
@@ -28,7 +33,12 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
       await intent.clearExpiredIntent();
       Sentry.captureMessage('Admin cleared an expired uncertain mutation', {
         level: 'info',
-        tags: { operation },
+        tags: { operation, surface: request.surface },
+        extra: {
+          scope: request.scope,
+          idempotencyKey: request.idempotencyKey,
+          createdAt: new Date(request.createdAtMs).toISOString(),
+        },
       });
       setConfirmOpen(false);
       toast('success', 'Saved request cleared. This form can be used again.');
@@ -53,7 +63,7 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
         onClose={() => setConfirmOpen(false)}
         onConfirm={() => void handleClear()}
         title="Clear the expired saved request?"
-        message="First check the real record (the bill, payment, receipt or stock count) to see whether this request was saved. Clearing only removes the stuck request from this browser; it does not change any records. If it was not saved, you can enter it again afterwards."
+        message={`This request was saved ${savedAt} on the ${screen} screen${record}. If that time looks wrong, this device's clock may be off: do not clear it. First check that real record (the bill, payment, receipt or stock count) to see whether this request was saved. Clearing only removes the stuck request from this browser; it does not change any records. If it was not saved, you can enter it again afterwards.`}
         confirmLabel="Clear it"
         variant="warning"
         loading={clearing}

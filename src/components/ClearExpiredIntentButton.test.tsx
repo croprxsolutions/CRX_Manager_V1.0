@@ -15,13 +15,16 @@ import ClearExpiredIntentButton from './ClearExpiredIntentButton';
 
 const LABEL = 'I checked the records — clear this';
 
-function lock(overrides: Partial<{ isIntentLocked: boolean; isRetryExpired: boolean }> = {}) {
-  return {
-    isIntentLocked: true,
-    isRetryExpired: true,
-    clearExpiredIntent: vi.fn(async () => {}),
-    ...overrides,
-  };
+const EXPIRED = {
+  surface: 'purchase-order-detail',
+  scope: 'po-1',
+  idempotencyKey: 'receive_po_items:admin:key-1',
+  createdAtMs: Date.parse('2026-11-01T12:00:00Z'),
+  retryNotAfterMs: Date.parse('2026-11-02T11:00:00Z'),
+};
+
+function lock(clearableExpiredRequest: typeof EXPIRED | null = EXPIRED) {
+  return { clearableExpiredRequest, clearExpiredIntent: vi.fn(async () => {}) };
 }
 
 describe('ClearExpiredIntentButton (KI-27)', () => {
@@ -38,7 +41,7 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
   });
 
   it('is hidden while a safe retry is still possible', () => {
-    render(<ClearExpiredIntentButton intent={lock({ isRetryExpired: false })} operation="receive_po_items" />);
+    render(<ClearExpiredIntentButton intent={lock(null)} operation="receive_po_items" />);
     expect(screen.queryByText(LABEL)).toBeNull();
   });
 
@@ -46,13 +49,17 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     const intent = lock();
     render(<ClearExpiredIntentButton intent={intent} operation="receive_po_items" />);
     fireEvent.click(screen.getByText(LABEL));
+    expect(screen.getByText(/purchase order detail screen for record po-1/)).toBeTruthy();
     expect(intent.clearExpiredIntent).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
     await waitFor(() => expect(intent.clearExpiredIntent).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.any(String)));
     expect(mockCapture).toHaveBeenCalledWith(
       'Admin cleared an expired uncertain mutation',
-      expect.objectContaining({ tags: { operation: 'receive_po_items' } }),
+      expect.objectContaining({
+        tags: { operation: 'receive_po_items', surface: 'purchase-order-detail' },
+        extra: expect.objectContaining({ scope: 'po-1', idempotencyKey: 'receive_po_items:admin:key-1' }),
+      }),
     );
   });
 });

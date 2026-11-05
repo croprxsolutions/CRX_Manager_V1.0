@@ -424,6 +424,7 @@ describe('useUncertainMutationIntent', () => {
     await act(async () => first.result.current.beginIntent({ amount: 9000 }));
     const originalKey = first.result.current.getIdempotencyKey();
 
+    expect(first.result.current.clearableExpiredRequest).toBeNull();
     await expect(first.result.current.clearExpiredIntent()).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
     expect(first.result.current.isIntentLocked).toBe(true);
     expect(first.result.current.getIdempotencyKey()).toBe(originalKey);
@@ -441,6 +442,11 @@ describe('useUncertainMutationIntent', () => {
     nowMs += 23 * 60 * 60 * 1000;
     const expired = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
     expect(expired.result.current.isRetryExpired).toBe(true);
+    expect(expired.result.current.clearableExpiredRequest).toMatchObject({
+      surface: 'vendor-bill-detail',
+      scope: 'bill-ki27',
+      idempotencyKey: originalKey,
+    });
     await act(async () => expired.result.current.clearExpiredIntent());
     expect(expired.result.current.isIntentLocked).toBe(false);
     expect(expired.result.current.isRetryExpired).toBe(false);
@@ -487,7 +493,7 @@ describe('useUncertainMutationIntent', () => {
     now.mockRestore();
   });
 
-  it('fails closed for a legacy durable record that has no retry deadline', () => {
+  it('fails closed for a legacy durable record that has no retry deadline', async () => {
     const options = {
       operation: 'receive_po_items',
       userId: 'admin-6',
@@ -514,6 +520,10 @@ describe('useUncertainMutationIntent', () => {
     expect(restored.result.current.isRetryExpired).toBe(true);
     expect(() => restored.result.current.getIdempotencyKey())
       .toThrow('DURABLE_MUTATION_INTENT_RETRY_EXPIRED');
+    // KI-27: an unknown deadline is never clearable; only manual reconciliation unlocks it.
+    expect(restored.result.current.clearableExpiredRequest).toBeNull();
+    await expect(restored.result.current.clearExpiredIntent()).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    expect(restored.result.current.isIntentLocked).toBe(true);
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
     expect(window.localStorage.getItem(
       `crx:uncertain-mutation:v4:${JSON.stringify([

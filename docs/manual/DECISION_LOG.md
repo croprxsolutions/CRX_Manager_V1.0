@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-05 — A quote's price tier check is parked until the rep-only database rule (To-Do 1.6)
+
+**Decision:** Mason chose a screen-only tier check (2026-11-05: "A: screen only"); the parked screen check stays unmerged on `claude/quote-tier-credit-status` until the database rule is built (KNOWN_ISSUES KI-105).
+**Why:** there are no regular sales reps yet, so only office staff and admins quote, and the screen-only check could not pass the independent review without the database rule behind it.
+**What this forbids/implies:** "The database refuses a different tier from reps; admins may override" is a rep-only rule that becomes MUST before the first regular rep gets an account (To-Do 1.6 and section 17).
+
 ## 2026-11-04 — Blend tickets go through application records only (KI-93)
 
 **Decision:** a blend ticket is recorded with an application record and billed with a direct invoice; creating an order from a ticket, linking a ticket to an order and Unlink are switched off (Mason, 2026-11-04).
@@ -49,6 +55,18 @@ short list, return to POs and receiving in CRX, and relabel the pricing-basis va
 The holding-cost numbers, supplier-price exposure, starting-date history, the Option B cost engine, freight,
 rebates, lots and GMROI are cut. Each pre-season item is still built only on Mason's go-ahead, through its own
 PR and reviews. The count comes before any estimated dates or costs are entered.
+
+## 2026-11-05 — The post-apply carry also accepts the awaiting-type-regeneration line
+
+**Source:** Mason, 2026-11-05, answering a retro proposal to "let the quick post-apply review accept
+the routine test-list line": "Yes, do 1".
+
+**Decision.** `--carry-post-apply` also accepts `src/lib/rpcContracts.test.ts` when the only change is
+adding the PR's own migration timestamps to `MIGRATIONS_AWAITING_TYPE_REGENERATION`. The
+regen-schema-registry skill requires that edit after every apply that adds functions, so before this
+every such apply forced a second full Sol run (KI-27, PR #1493). Any other change to that file, a
+timestamp of another migration, or a line outside that list still refuses and needs the full review.
+Checked by `awaitingRegenProblem` in `scripts/write-codex-push-proof.mjs`, with no model call.
 
 ## 2026-11-04 — The post-apply records commit keeps the Sol review
 

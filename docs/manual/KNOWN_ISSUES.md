@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80, KI-104) | 15 |
 | Closed as FIXED, with proof (bottom of file and archive) | 14 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
@@ -553,6 +553,17 @@ put that stock back a second time and reopened the voided order. Reproduced 2026
 hand, deliver 10, void the order, void the delivery: 110 on hand, order `confirmed`). The fix refuses that delivery
 void (`ORDER_VOIDED_DELIVERY_LOCKED`); nothing moves. Live 2026-11-04: 0 voided orders, 0 completed deliveries on
 voided orders. Proof: as KI-101.
+
+### KI-105 — A quote's price tier is not checked against the customer's assigned tier
+**LOW today, MUST before the first regular rep · PARKED 2026-11-05 · quotes/pricing · To-Do 1.6**
+Quote Builder lets any tier be picked, so a quote can be priced at a tier other than the customer's assigned one
+with no warning. A screen check (a note with "Use Tier N" and a "Quote at Tier M anyway" tick box that Save
+needs) is built on branch `claude/quote-tier-credit-status` and parked unmerged (Mason, 2026-11-05: screen only,
+then parked until the database rule exists). Only office staff and admins quote today. Before the first regular
+rep gets an account: the database must refuse a different tier from reps (admins may override). When it resumes,
+also fix Sol's two MED findings on that branch: (1) the customer's assigned tier is read once, so an admin
+changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
+quote changes the tier label without repricing its locked lines.
 
 ## Database and release process
 

@@ -721,10 +721,11 @@ function runHookOnDisk(toolInput) {
 const VIOLATING_FN = fn(`UPDATE customers SET name = 'x' WHERE id = 1;`);
 const VIOLATING_FN_V2 = fn(`UPDATE customers SET name = 'y' WHERE id = 1;`);
 
-// Allow-side assertions must be AFFIRMATIVE: a crashed hook produces empty
-// stdout, and `!isDeny` would read that as an allow (CodeRabbit PR #489).
+// Allow-side assertions must be AFFIRMATIVE: a crashed hook also produces empty
+// stdout, so a pass needs a clean exit 0 AND no decision printed (a passing
+// guard stays silent rather than printing "allow", which would pre-approve).
 const isAllow = (res) => !res.error && res.status === 0 &&
-  res.stdout.includes('"permissionDecision":"allow"');
+  !res.stdout.includes('"permissionDecision"');
 
 try {
   // Marker-ADDING edit (allow direction, CRLF-sensitive): the multi-line LF

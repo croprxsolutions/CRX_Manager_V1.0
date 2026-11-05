@@ -1360,11 +1360,14 @@ export default function CustomerDetail() {
               <Input label="Email" type="email" value={customer.email || ''} onChange={(e) => { update('email', e.target.value); setEmailError(''); }} error={emailError} />
               <Input label="Billing Address" value={customer.billing_address || ''} onChange={(e) => update('billing_address', e.target.value)} />
               <div>
-                <label className="block text-sm font-medium text-secondary mb-1">Pricing Tier</label>
+                <label htmlFor="customer-pricing-tier" className="block text-sm font-medium text-secondary mb-1">Pricing Tier</label>
+                {/* Price tiers and credit limits are admin-only (Mason 2026-11-01; enforced by the customer guard). */}
                 <select
+                  id="customer-pricing-tier"
+                  disabled={!isAdmin}
                   value={customer.assigned_tier}
                   onChange={(e) => { tierChosenRef.current = true; update('assigned_tier', parseInt(e.target.value)); }}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
                   <option value={1}>Tier 1</option>
                   <option value={2}>Tier 2</option>
@@ -1377,6 +1380,7 @@ export default function CustomerDetail() {
                 type="number"
                 min={0}
                 step={100}
+                disabled={!isAdmin}
                 value={customer.credit_limit_cents != null ? (customer.credit_limit_cents as number) / 100 : ''}
                 onChange={(e) => {
                   const cents = e.target.value ? parseDollarsToCents(e.target.value) : 0;
@@ -1386,6 +1390,11 @@ export default function CustomerDetail() {
                   update('credit_limit_cents', cents);
                 }}
               />
+              {!isAdmin && (
+                <p className="text-xs text-secondary sm:col-span-2">
+                  Only an admin can change a customer&apos;s price tier and credit limit.
+                </p>
+              )}
               <Input
                 label="Finance Charge Rate (%)"
                 type="number"

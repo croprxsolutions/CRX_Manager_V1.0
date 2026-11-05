@@ -1879,6 +1879,20 @@
         "security"
       ]
     },
+    "delivery_invoice_charge_lines": {
+      "chain": "smoke-delivery-invoice-charge-lines.sql",
+      "description": "Migration 20261108160000 (billing plan M1): on a completed delivery's invoice, a $45.00 freight charge saved through save_invoice is accepted and the invoice posts at the product total + $45.00 to the cent; a line with no product and no charge type is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; a product the delivery didn't carry is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; one more stored quantity tick on the delivered product is still refused. Fails on the old body at A and D. Terminal rollback.",
+      "covers": [
+        "_delivery_invoice_overbilling",
+        "enforce_delivery_invoice_within_delivered",
+        "save_invoice",
+        "post_invoice"
+      ],
+      "area": [
+        "billing",
+        "regression"
+      ]
+    },
     "retire_uncertain_request": {
       "chain": "smoke-uncertain-request-clear-check.sql",
       "description": "REQUIRES 20261107150000. KI-27 server check, and retire, before an admin clears a stuck request. Self-seeding (needs one active admin profile; everything is rolled back): the function and receipt-guard bodies are pinned, only authenticated can execute the function and no client role reaches either new table; a key recorded under its own operation is safe (expired too) and one under another operation is not; an unrecorded key needs two checks 15+ minutes apart by server time in a token signed for that exact request (no, forged, borrowed and future tokens start a new wait; 5 minutes refused, 16 minutes safe, then retired); a batch with a row saved under adjust_inventory is recorded and a row under another operation or not ending in a UUID is not; after a safe answer the database refuses a later save of the request, of any batch row under it (any ending) and of an expired key, while an unrelated key still saves and a retired request with a live receipt still replays (allocate_payment's claim row included); a non-admin (when one exists), another user's key, a row key, a wrong idempotency key and a signed-out session are refused. The in-progress answer needs two sessions and is proven on the local test database.",

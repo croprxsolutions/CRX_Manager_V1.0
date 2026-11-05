@@ -125,6 +125,15 @@ describe('row building', () => {
     expect(importRefusalReason('PRODUCT_SETUP_ROW_REFUSED: Chem: PRODUCT_SETUP_INVALID: EPA number must look like 524-475', 'Chem'))
       .toBe('EPA number must look like 524-475');
     expect(importRefusalReason('Unknown use timing "X". Pick from the list.', 'Chem')).toBe('Unknown use timing "X". Pick from the list.');
+    // The exact texts the local browser proof showed (2026-11-05).
+    expect(importRefusalReason('PRODUCT_SETUP_ROW_REFUSED: Bad Cat: insert or update on table "products" violates foreign key constraint "product_setup_category_fk"', 'Bad Cat'))
+      .toBe('Choose a category from the product category list');
+    expect(importRefusalReason('PRODUCT_SETUP_ROW_REFUSED: Bad Box: new row for relation "products" violates check constraint "products_container_type_check"', 'Bad Box'))
+      .toMatch(/^Choose a container type: Jug, Drum/);
+    expect(importRefusalReason('PRODUCT_SETUP_ROW_REFUSED: Bad EPA: PRODUCT_SETUP_INVALID: EPA number', 'Bad EPA'))
+      .toBe('Enter a valid EPA number, like 524-475 or 100-1234-5905');
+    expect(importRefusalReason('PRODUCT_SETUP_INVALID: a maximum label rate needs a unit of oz or pt (per acre): Label', 'Label'))
+      .toBe('A maximum label rate needs a unit of oz or pt (per acre)');
   });
 });
 

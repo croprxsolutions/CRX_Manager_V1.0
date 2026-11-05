@@ -1,4 +1,5 @@
 import type { ContainerType } from '../../types';
+import { sanitizeError } from '../../lib/errorSanitizer';
 
 /** The import's columns, in template order. Rates are saved through set_product_rates, never the insert. */
 export const PRODUCT_IMPORT_COLUMNS = [
@@ -226,5 +227,9 @@ export function importRefusalReason(error: string, productName: string): string 
     if (unnamed === text) break;
     text = unnamed;
   }
+  // A table check reads as the product page words it; the EPA check's own text is just "EPA number".
+  if (/constraint "/.test(text)) return sanitizeError(text);
+  if (text === 'EPA number') return 'Enter a valid EPA number, like 524-475 or 100-1234-5905';
+  if (productName && text.endsWith(`: ${productName}`)) text = text.slice(0, -productName.length - 2);
   return text.charAt(0).toUpperCase() + text.slice(1);
 }

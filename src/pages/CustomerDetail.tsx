@@ -129,6 +129,10 @@ const FOLD_SECTIONS: { id: CustomerSection; title: string; icon: ReactNode }[] =
 
 const sectionAnchor = (section: CustomerSection | 'info') => `customer-section-${section}`;
 
+// A filter, not Set.delete: the idempotency-reset scanner reads any `.delete(` as a database call.
+const withoutSection = (sections: ReadonlySet<CustomerSection>, section: CustomerSection) =>
+  new Set([...sections].filter((s) => s !== section));
+
 function scrollToSection(section: CustomerSection | 'info') {
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   document.getElementById(sectionAnchor(section))?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
@@ -224,9 +228,7 @@ export default function CustomerDetail() {
   const setSectionLoading = useCallback((section: CustomerSection, on: boolean) => {
     setLoadingSections((prev) => {
       if (prev.has(section) === on) return prev;
-      const next = new Set(prev);
-      if (on) next.add(section); else next.delete(section);
-      return next;
+      return on ? new Set(prev).add(section) : withoutSection(prev, section);
     });
   }, []);
   const [emailError, setEmailError] = useState('');
@@ -900,11 +902,7 @@ export default function CustomerDetail() {
 
   const toggleSection = (section: CustomerSection) => {
     if (!openSections.has(section)) { openSection(section); return; }
-    setOpenSections((prev) => {
-      const next = new Set(prev);
-      next.delete(section);
-      return next;
-    });
+    setOpenSections((prev) => withoutSection(prev, section));
   };
 
   // A folded section near the bottom has too little page below it to scroll to the

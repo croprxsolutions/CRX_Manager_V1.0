@@ -815,11 +815,29 @@ Deno.serve(async (req: Request) => {
     //     email_log row to status='pending' BEFORE calling Resend. If this
     //     write fails, we DON'T send — otherwise the customer could receive
     //     an email with no audit record and no idempotency replay marker.
-    const alreadyInProgress = () => jsonResponse({
-      success: false,
-      error: "Another send of this email is already in progress. Wait a minute, then check whether it was sent.",
-      email_log_id: emailLogId,
-    }, 409);
+    // Another request holds this email: if it already finished sending, report
+    // that send as this one's result; otherwise it is still in progress.
+    const alreadyInProgress = async () => {
+      const { data: holder } = await adminClient
+        .from("email_log")
+        .select("id, status, resend_message_id")
+        .eq("idempotency_key", scopedIdempotencyKey!)
+        .maybeSingle<{ id: string; status: string; resend_message_id: string | null }>();
+      if (holder?.status === "sent") {
+        return jsonResponse({
+          success: true,
+          email_log_id: holder.id,
+          resend_message_id: holder.resend_message_id,
+          deduplicated: true,
+        });
+      }
+      return jsonResponse({
+        success: false,
+        error: "Another send of this email is already in progress. Wait a minute, then check whether it was sent.",
+        email_log_id: holder?.id ?? emailLogId,
+        needs_reconciliation: true,
+      }, 409);
+    };
     if (emailLogId) {
       // Existing failed row from a prior attempt — reset it to pending and
       // record THIS attempt's content, so the log shows what was actually sent.
@@ -842,7 +860,7 @@ Deno.serve(async (req: Request) => {
         .select("id")
         .maybeSingle();
       if (!updateErr && !claimedRow) {
-        return alreadyInProgress();
+        return await alreadyInProgress();
       }
       if (updateErr) {
         await captureEdgeException(
@@ -881,7 +899,7 @@ Deno.serve(async (req: Request) => {
         .single();
       // email_log.idempotency_key is unique: a first send racing this one already holds the key.
       if (insertErr?.code === "23505") {
-        return alreadyInProgress();
+        return await alreadyInProgress();
       }
       if (insertErr || !newRow) {
         await captureEdgeException(
@@ -1093,8 +1111,9 @@ Deno.serve(async (req: Request) => {
       if (resendResp.ok && !success) {
         outcomeUnknown = true;
         errorMessage = `Email provider accepted the request but its reply was unreadable: ${resendText.slice(0, 200)}`;
-      } else if (resendResp.status >= 500) {
-        // A server or gateway error does not prove the email was not sent.
+      } else if (resendResp.status < 400 || resendResp.status >= 500) {
+        // Only a 4xx refusal proves the email was not sent; a server or gateway
+        // error, or any other unexpected reply, does not.
         outcomeUnknown = true;
         errorMessage = `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`;
       } else if (!success) {

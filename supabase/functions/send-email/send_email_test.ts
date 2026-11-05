@@ -279,30 +279,43 @@ Deno.test("two retries of the same failed email at the same moment send it once"
     await gate;
     return new Response(JSON.stringify({ id: "re_retry" }), { status: 200 });
   });
+  // Hold the first send at Resend until the second request, having lost the
+  // claim, has looked up who holds the row.
+  const realFakeFetch = world.fakeFetch;
+  world.fakeFetch = async (input, init) => {
+    const res = await realFakeFetch(input, init);
+    const url = new Request(input, init).url;
+    if (url.includes("/email_log?select=id%2Cstatus%2Cresend_message_id&")) release();
+    return res;
+  };
   const key = `quote-${QUOTE}`;
   world.tables.email_log.push({
     id: "log-failed", idempotency_key: `quote:quote:${QUOTE}:${key}`, email_type: "quote",
     customer_id: CUSTOMER, status: "failed", resend_message_id: null,
   });
-  const both = Promise.all([
+  const results = await Promise.all([
     send(world, ADMIN, quoteEmail(QUOTE, key)),
     send(world, ADMIN, quoteEmail(QUOTE, key)),
   ]);
-  setTimeout(() => release(), 50);
-  const statuses = (await both).map((r) => r.status).sort();
-  assertEquals(statuses, [200, 409]);
+  assertEquals(results.map((r) => r.status).sort(), [200, 409]);
+  assertEquals(results.find((r) => r.status === 409)!.body.error,
+    "Another send of this email is already in progress. Wait a minute, then check whether it was sent.");
   assertEquals(world.resendCalls.length, 1, "Resend calls");
   assertEquals(world.tables.email_log[0].status, "sent");
 });
 
-Deno.test("two first sends with the same key at the same moment send it once", async () => {
+Deno.test("a racing send that finds the email already sent reports it as sent", async () => {
   const world = makeWorld(okResend);
   const results = await Promise.all([
     send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`)),
     send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`)),
   ]);
-  assertEquals(results.map((r) => r.status).sort(), [200, 409]);
   assertEquals(world.resendCalls.length, 1, "Resend calls");
+  const fresh = results.filter((r) => r.status === 200 && !r.body.deduplicated);
+  const others = results.filter((r) => !fresh.includes(r));
+  assertEquals(fresh.length, 1, "exactly one real send");
+  // The other either saw it already sent or still in progress, depending on timing.
+  assert(others[0].status === 409 || others[0].body.deduplicated === true, JSON.stringify(others[0]));
 });
 
 // --- A slow or broken email provider (item 4) --------------------------------

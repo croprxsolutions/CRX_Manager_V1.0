@@ -37,9 +37,9 @@
 --   process_offline_action; send-email; email_log; every grant on existing objects except complete_delivery's
 --   (re-created with the same grants). No existing row changes.
 --
--- idempotency-body-check: exempt -- claim_delivery_receipts and finish_delivery_receipt are service_role-only
---   worker calls guarded by a per-claim token instead of a request key (a stale or repeated finish matches no
---   row and changes nothing). _enqueue_delivery_receipt is internal (no API role may run it) and inserts with
+-- idempotency-body-check: exempt -- claim_delivery_receipts and finish_delivery_receipt take p_idempotency_key
+--   (check_idempotency / save_idempotency: a retried claim returns the same claims, a retried finish its first
+--   answer) and are also bound to a per-claim token, so a stale finish matches no row and changes nothing. _enqueue_delivery_receipt is internal (no API role may run it) and inserts with
 --   ON CONFLICT (delivery_id) DO NOTHING. complete_delivery keeps its required-key replay binding unchanged.
 --
 -- actor-binding-check: exempt -- _enqueue_delivery_receipt(p_delivery_id, p_actor) is internal (EXECUTE revoked
@@ -418,7 +418,7 @@ COMMENT ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text
 -- ---------------------------------------------------------------------------------------------
 -- 4. The worker's calls (service_role only).
 -- ---------------------------------------------------------------------------------------------
-CREATE FUNCTION public.claim_delivery_receipts(p_limit integer DEFAULT 10)
+CREATE FUNCTION public.claim_delivery_receipts(p_limit integer DEFAULT 10, p_idempotency_key text DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -432,9 +432,24 @@ DECLARE
   v_contact text;
   v_token uuid;
   v_scoped text;
+  v_saved jsonb;
 BEGIN
   IF p_limit IS NULL OR p_limit < 1 OR p_limit > 50 THEN
     RAISE EXCEPTION 'CLAIM_LIMIT_INVALID: p_limit must be 1 to 50' USING ERRCODE = '22023';
+  END IF;
+  -- A retry with the same key (its answer was lost) gets back the receipts that call claimed and still holds,
+  -- with the same tokens, and claims nothing new. Only ids and tokens are saved, never the customer email.
+  v_saved := public.check_idempotency(p_idempotency_key, 'claim_delivery_receipts');
+  IF v_saved IS NOT NULL THEN
+    SELECT COALESCE(jsonb_agg(jsonb_build_object(
+             'id', q.id, 'claim_token', q.claim_token, 'delivery_id', q.delivery_id, 'customer_id', q.customer_id,
+             'requested_by', q.requested_by, 'attempt', q.attempts, 'to', NULLIF(btrim(COALESCE(c.email, '')), ''),
+             'contact_name', c.contact_name, 'receipt', q.receipt) ORDER BY q.next_attempt_at, q.id), '[]'::jsonb)
+      INTO v_out
+      FROM jsonb_to_recordset(v_saved) AS s(id uuid, claim_token uuid)
+      JOIN public.delivery_receipt_queue q ON q.id = s.id AND q.claim_token = s.claim_token AND q.status = 'sending'
+      LEFT JOIN public.customers c ON c.id = q.customer_id;
+    RETURN v_out;
   END IF;
   FOR v_row IN
     SELECT * FROM public.delivery_receipt_queue q
@@ -517,13 +532,18 @@ BEGIN
       'receipt', v_row.receipt
     ));
   END LOOP;
+  IF p_idempotency_key IS NOT NULL THEN
+    PERFORM public.save_idempotency(p_idempotency_key, 'claim_delivery_receipts', COALESCE(
+      (SELECT jsonb_agg(jsonb_build_object('id', e -> 'id', 'claim_token', e -> 'claim_token')) FROM jsonb_array_elements(v_out) e),
+      '[]'::jsonb));
+  END IF;
   RETURN v_out;
 END;
 $function$;
-ALTER FUNCTION public.claim_delivery_receipts(integer) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.claim_delivery_receipts(integer) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.claim_delivery_receipts(integer) TO service_role;
-COMMENT ON FUNCTION public.claim_delivery_receipts(integer) IS
+ALTER FUNCTION public.claim_delivery_receipts(integer, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.claim_delivery_receipts(integer, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_delivery_receipts(integer, text) TO service_role;
+COMMENT ON FUNCTION public.claim_delivery_receipts(integer, text) IS
   'KI-25 worker (service_role only): settles rows that must not be sent, then claims up to p_limit due receipts with a fresh claim token (10-minute lease) and returns them with the customer''s current email.';
 
 CREATE FUNCTION public.finish_delivery_receipt(
@@ -532,7 +552,8 @@ CREATE FUNCTION public.finish_delivery_receipt(
   p_outcome text,
   p_detail text DEFAULT NULL,
   p_resend_message_id text DEFAULT NULL,
-  p_sent_to text DEFAULT NULL
+  p_sent_to text DEFAULT NULL,
+  p_idempotency_key text DEFAULT NULL
 )
 RETURNS text
 LANGUAGE plpgsql
@@ -541,6 +562,7 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_status text;
+  v_saved jsonb;
 BEGIN
   IF p_outcome IS NULL OR p_outcome NOT IN ('sent', 'retry', 'check') THEN
     RAISE EXCEPTION 'RECEIPT_OUTCOME_INVALID: %', p_outcome USING ERRCODE = '22023';
@@ -549,6 +571,11 @@ BEGIN
                              OR NULLIF(btrim(COALESCE(p_sent_to, '')), '') IS NULL) THEN
     RAISE EXCEPTION 'RECEIPT_SENT_PROOF_REQUIRED: a sent receipt needs the provider message id and address'
       USING ERRCODE = '22023';
+  END IF;
+  -- A retry with the same key gets the answer the first call recorded.
+  v_saved := public.check_idempotency(p_idempotency_key, 'finish_delivery_receipt');
+  IF v_saved IS NOT NULL THEN
+    RETURN v_saved ->> 'status';
   END IF;
   UPDATE public.delivery_receipt_queue q
      SET status = CASE
@@ -573,13 +600,17 @@ BEGIN
    WHERE q.id = p_id AND q.claim_token = p_claim_token AND q.status = 'sending'
   RETURNING q.status INTO v_status;
   -- No row: the lease expired and another run owns (or finished) this receipt. Nothing changes.
-  RETURN COALESCE(v_status, 'stale');
+  v_status := COALESCE(v_status, 'stale');
+  IF p_idempotency_key IS NOT NULL THEN
+    PERFORM public.save_idempotency(p_idempotency_key, 'finish_delivery_receipt', jsonb_build_object('status', v_status));
+  END IF;
+  RETURN v_status;
 END;
 $function$;
-ALTER FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text) TO service_role;
-COMMENT ON FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text) IS
+ALTER FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text, text) TO service_role;
+COMMENT ON FUNCTION public.finish_delivery_receipt(uuid, uuid, text, text, text, text, text) IS
   'KI-25 worker (service_role only): records one claimed receipt''s outcome (sent / retry / check) against its claim token; returns the new status, or stale when the claim was lost.';
 
 -- ---------------------------------------------------------------------------------------------
@@ -640,7 +671,7 @@ BEGIN
      OR position('ACTOR_MISMATCH' IN p.prosrc) = 0 THEN
     RAISE EXCEPTION 'POSTFLIGHT: complete_delivery lost its receipt step, actor binding, owner, mode, search_path or grants';
   END IF;
-  FOREACH v_name IN ARRAY ARRAY['claim_delivery_receipts(integer)', 'finish_delivery_receipt(uuid, uuid, text, text, text, text)'] LOOP
+  FOREACH v_name IN ARRAY ARRAY['claim_delivery_receipts(integer, text)', 'finish_delivery_receipt(uuid, uuid, text, text, text, text, text)'] LOOP
     IF has_function_privilege('authenticated', ('public.' || v_name)::regprocedure, 'EXECUTE')
        OR has_function_privilege('anon', ('public.' || v_name)::regprocedure, 'EXECUTE')
        OR NOT has_function_privilege('service_role', ('public.' || v_name)::regprocedure, 'EXECUTE') THEN
@@ -668,7 +699,7 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT: the deliver-receipt-queue job is missing or not the expected postgres job';
   END IF;
   FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()',
-                                'claim_delivery_receipts(integer)', 'finish_delivery_receipt(uuid, uuid, text, text, text, text)'] LOOP
+                                'claim_delivery_receipts(integer, text)', 'finish_delivery_receipt(uuid, uuid, text, text, text, text, text)'] LOOP
     SELECT * INTO p FROM pg_proc WHERE oid = ('public.' || v_name)::regprocedure;
     IF NOT p.prosecdef OR p.proowner <> 'postgres'::regrole
        OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp'] THEN

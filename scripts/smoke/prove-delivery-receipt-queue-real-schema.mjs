@@ -279,7 +279,7 @@ function complete(i, { key = `ki25-complete-${i}`, emailReceipt, qty = 10, evide
 const queued = (i) => q(`SELECT count(*) FROM public.delivery_receipt_queue WHERE delivery_id = '${D(i)}';`).out;
 const row = (i, cols) => q(`SELECT ${cols} FROM public.delivery_receipt_queue WHERE delivery_id = '${D(i)}';`).out;
 function worker(sql, options) { return q(`BEGIN; SET LOCAL ROLE service_role; ${sql}; COMMIT;`, options); }
-const claim = () => JSON.parse(worker('SELECT public.claim_delivery_receipts(10)::text').out);
+const claim = (key) => JSON.parse(worker(`SELECT public.claim_delivery_receipts(10${key ? `, '${key}'` : ''})::text`).out);
 const finish = (c, outcome, extra = 'NULL, NULL, NULL') =>
   worker(`SELECT public.finish_delivery_receipt('${c.id}', '${c.claim_token}', '${outcome}', ${extra})`, { allowFailure: true });
 // Makes one row due now and every other pending row not due, keeping their other fields.
@@ -376,13 +376,21 @@ function main() {
   // Worker: claim, lease, retry backoff, stale claim, sent.
   psql(`INSERT INTO public.delivery_receipt_queue (delivery_id, customer_id, receipt) VALUES ('${D(1)}', '${CUST}', '{"lines":[]}');`);
   due(1);
-  const batch = claim();
+  const batch = claim('ki25-claim-1');
   assert.equal(batch.length, 1);
   const c1 = batch[0];
   assert.equal(c1.delivery_id, D(1)); assert.equal(c1.attempt, 1); assert.equal(c1.to, 'ki25-farm@example.invalid');
   assert.equal(c1.contact_name, 'Pat Prover');
   assert.equal(claim().length, 0, 'a claimed row is leased');
-  assert.equal(finish(c1, 'retry', "'Resend 503', NULL, NULL").out, 'pending');
+  // A claim retried with its key (the answer was lost) gets the same claim back and uses no extra attempt.
+  const replayClaim = claim('ki25-claim-1');
+  assert.deepEqual(replayClaim.map((c) => [c.id, c.claim_token, c.attempt, c.to]), [[c1.id, c1.claim_token, 1, c1.to]]);
+  assert.equal(row(1, 'attempts'), '1');
+  assert.equal(finish(c1, 'retry', "'Resend 503', NULL, NULL, 'ki25-finish-1'").out, 'pending');
+  // A finish retried with its key gets its first answer, not stale; a plain repeat is stale.
+  assert.equal(finish(c1, 'retry', "'Resend 503', NULL, NULL, 'ki25-finish-1'").out, 'pending');
+  assert.equal(finish(c1, 'retry', "'Resend 503', NULL, NULL").out, 'stale');
+  assert.equal(claim('ki25-claim-1').length, 0, 'a replayed claim never returns a receipt it no longer holds');
   assert.equal(row(1, "attempts || ' ' || (next_attempt_at BETWEEN now() + interval '115 seconds' AND now() + interval '125 seconds')"), '1 true');
   assert.equal(finish(c1, 'sent', "NULL, 'msg-1', 'ki25-farm@example.invalid'").out, 'stale', 'a finished claim cannot finish again');
   due(1);
@@ -394,7 +402,7 @@ function main() {
   assert.equal(row(1, "status || ' ' || resend_message_id || ' ' || sent_to || ' ' || (sent_at IS NOT NULL) || ' ' || (claim_token IS NULL)"),
     'sent msg-1 ki25-farm@example.invalid true true');
   due(1); assert.equal(claim().length, 0, 'a sent receipt is never claimed again');
-  console.log('[prover] claim leases a row; retry backs off 2 minutes; stale tokens change nothing; sent needs provider proof');
+  console.log('[prover] claim leases a row; retry backs off 2 minutes; stale tokens change nothing; sent needs provider proof; keyed claim and finish replay');
 
   // An expired lease is reclaimed with a new token; the old token is then stale.
   due(2);

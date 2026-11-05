@@ -13233,7 +13233,7 @@ export type Database = {
       check_unpriced_orders: { Args: never; Returns: Json }
       cleanup_rate_limits: { Args: never; Returns: undefined }
       claim_delivery_receipts: {
-        Args: { p_limit?: number }
+        Args: { p_idempotency_key?: string; p_limit?: number }
         Returns: Json
       }
       close_accounting_period: {
@@ -13815,6 +13815,7 @@ export type Database = {
           p_claim_token: string
           p_detail?: string
           p_id: string
+          p_idempotency_key?: string
           p_outcome: string
           p_resend_message_id?: string
           p_sent_to?: string

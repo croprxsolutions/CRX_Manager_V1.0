@@ -351,6 +351,8 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         toast('error', 'This import could not be prepared, so nothing was sent. Reload the page and try again.');
         return;
       }
+      let inserted: number;
+      // Only the save itself is classified: a failure after it (resolve, onSuccess) must never read as "not saved".
       try {
         const { data, error } = await supabase.rpc('apply_product_setup', {
           p_rows: request.rows,
@@ -358,24 +360,24 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
           p_idempotency_key: importIntent.getIdempotencyKey(),
         });
         if (error) throw error;
-        const result = assertRpcResult<{ inserted_count: number }>(data, 'apply_product_setup');
-        await importIntent.resolveIntent().catch((e: unknown) => Sentry.captureException(e, { extra: { context: 'Bulk product import: resolve' } }));
-        toast('success', `Imported ${result.inserted_count} product(s)`);
-        onSuccess();
-        if (gen === generation.current) setImported(result.inserted_count);
+        inserted = assertRpcResult<{ inserted_count: number }>(data, 'apply_product_setup').inserted_count;
       } catch (error) {
         const disposition = await importIntent.classifyFailure(error);
         Sentry.captureException(error, { extra: { context: 'Bulk product import', disposition } });
-        if (disposition === 'resolved') {
-          toast('warning', 'This import already finished in another tab, so it was not sent again.');
-          onSuccess();
-          if (gen === generation.current) setImported(request.count);
-        } else if (disposition === 'definitive') {
-          toast('error', sanitizeError(error));
-        } else {
+        if (disposition === 'definitive') toast('error', sanitizeError(error));
+        else if (disposition === 'uncertain') {
           toast('error', `The import was not confirmed (${sanitizeError(error)}). Press Finish Earlier Import: it will not add products twice.`);
+        } else {
+          toast('warning', 'This import already finished in another tab, so it was not sent again.');
+          if (gen === generation.current) setImported(request.count);
+          onSuccess();
         }
+        return;
       }
+      await importIntent.resolveIntent().catch((e: unknown) => Sentry.captureException(e, { extra: { context: 'Bulk product import: resolve' } }));
+      if (gen === generation.current) setImported(inserted);
+      toast('success', `Imported ${inserted} product(s)`);
+      onSuccess();
     } finally {
       setSaving(false);
     }

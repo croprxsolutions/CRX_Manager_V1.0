@@ -487,6 +487,8 @@ export default function Jobs() {
     // The Applicators and Customers filters each match a column OR a list of job ids.
     // A long id list would overflow the request URL, so each filter becomes one
     // `.or()` per chunk of ids, and the list is the union of every chunk's read.
+    // 80 UUIDs is ~3 KB, so both filters together stay well under an 8 KB request line.
+    const ID_CHUNK = 80;
     let applicatorFilters: Array<(q: JobsQuery) => JobsQuery> = [(q) => q];
     let customerFilters: Array<(q: JobsQuery) => JobsQuery> = [(q) => q];
     // U13 (Codex R2 #2): the Applicators filter must match jobs assigned via
@@ -518,7 +520,7 @@ export default function Jobs() {
       const dispJobIds = [...new Set(((dispJobs || []) as { job_id: string }[]).map((d) => d.job_id))];
       const appList = applied.applicatorIds.join(',');
       applicatorFilters = dispJobIds.length > 0
-        ? chunkIds(dispJobIds).map((chunk) => (q: JobsQuery) => q.or(`applicator_id.in.(${appList}),id.in.(${chunk.join(',')})`))
+        ? chunkIds(dispJobIds, ID_CHUNK).map((chunk) => (q: JobsQuery) => q.or(`applicator_id.in.(${appList}),id.in.(${chunk.join(',')})`))
         : [(q) => q.in('applicator_id', applied.applicatorIds)];
     }
     // Customer filter is applied SERVER-side and matches
@@ -546,7 +548,7 @@ export default function Jobs() {
       const shareJobIds = [...new Set(((shareJobs || []) as { job_id: string }[]).map((s) => s.job_id))];
       const custList = applied.customerIds.join(',');
       customerFilters = shareJobIds.length > 0
-        ? chunkIds(shareJobIds).map((chunk) => (q: JobsQuery) => q.or(`customer_id.in.(${custList}),id.in.(${chunk.join(',')})`))
+        ? chunkIds(shareJobIds, ID_CHUNK).map((chunk) => (q: JobsQuery) => q.or(`customer_id.in.(${custList}),id.in.(${chunk.join(',')})`))
         : [(q) => q.in('customer_id', applied.customerIds)];
     }
 
@@ -656,7 +658,10 @@ export default function Jobs() {
         for (const chunk of chunkIds(jobIds, 100)) {
           const { data: billed, error: billedErr } = await supabase.rpc('get_jobs_billed_customers', { p_job_ids: chunk });
           if (billedErr) throw billedErr;
-          for (const row of assertRpcResult<BilledRow[]>(billed, 'get_jobs_billed_customers')) billedRows.push(row);
+          const rows = assertRpcResult<BilledRow[]>(billed, 'get_jobs_billed_customers');
+          // A full reply may have been cut at the cap: report it rather than drop names silently.
+          if (rows.length >= 1000) throw new Error('get_jobs_billed_customers reply reached the 1,000-row cap');
+          for (const row of rows) billedRows.push(row);
         }
         if (superseded()) return;
         billedRows.forEach((b) => {

@@ -22,6 +22,11 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NAME = process.env.CRX_PROVER_REUSE_CONTAINER || `crx-ki25-receipt-queue-${process.pid}-${Date.now().toString(36)}`;
 const REUSE = Boolean(process.env.CRX_PROVER_REUSE_CONTAINER);
+// Only this prover's own throwaway containers: the proof writes, disables triggers and deletes.
+if (REUSE && !/^crx-ki25-receipt-queue-\d+-[0-9a-z]+$/.test(NAME)) {
+  console.error(`CRX_PROVER_REUSE_CONTAINER must name a container this prover created (crx-ki25-receipt-queue-<pid>-<id>), not "${NAME}"`);
+  process.exit(1);
+}
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');

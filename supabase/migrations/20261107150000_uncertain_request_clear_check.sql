@@ -31,8 +31,8 @@
 --
 -- Every safe answer RETIRES the request: it records the key in
 -- retired_uncertain_requests under the request's lock. The receipt insert guard
--- (re-issued below) then refuses any later save of that key, or of any batch row
--- under it ("<request key>:<uuid>"), with IDEMPOTENCY_REQUEST_RETIRED - from any
+-- (re-issued below) then refuses any later save of that key, or of any row of an
+-- inventory batch under it ("<adjust_inventory_batch key>:<anything>"), with IDEMPOTENCY_REQUEST_RETIRED - from any
 -- tab, whatever rows the browser knows about, expired receipts included - on the one
 -- path that saves a new receipt (no live receipt of the key). Every saving RPC writes its receipt in the same transaction as its work,
 -- so a refused receipt rolls the work back. Replays of a saved receipt are untouched.
@@ -93,11 +93,12 @@ BEGIN
     hashtextextended('crx:idempotency:' || NEW.idempotency_key, 0)
   );
 
-  -- KI-27: a batch row takes its batch's lock shared, so it waits for (or blocks)
+  -- KI-27: only an inventory batch sends rows under its own key ("<batch key>:<row>");
+  -- any such row takes its batch's lock shared, so it waits for (or blocks)
   -- retire_uncertain_request, which holds that lock exclusively. The retired check
   -- itself runs below, on the only path that saves a new receipt.
   v_parent := substring(NEW.idempotency_key FROM
-    '^([a-z0-9_]+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+    '^(adjust_inventory_batch:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):.+$');
   IF v_parent IS NOT NULL THEN
     PERFORM pg_advisory_xact_lock_shared(hashtextextended('crx:idempotency:' || v_parent, 0));
   END IF;
@@ -202,7 +203,7 @@ BEGIN
      WHERE (i.request_actor_id IS NULL OR i.request_actor_id = v_actor)
        AND ((i.idempotency_key = p_request_key AND i.operation = split_part(p_request_key, ':', 1))
          OR (v_row_operation IS NOT NULL AND i.operation = v_row_operation
-             AND starts_with(i.idempotency_key, p_request_key || ':')))
+             AND i.idempotency_key ~ ('^' || p_request_key || ':[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')))
   ) THEN
     v_reason := 'recorded';
   ELSE

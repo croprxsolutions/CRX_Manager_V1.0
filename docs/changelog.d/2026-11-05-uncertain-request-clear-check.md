@@ -20,7 +20,10 @@
   - `not_recorded_after_wait` (safe), or `retired` (safe; an earlier safe answer already retired it).
 - Every safe answer retires the request in `retired_uncertain_requests`, under the request's lock. The receipt
   insert guard `_guard_idempotency_key_insert` is re-issued (otherwise identical to `20260716160000`) to refuse any
-  later receipt of a retired request key, or of any row key under it, with `IDEMPOTENCY_REQUEST_RETIRED`. That covers
+  later receipt of a retired request key, or (inventory batches only) of any row key under it whatever its ending,
+  with `IDEMPOTENCY_REQUEST_RETIRED`. Only a row ending in a UUID (an inventory id) counts as a saved row, and no
+  other operation's longer keys are ever treated as rows, so retiring a key cannot block unrelated saves (Sol
+  review notes). That covers
   rows the browser never knew about, sends from other tabs, and expired receipts (the check runs on the one path
   that saves a new receipt, so a receipt removed by a concurrent cleanup cannot slip past it, and the refusal also
   undoes the guard's own removal of an expired receipt; Codex review finding). A row's receipt insert takes its batch's lock shared, so a retire waits for an in-flight row
@@ -42,8 +45,9 @@
   `scripts/smoke/smoke-uncertain-request-clear-check.sql` passed there (`SMOKE_PASS_ROLLBACK`): recorded and expired
   -> safe; a receipt under another operation -> wait; no, forged, borrowed and future tokens -> `first_check`; its
   own fresh token -> `waiting`; 5 minutes -> `waiting`, 16 minutes -> safe; asking again -> `retired`; a batch with a
-  row saved under `adjust_inventory` -> `recorded`, under another operation -> wait; then a late save of the request,
-  of an unknown row under it and of the expired key -> `IDEMPOTENCY_REQUEST_RETIRED`, while an unrelated key saves,
+  row saved under `adjust_inventory` -> `recorded`, under another operation or not ending in a UUID -> wait; then a late save of the request,
+  of an unknown row under it (UUID or not) and of the expired key -> `IDEMPOTENCY_REQUEST_RETIRED`, while an
+  unrelated key and another operation's longer key starting with a retired key save,
   a retired saved payment's claim-row retry is skipped quietly so it can replay, and a retired saved request's retry
   -> `IDEMPOTENCY_CONCURRENT_REPLAY_RETRY`;
   another user's key or a row key -> `REQUEST_KEY_NOT_OWNED`; a wrong idempotency key -> `IDEMPOTENCY_KEY_MISMATCH`;

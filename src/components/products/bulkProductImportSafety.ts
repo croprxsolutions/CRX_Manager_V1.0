@@ -93,8 +93,8 @@ export function parseCsvRecords(text: string): { cells: string[]; line: number }
         if (ch === '\n' || (ch === '\r' && src[i + 1] !== '\n')) line += 1;
         cell += ch;
       }
-    } else if (ch === '"' && cell === '') quoted = true;
-    // A quote inside an unquoted value is kept as text, so it cannot swallow the next row.
+    } else if (ch === '"' && cell.trim() === '') { quoted = true; cell = ''; }
+    // A quote that opens a value (after spaces, too) starts a quoted value; one inside a value is kept as text.
     else if (ch === ',') { row.push(cell); cell = ''; }
     else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && src[i + 1] === '\n') i += 1;

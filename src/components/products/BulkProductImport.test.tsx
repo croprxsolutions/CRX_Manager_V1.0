@@ -60,6 +60,9 @@ describe('CSV reader', () => {
     expect(parseCsv('product_name,notes\nA,Hello "bad\nB,another " note\n'))
       .toEqual([['product_name', 'notes'], ['A', 'Hello "bad'], ['B', 'another " note']]);
   });
+  it('still reads a quoted value that follows a space, commas and all', () => {
+    expect(parseCsv('product_name,sku\n "2,4-D",CHEM-1\n')).toEqual([['product_name', 'sku'], ['2,4-D', 'CHEM-1']]);
+  });
   it('refuses an unclosed quote instead of swallowing later rows', () => {
     expect(() => parseCsv('product_name,notes\nA,"open note\nB,x\n')).toThrow(/never closed/);
   });

@@ -397,7 +397,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
 
         {stage === 'preview' && unconfirmed && (
           <p role="alert" className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-            <AlertCircle className="w-4 h-4" /> The last import was not confirmed. Press Import again to finish it safely; another file can be chosen once it is confirmed.
+            <AlertCircle className="w-4 h-4" /> The last import was not confirmed. Press Import again to finish it safely; another file can be chosen once it is confirmed. If you leave this page first, check the product list before importing this file again.
           </p>
         )}
 

@@ -1143,7 +1143,7 @@ Deno.serve(async (req: Request) => {
       } catch {
         resendResult = null;
       }
-      success = resendResp.ok && typeof resendResult?.id === "string";
+      success = resendResp.ok && typeof resendResult?.id === "string" && resendResult.id !== "";
       resendMessageId = success ? resendResult!.id as string : null;
       if (resendResp.ok && !success) {
         outcomeUnknown = true;

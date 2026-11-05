@@ -456,7 +456,7 @@ function TileHeader({
   const color = count === null || count === 0 ? 'text-gray-600' : (countColor ?? 'text-red-600');
   return (
     // Style D band (docs/workflows/UI_PATTERNS.md), bled to the edges of the tile's padded Card.
-    <div className="-mx-5 -mt-5 mb-3 flex items-center justify-between gap-2 rounded-t-xl bg-cream-dark px-4 py-2.5">
+    <div className="-mx-5 -mt-5 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-t-xl bg-cream-dark px-4 py-2.5">
       <div className="flex min-w-0 items-center gap-2.5">
         <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-crx-green [&_svg]:text-white!">
           {icon}
@@ -1209,7 +1209,7 @@ export default function OfficeCockpit() {
 
       <SectionJumpBar
         sections={[
-          { id: 'cockpit-exceptions', label: 'Needs attention', count: totalExceptions },
+          { id: 'cockpit-exceptions', label: 'Needs attention' },
           { id: 'cockpit-snapshot', label: 'Morning snapshot' },
           { id: 'cockpit-inventory', label: 'Inventory' },
           ...(isAdmin || profile?.role === 'sales_rep' ? [{ id: 'cockpit-actions', label: 'Quick actions' }] : []),

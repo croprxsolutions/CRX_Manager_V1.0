@@ -36,9 +36,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80, KI-104) | 15 |
-| Closed as FIXED, with proof (bottom of file and archive) | 13 |
+| Closed as FIXED, with proof (bottom of file and archive) | 14 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
@@ -132,12 +132,6 @@ writes, Supabase feedback — are now `ask` rules in `.claude/settings.json` (ri
 `deny`). User-level settings were not changed. Accepted residual (Mason, 2026-10-29: a relaxed harness): a newly
 connected connector, or one whose id changes on reconnect, is unlisted until someone adds it. The two PR #605 hook
 gaps are accepted in KI-78.
-
-### KI-05 — A sales rep can write RUP register rows for an invoice that was never posted
-**MED · OPEN · security/money · unassigned**
-`generate_rup_sales_records` (latest body `20260707040000`) checks the caller's role but not that the invoice is
-posted, so a rep can add restricted-use-pesticide register rows for a draft. PR #927 hid register reads from
-reps but explicitly left this function unchanged. Live had 0 register rows when last checked (older record's claim).
 
 ### KI-06 — Financial audit log can point at hard-deleted records
 **HIGH (per older record) · UNVERIFIED · database/money · Mason (migration decision)**
@@ -931,6 +925,7 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 11. **KI-86, a direct admin turn-off skipped the warnings** — closed 2026-11-05: already fixed by `20261103100000_product_active_guard` (PR #1315, applied live 2026-11-02), whose trigger refuses any `is_active` change outside `set_product_active` with `PRODUCT_ACTIVE_RPC_REQUIRED`, so every turn-off passes the preview. Proven on the local test app: an admin's turn-off showed the "stock remains on hand" warning, and a direct admin `UPDATE` was refused.
 12. **KI-87, a refused turn-off said "Product details changed"** — closed 2026-11-05: already fixed by PR #1321, which shows the database's blocker text. Proven on the local test app: a draft purchase order added after the review made Confirm show "purchase order TEST-KI87-PO" and reopen the review naming it.
 13. **KI-88, Inventory loaded the whole catalog on mount** — closed 2026-11-05 by branch `claude/ki86-88-product-turnoff`: on mount the page reads only the ids of turned-off products (`select=id&is_active=eq.false`) for the Inactive label; the full catalog loads only when the Add Inventory or Create Hold picker opens. No migration. Proven on the local test app's network log (2,116 products: no catalog read until a picker opened) and by a component test.
+14. **KI-05, RUP register rows for an unposted invoice** — closed 2026-11-05: `20261110140000_rup_records_require_posted_invoice` (PR #1513) applied live 2026-11-05 21:32:09 UTC (3:32 PM Central), ledger `20261105213209`. `generate_rup_sales_records` refuses an invoice that is not posted, paid or overdue (`RUP_INVOICE_NOT_POSTED`), and a trigger on `rup_sales_records` applies the same rule to a direct insert. Proven by the real-schema prover and, after the apply, the live smoke chain (`SMOKE_PASS_ROLLBACK`: a real draft invoice is refused, posting still writes one register row); live body, trigger and guard re-read after the apply.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

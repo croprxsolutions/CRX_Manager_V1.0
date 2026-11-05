@@ -22,7 +22,8 @@ const fromSelect = vi.fn();
 vi.mock('../lib/db', () => ({
   supabase: {
     rpc: (...args: unknown[]) => rpc(...args),
-    from: () => ({ select: (...args: unknown[]) => fromSelect(...args) }),
+    // The acres read is paged: select → order → range, and the range call answers.
+    from: () => ({ select: (...args: unknown[]) => { const q = { order: () => q, range: () => fromSelect(...args) }; return q; } }),
   },
   assertRpcResult: (data: unknown, rpcName: string) => {
     if (data === null || data === undefined) {

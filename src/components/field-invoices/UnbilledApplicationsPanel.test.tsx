@@ -86,7 +86,7 @@ function queryResult(data: unknown[], error: unknown = null) {
   // Resolves within microtasks on purpose: React 19 then merges the loading
   // true→false pair into one render, so a fresh key after reconciliation must
   // come from the explicit row-action remount, not from the loading boundary.
-  chain.limit = vi.fn(() => Promise.resolve({ data, error }));
+  chain.range = vi.fn(() => Promise.resolve({ data, error, count: error ? null : data.length }));
   return chain;
 }
 
@@ -346,5 +346,31 @@ describe('UnbilledApplicationsPanel transfer intent recovery', () => {
     await waitFor(() => expect(mockSanitizeError).toHaveBeenCalledWith(unrelatedError));
     expect(mockToast).toHaveBeenCalledWith('error', 'sanitized fallback');
     expect(mockResetKey).not.toHaveBeenCalled();
+  });
+});
+
+// Goal 4: the backlog was cut at 500 rows per list. Every completed, unbilled job must show,
+// read page by page, and the headline count must be the full number.
+describe('UnbilledApplicationsPanel reads the whole backlog', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('shows all 1,234 unbilled jobs, not the first 500', async () => {
+    const jobs = Array.from({ length: 1234 }, (_, i) => ({
+      ...completedJob,
+      id: `job-${String(i).padStart(4, '0')}`,
+      job_number: `J-${String(i).padStart(4, '0')}`,
+    }));
+    mockFrom.mockImplementation((table: string) => {
+      const rows = table === 'jobs' ? jobs : [];
+      const chain: Record<string, unknown> = {};
+      for (const method of ['select', 'eq', 'is', 'order']) chain[method] = () => chain;
+      chain.range = (from: number, to: number) => Promise.resolve({ data: rows.slice(from, to + 1), error: null, count: rows.length });
+      return chain;
+    });
+
+    render(<UnbilledApplicationsPanel />);
+    await screen.findByText('J-1233');
+    expect(screen.getByText('J-0000')).toBeInTheDocument();
+    expect(screen.getByText('1234')).toBeInTheDocument();
   });
 });

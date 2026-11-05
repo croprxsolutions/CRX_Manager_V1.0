@@ -1265,7 +1265,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     isForeignIntentLocked,
     // eslint-disable-next-line react-hooks/purity -- the retryNotAfterMs effect above re-renders exactly when the window expires, so this clock read cannot go stale
     isRetryExpired: retryNotAfterMs !== null && Date.now() >= retryNotAfterMs,
-    // Set only when an admin may clear the locked request: its known deadline has passed.
+    // Set only when the signed-in staff member may clear the locked request: its known deadline has passed.
     clearableExpiredRequest: lockedRequest
       && hasKnownRetryDeadline(lockedRequest)
       // eslint-disable-next-line react-hooks/purity -- same expiry re-render as isRetryExpired

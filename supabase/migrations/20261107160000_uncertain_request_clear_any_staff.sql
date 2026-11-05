@@ -16,6 +16,18 @@
 -- lock check, the signed 15-minute server-time wait, the retire row, grants
 -- (EXECUTE for authenticated only) and SECURITY DEFINER with search_path = public, pg_temp.
 -- No table, policy or other function changes.
+--
+-- Why calling it directly (without the screen's activity note) is not a bypass: the
+-- server's own audit record of every clear is the retired_uncertain_requests row
+-- (retired_by = auth.uid(), retired_at, reason), written in the same transaction and
+-- unreadable and unwritable by clients. The screen's activity_log note was never a gate
+-- (clients can write activity_log, and admins could already call this RPC directly). A
+-- caller can only retire a key carrying their own user id, and retiring it only refuses
+-- that same caller's later save of that same request, which is what the button does.
+--
+-- Deliberately database-first: the screen still shows the button to admins only until a
+-- separate follow-up PR, after this is applied live, shows it to every staff member
+-- (a migration and its callers in one PR cannot land: the callers need it live first).
 
 DO $preflight$
 BEGIN

@@ -275,6 +275,11 @@ export function sanitizeError(error: unknown): string {
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;
   }
+  // Setup save and import (20261107080000, 20261107090000): the text after the token names the products.
+  const setupRefusal = message.match(/^PRODUCT_SETUP_(?:DUPLICATE|ROW_REFUSED|INVALID|STALE|ROW_SHAPE_INVALID|ROWS_REQUIRED|DUPLICATE_PRODUCT):\s*(.+)$/s)?.[1];
+  if (setupRefusal) {
+    return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
+  }
   if (/^PRODUCT_ACTIVE_REVIEW_STALE(?::|$)/.test(message)) {
     return 'Product details changed since the review. Review the selection again.';
   }

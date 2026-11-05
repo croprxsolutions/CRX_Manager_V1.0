@@ -1,312 +1,195 @@
 /**
- * BulkProductImport.test.tsx — Basic render + behavior tests
+ * BulkProductImport.test.tsx — the CSV reader, column mapping and row building, and the screen's
+ * preview-then-import flow against a mocked preview_product_import / apply_product_setup.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-// Fully chainable Supabase query-builder mock
-function chainable(resolveWith: unknown = { data: [], error: null }) {
-  const builder: Record<string, unknown> = {};
-  const self = () => builder;
-  const methods = [
-    'select','insert','update','upsert','delete',
-    'eq','neq','gt','gte','lt','lte','like','ilike','is','in','or','not','match',
-    'order','limit','range','single','maybeSingle',
-    'csv','explain',
-  ];
-  for (const m of methods) builder[m] = vi.fn(self);
-  builder.then = vi.fn((resolve: (v: unknown) => void) => {
-    Promise.resolve(resolveWith).then(resolve);
-    return builder;
-  });
-  return builder;
-}
+const { mockToast, rpc } = vi.hoisted(() => ({ mockToast: vi.fn(), rpc: vi.fn() }));
 
 vi.mock('../../lib/db', () => ({
-  supabase: { from: vi.fn(() => chainable()), rpc: vi.fn(() => chainable()) },
-  supabaseUntyped: { from: vi.fn(() => chainable({
-    data: [{ name: 'Herbicide', is_active: true, sort_order: 1 },
-      { name: 'Retired', is_active: false, sort_order: 2 }], error: null,
-  })) },
+  supabase: { rpc },
+  assertRpcResult: (data: unknown) => data,
 }));
-
-vi.mock('../../lib/documentOCR', () => ({
-  isCSVFile: vi.fn(() => true),
+vi.mock('../../lib/productSetup', () => ({
+  listProductCategories: vi.fn(async () => [
+    { name: 'Herbicide', is_active: true }, { name: 'Retired', is_active: false },
+  ]),
 }));
-
-vi.mock('../ui/Toast', () => ({
-  useToast: () => ({ toast: mockToast }),
-}));
-
-const { mockToast } = vi.hoisted(() => ({ mockToast: vi.fn() }));
+vi.mock('../../lib/documentOCR', () => ({ isCSVFile: vi.fn(() => true) }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1' } }) }));
+vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import BulkProductImport from './BulkProductImport';
-import { supabase } from '../../lib/db';
 import {
-  buildProductInsert,
-  isProductImportStringField,
+  PRODUCT_IMPORT_COLUMNS,
+  PRODUCT_IMPORT_TEMPLATE,
+  buildProductImportRow,
+  importRefusalReason,
   isRetiredPricingColumn,
-  type ParsedProduct,
+  mapProductImportHeaders,
+  parseCsv,
+  productImportColumn,
+  toCsv,
 } from './bulkProductImportSafety';
 
-describe('BulkProductImport', () => {
-  const defaultProps = { open: true, onClose: vi.fn(), onSuccess: vi.fn() };
-  beforeEach(() => vi.clearAllMocks());
+const okRow = (over: Record<string, unknown> = {}) => ({
+  status: 'ok', error: null, after: { rate_per_acre: null, rate_unit: null, tier1_price_per_acre: null, tier2_price_per_acre: null, tier3_price_per_acre: null },
+  expected_prices: null, sku_matches: [], name_matches: [], epa_matches: [], in_file_duplicate: false, ...over,
+});
 
-  it('renders when open', () => {
-    render(<BulkProductImport {...defaultProps} />);
-    expect(screen.getByText(/bulk product/i)).toBeInTheDocument();
+async function upload(csv: string) {
+  const file = new File([csv], 'products.csv', { type: 'text/csv' });
+  Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
+  fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
+  fireEvent.click(screen.getByRole('button', { name: /check file/i }));
+}
+
+describe('CSV reader', () => {
+  it('keeps a quoted note with a comma, a doubled quote and a line break intact', () => {
+    expect(parseCsv('﻿product_name,notes\r\nChem,"line one\nline two, ""quoted"""\r\nOther,plain\r\n'))
+      .toEqual([['product_name', 'notes'], ['Chem', 'line one\nline two, "quoted"'], ['Other', 'plain']]);
   });
-
-  it('does not render when closed', () => {
-    render(<BulkProductImport {...defaultProps} open={false} />);
-    expect(screen.queryByText(/bulk product/i)).not.toBeInTheDocument();
+  it('drops blank lines and keeps a last row without a newline', () => {
+    expect(parseCsv('a,b\n\n1,2\n , \n3,4')).toEqual([['a', 'b'], ['1', '2'], ['3', '4']]);
   });
-
-  it('shows file upload area', () => {
-    render(<BulkProductImport {...defaultProps} />);
-    expect(screen.getAllByText(/csv/i).length).toBeGreaterThan(0);
+  it('round-trips through its own writer', () => {
+    const rows = [['a', 'b,c'], ['line\nbreak', 'say "hi"']];
+    expect(parseCsv(toCsv(rows))).toEqual(rows);
   });
+});
 
-  it('accepts CSV files only and makes the pricing boundary explicit', () => {
-    render(<BulkProductImport {...defaultProps} />);
-
-    expect(screen.getByLabelText('Select File')).toHaveAttribute('accept', '.csv,text/csv');
-    expect(screen.getByText(/pricing columns are rejected/i)).toBeInTheDocument();
-    expect(screen.queryByText(/vision ocr/i)).not.toBeInTheDocument();
+describe('template and columns', () => {
+  it('the template round-trips: every header maps to its own column', () => {
+    const [headers] = parseCsv(PRODUCT_IMPORT_TEMPLATE);
+    expect(headers).toEqual([...PRODUCT_IMPORT_COLUMNS]);
+    const mapping = mapProductImportHeaders(headers);
+    expect(Object.values(mapping.byIndex)).toEqual([...PRODUCT_IMPORT_COLUMNS]);
+    expect(mapping.ignored).toEqual([]);
+    expect(mapping.conflicts).toEqual([]);
   });
-
-  it.each([
-    'cost',
-    'current_cost',
-    'unit-cost-cents',
-    'supplier_cost',
-    'supplier-cost-cents',
-    'price',
-    'price_cents',
-    'retail_price',
-    'selling-price',
-    'list price cents',
-    'margin',
-    'margin_percent',
-    'gross_profit',
-    'markup',
-    'markup_pct',
-    'tier1_price',
-    'tier_2_margin',
-    't3_gross_margin',
-    'tier3_price_per_acre',
-    'pricing_version',
-  ])('rejects retired pricing header %s', (header) => {
-    expect(isRetiredPricingColumn(header)).toBe(true);
+  it('no longer guesses "unit" or "type"', () => {
+    expect(productImportColumn('unit')).toBeNull();
+    expect(productImportColumn('Type')).toBeNull();
+    expect(productImportColumn('Rate Unit')).toBe('rate_unit');
+    expect(productImportColumn('EPA Reg')).toBe('epa_registration');
   });
-
-  it('does not mistake application-rate details for pricing', () => {
+  it('names two columns that mean the same field, and lists unknown ones', () => {
+    const m = mapProductImportHeaders(['product_name', 'product', 'colour']);
+    expect(m.conflicts).toEqual(['"product_name" and "product" both mean product_name']);
+    expect(m.ignored).toEqual(['colour']);
+  });
+  it.each(['cost', 'supplier-cost-cents', 'tier1_price', 't3_gross_margin', 'tier3_price_per_acre', 'pricing_version'])(
+    'rejects pricing header %s', (h) => expect(isRetiredPricingColumn(h)).toBe(true));
+  it('does not mistake rate details for pricing', () => {
     expect(isRetiredPricingColumn('rate_per_acre')).toBe(false);
     expect(isRetiredPricingColumn('suggested_rate')).toBe(false);
   });
+});
 
-  it('blocks a supplier-cost CSV before preview or database insertion', async () => {
-    render(<BulkProductImport {...defaultProps} />);
-    const file = new File(['product_name,supplier_cost\nAtrazine,12.34'], 'supplier-prices.csv', {
-      type: 'text/csv',
-    });
-    Object.defineProperty(file, 'text', {
-      value: vi.fn().mockResolvedValue('product_name,supplier_cost\nAtrazine,12.34'),
-    });
+describe('row building', () => {
+  const build = (headers: string[], cells: string[]) =>
+    buildProductImportRow(cells, mapProductImportHeaders(headers), 2, ['Herbicide', 'Seed']);
 
-    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
-
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith(
-        'error',
-        expect.stringMatching(/pricing columns are not allowed.*supplier_cost/i),
-      );
-    });
-    expect(screen.queryByText('Valid Products')).not.toBeInTheDocument();
-    expect(supabase.from).not.toHaveBeenCalled();
+  it('fixes spelling only, and says so', () => {
+    const r = build(['product_name', 'category', 'product_form', 'container_type', 'signal_word', 'is_rup'],
+      ['Chem', 'herbicide', 'Liquid', 'jug', 'CAUTION', 'Yes']);
+    expect(r.insert).toEqual({ product_name: 'Chem', category: 'Herbicide', product_form: 'liquid', container_type: 'Jug', signal_word: 'Caution', is_rup: true });
+    expect(r.fixes).toEqual(['category: "herbicide" → "Herbicide"', 'product_form: "Liquid" → "liquid"', 'container_type: "jug" → "Jug"', 'signal_word: "CAUTION" → "Caution"']);
+    expect(r.error).toBeUndefined();
   });
-
-  it.each(['product_form', 'inventory_unit', 'container_unit', 'container_type'])(
-    'preserves catalog metadata field %s during CSV parsing',
-    (field) => {
-      expect(isProductImportStringField(field)).toBe(true);
-    },
-  );
-
-  it('builds the database insert from an explicit non-pricing allowlist', () => {
-    const unsafeInput = {
-      product_name: 'Safe Product',
-      sku: 'SAFE-1',
-      category: 'Herbicide',
-      rate_per_acre: 2,
-      current_cost: 10,
-      tier1_price: 20,
-      tier1_margin: 0.5,
-      tier1_gross_margin: 1,
-      tier1_price_per_acre: 40,
-      pricing_version: 99,
-    } as unknown as ParsedProduct;
-
-    const insert = buildProductInsert(unsafeInput);
-
-    expect(insert).toMatchObject({
-      product_name: 'Safe Product',
-      sku: 'SAFE-1',
-      category: 'Herbicide',
-      rate_per_acre: 2,
-      is_active: true,
-    });
-    expect(insert).not.toHaveProperty('current_cost');
-    expect(insert).not.toHaveProperty('tier1_price');
-    expect(insert).not.toHaveProperty('tier1_margin');
-    expect(insert).not.toHaveProperty('tier1_gross_margin');
-    expect(insert).not.toHaveProperty('tier1_price_per_acre');
-    expect(insert).not.toHaveProperty('pricing_version');
+  it('sends no rate columns in the insert; rates travel separately', () => {
+    const r = build(['product_name', 'rate_per_acre', 'rate_unit', 'suggested_rate'], ['Chem', '4', 'oz', '4 oz/A']);
+    expect(r.insert).toEqual({ product_name: 'Chem' });
+    expect(r.rates).toEqual({ rate_per_acre: '4', rate_unit: 'oz', suggested_rate: '4 oz/A' });
   });
-
-  it('trims identity fields and sends blank optional text as NULL', () => {
-    expect(buildProductInsert({
-      product_name: '  Chem  ', sku: '  ', category: '  Herbicide  ', epa_registration: '', vendor: ' ', manufacturer: '  Acme  ',
-    })).toMatchObject({
-      product_name: 'Chem', sku: null, category: 'Herbicide', epa_registration: null, vendor: null, manufacturer: 'Acme',
-    });
+  it('a seed unit alone is not a rate', () => {
+    expect(build(['product_name', 'product_form', 'rate_unit'], ['Corn', 'seed', 'Lb']).rates).toBeUndefined();
   });
-
-  it('passes several use timing labels to the database as semicolon-separated text', () => {
-    expect(buildProductInsert({
-      product_name: 'Chem', category: 'Herbicide', use_timing: '  Pre-Emerge; Post-Emergence  ',
-    }).use_timing).toBe('Pre-Emerge; Post-Emergence');
-  });
-
-  it('shows a plain database refusal for an imported row', async () => {
-    vi.mocked(supabase.from).mockImplementation(() => chainable({
-      data: null,
-      error: { message: 'insert or update on table "products" violates foreign key constraint "product_setup_category_fk"' },
-    }) as unknown as ReturnType<typeof supabase.from>);
-    render(<BulkProductImport {...defaultProps} />);
-    const csv = 'product_name,category\nChem,Herbicide';
-    const file = new File([csv], 'products.csv', { type: 'text/csv' });
-    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
-    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
-    await screen.findByText('Valid Products');
-    fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
-    expect(await screen.findByText(/Chem: Choose a category from the product category list/)).toBeInTheDocument();
-  });
-
-  it.each(['-1', 'not-a-number', '0.1234567', '1e21', '123456789012.123456'])('refuses invalid imported Rate Per Acre %s', async (rate) => {
-    render(<BulkProductImport {...defaultProps} />);
-    const csv = `product_name,rate_per_acre\nChem,${rate}`;
-    const file = new File([csv], 'products.csv', { type: 'text/csv' });
-    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
-    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
-    expect(await screen.findByText(/Row 2: Rate Per Acre must be/)).toBeInTheDocument();
-    expect(supabase.from).not.toHaveBeenCalled();
-  });
-
   it.each([
-    ['container_size', '0', /Container size must be/],
-    ['container_size', '-1', /Container size must be/],
-    ['container_size', '0x1A', /Container size must be/],
-    ['rate_per_acre', '0x1A', /Rate Per Acre must be/],
-    ['category', 'Unknown', /Choose an active category/],
-    ['category', 'Retired', /Choose an active category/],
-  ])('marks %s=%s invalid before import', async (field, value, message) => {
-    render(<BulkProductImport {...defaultProps} />);
-    const csv = `product_name,${field}\nChem,${value}`;
-    const file = new File([csv], 'products.csv', { type: 'text/csv' });
-    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
-    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
-    expect(await screen.findByText(message)).toBeInTheDocument();
-    expect(supabase.from).not.toHaveBeenCalled();
+    [['product_name'], [''], /Missing product name/],
+    [['product_name', 'container_size'], ['Chem', '0'], /Container size must be/],
+    [['product_name', 'container_size'], ['Chem', '0x1A'], /Container size must be/],
+    [['product_name', 'rate_per_acre', 'rate_unit'], ['Chem', '-1', 'oz'], /Rate per acre must be/],
+    [['product_name', 'rate_per_acre', 'rate_unit'], ['Chem', '1e21', 'oz'], /Rate per acre must be/],
+    [['product_name', 'rei'], ['Chem', '12.5'], /REI hours must be a whole number/],
+    [['product_name', 'rup'], ['Chem', 'maybe'], /RUP must be yes or no/],
+  ])('refuses a bad value before the database sees it: %j', (headers, cells, why) => {
+    expect(build(headers, cells).error).toMatch(why);
+  });
+  it('strips the refusal code and the repeated product name', () => {
+    expect(importRefusalReason('PRODUCT_SETUP_ROW_REFUSED: Chem: PRODUCT_SETUP_INVALID: EPA number must look like 524-475', 'Chem'))
+      .toBe('EPA number must look like 524-475');
+    expect(importRefusalReason('Unknown use timing "X". Pick from the list.', 'Chem')).toBe('Unknown use timing "X". Pick from the list.');
+  });
+});
+
+describe('BulkProductImport screen', () => {
+  const props = { open: true, onClose: vi.fn(), onSuccess: vi.fn() };
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('offers the template and blocks a pricing column before anything is sent', async () => {
+    render(<BulkProductImport {...props} />);
+    expect(screen.getByRole('button', { name: /download template/i })).toBeInTheDocument();
+    expect(screen.getByLabelText('Select File')).toHaveAttribute('accept', '.csv,text/csv');
+    await upload('product_name,supplier_cost\nAtrazine,12.34');
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/pricing columns are not allowed.*supplier_cost/i)));
+    expect(rpc).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['product_name,rate_per_acre\nChem,13', true],
-    ['product_name,rate_per_acre,product_form\nChem,13,liquid', true],
-    ['product_name,rate_per_acre,product_form\nCorn,1,seed', false],
-    ['product_name,rate_per_acre,product_form\nTote,1,Each', false],
-  ])('needs a rate unit for a rate except on seed and each: %s', async (csv, refused) => {
-    render(<BulkProductImport {...defaultProps} />);
-    const file = new File([csv], 'products.csv', { type: 'text/csv' });
-    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
-    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
-    if (refused) expect(await screen.findByText(/Row 2: A rate per acre needs a rate unit/)).toBeInTheDocument();
-    else expect(await screen.findByText('Valid Products')).toBeInTheDocument();
+  it('refuses two columns that mean the same thing', async () => {
+    render(<BulkProductImport {...props} />);
+    await upload('product_name,name\nA,B');
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/Two columns mean the same thing/)));
+    expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('imports nothing while rates are locked when a row sets a rate', async () => {
-    vi.mocked(supabase.from).mockImplementation(((table: string) => chainable(table === 'product_rate_lock'
-      ? { data: { is_locked: true }, error: null } : { data: [], error: null })) as unknown as typeof supabase.from);
-    render(<BulkProductImport {...defaultProps} />);
-    const csv = 'product_name,rate_per_acre,rate_unit\nChem,13,oz';
-    const file = new File([csv], 'products.csv', { type: 'text/csv' });
-    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
-    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
-    await screen.findByText('Valid Products');
+  it('previews every row with its reason, imports only the ready ones with their previewed prices, once', async () => {
+    const prices = { tier1_price_per_acre: 1.25, tier2_price_per_acre: 1.13, tier3_price_per_acre: 1 };
+    rpc.mockImplementation(async (name: string) => (name === 'preview_product_import'
+      ? { data: { rates_locked: false, rows: [
+        okRow({ after: { rate_per_acre: '4', rate_unit: 'oz', ...prices }, expected_prices: prices }),
+        okRow({ status: 'refused', error: 'PRODUCT_SETUP_ROW_REFUSED: Bad: PRODUCT_SETUP_INVALID: EPA number must look like 524-475' }),
+        okRow({ status: 'refused', error: 'PRODUCT_SETUP_DUPLICATE: x', sku_matches: [{ product_name: 'Old Chem', is_active: true }] }),
+      ] }, error: null }
+      : { data: null, error: { message: 'network' } }));
+    render(<BulkProductImport {...props} />);
+    await upload('product_name,sku,epa_registration,rate_per_acre,rate_unit,notes\nGood,G1,,4,oz,"two\nlines"\nBad,B1,abc,,,\nAgain,OLD,,,,\n');
+    expect(await screen.findByText('EPA number must look like 524-475')).toBeInTheDocument();
+    expect(screen.getByText('Duplicate of Old Chem: skipped.')).toBeInTheDocument();
+    expect(screen.getByText('$1.25 / $1.13 / $1.00')).toBeInTheDocument();
+    expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [
+      { insert: { product_name: 'Good', sku: 'G1', notes: 'two\nlines' }, rates: { rate_per_acre: '4', rate_unit: 'oz', suggested_rate: null } },
+      { insert: { product_name: 'Bad', sku: 'B1', epa_registration: 'abc' } },
+      { insert: { product_name: 'Again', sku: 'OLD' } },
+    ] });
     fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/^Nothing was imported: 1 row sets a rate/)));
-    expect(supabase.from).not.toHaveBeenCalledWith('products');
-  });
-
-  it('saves a rate-setting file in one insert, so a refusal imports nothing', async () => {
-    vi.mocked(supabase.from).mockImplementation(((table: string) => chainable(table === 'product_rate_lock'
-      ? { data: { is_locked: false }, error: null }
-      : { data: null, error: { message: 'PRODUCT_RATES_LOCKED: rates are locked' } })) as unknown as typeof supabase.from);
-    render(<BulkProductImport {...defaultProps} />);
-    const csv = 'product_name,rate_per_acre,rate_unit\nChem,13,oz\nPlain,,';
-    const file = new File([csv], 'products.csv', { type: 'text/csv' });
-    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
-    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
-    await screen.findByText('Valid Products');
-    fireEvent.click(screen.getByRole('button', { name: /Import 2 Product/ }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/^Nothing was imported/)));
-    const inserts = vi.mocked(supabase.from).mock.calls.filter(([t]) => String(t) === 'products');
-    expect(inserts).toHaveLength(1);
-    const builder = vi.mocked(supabase.from).mock.results.find((_, i) => String(vi.mocked(supabase.from).mock.calls[i][0]) === 'products')?.value;
-    expect(builder.insert).toHaveBeenCalledWith(
-      [expect.objectContaining({ product_name: 'Chem', rate_per_acre: 13 }), expect.objectContaining({ product_name: 'Plain' })],
-      { defaultToNull: false });
-    expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
-  });
-
-  it('treats a whitespace-only number cell as blank', async () => {
-    render(<BulkProductImport {...defaultProps} />);
-    const csv = 'product_name,container_size,rate_per_acre\nChem,   ,   ';
-    const file = new File([csv], 'products.csv', { type: 'text/csv' });
-    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
-    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
-    await screen.findByText('Valid Products');
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/^The import was not confirmed \(network\)/)));
     fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
-    await waitFor(() => expect(supabase.from).toHaveBeenCalledWith('products'));
-    const builder = vi.mocked(supabase.from).mock.results[0]?.value;
-    expect(builder.insert).toHaveBeenCalledWith(expect.objectContaining({
-      container_size: undefined, rate_per_acre: undefined,
-    }));
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(3));
+    const saves = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup');
+    expect(saves[0][1]).toMatchObject({ p_performed_by: 'u1', p_rows: [
+      { insert: { product_name: 'Good', sku: 'G1', notes: 'two\nlines' }, rates: { rate_per_acre: '4', rate_unit: 'oz', suggested_rate: null }, expected_prices: prices },
+    ] });
+    expect(saves[1][1].p_idempotency_key).toBe(saves[0][1].p_idempotency_key);
+    expect(props.onSuccess).not.toHaveBeenCalled();
   });
 
-  it('treats whitespace-only category and EPA cells as blank', async () => {
-    render(<BulkProductImport {...defaultProps} />);
-    const csv = 'product_name,category,epa_registration\nChem,   ,   ';
-    const file = new File([csv], 'products.csv', { type: 'text/csv' });
-    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(csv) });
-    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
-    await screen.findByText('Valid Products');
+  it('shows the lock, skips rated rows it refuses, and reports the import', async () => {
+    rpc.mockImplementation(async (name: string) => (name === 'preview_product_import'
+      ? { data: { rates_locked: true, rows: [
+        okRow({ status: 'refused', error: 'PRODUCT_RATES_LOCKED: rates are locked; an admin can correct one product\'s rates' }),
+        okRow(),
+      ] }, error: null }
+      : { data: { inserted_count: 1, rows: [] }, error: null }));
+    render(<BulkProductImport {...props} />);
+    await upload('product_name,rate_per_acre,rate_unit\nRated,1,oz\nPlain,,\n');
+    expect(await screen.findByText(/Rates are locked\. Rows that set a rate are skipped/)).toBeInTheDocument();
+    expect(screen.getByText(/^Rates are locked; an admin can correct/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
-    await waitFor(() => expect(supabase.from).toHaveBeenCalledWith('products'));
-    const builder = vi.mocked(supabase.from).mock.results[0]?.value;
-    expect(builder.insert).toHaveBeenCalledWith(expect.objectContaining({
-      category: null, epa_registration: null,
-    }));
+    expect(await screen.findByText('Import Complete')).toBeInTheDocument();
+    expect(rpc.mock.calls.find(([n]) => n === 'apply_product_setup')?.[1].p_rows).toEqual([{ insert: { product_name: 'Plain' } }]);
+    expect(props.onSuccess).toHaveBeenCalled();
   });
 });

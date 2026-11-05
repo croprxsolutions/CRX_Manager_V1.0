@@ -274,6 +274,11 @@ function main() {
   // Apply the candidate as one transaction (its preflight checks that).
   const r = apply('candidate.sql');
   assert.equal(r.status, 0, `candidate failed to apply:\n${r.output}`);
+  // From here on the real jobs triggers (the lifecycle sync and the completing marker) fire on every
+  // status update even with replication role replica, as they do in production; the explicit syncs
+  // below are the same convergent rebuild run again.
+  const TRIGGERS_ON = 'ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_release_job_holds_on_lifecycle; ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_mark_job_completing;';
+  psql(TRIGGERS_ON);
 
   // AFTER: the same sync draws whole hundredths and leaves a remainder a Partial Order can take.
   sync();
@@ -284,12 +289,13 @@ function main() {
   assert.equal(Number(scalar(HOLD)), 0.01, 'after: the shed hold should be at least the draw the booking gave up');
   console.log(`[prover] AFTER: job draw ${scalar(DRAWN)} gal, booking left ${leftAfter} gal, shed hold ${scalar(HOLD)} gal`);
 
-  // A demand under half a hundredth draws nothing (and so writes no draw row); the hold still covers it.
+  // An active demand under half a hundredth still draws 0.01, so every booking guard that looks for a
+  // positive job draw (convert, delete, close, rollover) still sees the active job (Sol, 2026-11-05).
   psql(`SET session_replication_role = replica; UPDATE public.job_chemicals SET quantity = 0.5 WHERE job_id = '${J}';`);
   sync();
-  assert.equal(scalar(DRAWN), '', 'after: 0.5 fl oz (0.0039 gal) should draw nothing');
-  assert.equal(Number(scalar(HOLD)), 0.00390625, 'after: the hold should still be 0.00390625 gal');
-  console.log('[prover] AFTER: a demand under 0.005 gal draws nothing; its hold is kept');
+  assert.equal(scalar(DRAWN), '0.01', 'after: an active 0.5 fl oz (0.0039 gal) job should still draw 0.01');
+  assert.equal(Number(scalar(HOLD)), 0.01, 'after: the hold should cover that draw');
+  console.log('[prover] AFTER: an active demand under 0.005 gal still draws 0.01 (visible to every booking guard); hold 0.01');
 
   // Many small jobs completed one after another: the booking's draws track the real total applied,
   // rounded once, instead of adding up one rounding per job (8 x 0.01 = 0.08 for 0.0625 applied).
@@ -304,11 +310,13 @@ function main() {
           VALUES ('${jobN}', '${P}', 1, 'fl oz', false);`);
     }
     sync();
+    // While active, the job draws at least 0.01 so every booking guard sees it; completion rebuilds it to its step.
+    assert.ok(Number(scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE job_id = '${jobN}';`)) >= 0.01, `active job ${n} should draw at least 0.01`);
+    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${jobN}';`);
     const total = scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
     const expected = Math.round(n * 0.0078125 * 100) / 100;
-    assert.equal(Number(total), expected, `after ${n} jobs the booking should have drawn ${expected} gal, not ${total}`);
+    assert.equal(Number(total), expected, `after ${n} completed jobs the booking should have drawn ${expected} gal, not ${total}`);
     assert.ok(Number(scaleOf(scalar(LEFT))) <= 2, `after ${n} jobs the remainder should be whole hundredths`);
-    psql(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = '${jobN}';`);
   }
   console.log(`[prover] AFTER: 8 jobs of 1 fl oz completed one by one drew ${scalar(`SELECT sum(quantity_drawn) FROM public.job_product_draws WHERE quote_id = '${Q}';`)} gal for 0.0625 gal applied`);
   // Small jobs ahead of a larger sibling: they complete, the sibling is cancelled. Their kept draws
@@ -500,11 +508,12 @@ function main() {
       $last_first$;`);
     return scalar(`SELECT COALESCE(sum(quantity_drawn), 0) FROM public.job_product_draws WHERE quote_id = '${Q}' AND product_id = '${P}';`);
   };
+  psql('ALTER TABLE public.jobs ENABLE TRIGGER trg_release_job_holds_on_lifecycle; ALTER TABLE public.jobs ENABLE TRIGGER trg_mark_job_completing;');
   const keptDirect = lastFirst(id('f4'), 'd0', false);
-  assert.ok(Number(keptDirect) < 0.77, `without the completing mark the last-first case should underdraw, kept ${keptDirect}`);
-  console.log(`[prover] Codex last-first, sync called directly (no completing mark, the previous behaviour): kept ${keptDirect} gal for 0.78125 applied`);
-  // From here on the real lifecycle trigger fires on status updates even with replication role replica.
-  psql('ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_release_job_holds_on_lifecycle; ALTER TABLE public.jobs ENABLE ALWAYS TRIGGER trg_mark_job_completing;');
+  // Without the rebuild a completed job keeps whatever it drew while active, so the kept total drifts off the rounded demand.
+  assert.ok(Math.abs(Number(keptDirect) - 0.78) > 0.01, `without the completing mark the last-first case should drift off 0.78, kept ${keptDirect}`);
+  console.log(`[prover] Codex last-first, sync called directly (no completing mark): kept ${keptDirect} gal for 0.78125 applied`);
+  psql(TRIGGERS_ON);
   const keptTrigger = lastFirst(id('f5'), 'e0', true);
   assert.equal(Number(keptTrigger), 0.78, `through the lifecycle trigger the last-first case should keep 0.78 gal, not ${keptTrigger}`);
   console.log(`[prover] Codex last-first, through the lifecycle trigger: kept ${keptTrigger} gal for 0.78125 applied, within 0.01 after every completion`);

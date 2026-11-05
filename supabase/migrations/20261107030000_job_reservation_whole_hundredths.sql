@@ -45,8 +45,10 @@
 --   server-side SQL can set either setting (the API cannot); a forged value only re-runs the
 --   standalone step for a completed job.
 --
--- KNOWN LIMIT: the sync cannot tell an active sibling's over-reservation from real demand, so active
---   siblings may hold up to 0.01 each over their demand until they complete or are cancelled. A
+-- KNOWN LIMIT: an active job draws at least 0.01 (so every booking guard still sees it) and each
+--   rounds on its own, so active siblings may draw and hold up to 0.01 each over their demand until
+--   they complete or are cancelled (100 active 0.006 gal jobs draw 1.00 gal for 0.60 of demand, and a
+--   Partial Order for the rest waits until then). A
 --   completion with the jobs triggers disabled (replication role replica) is not rebuilt.
 --
 -- ROLLBACK (its own reviewed migration): drop trigger trg_mark_job_completing and function
@@ -331,8 +333,11 @@ BEGIN
     -- ones each rounding up; kept draws above it are absorbed by later steps. Active siblings may
     -- briefly over-reserve together; each completion re-syncs the rest (complete_job's status update
     -- fires _sync_job_holds in the same transaction), so the kept draws move by ROUND(completed demand).
-    -- Never more than the job's own demand rounded up.
-    v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);
+    -- Never more than the job's own demand rounded up. An active job with any demand draws at least
+    -- 0.01 while the booking has it: every booking guard (convert, delete, close, rollover) treats a
+    -- positive job draw as the sign an active job is using the booking, so it must never round to
+    -- nothing. Its completion rebuild (above) has no such floor, so the kept draws still track ROUND.
+    v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);
     -- >>>JOB_DRAW_HUNDREDTHS
     v_crop_pool := v_crop_pool - v_draw;
     -- Hold the FULL application demand in the shed (channels don't offset, #A).
@@ -433,7 +438,7 @@ BEGIN
   IF NOT FOUND
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_sync_quote_job_reservations') <> 1
-     OR position('v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
+     OR position('v_draw := LEAST(GREATEST(ROUND(v_completed_demand + v_row.demand, 2) - GREATEST(ROUND(v_completed_demand, 2), v_consumed_drawn), 0.01), ROUND(CEIL(v_row.demand * 100) / 100, 2), v_crop_pool);' IN p.prosrc) = 0
      OR position('INTO v_completed_demand' IN p.prosrc) = 0
      OR position('v_hold := GREATEST(v_row.demand, v_draw);' IN p.prosrc) = 0
      OR position('IF v_row.completing THEN' IN p.prosrc) = 0

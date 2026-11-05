@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, Check, Send, Ban, Printer, Mail, Zap, Trash2, Download, PanelRightOpen } from 'lucide-react';
+import { Plus, FileText, Check, Send, Ban, Printer, Mail, Zap, Trash2, Download, PanelRightOpen, ChevronRight } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
@@ -615,24 +615,66 @@ export default function Invoices() {
     setSelected(new Set(selectableThisSeason.map((i) => i.id)));
   };
 
+  const selectBox = (row: InvoiceRow) => (
+    <input
+      type="checkbox"
+      checked={selected.has(row.id)}
+      onChange={(e) => {
+        e.stopPropagation();
+        toggleSelect(row.id);
+      }}
+      onClick={(e) => e.stopPropagation()}
+      aria-label={`Select invoice ${row.invoice_number}`}
+      className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+    />
+  );
+
+  // Phone layout of one invoice: the same values and formatting as the table's columns.
+  const invoiceMobileRow = (row: InvoiceRow) => (
+    <div className="flex items-center gap-1 px-4 py-2">
+      {/* A 44px tap area around the small checkbox; a spacer keeps rows aligned without one. */}
+      {SELECTABLE_STATUSES.includes(row.status)
+        ? <label className="-ml-3 flex h-11 w-11 shrink-0 items-center justify-center">{selectBox(row)}</label>
+        : <span aria-hidden="true" className="-ml-3 w-11 shrink-0" />}
+      <button
+        type="button"
+        onClick={() => navigate(`/invoices/${row.id}`)}
+        className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left"
+      >
+        <span className="min-w-0 flex-1 space-y-0.5">
+          <span className="flex items-baseline justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-sm text-secondary">
+              <span>{row.invoice_number}</span>
+              {row.is_quick_delivery && <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" aria-label="Quick Delivery" />}
+            </span>
+            <span className="shrink-0 font-heading text-lg font-bold text-nav-dark">{fmt(row.total_amount_cents)}</span>
+          </span>
+          <span className="line-clamp-2 break-words font-heading text-lg font-bold leading-snug text-nav-dark">{row.customer_name}</span>
+          <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-secondary">
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span>{new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}</span>
+              <SeasonTag season={row.season} />
+            </span>
+            <span className={row.balance_cents > 0 ? 'text-red-600 font-semibold' : 'text-crx-green'}>
+              Balance {fmt(row.balance_cents)}
+            </span>
+          </span>
+          <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
+            {statusBadge(row.status)}
+            {typeBadge(row.invoice_type)}
+          </span>
+        </span>
+        <ChevronRight className="w-5 h-5 shrink-0 text-gray-400" aria-hidden="true" />
+      </button>
+    </div>
+  );
+
   const columns: Column<InvoiceRow>[] = [
     {
       key: 'id',
       header: '',
       className: 'w-10',
-      render: (row) =>
-        SELECTABLE_STATUSES.includes(row.status) ? (
-          <input
-            type="checkbox"
-            checked={selected.has(row.id)}
-            onChange={(e) => {
-              e.stopPropagation();
-              toggleSelect(row.id);
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-          />
-        ) : null,
+      render: (row) => (SELECTABLE_STATUSES.includes(row.status) ? selectBox(row) : null),
     },
     {
       key: 'invoice_number',
@@ -641,7 +683,7 @@ export default function Invoices() {
       render: (row) => (
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-crx-green shrink-0" />
-          <span className="font-medium text-nav-dark">{row.invoice_number}</span>
+          <span className="whitespace-nowrap font-medium text-nav-dark">{row.invoice_number}</span>
           {row.is_quick_delivery && (
             <span title="Quick Delivery"><Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" /></span>
           )}
@@ -656,7 +698,7 @@ export default function Invoices() {
         row.order_number && row.order_id ? (
           <button
             onClick={(e) => { e.stopPropagation(); navigate(`/orders/${row.order_id}`); }}
-            className="text-crx-green hover:underline font-medium"
+            className="whitespace-nowrap text-crx-green hover:underline font-medium"
             title="Open the source order"
           >
             {row.order_number}
@@ -761,9 +803,12 @@ export default function Invoices() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="phone-touch space-y-4">
       <PageHeader
-        title="Invoices"
+        title="Customer"
+        accent="Invoices"
+        large
+        subtitle="Post, print and follow up on every bill sent to customers."
         actions={
           <div className="flex gap-2 flex-wrap justify-end">
             {selectedInvoices.length > 0 && canPostInvoices && (
@@ -844,55 +889,57 @@ export default function Invoices() {
             >
               Download PDF
             </Button>
-            <Button variant="secondary" onClick={() => navigate('/invoices/new?type=misc_charge')}>
+            <Button variant="secondary" icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/invoices/new?type=misc_charge')}>
               Misc Charge
             </Button>
           </div>
         }
       />
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <button
-          type="button"
-          className="w-full text-left"
-          onClick={() => setStatusFilter('ready_to_post')}
-          aria-label="Show invoices ready to post"
-        >
-          <Card hover className={statusFilter === 'ready_to_post' ? 'border-amber-400 ring-2 ring-amber-100' : ''}>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
-                <FileText className="w-5 h-5 text-amber-600" />
+      {/* Summary: one compact card; on a phone each figure is a label-left row. */}
+      <div className="space-y-2">
+        <Card padding={false} className="grid grid-cols-1 overflow-hidden divide-y divide-gray-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <button
+            type="button"
+            className={`w-full text-left transition-colors hover:bg-cream-dark/60 ${statusFilter === 'ready_to_post' ? 'bg-amber-50 ring-2 ring-inset ring-amber-400' : ''}`}
+            onClick={() => setStatusFilter('ready_to_post')}
+            aria-label="Show invoices ready to post"
+          >
+            <div className="flex items-center justify-between gap-3 px-4 py-3 sm:block">
+              <div className="flex shrink-0 items-center gap-2 sm:mb-1">
+                <FileText className="w-4 h-4 text-amber-600" aria-hidden="true" />
+                <span className="text-sm font-semibold text-nav-dark">Unposted</span>
               </div>
-              <span className="text-sm text-secondary">Unposted</span>
+              <div className="text-right sm:text-left">
+                <p className="font-heading text-2xl font-bold leading-tight text-amber-600">{loadError ? '—' : unpostedCount}</p>
+                <p className="text-xs text-secondary">invoices awaiting review</p>
+              </div>
             </div>
-            <p className="text-2xl font-semibold font-heading text-amber-600">{loadError ? '—' : unpostedCount}</p>
-            <p className="text-xs text-secondary mt-1">invoices awaiting review</p>
-          </Card>
-        </button>
-        <Card>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-lg bg-crx-green-light flex items-center justify-center">
-              <Check className="w-5 h-5 text-crx-green" />
+          </button>
+          <div className="flex items-center justify-between gap-3 px-4 py-3 sm:block">
+            <div className="flex shrink-0 items-center gap-2 sm:mb-1">
+              <Check className="w-4 h-4 text-crx-green" aria-hidden="true" />
+              <span className="text-sm font-semibold text-nav-dark">Posted Total</span>
             </div>
-            <span className="text-sm text-secondary">Posted Total</span>
+            <div className="text-right sm:text-left">
+              <p className="font-heading text-2xl font-bold leading-tight text-crx-green">{loadError ? '—' : fmt(postedTotal)}</p>
+              <p className="text-xs text-secondary">
+                {loadError ? 'Could not be loaded' : `${postedLikeInvoices.length} posted invoices (including overdue)`}
+              </p>
+            </div>
           </div>
-          <p className="text-2xl font-semibold font-heading text-crx-green">{loadError ? '—' : fmt(postedTotal)}</p>
-          <p className="text-xs text-secondary mt-1">
-            {loadError ? 'Could not be loaded' : `${postedLikeInvoices.length} posted invoices (including overdue)`}
-          </p>
-        </Card>
-        <Card>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center">
-              <Ban className="w-5 h-5 text-red-600" />
+          <div className="flex items-center justify-between gap-3 px-4 py-3 sm:block">
+            <div className="flex shrink-0 items-center gap-2 sm:mb-1">
+              <Ban className="w-4 h-4 text-red-600" aria-hidden="true" />
+              <span className="text-sm font-semibold text-nav-dark">Outstanding</span>
             </div>
-            <span className="text-sm text-secondary">Outstanding</span>
+            <div className="text-right sm:text-left">
+              <p className="font-heading text-2xl font-bold leading-tight text-red-600">{loadError ? '—' : fmt(outstandingBalance)}</p>
+              <p className="text-xs text-secondary">unpaid balance on posted and overdue invoices</p>
+            </div>
           </div>
-          <p className="text-2xl font-semibold font-heading text-red-600">{loadError ? '—' : fmt(outstandingBalance)}</p>
-          <p className="text-xs text-secondary mt-1">unpaid balance on posted and overdue invoices</p>
         </Card>
-        <p className="sm:col-span-3 text-xs text-secondary">
+        <p className="text-xs text-secondary">
           Shows this season&apos;s invoices plus any invoice from an earlier season that is still unposted
           or unpaid; the totals above include those older open invoices.
         </p>
@@ -900,10 +947,11 @@ export default function Invoices() {
 
       {/* Data Table */}
       <Card padding={false}>
-        <div className="p-5">
+        <div className="p-3 sm:p-5">
           <DataTable<InvoiceRow>
             data={filtered}
             columns={columns}
+            mobileRow={invoiceMobileRow}
             searchable
             searchPlaceholder="Search invoices..."
             searchKeys={SEARCH_KEYS}

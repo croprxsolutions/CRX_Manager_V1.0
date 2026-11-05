@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
+| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 58 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 9 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
@@ -417,6 +417,20 @@ unrebuildable on a current-date report. Neither payment screen sends a date. Pro
 ### KI-100 — An open product page learns of a lock change only on reload or a refused save
 **LOW · product UI · `20261107060000` — APPLIED LIVE 2026-11-04**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
+
+### KI-103 — Bulk product import: a large file with per-acre rates times out at Check File
+**MED · OPEN · products/import · `20261107130000` live, PR #1494 · found 2026-11-05 (WP-PM-10 follow-up) · unassigned**
+Measured on live 2026-11-05 ~10:30 AM Central through Products → Import Products → Check File (read-only
+preview; nothing saved, checked afterwards): 500 rows without rates took 4.7 s; 250 rows that all carry a
+per-acre rate took 5.2 s; 500 such rows failed after 9.2 s with "canceling statement due to statement timeout"
+(the signed-in role's limit is 8 s). A rate row costs about 20 ms, so the limit is near 390 rate rows. Nothing
+is saved; the workaround is to split the file. The Import save of a large rate file is unmeasured (measuring it
+writes). Fix options: the screen checks the file in chunks (the whole-file duplicate check must still cover every
+row), or a lower row cap for rate files.
+Also known, no fix planned (Sol LOW on #1486): `preview_product_import` ignores unknown top-level keys on a row,
+but `apply_product_setup` refuses them, so such a file previews "ready" and then the whole save is refused with
+nothing written. The screen never sends extra keys, and keys inside `insert` or `rates` are already refused by
+the preview.
 
 ---
 

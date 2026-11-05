@@ -7130,6 +7130,16 @@ If a stock receive/adjust or vendor-bill save loses its reply and 23 hours pass,
 with a "do not submit again" message and no way to dismiss it (`src/hooks/useUncertainMutationIntent.ts:69`). Fix
 is an admin-only "I checked, clear this" control.
 
+### Closed 2026-11-05 — KI-103 Bulk product import: a large file with per-acre rates timed out at Check File
+PR #1502 (merged 2026-11-05 12:46 PM Central, merge `48ff46a7f`): Check File sends 100 rows per request and joins
+the answers in order; a reply with the wrong row count is refused, and so is a check where rates were locked or
+unlocked between requests. In-file duplicates are still refused across the whole file first; Import stays one
+all-or-nothing save. Proved live 2026-11-05 12:52 PM Central on bundle `index-Cxon6mgH.js` (read-only: Check File
+then Cancel; the save call was blocked in the page): 500 rows that all carry a per-acre rate were checked in 5
+requests (1.6 to 2.7 s each, about 10 s in all), all ready; products, change history and supplier links unchanged
+afterwards. Before the fix, 500 such rows failed after 9.2 s on the signed-in role's 8 s statement limit. The
+unknown-extra-field quirk stays open under KI-103.
+
 ### Closed 2026-11-05 — KI-86, KI-87, KI-88
 
 KI-86 and KI-87 were already fixed on `main` when re-checked: the live product-active guard (`20261103100000`, PR #1315) refuses direct `is_active` writes, and PR #1321 shows the blocker text when `set_product_active` refuses. KI-88 was fixed by branch `claude/ki86-88-product-turnoff` (`src/pages/InventoryPage.tsx`): the mount read is now the turned-off product ids only. All three were proven on the local test app on 2026-11-05.

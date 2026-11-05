@@ -244,6 +244,12 @@ describe('sanitizeError', () => {
     expect(sanitizeError(
       'ORDER_HAS_FIELD_SPLIT: this order is split across fields; bill it per field owner through create_split_invoices_from_order'
     )).toBe("Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again");
+    expect(sanitizeError("BILL_SPLIT_FROZEN: delivery DEL-1 is complete, so this sale's bill split can't change. Void the delivery to change it."))
+      .toContain('its bill split is locked');
+    expect(sanitizeError('ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice'))
+      .toContain('billed per payer');
+    expect(sanitizeError("ORDER_ITEM_SHARES_OVER_100: a line's shares can't total more than 100%"))
+      .toContain('more than 100%');
     expect(sanitizeError('INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID: invoice and order customer must match'))
       .toContain("only be for that order's customer");
     expect(sanitizeError(

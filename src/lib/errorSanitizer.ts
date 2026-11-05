@@ -125,6 +125,12 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'This order invoice is already final and cannot be changed'],
   // create_invoice_from_order refuses an order split across fields (20261022021000): it is billed
   // per field owner. The page offers that path once it sees the order's field allocations.
+  [/^BILL_SPLIT_FROZEN\b/,
+   "Nothing was changed. A delivery on this sale is complete, so its bill split is locked. Void the delivery to change the split"],
+  [/^ORDER_HAS_BILL_SPLIT\b/,
+   "Nothing was billed. This sale has a bill split, so it is billed per payer. Refresh the page, then choose Create Invoice on the delivery"],
+  [/^ORDER_ITEM_SHARES_OVER_100\b/,
+   "Nothing was changed. A line's shares can't total more than 100%"],
   [/^ORDER_HAS_FIELD_SPLIT\b/,
    "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],
   [/^ORDER_INVOICE_EXCEEDS_DELIVERED\b/,

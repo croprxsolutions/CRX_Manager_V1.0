@@ -121,7 +121,7 @@ export default function ReceivingHubPanel() {
           .in('status', ['submitted', 'partially_received'])
           .order('expected_delivery_date', { ascending: true, nullsFirst: false })
           .order('id')
-          .order('id', { referencedTable: 'purchase_order_items' })
+          .order('id', { referencedTable: 'items' }) // the embed alias, not the table name
           .range(from, to)));
         // A failed PO load must NOT look like "nothing on order" — surface it.
         // (Codex P2: poRes.data || [] below would silently swallow an RLS/drift

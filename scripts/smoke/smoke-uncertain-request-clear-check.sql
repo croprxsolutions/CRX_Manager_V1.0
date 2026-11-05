@@ -50,7 +50,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: retire_uncertain_request is not the body of 20261107150000';
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._guard_idempotency_key_insert()'::regprocedure), chr(13), ''))
-     <> '2c85eb6f59909cbc120c5242045d5334' THEN
+     <> '90a587f5b86c8dbf34ffbb586c562d20' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: _guard_idempotency_key_insert is not the body of 20261107150000';
   END IF;
   IF has_function_privilege('anon', v_fn, 'EXECUTE') OR has_function_privilege('service_role', v_fn, 'EXECUTE')
@@ -237,6 +237,9 @@ BEGIN
     END;
     IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a retired request was saved later: %', v_bad; END IF;
   END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM public.idempotency_keys WHERE idempotency_key = v_expired AND result = '{"smoke": true}') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a refused late save removed the expired receipt';
+  END IF;
   INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
   VALUES ('save_vendor:' || v_actor || ':' || gen_random_uuid(), 'save_vendor', '{"smoke": true}', v_actor, 'smoke');
   -- A retry of a retired request whose receipt is still live keeps its replay handling:

@@ -21,8 +21,9 @@
 - Every safe answer retires the request in `retired_uncertain_requests`, under the request's lock. The receipt
   insert guard `_guard_idempotency_key_insert` is re-issued (otherwise identical to `20260716160000`) to refuse any
   later receipt of a retired request key, or of any row key under it, with `IDEMPOTENCY_REQUEST_RETIRED`. That covers
-  rows the browser never knew about, sends from other tabs, and expired receipts (the check runs before an expired
-  receipt is removed). A row's receipt insert takes its batch's lock shared, so a retire waits for an in-flight row
+  rows the browser never knew about, sends from other tabs, and expired receipts (the check runs on the one path
+  that saves a new receipt, so a receipt removed by a concurrent cleanup cannot slip past it, and the refusal also
+  undoes the guard's own removal of an expired receipt; Codex review finding). A row's receipt insert takes its batch's lock shared, so a retire waits for an in-flight row
   and a row sent during a retire waits and is then refused. Every saving RPC writes its receipt in the same
   transaction as its work, so the refusal rolls the work back (Sol findings). A retry that finds a live receipt of
   the key is left to the existing replay handling, so a saved request still replays; `allocate_payment`'s

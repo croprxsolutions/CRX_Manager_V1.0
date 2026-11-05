@@ -33,8 +33,8 @@
 -- retired_uncertain_requests under the request's lock. The receipt insert guard
 -- (re-issued below) then refuses any later save of that key, or of any batch row
 -- under it ("<request key>:<uuid>"), with IDEMPOTENCY_REQUEST_RETIRED - from any
--- tab, whatever rows the browser knows about, and before an expired receipt is
--- removed. Every saving RPC writes its receipt in the same transaction as its work,
+-- tab, whatever rows the browser knows about, expired receipts included - on the one
+-- path that saves a new receipt (no live receipt of the key). Every saving RPC writes its receipt in the same transaction as its work,
 -- so a refused receipt rolls the work back. Replays of a saved receipt are untouched.
 --
 -- The first check's time travels in the browser as a token signed with a random key
@@ -93,27 +93,13 @@ BEGIN
     hashtextextended('crx:idempotency:' || NEW.idempotency_key, 0)
   );
 
-  -- KI-27: a retired request, or a batch row under one, never saves new work. A row
-  -- takes its batch's lock shared, so this waits for (or blocks)
-  -- retire_uncertain_request, which holds that lock exclusively. Checked before any
-  -- expired receipt is removed. A live receipt of the key is left to the replay
-  -- handling below (allocate_payment's claim-row replay included): that saves nothing.
+  -- KI-27: a batch row takes its batch's lock shared, so it waits for (or blocks)
+  -- retire_uncertain_request, which holds that lock exclusively. The retired check
+  -- itself runs below, on the only path that saves a new receipt.
   v_parent := substring(NEW.idempotency_key FROM
     '^([a-z0-9_]+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
   IF v_parent IS NOT NULL THEN
     PERFORM pg_advisory_xact_lock_shared(hashtextextended('crx:idempotency:' || v_parent, 0));
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM public.idempotency_keys
-     WHERE idempotency_key = NEW.idempotency_key
-       AND (expires_at < now()) IS NOT TRUE
-  ) AND EXISTS (
-    SELECT 1 FROM public.retired_uncertain_requests r
-     WHERE r.request_key = NEW.idempotency_key OR r.request_key = v_parent
-  ) THEN
-    RAISE EXCEPTION
-      'IDEMPOTENCY_REQUEST_RETIRED: idempotency_key % belongs to a request an admin cleared; it cannot be saved',
-      NEW.idempotency_key;
   END IF;
 
   DELETE FROM public.idempotency_keys
@@ -142,6 +128,18 @@ BEGIN
     RAISE EXCEPTION
       'IDEMPOTENCY_CONCURRENT_REPLAY_RETRY: operation % with key % completed concurrently; retry to read its saved result',
       NEW.operation, NEW.idempotency_key;
+  END IF;
+
+  -- KI-27: no live receipt, so this insert would save new work: a retired request, or
+  -- a batch row under one, never does. The exception also undoes the expired-receipt
+  -- delete above. A live receipt's replay (above) saves nothing and is left alone.
+  IF EXISTS (
+    SELECT 1 FROM public.retired_uncertain_requests r
+     WHERE r.request_key = NEW.idempotency_key OR r.request_key = v_parent
+  ) THEN
+    RAISE EXCEPTION
+      'IDEMPOTENCY_REQUEST_RETIRED: idempotency_key % belongs to a request an admin cleared; it cannot be saved',
+      NEW.idempotency_key;
   END IF;
 
   RETURN NEW;

@@ -40,8 +40,10 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
           createdAt: new Date(request.createdAtMs).toISOString(),
         },
       });
-      setConfirmOpen(false);
-      toast('success', 'Saved request cleared. This form can be used again.');
+      // Reload so no screen keeps the recovered form values: resubmitting them would
+      // send the same change again under a new key. Flush first so the log survives.
+      await Promise.resolve(Sentry.flush(2000)).catch(() => false);
+      window.location.reload();
     } catch {
       toast('error', 'Could not clear this saved request: it may still be retryable, or its saved data is damaged. Reload the page; if it stays locked, report it.');
     } finally {
@@ -63,7 +65,7 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
         onClose={() => setConfirmOpen(false)}
         onConfirm={() => void handleClear()}
         title="Clear the expired saved request?"
-        message={`This request was saved ${savedAt} on the ${screen} screen${record}. If that time looks wrong, this device's clock may be off: do not clear it. First check that real record (the bill, payment, receipt or stock count) to see whether this request was saved. Clearing only removes the stuck request from this browser; it does not change any records. If it was not saved, you can enter it again afterwards.`}
+        message={`This request was saved ${savedAt} on the ${screen} screen${record}. If that time looks wrong, this device's clock may be off: do not clear it. First check that real record (the bill, payment, receipt or stock count) to see whether this request was saved. Clearing only removes the stuck request from this browser and reloads the page with an empty form; it does not change any records. If it was not saved, enter it again afterwards.`}
         confirmLabel="Clear it"
         variant="warning"
         loading={clearing}

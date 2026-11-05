@@ -47,7 +47,9 @@ export default function ProductRateLockControl({ lock, loadFailed, onRetry, isAd
       resetKey();
       onChanged(next);
       // A replayed receipt may be older than the switch: show what is current now.
-      loadProductRateLock().then((current) => { if (seq === saveSeq.current) onChanged(current); }).catch(() => undefined);
+      // If that read fails, the receipt is unconfirmed: reload, which shows "Couldn't check" if it fails too.
+      loadProductRateLock().then((current) => { if (seq === saveSeq.current) onChanged(current); })
+        .catch(() => { if (seq === saveSeq.current) onRetry(); });
       setOpen(false);
       setReason('');
       toast('success', next.is_locked ? 'Rates locked' : 'Rates unlocked');

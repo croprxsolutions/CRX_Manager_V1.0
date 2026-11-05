@@ -53,6 +53,18 @@ describe('rate lock switch failure paths', () => {
     await waitFor(() => expect(onChanged).toHaveBeenLastCalledWith(open));
   });
 
+  it('reloads the lock when the read after a save fails, rather than trusting a possibly replayed receipt', async () => {
+    mockSet.mockReset().mockResolvedValueOnce(locked);
+    mockLoad.mockReset().mockRejectedValueOnce(new Error('network lost'));
+    const onRetry = vi.fn();
+    render(<ProductRateLockControl lock={open} loadFailed={false} onRetry={onRetry} isAdmin profileId="u1" onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Lock rates' }));
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'season' } });
+    const buttons = screen.getAllByRole('button', { name: 'Lock rates' });
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(onRetry).toHaveBeenCalled());
+  });
+
   it('drops an older save\'s late read once a newer save has started', async () => {
     let releaseFirstRead: (lock: typeof locked) => void = () => undefined;
     mockSet.mockReset().mockResolvedValueOnce(locked).mockResolvedValueOnce(open);

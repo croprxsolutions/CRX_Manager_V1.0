@@ -228,6 +228,8 @@ export default function ProductDetail() {
     setRateLockFailed(false);
     loadProductRateLock().then(setRateLock).catch((error: unknown) => {
       Sentry.captureException(error);
+      // An older "open" may be out of date: back to read-only.
+      setRateLock(null);
       setRateLockFailed(true);
     });
   }, []);

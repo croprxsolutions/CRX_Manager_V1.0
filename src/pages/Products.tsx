@@ -296,6 +296,8 @@ export default function Products() {
     setRateLockFailed(false);
     loadProductRateLock().then(setRateLock).catch((error: unknown) => {
       Sentry.captureException(error);
+      // An older state may be out of date: show "Couldn't check" instead.
+      setRateLock(null);
       setRateLockFailed(true);
     });
   }, []);

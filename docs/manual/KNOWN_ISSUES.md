@@ -36,9 +36,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 58 |
+| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
-| Closed as FIXED, with proof (bottom of file and archive) | 8 |
+| Closed as FIXED, with proof (bottom of file and archive) | 9 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
@@ -464,10 +464,8 @@ WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup chec
 
 ### KI-31 — Field Setup and field-save loose ends
 **LOW · OPEN · UI/database · unassigned**
-After saving a boundary the page does not refresh total acres, so a later attribute-only save can revert legacy
-acres; deleting every drawn polygon of a multi-part field falls back to the old boundary
-(`src/pages/FieldSetup.tsx:572`). `save_field` reports success for a missing id (`20260729222311:80`, no `FOUND`
-check).
+`save_field` reports success for a missing id (`20260729222311:80`, no `FOUND` check). (The stale-acres and
+delete-every-polygon sub-items were closed 2026-11-05; see the archive.)
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
 **MED · PARTIAL · UI/database · Mason (Goal 4)**
@@ -597,11 +595,6 @@ comment. Nothing is wrong today because it is unapplied.
 **LOW · OPEN · tooling/process · Mason (deploy approval)**
 `supabase/functions/_shared/sentry.ts:60` defines `validateSentryDsnOrThrow()` but nothing calls it; a missing key
 logs `[SENTRY_MISCONFIG]` and drops the alert. Failing loudly needs the key confirmed and eight function deploys.
-
-### KI-39 — Customer-facing PDF polish
-**LOW · OPEN · UI · unassigned**
-Long section notes on quote PDFs overprint the items table (`src/lib/quotePdf.ts:190-191`); the year-over-year
-"Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`).
 
 ### KI-40 — CRM Phase 5 (AI receptionist) preconditions
 **LOW · OPEN (future work) · database · unassigned**
@@ -945,6 +938,8 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 7. **KI-15, stored-profit Reports tabs** — PR #1134 merged 2026-10-27 (`cef4e3015`); `Reports.tsx` now calls `get_profitability_report` for customer, product and month groups. The PR records real-data local-app proof and paging/failure tests. Full report approval remains To-Do 10.2. Original issue and closure evidence appended to the archive.
 
 8. **KI-85, stale sweep fingerprints on quote functions** — closed 2026-11-01 by the pin-refresh change on branch `fix/refresh-quote-sweep-pins-2026-11-01`; the 2026-11-01 live sweep adjudicated all 29 predicates `ok: true`, `complete: true`.
+
+9. **KI-39, customer-facing PDF polish** — closed 2026-11-05: quote-PDF section notes wrap instead of overprinting (PR #1480); the year-end "Change" column shows green/red again (PR #1477). Both checked on a rendered PDF; original text appended to the archive.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

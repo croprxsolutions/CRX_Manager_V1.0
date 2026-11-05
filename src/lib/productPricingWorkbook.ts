@@ -286,7 +286,7 @@ async function measurePricingWorkbookZipEntry(
 }
 
 /** Validate compressed and actual expanded sizes before ExcelJS loads XML. */
-async function validatePricingWorkbookArchive(arrayBuffer: ArrayBuffer): Promise<void> {
+export async function validatePricingWorkbookArchive(arrayBuffer: ArrayBuffer): Promise<void> {
   if (arrayBuffer.byteLength > MAX_PRICING_WORKBOOK_FILE_BYTES) {
     throw new PricingWorkbookFormatError(
       `Pricing workbooks must be ${MAX_PRICING_WORKBOOK_FILE_BYTES / 1024 / 1024} MB or smaller.`,
@@ -407,7 +407,7 @@ async function validatePricingWorkbookArchive(arrayBuffer: ArrayBuffer): Promise
   }
 }
 
-async function loadExcelJs(): Promise<typeof import('exceljs')> {
+export async function loadExcelJs(): Promise<typeof import('exceljs')> {
   const imported = await import('exceljs') as unknown as {
     default?: typeof import('exceljs');
   } & Partial<typeof import('exceljs')>;
@@ -577,7 +577,7 @@ export async function generateProductPricingWorkbook(
   });
 }
 
-function isFormulaValue(value: CellValue): boolean {
+export function isFormulaValue(value: CellValue): boolean {
   return Boolean(
     value
     && typeof value === 'object'
@@ -612,7 +612,7 @@ function numberToPlainDecimal(value: number, context: string): string {
   return `${sign}${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
 }
 
-function cellValueToText(value: CellValue, context: string): string {
+export function cellValueToText(value: CellValue, context: string): string {
   const resolved = formulaResult(value);
   if (resolved == null) return '';
   if (typeof resolved === 'string') return resolved;

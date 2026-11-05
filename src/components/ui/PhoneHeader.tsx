@@ -4,7 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 interface PhoneHeaderProps {
   title: string;
   /** Small light-gray line above the title (a record number, a date). */
-  eyebrow?: string | null;
+  eyebrow?: ReactNode;
   /** Shows a back arrow with this label. */
   back?: { label: string; onClick: () => void };
   /** Labelled steps of a step-by-step flow, and which one is current. */

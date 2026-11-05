@@ -7,6 +7,20 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "apply_product_setup": {
+      "chain": "smoke-product_setup_workbook.sql",
+      "container_prover": "prove-product-setup-workbook-real-schema.mjs",
+      "description": "REQUIRES 20261107080000 and 20261107130000. The product setup workbook (WP-PM-11a-2): the bodies of get_product_setup_workbook, preview_product_rates, apply_product_setup (20261107130000), its renamed update body _apply_product_setup_update and the fingerprint helper are pinned, no signed-in user can call the update body directly and anon cannot execute them; on an invented product an admin downloads it, previews a rate change, saves a setup change and a same-key replay answers the same, and the old downloaded row is then refused PRODUCT_SETUP_STALE; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED by all three functions and a signed-out visitor is refused EXECUTE.",
+      "covers": [
+        "apply_product_setup",
+        "get_product_setup_workbook",
+        "preview_product_rates"
+      ],
+      "area": [
+        "security",
+        "pricing"
+      ]
+    },
     "order_replay_binding_batch4b": {
       "chain": "smoke-order-replay-binding-batch4b.sql",
       "container_only": true,

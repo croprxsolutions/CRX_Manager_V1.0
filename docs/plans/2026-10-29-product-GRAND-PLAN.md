@@ -535,6 +535,8 @@ The overnight loop (`docs/plans/2026-10-28-product-master-loop-MISSION.md`) runs
 ## 6. Stages 2 to 9
 
 ### Stage 2: parent records, then weight, chemistry, EPA data (To-Do 2.9). Mason's order: weight before chemistry.
+**Build sheet: `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md` (2026-11-04)**, which details these packages against current code and lists its corrections to this section.
+
 Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Catalog coverage is tracked in section 7. From PAR-1 on, formulation values (weight per gallon, ingredients, house rates) live on the parent, label facts live on each EPA registration (REG-1), and size values stay on each row (overlap 13's table).
 
 **PAR-1 · Parent record per formulation, plus nickname** (overlap 13; August PRD 1.15)

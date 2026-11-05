@@ -7066,3 +7066,46 @@ quote-version trust-marker route intact, so these were stale fingerprints, not d
 `20261027080400` (any active rep may convert; the actor stays bound), so the sweep is clean both before and after
 that migration applies. The candidate digest was captured from a disposable PostgreSQL replica that first reproduced
 every live digest. Still open until: review, merge, and a fresh live sweep after the candidate migration is applied.
+
+### Closed sub-item 2026-11-05 — KI-39 quote PDF section notes
+
+Original text: "Long section notes on quote PDFs overprint the items table (`src/lib/quotePdf.ts:190-191`)".
+
+Closure: `src/lib/quotePdf.ts` now wraps section header notes, notes under a section's table and quote footer notes
+one line at a time, with full line spacing, and starts a new page before a line would reach the footer. A new section
+also starts on a fresh page when there is no room for its header, table heading and first row. Checked by rendering
+test quotes (short notes, long notes, a note crossing a page, long footer notes) to images before and after the fix.
+No database change. The year-end "Change" colour part of KI-39 stays open.
+
+### Closed sub-item 2026-11-05 — KI-31 stale total acres after a boundary or override save
+
+Original text: "After saving a boundary the page does not refresh total acres, so a later attribute-only save can revert legacy
+acres" (`src/pages/FieldSetup.tsx`).
+
+Fixed in `src/pages/FieldSetup.tsx` (branch `claude/fieldsetup-acres-refresh-26a603`; frontend only, no migration): after a
+successful `set_field_boundary` or `set_field_override_acres` the page copies the returned `billable_acres` into its
+`total_acres` (and `measured_acres` after a boundary), and makes that the page's clean baseline, so a later attribute-only
+save sends the stored acres. Proven on the local test app: before the fix, setting 55 acres to bill and then saving only
+the crop left `total_acres` 12 beside `override_acres` 55; after it, `total_acres` stayed 55. The rest of KI-31 stays open.
+
+### Closed sub-item 2026-11-05 — KI-31 deleting every polygon fell back to the old boundary
+
+Original text: "Deleting every drawn polygon of a multi-part field falls back to the old boundary
+(`src/pages/FieldSetup.tsx:686`)."
+
+Already fixed in code by commit `12dcf01b8` (2026-07-11): every part delete now goes through `handlePolygonsChange`,
+which clears the loaded boundary when no part is left, so `buildBoundaryGeometry` has nothing old to fall back to.
+Saving with every part deleted now sends no boundary and says "A measured boundary cannot be removed here — draw a
+replacement boundary and save." A regression test was added in `src/pages/FieldSetup.saveNavigation.test.tsx`
+("deleting every part of a saved multi-part boundary"). It fails if the clear is removed. No code or database change.
+
+### Closed 2026-11-05 — KI-39 (year-end "Change" colour; the whole entry is now closed)
+
+Original text: "The year-over-year "Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`).
+The quote-PDF notes part was fixed 2026-11-05 (see the archive)."
+
+Fixed by PR #1477 (merge `a1076c552`). The colour was set in the table's after-draw hook, after the text was already on
+the page, so it never applied. It is now set on each cell before drawing (`didParseCell`): green for zero or growth, red
+for a decline, unchanged when there is no prior-season value. A test covers it in `src/lib/yearEndSummaryPdf.test.ts`.
+Proof: a Year-End Summary rendered from test data showed +23.3% and +25.0% green, −25.0% red, "—" in the normal colour,
+and no other text changed colour. With the quote-PDF part closed by PR #1480, KI-39 is fully closed. No database change.

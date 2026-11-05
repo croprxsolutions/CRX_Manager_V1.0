@@ -281,9 +281,11 @@ export function sanitizeError(error: unknown): string {
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;
   }
-  // Setup save and import (20261107080000, 20261107090000): the text after the token names the products.
-  const setupRefusal = message.match(/^PRODUCT_SETUP_(?:DUPLICATE|ROW_REFUSED|INVALID|STALE|ROW_SHAPE_INVALID|ROWS_REQUIRED|DUPLICATE_PRODUCT):\s*(.+)$/s)?.[1];
-  if (setupRefusal) {
+  // Setup save and import (20261107080000, 20261107130000): a table check refused one product; name it, then explain the check.
+  const refusedRow = message.match(/^PRODUCT_SETUP_ROW_REFUSED:\s*(.+?):\s+(.+)$/s);
+  if (refusedRow) return `Nothing was saved. ${refusedRow[1]}: ${sanitizeError(refusedRow[2])}`;
+  const setupRefusal = message.match(/^(?:PRODUCT_SETUP_STALE|PRODUCT_SETUP_INVALID|PRODUCT_SETUP_DUPLICATE_PRODUCT|PRODUCT_SETUP_ROW_SHAPE_INVALID|PRODUCT_SETUP_DUPLICATE|PRODUCT_SETUP_ROWS_REQUIRED):\s*(.+)$/s)?.[1];
+  if (setupRefusal && !CONSTRAINT_PATTERNS.some(([pattern]) => pattern.test(message))) {
     return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }
   if (/^PRODUCT_ACTIVE_REVIEW_STALE(?::|$)/.test(message)) {

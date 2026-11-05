@@ -23,6 +23,7 @@ import { requireGroupVersions, requirePostVersion } from '../lib/invoicePostVers
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
+import { invoiceEmailKey, wasInvoiceSentSinceLastChange } from '../lib/invoiceBulkEmail';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
@@ -229,6 +230,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
   // Email invoice
   const [emailing, setEmailing] = useState(false);
+  // The address an unchanged invoice already went to: asks before mailing another copy.
+  const [resendTo, setResendTo] = useState<string | null>(null);
   const emailingRef = useRef(false);
 
   // Write-off modal + write-off list
@@ -1816,7 +1819,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   };
 
   // Email invoice with PDF attachment
-  const handleEmailInvoice = async () => {
+  const handleEmailInvoice = async (resend = false) => {
+    setResendTo(null);
     if (!profile) {
       toast('error', 'Cannot email invoice — profile not loaded. Please refresh.');
       return;
@@ -1831,14 +1835,14 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     emailingRef.current = true;
     setEmailing(true);
     try {
-      await sendInvoiceEmail();
+      await sendInvoiceEmail(resend);
     } finally {
       emailingRef.current = false;
       setEmailing(false);
     }
   };
 
-  const sendInvoiceEmail = async () => {
+  const sendInvoiceEmail = async (resend: boolean) => {
     if (!profile) return;
     // Read the billed customer by id: the picker list skips inactive customers and stops at 500,
     // so a customer missing from it would read as "no email on file".
@@ -1876,7 +1880,15 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           <p style="margin:8px 0 0;color:#6b7280;font-size:13px;">If you have questions about this invoice, please contact us.</p>
         `);
 
-        await assertInvoiceSendable(id!);
+        const liveVersion = await assertInvoiceSendable(id!);
+        if (!liveVersion) throw new Error('Could not read this invoice. Reload and try again.');
+        const version = { id: id!, updated_at: liveVersion };
+        // The same rule as the list's bulk Email: this version already went to this address
+        // (from either screen) asks first; a deliberate extra copy gets its own key.
+        if (!resend && await wasInvoiceSentSinceLastChange(version, cust.email!)) {
+          setResendTo(cust.email!);
+          return 'ask' as const;
+        }
         const result = await sendEmail({
           to: cust.email!,
           subject: `Invoice ${invoice.invoice_number || ''} from Crop RX Solutions`,
@@ -1885,18 +1897,21 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           customer_id: invoice.customer_id!,
           resource_type: 'invoice',
           resource_id: id,
-          idempotency_key: `invoice-email-${id}-${Date.now()}`,
+          idempotency_key: resend ? `invoice-email-${id}-copy-${Date.now()}` : await invoiceEmailKey(version, cust.email!),
           invoice_snapshot: invoiceEmailSnapshot(pdfData),
         });
 
-        if (result.success) {
-          logActivity({ event: 'invoice_emailed', description: `Invoice ${invoice.invoice_number} emailed to ${cust.email}`, performedBy: profile.id, entityType: 'invoice', entityId: id, customerId: invoice.customer_id });
-        } else {
-          throw new Error(result.error || 'Failed to send email');
-        }
+        if (!result.success) throw new Error(result.error || 'Failed to send email');
+        // The same version and address sent at the same moment from the list: the server sent it once.
+        if (result.deduplicated) return 'already' as const;
+        logActivity({ event: 'invoice_emailed', description: `Invoice ${invoice.invoice_number} emailed to ${cust.email}`, performedBy: profile.id, entityType: 'invoice', entityId: id, customerId: invoice.customer_id });
+        return 'sent' as const;
       },
       toast,
-      successMessage: `Invoice emailed to ${cust.email}`,
+      onSuccess: (outcome) => {
+        if (outcome === 'sent') toast('success', `Invoice emailed to ${cust.email}`);
+        if (outcome === 'already') toast('info', `This invoice was already emailed to ${cust.email}; not sent again.`);
+      },
       sentryTag: 'email_invoice',
     });
   };
@@ -2066,7 +2081,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             <Button
               variant="secondary"
               icon={<Mail className="w-4 h-4" />}
-              onClick={handleEmailInvoice}
+              onClick={() => handleEmailInvoice()}
               loading={emailing}
               showChevron={false}
             >
@@ -2843,6 +2858,19 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         open={unsavedBlocker.state === 'blocked'}
         onStay={() => unsavedBlocker.reset?.()}
         onLeave={() => unsavedBlocker.proceed?.()}
+      />
+
+      {/* Already emailed: an extra copy only on a deliberate yes */}
+      <ConfirmModal
+        open={resendTo != null}
+        onClose={() => setResendTo(null)}
+        onConfirm={() => handleEmailInvoice(true)}
+        title="Email Another Copy?"
+        message={`This invoice was already emailed to ${resendTo ?? ''} and has not changed since. Send another copy?`}
+        confirmLabel="Send Another Copy"
+        variant="info"
+        icon={Mail}
+        loading={emailing}
       />
 
       {/* Post Invoice Confirm */}

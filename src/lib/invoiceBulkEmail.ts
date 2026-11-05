@@ -1,6 +1,7 @@
-// Bulk "Email" on the Invoices list (To-Do 9.6). Each invoice goes through the same
-// send-email path as the single-invoice Email button; these helpers decide which
-// selected invoices can go and give each send its retry key.
+// Invoice email (To-Do 9.6 bulk, 9.8 record key). The list's bulk Email and the invoice page's
+// Email button share these rules: which invoices can go, each send's retry key, and whether this
+// version already went to this address.
+import { supabase } from './db';
 
 export type BulkEmailOutcome = 'sent' | 'already_sent' | 'failed' | 'skipped';
 
@@ -21,14 +22,17 @@ export function isBulkEmailable(inv: { status?: string | null; send_disposition?
 
 /**
  * The retry key comes from the record (To-Do 9.8): the invoice id, the time it last changed,
- * and the address. Retrying a lost or failed send reuses it, so the server never mails the same
+ * and a short code for the address. Both screens use it, so the server never mails the same
  * version to the same address twice; an edit, a payment or a corrected address sends again.
+ * The address is hashed so a long one cannot push the key past the server's 256 characters.
  */
-export function bulkInvoiceEmailKey(inv: { id: string; updated_at: string }, to: string): string {
-  return `invoice-email-${inv.id}-v${inv.updated_at}-to-${to.trim().toLowerCase()}`;
+export async function invoiceEmailKey(inv: { id: string; updated_at: string }, to: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(to.trim().toLowerCase()));
+  const code = Array.from(new Uint8Array(digest).slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
+  return `invoice-email-${inv.id}-v${inv.updated_at}-to-${code}`;
 }
 
-/** An invoice email already sent to this address since the invoice last changed, from any screen. */
+/** An invoice email already sent to this address since the invoice last changed. */
 export function sentSinceLastChange(
   log: { recipient_email: string | null; created_at: string | null }[],
   to: string,
@@ -37,6 +41,26 @@ export function sentSinceLastChange(
   const changed = Date.parse(updatedAt);
   return log.some((l) => (l.recipient_email ?? '').trim().toLowerCase() === to.trim().toLowerCase()
     && Date.parse(l.created_at ?? '') >= changed);
+}
+
+/**
+ * Reads the email log for this invoice: every key the server accepts for it names the invoice
+ * id (scoped keys and older unscoped ones alike), whichever screen sent it.
+ */
+export async function wasInvoiceSentSinceLastChange(inv: { id: string; updated_at: string }, to: string): Promise<boolean> {
+  const { data: log, error } = await supabase
+    .from('email_log')
+    .select('recipient_email, created_at')
+    .eq('email_type', 'invoice')
+    .eq('status', 'sent')
+    .like('idempotency_key', `%${inv.id}%`);
+  if (error) throw error;
+  return sentSinceLastChange(log ?? [], to, inv.updated_at);
+}
+
+/** The server's hourly cap (50 per user): later sends in the batch would be refused too. */
+export function isEmailRateLimit(message: string): boolean {
+  return message.startsWith('Rate limit:');
 }
 
 export function summarizeBulkEmail(results: BulkEmailResult[]): { type: 'success' | 'warning' | 'error'; message: string } {

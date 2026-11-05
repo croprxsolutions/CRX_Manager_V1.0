@@ -45,7 +45,7 @@ import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
 import { assertInvoiceSendDisposition } from '../lib/invoiceSendDisposition';
 import { logActivity } from '../lib/activityLogger';
-import { bulkInvoiceEmailKey, isBulkEmailable, sentSinceLastChange, summarizeBulkEmail, type BulkEmailResult } from '../lib/invoiceBulkEmail';
+import { invoiceEmailKey, isBulkEmailable, isEmailRateLimit, summarizeBulkEmail, wasInvoiceSentSinceLastChange, type BulkEmailResult } from '../lib/invoiceBulkEmail';
 
 type InvoiceRow = Invoice & { customer_name: string; salesman_name: string | null; order_number: string | null };
 
@@ -155,19 +155,6 @@ async function assertStillSendable(inv: InvoiceRow): Promise<void> {
   if (live.updated_at !== inv.updated_at) {
     throw new Error('This invoice changed since the list loaded. Reload the list and email it again.');
   }
-}
-
-// A send from the invoice page uses its own key, so check the log too: never mail the same
-// version to the same address twice from either screen.
-async function wasSentSinceLastChange(inv: InvoiceRow, to: string): Promise<boolean> {
-  const { data: log, error } = await supabase
-    .from('email_log')
-    .select('recipient_email, created_at')
-    .eq('email_type', 'invoice')
-    .eq('status', 'sent')
-    .like('idempotency_key', `invoice:invoice:${inv.id}:%`);
-  if (error) throw error;
-  return sentSinceLastChange(log ?? [], to, inv.updated_at);
 }
 
 export default function Invoices() {
@@ -555,7 +542,7 @@ export default function Invoices() {
     const targets = selectedEmailable;
     const results: BulkEmailResult[] = [];
     try {
-      for (const inv of targets) {
+      for (const [index, inv] of targets.entries()) {
         const base = { invoiceId: inv.id, invoiceNumber: inv.invoice_number, customerName: inv.customer_name };
         try {
           // Read the address right before each send, so a change made mid-batch is used.
@@ -573,7 +560,7 @@ export default function Invoices() {
           // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
           const pdfData = await loadInvoicePdfData(inv);
           await assertStillSendable(inv);
-          if (await wasSentSinceLastChange(inv, to)) {
+          if (await wasInvoiceSentSinceLastChange(inv, to)) {
             results.push({ ...base, outcome: 'already_sent', detail: `Already emailed to ${to}; not sent again` });
             continue;
           }
@@ -585,7 +572,7 @@ export default function Invoices() {
             customer_id: inv.customer_id,
             resource_type: 'invoice',
             resource_id: inv.id,
-            idempotency_key: bulkInvoiceEmailKey(inv, to),
+            idempotency_key: await invoiceEmailKey(inv, to),
             invoice_snapshot: invoiceEmailSnapshot(pdfData),
           });
           if (!result.success) throw new Error(result.error || 'Failed to send email');
@@ -596,6 +583,12 @@ export default function Invoices() {
             logActivity({ event: 'invoice_emailed', description: `Invoice ${inv.invoice_number} emailed to ${to}`, performedBy: profile.id, entityType: 'invoice', entityId: inv.id, customerId: inv.customer_id });
           }
         } catch (err) {
+          if (err instanceof Error && isEmailRateLimit(err.message)) {
+            // Every later send would be refused too: stop, and leave the rest ticked for a retry.
+            const detail = 'Not sent: the hourly email limit (50 an hour) was reached. Try again later.';
+            results.push(...targets.slice(index).map((t) => ({ invoiceId: t.id, invoiceNumber: t.invoice_number, customerName: t.customer_name, outcome: 'failed' as const, detail })));
+            break;
+          }
           Sentry.captureException(err, { tags: { action: 'bulk_email_invoices' }, extra: { invoiceId: inv.id } });
           results.push({ ...base, outcome: 'failed', detail: sanitizeError(err) });
         }
@@ -1211,7 +1204,7 @@ export default function Invoices() {
           (selectedInvoices.length > selectedEmailable.length
             ? `${selectedInvoices.length - selectedEmailable.length} selected invoice(s) are left out (only posted or overdue invoices are emailed). `
             : '') +
-          'An invoice already emailed and unchanged since is not sent twice.'
+          'An invoice already emailed to the same address and unchanged since is not sent twice. Up to 50 emails go out an hour.'
         }
         confirmLabel={`Email ${selectedEmailable.length}`}
         variant="info"

@@ -596,7 +596,8 @@ logs `[SENTRY_MISCONFIG]` and drops the alert. Failing loudly needs the key conf
 
 ### KI-39 — Customer-facing PDF polish
 **LOW · OPEN · UI · unassigned**
-Long section notes on quote PDFs overprint the items table (`src/lib/quotePdf.ts:190-191`).
+Long section notes on quote PDFs overprint the items table (`src/lib/quotePdf.ts:190-191`); the year-over-year
+"Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`).
 
 ### KI-40 — CRM Phase 5 (AI receptionist) preconditions
 **LOW · OPEN (future work) · database · unassigned**

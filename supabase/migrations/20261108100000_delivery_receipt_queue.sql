@@ -9,10 +9,11 @@
 --      as it was at completion (delivery number, Central business date, signer, partial, delivered lines), a status
 --      and a retry count. RLS on; active admins and sales reps may read it; no API role may write it.
 --   2. complete_delivery gains a trailing p_email_receipt boolean DEFAULT NULL. TRUE (with any proof other than
---      no_proof, and a customer email on file) records a pending receipt after the evidence is recorded, in the
---      same transaction. NULL and FALSE are today's behaviour exactly: the request fingerprint carries the new value
+--      no_proof) records the receipt after the evidence is recorded, in the same transaction: pending, or needs_check
+--      when the customer has no email on file by then. NULL and FALSE are today's behaviour exactly: the request fingerprint carries the new value
 --      only when it is TRUE, so a completion committed before this file still replays with its saved fingerprint. A
---      replay never records a receipt (the first commit did). start_and_complete_delivery and
+--      replay never records a receipt (the first commit did); a NULL-evidence (pre-20261022075000) replay ignores
+--      p_email_receipt, since no current app sends one without evidence. start_and_complete_delivery and
 --      process_offline_action call complete_delivery without it (NULL) and are not changed.
 --   3. claim_delivery_receipts / finish_delivery_receipt (service_role only): the worker claims due rows with a
 --      fresh claim token (FOR UPDATE SKIP LOCKED, a 10-minute lease) and reports sent / retry / check against
@@ -38,7 +39,12 @@
 --   3b. _delivery_receipt_send_lock (trigger on email_log): while a receipt is owed (pending or sending, however
 --      long), every other new delivery_completed send whose key names that delivery (any letter case) or that
 --      goes to that customer is refused at its pre-send log row: only the worker sends an owed receipt. It locks
---      the queue rows, so it waits for a claim in progress.
+--      the queue rows, so it waits for a claim in progress. Accepted limit: a confirmation the office started just
+--      before the completion committed (its log row predates the owed receipt) and that finished before the claim
+--      is not detected, so the customer may get two; a duplicate is preferred to a lost receipt (Mason, 2026-11-05).
+--   3c. _delivery_receipt_keep_owed (trigger on delivery_receipt_queue): an owed receipt cannot be deleted, so a
+--      hard delete of its delivery is refused instead of erasing it. A retry whose address differs from the
+--      earlier attempt goes to needs_check (one provider key per receipt). A finish key binds its detail too.
 --   4. pg_net is enabled and a pg_cron job (every 2 minutes) runs _wake_delivery_receipt_worker(), which posts to
 --      the worker only when a row is due AND both Vault secrets delivery_receipt_worker_url and
 --      delivery_receipt_worker_secret exist. Neither is created here: until they are stored (a separate approved
@@ -104,6 +110,7 @@ BEGIN
      OR to_regproc('public._enqueue_delivery_receipt') IS NOT NULL
      OR to_regproc('public._wake_delivery_receipt_worker') IS NOT NULL
      OR to_regproc('public._delivery_receipt_send_lock') IS NOT NULL
+     OR to_regproc('public._delivery_receipt_keep_owed') IS NOT NULL
      OR EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'deliver-receipt-queue') THEN
     RAISE EXCEPTION 'PREFLIGHT_DELIVERY_RECEIPT_QUEUE_DRIFT: an object this file creates already exists';
   END IF;
@@ -175,15 +182,17 @@ BEGIN
     INTO v_delivery
     FROM public.deliveries d JOIN public.customers c ON c.id = d.customer_id
    WHERE d.id = p_delivery_id AND d.status = 'completed' AND d.deleted_at IS NULL;
-  -- No customer email on file: nothing to send (the screen says so, as before).
-  IF v_delivery.id IS NULL OR v_delivery.email IS NULL THEN
+  IF v_delivery.id IS NULL THEN
     RETURN;
   END IF;
-  INSERT INTO public.delivery_receipt_queue (delivery_id, customer_id, requested_by, receipt)
+  -- No customer email on file now (removed after the screen checked): the office follows up instead.
+  INSERT INTO public.delivery_receipt_queue (delivery_id, customer_id, requested_by, status, last_error, receipt)
   VALUES (
     p_delivery_id,
     v_delivery.customer_id,
     p_actor,
+    CASE WHEN v_delivery.email IS NULL THEN 'needs_check' ELSE 'pending' END,
+    CASE WHEN v_delivery.email IS NULL THEN 'The customer has no email on file; the receipt was not sent.' END,
     jsonb_build_object(
       'delivery_number', COALESCE(v_delivery.delivery_number, ''),
       'delivered_on', to_char((v_delivery.completed_at AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD'),
@@ -575,6 +584,15 @@ BEGIN
        WHERE id = v_row.id;
       CONTINUE;
     END IF;
+    -- The provider key is the same for every attempt, so a retry to a new address may be dropped as a duplicate
+    -- of the earlier one: the office checks instead.
+    IF v_row.attempts > 0 AND v_row.attempt_to IS NOT NULL AND lower(v_email) <> lower(v_row.attempt_to) THEN
+      UPDATE public.delivery_receipt_queue
+         SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
+             last_error = 'The customer''s email changed after an attempt that may have gone out; check whether the customer got it.'
+       WHERE id = v_row.id;
+      CONTINUE;
+    END IF;
 
     v_token := gen_random_uuid();
     UPDATE public.delivery_receipt_queue
@@ -641,7 +659,8 @@ BEGIN
        OR v_saved ->> 'claim_token' IS DISTINCT FROM p_claim_token::text
        OR v_saved ->> 'outcome' IS DISTINCT FROM p_outcome
        OR v_saved ->> 'resend_message_id' IS DISTINCT FROM p_resend_message_id
-       OR v_saved ->> 'sent_to' IS DISTINCT FROM p_sent_to THEN
+       OR v_saved ->> 'sent_to' IS DISTINCT FROM p_sent_to
+       OR v_saved ->> 'detail' IS DISTINCT FROM p_detail THEN
       RAISE EXCEPTION 'IDEMPOTENCY_KEY_REUSED: this key finished a different receipt or outcome' USING ERRCODE = '22023';
     END IF;
     RETURN v_saved ->> 'status';
@@ -692,7 +711,7 @@ BEGIN
   END IF;
   IF p_idempotency_key IS NOT NULL THEN
     PERFORM public.save_idempotency(p_idempotency_key, 'finish_delivery_receipt', jsonb_build_object('id', p_id, 'claim_token', p_claim_token, 'outcome', p_outcome,
-      'resend_message_id', p_resend_message_id, 'sent_to', p_sent_to, 'status', v_status));
+      'resend_message_id', p_resend_message_id, 'sent_to', p_sent_to, 'detail', p_detail, 'status', v_status));
   END IF;
   RETURN v_status;
 END;
@@ -746,6 +765,24 @@ ALTER FUNCTION public._delivery_receipt_send_lock() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._delivery_receipt_send_lock() FROM PUBLIC, anon, authenticated, service_role;
 CREATE TRIGGER delivery_receipt_send_lock BEFORE INSERT OR UPDATE ON public.email_log
   FOR EACH ROW EXECUTE FUNCTION public._delivery_receipt_send_lock();
+CREATE FUNCTION public._delivery_receipt_keep_owed()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF OLD.status IN ('pending', 'sending') THEN
+    RAISE EXCEPTION 'DELIVERY_RECEIPT_OWED: this delivery''s receipt is still being emailed; void the delivery instead of deleting it, or wait until the receipt settles';
+  END IF;
+  RETURN OLD;
+END;
+$function$;
+ALTER FUNCTION public._delivery_receipt_keep_owed() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._delivery_receipt_keep_owed() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER delivery_receipt_keep_owed BEFORE DELETE ON public.delivery_receipt_queue
+  FOR EACH ROW EXECUTE FUNCTION public._delivery_receipt_keep_owed();
+COMMENT ON FUNCTION public._delivery_receipt_keep_owed() IS
+  'KI-25 (trigger on delivery_receipt_queue): an owed receipt (pending or sending) cannot be deleted, so a hard delete of its delivery is refused instead of erasing it.';
 COMMENT ON FUNCTION public._delivery_receipt_send_lock() IS
   'KI-25 (trigger on email_log): while a delivery receipt is owed, refuses any other new delivery_completed send for that delivery or customer, so only the receipt worker sends it; and refuses API users writing the worker''s own log rows.';
 
@@ -819,7 +856,8 @@ BEGIN
          AND tgfoid = 'public._delivery_receipt_send_lock()'::regprocedure) <> 1 THEN
     RAISE EXCEPTION 'POSTFLIGHT: the email_log send lock trigger is missing';
   END IF;
-  FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()', '_delivery_receipt_send_lock()'] LOOP
+  FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()', '_delivery_receipt_send_lock()',
+                                '_delivery_receipt_keep_owed()'] LOOP
     IF has_function_privilege('authenticated', ('public.' || v_name)::regprocedure, 'EXECUTE')
        OR has_function_privilege('anon', ('public.' || v_name)::regprocedure, 'EXECUTE')
        OR has_function_privilege('service_role', ('public.' || v_name)::regprocedure, 'EXECUTE') THEN

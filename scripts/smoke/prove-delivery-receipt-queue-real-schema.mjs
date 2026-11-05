@@ -5,7 +5,7 @@
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays migrations up to the
  * candidate, completes one delivery with today's call (key K), applies the candidate (a second apply refuses),
  * then shows on invented rows: K still replays with its saved fingerprint and records nothing; TRUE records one
- * receipt with the right content; NULL, FALSE, no_proof and a customer with no email record none; a replay records
+ * receipt with the right content; NULL, FALSE and no_proof record none (no email: office list); a replay records
  * none; and the worker calls claim, lease, back off, cap, stop at 23 hours, settle rows sent elsewhere, cancel
  * deliveries no longer completed, refuse stale claims, and stay service_role only. No email is sent.
  *
@@ -342,8 +342,10 @@ function main() {
     delivered_on: scalar("SELECT to_char((now() AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD');"),
     delivery_number: 'PROVER-KI25-D1',
   });
-  // A replay of that completion records nothing new, even after the row is gone.
-  psql(`DELETE FROM public.delivery_receipt_queue WHERE delivery_id = '${D(1)}';`);
+  // An owed receipt cannot be deleted (a completed delivery already cannot be; a cancelled one waits for the claim).
+  assert.match(psql(`DELETE FROM public.delivery_receipt_queue WHERE delivery_id = '${D(1)}';`, { allowFailure: true }).stderr, /DELIVERY_RECEIPT_OWED/);
+  // A replay of that completion records nothing new, even after the row is gone (removed with triggers off).
+  psql(`SET session_replication_role = replica; DELETE FROM public.delivery_receipt_queue WHERE delivery_id = '${D(1)}';`);
   const replay1 = complete(1, { emailReceipt: 'true' });
   assert.equal(replay1.status, 0, replay1.err);
   assert.equal(replay1.out, done1.out);
@@ -354,16 +356,17 @@ function main() {
   seedDelivery(2);
   assert.equal(complete(2, { emailReceipt: 'true', qty: 4 }).status, 0);
   assert.equal(row(2, "(receipt->>'is_partial') || ' ' || (receipt->'lines'->0->>'qty')"), 'true 4');
-  // Left out, FALSE, no_proof and a customer with no email record nothing.
+  // Left out, FALSE and no_proof record nothing; a customer with no email goes to the office list.
   seedDelivery(3); assert.equal(complete(3).status, 0); assert.equal(queued(3), '0');
   seedDelivery(4); assert.equal(complete(4, { emailReceipt: 'false' }).status, 0); assert.equal(queued(4), '0');
   seedDelivery(5); assert.equal(complete(5, { emailReceipt: 'true', evidence: 'no_proof' }).status, 0); assert.equal(queued(5), '0');
-  seedDelivery(6, CUST_NOEMAIL); assert.equal(complete(6, { emailReceipt: 'true' }).status, 0); assert.equal(queued(6), '0');
-  console.log('[prover] part delivery marked partial; left out, FALSE, no_proof and no-email customers record nothing');
+  seedDelivery(6, CUST_NOEMAIL); assert.equal(complete(6, { emailReceipt: 'true' }).status, 0);
+  assert.equal(row(6, "status || ' ' || last_error"), 'needs_check The customer has no email on file; the receipt was not sent.');
+  console.log('[prover] part delivery marked partial; left out, FALSE and no_proof record nothing; no email goes to the office list');
 
   // Access: staff read only; drivers see nothing; nobody but service_role runs the worker calls.
   const asUser = (uid, sql) => q(`BEGIN;\n${claims(uid)}\nSET LOCAL ROLE authenticated; ${sql}; COMMIT;`, { allowFailure: true });
-  assert.equal(asUser(ADMIN, 'SELECT count(*) FROM public.delivery_receipt_queue').out, '1');
+  assert.equal(asUser(ADMIN, 'SELECT count(*) FROM public.delivery_receipt_queue').out, '2', 'D2 pending and D6 to check');
   assert.equal(asUser(DRIVER, 'SELECT count(*) FROM public.delivery_receipt_queue').out, '0');
   assert.match(asUser(ADMIN, "UPDATE public.delivery_receipt_queue SET status = 'sent'").err, /permission denied/);
   // An admin may write the email log directly, but never a row in the worker's namespace.
@@ -395,6 +398,7 @@ function main() {
   assert.equal(finish(c1, 'retry', "'Resend 503', NULL, NULL, 'ki25-finish-1'").out, 'pending');
   // A finish retried with its key gets its first answer, not stale; a plain repeat is stale.
   assert.equal(finish(c1, 'retry', "'Resend 503', NULL, NULL, 'ki25-finish-1'").out, 'pending');
+  assert.match(finish(c1, 'retry', "'invalid address', NULL, NULL, 'ki25-finish-1'").err, /IDEMPOTENCY_KEY_REUSED/, 'the key binds its detail');
   assert.equal(finish(c1, 'retry', "'Resend 503', NULL, NULL").out, 'stale');
   assert.equal(claim('ki25-claim-1').length, 0, 'a replayed claim never returns a receipt it no longer holds');
   assert.equal(row(1, "attempts || ' ' || (next_attempt_at BETWEEN now() + interval '115 seconds' AND now() + interval '125 seconds')"), '1 true');
@@ -546,6 +550,17 @@ function main() {
   due(23); assert.equal(claim().length, 0);
   assert.match(row(23, "status || ' ' || sent_to || ' ' || last_error"), /^needs_check ki25-farm@example.invalid The receipt was emailed, but/);
   console.log('[prover] its own logged send to a changed address or a voided delivery goes to the office list');
+
+  // A retry after an attempt that may have gone out is sent only to that attempt's address.
+  seedDelivery(24); assert.equal(complete(24, { emailReceipt: 'true' }).status, 0);
+  due(24);
+  const a1 = claim(); assert.equal(a1.length, 1);
+  finish(a1[0], 'retry');
+  psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}';`);
+  due(24); assert.equal(claim().length, 0);
+  assert.match(row(24, "status || ' ' || last_error"), /^needs_check The customer's email changed after an attempt/);
+  psql(`UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
+  console.log('[prover] a retry to a changed address goes to the office list');
 
   // The delivery now belongs to another customer: the office checks who gets the receipt.
   seedDelivery(16); assert.equal(complete(16, { emailReceipt: 'true' }).status, 0);

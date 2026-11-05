@@ -43,7 +43,7 @@ import { applyTableSearchSort } from '../lib/tableSearchSort';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
-import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
+import { assertInvoiceSendDisposition } from '../lib/invoiceSendDisposition';
 import { logActivity } from '../lib/activityLogger';
 import { bulkInvoiceEmailKey, isBulkEmailable, summarizeBulkEmail, type BulkEmailResult } from '../lib/invoiceBulkEmail';
 
@@ -536,7 +536,18 @@ export default function Invoices() {
         try {
           // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
           const pdfData = await loadInvoicePdfData(inv);
-          await assertInvoiceSendable(inv.id);
+          // Re-read the server-owned gate and the version the retry key names: an invoice
+          // edited since this list loaded is refused, never sent under its old key.
+          const { data: live, error: liveError } = await supabase
+            .from('invoices')
+            .select('send_disposition, status, deleted_at, updated_at')
+            .eq('id', inv.id)
+            .maybeSingle();
+          if (liveError) throw liveError;
+          assertInvoiceSendDisposition(live?.send_disposition, live?.status, live?.deleted_at);
+          if (live?.updated_at !== inv.updated_at) {
+            throw new Error('This invoice changed since the list loaded. Reload the list and email it again.');
+          }
           const result = await sendEmail({
             to,
             subject: `Invoice ${inv.invoice_number} from Crop RX Solutions`,
@@ -1160,7 +1171,7 @@ export default function Invoices() {
         onConfirm={handleBulkEmail}
         title="Email Selected Invoices"
         message={
-          `Email ${selectedEmailable.length} posted invoice(s) to each customer's email on file? ` +
+          `Email ${selectedEmailable.length} posted or overdue invoice(s) to each customer's email on file? ` +
           (selectedInvoices.length > selectedEmailable.length
             ? `${selectedInvoices.length - selectedEmailable.length} selected invoice(s) are left out (only posted or overdue invoices are emailed). `
             : '') +

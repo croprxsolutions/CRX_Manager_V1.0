@@ -1058,10 +1058,18 @@ Deno.serve(async (req: Request) => {
     }
 
     // A slow or broken reply ends as 'failed', never stuck on 'pending' (PR #1302
-    // review, finding 4). The email may still have gone out, so Resend gets this
-    // log row's id as its idempotency key: a retry reuses the row, and Resend
-    // returns the first send instead of mailing it twice (it keeps keys 24 hours
-    // and never stores a failed request).
+    // review, finding 4). The email may still have gone out, so Resend gets an
+    // idempotency key made of this log row's id and a fingerprint of the email: a
+    // retry of the same email reuses the row and Resend returns the first send
+    // instead of mailing it twice (it keeps keys 24 hours and never stores a failed
+    // request); a retry whose content changed is a different email and is sent.
+    // shortcut: past Resend's 24 hours a retry of a timed-out send can arrive twice; the error says to check first.
+    const resendPayload = JSON.stringify(resendBody);
+    const payloadDigest = Array.from(
+      new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(resendPayload))),
+      (b) => b.toString(16).padStart(2, "0"),
+    ).join("");
+    const resendIdempotencyKey = `${emailLogId}:${payloadDigest}`;
     let resendStatus = 0;
     let success = false;
     let resendMessageId: string | null = null;
@@ -1072,9 +1080,9 @@ Deno.serve(async (req: Request) => {
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${resendApiKey}`,
-          "Idempotency-Key": emailLogId!,
+          "Idempotency-Key": resendIdempotencyKey,
         },
-        body: JSON.stringify(resendBody),
+        body: resendPayload,
         signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
       });
       resendStatus = resendResp.status;

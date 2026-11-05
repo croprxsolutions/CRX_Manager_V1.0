@@ -1,7 +1,7 @@
 // Behaviour tests for send-email (PR #1302 review, finding 2). They run the real
 // handler against an in-memory stand-in for the database's REST API and for
 // Resend, both reached through a stubbed global fetch, so nothing leaves this
-// process. Run: deno test --no-prompt --allow-env --node-modules-dir=none supabase/functions
+// process. Run with the command in .github/workflows/ci.yml (Edge Function unit tests).
 
 type Row = Record<string, unknown>;
 type Handler = (req: Request) => Promise<Response>;
@@ -306,7 +306,7 @@ Deno.test("two first sends with the same key at the same moment send it once", a
 
 // --- A slow or broken email provider (item 4) --------------------------------
 
-Deno.test("a provider that never answers ends as failed, not pending, and a retry reuses the provider key", async () => {
+Deno.test("a provider that never answers ends as failed, not pending, and a retry reuses the provider key only for the same content", async () => {
   const realTimeout = AbortSignal.timeout;
   const askedMs: number[] = [];
   AbortSignal.timeout = (ms: number) => {
@@ -325,12 +325,20 @@ Deno.test("a provider that never answers ends as failed, not pending, and a retr
     assertEquals(askedMs, [30_000]);
     const row = world.tables.email_log[0];
     assertEquals(row.status, "failed");
-    assertEquals(world.resendCalls[0].idempotencyKey, row.id, "Resend idempotency key is the log row id");
+    const firstKey = String(world.resendCalls[0].idempotencyKey);
+    assert(/^log-\d+:[0-9a-f]{64}$/.test(firstKey) && firstKey.startsWith(`${row.id}:`), `Resend key ${firstKey}`);
 
     const retry = await send(world, ADMIN, quoteEmail(QUOTE, `quote-${QUOTE}`));
     assertEquals(retry.status, 502);
     assertEquals(world.tables.email_log.length, 1, "the retry reuses the failed row");
-    assertEquals(world.resendCalls[1].idempotencyKey, row.id, "the retry sends the same provider key");
+    assertEquals(world.resendCalls[1].idempotencyKey, firstKey, "the same email retried sends the same provider key");
+
+    // Corrected content is a different email: a new provider key, so Resend sends it.
+    const changed = await send(world, ADMIN, { ...quoteEmail(QUOTE, `quote-${QUOTE}`), html: "<p>Your corrected quote.</p>" });
+    assertEquals(changed.status, 502);
+    assertEquals(world.tables.email_log.length, 1, "still one row");
+    const changedKey = String(world.resendCalls[2].idempotencyKey);
+    assert(changedKey.startsWith(`${row.id}:`) && changedKey !== firstKey, `changed-content key ${changedKey}`);
   } finally {
     AbortSignal.timeout = realTimeout;
   }

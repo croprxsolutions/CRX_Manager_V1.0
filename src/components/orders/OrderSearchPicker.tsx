@@ -1,12 +1,14 @@
 import { supabase } from '../../lib/db';
 import RecordSearchPicker from '../ui/RecordSearchPicker';
 import { excludedIdList } from '../../lib/recordSearch';
-import { numberOrCustomerNameTerms } from '../../lib/customerNameSearch';
+import { searchByNumberOrCustomerName } from '../../lib/customerNameSearch';
 import { orderSearchLabel } from '../../lib/recordLabels';
 import type { OrderStatus } from '../../types';
 
 // A fixed column list: orders is a cost table, so screens never read a caller-built one.
 export const ORDER_SEARCH_SELECT = 'id, order_number, customer_id, status, order_date, customer:customers(farm_name)';
+// The same columns, kept only when the customer row matches (the by-name read).
+const ORDER_SEARCH_BY_CUSTOMER_SELECT = 'id, order_number, customer_id, status, order_date, customer:customers!inner(farm_name)';
 
 export interface OrderSearchResult {
   id: string;
@@ -63,19 +65,16 @@ export default function OrderSearchPicker<T extends OrderSearchResult = OrderSea
       value={value}
       selectedLabel={selectedLabel}
       onSelect={onSelect}
-      search={async (pattern, limit) => {
-        const { terms, error } = await numberOrCustomerNameTerms('order_number', pattern, customerId);
-        if (error || !terms) return { data: null, error };
-        let query = supabase
-          .from('orders')
-          .select(ORDER_SEARCH_SELECT)
-          .or(terms)
+      search={(pattern, limit) => searchByNumberOrCustomerName((match) => {
+        let query = (match === 'number'
+          ? supabase.from('orders').select(ORDER_SEARCH_SELECT).or(`order_number.ilike.${pattern}`)
+          : supabase.from('orders').select(ORDER_SEARCH_BY_CUSTOMER_SELECT).or(`farm_name.ilike.${pattern}`, { referencedTable: 'customer' }))
           .in('status', [...statuses])
           .is('deleted_at', null);
         if (customerId) query = query.eq('customer_id', customerId);
         if (excludeIds?.length) query = query.not('id', 'in', excludedIdList(excludeIds));
         return query.order('order_date', { ascending: false }).order('id').limit(limit);
-      }}
+      }, 'order_date', limit)}
       searchKey={[statuses.join(','), customerId ?? '', excludeIds?.join(',') ?? ''].join('|')}
       getLabel={orderSearchLabel}
       renderDetails={orderDetails}

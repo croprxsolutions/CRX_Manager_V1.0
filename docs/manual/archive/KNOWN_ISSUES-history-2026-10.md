@@ -7139,3 +7139,21 @@ then Cancel; the save call was blocked in the page): 500 rows that all carry a p
 requests (1.6 to 2.7 s each, about 10 s in all), all ready; products, change history and supplier links unchanged
 afterwards. Before the fix, 500 such rows failed after 9.2 s on the signed-in role's 8 s statement limit. The
 unknown-extra-field quirk stays open under KI-103.
+
+### Closed 2026-11-05 — KI-86, KI-87, KI-88
+
+KI-86 and KI-87 were already fixed on `main` when re-checked: the live product-active guard (`20261103100000`, PR #1315) refuses direct `is_active` writes, and PR #1321 shows the blocker text when `set_product_active` refuses. KI-88 was fixed by branch `claude/ki86-88-product-turnoff` (`src/pages/InventoryPage.tsx`): the mount read is now the turned-off product ids only. All three were proven on the local test app on 2026-11-05.
+
+Original text:
+
+### KI-86 — Direct admin turn-off skips warnings
+**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
+Direct admin updates of `products.is_active` bypass the preview warning step; database blockers still refuse unsafe turn-off.
+
+### KI-87 — Refused turn-off uses the stale-review message
+**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
+A blocked turn-off is reported as “Product details changed,” hiding the actual blocker in that dialog.
+
+### KI-88 — Inventory loads the full catalog on mount
+**LOW · UNVERIFIED · inventory UI · LOCAL CANDIDATE — NOT APPLIED**
+Inventory pages through all products on mount to label inactive rows; product status could instead come from the position RPC.

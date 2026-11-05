@@ -523,7 +523,7 @@ A retired product with a negative balance in the position report was checked by 
 The accepted-quote and live-order warning case was checked by hand only.
 
 ### KI-93 — One blend ticket can deduct its stock twice
-**MED · FIX READY — `20261107050000_blend_tickets_application_records_only.sql`, not yet applied (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · Claude**
+**MED · FIXED 2026-11-04 (`20261107050000` applied live, ledger `20261105014219`; PR #1459) (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · Claude**
 A blend ticket can produce both an application record (`create_application_record_from_blend_ticket`, which
 deducts stock as `job_applied`) and an order (`create_order_from_blend_ticket`, whose delivery deducts again).
 Neither checks for the other, and same-operation retry protection does not cover the cross-path case. Five designs

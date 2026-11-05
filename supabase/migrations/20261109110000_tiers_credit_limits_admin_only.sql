@@ -1,5 +1,5 @@
 -- Written 2026-11-05. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261107100000_tiers_credit_limits_admin_only.md.
+-- docs/reference/migrations.d/20261109110000_tiers_credit_limits_admin_only.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (permissions; Mason's decision 2026-11-01, Taha's lane item 4, 2026-11-03):

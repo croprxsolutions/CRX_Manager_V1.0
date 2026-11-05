@@ -1,6 +1,6 @@
 ## 2026-11-05 — Price tiers and credit limits are admin-only; a booking's tier and planned flag change only by saving the quote
 
-- New migration `20261107100000_tiers_credit_limits_admin_only.sql` (not applied; record in
+- New migration `20261109110000_tiers_credit_limits_admin_only.sql` (not applied; record in
   `docs/reference/migrations.d/`). Mason's decision of 1 Nov: only an admin sets or changes a
   customer's price tier or credit limit. The customer guard that already keeps the commission split
   admin-only now refuses a sales rep's tier or credit-limit change (`TIER_ADMIN_ONLY`,

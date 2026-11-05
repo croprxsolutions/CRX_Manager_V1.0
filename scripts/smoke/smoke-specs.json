@@ -951,7 +951,7 @@
     },
     "tiers_credit_limits_admin_only": {
       "chain": "smoke-tiers-credit-limits-admin-only.sql",
-      "description": "Migration 20261107100000 (Mason 2026-11-01, permissions): a sales rep's direct update of a customer's price tier is refused TIER_ADMIN_ONLY; a rep's save_customer that changes the credit limit is refused CREDIT_LIMIT_ADMIN_ONLY, while re-sending the unchanged tier and limit is accepted; a rep's new customer on the Settings Default Tier with no limit is accepted and one with a limit is refused; an admin changes both; a direct API update of a booking's tier is refused QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE even for an admin, while a direct update of header notes still works. Fails on the old bodies at A, B, D and F. Terminal rollback.",
+      "description": "Migration 20261109110000 (Mason 2026-11-01, permissions): a sales rep's direct update of a customer's price tier is refused TIER_ADMIN_ONLY; a rep's save_customer that changes the credit limit is refused CREDIT_LIMIT_ADMIN_ONLY, while re-sending the unchanged tier and limit is accepted; a rep's new customer on the Settings Default Tier with no limit is accepted and one with a limit is refused; an admin changes both; a direct API update of a booking's tier is refused QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE even for an admin, while a direct update of header notes still works. Fails on the old bodies at A, B, D and F. Terminal rollback.",
       "covers": [
         "guard_customer_rep_edit_20261013",
         "guard_quote_direct_tier_planned_20261107",

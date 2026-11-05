@@ -6,6 +6,7 @@
 --   B  A line with no product and no charge type is still refused
 --   C  One more stored quantity tick on the delivered product is still refused
 --   D  The invoice posts at product + $45.00, to the cent
+--   E  A product the delivery didn't carry is still refused, even with its charge type left empty
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -17,6 +18,7 @@ DECLARE
   v_admin uuid;
   v_customer uuid;
   v_product public.products%ROWTYPE;
+  v_other public.products%ROWTYPE;
   v_suffix text := substr(md5(random()::text), 1, 8);
   v_order uuid;
   v_line uuid;
@@ -32,8 +34,11 @@ BEGIN
   SELECT * INTO v_product FROM products
    WHERE is_active = true AND current_cost > 0 AND current_cost = round(current_cost, 2)
    ORDER BY created_at LIMIT 1;
-  IF v_admin IS NULL OR v_customer IS NULL OR v_product.id IS NULL THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: needs an active admin, an active customer and an active product with a cost';
+  SELECT * INTO v_other FROM products
+   WHERE is_active = true AND current_cost > 0 AND current_cost = round(current_cost, 2) AND id <> v_product.id
+   ORDER BY created_at LIMIT 1;
+  IF v_admin IS NULL OR v_customer IS NULL OR v_product.id IS NULL OR v_other.id IS NULL THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: needs an active admin, an active customer and two active products with a cost';
   END IF;
 
   -- Fixtures as the admin: a 10-unit order line priced $1.00 above cost, delivered in full.
@@ -89,6 +94,20 @@ BEGIN
     END IF;
   END;
 
+  -- E: extra product. Priced $1.00 above cost so only the delivery rule can refuse it.
+  BEGIN
+    PERFORM save_invoice(v_header, v_lines || jsonb_build_array(jsonb_build_object('product_id', v_other.id,
+      'description', '[SMOKE] Not on the delivery', 'quantity', 1, 'unit_price_cents', round((v_other.current_cost + 1) * 100),
+      'extended_cents', round((v_other.current_cost + 1) * 100), 'cost_cents', round(v_other.current_cost * 100),
+      'sort_order', 9, 'unit_size', 'gal')),
+      'smk-chg-extra-' || v_suffix);
+    v_fails := v_fails || ' (E) a product the delivery did not carry was accepted;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'DELIVERY_INVOICE_EXCEEDS_DELIVERED:%' AND SQLERRM NOT LIKE 'ORDER_INVOICE_%' THEN
+      v_fails := v_fails || ' (E) wrong refusal: ' || SQLERRM || ';';
+    END IF;
+  END;
+
   BEGIN
     UPDATE invoice_items SET quantity = quantity + 0.0001 WHERE invoice_id = v_invoice AND product_id IS NOT NULL;
     v_fails := v_fails || ' (C) a quantity above the delivery was accepted;';
@@ -112,6 +131,6 @@ BEGIN
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL delivery invoice charge lines:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK delivery invoice charge lines: freight charge accepted and posted at product + $45.00, untyped line and extra quantity still refused';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK delivery invoice charge lines: freight charge accepted and posted at product + $45.00, untyped line, extra product and extra quantity still refused';
 END
 $smoke$;

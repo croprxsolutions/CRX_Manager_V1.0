@@ -723,7 +723,7 @@ export default function ARaging() {
           }
         }
 
-        logActivity({ event: 'ar_reminders_sent', description: `Sent ${sent} AR reminder(s) to overdue customers (${skipped} skipped/deduped, ${failed} failed, ${heldForCredit} held: credit on file covers balance)`, performedBy: profile.id, entityType: 'system' });
+        logActivity({ event: 'ar_reminders_sent', description: `Sent ${sent} AR reminder(s) to overdue customers (${skipped} skipped/deduped, ${failed} failed, ${unconfirmed} not confirmed, ${heldForCredit} held: credit on file covers balance)`, performedBy: profile.id, entityType: 'system' });
         const heldNote = heldForCredit > 0 ? `, ${heldForCredit} held (credit on file covers balance — apply it)` : '';
         const problems = sendProblemsNote(failed, unconfirmed);
         if (problems) {

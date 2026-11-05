@@ -611,13 +611,15 @@ export default function Jobs() {
     const nameMap: Record<string, string> = {};
     if (profileIds.length > 0) {
       // In chunks and paged: the list now holds every job, so the ids can be many (KI-32).
-      const { data: profs } = await fetchAllRowsForIds(profileIds, (chunk, from, to) => supabase
+      const { data: profs, error: profErr } = await fetchAllRowsForIds(profileIds, (chunk, from, to) => supabase
         .from('profile_public_view')
         .select('id, full_name', { count: 'exact' })
         .in('id', chunk)
         .order('id')
         .range(from, to));
       if (superseded()) return;
+      // Non-fatal: the list still shows, with names falling back as below.
+      if (profErr) Sentry.captureException(profErr, { tags: { source: 'fetch', action: 'load_jobs_profile_names' } });
       ((profs || []) as Array<{ id: string | null; full_name: string | null }>).forEach((a: { id: string | null; full_name: string | null }) => { if (a.id) nameMap[a.id] = a.full_name ?? ''; });
     }
 
@@ -629,13 +631,15 @@ export default function Jobs() {
     )];
     const crewNameMap: Record<string, string> = {};
     if (dispatchCrewIds.length > 0) {
-      const { data: crewRows } = await fetchAllRowsForIds(dispatchCrewIds, (chunk, from, to) => supabase
+      const { data: crewRows, error: crewErr } = await fetchAllRowsForIds(dispatchCrewIds, (chunk, from, to) => supabase
         .from('ground_crews')
         .select('id, name', { count: 'exact' })
         .in('id', chunk)
         .order('id')
         .range(from, to));
       if (superseded()) return;
+      // Non-fatal: the list still shows, with crew names falling back as below.
+      if (crewErr) Sentry.captureException(crewErr, { tags: { source: 'fetch', action: 'load_jobs_crew_names' } });
       ((crewRows || []) as Array<{ id: string; name: string }>).forEach((c: { id: string; name: string }) => { crewNameMap[c.id] = c.name; });
     }
 
@@ -654,9 +658,15 @@ export default function Jobs() {
       // server's row cap. A failed batch falls back to the primary customer for its jobs only.
       for (const chunk of chunkIds(jobIds, 100)) {
         try {
-          const { data: billed, error: billedErr } = await fetchAllRows((from, to) => supabase
+          // (job_id, customer_id) is unique per row, so this order pages without skips or
+          // repeats; is_primary and farm_name keep the RPC's primary-first order within a job.
+          const { data: billed, error: billedErr } = await fetchAllRows((from, to) => pageWithList(supabase
             .rpc('get_jobs_billed_customers', { p_job_ids: chunk }, { count: 'exact' })
-            .range(from, to));
+            .order('job_id')
+            .order('is_primary', { ascending: false })
+            .order('farm_name', { nullsFirst: false })
+            .order('customer_id')
+            .range(from, to)));
           if (billedErr) throw billedErr;
           for (const row of assertRpcResult<BilledRow[]>(billed, 'get_jobs_billed_customers')) billedRows.push(row);
         } catch (billedErr) {

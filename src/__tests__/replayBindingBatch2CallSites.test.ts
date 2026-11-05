@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 // File -> number of batch-2 call sites in it.
 const SITES: Record<string, number> = {
   'src/pages/InventoryPage.tsx': 3, // release_inventory_hold, manual_inventory_add, retire_inventory_item
-  'src/pages/BlendTicketDetail.tsx': 2, // create_order_from_blend_ticket, create_application_record_from_blend_ticket
+  'src/pages/BlendTicketDetail.tsx': 1, // create_application_record_from_blend_ticket
   'src/pages/NewOrder.tsx': 2, // create_rush_order, create_direct_order
   'src/pages/QuoteBuilder.tsx': 3, // create_planned_holds, close_quote_as_applied, close_quote_as_short
   'src/pages/Deliveries.tsx': 1, // batch_cancel_deliveries
@@ -49,7 +49,6 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     ['src/pages/InventoryPage.tsx', 'manual_inventory_add'],
     ['src/pages/InventoryPage.tsx', 'retire_inventory_item'],
     ['src/components/integrity/IntegrityCleanupPanel.tsx', 'reconcile_negative_inventory'],
-    ['src/pages/BlendTicketDetail.tsx', 'create_order_from_blend_ticket'],
     ['src/pages/BlendTicketDetail.tsx', 'create_application_record_from_blend_ticket'],
     ['src/pages/NewOrder.tsx', 'create_rush_order'],
     ['src/pages/NewOrder.tsx', 'create_direct_order'],
@@ -83,7 +82,6 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
   const ORDER_RECOVERY: Array<[string, string, string]> = [
     ['src/pages/NewOrder.tsx', 'create_rush_order', HANDLED_EXIT],
     ['src/pages/NewOrder.tsx', 'create_direct_order', HANDLED_EXIT],
-    ['src/pages/BlendTicketDetail.tsx', 'create_order_from_blend_ticket', 'return;'],
   ];
   for (const [file, rpc, exit] of ORDER_RECOVERY) {
     it(`${file}: a ${rpc} intent refusal opens the order already created`, () => {
@@ -141,6 +139,18 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
     expect(BARE_HELPER_RESET.test(bad)).toBe(true);
     expect(BARE_HELPER_RESET.test('if (getIdempotencyBindingRejection(error)) completeIdem.resetKey();')).toBe(false);
     expect(BARE_HELPER_RESET.test('if (getIdempotencyBindingRejection(error)) batchCancelIdem.resetKey();')).toBe(true);
+  });
+});
+
+// KI-93 (owner decision 2026-11-04): blend tickets are recorded through application records and billed
+// with a direct invoice, so the three ticket-to-order RPCs are refused by the database and have no caller.
+describe('the blend-ticket order RPCs have no frontend caller', () => {
+  it('no source file under src/ calls them (the generated types keep the definitions)', () => {
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(`${dir}/${e.name}`) : /\.(ts|tsx)$/.test(e.name) ? [`${dir}/${e.name}`] : []);
+    const callers = walk('src').filter((f) =>
+      !/(\.test\.tsx?|types\/supabase\.ts)$/.test(f) && /create_order_from_blend_ticket|link_blend_ticket_to_order|unlink_blend_ticket_from_order/.test(read(f)));
+    expect(callers).toEqual([]);
   });
 });
 

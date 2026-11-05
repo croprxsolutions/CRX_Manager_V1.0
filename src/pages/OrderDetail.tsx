@@ -109,9 +109,6 @@ export default function OrderDetail() {
   // Parent quote for transaction thread
   const [parentQuote, setParentQuote] = useState<{ id: string; quote_number: string } | null>(null);
 
-  // Related blend tickets
-  const [relatedTickets, setRelatedTickets] = useState<{ id: string; ticket_number: string; ticket_date: string | null; order_link_status: string | null; payment_status: string | null }[]>([]);
-
   // Shares state
   const [shares, setShares] = useState<OrderShare[]>([]);
   const [showShareEditor, setShowShareEditor] = useState(false);
@@ -254,21 +251,6 @@ export default function OrderDetail() {
         setPriceInputs(Object.fromEntries(
           itemsList.filter((i) => i.pricing_pending).map((i) => [i.id, i.suggested_price != null ? String(i.suggested_price) : ''])
         ));
-
-        // Load related blend tickets
-        const { data: btLinks } = await supabase
-          .from('blend_ticket_to_order_items')
-          .select('blend_ticket_id, blend_ticket:blend_tickets(id, ticket_number, ticket_date, order_link_status, payment_status)')
-          .eq('order_id', id!);
-        if (isStale()) return false;
-        // Deduplicate by blend_ticket_id
-        const uniqueTickets = new Map<string, { id: string; ticket_number: string; ticket_date: string | null; order_link_status: string | null; payment_status: string | null }>();
-        ((btLinks || []) as unknown as Array<{ blend_ticket_id: string; blend_ticket: { id: string; ticket_number: string; ticket_date: string | null; order_link_status: string | null; payment_status: string | null } | null }>).forEach((link) => {
-          if (link.blend_ticket && !uniqueTickets.has(link.blend_ticket_id)) {
-            uniqueTickets.set(link.blend_ticket_id, link.blend_ticket);
-          }
-        });
-        setRelatedTickets(Array.from(uniqueTickets.values()));
 
         // Load linked deliveries
         // PR-07 follow-up: dropped driver FK embed; resolve via profile_public_view.
@@ -2243,36 +2225,6 @@ export default function OrderDetail() {
               <p className="text-[11px] text-secondary mt-2">Exact penny amounts are computed when you create the invoice.</p>
             </div>
           )}
-        </Card>
-      )}
-
-      {/* Related Blend Tickets */}
-      {relatedTickets.length > 0 && (
-        <Card>
-          <div className="flex items-center gap-2 mb-3">
-            <FileText className="w-5 h-5 text-crx-green" />
-            <h3 className="font-semibold text-nav-dark">Related Blend Tickets</h3>
-          </div>
-          <div className="space-y-2">
-            {relatedTickets.map((bt) => (
-              <div key={bt.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <button
-                  onClick={() => navigate(`/blend-tickets/${bt.id}`)}
-                  className="text-crx-green hover:underline font-medium text-sm"
-                >
-                  {bt.ticket_number}
-                </button>
-                <div className="flex items-center gap-2">
-                  {bt.ticket_date && (
-                    <span className="text-xs text-gray-500">{parseLocalDate(bt.ticket_date).toLocaleDateString()}</span>
-                  )}
-                  <Badge variant={bt.payment_status === 'billed' ? 'success' : bt.payment_status === 'prepaid' ? 'info' : 'default'}>
-                    {(bt.payment_status || 'unbilled').replace('_', ' ')}
-                  </Badge>
-                </div>
-              </div>
-            ))}
-          </div>
         </Card>
       )}
 

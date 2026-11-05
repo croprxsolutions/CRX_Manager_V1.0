@@ -36,9 +36,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
-| Closed as FIXED, with proof (bottom of file and archive) | 9 |
+| Closed as FIXED, with proof (bottom of file and archive) | 10 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
@@ -590,11 +590,6 @@ comment. Nothing is wrong today because it is unapplied.
 `supabase/functions/_shared/sentry.ts:60` defines `validateSentryDsnOrThrow()` but nothing calls it; a missing key
 logs `[SENTRY_MISCONFIG]` and drops the alert. Failing loudly needs the key confirmed and eight function deploys.
 
-### KI-39 — Customer-facing PDF polish
-**LOW · OPEN · UI · unassigned**
-The year-over-year "Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`). The
-quote-PDF notes part was fixed 2026-11-05 (see the archive).
-
 ### KI-40 — CRM Phase 5 (AI receptionist) preconditions
 **LOW · OPEN (future work) · database · unassigned**
 Five prerequisites before building an automated phone receptionist (service-callable customer summary, service
@@ -937,7 +932,9 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 7. **KI-15, stored-profit Reports tabs** — PR #1134 merged 2026-10-27 (`cef4e3015`); `Reports.tsx` now calls `get_profitability_report` for customer, product and month groups. The PR records real-data local-app proof and paging/failure tests. Full report approval remains To-Do 10.2. Original issue and closure evidence appended to the archive.
 
 8. **KI-85, stale sweep fingerprints on quote functions** — closed 2026-11-01 by the pin-refresh change on branch `fix/refresh-quote-sweep-pins-2026-11-01`; the 2026-11-01 live sweep adjudicated all 29 predicates `ok: true`, `complete: true`.
-9. **KI-27, an expired uncertain request locked its dialog** — closed 2026-11-05 by branch `claude/uncertain-intent-admin-clear-5591c7`: an admin-only "I checked the records — clear this" control (with a confirm) appears only once the safe retry window has passed, removes that browser's expired saved request, and is logged to Sentry. Proven on the local test app (admin clears and the form works again; a sales rep and a still-retryable request show no control) and by hook and component tests.
+
+9. **KI-39, customer-facing PDF polish** — closed 2026-11-05: quote-PDF section notes wrap instead of overprinting (PR #1480); the year-end "Change" column shows green/red again (PR #1477). Both checked on a rendered PDF; original text appended to the archive.
+10. **KI-27, an expired uncertain request locked its dialog** — closed 2026-11-05 by branch `claude/uncertain-intent-admin-clear-5591c7`: an admin-only "I checked the records — clear this" control (with a confirm) appears only once the safe retry window has passed, removes that browser's expired saved request, and is logged to Sentry. Proven on the local test app (admin clears and the form works again; a sales rep and a still-retryable request show no control) and by hook and component tests.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

@@ -134,10 +134,14 @@ connected connector, or one whose id changes on reconnect, is unlisted until som
 gaps are accepted in KI-78.
 
 ### KI-05 — A sales rep can write RUP register rows for an invoice that was never posted
-**MED · OPEN · security/money · unassigned**
-`generate_rup_sales_records` (latest body `20260707040000`) checks the caller's role but not that the invoice is
-posted, so a rep can add restricted-use-pesticide register rows for a draft. PR #927 hid register reads from
-reps but explicitly left this function unchanged. Live had 0 register rows when last checked (older record's claim).
+**MED · FIX WRITTEN, NOT YET LIVE · security/money · Claude**
+`generate_rup_sales_records` (live body `20260707040000`, re-read 2026-11-05) checks the caller's role but not that
+the invoice is posted, so a rep can add restricted-use-pesticide register rows for a draft. PR #927 hid register
+reads from reps but explicitly left this function unchanged. Fix: `20261108140000_rup_records_require_posted_invoice`
+refuses any invoice that is not posted, paid or overdue (`RUP_INVOICE_NOT_POSTED`); posting still writes the rows.
+Proof: `scripts/smoke/prove-rup-records-require-posted-invoice-real-schema.mjs`. Still open after it, admin only:
+the live `rup_sales_insert` policy (read 2026-11-05) lets an active admin insert register rows directly for any
+invoice; closing it means dropping that policy and the table INSERT grant, a permission change for Mason to approve.
 
 ### KI-06 — Financial audit log can point at hard-deleted records
 **HIGH (per older record) · UNVERIFIED · database/money · Mason (migration decision)**

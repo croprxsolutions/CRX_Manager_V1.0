@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, useMemo, lazy, Suspense } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Save, Plus, Trash2, Check, FileText, Beaker, Ban, MessageSquarePlus, Printer, CloudSun, MapPin, Truck, ClipboardList, FlaskConical, Bell, History, BookmarkPlus, GripVertical, ChevronUp, ChevronDown, Map as MapIcon, ShieldAlert, CalendarClock, AlertTriangle, Sprout, Send } from 'lucide-react';
+import { Save, Plus, Trash2, Check, FileText, Beaker, Ban, MessageSquarePlus, Printer, CloudSun, MapPin, Truck, ClipboardList, FlaskConical, Bell, History, BookmarkPlus, GripVertical, ChevronUp, ChevronDown, Map as MapIcon, ShieldAlert, CalendarClock, AlertTriangle, Sprout, Send, Paperclip, StickyNote } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -44,6 +44,8 @@ import {
 import { overrideSaveApplicatorId, shouldReassignApplicatorAfterSave, canGenerateWpsNotice, anySelectedFieldSharesLoading } from '../lib/jobSaveHelpers';
 import { fetchCurrentWeather, parseCentroid } from '../lib/weatherCapture';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
+import SectionCard from '../components/ui/SectionCard';
+import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
 import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
@@ -226,16 +228,17 @@ const statusVariant: Record<JobStatus, BadgeVariant> = {
   invoiced: 'success',
 };
 
+// One page of sections (Style D). The old tab keys stay valid in ?tab= deep links (the
+// Jobs list's "Map / Logs" action opens ?tab=map_logs); each now scrolls to its section.
 type TabKey = 'locations' | 'chemicals' | 'loader' | 'applied' | 'map_logs' | 'notifications';
-const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
-  { key: 'locations', label: 'Locations', icon: <MapPin className="w-4 h-4" /> },
-  { key: 'chemicals', label: 'Chemicals / Charges', icon: <Beaker className="w-4 h-4" /> },
-  { key: 'loader', label: 'Loader Worksheet', icon: <Truck className="w-4 h-4" /> },
-  { key: 'applied', label: 'Applied Info', icon: <ClipboardList className="w-4 h-4" /> },
-  // Field-app parity #16: per-job field map + attach log files (the last Phase-4 printout).
-  { key: 'map_logs', label: 'Map / Logs', icon: <MapIcon className="w-4 h-4" /> },
-  { key: 'notifications', label: 'Notifications', icon: <Bell className="w-4 h-4" /> },
-];
+const TAB_SECTION_ID: Record<TabKey, string> = {
+  locations: 'job-scheduling',
+  chemicals: 'job-chemicals',
+  loader: 'job-loader',
+  applied: 'job-applied',
+  map_logs: 'job-map',
+  notifications: 'job-notifications',
+};
 
 interface ChemRow {
   id?: string;
@@ -371,14 +374,6 @@ export default function JobDetail() {
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
   const skipUnsavedPromptRef = useRef(false);
   const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
-  // Field-app parity #16: allow a deep-link to a tab (e.g. the Jobs-list "Map / Logs"
-  // row action opens /jobs/:id?tab=map_logs). Falls back to 'locations'.
-  const initialTab = ((): TabKey => {
-    const t = searchParams.get('tab');
-    const valid: TabKey[] = ['locations', 'chemicals', 'loader', 'applied', 'map_logs', 'notifications'];
-    return (valid as string[]).includes(t ?? '') ? (t as TabKey) : 'locations';
-  })();
-  const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
 
   // Lookup data
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -2320,19 +2315,15 @@ export default function JobDetail() {
     return () => { cancelled = true; };
   }, [id, isNew, profile, role]);
 
-  // Field-app parity #16: keep the active tab in sync with the ?tab= param AFTER mount.
-  // The useState initializer only reads ?tab= once, so a same-route param change (e.g.
-  // clicking the Jobs-list "Map / Logs" action while already on this job) wouldn't switch
-  // tabs. This effect applies a valid tab param whenever it changes; an absent/invalid
-  // param leaves the current tab untouched (no snap-back to 'locations' on unrelated
-  // param changes like recipe_id).
+  // Field-app parity #16: a ?tab= deep link (e.g. the Jobs-list "Map / Logs" action) scrolls
+  // to that section once the page has rendered, and again when the param changes while
+  // already on this job. An absent/invalid param leaves the scroll position alone.
+  const deepLinkTab = searchParams.get('tab');
   useEffect(() => {
-    const t = searchParams.get('tab');
-    const valid: TabKey[] = ['locations', 'chemicals', 'loader', 'applied', 'map_logs', 'notifications'];
-    if (t && (valid as string[]).includes(t)) {
-      setActiveTab(t as TabKey);
-    }
-  }, [searchParams]);
+    if (loading || !deepLinkTab || !Object.prototype.hasOwnProperty.call(TAB_SECTION_ID, deepLinkTab)) return;
+    const section = document.getElementById(TAB_SECTION_ID[deepLinkTab as TabKey]);
+    if (typeof section?.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' });
+  }, [loading, deepLinkTab]);
 
   // Computed
   const customerFields = allFields.filter(f => !customerId || f.customer_id === customerId);
@@ -2435,13 +2426,13 @@ export default function JobDetail() {
     };
   }, [firstFieldId]);
 
-  // Field-app parity #40: load the customer notification log when the
-  // Notifications tab is first opened for a saved job.
+  // Field-app parity #40: load the customer notification log for a saved job (the
+  // Notifications section is always on the page now, so it loads with the job).
   useEffect(() => {
-    if (activeTab === 'notifications' && !isNew && id) {
+    if (!isNew && id) {
       void loadJobNotifications();
     }
-  }, [activeTab, isNew, id, loadJobNotifications]);
+  }, [isNew, id, loadJobNotifications]);
 
   // Codex #40 re-review P1: the pre-notice idempotency key is intentionally KEPT on
   // a failed send (for retry), but useIdempotencyKey stores it in a ref that
@@ -3916,7 +3907,7 @@ export default function JobDetail() {
   const shareInputCls = 'w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50';
 
   return (
-    <div className="space-y-6">
+    <div className="phone-touch space-y-4">
       <UnsavedChangesModal
         open={blocker.state === 'blocked'}
         onStay={() => blocker.reset?.()}
@@ -3937,50 +3928,51 @@ export default function JobDetail() {
           </span>
         </div>
       )}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-bold text-nav-dark">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 md:shrink-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-secondary">Spray job</p>
+          <h1 className="font-heading text-3xl font-bold leading-tight break-words text-nav-dark md:text-4xl">
             {isNew ? (jobNumber ? `New Job — ${jobNumber}` : 'New Job') : jobNumber}
           </h1>
           {isNew && jobNumber && (
-            <p className="text-xs text-secondary mt-0.5">Next job number (assigned on save)</p>
+            <p className="text-sm text-secondary mt-1">Next job number (assigned on save)</p>
           )}
           {!isNew && (
-            <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex items-center gap-2 mt-1.5">
               <Badge variant={statusVariant[status]}>{status.replace('_', ' ')}</Badge>
               <span className="text-sm text-secondary">{parseLocalDate(jobDate).toLocaleDateString()}</span>
             </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
           {!isNew && fieldRows.some((f) => f.field_id) && chemRows.some((c) => c.product_id) && (
             <>
-              <Button variant="secondary" onClick={() => setPrintOptionsOpen(true)} loading={generatingSheet !== null}>
-                <ClipboardList className="w-4 h-4" />
+              <Button icon={<ClipboardList className="w-4 h-4" />} variant="secondary" onClick={() => setPrintOptionsOpen(true)} loading={generatingSheet !== null}>
+                
                 Field Sheet
               </Button>
-              <Button variant="secondary" onClick={handleChemicalReport} loading={generatingChemReport}>
-                <FlaskConical className="w-4 h-4" />
+              <Button icon={<FlaskConical className="w-4 h-4" />} variant="secondary" onClick={handleChemicalReport} loading={generatingChemReport}>
+                
                 Chem Report
               </Button>
-              <Button variant="secondary" onClick={handleLoaderWorksheet} loading={printingLoader}>
-                <Truck className="w-4 h-4" />
+              <Button icon={<Truck className="w-4 h-4" />} variant="secondary" onClick={handleLoaderWorksheet} loading={printingLoader}>
+                
                 Loader
               </Button>
-              <Button variant="secondary" onClick={handleWpsNotice} loading={printingWps}>
-                <Printer className="w-4 h-4" />
+              <Button icon={<Printer className="w-4 h-4" />} variant="secondary" onClick={handleWpsNotice} loading={printingWps}>
+                
                 WPS Notice
               </Button>
             </>
           )}
           {canCancel && (
-            <Button variant="danger" onClick={() => setShowCancelConfirm(true)} loading={cancelling}>
-              <Ban className="w-4 h-4" />
+            <Button icon={<Ban className="w-4 h-4" />} variant="danger" onClick={() => setShowCancelConfirm(true)} loading={cancelling}>
+              
               Cancel Job
             </Button>
           )}
           {canStart && (
-            <Button
+            <Button icon={<Check className="w-4 h-4" />}
               variant="secondary"
               onClick={() => {
                 // U3 (Codex R2 P1): starting refetches the job and resets the dirty
@@ -3995,12 +3987,12 @@ export default function JobDetail() {
               loading={starting}
               disabled={starting}
             >
-              <Check className="w-4 h-4" />
+              
               Start Job
             </Button>
           )}
           {canComplete && (
-            <Button
+            <Button icon={<Check className="w-4 h-4" />}
               variant="secondary"
               onClick={() => {
                 // U3 (Codex P1): completion reads billing-impacting fields (e.g. the
@@ -4013,7 +4005,7 @@ export default function JobDetail() {
                 setShowCompleteModal(true);
               }}
             >
-              <Check className="w-4 h-4" />
+              
               Complete Job
             </Button>
           )}
@@ -4023,13 +4015,13 @@ export default function JobDetail() {
             </div>
           )}
           {canTransfer && (
-            <Button
+            <Button icon={<FileText className="w-4 h-4" />}
               variant="secondary"
               onClick={() => setShowTransferConfirm(true)}
               loading={transferring}
               disabled={transferReconciliationPending}
             >
-              <FileText className="w-4 h-4" />
+              
               Transfer to Invoice
             </Button>
           )}
@@ -4061,8 +4053,23 @@ export default function JobDetail() {
       {/* §2 Watchdog — inline advisory flags for this job (auto-refreshes on open) */}
       {!isNew && id && <WatchdogFlagBanner jobId={id} autoRefresh />}
 
+      <SectionJumpBar
+        sections={[
+          { id: 'job-details', label: 'Job' },
+          { id: 'job-scheduling', label: 'Scheduling' },
+          { id: 'job-fields', label: 'Fields', count: fieldRows.length },
+          { id: 'job-chemicals', label: 'Chemicals', count: chemRows.length },
+          { id: 'job-loader', label: 'Loader' },
+          { id: 'job-applied', label: 'Applied' },
+          { id: 'job-map', label: 'Map & logs' },
+          { id: 'job-notifications', label: 'Notifications' },
+          { id: 'job-notes', label: 'Notes' },
+        ]}
+      />
+
       {/* Job Header */}
-      <Card>
+      <SectionCard id="job-details" icon={<FileText className="w-5 h-5" />} title="Job">
+        <div className="p-4 sm:p-5">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div>
             <label className="block text-sm font-medium text-nav-dark mb-1">Customer *</label>
@@ -4187,40 +4194,13 @@ export default function JobDetail() {
             disabled={!canEdit}
           />
         </div>
-      </Card>
+        </div>
+      </SectionCard>
 
-      {/* Tabs */}
-      <div className="border-b">
-        <nav className="flex gap-1 px-1 overflow-x-auto">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                activeTab === tab.key
-                  ? 'border-crx-green text-crx-green'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              {tab.icon}
-              {tab.label}
-              {tab.key === 'locations' && fieldRows.length > 0 && (
-                <span className="ml-1 text-xs bg-gray-100 rounded-full px-1.5">{fieldRows.length}</span>
-              )}
-              {tab.key === 'chemicals' && chemRows.length > 0 && (
-                <span className="ml-1 text-xs bg-gray-100 rounded-full px-1.5">{chemRows.length}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {/* ─────────────── LOCATIONS TAB ─────────────── */}
-      {activeTab === 'locations' && (
-        <>
+      {/* ─────────────── LOCATIONS ─────────────── */}
           {/* Scheduling fields */}
-          <Card>
-            <h2 className="text-lg font-semibold text-nav-dark mb-3">Scheduling</h2>
+          <SectionCard id="job-scheduling" icon={<CalendarClock className="w-5 h-5" />} title="Scheduling">
+            <div className="p-4 sm:p-5">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Input label="Call Date" type="date" value={callDate} onChange={(e) => setCallDate(e.target.value)} disabled={!canEdit} />
               <Input label="Date Proposed" type="date" value={dateProposed} onChange={(e) => setDateProposed(e.target.value)} disabled={!canEdit} />
@@ -4258,42 +4238,44 @@ export default function JobDetail() {
                 </select>
               </div>
             </div>
-          </Card>
+            </div>
+          </SectionCard>
 
           {/* Fields + per-field agronomy + customer shares */}
-          <Card>
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="text-lg font-semibold text-nav-dark">Fields ({fieldRows.length})</h2>
-              {canEdit && (
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button
+          <SectionCard
+            id="job-fields"
+            icon={<MapPin className="w-5 h-5" />}
+            title={`Fields (${fieldRows.length})`}
+            action={canEdit && (
+                <div className="flex flex-wrap gap-2">
+                  <Button icon={<MapPin className="w-4 h-4" />}
                     size="sm"
                     variant="secondary"
                     onClick={() => setFieldPickerOpen(true)}
                     disabled={!fieldsLookupReady}
                     title={!fieldsLookupReady ? 'Loading fields…' : undefined}
                   >
-                    <MapPin className="w-4 h-4" /> Select locations on map
+                    Select locations on map
                   </Button>
-                  <Button
+                  <Button icon={<Plus className="w-4 h-4" />}
                     size="sm"
                     variant="secondary"
                     onClick={addFieldRow}
                     disabled={!customerId || !fieldsLookupReady}
                     title={!fieldsLookupReady ? 'Loading fields…' : undefined}
                   >
-                    <Plus className="w-4 h-4" /> Add Field
+                    Add Field
                   </Button>
                 </div>
               )}
-            </div>
+          >
+            <div className="p-4 sm:p-5">
             {fieldRows.length > 1 && (
               <p className="text-xs text-secondary mb-4 flex items-center gap-1">
                 <GripVertical className="w-3.5 h-3.5 text-gray-400" />
                 Drag the handle (or use the up/down arrows) to set the applicator&rsquo;s drive order. Stop&nbsp;1 is visited first.
               </p>
             )}
-            {fieldRows.length <= 1 && <div className="mb-4" />}
             {fieldRows.length === 0 ? (
               <p className="text-sm text-secondary text-center py-4">
                 {customerId ? 'No fields added. Click "Add Field" to assign fields.' : 'Select a customer first.'}
@@ -4463,9 +4445,8 @@ export default function JobDetail() {
                 <p className="text-xs text-secondary text-right">Total: {totalAcres.toLocaleString()} acres</p>
               </div>
             )}
-          </Card>
-        </>
-      )}
+            </div>
+          </SectionCard>
 
       {fieldPickerOpen && (
         <Suspense fallback={null}>
@@ -4479,44 +4460,47 @@ export default function JobDetail() {
         </Suspense>
       )}
 
-      {/* ─────────────── CHEMICALS / CHARGES TAB ─────────────── */}
-      {activeTab === 'chemicals' && (
-        <Card>
-          <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
-            <h2 className="text-lg font-semibold text-nav-dark">Chemicals / Charges ({chemRows.length})</h2>
+      {/* ─────────────── CHEMICALS / CHARGES ─────────────── */}
+        <SectionCard
+          id="job-chemicals"
+          icon={<Beaker className="w-5 h-5" />}
+          title={`Chemicals / Charges (${chemRows.length})`}
+          action={canEdit && (
             <div className="flex gap-2 flex-wrap">
               {canEdit && (
-                <Button size="sm" variant="secondary" onClick={() => { setSelectedRecipeId(''); setRecipeMode('replace'); setShowRecipeModal(true); }}>
-                  <Beaker className="w-4 h-4" /> Select Recipe
+                <Button icon={<Beaker className="w-4 h-4" />} size="sm" variant="secondary" onClick={() => { setSelectedRecipeId(''); setRecipeMode('replace'); setShowRecipeModal(true); }}>
+                  Select Recipe
                 </Button>
               )}
               {canEdit && cropPrograms.some((p) => p.is_active) && (
-                <Button size="sm" variant="secondary" onClick={() => { setSelectedProgramId(''); setShowProgramModal(true); }}
+                <Button icon={<Sprout className="w-4 h-4" />} size="sm" variant="secondary" onClick={() => { setSelectedProgramId(''); setShowProgramModal(true); }}
                   title="Add a saved crop program's products to this job">
-                  <Sprout className="w-4 h-4" /> Load Program
+                  Load Program
                 </Button>
               )}
               {canEdit && lastRecipeId && recipes.some((r) => r.id === lastRecipeId) && (
-                <Button size="sm" variant="secondary" onClick={handleUseLastRecipe} loading={loadingRecipe}
+                <Button icon={<History className="w-4 h-4" />} size="sm" variant="secondary" onClick={handleUseLastRecipe} loading={loadingRecipe}
                   title={`Load "${recipes.find((r) => r.id === lastRecipeId)?.name || 'last recipe'}" (replaces current chemicals)`}>
-                  <History className="w-4 h-4" /> Use Last Recipe
+                  Use Last Recipe
                 </Button>
               )}
               {canEdit && (
-                <Button size="sm" variant="secondary"
+                <Button icon={<BookmarkPlus className="w-4 h-4" />} size="sm" variant="secondary"
                   disabled={chemRowsToRecipeItems(chemRows).length === 0}
                   onClick={() => { saveRecipeIdem.resetKey(); setNewRecipeName(''); setShowSaveRecipeModal(true); }}
                   title="Save the current chemical lines as a reusable recipe">
-                  <BookmarkPlus className="w-4 h-4" /> Save as Recipe
+                  Save as Recipe
                 </Button>
               )}
               {canEdit && (
-                <Button size="sm" variant="secondary" onClick={addChemRow}>
-                  <Plus className="w-4 h-4" /> Add Chemical
+                <Button icon={<Plus className="w-4 h-4" />} size="sm" variant="secondary" onClick={addChemRow}>
+                  Add Chemical
                 </Button>
               )}
             </div>
-          </div>
+          )}
+        >
+          <div className="p-4 sm:p-5">
           <JobLabelCorrectionsNotice
             rows={chemRows}
             canEdit={canEdit && !isNew}
@@ -4734,13 +4718,12 @@ export default function JobDetail() {
               </div>
             </div>
           )}
-        </Card>
-      )}
+          </div>
+        </SectionCard>
 
-      {/* ─────────────── LOADER WORKSHEET TAB ─────────────── */}
-      {activeTab === 'loader' && (
-        <Card>
-          <h2 className="text-lg font-semibold text-nav-dark mb-3">Loader Worksheet</h2>
+      {/* ─────────────── LOADER WORKSHEET ─────────────── */}
+        <SectionCard id="job-loader" icon={<Truck className="w-5 h-5" />} title="Loader Worksheet">
+          <div className="p-4 sm:p-5">
           {isNew ? (
             <>
           {/* Inputs: carrier rate (gal/acre) drives spray volume; tank capacity is
@@ -4918,17 +4901,16 @@ export default function JobDetail() {
               onDisplayModeChange={setLoaderDisplayMode}
             />
           )}
-        </Card>
-      )}
+          </div>
+        </SectionCard>
 
-      {/* ─────────────── APPLIED INFO TAB ─────────────── */}
-      {activeTab === 'applied' && (
-        <div className="space-y-4">
+      {/* ─────────────── APPLIED INFO ─────────────── */}
+        <SectionCard id="job-applied" icon={<ClipboardList className="w-5 h-5" />} title="Applied Info">
           {/* As-applied entry records (#17): MANY per job — applicator, vehicle,
               date. This is the Phase-2 foundation that #18 (acres), #19
               (weather), #20 (tach), #21 (crew) extend off each record's id.
               Only available once the job is saved (records reference a job_id). */}
-          <Card>
+          <div className="p-4 sm:p-5">
             {isNew ? (
               <p className="text-sm text-secondary py-2">
                 Save the job first, then add as-applied entries (applicator, vehicle, date).
@@ -4952,12 +4934,12 @@ export default function JobDetail() {
                 performedBy={profile?.id ?? null}
               />
             )}
-          </Card>
+          </div>
 
           {/* Completion weather snapshot (legacy job_applied_info, 1:1) — set by
               Complete Job. Distinct from the per-pass as-applied entries above. */}
-          <Card>
-            <h2 className="text-lg font-semibold text-nav-dark mb-3">Completion Weather Snapshot</h2>
+          <div className="border-t border-gray-100 p-4 sm:p-5">
+            <h3 className="font-heading text-lg font-semibold text-nav-dark mb-3">Completion Weather Snapshot</h3>
             {!isNew && (status === 'completed' || status === 'invoiced') ? (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div><span className="text-xs text-secondary">Wind Speed</span><p className="font-medium">{appliedInfo.wind_speed || '-'} mph</p></div>
@@ -4976,37 +4958,33 @@ export default function JobDetail() {
                   : 'Applied information is recorded once the job is started and completed.'}
               </p>
             )}
-          </Card>
-        </div>
-      )}
+          </div>
+        </SectionCard>
 
-      {/* ─────────────── NOTIFICATIONS TAB ─────────────── */}
-      {/* ─────────────── MAP / LOGS TAB (#16) ─────────────── */}
-      {activeTab === 'map_logs' && (
-        <div className="space-y-4">
+      {/* ─────────────── MAP / LOGS (#16) ─────────────── */}
           {isNew || !id ? (
-            <Card>
+            <SectionCard id="job-map" icon={<MapIcon className="w-5 h-5" />} title="Field Map">
               <p className="text-sm text-secondary text-center py-6">
                 Save this job first to see its field map.
               </p>
-            </Card>
+            </SectionCard>
           ) : (
             <Suspense
               fallback={
-                <Card>
+                <SectionCard id="job-map" icon={<MapIcon className="w-5 h-5" />} title="Field Map">
                   <p className="text-sm text-gray-500 py-10 text-center">Loading map…</p>
-                </Card>
+                </SectionCard>
               }
             >
-              <JobFieldMap jobId={id} />
+              <JobFieldMap jobId={id} refreshKey={baselineSettleTick} />
             </Suspense>
           )}
           {isNew || !id ? (
-            <Card>
+            <SectionCard id="job-logs" icon={<Paperclip className="w-5 h-5" />} title="Attached Log Files">
               <p className="text-sm text-secondary text-center py-6">
                 Save this job first to attach log files.
               </p>
-            </Card>
+            </SectionCard>
           ) : (
             // Codex #16 P2: the RLS lets the assigned applicator attach/delete their
             // OWN logs (they hold the GPS/equipment files), so the upload/delete
@@ -5017,22 +4995,18 @@ export default function JobDetail() {
               canEdit={isEditable || (role === 'applicator' && applicatorId === profile?.id)}
             />
           )}
-        </div>
-      )}
 
-      {activeTab === 'notifications' && (
-        <div className="space-y-4">
         {/* ── Customer Notifications log (#40 pre-application notice) ── */}
-        <Card>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-nav-dark flex items-center gap-2">
-              <Bell className="w-4 h-4 text-crx-green" /> Customer Notifications
-            </h2>
+        <SectionCard
+          id="job-notifications"
+          icon={<Bell className="w-5 h-5" />}
+          title="Customer Notifications"
+          action={
             <div className="flex items-center gap-2">
               {/* #40 Codex P2: a PRE-application notice only on a not-yet-applied job
                   (scheduled / in_progress); hidden on completed / invoiced / cancelled. */}
               {isEditable && !isNew && id && (status === 'scheduled' || status === 'in_progress') && (
-                <Button
+                <Button icon={<Bell className="w-4 h-4" />}
                   size="sm"
                   variant={preSendCopy.isResend ? 'secondary' : 'primary'}
                   onClick={() => setShowPreNoticeConfirm(true)}
@@ -5043,25 +5017,27 @@ export default function JobDetail() {
                   // job that already has sent notices. notificationsLoaded fails closed.
                   disabled={sendingPreNotice || loadingNotifications || !notificationsLoaded}
                 >
-                  <Bell className="w-4 h-4" /> {preSendCopy.buttonLabel}
+                  {preSendCopy.buttonLabel}
                 </Button>
               )}
               {/* #41: a POST-application notice only on an APPLIED job (completed /
                   invoiced); hidden on scheduled / in_progress / cancelled. Same
                   fail-closed gating + re-send safety as the pre control above. */}
               {isEditable && !isNew && id && (status === 'completed' || status === 'invoiced') && (
-                <Button
+                <Button icon={<Bell className="w-4 h-4" />}
                   size="sm"
                   variant={postSendCopy.isResend ? 'secondary' : 'primary'}
                   onClick={() => setShowPostNoticeConfirm(true)}
                   loading={sendingPostNotice}
                   disabled={sendingPostNotice || loadingNotifications || !notificationsLoaded}
                 >
-                  <Bell className="w-4 h-4" /> {postSendCopy.buttonLabel}
+                  {postSendCopy.buttonLabel}
                 </Button>
               )}
             </div>
-          </div>
+          }
+        >
+          <div className="p-4 sm:p-5">
           {isNew || !id ? (
             <p className="text-sm text-secondary text-center py-6">
               Save this job first to send and track customer notifications.
@@ -5080,7 +5056,7 @@ export default function JobDetail() {
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="phone-stack w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs font-medium text-secondary border-b border-gray-200">
                     <th className="py-2 pr-3">Type</th>
@@ -5098,15 +5074,17 @@ export default function JobDetail() {
                           {n.notification_type === 'pre' ? 'Pre' : 'Post'}
                         </Badge>
                       </td>
-                      <td className="py-2 pr-3 text-charcoal">
-                        <div className="font-medium">{n.customer?.farm_name ?? 'Customer'}</div>
-                        <div className="text-xs text-secondary">{n.recipient_email || 'no email on file'}</div>
+                      <td data-label="Recipient" className="py-2 pr-3 text-charcoal">
+                        <div className="min-w-0 break-words">
+                          <div className="font-medium">{n.customer?.farm_name ?? 'Customer'}</div>
+                          <div className="text-xs text-secondary">{n.recipient_email || 'no email on file'}</div>
+                        </div>
                       </td>
-                      <td className="py-2 pr-3 capitalize text-secondary">{n.channel}</td>
-                      <td className="py-2 pr-3 text-secondary">
+                      <td data-label="Channel" className="py-2 pr-3 capitalize text-secondary">{n.channel}</td>
+                      <td data-label="Sent" className="py-2 pr-3 text-secondary">
                         {n.sent_at ? new Date(n.sent_at).toLocaleString() : '—'}
                       </td>
-                      <td className="py-2 pr-3">
+                      <td data-label="Status" className="py-2 pr-3">
                         <Badge variant={n.status === 'sent' ? 'success' : 'danger'}>
                           {n.status === 'sent' ? 'Sent' : 'Failed'}
                         </Badge>
@@ -5120,12 +5098,12 @@ export default function JobDetail() {
           <p className="mt-3 text-xs text-secondary">
             The pre- and post-notification messages are configured in Settings (editable wording) and go to the job&apos;s billed customer(s) by email. This history carries over to the job&apos;s field-application invoice.
           </p>
-        </Card>
+          </div>
+        </SectionCard>
 
         {/* ── Job notes / memos (internal) ── */}
-        <Card>
-          <h2 className="text-lg font-semibold text-nav-dark mb-3">Job Notes &amp; Memos</h2>
-          <div className="space-y-4">
+        <SectionCard id="job-notes" icon={<StickyNote className="w-5 h-5" />} title="Job Notes & Memos">
+          <div className="space-y-4 p-4 sm:p-5">
             <div>
               <label className="block text-sm font-medium text-nav-dark mb-1">Job Notes</label>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} disabled={!canEdit}
@@ -5154,9 +5132,7 @@ export default function JobDetail() {
               </p>
             )}
           </div>
-        </Card>
-        </div>
-      )}
+        </SectionCard>
 
       {/* Related Notes */}
       {!isNew && id && (
@@ -5180,8 +5156,8 @@ export default function JobDetail() {
             </div>
           )}
           {jobFieldCentroid && (
-            <Button variant="ghost" size="sm" onClick={handleFetchWeather} loading={fetchingWeather}>
-              <CloudSun className="w-4 h-4" />
+            <Button icon={<CloudSun className="w-4 h-4" />} variant="ghost" size="sm" onClick={handleFetchWeather} loading={fetchingWeather}>
+              
               Use current weather at {allFields.find(f => f.id === fieldRows.find(r => r.field_id)?.field_id)?.field_name || 'field'}
             </Button>
           )}
@@ -5206,8 +5182,8 @@ export default function JobDetail() {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setShowCompleteModal(false)}>Cancel</Button>
-            <Button onClick={() => setShowCompleteConfirm(true)} loading={completing}>
-              <Check className="w-4 h-4" /> Complete Job
+            <Button icon={<Check className="w-4 h-4" />} onClick={() => setShowCompleteConfirm(true)} loading={completing}>
+              Complete Job
             </Button>
           </div>
         </div>
@@ -5250,8 +5226,8 @@ export default function JobDetail() {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setShowRecipeModal(false)}>Cancel</Button>
-            <Button onClick={handleLoadRecipe} disabled={!selectedRecipeId} loading={loadingRecipe}>
-              <Beaker className="w-4 h-4" /> Load Recipe
+            <Button icon={<Beaker className="w-4 h-4" />} onClick={handleLoadRecipe} disabled={!selectedRecipeId} loading={loadingRecipe}>
+              Load Recipe
             </Button>
           </div>
         </div>
@@ -5281,8 +5257,8 @@ export default function JobDetail() {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setShowProgramModal(false)}>Cancel</Button>
-            <Button onClick={() => loadProgramById(selectedProgramId)} disabled={!selectedProgramId || loadingProgram} loading={loadingProgram}>
-              <Sprout className="w-4 h-4" /> Load Program
+            <Button icon={<Sprout className="w-4 h-4" />} onClick={() => loadProgramById(selectedProgramId)} disabled={!selectedProgramId || loadingProgram} loading={loadingProgram}>
+              Load Program
             </Button>
           </div>
         </div>
@@ -5308,8 +5284,8 @@ export default function JobDetail() {
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setShowSaveRecipeModal(false)}>Cancel</Button>
-            <Button onClick={handleSaveAsRecipe} disabled={!newRecipeName.trim()} loading={savingRecipe}>
-              <BookmarkPlus className="w-4 h-4" /> Save Recipe
+            <Button icon={<BookmarkPlus className="w-4 h-4" />} onClick={handleSaveAsRecipe} disabled={!newRecipeName.trim()} loading={savingRecipe}>
+              Save Recipe
             </Button>
           </div>
         </div>

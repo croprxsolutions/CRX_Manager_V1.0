@@ -1,105 +1,127 @@
 -- Smoke chain: retire_uncertain_request (REQUIRES 20261107150000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so the receipts it seeds and the
--- retire receipts the function writes are all rolled back. It needs only one active
--- profile: every receipt it reads it seeds itself. Proves, as a real signed-in session
--- (role authenticated with that profile's claims) and with those claims cleared:
---   * the installed body is 20261107150000's, only authenticated can execute it, and no
---     client role can reach the signing-key table;
---   * a request key recorded under the operation it names is safe ('recorded'); a
---     receipt under another operation is not;
+-- retired-request rows the function writes are all rolled back. It needs one active
+-- admin profile: every receipt it reads it seeds itself. Proves, as a real signed-in
+-- session (role authenticated with that profile's claims) and with those claims cleared:
+--   * the installed bodies (the function and the receipt insert guard) are
+--     20261107150000's, only authenticated can execute the function, and no client role
+--     can reach the signing-key or retired-request tables;
+--   * a request key recorded under the operation it names is safe ('recorded'), even
+--     when the receipt has expired; a receipt under another operation is not;
 --   * an unrecorded key needs two checks 15+ minutes apart by SERVER time, carried in a
---     token the server signed for that exact request (key and row keys): no token, a
---     forged one, another request's token or a future one -> 'first_check'; a genuine
---     token 5 minutes old -> 'waiting', 16 minutes -> safe;
---   * a safe answer retires every key that had no receipt: a later send of that key is
---     refused (IDEMPOTENCY_CROSS_OP_KEY_REUSE), and asking again answers 'retired';
---   * a batch whose row key is recorded is 'recorded', and its unrecorded rows retire;
---   * an EXPIRED receipt still counts as saved, and the safe answer keeps it 30 more days,
---     so a later send replays instead of deleting it and saving again;
---   * another user's key, a row key outside the request, a wrong idempotency key and a
---     signed-out session are refused.
--- The 'in_progress' answer needs a second session holding a key's lock, so it is proven
--- on the local test database instead (docs/changelog.d/2026-11-05-uncertain-request-clear-check.md).
+--     token the server signed for that exact request: no token, a forged one, another
+--     request's token or a future one -> 'first_check'; a genuine token 5 minutes old ->
+--     'waiting', 16 minutes -> safe; asking again -> 'retired';
+--   * a batch with a row saved under adjust_inventory is 'recorded'; a row receipt under
+--     another operation does not count;
+--   * after a safe answer the database refuses any later save of the request key, of
+--     any row under it (known or not), and of an expired one
+--     (IDEMPOTENCY_REQUEST_RETIRED); an unrelated key still saves;
+--   * a non-admin (when one exists), another user's key, a row key, a wrong idempotency
+--     key and a signed-out session are refused.
+-- The 'in_progress' answer and the wait of a row save behind a retire need two sessions,
+-- so they are proven on the local test database instead
+-- (docs/changelog.d/2026-11-05-uncertain-request-clear-check.md).
 DO $$
 DECLARE
-  v_fn regprocedure := 'public.retire_uncertain_request(text,text[],text,text)'::regprocedure;
+  v_fn regprocedure := 'public.retire_uncertain_request(text,text,text)'::regprocedure;
   v_actor uuid;
+  v_other uuid;
   v_recorded text;
   v_expired text;
   v_foreign text;
   v_unrecorded text;
   v_batch text;
-  v_row_saved text;
-  v_row_open text;
+  v_batch_foreign text;
   v_signing bytea;
   v_tok_5 text;
   v_tok_16 text;
   v_tok_future text;
   v_tok_other text;
-  v_tok_batch text;
   v_bad text;
   v_r jsonb;
   v_refused boolean;
   v_role text;
 BEGIN
-  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_fn), chr(13), '')) <> 'ef21fcfd51b1c6d51ae73837c8bd07c0' THEN
+  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_fn), chr(13), '')) <> 'a1496e06fe691f433c93daeac45dc96e' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: retire_uncertain_request is not the body of 20261107150000';
+  END IF;
+  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._guard_idempotency_key_insert()'::regprocedure), chr(13), ''))
+     <> 'dc8f53f52365ff2f28d9c126dd9bb41d' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: _guard_idempotency_key_insert is not the body of 20261107150000';
   END IF;
   IF has_function_privilege('anon', v_fn, 'EXECUTE') OR has_function_privilege('service_role', v_fn, 'EXECUTE')
      OR has_function_privilege('metabase_ro', v_fn, 'EXECUTE') OR NOT has_function_privilege('authenticated', v_fn, 'EXECUTE') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: EXECUTE grants are not authenticated-only';
   END IF;
   FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role', 'metabase_ro'] LOOP
-    IF has_table_privilege(v_role, 'public.uncertain_request_clear_check_key', 'SELECT,INSERT,UPDATE,DELETE') THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: % can reach the signing-key table', v_role;
+    IF has_table_privilege(v_role, 'public.uncertain_request_clear_check_key', 'SELECT,INSERT,UPDATE,DELETE')
+       OR has_table_privilege(v_role, 'public.retired_uncertain_requests', 'SELECT,INSERT,UPDATE,DELETE') THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: % can reach a clear-check table', v_role;
     END IF;
   END LOOP;
   SELECT signing_key INTO STRICT v_signing FROM public.uncertain_request_clear_check_key;
-  SELECT id INTO v_actor FROM public.profiles WHERE is_active ORDER BY created_at LIMIT 1;
-  IF v_actor IS NULL THEN RAISE EXCEPTION 'SMOKE_FAIL: need one active profile'; END IF;
+  SELECT id INTO v_actor FROM public.profiles WHERE is_active AND role = 'admin' ORDER BY created_at LIMIT 1;
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'SMOKE_FAIL: need one active admin profile'; END IF;
+  SELECT id INTO v_other FROM public.profiles WHERE is_active AND role <> 'admin' ORDER BY created_at LIMIT 1;
 
-  -- Seeded receipts (rolled back): a saved request, a request key used by another
-  -- operation, and a batch with one saved row and one unsent row.
+  -- Seeded receipts (rolled back).
   v_recorded := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
   v_expired := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
   v_foreign := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
   v_unrecorded := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
   v_batch := 'adjust_inventory_batch:' || v_actor || ':' || gen_random_uuid();
-  v_row_saved := v_batch || ':' || gen_random_uuid();
-  v_row_open := v_batch || ':' || gen_random_uuid();
+  v_batch_foreign := 'adjust_inventory_batch:' || v_actor || ':' || gen_random_uuid();
   INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
   VALUES (v_recorded, 'save_vendor', '{"smoke": true}', v_actor, 'smoke'),
          (v_foreign, 'save_customer', '{"smoke": true}', v_actor, 'smoke'),
-         (v_row_saved, 'adjust_inventory', '{"smoke": true}', v_actor, 'smoke');
+         (v_batch || ':' || gen_random_uuid(), 'adjust_inventory', '{"smoke": true}', v_actor, 'smoke'),
+         (v_batch_foreign || ':' || gen_random_uuid(), 'save_vendor', '{"smoke": true}', v_actor, 'smoke');
   INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint, created_at, expires_at)
   VALUES (v_expired, 'save_vendor', '{"smoke": true}', v_actor, 'smoke', now() - interval '25 hours', now() - interval '1 hour');
 
   -- Tokens signed here exactly as the function signs them (postgres can read the key; clients cannot).
-  SELECT string_agg(us::text || '.' || encode(extensions.hmac(convert_to(k || '|' || us::text || '|' || rows, 'UTF8'), v_signing, 'sha256'), 'hex'), ',' ORDER BY n)
+  SELECT string_agg(us::text || '.' || encode(extensions.hmac(convert_to(k || '|' || us::text, 'UTF8'), v_signing, 'sha256'), 'hex'), ',' ORDER BY n)
     INTO v_bad
     FROM (VALUES
-      (1, v_unrecorded, (extract(epoch FROM now() - interval '5 minutes') * 1000000)::bigint, ''),
-      (2, v_unrecorded, (extract(epoch FROM now() - interval '16 minutes') * 1000000)::bigint, ''),
-      (3, v_unrecorded, (extract(epoch FROM now() + interval '1 hour') * 1000000)::bigint, ''),
-      (4, 'save_vendor:' || v_actor || ':' || gen_random_uuid(), (extract(epoch FROM now() - interval '16 minutes') * 1000000)::bigint, ''),
-      (5, v_unrecorded, (extract(epoch FROM now() - interval '16 minutes') * 1000000)::bigint, v_row_open)
-    ) AS t(n, k, us, rows);
+      (1, v_unrecorded, (extract(epoch FROM now() - interval '5 minutes') * 1000000)::bigint),
+      (2, v_unrecorded, (extract(epoch FROM now() - interval '16 minutes') * 1000000)::bigint),
+      (3, v_unrecorded, (extract(epoch FROM now() + interval '1 hour') * 1000000)::bigint),
+      (4, 'save_vendor:' || v_actor || ':' || gen_random_uuid(), (extract(epoch FROM now() - interval '16 minutes') * 1000000)::bigint)
+    ) AS t(n, k, us);
   v_tok_5 := split_part(v_bad, ',', 1);
   v_tok_16 := split_part(v_bad, ',', 2);
   v_tok_future := split_part(v_bad, ',', 3);
   v_tok_other := split_part(v_bad, ',', 4);
-  v_tok_batch := split_part(v_bad, ',', 5);
+
+  -- A signed-in non-admin is refused before anything is read.
+  IF v_other IS NOT NULL THEN
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_other, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_other::text, true);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_refused := false;
+    BEGIN
+      PERFORM public.retire_uncertain_request('save_vendor:' || v_other || ':' || gen_random_uuid());
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'NOT_AUTHORIZED%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: a non-admin failed oddly: % %', SQLSTATE, SQLERRM;
+      END IF;
+      v_refused := true;
+    END;
+    IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a non-admin was answered'; END IF;
+    EXECUTE 'RESET ROLE';
+  END IF;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_actor, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_actor::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
 
   v_r := public.retire_uncertain_request(v_recorded, p_idempotency_key => v_recorded);
-  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' OR (v_r->>'retired_keys')::int <> 0 THEN
+  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a recorded key was not safe: %', v_r;
   END IF;
   v_r := public.retire_uncertain_request(v_expired);
-  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' OR (v_r->>'retired_keys')::int <> 0 THEN
+  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: an expired receipt was not counted as saved: %', v_r;
   END IF;
   v_r := public.retire_uncertain_request(v_foreign);
@@ -112,7 +134,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: a first check did not return a signed server time and refuse: %', v_r;
   END IF;
   -- Its own fresh token is genuine: asking again at once is 'waiting', not a new first check.
-  IF public.retire_uncertain_request(v_unrecorded, NULL, v_r->>'first_check_token')->>'reason' <> 'waiting' THEN
+  IF public.retire_uncertain_request(v_unrecorded, v_r->>'first_check_token')->>'reason' <> 'waiting' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a token the server just signed was not accepted';
   END IF;
   FOREACH v_bad IN ARRAY ARRAY[
@@ -121,67 +143,60 @@ BEGIN
     v_tok_other,
     v_tok_future
   ] LOOP
-    v_r := public.retire_uncertain_request(v_unrecorded, NULL, v_bad);
+    v_r := public.retire_uncertain_request(v_unrecorded, v_bad);
     IF (v_r->>'safe')::boolean IS NOT FALSE OR v_r->>'reason' <> 'first_check' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: an unsigned, borrowed or future token was trusted: %', v_r;
     END IF;
   END LOOP;
-  -- A token signed for other row keys does not count for this request.
-  IF public.retire_uncertain_request(v_unrecorded, NULL, v_tok_batch)->>'reason' <> 'first_check' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a token signed for different row keys was trusted';
-  END IF;
-  v_r := public.retire_uncertain_request(v_unrecorded, NULL, v_tok_5);
+  v_r := public.retire_uncertain_request(v_unrecorded, v_tok_5);
   IF (v_r->>'safe')::boolean IS NOT FALSE OR v_r->>'reason' <> 'waiting' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a check 5 minutes later was not refused: %', v_r;
   END IF;
-  v_r := public.retire_uncertain_request(v_unrecorded, NULL, v_tok_16);
-  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'not_recorded_after_wait' OR (v_r->>'retired_keys')::int <> 1 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a check 16 minutes later was not safe and retired: %', v_r;
+  v_r := public.retire_uncertain_request(v_unrecorded, v_tok_16);
+  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'not_recorded_after_wait' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a check 16 minutes later was not safe: %', v_r;
   END IF;
-  v_r := public.retire_uncertain_request(v_unrecorded);
-  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'retired' OR (v_r->>'retired_keys')::int <> 0 THEN
+  v_r := public.retire_uncertain_request(v_unrecorded, p_idempotency_key => v_unrecorded);
+  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'retired' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: asking again after a retire was not answered retired: %', v_r;
   END IF;
 
-  -- A batch: one row saved, one never saved. Recorded at once; the base key and the
-  -- unsaved row retire.
-  v_r := public.retire_uncertain_request(v_batch, ARRAY[v_row_saved, v_row_open, v_row_open]);
-  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' OR (v_r->>'retired_keys')::int <> 2 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a batch with a saved row was not recorded with its open keys retired: %', v_r;
+  -- Batches: a row saved under adjust_inventory counts; one under another operation does not.
+  v_r := public.retire_uncertain_request(v_batch);
+  IF (v_r->>'safe')::boolean IS NOT TRUE OR v_r->>'reason' <> 'recorded' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a batch with a saved row was not recorded: %', v_r;
+  END IF;
+  v_r := public.retire_uncertain_request(v_batch_foreign);
+  IF (v_r->>'safe')::boolean IS NOT FALSE OR v_r->>'reason' <> 'first_check' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a batch row under another operation counted as saved: %', v_r;
   END IF;
 
   FOREACH v_bad IN ARRAY ARRAY[
     'save_vendor:' || gen_random_uuid() || ':' || gen_random_uuid(),
     v_recorded || ':row',
-    v_recorded || ':' || gen_random_uuid()
+    v_batch || ':' || gen_random_uuid()
   ] LOOP
     v_refused := false;
     BEGIN
       PERFORM public.retire_uncertain_request(v_bad);
     EXCEPTION WHEN OTHERS THEN
       IF SQLERRM NOT LIKE 'REQUEST_KEY_NOT_OWNED%' THEN
-        RAISE EXCEPTION 'SMOKE_FAIL: another user''s key failed oddly: % %', SQLSTATE, SQLERRM;
+        RAISE EXCEPTION 'SMOKE_FAIL: a key that is not a request this user owns failed oddly: % %', SQLSTATE, SQLERRM;
       END IF;
       v_refused := true;
     END;
     IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a key this user does not own was accepted: %', v_bad; END IF;
   END LOOP;
-  FOREACH v_bad IN ARRAY ARRAY['REQUEST_KEY_NOT_OWNED', 'IDEMPOTENCY_KEY_MISMATCH'] LOOP
-    v_refused := false;
-    BEGIN
-      IF v_bad = 'REQUEST_KEY_NOT_OWNED' THEN
-        PERFORM public.retire_uncertain_request(v_batch, ARRAY[v_recorded || ':' || gen_random_uuid()]);
-      ELSE
-        PERFORM public.retire_uncertain_request(v_batch, NULL, NULL, v_recorded);
-      END IF;
-    EXCEPTION WHEN OTHERS THEN
-      IF SQLERRM NOT LIKE v_bad || '%' THEN
-        RAISE EXCEPTION 'SMOKE_FAIL: expected %, got % %', v_bad, SQLSTATE, SQLERRM;
-      END IF;
-      v_refused := true;
-    END;
-    IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: % was not raised', v_bad; END IF;
-  END LOOP;
+  v_refused := false;
+  BEGIN
+    PERFORM public.retire_uncertain_request(v_batch, NULL, v_recorded);
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'IDEMPOTENCY_KEY_MISMATCH%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: expected IDEMPOTENCY_KEY_MISMATCH, got % %', SQLSTATE, SQLERRM;
+    END IF;
+    v_refused := true;
+  END;
+  IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: IDEMPOTENCY_KEY_MISMATCH was not raised'; END IF;
 
   PERFORM set_config('request.jwt.claims', '', true);
   PERFORM set_config('request.jwt.claim.sub', '', true);
@@ -196,35 +211,25 @@ BEGIN
   END;
   IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a signed-out session was answered'; END IF;
 
-  -- A late send of a retired key, by any path, is refused by the database.
+  -- After the clear, the database refuses a late save of the request, of any row under
+  -- it (one the browser never knew about included) and of an expired receipt's key.
   EXECUTE 'RESET ROLE';
-  IF (SELECT expires_at FROM public.idempotency_keys WHERE idempotency_key = v_expired) < now() + interval '29 days' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: the expired receipt was not kept for 30 more days';
-  END IF;
-  v_refused := false;
-  BEGIN
-    INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
-    VALUES (v_expired, 'save_vendor', '{"late": true}', v_actor, 'late');
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT LIKE 'IDEMPOTENCY_CONCURRENT_REPLAY_RETRY%' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: a late send of a kept receipt failed oddly: % %', SQLSTATE, SQLERRM;
-    END IF;
-    v_refused := true;
-  END;
-  IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a kept receipt was replaced by a late send'; END IF;
-  FOREACH v_bad IN ARRAY ARRAY[v_unrecorded, v_row_open] LOOP
+  FOREACH v_bad IN ARRAY ARRAY[v_unrecorded, v_expired, v_batch || ':' || gen_random_uuid(), v_unrecorded || ':' || gen_random_uuid()] LOOP
     v_refused := false;
     BEGIN
       INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
-      VALUES (v_bad, CASE WHEN v_bad = v_row_open THEN 'adjust_inventory' ELSE 'save_vendor' END, '{"late": true}', v_actor, 'late');
+      VALUES (v_bad, CASE WHEN v_bad LIKE 'adjust_inventory_batch:%' THEN 'adjust_inventory' ELSE 'save_vendor' END,
+              '{"late": true}', v_actor, 'late');
     EXCEPTION WHEN OTHERS THEN
-      IF SQLERRM NOT LIKE 'IDEMPOTENCY_CROSS_OP_KEY_REUSE%' THEN
-        RAISE EXCEPTION 'SMOKE_FAIL: a late send of a retired key failed oddly: % %', SQLSTATE, SQLERRM;
+      IF SQLERRM NOT LIKE 'IDEMPOTENCY_REQUEST_RETIRED%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: a late save of a retired request failed oddly: % %', SQLSTATE, SQLERRM;
       END IF;
       v_refused := true;
     END;
-    IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a retired key was saved later: %', v_bad; END IF;
+    IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a retired request was saved later: %', v_bad; END IF;
   END LOOP;
+  INSERT INTO public.idempotency_keys (idempotency_key, operation, result, request_actor_id, request_fingerprint)
+  VALUES ('save_vendor:' || v_actor || ':' || gen_random_uuid(), 'save_vendor', '{"smoke": true}', v_actor, 'smoke');
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: retire_uncertain_request';
 END $$;

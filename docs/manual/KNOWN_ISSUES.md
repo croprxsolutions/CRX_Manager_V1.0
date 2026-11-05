@@ -304,9 +304,14 @@ hold sub-cent values, adding the checks is Mason's call (LOW-MED); the old name-
 can make old splits refuse to save (LOW-MED).
 
 ### KI-14 — Transfer-created field invoices are always Net 30
-**MED · OPEN · money · unassigned**
-`20260914100500` lines ~2587 and 2820 stamp invoice date + 30 days regardless of the customer's terms. The post
-path was not traced.
+**MED · PARTIAL · money · screen half unassigned**
+- Database half: candidate `20261108150000` (not yet live) stops the transfer stamping invoice date + 30 days;
+  posting then stamps the invoice's terms, else the customer's (every posting route ends in
+  `_post_invoice_impl_20260714`, which fills the due date only when blank, so the old +30 always survived).
+  Saved invoices keep their dates; on 2026-11-05 none disagreed with its customer's terms (all customers Net 30).
+- Still open (MED, not reachable while every customer is Net 30): the field-application screen shows Net 30 when an
+  invoice has no terms of its own, and saving writes that onto the invoice, so a saved-then-posted invoice for a
+  Net 15 customer is due in 30 days. Affects every field invoice, not only transfers.
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**
@@ -840,7 +845,7 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   for the same product (LOW).
 - `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (applied live 2026-11-03, ledger `20261103003731`) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
-- Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
+- Transfer Net 30 (KI-14): traced 2026-11-05; posting kept the +30. See KI-14.
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).

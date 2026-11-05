@@ -13,17 +13,17 @@
 --   1) NEW trigger on profiles: when a profile BECOMES an active applicator (it was not one before the
 --      update), each location of that person's open jobs (scheduled / in_progress, not deleted) is put on
 --      their board: a location with no dispatch row gets one, written exactly as the field-insert trigger
---      writes it; a location held for this person by (2) ('cancelled', theirs, dispatched_by NULL) is
---      re-dispatched to them. Rows held by anyone else (a wizard split), active rows, completed rows and
---      rows a dispatcher undispatched (they keep dispatched_by) are never touched, so a repeat of the
---      update changes nothing. A person whose tracked active licenses have ALL expired is
+--      writes it. Any location that already has a row (a wizard split, an active, completed or
+--      undispatched row) is never touched (ON CONFLICT DO NOTHING), so a dispatcher's undispatch always
+--      stands and a repeat of the update changes nothing. A person whose tracked active licenses have ALL expired is
 --      skipped, the same rule dispatch_job_locations enforces (no license on file = allowed); those jobs
 --      stay for the Dispatch Board wizard and its admin license override.
 --   2) _sync_job_location_dispatch_on_applicator_change: reassigning an open job to someone who does not
---      qualify now hands every ACTIVE location row to the new assignee as 'cancelled' (off every board),
---      with dispatched_by NULL and dispatched_at = now (nobody dispatched it to them yet), instead of
---      leaving the old holders working it. (1) re-dispatches them once that person qualifies.
---      A qualifying reassignment already overwrote every location; this is the same scope.
+--      qualify now removes the job's dispatched and cancelled location rows (completed rows stay), instead
+--      of leaving the old holders working it. The locations are then simply undispatched, as the table's
+--      ON DELETE CASCADE already treats a removed assignee; (1) adds them once the new person qualifies.
+--      A qualifying reassignment already replaced every location with a fresh dispatch; this is the same
+--      scope. Nothing references a dispatch row, so removing one leaves nothing behind.
 --   3) Both existing triggers read the assignee's profile row with FOR SHARE (locked by id). A concurrent
 --      reactivation then either commits first and is seen, or waits for this job's transaction to commit,
 --      after which its own sync (new statements, fresh snapshot) sees the job. Without the lock, a job and
@@ -37,8 +37,8 @@
 --     is re-activated can deadlock; Postgres cancels one of the two saves with an error and the user saves
 --     again. No data is left half-written. A reassignment overlapping a reactivation does not deadlock
 --     (the reactivation only locks jobs already committed to that person); the proof runs both orders.
---   - The "held" marker is dispatched_by NULL. Live 2026-11-05 has no row with a NULL dispatched_by; a
---     trigger-written row can only get one if its job has no creator.
+--     Breaking that cycle would need the location sync to skip a reactivation it cannot see, which brings
+--     back a silent miss (KI-28 itself); a cancelled save that is retried is the safer failure.
 --
 -- NOT CHANGED: dispatch_job_locations, undispatch_job_locations, every table, column, row and existing grant
 --   (CREATE OR REPLACE keeps the two existing functions' grants). Live read-only 2026-11-05: 0 open-job
@@ -130,7 +130,7 @@ BEGIN
      FOR NO KEY UPDATE;
 
   -- The field-insert trigger's whole-job fallback, for every location it skipped while this person did
-  -- not qualify; plus re-dispatch of a location held for this person as 'cancelled' (step 2 below).
+  -- not qualify. A location that already has any row keeps it: an undispatch stands.
   INSERT INTO job_location_dispatches
     (job_field_id, job_id, applicator_id, crew_id, dispatched_at, dispatch_status, dispatched_by)
   SELECT jf.id, j.id, j.applicator_id, NULL, now(), 'dispatched',
@@ -140,15 +140,7 @@ BEGIN
    WHERE j.applicator_id = NEW.id
      AND j.status IN ('scheduled', 'in_progress')
      AND j.deleted_at IS NULL
-  ON CONFLICT (job_field_id) DO UPDATE
-    SET applicator_id   = EXCLUDED.applicator_id,
-        crew_id         = NULL,
-        dispatched_at   = now(),
-        dispatch_status = 'dispatched',
-        dispatched_by   = EXCLUDED.dispatched_by
-  WHERE job_location_dispatches.dispatch_status = 'cancelled'
-    AND job_location_dispatches.applicator_id = NEW.id
-    AND job_location_dispatches.dispatched_by IS NULL;  -- held for them by step 2, not undispatched
+  ON CONFLICT (job_field_id) DO NOTHING;
 
   RETURN NEW;
 END;
@@ -203,21 +195,13 @@ BEGIN
    WHERE p.id = NEW.applicator_id
      FOR SHARE;
   IF v_qualifies IS NOT TRUE THEN
-    -- KI-28: the job is no longer the old holders'. Every active location goes to the new assignee as
-    -- 'cancelled' (off every board), the same scope a qualifying reassignment overwrites below; the
-    -- reactivation sync re-dispatches them once this person qualifies.
-    -- dispatched_by NULL marks the row "held for this assignee" (nobody dispatched it to them), which is
-    -- what the reactivation sync re-dispatches; a row a dispatcher undispatched keeps its dispatcher and
-    -- stays cancelled. dispatched_at becomes the moment it was held.
-    UPDATE job_location_dispatches
-       SET applicator_id   = NEW.applicator_id,
-           crew_id         = NULL,
-           dispatch_status = 'cancelled',
-           dispatched_by   = NULL,
-           dispatched_at   = now(),
-           updated_at      = now()
+    -- KI-28: the job is no longer the old holders'. Its locations become undispatched (no row), the
+    -- scope a qualifying reassignment replaces below minus completed work; the reactivation sync adds
+    -- fresh rows once this person qualifies. A later reassignment between two people who do not qualify
+    -- finds nothing to move, so nothing can be stranded under an earlier assignee.
+    DELETE FROM job_location_dispatches
      WHERE job_id = NEW.id
-       AND dispatch_status = 'dispatched';
+       AND dispatch_status IN ('dispatched', 'cancelled');
     RETURN NEW;
   END IF;
 

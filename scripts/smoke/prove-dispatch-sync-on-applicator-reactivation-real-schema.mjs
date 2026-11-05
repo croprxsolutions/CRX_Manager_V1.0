@@ -217,7 +217,7 @@ const CUSTOMER = () => id('c1');
 const FIELD = (n) => id(`f${n}`);
 // People: A = inactive applicator (the KI-28 case), B = active applicator (a wizard split),
 // X = inactive applicator whose only tracked license has expired, D = active driver later made applicator.
-// 'moved' is dispatched to B, then reassigned to inactive A (the old holder must not keep it).
+// 'moved' is dispatched to B, then reassigned to driver D and on to inactive A (no old holder may keep it).
 const PERSON = { A: 'b1', B: 'b2', X: 'b3', D: 'b4' };
 const P = (k) => id(PERSON[k]);
 const JOB = { open: 'd1', done: 'd2', deleted: 'd3', expired: 'd4', role: 'd5', moved: 'd6' };
@@ -276,6 +276,7 @@ function seed() {
     INSERT INTO public.job_location_dispatches (job_field_id, job_id, applicator_id, dispatch_status, dispatched_by, dispatched_at)
       VALUES ('${JF('open', 3)}', '${J('open')}', '${P('B')}', 'dispatched', '${ADMIN()}', '2026-01-02 03:04:05+00');
     UPDATE public.jobs SET deleted_at = now() WHERE id = '${J('deleted')}';
+    UPDATE public.jobs SET applicator_id = '${P('D')}' WHERE id = '${J('moved')}';
     UPDATE public.jobs SET applicator_id = '${P('A')}' WHERE id = '${J('moved')}';`);
 }
 
@@ -362,11 +363,11 @@ async function main() {
   // AFTER: fresh rows.
   PHASE += 1;
   seed();
-  // AFTER: the reassignment to inactive A takes the moved job off B's board, held for A as cancelled.
-  // Held rows name nobody as dispatcher ('-'): nobody dispatched them to A.
-  const seededAfter = { ...seededBase, moved: '1=A/cancelled/- 2=A/cancelled/-' };
+  // AFTER: the reassignment B -> driver D -> inactive A takes the moved job off B's board (no rows left),
+  // and nothing is stranded under D (Sol round 3 HIGH).
+  const seededAfter = { ...seededBase, moved: '1=none 2=none' };
   assert.deepEqual(boards(), seededAfter, 'AFTER seed: same starting state, except B no longer holds the moved job');
-  assert.equal(sweepRows(), '6');
+  assert.equal(sweepRows(), '8', 'the sweep also sees the moved job’s 2 undispatched locations');
   const splitBefore = SPLIT_ROW();
 
   // Activate A (the admin screen's real call): its open job's two missing locations appear, once each.
@@ -398,7 +399,13 @@ async function main() {
   assert.equal(board('open'), '1=A/cancelled/admin 2=A/dispatched/admin 3=B/dispatched/admin',
     'a deliberate undispatch is not undone by re-activation');
   assert.equal(dispatchRows(), '5');
-  console.log('[prover] a location the dispatcher undispatched stays off the board through deactivate/re-activate');
+  // Even when that row names no dispatcher (a service-created job; Sol round 3 HIGH).
+  psql(`UPDATE public.job_location_dispatches SET dispatched_by = NULL WHERE job_field_id = '${JF('open', 1)}';`);
+  updateProfile('A', 'new_is_active => false', `ki28-undispatch-off2-${PHASE}`);
+  updateProfile('A', 'new_is_active => true', `ki28-undispatch-on2-${PHASE}`);
+  assert.equal(board('open'), '1=A/cancelled/- 2=A/dispatched/admin 3=B/dispatched/admin',
+    'an undispatch with no recorded dispatcher is not undone by re-activation either');
+  console.log('[prover] a location the dispatcher undispatched stays off the board through deactivate/re-activate (with or without a recorded dispatcher)');
 
   // Expired license: X's re-activation does not auto-dispatch (same rule as dispatch_job_locations).
   updateProfile('X', 'new_is_active => true', `ki28-expired-${PHASE}`);
@@ -447,14 +454,14 @@ async function main() {
   const r3 = await reactivating3;
   assert.equal(r3.code, 0, r3.output);
   assert.equal(raceBoard(3), 'A/dispatched', 'a reassignment during an uncommitted reactivation dispatches to A');
-  // 4) Reassignment open first; the reactivation waits for it, then re-dispatches the row held for A.
+  // 4) Reassignment open first (B's rows removed); the reactivation waits for it, then dispatches to A.
   updateProfile('A', 'new_is_active => false', `ki28-race4-off-${PHASE}`);
   const reassigning4 = psqlAsync(`BEGIN;\n${reassign(4)}\nSELECT pg_sleep(3);\nCOMMIT;\n`);
   await pause(1500);
   updateProfile('A', 'new_is_active => true', `ki28-race4-on-${PHASE}`);
   const r4 = await reassigning4;
   assert.equal(r4.code, 0, r4.output);
-  assert.equal(raceBoard(4), 'A/dispatched', 'a reactivation during an uncommitted reassignment re-dispatches the held row to A');
+  assert.equal(raceBoard(4), 'A/dispatched', 'a reactivation during an uncommitted reassignment dispatches the job to A');
   console.log('[prover] concurrency: a reassignment and a reactivation overlap in both orders without a deadlock; A holds the job');
   console.log('KI28_DISPATCH_SYNC_PROOF_PASS');
 }

@@ -544,7 +544,14 @@ Deno.test("a send of the same email confirmed after the early check stops this o
   assertEquals(res.body.deduplicated, true);
   assertEquals(res.body.email_log_id, "sent-now");
   assertEquals(world.resendCalls.length, 0, "Resend calls");
-  assertEquals(world.tables.email_log[1].status, "failed", "this request's row gives up the lock");
+  assertEquals(world.tables.email_log[1].status, "sent", "this request's row gives up the lock as a deduplicated send");
+  assertEquals(world.tables.email_log[1].resend_message_id, "re_0");
+  // Replayed after the few-second window (its first answer lost): still no second email.
+  world.tables.email_log[0].created_at = new Date(Date.now() - 60_000).toISOString();
+  const replay = await send(world, ADMIN, quoteEmail(QUOTE, "second-click-key"));
+  assertEquals(replay.status, 200);
+  assertEquals(replay.body.deduplicated, true);
+  assertEquals(world.resendCalls.length, 0, "Resend calls after replay");
 });
 
 Deno.test("an earlier confirmed send of the same email does not block a new one", async () => {

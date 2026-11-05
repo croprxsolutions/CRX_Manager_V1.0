@@ -1016,10 +1016,14 @@ Deno.serve(async (req: Request) => {
       if (justSentErr || (justSent && justSent.length > 0)) {
         const reason = justSentErr
           ? `Not sent: checking for a send of this email at the same moment failed: ${justSentErr.message}`
-          : `Not sent: the same email was sent at the same moment (email_log ${justSent![0].id}).`;
+          : `Not sent again: the same email went out at the same moment as email_log ${justSent![0].id}.`;
+        // A deduplicated row is stored as sent, with the other send's message id, so a
+        // replay of this key returns that send instead of sending again.
         const { error: releaseErr } = await adminClient
           .from("email_log")
-          .update({ status: "failed", error_message: reason })
+          .update(justSentErr
+            ? { status: "failed", error_message: reason }
+            : { status: "sent", resend_message_id: justSent![0].resend_message_id, error_message: reason })
           .eq("id", emailLogId)
           .eq("status", "pending");
         if (justSentErr || releaseErr) {

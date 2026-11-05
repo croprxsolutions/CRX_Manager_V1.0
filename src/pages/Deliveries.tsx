@@ -1946,7 +1946,9 @@ export default function Deliveries() {
                             </span>
                             <span className="block truncate font-heading text-lg font-bold text-nav-dark">{row.customer_name}</span>
                             <span className="block text-xs text-secondary">
-                              {parseLocalDate(row.scheduled_date).toLocaleDateString()} · <span className={!row.assigned_driver ? 'font-medium text-amber-800' : ''}>{row.driver_name}</span> · {row.item_count} items
+                              {parseLocalDate(row.scheduled_date).toLocaleDateString()}
+                              {row.delivery_window_start && ` ${row.delivery_window_start}${row.delivery_window_end ? '-' + row.delivery_window_end : ''}`}
+                              {' · '}<span className={!row.assigned_driver ? 'font-medium text-amber-800' : ''}>{row.driver_name}</span> · {row.item_count} items
                             </span>
                             <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
                               <Badge variant={statusToBadgeVariant[row.status] || 'default'}>{row.status.replace('_', ' ')}</Badge>

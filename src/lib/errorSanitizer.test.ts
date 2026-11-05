@@ -208,7 +208,7 @@ describe('sanitizeError', () => {
     expect(intent).toContain('Refresh');
     const retired = sanitizeError({ message: 'IDEMPOTENCY_REQUEST_RETIRED: idempotency_key adjust_inventory_batch:u:1:2 belongs to a request an admin cleared; it cannot be saved' });
     expect(retired).toContain('Nothing was changed');
-    expect(retired).toContain('An admin cleared');
+    expect(retired).toContain('This request was cleared');
     expect(retired).not.toMatch(/adjust_inventory|IDEMPOTENCY/);
     const actor = sanitizeError('IDEMPOTENCY_ACTOR_MISMATCH');
     expect(actor).toContain('Nothing was changed');

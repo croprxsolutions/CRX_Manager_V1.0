@@ -1,4 +1,4 @@
-import { useState, useMemo, type ReactNode } from 'react';
+import { useState, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import EmptyState, { LoadFailedState } from './EmptyState';
 import { applyTableSearchSort, type SortDir } from '../../lib/tableSearchSort';
@@ -36,7 +36,23 @@ interface DataTableProps<T> {
   onSearchChange?: (value: string) => void;
   sortState?: { key: string | null; dir: SortDir };
   onSortChange?: (next: { key: string | null; dir: SortDir }) => void;
+  /**
+   * Phone layout (Style D in docs/workflows/UI_PATTERNS.md): below 768px each row renders
+   * through this inside one white rounded list instead of the table. The row owns its own
+   * tap targets; search, filters, empty and failed states stay shared with the table.
+   */
+  mobileRow?: (row: T) => ReactNode;
 }
+
+const PHONE_QUERY = '(max-width: 767px)';
+const subscribePhone = (onChange: () => void) => {
+  if (typeof window.matchMedia !== 'function') return () => {};
+  const query = window.matchMedia(PHONE_QUERY);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+};
+// One layout at a time, so a long list is never rendered twice. No matchMedia (tests) = desktop.
+const isPhoneNow = () => typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default function DataTable<T extends Record<string, any>>({
@@ -57,7 +73,9 @@ export default function DataTable<T extends Record<string, any>>({
   onSearchChange,
   sortState,
   onSortChange,
+  mobileRow,
 }: DataTableProps<T>) {
+  const isPhone = useSyncExternalStore(subscribePhone, isPhoneNow, () => false);
   // Internal fallback state — used only when the caller doesn't control it.
   const [searchInner, setSearchInner] = useState('');
   const [sortKeyInner, setSortKeyInner] = useState<string | null>(null);
@@ -124,6 +142,12 @@ export default function DataTable<T extends Record<string, any>>({
           description={emptyDescription}
           action={emptyAction}
         />
+      ) : mobileRow && isPhone ? (
+        <ul className="overflow-hidden rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
+          {filtered.map((row, idx) => (
+            <li key={idx}>{mobileRow(row)}</li>
+          ))}
+        </ul>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

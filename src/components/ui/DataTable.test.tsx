@@ -212,3 +212,31 @@ describe('DataTable', () => {
     expect(screen.getByText('Filter Active')).toBeInTheDocument();
   });
 });
+
+describe('DataTable phone layout', () => {
+  const phoneRow = (row: TestRow) => <span>phone {row.name}</span>;
+
+  it('renders the table, not the phone list, when no phone layout is given or the screen is wide', () => {
+    render(<DataTable data={data} columns={columns} mobileRow={phoneRow} />);
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.queryByText('phone Alice')).not.toBeInTheDocument();
+  });
+
+  it('renders only the phone list on a phone-width screen', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(max-width: 767px)',
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    try {
+      render(<DataTable data={data} columns={columns} mobileRow={phoneRow} searchable searchKeys={['name']} />);
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+      expect(screen.getByText('phone Alice')).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'bob' } });
+      expect(screen.queryByText('phone Alice')).not.toBeInTheDocument();
+      expect(screen.getByText('phone Bob')).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

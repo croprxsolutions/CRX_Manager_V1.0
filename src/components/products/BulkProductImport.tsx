@@ -4,7 +4,11 @@ import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
-import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import {
+  UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE,
+  UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE,
+  useUncertainMutationIntent,
+} from '../../hooks/useUncertainMutationIntent';
 import { supabase, assertRpcResult } from '../../lib/db';
 import { isCSVFile } from '../../lib/documentOCR';
 import { Sentry } from '../../lib/sentry';
@@ -15,6 +19,7 @@ import {
   PRODUCT_IMPORT_COLUMNS,
   PRODUCT_IMPORT_TEMPLATE,
   buildProductImportRow,
+  csvRecordProblem,
   importRefusalReason,
   isRetiredPricingColumn,
   mapProductImportHeaders,
@@ -43,6 +48,8 @@ interface PreviewResult {
   in_file_duplicate: boolean;
 }
 interface Row extends ProductImportRow { preview?: PreviewResult }
+/** The exact apply_product_setup rows sent, kept in this browser until the save is confirmed. */
+interface ImportIntent { rows: Json; count: number }
 
 const MAX_ROWS = 500;
 // Per-acre prices are whole cents in the database (a CHECK), so pad the digits as sent; never round a float.
@@ -162,27 +169,45 @@ function ImportPreviewRow({ r }: { r: Row }) {
   );
 }
 
-function ImportActions({ stage, hasFile, parsing, saving, unconfirmed, ready, onClose, onParse, onChooseAgain, onImport }: {
-  stage: 'choose' | 'preview' | 'done'; hasFile: boolean; parsing: boolean; saving: boolean; unconfirmed: boolean; ready: number;
+function UnconfirmedNotice({ count, foreign, expired }: { count: number; foreign: boolean; expired: boolean }) {
+  return (
+    <p role="alert" className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+      <AlertCircle className="w-4 h-4 shrink-0" />
+      {foreign ? UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE
+        : expired ? UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE
+        : `An earlier import of ${count} product(s) was not confirmed. Press Finish Earlier Import to send it again safely: products it already added will not be added twice. Another file can be checked once it is confirmed.`}
+    </p>
+  );
+}
+
+function ImportActions({ stage, hasFile, parsing, saving, earlier, canRetry, ready, onClose, onParse, onChooseAgain, onImport }: {
+  stage: 'choose' | 'preview' | 'done'; hasFile: boolean; parsing: boolean; saving: boolean;
+  /** Products in an import whose save was not confirmed, or null when there is none. */
+  earlier: number | null; canRetry: boolean; ready: number;
   onClose: () => void; onParse: () => void; onChooseAgain: () => void; onImport: () => void;
 }) {
   const busy = parsing || saving;
+  const finish = (
+    <Button onClick={onImport} disabled={!canRetry || saving} loading={saving}>Finish Earlier Import ({earlier})</Button>
+  );
   return (
     <div className="flex justify-end gap-2 pt-2">
       <Button variant="secondary" onClick={onClose} disabled={busy}>
         {stage === 'done' ? 'Close' : 'Cancel'}
       </Button>
-      {stage === 'choose' && (
+      {stage === 'choose' && (earlier !== null ? finish : (
         <Button icon={<Upload className="w-4 h-4" />} onClick={onParse} disabled={!hasFile || parsing} loading={parsing}>
           {parsing ? 'Checking...' : 'Check File'}
         </Button>
-      )}
+      ))}
       {stage === 'preview' && (
         <>
-          <Button variant="secondary" onClick={onChooseAgain} disabled={busy || unconfirmed}>Choose Different File</Button>
-          <Button onClick={onImport} disabled={ready === 0 || saving} loading={saving}>
-            Import {ready} Product(s)
-          </Button>
+          <Button variant="secondary" onClick={onChooseAgain} disabled={busy || earlier !== null}>Choose Different File</Button>
+          {earlier !== null ? finish : (
+            <Button onClick={onImport} disabled={ready === 0 || saving} loading={saving}>
+              Import {ready} Product(s)
+            </Button>
+          )}
         </>
       )}
     </div>
@@ -193,7 +218,9 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const { toast } = useToast();
   const { profile } = useAuth();
   const userId = profile?.id ?? '';
-  const { getKeyFor, resetKeyFor } = useIdempotencyKey('apply_product_setup', userId);
+  // A save whose reply was lost may have committed: its exact rows and retry key survive a reload until it is confirmed.
+  const importIntent = useUncertainMutationIntent<ImportIntent>({ operation: 'apply_product_setup', userId, surface: 'bulk-product-import' });
+  const earlier = importIntent.isIntentLocked ? (importIntent.unresolvedIntent?.count ?? 0) : null;
   const [file, setFile] = useState<File | null>(null);
   // The generation being checked (0 = none), so only that check can clear it.
   const [checking, setChecking] = useState(0);
@@ -203,12 +230,8 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const [ignored, setIgnored] = useState<string[]>([]);
   const [ratesLocked, setRatesLocked] = useState(false);
   const [imported, setImported] = useState<number | null>(null);
-  // A save whose reply was lost may have committed: keep this preview and its retry key until Import is confirmed.
-  const [unconfirmed, setUnconfirmed] = useState(false);
   // Bumped whenever the file or preview changes; a reply from an older generation is ignored.
   const generation = useRef(0);
-  // One retry key per previewed file: a double click or a retry after a lost reply saves once.
-  const [previewId, setPreviewId] = useState('');
   const busy = parsing || saving;
 
   const reset = () => {
@@ -216,7 +239,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
     setFile(null); setRows(null); setIgnored([]); setImported(null); setRatesLocked(false);
   };
   // Never wipe an import mid-check or mid-save, so a late reply lands on the import it belongs to.
-  const resetIfSettled = () => { if (!unconfirmed && !busy) reset(); };
+  const resetIfSettled = () => { if (!busy) reset(); };
   useResetOnClose(open, resetIfSettled);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -279,7 +302,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         return;
       }
       const categories = (await listProductCategories()).filter((c) => c.is_active).map((c) => c.name);
-      const built: Row[] = refuseInFileDuplicates(data.map(({ cells, line }) => buildProductImportRow(cells, mapping, line, categories)));
+      const built: Row[] = refuseInFileDuplicates(data.map((rec) => buildProductImportRow(rec.cells, mapping, rec.line, categories, csvRecordProblem(rec, headers.length))));
       const checkable = built.filter((r) => !r.error);
       if (checkable.length > 0) {
         const { data: res, error } = await supabase.rpc('preview_product_import', {
@@ -292,7 +315,6 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         setRatesLocked(preview.rates_locked);
       }
       if (gen !== generation.current) return;
-      setPreviewId(`${file.name}:${file.lastModified}:${gen}`);
       setIgnored(mapping.ignored);
       setRows(built);
     } catch (error) {
@@ -308,34 +330,52 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const skipped = (rows ?? []).filter((r) => skipReason(r) !== null);
 
   const handleImport = async () => {
-    if (ready.length === 0) return;
+    if (importIntent.isForeignIntentLocked) { toast('error', UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE); return; }
+    if (importIntent.isRetryExpired) { toast('error', UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE); return; }
+    // An unconfirmed import is always re-sent exactly as it was, under its own key, before any new file.
+    const candidate: ImportIntent | null = importIntent.getUnresolvedIntent() ?? (ready.length === 0 ? null : {
+      rows: ready.map(({ insert, rates, preview }) => (rates
+        ? { insert, rates, expected_prices: preview?.expected_prices }
+        : { insert })) as unknown as Json,
+      count: ready.length,
+    });
+    if (!candidate) return;
     const gen = generation.current;
     setSaving(true);
     try {
-      const { data, error } = await supabase.rpc('apply_product_setup', {
-        p_rows: ready.map(({ insert, rates, preview }) => (rates
-          ? { insert, rates, expected_prices: preview?.expected_prices }
-          : { insert })) as unknown as Json,
-        p_performed_by: userId,
-        p_idempotency_key: getKeyFor(previewId),
-      });
-      if (error) throw error;
-      const result = assertRpcResult<{ inserted_count: number }>(data, 'apply_product_setup');
-      if (gen !== generation.current) return;
-      resetKeyFor(previewId);
-      setUnconfirmed(false);
-      setImported(result.inserted_count);
-      toast('success', `Imported ${result.inserted_count} product(s)`);
-      onSuccess();
-    } catch (error) {
-      Sentry.captureException(error, { extra: { context: 'Bulk product import' } });
-      if (gen !== generation.current) return;
-      const message = sanitizeError(error);
-      // A refusal saved nothing; anything else (a lost reply) may have saved, and the same key makes a retry safe.
-      const refused = message.startsWith('Nothing was saved.');
-      setUnconfirmed(!refused);
-      toast('error', refused ? message
-        : `The import was not confirmed (${message}). Press Import again: it will not add products twice.`);
+      let request: ImportIntent;
+      try {
+        request = await importIntent.beginIntent(candidate);
+      } catch (error) {
+        Sentry.captureException(error, { extra: { context: 'Bulk product import: prepare' } });
+        toast('error', 'This import could not be prepared, so nothing was sent. Reload the page and try again.');
+        return;
+      }
+      try {
+        const { data, error } = await supabase.rpc('apply_product_setup', {
+          p_rows: request.rows,
+          p_performed_by: userId,
+          p_idempotency_key: importIntent.getIdempotencyKey(),
+        });
+        if (error) throw error;
+        const result = assertRpcResult<{ inserted_count: number }>(data, 'apply_product_setup');
+        await importIntent.resolveIntent().catch((e: unknown) => Sentry.captureException(e, { extra: { context: 'Bulk product import: resolve' } }));
+        toast('success', `Imported ${result.inserted_count} product(s)`);
+        onSuccess();
+        if (gen === generation.current) setImported(result.inserted_count);
+      } catch (error) {
+        const disposition = await importIntent.classifyFailure(error);
+        Sentry.captureException(error, { extra: { context: 'Bulk product import', disposition } });
+        if (disposition === 'resolved') {
+          toast('warning', 'This import already finished in another tab, so it was not sent again.');
+          onSuccess();
+          if (gen === generation.current) setImported(request.count);
+        } else if (disposition === 'definitive') {
+          toast('error', sanitizeError(error));
+        } else {
+          toast('error', `The import was not confirmed (${sanitizeError(error)}). Press Finish Earlier Import: it will not add products twice.`);
+        }
+      }
     } finally {
       setSaving(false);
     }
@@ -371,6 +411,10 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
           </div>
         )}
 
+        {stage !== 'done' && earlier !== null && (
+          <UnconfirmedNotice count={earlier} foreign={importIntent.isForeignIntentLocked} expired={importIntent.isRetryExpired} />
+        )}
+
         {stage === 'choose' && (
           <div>
             <label className="block text-sm font-medium text-secondary mb-2">Select File</label>
@@ -379,7 +423,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
               aria-label="Select File"
               accept=".csv,text/csv"
               onChange={handleFileChange}
-              disabled={busy}
+              disabled={busy || earlier !== null}
               className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-crx-green-light file:text-crx-green file:hover:bg-crx-green file:hover:text-white transition-colors cursor-pointer"
             />
             {file && (
@@ -395,12 +439,6 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
           <ImportPreview rows={rows} ready={ready.length} skipped={skipped.length} ratesLocked={ratesLocked} ignored={ignored} />
         )}
 
-        {stage === 'preview' && unconfirmed && (
-          <p role="alert" className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-            <AlertCircle className="w-4 h-4" /> The last import was not confirmed. Press Import again to finish it safely; another file can be chosen once it is confirmed. If you leave this page first, check the product list before importing this file again.
-          </p>
-        )}
-
         {stage === 'done' && (
           <div className="p-4 bg-green-50 border border-green-100 rounded-lg text-center" role="status">
             <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-2" />
@@ -410,7 +448,8 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         )}
 
         <ImportActions
-          stage={stage} hasFile={!!file} parsing={parsing} saving={saving} unconfirmed={unconfirmed} ready={ready.length}
+          stage={stage} hasFile={!!file} parsing={parsing} saving={saving} ready={ready.length}
+          earlier={earlier} canRetry={!importIntent.isForeignIntentLocked && !importIntent.isRetryExpired}
           onClose={handleClose} onParse={handleParse} onChooseAgain={reset} onImport={handleImport}
         />
       </div>

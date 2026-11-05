@@ -75,12 +75,22 @@ export function isRetiredPricingColumn(header: string): boolean {
 /**
  * RFC 4180 CSV: quoted fields may hold commas, doubled quotes and line breaks. A leading BOM is dropped; an unclosed
  * quote throws. Each record keeps the file line it starts on, so a multi-line note does not shift row numbers.
+ * Text after a closing quote marks the record malformed instead of being glued on silently.
  */
-export function parseCsvRecords(text: string): { cells: string[]; line: number }[] {
-  const rows: { cells: string[]; line: number }[] = [];
+export interface CsvRecord { cells: string[]; line: number; malformed?: boolean }
+export function parseCsvRecords(text: string): CsvRecord[] {
+  const rows: CsvRecord[] = [];
   let row: string[] = [];
   let cell = '';
   let quoted = false;
+  // Where the last quoted value closed: anything but spaces after it means the value was not fully quoted.
+  let closedAt = Infinity;
+  let malformed = false;
+  const endCell = () => {
+    if (cell.slice(closedAt).trim() !== '') malformed = true;
+    row.push(cell); cell = ''; closedAt = Infinity;
+  };
+  const push = () => { rows.push({ cells: row, line: start, ...(malformed ? { malformed } : {}) }); malformed = false; };
   let line = 1;
   let start = 1;
   const src = text.replace(/^\uFEFF/, '');
@@ -88,24 +98,24 @@ export function parseCsvRecords(text: string): { cells: string[]; line: number }
     const ch = src[i];
     if (quoted) {
       if (ch === '"' && src[i + 1] === '"') { cell += '"'; i += 1; }
-      else if (ch === '"') quoted = false;
+      else if (ch === '"') { quoted = false; closedAt = cell.length; }
       else {
         if (ch === '\n' || (ch === '\r' && src[i + 1] !== '\n')) line += 1;
         cell += ch;
       }
     } else if (ch === '"' && cell.trim() === '') { quoted = true; cell = ''; }
     // A quote that opens a value (after spaces, too) starts a quoted value; one inside a value is kept as text.
-    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === ',') endCell();
     else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && src[i + 1] === '\n') i += 1;
-      row.push(cell); rows.push({ cells: row, line: start }); row = []; cell = '';
+      endCell(); push(); row = [];
       line += 1;
       start = line;
     } else cell += ch;
   }
   // An unclosed quote would swallow every later line into one cell, dropping those rows unseen.
   if (quoted) throw new Error('A quoted value is never closed (a " is missing). Fix the file and try again.');
-  if (cell !== '' || row.length > 0) { row.push(cell); rows.push({ cells: row, line: start }); }
+  if (cell !== '' || row.length > 0) { endCell(); push(); }
   return rows.filter((r) => r.cells.some((c) => c.trim() !== ''));
 }
 
@@ -176,8 +186,16 @@ function canonical(value: string, allowed: readonly string[]): string {
  * One CSV row to an insert-mode row. Only spelling is fixed here (case, spaces, yes/no); every rule is
  * the database's, which the preview runs row by row.
  */
+/** Why a data record cannot be trusted as written, or undefined: a stray quote, or more values than columns. */
+export function csvRecordProblem(record: CsvRecord, columnCount: number): string | undefined {
+  if (record.malformed) return 'Text follows a closing quote. Put the whole value inside the quotes.';
+  const extra = record.cells.slice(columnCount).filter((c) => c.trim() !== '').length;
+  if (extra > 0) return `This row has ${extra} more value(s) than the header has columns. Check for a comma that needs quotes.`;
+  return undefined;
+}
+
 export function buildProductImportRow(
-  cells: readonly string[], mapping: ColumnMapping, row: number, categories: readonly string[],
+  cells: readonly string[], mapping: ColumnMapping, row: number, categories: readonly string[], problem?: string,
 ): ProductImportRow {
   const raw: RawImportRow = {};
   Object.entries(mapping.byIndex).forEach(([i, col]) => {
@@ -211,7 +229,7 @@ export function buildProductImportRow(
   const rupError = parseImportRup(raw.is_rup, insert);
   const error = (insert.product_name ? undefined : 'Missing product name.') ?? numberError ?? rupError;
   const { rates, error: rateError } = importRates(raw, insert.product_form, insert.inventory_unit);
-  const firstError = error ?? rateError;
+  const firstError = problem ?? error ?? rateError;
   return { row, insert, ...(rates ? { rates } : {}), fixes, ...(firstError ? { error: firstError } : {}) };
 }
 

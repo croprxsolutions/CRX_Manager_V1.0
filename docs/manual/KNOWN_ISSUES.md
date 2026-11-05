@@ -442,7 +442,9 @@ with a "do not submit again" message and no way to dismiss it (`src/hooks/useUnc
 is an admin-only "I checked, clear this" control.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
-**MED · OPEN · database · LOCAL CANDIDATE — NOT APPLIED**
+**MED · OPEN · database · PARKED for Taha (design) — candidate on branch `claude/ki28-dispatch-sync-reactivation`, NOT APPLIED**
+Sol blocked 5 rounds: a cancelled dispatch row means either "a dispatcher undispatched it" or "the assignment moved", and
+the table cannot tell them apart; plus a rare save deadlock. Needs a design decision (e.g. record why a row was cancelled).
 The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later does not
 add the job back. A detection sweep exists (`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`).
 Reassigning a dispatched job to an inactive person also left the old holder working it.

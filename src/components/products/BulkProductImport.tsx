@@ -161,6 +161,33 @@ function ImportPreviewRow({ r }: { r: Row }) {
   );
 }
 
+function ImportActions({ stage, hasFile, parsing, saving, unconfirmed, ready, onClose, onParse, onChooseAgain, onImport }: {
+  stage: 'choose' | 'preview' | 'done'; hasFile: boolean; parsing: boolean; saving: boolean; unconfirmed: boolean; ready: number;
+  onClose: () => void; onParse: () => void; onChooseAgain: () => void; onImport: () => void;
+}) {
+  const busy = parsing || saving;
+  return (
+    <div className="flex justify-end gap-2 pt-2">
+      <Button variant="secondary" onClick={onClose} disabled={busy}>
+        {stage === 'done' ? 'Close' : 'Cancel'}
+      </Button>
+      {stage === 'choose' && (
+        <Button icon={<Upload className="w-4 h-4" />} onClick={onParse} disabled={!hasFile || parsing} loading={parsing}>
+          {parsing ? 'Checking...' : 'Check File'}
+        </Button>
+      )}
+      {stage === 'preview' && (
+        <>
+          <Button variant="secondary" onClick={onChooseAgain} disabled={busy || unconfirmed}>Choose Different File</Button>
+          <Button onClick={onImport} disabled={ready === 0 || saving} loading={saving}>
+            Import {ready} Product(s)
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function BulkProductImport({ open, onClose, onSuccess }: BulkProductImportProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
@@ -173,12 +200,20 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const [ignored, setIgnored] = useState<string[]>([]);
   const [ratesLocked, setRatesLocked] = useState(false);
   const [imported, setImported] = useState<number | null>(null);
+  // A save whose reply was lost may have committed: keep this preview and its retry key until Import is confirmed.
+  const [unconfirmed, setUnconfirmed] = useState(false);
+  // Bumped whenever the file or preview changes; a reply from an older generation is ignored.
+  const generation = useRef(0);
   // One retry key per previewed file: a double click or a retry after a lost reply saves once.
-  const previewSeq = useRef(0);
   const [previewId, setPreviewId] = useState('');
+  const busy = parsing || saving;
 
-  const reset = () => { setFile(null); setRows(null); setIgnored([]); setImported(null); setRatesLocked(false); };
-  useResetOnClose(open, reset);
+  const reset = () => {
+    generation.current += 1;
+    setFile(null); setRows(null); setIgnored([]); setImported(null); setRatesLocked(false);
+  };
+  const resetUnlessUnconfirmed = () => { if (!unconfirmed) reset(); };
+  useResetOnClose(open, resetUnlessUnconfirmed);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -193,6 +228,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       e.target.value = '';
       return;
     }
+    generation.current += 1;
     setFile(selectedFile);
     setRows(null);
     setImported(null);
@@ -209,6 +245,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
 
   const handleParse = async () => {
     if (!file) return;
+    const gen = ++generation.current;
     setParsing(true);
     setRatesLocked(false);
     try {
@@ -246,11 +283,12 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         });
         if (error) throw error;
         const preview = assertRpcResult<{ rates_locked: boolean; rows: PreviewResult[] }>(res, 'preview_product_import');
+        if (gen !== generation.current) return;
         checkable.forEach((r, i) => { r.preview = preview.rows[i]; });
         setRatesLocked(preview.rates_locked);
       }
-      previewSeq.current += 1;
-      setPreviewId(`${file.name}:${file.lastModified}:${previewSeq.current}`);
+      if (gen !== generation.current) return;
+      setPreviewId(`${file.name}:${file.lastModified}:${gen}`);
       setIgnored(mapping.ignored);
       setRows(built);
     } catch (error) {
@@ -267,6 +305,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
 
   const handleImport = async () => {
     if (ready.length === 0) return;
+    const gen = generation.current;
     setSaving(true);
     try {
       const { data, error } = await supabase.rpc('apply_product_setup', {
@@ -279,24 +318,29 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       if (error) throw error;
       const result = assertRpcResult<{ inserted_count: number }>(data, 'apply_product_setup');
       resetKeyFor(previewId);
+      if (gen !== generation.current) return;
+      setUnconfirmed(false);
       setImported(result.inserted_count);
       toast('success', `Imported ${result.inserted_count} product(s)`);
       onSuccess();
     } catch (error) {
       Sentry.captureException(error, { extra: { context: 'Bulk product import' } });
+      if (gen !== generation.current) return;
       const message = sanitizeError(error);
       // A refusal saved nothing; anything else (a lost reply) may have saved, and the same key makes a retry safe.
-      toast('error', message.startsWith('Nothing was saved.') ? message
+      const refused = message.startsWith('Nothing was saved.');
+      setUnconfirmed(!refused);
+      toast('error', refused ? message
         : `The import was not confirmed (${message}). Press Import again: it will not add products twice.`);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleClose = () => { reset(); onClose(); };
+  const handleClose = () => { if (busy) return; resetUnlessUnconfirmed(); onClose(); };
 
   return (
-    <Modal open={open} onClose={handleClose} title="Bulk Product" accent="Import" maxWidth="max-w-4xl">
+    <Modal open={open} onClose={handleClose} closeDisabled={busy} title="Bulk Product" accent="Import" maxWidth="max-w-4xl">
       <div className="space-y-4">
         {stage === 'choose' && (
           <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
@@ -331,6 +375,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
               aria-label="Select File"
               accept=".csv,text/csv"
               onChange={handleFileChange}
+              disabled={busy}
               className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-crx-green-light file:text-crx-green file:hover:bg-crx-green file:hover:text-white transition-colors cursor-pointer"
             />
             {file && (
@@ -346,6 +391,12 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
           <ImportPreview rows={rows} ready={ready.length} skipped={skipped.length} ratesLocked={ratesLocked} ignored={ignored} />
         )}
 
+        {stage === 'preview' && unconfirmed && (
+          <p role="alert" className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+            <AlertCircle className="w-4 h-4" /> The last import was not confirmed. Press Import again to finish it safely; another file can be chosen once it is confirmed.
+          </p>
+        )}
+
         {stage === 'done' && (
           <div className="p-4 bg-green-50 border border-green-100 rounded-lg text-center" role="status">
             <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-2" />
@@ -354,24 +405,10 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
           </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={handleClose}>
-            {stage === 'done' ? 'Close' : 'Cancel'}
-          </Button>
-          {stage === 'choose' && (
-            <Button icon={<Upload className="w-4 h-4" />} onClick={handleParse} disabled={!file || parsing} loading={parsing}>
-              {parsing ? 'Checking...' : 'Check File'}
-            </Button>
-          )}
-          {stage === 'preview' && rows && (
-            <>
-              <Button variant="secondary" onClick={reset}>Choose Different File</Button>
-              <Button onClick={handleImport} disabled={ready.length === 0 || saving} loading={saving}>
-                Import {ready.length} Product(s)
-              </Button>
-            </>
-          )}
-        </div>
+        <ImportActions
+          stage={stage} hasFile={!!file} parsing={parsing} saving={saving} unconfirmed={unconfirmed} ready={ready.length}
+          onClose={handleClose} onParse={handleParse} onChooseAgain={reset} onImport={handleImport}
+        />
       </div>
     </Modal>
   );

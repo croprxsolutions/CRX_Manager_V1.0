@@ -223,4 +223,68 @@ describe('BulkProductImport screen', () => {
     expect(screen.queryByText('Import Complete')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Select File')).toBeInTheDocument();
   });
+
+  it('locks the file and buttons while checking, and ignores a check reply for a file that was replaced', async () => {
+    let answer!: (v: unknown) => void;
+    rpc.mockImplementation(() => new Promise((r) => { answer = r; }));
+    render(<BulkProductImport {...props} />);
+    await upload('product_name\nFromA\n');
+    await waitFor(() => expect(rpc).toHaveBeenCalled());
+    expect(screen.getByLabelText('Select File')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Checking/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    // A change that slips through anyway (file B) makes A's late reply stale.
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [new File(['x'], 'b.csv')] } });
+    answer({ data: { rates_locked: false, rows: [okRow()] }, error: null });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Check File/ })).toBeEnabled());
+    expect(screen.queryByText('FromA')).not.toBeInTheDocument();
+    expect(screen.getByText(/b\.csv/)).toBeInTheDocument();
+  });
+
+  it('after an unconfirmed save, keeps the same preview and retry key, even through closing, until Import is confirmed', async () => {
+    let saves = 0;
+    rpc.mockImplementation(async (name: string) => {
+      if (name === 'preview_product_import') return { data: { rates_locked: false, rows: [okRow()] }, error: null };
+      saves += 1;
+      return saves === 1 ? { data: null, error: { message: 'network' } } : { data: { inserted_count: 1, rows: [] }, error: null };
+    });
+    const { rerender } = render(<BulkProductImport {...props} />);
+    await upload('product_name\nOne\n');
+    fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
+    expect(await screen.findByText(/The last import was not confirmed/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose Different File' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(props.onClose).toHaveBeenCalled();
+    rerender(<BulkProductImport {...props} open={false} />);
+    rerender(<BulkProductImport {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
+    expect(await screen.findByText('Import Complete')).toBeInTheDocument();
+    const keys = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup').map(([, a]) => a.p_idempotency_key);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+    expect(screen.queryByText(/The last import was not confirmed/)).not.toBeInTheDocument();
+  });
+
+  it('a refused save frees the screen; a save reply that arrives after the import was closed is ignored', async () => {
+    let answer!: (v: unknown) => void;
+    rpc.mockImplementation((name: string) => (name === 'preview_product_import'
+      ? Promise.resolve({ data: { rates_locked: false, rows: [okRow()] }, error: null })
+      : new Promise((r) => { answer = r; })));
+    const { rerender } = render(<BulkProductImport {...props} />);
+    await upload('product_name\nOne\n');
+    fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
+    expect(screen.getByRole('button', { name: 'Choose Different File' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    answer({ data: null, error: { message: 'Nothing was saved. Bad row.' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Choose Different File' })).toBeEnabled());
+    expect(screen.queryByText(/The last import was not confirmed/)).not.toBeInTheDocument();
+    // Save again, and the page closes the window before the reply lands.
+    fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
+    rerender(<BulkProductImport {...props} open={false} />);
+    rerender(<BulkProductImport {...props} />);
+    answer({ data: { inserted_count: 1, rows: [] }, error: null });
+    await waitFor(() => expect(screen.getByLabelText('Select File')).toBeEnabled());
+    expect(props.onSuccess).not.toHaveBeenCalled();
+    expect(screen.queryByText('Import Complete')).not.toBeInTheDocument();
+  });
 });

@@ -30,7 +30,7 @@ export async function searchByNumberOrCustomerName(
 }
 
 // Postgres `ORDER BY <date> DESC, id`: a NULL date sorts first in a DESC sort.
-export function newestFirst(a: DatedRow, b: DatedRow, dateColumn: string): number {
+function newestFirst(a: DatedRow, b: DatedRow, dateColumn: string): number {
   const ad = a[dateColumn] == null ? null : String(a[dateColumn]);
   const bd = b[dateColumn] == null ? null : String(b[dateColumn]);
   if (ad !== bd) {

@@ -889,6 +889,14 @@ Deno.serve(async (req: Request) => {
       return unconfirmedSend(data?.[0]?.id ?? null);
     };
 
+    // The stored and sent body ends with an invisible fingerprint of the attachments,
+    // so two sends that differ only in their PDF never count as the same message below.
+    if (attachments?.length) {
+      const bytes = new TextEncoder().encode(attachments.map((a: { filename: string; content: string }) => `${a.filename}\n${a.content}`).join("\n"));
+      const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
+      html = `${html}\n<!-- attachments-sha256:${digest} -->`;
+    }
+
     // A send of this email that STARTS after this check, and is confirmed before this
     // request takes the lock, is found by the re-check below. Each attempt stamps
     // created_at from this clock just before its row is written; the 1s margin

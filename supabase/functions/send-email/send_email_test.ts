@@ -577,6 +577,23 @@ Deno.test("a corrected email at the same moment still goes out", async () => {
   assertEquals(world.resendCalls.length, 2, "Resend calls");
 });
 
+Deno.test("the same text with a different PDF at the same moment still goes out", async () => {
+  const world = makeWorld(okResend);
+  const withPdf = (key: string, pdf: string) => ({
+    ...quoteEmail(QUOTE, key),
+    attachments: [{ filename: "Quote.pdf", content: btoa(`%PDF-1.4 ${pdf}`) }],
+  });
+  assertEquals((await send(world, ADMIN, withPdf("pdf-1", "old prices"))).status, 200);
+  const res = await send(world, ADMIN, withPdf("pdf-2", "new prices"));
+  assertEquals(res.status, 200);
+  assertEquals(res.body.deduplicated, undefined);
+  assertEquals(world.resendCalls.length, 2, "Resend calls");
+  // The same PDF again at the same moment is the same email.
+  const again = await send(world, ADMIN, withPdf("pdf-3", "new prices"));
+  assertEquals(again.body.deduplicated, true);
+  assertEquals(world.resendCalls.length, 2, "Resend calls after the repeat");
+});
+
 Deno.test("the same email sent again two seconds later goes out", async () => {
   const world = makeWorld(okResend);
   await sentAlready(world, "first-click-key", 2000);

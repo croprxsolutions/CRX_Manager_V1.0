@@ -17,3 +17,5 @@
   still writes the rows. No screen calls it.
 - Proof: `node scripts/smoke/prove-rup-records-require-posted-invoice-real-schema.mjs`
   (`RUP_RECORDS_REQUIRE_POSTED_INVOICE_PROOF_PASS`).
+- Applied live 2026-11-05 21:32:09 UTC (3:32 PM Central), ledger `20261105213209`; the live smoke chain passed
+  (a real draft invoice is refused, posting still writes the register row) and rolled back.

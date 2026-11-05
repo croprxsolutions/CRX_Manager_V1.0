@@ -5,8 +5,8 @@
 -- Run AFTER the migration is applied; before it, S1 FAILs (the draft is let
 -- through).
 --   S0  the live body carries RUP_INVOICE_NOT_POSTED; grants unchanged.
---   S1  an active admin, AS ROLE authenticated, calls it on a [SMOKE] draft
---       chemical_sale invoice with one RUP line -> RUP_INVOICE_NOT_POSTED,
+--   S1  an active admin, AS ROLE authenticated, calls it on the [SMOKE]
+--       draft invoice (left by complete_delivery) with one RUP line -> RUP_INVOICE_NOT_POSTED,
 --       and no register row or idempotency receipt is written.
 --   S1b the same admin's direct INSERT into rup_sales_records for the draft
 --       is refused by the table trigger with RUP_INVOICE_NOT_POSTED.
@@ -24,6 +24,10 @@ DECLARE
   v_suffix   text := substr(md5(random()::text), 1, 8);
   v_customer uuid;
   v_product  uuid;
+  v_pricing  jsonb;
+  v_line     uuid;
+  v_delivery uuid;
+  v_ditem    uuid;
   v_order    uuid;
   v_invoice  uuid;
   v_version  text;
@@ -72,33 +76,58 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: S0 the rup_sales_records posted-invoice trigger is missing or disabled';
   END IF;
 
-  -- Fixtures: a draft chemical_sale invoice with one RUP line and a valid licence.
+  -- Fixtures, built the real way: a [SMOKE] RUP product priced through the governed path, an order
+  -- and an in-progress delivery, then complete_delivery, which leaves the real draft invoice.
   INSERT INTO customers (farm_name)
   VALUES ('[SMOKE] RUP Posted Farm ' || v_suffix)
   RETURNING id INTO v_customer;
 
-  INSERT INTO products (product_name, is_rup, epa_registration, signal_word)
-  VALUES ('[SMOKE] RUP Product ' || v_suffix, true, '999999-99999', 'Warning')
+  INSERT INTO products (product_name, unit_size, is_rup, epa_registration, signal_word, product_form)
+  VALUES ('[SMOKE] RUP Product ' || v_suffix, 'GL', true, '999999-99999', 'Warning', 'liquid')
   RETURNING id INTO v_product;
+  v_pricing := public.preview_product_pricing_changes('product_page', NULL,
+    jsonb_build_array(jsonb_build_object('product_id', v_product, 'row_version', 1, 'pricing_mode', 'price_driven',
+      'new_cost', '6.00', 'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00')),
+    v_admin, 'smoke-rupp-pricing-preview-' || v_suffix);
+  PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
+    v_admin, 'smoke-rupp-pricing-apply-' || v_suffix);
+  INSERT INTO inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
+  VALUES (v_product, 'Main Warehouse', 100, 0, 'GL');
 
   v_lic_num := 'SMK-LIC-' || v_suffix;
   INSERT INTO applicator_licenses (customer_id, license_number, license_type, holder_name, expiry_date, is_active)
   VALUES (v_customer, v_lic_num, 'private', '[SMOKE] Holder ' || v_suffix, CURRENT_DATE + 365, true);
 
-  INSERT INTO orders (order_number, customer_id, salesman_id)
-  VALUES ('SMK-RUPP-' || v_suffix, v_customer, v_admin)
+  INSERT INTO orders (order_number, customer_id, status, booking_draw, salesman_id)
+  VALUES ('[SMOKE] RUPP-' || v_suffix, v_customer, 'confirmed', false, v_admin)
   RETURNING id INTO v_order;
+  INSERT INTO order_items (order_id, product_id, product_name, price_per_unit, cost_per_unit,
+    total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining)
+  VALUES (v_order, v_product, '[SMOKE] RUP Product ' || v_suffix, 10, 6, 10, 100, 40, 40, 0, 10)
+  RETURNING id INTO v_line;
+  INSERT INTO deliveries (delivery_number, order_id, customer_id, scheduled_date, status, created_by)
+  VALUES ('[SMOKE] RUPP-DEL-' || v_suffix, v_order, v_customer, CURRENT_DATE, 'scheduled', v_admin)
+  RETURNING id INTO v_delivery;
+  INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
+  VALUES (v_delivery, v_line, v_product, 10, 0, 'GL')
+  RETURNING id INTO v_ditem;
+  UPDATE deliveries SET status = 'in_progress' WHERE id = v_delivery;
 
-  INSERT INTO invoices (invoice_number, order_id, customer_id, invoice_type,
-    status, total_amount_cents, invoice_date, created_by)
-  VALUES ('SMK-RUPP-INV-' || v_suffix, v_order, v_customer, 'chemical_sale',
-    'draft', 5000, CURRENT_DATE, v_admin)
-  RETURNING id INTO v_invoice;
-
-  INSERT INTO invoice_items (invoice_id, product_id, description, quantity,
-    unit_size, unit_price_cents, extended_cents)
-  VALUES (v_invoice, v_product, '[SMOKE] RUP line ' || v_suffix, 10,
-    'gal', 500, 5000);
+  BEGIN
+    SET LOCAL ROLE authenticated;
+    PERFORM public.complete_delivery(v_delivery, 'No proof — recorded by office', v_admin,
+      jsonb_build_object(v_ditem, 10), NULL, NULL, 'smoke-rupp-complete-' || v_suffix, NULL, 'no_proof', '[SMOKE] no signature');
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: complete_delivery failed: % (%)', SQLERRM, SQLSTATE;
+  END;
+  RESET ROLE;
+  SELECT id INTO v_invoice FROM invoices WHERE delivery_id = v_delivery AND deleted_at IS NULL AND status = 'draft';
+  IF v_invoice IS NULL THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: complete_delivery left no draft invoice';
+  END IF;
+  IF (SELECT count(*) FROM rup_sales_records WHERE invoice_id = v_invoice) <> 0 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: completing the delivery wrote register rows for the draft';
+  END IF;
 
   -- S1. Draft refused by name, nothing written.
   BEGIN
@@ -107,7 +136,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: S1 draft invoice was let through (expected RUP_INVOICE_NOT_POSTED)';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
-    IF SQLERRM NOT LIKE 'RUP_INVOICE_NOT_POSTED: invoice SMK-RUPP-INV-% is draft%' THEN
+    IF SQLERRM NOT LIKE 'RUP_INVOICE_NOT_POSTED: invoice % is draft%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: S1 expected RUP_INVOICE_NOT_POSTED for the draft, got % (%)', SQLERRM, SQLSTATE;
     END IF;
   END;
@@ -133,7 +162,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: S1b a direct insert for the draft was let through';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
-    IF SQLERRM NOT LIKE 'RUP_INVOICE_NOT_POSTED: invoice SMK-RUPP-INV-% is draft%' THEN
+    IF SQLERRM NOT LIKE 'RUP_INVOICE_NOT_POSTED: invoice % is draft%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: S1b expected RUP_INVOICE_NOT_POSTED for a direct insert, got % (%)', SQLERRM, SQLSTATE;
     END IF;
   END;

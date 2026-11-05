@@ -886,7 +886,7 @@ Deno.serve(async (req: Request) => {
     // A send of this email that STARTS after this check, and is confirmed before this
     // request takes the lock, is found by the re-check below. Each attempt stamps
     // created_at from this clock just before its row is written; the 1s margin
-    // covers that gap and clock skew. A send that started earlier is a separate
+    // covers that gap and clock skew. A send that started more than 1s earlier is a separate
     // send (a corrected quote mailed again) and is never deduplicated.
     const lockCheckFrom = new Date(Date.now() - 1000).toISOString();
     // Early check; the unique index above is what holds when two arrive together.

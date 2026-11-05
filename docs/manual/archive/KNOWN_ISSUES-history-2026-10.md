@@ -7098,3 +7098,14 @@ which clears the loaded boundary when no part is left, so `buildBoundaryGeometry
 Saving with every part deleted now sends no boundary and says "A measured boundary cannot be removed here — draw a
 replacement boundary and save." A regression test was added in `src/pages/FieldSetup.saveNavigation.test.tsx`
 ("deleting every part of a saved multi-part boundary"). It fails if the clear is removed. No code or database change.
+
+### Closed 2026-11-05 — KI-39 (year-end "Change" colour; the whole entry is now closed)
+
+Original text: "The year-over-year "Change" colour in the year-end PDF never shows (`src/lib/yearEndSummaryPdf.ts:295`).
+The quote-PDF notes part was fixed 2026-11-05 (see the archive)."
+
+Fixed by PR #1477 (merge `a1076c552`). The colour was set in the table's after-draw hook, after the text was already on
+the page, so it never applied. It is now set on each cell before drawing (`didParseCell`): green for zero or growth, red
+for a decline, unchanged when there is no prior-season value. A test covers it in `src/lib/yearEndSummaryPdf.test.ts`.
+Proof: a Year-End Summary rendered from test data showed +23.3% and +25.0% green, −25.0% red, "—" in the normal colour,
+and no other text changed colour. With the quote-PDF part closed by PR #1480, KI-39 is fully closed. No database change.

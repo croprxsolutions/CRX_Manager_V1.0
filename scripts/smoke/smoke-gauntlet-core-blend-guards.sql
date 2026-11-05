@@ -35,9 +35,7 @@ DECLARE
   v_empty_ticket uuid := gen_random_uuid();
   v_billed_ticket uuid := gen_random_uuid();
   v_partial_ticket uuid := gen_random_uuid();
-  v_mapping_ticket uuid := gen_random_uuid();
   v_duplicate_ticket uuid := gen_random_uuid();
-  v_inventory_ticket uuid := gen_random_uuid();
   v_wrong_customer_ticket uuid := gen_random_uuid();
   v_storage_object uuid := gen_random_uuid();
   v_storage_sales_object uuid := gen_random_uuid();
@@ -51,14 +49,9 @@ DECLARE
   v_result jsonb;
   v_pricing jsonb;
   v_replay jsonb;
-  v_order_id uuid;
-  v_order_item_id uuid;
-  v_inventory_order_id uuid;
   v_invoice_id uuid;
   v_blend_product_id uuid;
-  v_blend_product_id2 uuid;
   v_billed_blend_product_id uuid;
-  v_linked_blend_product_id uuid;
   v_count integer;
   v_side_effect_count integer;
   v_status text;
@@ -1267,18 +1260,18 @@ BEGIN
   UPDATE public.blend_tickets
      SET review_status = 'approved', reviewed_by = v_admin, reviewed_at = now()
    WHERE id = v_empty_ticket;
-  v_result := public.create_order_from_blend_ticket(
-    v_empty_ticket,
-    '[E2E]-GAUNTLET-EMPTY-' || left(v_empty_ticket::text, 8),
-    current_date,
-    '[E2E] must reject an empty ticket',
-    v_admin,
-    v_key_prefix || '-order-empty'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, true) IS NOT FALSE
-     OR position('no products' IN lower(COALESCE(v_result->>'error', ''))) = 0 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): approved empty ticket was not blocked: %', v_result;
-  END IF;
+  BEGIN
+    PERFORM public.create_order_from_blend_ticket(
+      v_empty_ticket, '[E2E]-GAUNTLET-EMPTY-' || left(v_empty_ticket::text, 8), current_date,
+      '[E2E] must reject an empty ticket', v_admin, v_key_prefix || '-order-empty'
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL(blend): empty-ticket order creation succeeded';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL(blend)%' THEN RAISE; END IF;
+    IF position('BLEND_TICKET_ORDERS_DISABLED' IN SQLERRM) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(blend): wrong empty-ticket order creation error: %', SQLERRM;
+    END IF;
+  END;
   IF EXISTS (
     SELECT 1 FROM public.orders
      WHERE order_number = '[E2E]-GAUNTLET-EMPTY-' || left(v_empty_ticket::text, 8)
@@ -1373,7 +1366,7 @@ BEGIN
   IF (SELECT payment_status FROM public.blend_tickets WHERE id = v_billed_ticket) <> 'billed' THEN
     RAISE EXCEPTION 'SMOKE_FAIL(blend): active direct invoice did not establish valid billing provenance';
   END IF;
-  UPDATE public.invoices SET status = 'posted' WHERE id = v_invoice_id;
+  UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = v_invoice_id;
   UPDATE public.invoices SET status = 'voided' WHERE id = v_invoice_id;
   IF (SELECT payment_status FROM public.blend_tickets WHERE id = v_billed_ticket) <> 'unbilled' THEN
     RAISE EXCEPTION 'SMOKE_FAIL(blend): voided direct invoice did not reset payment state';
@@ -1393,10 +1386,8 @@ BEGIN
     v_billed_ticket, v_customer, 'draft', v_admin
   ) RETURNING id INTO v_invoice_id;
 
-  -- An active direct invoice is downstream provenance even while the ticket's
-  -- cached payment status is still unbilled. Both order paths must reject
-  -- under the locked ticket before creating any order, link, inventory,
-  -- activity, audit, or idempotency effect.
+  -- KI-93: both order paths are switched off. They must refuse before creating
+  -- any order, link, inventory, activity, audit, or idempotency effect.
   SELECT
       (SELECT count(*) FROM public.invoices WHERE blend_ticket_id = v_billed_ticket)
     + (SELECT count(*)
@@ -1430,7 +1421,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL(downstream): active-invoice link succeeded';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL(downstream)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_ACTIVE_INVOICE_ORDER_LOCKED' IN SQLERRM) = 0 THEN
+    IF position('BLEND_TICKET_ORDERS_DISABLED' IN SQLERRM) = 0 THEN
       RAISE EXCEPTION 'SMOKE_FAIL(downstream): wrong active-invoice link error: %', SQLERRM;
     END IF;
   END;
@@ -1447,7 +1438,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL(downstream): active-invoice order creation succeeded';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL(downstream)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_ACTIVE_INVOICE_ORDER_LOCKED' IN SQLERRM) = 0 THEN
+    IF position('BLEND_TICKET_ORDERS_DISABLED' IN SQLERRM) = 0 THEN
       RAISE EXCEPTION 'SMOKE_FAIL(downstream): wrong active-invoice create-order error: %', SQLERRM;
     END IF;
   END;
@@ -1601,222 +1592,71 @@ BEGIN
     json_build_object('sub', v_admin, 'role', 'authenticated')::text,
     true
   );
-  UPDATE public.invoices SET status = 'posted' WHERE id = v_invoice_id;
+  UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = v_invoice_id;
   UPDATE public.invoices SET status = 'voided' WHERE id = v_invoice_id;
 
-  v_result := public.create_order_from_blend_ticket(
-    v_ticket,
-    '[E2E]-GAUNTLET-BLOCKED-' || left(v_ticket::text, 8),
-    current_date,
-    '[E2E] must be blocked before review',
-    v_admin,
-    v_key_prefix || '-order-blocked'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, true) IS NOT FALSE
-     OR position('completed and approved' IN COALESCE(v_result->>'error', '')) = 0 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): unreviewed ticket was not blocked: %', v_result;
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM public.orders
-     WHERE order_number = '[E2E]-GAUNTLET-BLOCKED-' || left(v_ticket::text, 8)
-  ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): blocked lifecycle call created an order';
-  END IF;
+  BEGIN
+    PERFORM public.create_order_from_blend_ticket(
+      v_ticket, '[E2E]-GAUNTLET-BLOCKED-' || left(v_ticket::text, 8), current_date,
+      '[E2E] must be blocked before review', v_admin, v_key_prefix || '-order-blocked'
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL(blend): unreviewed-ticket order creation succeeded';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL(blend)%' THEN RAISE; END IF;
+    IF position('BLEND_TICKET_ORDERS_DISABLED' IN SQLERRM) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(blend): wrong unreviewed-ticket order creation error: %', SQLERRM;
+    END IF;
+  END;
 
   UPDATE public.blend_tickets
      SET review_status = 'approved', reviewed_by = v_admin, reviewed_at = now()
    WHERE id = v_ticket;
-  v_result := public.create_order_from_blend_ticket(
-    v_ticket,
-    '[E2E]-GAUNTLET-' || left(v_ticket::text, 8),
-    current_date,
-    '[E2E] rollback-only gauntlet',
-    v_admin,
-    v_key_prefix || '-order-create'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, false) IS NOT TRUE THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): approved ticket did not create order: %', v_result;
-  END IF;
-  v_order_id := (v_result->>'order_id')::uuid;
-  IF NOT EXISTS (
-    SELECT 1 FROM public.blend_ticket_to_order_items
-     WHERE blend_ticket_id = v_ticket AND order_id = v_order_id
-  ) OR NOT EXISTS (
-    SELECT 1 FROM public.blend_tickets
-     WHERE id = v_ticket AND order_link_status = 'linked'
-  ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): order effect was not atomically linked';
-  END IF;
-  -- An exact retry under the same key returns the cached result.
-  v_replay := public.create_order_from_blend_ticket(
-    v_ticket,
-    '[E2E]-GAUNTLET-' || left(v_ticket::text, 8),
-    current_date,
-    '[E2E] rollback-only gauntlet',
-    v_admin,
-    v_key_prefix || '-order-create'
-  )::jsonb;
-  IF v_replay IS DISTINCT FROM v_result THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): order replay did not return the cached result';
-  END IF;
-  -- Since 20261016140000 the key is bound to the exact request: the same key with a different
-  -- order number and notes is refused, and no second order is created.
   BEGIN
-    v_replay := public.create_order_from_blend_ticket(
-      v_ticket,
-      '[E2E]-IGNORED-REPLAY-' || left(v_ticket::text, 8),
-      current_date,
-      NULL,
-      v_admin,
-      v_key_prefix || '-order-create'
-    )::jsonb;
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): a changed request replayed another request''s order: %', v_replay;
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'SMOKE_FAIL(blend)%' THEN RAISE; END IF;
-    IF position('IDEMPOTENCY_INTENT_MISMATCH' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(blend): wrong changed-request refusal: %', SQLERRM;
-    END IF;
-  END;
-  IF EXISTS (
-    SELECT 1 FROM public.orders WHERE order_number = '[E2E]-IGNORED-REPLAY-' || left(v_ticket::text, 8)
-  ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): a refused changed request created an order';
-  END IF;
-
-  -- The linked sales-order path and direct blend-ticket invoice path are
-  -- mutually exclusive. The invoice RPC must reject before invoice numbering,
-  -- commissions, activity, audit, or idempotency effects.
-  BEGIN
-    PERFORM public.create_invoice_from_blend_ticket(
-      v_ticket,
-      v_admin,
-      v_key_prefix || '-invoice-linked-order'
+    PERFORM public.create_order_from_blend_ticket(
+      v_ticket, '[E2E]-GAUNTLET-' || left(v_ticket::text, 8), current_date,
+      '[E2E] rollback-only gauntlet', v_admin, v_key_prefix || '-order-create'
     );
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): linked ticket created a direct invoice';
+    RAISE EXCEPTION 'SMOKE_FAIL(blend): approved-ticket order creation succeeded';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL(blend)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_LINKED_ORDER_INVOICE_LOCKED' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(blend): wrong linked-ticket invoice error: %', SQLERRM;
+    IF position('BLEND_TICKET_ORDERS_DISABLED' IN SQLERRM) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(blend): wrong approved-ticket order creation error: %', SQLERRM;
+    END IF;
+  END;
+  BEGIN
+    PERFORM public.link_blend_ticket_to_order(
+      v_ticket, gen_random_uuid(), NULL, v_admin, v_key_prefix || '-link-approved'
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL(blend): approved-ticket link succeeded';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL(blend)%' THEN RAISE; END IF;
+    IF position('BLEND_TICKET_ORDERS_DISABLED' IN SQLERRM) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(blend): wrong approved-ticket link error: %', SQLERRM;
+    END IF;
+  END;
+  BEGIN
+    PERFORM public.unlink_blend_ticket_from_order(
+      v_ticket, v_admin, v_key_prefix || '-unlink-approved'
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL(blend): approved-ticket unlink succeeded';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL(blend)%' THEN RAISE; END IF;
+    IF position('BLEND_TICKET_ORDERS_DISABLED' IN SQLERRM) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(blend): wrong approved-ticket unlink error: %', SQLERRM;
     END IF;
   END;
   IF EXISTS (
-       SELECT 1 FROM public.invoices WHERE blend_ticket_id = v_ticket
-     ) OR EXISTS (
-       SELECT 1 FROM public.commissions c
-       JOIN public.invoices i ON i.id = c.invoice_id
-        WHERE i.blend_ticket_id = v_ticket
-     ) OR EXISTS (
-       SELECT 1 FROM public.idempotency_keys
-        WHERE idempotency_key = v_key_prefix || '-invoice-linked-order'
-     ) OR EXISTS (
-       SELECT 1 FROM public.activity_feed
-        WHERE event_type = 'invoice_created'
-          AND description LIKE '%blend ticket ' || (
-            SELECT ticket_number FROM public.blend_tickets WHERE id = v_ticket
-          ) || '%'
-     ) OR EXISTS (
-       SELECT 1 FROM public.financial_audit_log fal
-       JOIN public.invoices i ON i.id = fal.entity_id
-        WHERE fal.entity_type = 'invoice'
-          AND i.blend_ticket_id = v_ticket
-     ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): linked-ticket invoice rejection leaked side effects';
+    SELECT 1 FROM public.orders WHERE order_number = '[E2E]-GAUNTLET-' || left(v_ticket::text, 8)
+  ) OR EXISTS (
+    SELECT 1 FROM public.blend_ticket_to_order_items WHERE blend_ticket_id = v_ticket
+  ) OR EXISTS (
+    SELECT 1 FROM public.idempotency_keys
+     WHERE idempotency_key IN (v_key_prefix || '-order-create', v_key_prefix || '-link-approved', v_key_prefix || '-unlink-approved')
+  ) OR (SELECT order_link_status FROM public.blend_tickets WHERE id = v_ticket) <> 'unlinked' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL(blend): a refused order-path call left an order, link, receipt or linked status';
   END IF;
 
-  -- Once linked, direct table writes cannot silently diverge the ticket from
-  -- its order. Prove both a numeric field from the original narrow guard and
-  -- an independently editable text field, plus the product database trigger.
-  SELECT total_acres INTO v_quantity FROM public.blend_tickets WHERE id = v_ticket;
-  BEGIN
-    UPDATE public.blend_tickets SET total_acres = total_acres + 1 WHERE id = v_ticket;
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): linked header mutation succeeded';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'SMOKE_FAIL(blend-lock)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_LINKED_CONTENT_LOCKED' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): wrong linked-header error: %', SQLERRM;
-    END IF;
-  END;
-  IF (SELECT total_acres FROM public.blend_tickets WHERE id = v_ticket)
-       IS DISTINCT FROM v_quantity THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): rejected header mutation changed total acres';
-  END IF;
-
-  SELECT notes INTO v_status FROM public.blend_tickets WHERE id = v_ticket;
-  BEGIN
-    UPDATE public.blend_tickets SET notes = '[E2E] forbidden linked note edit' WHERE id = v_ticket;
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): linked text-content mutation succeeded';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'SMOKE_FAIL(blend-lock)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_LINKED_CONTENT_LOCKED' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): wrong linked text-content error: %', SQLERRM;
-    END IF;
-  END;
-  IF (SELECT notes FROM public.blend_tickets WHERE id = v_ticket)
-       IS DISTINCT FROM v_status THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): rejected text-content mutation changed notes';
-  END IF;
-
-  SELECT id, quantity INTO v_linked_blend_product_id, v_quantity
-    FROM public.blend_ticket_products
-   WHERE blend_ticket_id = v_ticket
-   ORDER BY sequence_order
-   LIMIT 1;
-  BEGIN
-    UPDATE public.blend_ticket_products
-     SET quantity = quantity + 1
-     WHERE id = v_linked_blend_product_id;
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): linked product mutation succeeded';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'SMOKE_FAIL(blend-lock)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_LINKED_CONTENT_LOCKED' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): wrong linked-product error: %', SQLERRM;
-    END IF;
-  END;
-  IF (SELECT quantity FROM public.blend_ticket_products WHERE id = v_linked_blend_product_id)
-       IS DISTINCT FROM v_quantity THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): rejected product mutation changed quantity';
-  END IF;
-
-  BEGIN
-    UPDATE public.blend_tickets SET order_link_status = 'unlinked' WHERE id = v_ticket;
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): direct linked-to-unlinked flag bypass succeeded';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'SMOKE_FAIL(blend-lock)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_LINK_STATE_INVALID' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): wrong direct-unlink bypass error: %', SQLERRM;
-    END IF;
-  END;
-  BEGIN
-    UPDATE public.blend_tickets SET review_status = 'unreviewed' WHERE id = v_ticket;
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): linked ticket was directly unapproved';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'SMOKE_FAIL(blend-lock)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_SETTLED_LIFECYCLE_INVALID' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): wrong linked lifecycle error: %', SQLERRM;
-    END IF;
-  END;
-  BEGIN
-    UPDATE public.blend_tickets SET deleted_at = now() WHERE id = v_ticket;
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): linked ticket was soft-deleted';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'SMOKE_FAIL(blend-lock)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_SETTLED_LIFECYCLE_INVALID' IN SQLERRM) = 0
-       AND position('BLEND_TICKET_DELETE_LIFECYCLE_LOCKED' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): wrong linked delete error: %', SQLERRM;
-    END IF;
-  END;
-
-  SELECT id INTO v_order_item_id
-    FROM public.order_items
-   WHERE order_id = v_order_id
-     AND product_id = v_product
-   ORDER BY sort_order
-   LIMIT 1;
-  IF v_order_item_id IS NULL THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): created order has no mapped product item';
-  END IF;
-
-  -- A two-product ticket cannot be partially mapped to a one-product order.
+  -- A two-product ticket for the non-finite constraint and direct link-flag checks.
   PERFORM public.create_blend_ticket(
     v_partial_ticket,
     jsonb_build_object(
@@ -1867,43 +1707,6 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL(blend): wrong direct NaN constraint error: %', SQLERRM;
     END IF;
   END;
-  SELECT id INTO v_blend_product_id
-    FROM public.blend_ticket_products
-   WHERE blend_ticket_id = v_partial_ticket AND product_id = v_product
-   ORDER BY sequence_order
-   LIMIT 1;
-  v_result := public.link_blend_ticket_to_order(
-    v_partial_ticket,
-    v_order_id,
-    jsonb_build_array(jsonb_build_object(
-      'blend_product_id', v_blend_product_id,
-      'order_item_id', v_order_item_id,
-      'quantity_applied', 1
-    )),
-    v_admin,
-    v_key_prefix || '-link-partial'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, true) IS NOT FALSE
-     OR (
-       position('mapping' IN lower(COALESCE(v_result->>'error', ''))) = 0
-       AND position('each blend line' IN lower(COALESCE(v_result->>'error', ''))) = 0
-     ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): partial product mapping was not blocked: %', v_result;
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM public.blend_ticket_to_order_items
-     WHERE blend_ticket_id = v_partial_ticket
-  ) OR EXISTS (
-    SELECT 1 FROM public.blend_tickets
-     WHERE id = v_partial_ticket AND order_link_status <> 'unlinked'
-  ) OR EXISTS (
-    SELECT 1 FROM public.financial_audit_log
-     WHERE entity_type = 'blend_ticket' AND entity_id = v_partial_ticket
-       AND operation_type = 'blend_ticket_linked'
-  ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): partial-mapping rejection leaked link/status/audit effects';
-  END IF;
-
   BEGIN
     UPDATE public.blend_tickets SET order_link_status = 'linked' WHERE id = v_partial_ticket;
     RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): direct unlinked-to-linked flag bypass succeeded';
@@ -1913,108 +1716,6 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): wrong direct-link bypass error: %', SQLERRM;
     END IF;
   END;
-
-  BEGIN
-    UPDATE public.blend_ticket_products
-       SET blend_ticket_id = v_partial_ticket
-     WHERE id = v_linked_blend_product_id;
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): linked product was reparented to an unlinked ticket';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'SMOKE_FAIL(blend-lock)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_LINKED_CONTENT_LOCKED' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): wrong linked-product reparent error: %', SQLERRM;
-    END IF;
-  END;
-  IF (SELECT blend_ticket_id FROM public.blend_ticket_products
-       WHERE id = v_linked_blend_product_id) IS DISTINCT FROM v_ticket THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend-lock): rejected reparent changed the product parent';
-  END IF;
-
-  -- Explicit mappings are keyed by the exact blend-product row and must sum to
-  -- that row's finite quantity. Duplicate blend lines may deliberately share
-  -- one matching order item without collapsing either source line.
-  PERFORM public.create_blend_ticket(
-    v_mapping_ticket,
-    jsonb_build_object(
-      'customer_id', v_customer,
-      'ticket_date', current_date,
-      'total_acres', 1,
-      'notes', '[E2E] exact mapping guard'
-    ),
-    jsonb_build_array(jsonb_build_object(
-      'product_id', v_product,
-      'product_name', v_product_name,
-      'quantity', 1,
-      'unit', v_inventory_unit,
-      'rate_per_acre', 1,
-      'rate_per_acre_unit', v_inventory_unit || '/ac',
-      'sequence_order', 1
-    )),
-    '[]'::jsonb,
-    false,
-    v_admin,
-    v_key_prefix || '-ticket-mapping'
-  );
-  UPDATE public.blend_tickets
-     SET review_status = 'approved', reviewed_by = v_admin, reviewed_at = now()
-   WHERE id = v_mapping_ticket;
-  SELECT id INTO v_blend_product_id
-    FROM public.blend_ticket_products
-   WHERE blend_ticket_id = v_mapping_ticket;
-
-  v_result := public.link_blend_ticket_to_order(
-    v_mapping_ticket,
-    v_order_id,
-    jsonb_build_array(jsonb_build_object(
-      'blend_product_id', v_blend_product_id,
-      'order_item_id', v_order_item_id,
-      'quantity_applied', 0.5
-    )),
-    v_admin,
-    v_key_prefix || '-link-wrong-sum'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, true) IS NOT FALSE
-     OR position('sum to the exact finite blend quantity' IN COALESCE(v_result->>'error', '')) = 0 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): wrong mapping sum was not blocked: %', v_result;
-  END IF;
-
-  v_result := public.link_blend_ticket_to_order(
-    v_mapping_ticket,
-    v_order_id,
-    jsonb_build_array(jsonb_build_object(
-      'blend_product_id', v_blend_product_id,
-      'order_item_id', v_order_item_id,
-      'quantity_applied', 'Infinity'
-    )),
-    v_admin,
-    v_key_prefix || '-link-infinite'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, true) IS NOT FALSE
-     OR position('exact finite blend quantity' IN COALESCE(v_result->>'error', '')) = 0 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): infinite mapping quantity was not blocked: %', v_result;
-  END IF;
-
-  v_result := public.link_blend_ticket_to_order(
-    v_mapping_ticket,
-    v_order_id,
-    jsonb_build_array(jsonb_build_object(
-      'blend_product_id', v_blend_product_id,
-      'order_item_id', v_order_item_id,
-      'quantity_applied', 1
-    )),
-    v_admin,
-    v_key_prefix || '-link-exact'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, false) IS NOT TRUE
-     OR NOT EXISTS (
-       SELECT 1 FROM public.blend_ticket_to_order_items
-        WHERE blend_ticket_id = v_mapping_ticket
-          AND blend_ticket_product_id = v_blend_product_id
-          AND order_item_id = v_order_item_id
-          AND quantity_applied = 1
-     ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): exact line mapping did not link atomically: %', v_result;
-  END IF;
 
   PERFORM public.create_blend_ticket(
     v_duplicate_ticket,
@@ -2048,110 +1749,6 @@ BEGIN
   UPDATE public.blend_tickets
      SET review_status = 'approved', reviewed_by = v_admin, reviewed_at = now()
    WHERE id = v_duplicate_ticket;
-  SELECT id INTO v_blend_product_id
-    FROM public.blend_ticket_products
-   WHERE blend_ticket_id = v_duplicate_ticket AND sequence_order = 1;
-  SELECT id INTO v_blend_product_id2
-    FROM public.blend_ticket_products
-   WHERE blend_ticket_id = v_duplicate_ticket AND sequence_order = 2;
-  v_result := public.link_blend_ticket_to_order(
-    v_duplicate_ticket,
-    v_order_id,
-    jsonb_build_array(
-      jsonb_build_object(
-        'blend_product_id', v_blend_product_id,
-        'order_item_id', v_order_item_id,
-        'quantity_applied', 0.4
-      ),
-      jsonb_build_object(
-        'blend_product_id', v_blend_product_id2,
-        'order_item_id', v_order_item_id,
-        'quantity_applied', 0.6
-      )
-    ),
-    v_admin,
-    v_key_prefix || '-link-duplicate-line'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, false) IS NOT TRUE
-     OR (SELECT count(*) FROM public.blend_ticket_to_order_items
-          WHERE blend_ticket_id = v_duplicate_ticket
-            AND order_item_id = v_order_item_id) <> 2
-     OR (SELECT count(DISTINCT blend_ticket_product_id)
-           FROM public.blend_ticket_to_order_items
-          WHERE blend_ticket_id = v_duplicate_ticket
-            AND order_item_id = v_order_item_id) <> 2
-     OR EXISTS (
-       SELECT 1
-         FROM public.blend_ticket_products btp
-        WHERE btp.blend_ticket_id = v_duplicate_ticket
-          AND COALESCE((
-            SELECT sum(link.quantity_applied)
-              FROM public.blend_ticket_to_order_items link
-             WHERE link.blend_ticket_product_id = btp.id
-          ), 0) IS DISTINCT FROM btp.quantity
-     ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): duplicate order-line mappings collapsed exact source lines: %', v_result;
-  END IF;
-
-  -- create_order_from_blend_ticket must create a missing Main Warehouse row,
-  -- not silently skip prebooking when inventory has not been initialized.
-  PERFORM public.create_blend_ticket(
-    v_inventory_ticket,
-    jsonb_build_object(
-      'customer_id', v_customer,
-      'ticket_date', current_date,
-      'total_acres', 1,
-      'notes', '[E2E] missing inventory upsert guard'
-    ),
-    jsonb_build_array(jsonb_build_object(
-      'product_id', v_product2,
-      'product_name', v_product2_name,
-      'quantity', 1,
-      'unit', v_inventory_unit2,
-      'rate_per_acre', 1,
-      'rate_per_acre_unit', v_inventory_unit2 || '/ac',
-      'sequence_order', 1
-    )),
-    '[]'::jsonb,
-    false,
-    v_admin,
-    v_key_prefix || '-ticket-inventory-upsert'
-  );
-  UPDATE public.blend_tickets
-     SET review_status = 'approved', reviewed_by = v_admin, reviewed_at = now()
-   WHERE id = v_inventory_ticket;
-  DELETE FROM public.inventory
-   WHERE product_id = v_product2 AND location = 'Main Warehouse';
-  IF EXISTS (
-    SELECT 1 FROM public.inventory
-     WHERE product_id = v_product2 AND location = 'Main Warehouse'
-  ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(inventory): could not establish missing-row fixture';
-  END IF;
-  v_result := public.create_order_from_blend_ticket(
-    v_inventory_ticket,
-    '[E2E]-GAUNTLET-INVENTORY-' || left(v_inventory_ticket::text, 8),
-    current_date,
-    '[E2E] missing inventory row must upsert',
-    v_admin,
-    v_key_prefix || '-order-inventory-upsert'
-  )::jsonb;
-  v_inventory_order_id := (v_result->>'order_id')::uuid;
-  IF COALESCE((v_result->>'success')::boolean, false) IS NOT TRUE
-     OR NOT EXISTS (
-       SELECT 1 FROM public.inventory
-        WHERE product_id = v_product2
-          AND location = 'Main Warehouse'
-          AND quantity_prebooked > 0
-     ) OR NOT EXISTS (
-       SELECT 1 FROM public.inventory_transactions
-        WHERE order_id = v_inventory_order_id
-          AND product_id = v_product2
-          AND transaction_type = 'booked'
-     ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(inventory): missing row was not upserted with booked effects: %', v_result;
-  END IF;
-
   -- A fully valid ticket still cannot link across customer boundaries.
   PERFORM public.create_blend_ticket(
     v_wrong_customer_ticket,
@@ -2178,27 +1775,6 @@ BEGIN
   UPDATE public.blend_tickets
      SET review_status = 'approved', reviewed_by = v_admin, reviewed_at = now()
    WHERE id = v_wrong_customer_ticket;
-  v_result := public.link_blend_ticket_to_order(
-    v_wrong_customer_ticket,
-    v_order_id,
-    NULL,
-    v_admin,
-    v_key_prefix || '-link-wrong-customer'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, true) IS NOT FALSE
-     OR position('customer mismatch' IN lower(COALESCE(v_result->>'error', ''))) = 0 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): cross-customer link was not blocked: %', v_result;
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM public.blend_ticket_to_order_items
-     WHERE blend_ticket_id = v_wrong_customer_ticket
-  ) OR EXISTS (
-    SELECT 1 FROM public.blend_tickets
-     WHERE id = v_wrong_customer_ticket AND order_link_status <> 'unlinked'
-  ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(blend): customer-mismatch rejection leaked link/status effects';
-  END IF;
-
   SELECT count(*) INTO v_side_effect_count
     FROM public.activity_feed
    WHERE related_entity_type = 'blend_ticket'
@@ -2254,6 +1830,13 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL(blend): no-op billing idempotency was not saved exactly once';
   END IF;
 
+  -- KI-93: tickets are never linked now, so a direct draft invoice is the
+  -- billing provenance for the billing-status replay checks.
+  INSERT INTO public.invoices (
+    blend_ticket_id, customer_id, status, created_by
+  ) VALUES (
+    v_ticket, v_customer, 'draft', v_admin
+  ) RETURNING id INTO v_invoice_id;
   v_result := public.update_blend_ticket_billing_status(
     v_ticket,
     'billed',
@@ -2310,19 +1893,14 @@ BEGIN
     PERFORM public.unlink_blend_ticket_from_order(
       v_ticket, v_admin, v_key_prefix || '-unlink-billed'
     );
-    RAISE EXCEPTION 'SMOKE_FAIL(unlink): billed ticket unlinked';
+    RAISE EXCEPTION 'SMOKE_FAIL(unlink): billed-ticket unlink succeeded';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL(unlink)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_UNLINK_BILLING_LOCKED' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(unlink): wrong billed unlink error: %', SQLERRM;
+    IF position('BLEND_TICKET_ORDERS_DISABLED' IN SQLERRM) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(unlink): wrong billed-ticket unlink error: %', SQLERRM;
     END IF;
   END;
 
-  INSERT INTO public.invoices (
-    blend_ticket_id, customer_id, status, created_by
-  ) VALUES (
-    v_ticket, v_customer, 'draft', v_admin
-  ) RETURNING id INTO v_invoice_id;
   BEGIN
     UPDATE public.blend_tickets SET payment_status = 'unbilled' WHERE id = v_ticket;
     RAISE EXCEPTION 'SMOKE_FAIL(billing): active invoice allowed direct unbill';
@@ -2334,51 +1912,10 @@ BEGIN
   END;
 
   -- Invoice cancellation is a terminal state and its trigger may safely reset
-  -- the linked ticket to unbilled. The hardened unlink then accepts it.
+  -- the ticket to unbilled.
   UPDATE public.invoices SET status = 'cancelled' WHERE id = v_invoice_id;
   IF (SELECT payment_status FROM public.blend_tickets WHERE id = v_ticket) <> 'unbilled' THEN
     RAISE EXCEPTION 'SMOKE_FAIL(billing): cancelled invoice did not reset ticket to unbilled';
-  END IF;
-  v_result := public.unlink_blend_ticket_from_order(
-    v_ticket, v_admin, v_key_prefix || '-unlink-cancelled-invoice'
-  )::jsonb;
-  v_replay := public.unlink_blend_ticket_from_order(
-    v_ticket, v_admin, v_key_prefix || '-unlink-cancelled-invoice'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, false) IS NOT TRUE
-     OR v_replay IS DISTINCT FROM v_result
-     OR EXISTS (
-       SELECT 1 FROM public.blend_ticket_to_order_items WHERE blend_ticket_id = v_ticket
-     ) OR (SELECT order_link_status FROM public.blend_tickets WHERE id = v_ticket) <> 'unlinked' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(unlink): cancelled-invoice unlink/replay failed: %', v_result;
-  END IF;
-
-  -- An active invoice blocks an otherwise-unbilled link. Once voided, it is
-  -- the other exact terminal state and unlink is valid.
-  INSERT INTO public.invoices (
-    blend_ticket_id, customer_id, status, created_by
-  ) VALUES (
-    v_mapping_ticket, v_customer, 'draft', v_admin
-  ) RETURNING id INTO v_invoice_id;
-  BEGIN
-    PERFORM public.unlink_blend_ticket_from_order(
-      v_mapping_ticket, v_admin, v_key_prefix || '-unlink-active-invoice'
-    );
-    RAISE EXCEPTION 'SMOKE_FAIL(unlink): active-invoice ticket unlinked';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE 'SMOKE_FAIL(unlink)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_UNLINK_INVOICE_EXISTS' IN SQLERRM) = 0 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL(unlink): wrong active-invoice unlink error: %', SQLERRM;
-    END IF;
-  END;
-  UPDATE public.invoices SET status = 'posted' WHERE id = v_invoice_id;
-  UPDATE public.invoices SET status = 'voided' WHERE id = v_invoice_id;
-  v_result := public.unlink_blend_ticket_from_order(
-    v_mapping_ticket, v_admin, v_key_prefix || '-unlink-voided-invoice'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, false) IS NOT TRUE
-     OR (SELECT order_link_status FROM public.blend_tickets WHERE id = v_mapping_ticket) <> 'unlinked' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(unlink): voided-invoice unlink failed: %', v_result;
   END IF;
 
   INSERT INTO public.blend_ticket_fields (
@@ -2401,7 +1938,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL(unlink): application-record ticket unlinked';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL(unlink)%' THEN RAISE; END IF;
-    IF position('BLEND_TICKET_UNLINK_APPLICATION_EXISTS' IN SQLERRM) = 0 THEN
+    IF position('BLEND_TICKET_ORDERS_DISABLED' IN SQLERRM) = 0 THEN
       RAISE EXCEPTION 'SMOKE_FAIL(unlink): wrong application unlink error: %', SQLERRM;
     END IF;
   END;
@@ -2438,10 +1975,6 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL(downstream): wrong downstream field error: %', SQLERRM;
     END IF;
   END;
-  -- Remove only the rollback fixture's link rows so the product trigger is
-  -- proven against the application record itself, not merely linked status.
-  DELETE FROM public.blend_ticket_to_order_items WHERE blend_ticket_id = v_duplicate_ticket;
-  UPDATE public.blend_tickets SET order_link_status = 'unlinked' WHERE id = v_duplicate_ticket;
   BEGIN
     UPDATE public.blend_ticket_products
        SET quantity = quantity + 1
@@ -2453,17 +1986,6 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL(downstream): wrong downstream product error: %', SQLERRM;
     END IF;
   END;
-
-  v_result := public.unlink_blend_ticket_from_order(
-    v_inventory_ticket, v_admin, v_key_prefix || '-unlink-valid-unbilled'
-  )::jsonb;
-  IF COALESCE((v_result->>'success')::boolean, false) IS NOT TRUE
-     OR (SELECT order_link_status FROM public.blend_tickets WHERE id = v_inventory_ticket) <> 'unlinked'
-     OR EXISTS (
-       SELECT 1 FROM public.blend_ticket_to_order_items WHERE blend_ticket_id = v_inventory_ticket
-     ) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL(unlink): valid unbilled unlink failed: %', v_result;
-  END IF;
 
   -- Sensitive inventory reporting excludes applicators but remains available
   -- to office roles. Function and policy grants stay closed to anon.

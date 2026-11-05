@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef , useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Check, X, Plus, Trash2, Image as ImageIcon, AlertCircle, Link2, Unlink, ShoppingCart, ClipboardCheck, RefreshCw, MapPin, FileText } from 'lucide-react';
+import { Save, Check, X, Plus, Trash2, Image as ImageIcon, AlertCircle, ClipboardCheck, RefreshCw, MapPin, FileText } from 'lucide-react';
 import { sanitizeError, supabase, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { blendQuotePriceSaveErrorMessage, blendTicketInvoiceRefusalMessage, blendTicketMissingPriceMessage, getBlendQuotePriceChoices, type BlendQuotePriceChoice } from '../lib/blendTicketPricing';
 import { Sentry } from '../lib/sentry';
-import { BLEND_TICKET_PRODUCT_COLUMNS, ORDER_COLUMNS, ORDER_ITEM_COLUMNS, PRODUCT_COLUMNS } from '../lib/costFields';
+import { BLEND_TICKET_PRODUCT_COLUMNS, PRODUCT_COLUMNS } from '../lib/costFields';
 import { blockedUnitSaveMessage, type UnitLoadState } from '../lib/units';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
-import { fingerprintIntentPayload, getCommittedOrderIdFromMismatch, getIdempotencyBindingRejection } from '../lib/idempotency';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
 import { logActivity } from '../lib/activityLogger';
 import { useAuth } from '../contexts/AuthContext';
 import Button from '../components/ui/Button';
@@ -18,7 +18,6 @@ import SearchableSelect from '../components/ui/SearchableSelect';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import { fetchAllRows } from '../lib/pagedRead';
 import Badge from '../components/ui/Badge';
-import Modal from '../components/ui/Modal';
 import Skeleton from '../components/ui/Skeleton';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import HelpTip from '../components/ui/HelpTip';
@@ -28,11 +27,10 @@ import { useToast } from '../components/ui/Toast';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { validateBlendMath, type BlendMathWarning } from '../lib/blendMathValidator';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
-import { localToday } from '../lib/dateUtils';
 import { useOCRThresholds } from '../hooks/useOCRThresholds';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { withBelowCostReason } from '../lib/belowCostApproval';
-import type { BlendTicket, BlendTicketProduct, BlendTicketImage, BlendTicketToOrderItem, Product, Order, OrderItem, Field, UnitConversion } from '../types';
+import type { BlendTicket, BlendTicketProduct, BlendTicketImage, Product, Field, UnitConversion } from '../types';
 import JobSearchPicker from '../components/jobs/JobSearchPicker';
 import { jobSearchLabel } from '../lib/recordLabels';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
@@ -52,12 +50,6 @@ export function BlendTicketDetail() {
   const { toast } = useToast();
   const ocrThresholds = useOCRThresholds();
   const saveIdem = useIdempotencyKey('save_blend_ticket', profile?.id || '');
-  const linkIdem = useIdempotencyKey('link_blend_ticket_to_order', profile?.id || '');
-  // Only the latest attempt keeps its retry key: going back to an older edit applies it again instead of
-  // replaying a result that a later edit may have replaced.
-  const lastLinkScopeRef = useRef<string | null>(null);
-  const unlinkIdem = useIdempotencyKey('unlink_blend_ticket_from_order', profile?.id || '');
-  const createOrderIdem = useIdempotencyKey('create_order_from_blend_ticket', profile?.id || '');
   const appRecordIdem = useIdempotencyKey('create_application_record_from_blend_ticket', profile?.id || '');
   const fieldsIdem = useIdempotencyKey('save_blend_ticket_fields', profile?.id || '');
   const approveIdem = useIdempotencyKey('batch_approve_blend_tickets', profile?.id || '');
@@ -97,30 +89,19 @@ export function BlendTicketDetail() {
   const [selectedJobId, setSelectedJobId] = useState<string>('');
   const [appServices, setAppServices] = useState<{id: string; name: string; vehicle_id: string | null}[]>([]);
 
-  // Phase 3: Order linkage state
+  // Application fields state
   const [availableFields, setAvailableFields] = useState<Field[]>([]);
   const [ticketFields, setTicketFields] = useState<{ field_id: string; customer_id: string | null; planned_acres: string; field_name?: string; customer_name?: string }[]>([]);
   const [savingFields, setSavingFields] = useState(false);
-  const [linkedOrders, setLinkedOrders] = useState<BlendTicketToOrderItem[]>([]);
-  const [showLinkModal, setShowLinkModal] = useState(false);
-  const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
-  const [availableOrders, setAvailableOrders] = useState<(Order & { items?: OrderItem[] })[]>([]);
-  const [selectedOrderId, setSelectedOrderId] = useState('');
-  const [linking, setLinking] = useState(false);
-  const [newOrderNumber, setNewOrderNumber] = useState('');
-  const [newOrderDate, setNewOrderDate] = useState(localToday());
-  const [newOrderNotes, setNewOrderNotes] = useState('');
 
   // Confirm modal states
   const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
   const [rejectConfirmOpen, setRejectConfirmOpen] = useState(false);
   const [removeProductConfirmOpen, setRemoveProductConfirmOpen] = useState(false);
   const [removeProductIndex, setRemoveProductIndex] = useState<number | null>(null);
-  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
   const [reprocessConfirmOpen, setReprocessConfirmOpen] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<{ message: string; dupeId: string; dupeNumber: string } | null>(null);
-  const [suggestedOrder, setSuggestedOrder] = useState<{ id: string; order_number: string; matchCount: number } | null>(null);
   const [createInvoiceConfirmOpen, setCreateInvoiceConfirmOpen] = useState(false);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const invoiceIdem = useIdempotencyKey('create_invoice_from_blend_ticket', profile?.id || '');
@@ -180,28 +161,6 @@ export function BlendTicketDetail() {
     && (formData.customer_id === ticket.customer_id || formData.customer_id === ''),
   );
 
-  const orderActionBlockReason = !ticket
-    ? 'Blend ticket is still loading.'
-    : hasUnsavedChanges
-      ? 'Save your ticket changes before creating, linking, or billing downstream records.'
-      : hasActiveInvoice
-        ? 'This blend ticket has an active invoice. Void or cancel that invoice before creating or linking an order.'
-        : customerRowMissing
-          ? 'This ticket\'s customer could not be loaded. Choose the customer again before creating or linking an order.'
-        : ticket.status !== 'completed'
-          ? 'Complete OCR processing before creating or linking an order.'
-          : ticket.review_status !== 'approved'
-            ? 'Approve this blend ticket before creating or linking an order.'
-            : ticket.payment_status !== 'unbilled'
-              ? 'Only an unbilled blend ticket can create or link an order.'
-              : ticket.order_link_status !== 'unlinked'
-                ? 'This blend ticket is already linked to an order.'
-                : products.length === 0
-                  ? 'Add at least one product before creating or linking an order.'
-                  : products.some((product) => !product.product_id || product.quantity <= 0 || product.product?.is_active !== true)
-                    ? 'Match every product to the active catalog and enter a positive quantity first.'
-                    : null;
-
   const invoiceActionBlockReason = !ticket
     ? 'Blend ticket is still loading.'
     : hasUnsavedChanges
@@ -237,7 +196,7 @@ export function BlendTicketDetail() {
     // state has rendered, then re-arm dirty tracking in the animation frame.
     initialLoadDone.current = false;
     try {
-      const [ticketResult, imagesResult, productsResult, allProductsResult, fieldsResult, linkedResult, applicationRecordResult, activeInvoiceResult] = await Promise.all([
+      const [ticketResult, imagesResult, productsResult, allProductsResult, fieldsResult, applicationRecordResult, activeInvoiceResult] = await Promise.all([
         // PR-07 follow-up: dropped uploader/reviewer/salesman FK embeds;
         // resolved via profile_public_view post-fetch (see below).
         supabase
@@ -275,10 +234,6 @@ export function BlendTicketDetail() {
           .order('field_name')
           .order('id')
           .range(from, to)),
-        supabase
-          .from('blend_ticket_to_order_items')
-          .select('*, order:orders(id, order_number, status, customer_id, total_price)')
-          .eq('blend_ticket_id', id!),
         supabase
           .from('application_records')
           .select('id')
@@ -379,7 +334,6 @@ export function BlendTicketDetail() {
       const allFields = fieldsResult.error ? [] : (fieldsResult.data || []) as Field[];
       setAvailableFields(allFields);
       setCustomerLabel(ticketResult.data.customer?.farm_name ?? '');
-      setLinkedOrders((linkedResult.data || []) as BlendTicketToOrderItem[]);
       const linkedJob = (ticketResult.data as { job?: { job_number: string; job_date: string | null; customer: { farm_name: string | null } | null } | null }).job;
       // A linked job the reader cannot see keeps its link; only the label says so.
       setJobLabel(linkedJob ? jobSearchLabel(linkedJob) : ticketResult.data.job_id ? 'Linked job (not visible)' : '');
@@ -447,32 +401,6 @@ export function BlendTicketDetail() {
             dupeNumber: dupe.ticket_number,
           });
         }
-      }
-
-      // Suggest matching orders (read-only hint, no auto-link)
-      // Wrapped in its own try/catch so suggestion failures don't block page load
-      try {
-        const custId = ticketResult.data.customer_id;
-        const prods = (productsResult.data || []) as BlendTicketProduct[];
-        const pids = prods
-          .map((p: BlendTicketProduct) => p.product_id)
-          .filter((pid): pid is string => Boolean(pid));
-        if (ticketResult.data.order_link_status === 'unlinked' && custId && pids.length) {
-          const { data: co } = await supabase.from('orders').select('id, order_number').eq('customer_id', custId).eq('status', 'confirmed');
-          if (co?.length) {
-            const { data: mi } = await supabase.from('order_items').select('order_id, product_id').in('order_id', co.map(o => o.id)).in('product_id', pids);
-            if (mi?.length) {
-              const ct: Record<string, number> = {};
-              mi.forEach(m => { ct[m.order_id] = (ct[m.order_id] || 0) + 1; });
-              const best = Object.entries(ct).sort((a, b) => b[1] - a[1])[0];
-              const bo = co.find(o => o.id === best[0]);
-              ensureCurrent();
-            if (bo) setSuggestedOrder({ id: bo.id, order_number: bo.order_number, matchCount: best[1] });
-            }
-          }
-        }
-      } catch {
-        // Non-critical: suggestion just won't appear
       }
     } catch (error) {
       if (error === STALE_TICKET_LOAD) return;
@@ -906,103 +834,6 @@ export function BlendTicketDetail() {
       .map((product, productIndex) => ({ ...product, sequence_order: productIndex + 1 })));
   }
 
-  // Phase 3: Order linkage handlers
-  async function openLinkModal() {
-    if (orderActionBlockReason) {
-      toast('error', orderActionBlockReason);
-      return;
-    }
-    if (!ticket?.customer_id) {
-      toast('error', 'Please assign a customer before linking to an order');
-      return;
-    }
-    // Load orders for the same customer
-    const { data, error } = await supabase
-      .from('orders')
-      .select(`${ORDER_COLUMNS}, items:order_items(${ORDER_ITEM_COLUMNS})`)
-      .eq('customer_id', ticket.customer_id)
-      .is('deleted_at', null)
-      .in('status', ['confirmed', 'partially_fulfilled'])
-      .order('created_at', { ascending: false })
-      .limit(50);
-    if (error) {
-      toast('error', 'Failed to load orders');
-      return;
-    }
-    setAvailableOrders((data || []) as (Order & { items?: OrderItem[] })[]);
-    setSelectedOrderId('');
-    setShowLinkModal(true);
-  }
-
-  async function handleLinkToOrder() {
-    if (!ticket || !selectedOrderId || !profile) return;
-    if (orderActionBlockReason) {
-      toast('error', orderActionBlockReason);
-      return;
-    }
-    setLinking(true);
-    try {
-      const linkScope = fingerprintIntentPayload([ticket.id, selectedOrderId]);
-      if (lastLinkScopeRef.current && lastLinkScopeRef.current !== linkScope) linkIdem.resetKeyFor(lastLinkScopeRef.current);
-      lastLinkScopeRef.current = linkScope;
-      const { data, error } = await supabase.rpc('link_blend_ticket_to_order', {
-        p_blend_ticket_id: ticket.id,
-        p_order_id: selectedOrderId,
-        p_performed_by: profile.id,
-        p_idempotency_key: linkIdem.getKeyFor(linkScope),
-      });
-      if (error) throw error;
-      const result = assertRpcResult<{ success: boolean; error?: string; order_number?: string; items_linked?: number }>(data, 'link_blend_ticket_to_order');
-      linkIdem.resetKeyFor(linkScope);
-      if (!result.success) throw new Error(result.error);
-      toast('success', `Linked to order ${result.order_number} (${result.items_linked} items matched)`);
-      setShowLinkModal(false);
-      await loadTicketData();
-    } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'link_blend_ticket_to_order' } });
-      toast('error', sanitizeError(err));
-    } finally {
-      setLinking(false);
-    }
-  }
-
-  async function handleUnlink() {
-    if (!ticket || !profile) return;
-    setUnlinkConfirmOpen(false);
-    if (saveHydrationRequired) {
-      toast('error', 'The refreshed ticket could not be loaded. Reopen this ticket before changing its lifecycle state.');
-      return;
-    }
-    if (hasActiveInvoice) {
-      toast('error', 'This blend ticket has an active invoice and cannot be unlinked. Void or cancel the invoice first.');
-      return;
-    }
-    if (hasApplicationRecord) {
-      toast('error', 'This blend ticket has an application record and cannot be unlinked. Reverse or remove that application record first.');
-      return;
-    }
-    if (ticket.payment_status !== 'unbilled') {
-      toast('error', 'A billed blend ticket cannot be unlinked from its order.');
-      return;
-    }
-    try {
-      const { data, error } = await supabase.rpc('unlink_blend_ticket_from_order', {
-        p_blend_ticket_id: ticket.id,
-        p_performed_by: profile.id,
-        p_idempotency_key: unlinkIdem.getKeyFor(ticket.id),
-      });
-      if (error) throw error;
-      const result = assertRpcResult<{ success: boolean; error?: string }>(data, 'unlink_blend_ticket_from_order');
-      unlinkIdem.resetKeyFor(ticket.id);
-      if (!result.success) throw new Error(result.error);
-      toast('success', 'Blend ticket unlinked from order');
-      await loadTicketData();
-    } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'unlink_blend_ticket_from_order' } });
-      toast('error', sanitizeError(err));
-    }
-  }
-
   async function handleCreateInvoice() {
     if (!ticket || !profile) return;
     setCreateInvoiceConfirmOpen(false);
@@ -1125,83 +956,6 @@ export function BlendTicketDetail() {
     });
   }
 
-  async function openCreateOrderModal() {
-    if (orderActionBlockReason) {
-      toast('error', orderActionBlockReason);
-      return;
-    }
-    if (!ticket?.customer_id) {
-      toast('error', 'Please assign a customer first');
-      return;
-    }
-
-    setNewOrderNumber('');
-    setNewOrderDate(localToday());
-    setNewOrderNotes('');
-    setShowCreateOrderModal(true);
-
-    try {
-      const { data, error } = await supabase.rpc('generate_order_number');
-      if (error) throw error;
-      const generatedOrderNumber = assertRpcResult<string>(data, 'generate_order_number');
-      // Preserve anything the user typed while the asynchronous prefill was loading.
-      setNewOrderNumber((current) => current.trim() ? current : generatedOrderNumber);
-    } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'generate_order_number' } });
-      toast('warning', 'Could not prefill an order number. Enter one to continue.');
-    }
-  }
-
-  async function handleCreateOrder() {
-    if (!ticket || !profile || !newOrderNumber.trim()) return;
-    if (orderActionBlockReason) {
-      toast('error', orderActionBlockReason);
-      return;
-    }
-    setLinking(true);
-    try {
-      // One key per ticket: the server binds this key to its request, so edited details after a lost reply are refused with the committed result (the order number is regenerated on each open).
-      const createOrderScope = ticket.id;
-      const { data, error } = await supabase.rpc('create_order_from_blend_ticket', {
-        p_blend_ticket_id: ticket.id,
-        p_order_number: newOrderNumber.trim(),
-        p_order_date: newOrderDate,
-        p_notes: newOrderNotes || undefined,
-        p_performed_by: profile.id,
-        p_idempotency_key: createOrderIdem.getKeyFor(createOrderScope),
-      });
-      if (error) {
-        // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
-        // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
-        const bindingRejection = getIdempotencyBindingRejection(error);
-        if (bindingRejection === 'intent' || bindingRejection === 'actor') createOrderIdem.resetKeyFor(createOrderScope);
-        // An intent refusal carries the order an earlier attempt under this key already created: open it
-        // instead of letting the next click, with a fresh key, create a second order.
-        const committedOrderId = getCommittedOrderIdFromMismatch(error, 'create_order_from_blend_ticket');
-        if (committedOrderId) {
-          setShowCreateOrderModal(false);
-          toast('warning', 'An earlier attempt with this retry already created this order. Nothing new was created — opening that order now.');
-          navigate(`/orders/${committedOrderId}`);
-          return;
-        }
-        const missingPrice = blendTicketMissingPriceMessage(error);
-        if (missingPrice) throw new Error(missingPrice);
-        throw error;
-      }
-      const result = assertRpcResult<{ success: boolean; error?: string; order_number?: string; order_id?: string; items_created?: number }>(data, 'create_order_from_blend_ticket');
-      createOrderIdem.resetKeyFor(createOrderScope);
-      if (!result.success) throw new Error(result.error);
-      toast('success', `Order ${result.order_number} created with ${result.items_created} items`);
-      setShowCreateOrderModal(false);
-      navigate(`/orders/${result.order_id}`);
-    } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'create_order_from_blend_ticket' } });
-      toast('error', sanitizeError(err));
-    } finally {
-      setLinking(false);
-    }
-  }
-
   const [creatingAppRecord, setCreatingAppRecord] = useState(false);
   const [appRecordConfirmOpen, setAppRecordConfirmOpen] = useState(false);
 
@@ -1314,6 +1068,13 @@ export function BlendTicketDetail() {
           </Badge>
           <Badge variant={ticket.review_status === 'approved' ? 'success' : 'default'}>
             {ticket.review_status}
+          </Badge>
+          <Badge variant={
+            ticket.payment_status === 'billed' ? 'success' :
+            ticket.payment_status === 'prepaid' ? 'info' :
+            ticket.payment_status === 'no_charge' ? 'warning' : 'default'
+          }>
+            {ticket.payment_status.replace('_', ' ')}
           </Badge>
         </div>
       </div>
@@ -1923,142 +1684,6 @@ export function BlendTicketDetail() {
       </Card>
       </fieldset>
 
-      {/* Phase 3: Order Linkage Section */}
-      <Card className="p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Link2 className="h-5 w-5" />
-            Order Linkage
-          </h2>
-          <div className="flex items-center gap-2">
-            <Badge variant={ticket.order_link_status === 'linked' ? 'success' : 'default'}>
-              {ticket.order_link_status === 'linked' ? 'Linked' : 'Unlinked'}
-            </Badge>
-            <Badge variant={
-              ticket.payment_status === 'billed' ? 'success' :
-              ticket.payment_status === 'prepaid' ? 'info' :
-              ticket.payment_status === 'no_charge' ? 'warning' : 'default'
-            }>
-              {ticket.payment_status.replace('_', ' ')}
-            </Badge>
-          </div>
-        </div>
-
-        {suggestedOrder && !orderActionBlockReason && (
-          <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-lg px-4 py-3 text-sm mb-4">
-            <div className="flex items-center gap-2">
-              <ShoppingCart className="h-4 w-4 shrink-0" />
-              <span>May match <strong>Order {suggestedOrder.order_number}</strong> ({suggestedOrder.matchCount} matching product{suggestedOrder.matchCount !== 1 ? 's' : ''})</span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={async () => {
-                  if (!ticket || !profile || linking) return;
-                  setLinking(true);
-                  try {
-                    const linkScope = fingerprintIntentPayload([ticket.id, suggestedOrder.id]);
-                    if (lastLinkScopeRef.current && lastLinkScopeRef.current !== linkScope) linkIdem.resetKeyFor(lastLinkScopeRef.current);
-                    lastLinkScopeRef.current = linkScope;
-                    const { data, error } = await supabase.rpc('link_blend_ticket_to_order', {
-                      p_blend_ticket_id: ticket.id,
-                      p_order_id: suggestedOrder.id,
-                      p_performed_by: profile.id,
-                      p_idempotency_key: linkIdem.getKeyFor(linkScope),
-                    });
-                    if (error) throw error;
-                    const result = assertRpcResult<{ success: boolean; error?: string; order_number?: string; items_linked?: number }>(data, 'link_blend_ticket_to_order');
-                    linkIdem.resetKeyFor(linkScope);
-                    if (!result.success) throw new Error(result.error);
-                    toast('success', `Linked to order ${result.order_number} (${result.items_linked} items matched)`);
-                    await loadTicketData();
-                  } catch (err: unknown) {
-                    Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'quick_link_blend_ticket' } });
-                    toast('error', sanitizeError(err));
-                  } finally {
-                    setLinking(false);
-                  }
-                }}
-                loading={linking}
-              >
-                <Link2 className="h-3.5 w-3.5" />
-                Link
-              </Button>
-              <button onClick={() => setSuggestedOrder(null)} className="text-blue-400 hover:text-blue-600 text-xs">
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
-
-        {ticket.order_link_status === 'linked' && linkedOrders.length > 0 ? (
-          <div className="space-y-3">
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <p className="text-sm text-green-800 font-medium mb-2">Linked Order</p>
-              {(() => {
-                const order = linkedOrders[0]?.order;
-                return order ? (
-                  <div className="flex items-center justify-between">
-                    <button
-                      onClick={() => navigate(`/orders/${order.id}`)}
-                      className="text-crx-green hover:underline font-medium"
-                    >
-                      {order.order_number}
-                    </button>
-                    <span className="text-sm text-gray-600">
-                      {linkedOrders.length} item(s) mapped
-                    </span>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500">Order details unavailable</p>
-                );
-              })()}
-            </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setUnlinkConfirmOpen(true)}
-              className="text-red-600"
-              disabled={saveHydrationRequired || hasActiveInvoice || hasApplicationRecord || ticket.payment_status !== 'unbilled'}
-              title={hasActiveInvoice
-                ? 'Active invoices must be voided or cancelled before unlinking'
-                : hasApplicationRecord
-                  ? 'Application records must be reversed or removed before unlinking'
-                : ticket.payment_status !== 'unbilled'
-                  ? 'Billed tickets must remain linked to their order'
-                  : undefined}
-            >
-              <Unlink className="h-4 w-4" />
-              Unlink from Order
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-gray-500">
-              This blend ticket is not linked to any order. Link it to an existing order or create a new one.
-            </p>
-            {orderActionBlockReason && (
-              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                {orderActionBlockReason}
-              </p>
-            )}
-            <div className="flex gap-2 items-center">
-              <Button variant="secondary" size="sm" onClick={openLinkModal} disabled={Boolean(orderActionBlockReason)}>
-                <Link2 className="h-4 w-4" />
-                Link to Existing Order
-              </Button>
-              <HelpTip text="Link to Order attaches this ticket to an EXISTING sales order — the 'chemical sale' path where we deliver the product and the order draws it from inventory. Use this when the customer is buying the chemical, not us applying it." />
-              <Button size="sm" onClick={openCreateOrderModal} disabled={Boolean(orderActionBlockReason)}>
-                <ShoppingCart className="h-4 w-4" />
-                Create Order from Ticket
-              </Button>
-              <HelpTip text="Create Order builds a NEW sales order from this ticket's products at tier pricing — also the 'chemical sale' path (we deliver, inventory is drawn). Use this when there is no existing order to link to." />
-            </div>
-          </div>
-        )}
-      </Card>
-
       {/* Create Invoice directly from Blend Ticket (Pillar 1) */}
       {/* codex-driven hunt cycle 4: gate on payment_status === 'unbilled' to match the
           RPC's actual guard (create_invoice_from_blend_ticket rejects anything not
@@ -2111,99 +1736,6 @@ export function BlendTicketDetail() {
         onClose={() => setQuotePriceChoices(null)}
         onConfirm={handleSaveQuotePrices}
       />
-
-      {/* Link to Order Modal */}
-      <Modal open={showLinkModal} onClose={() => setShowLinkModal(false)} title="Link to Existing Order" size="large">
-        <div className="space-y-4">
-          <p className="text-sm text-gray-600">
-            Select an order for customer <strong>{ticket.customer?.farm_name}</strong> to link this blend ticket to.
-            Products will be auto-matched by product ID.
-          </p>
-          {availableOrders.length === 0 ? (
-            <p className="text-sm text-gray-500 py-4 text-center">
-              No open orders found for this customer. Create an order first or use "Create Order from Ticket".
-            </p>
-          ) : (
-            <div className="max-h-80 overflow-y-auto space-y-2">
-              {availableOrders.map((order) => (
-                <label
-                  key={order.id}
-                  className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors ${
-                    selectedOrderId === order.id ? 'border-crx-green bg-crx-green-light' : 'border-gray-200'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="order"
-                    value={order.id}
-                    checked={selectedOrderId === order.id}
-                    onChange={() => setSelectedOrderId(order.id)}
-                    className="text-crx-green focus:ring-crx-green"
-                  />
-                  <div className="flex-1">
-                    <p className="font-medium text-nav-dark">{order.order_number}</p>
-                    <p className="text-xs text-gray-500">
-                      {new Date(order.order_date + 'T00:00:00').toLocaleDateString()} · {order.status} · ${order.total_price.toFixed(2)}
-                      {order.items && ` · ${order.items.length} items`}
-                    </p>
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setShowLinkModal(false)}>Cancel</Button>
-            <Button onClick={handleLinkToOrder} disabled={!selectedOrderId || linking || Boolean(orderActionBlockReason)} loading={linking}>
-              <Link2 className="h-4 w-4" />
-              Link to Order
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Create Order from Blend Ticket Modal */}
-      <Modal open={showCreateOrderModal} onClose={() => setShowCreateOrderModal(false)} title="Create Order from Blend Ticket">
-        <div className="space-y-4">
-          <p className="text-sm text-gray-600">
-            A new order will be created for <strong>{ticket.customer?.farm_name}</strong> using
-            the {products.length} product(s) from this blend ticket. Tier pricing will be applied automatically.
-          </p>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Order Number *</label>
-            <Input
-              type="text"
-              value={newOrderNumber}
-              onChange={(e) => setNewOrderNumber(e.target.value)}
-              placeholder="e.g., ORD-2026-001"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Order Date</label>
-            <Input
-              type="date"
-              value={newOrderDate}
-              onChange={(e) => setNewOrderDate(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
-            <textarea
-              value={newOrderNotes}
-              onChange={(e) => setNewOrderNotes(e.target.value)}
-              rows={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-              placeholder="Order notes..."
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setShowCreateOrderModal(false)}>Cancel</Button>
-            <Button onClick={handleCreateOrder} disabled={!newOrderNumber.trim() || linking || Boolean(orderActionBlockReason)} loading={linking}>
-              <ShoppingCart className="h-4 w-4" />
-              Create Order
-            </Button>
-          </div>
-        </div>
-      </Modal>
 
       {/* Two tiers, deliberately. A "couldn't check this" note is the COMMON case
           on a real ticket, and rendering it in the same alarmed amber as a genuine
@@ -2284,7 +1816,7 @@ export function BlendTicketDetail() {
               <ClipboardCheck className="h-4 w-4" />
               Create App Record
             </Button>
-            <HelpTip text="Create Application Record files the legal as-applied record (product, field, date, rate) for compliance. It does NOT bill anyone — it's the regulatory paperwork, separate from Create Invoice (billing) and from linking to an order or job." />
+            <HelpTip text="Create Application Record files the legal as-applied record (product, field, date, rate) for compliance. It does NOT bill anyone — it's the regulatory paperwork, separate from Create Invoice (billing) and from linking to a job." />
           </span>
         )}
         <Button
@@ -2342,16 +1874,6 @@ export function BlendTicketDetail() {
         message="Remove this product from the ticket?"
         confirmLabel="Remove"
         variant="danger"
-      />
-
-      <ConfirmModal
-        open={unlinkConfirmOpen}
-        onClose={() => setUnlinkConfirmOpen(false)}
-        onConfirm={handleUnlink}
-        title="Unlink Blend Ticket"
-        message="Unlink this blend ticket from its order? The order itself will not be deleted."
-        confirmLabel="Unlink"
-        variant="warning"
       />
 
       <ConfirmModal

@@ -48,6 +48,11 @@ const PHONE_QUERY = '(max-width: 767px)';
 const subscribePhone = (onChange: () => void) => {
   if (typeof window.matchMedia !== 'function') return () => {};
   const query = window.matchMedia(PHONE_QUERY);
+  // Safari before 14 has only the older addListener/removeListener.
+  if (typeof query.addEventListener !== 'function') {
+    query.addListener(onChange);
+    return () => query.removeListener(onChange);
+  }
   query.addEventListener('change', onChange);
   return () => query.removeEventListener('change', onChange);
 };
@@ -94,9 +99,7 @@ export default function DataTable<T extends Record<string, any>>({
     [data, searchKeys, search, sortKey, sortDir]
   );
 
-  const toggleSort = (key: string) => {
-    const nextDir: SortDir = sortKey === key && sortDir === 'asc' ? 'desc' : 'asc';
-    const next = sortKey === key ? { key, dir: nextDir } : { key, dir: 'asc' as SortDir };
+  const setSort = (next: { key: string | null; dir: SortDir }) => {
     if (controlledSort) {
       onSortChange(next);
     } else {
@@ -105,9 +108,18 @@ export default function DataTable<T extends Record<string, any>>({
     }
   };
 
+  const toggleSort = (key: string) => {
+    const nextDir: SortDir = sortKey === key && sortDir === 'asc' ? 'desc' : 'asc';
+    setSort(sortKey === key ? { key, dir: nextDir } : { key, dir: 'asc' });
+  };
+
+  const phoneList = Boolean(mobileRow) && isPhone;
+  // The phone list has no column headers, so its sort lives in a select.
+  const sortableColumns = phoneList ? columns.filter((col) => col.sortable) : [];
+
   return (
     <div>
-      {(searchable || filters) && (
+      {(searchable || filters || sortableColumns.length > 0) && (
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
           {searchable && (
             <div className="relative flex-1">
@@ -125,6 +137,26 @@ export default function DataTable<T extends Record<string, any>>({
             </div>
           )}
           {filters && <div className="flex gap-2 flex-wrap">{filters}</div>}
+          {sortableColumns.length > 0 && (
+            <select
+              value={sortKey ? `${sortKey}:${sortDir}` : ''}
+              onChange={(e) => {
+                const [key, dir] = e.target.value.split(':');
+                setSort(key ? { key, dir: dir as SortDir } : { key: null, dir: 'asc' });
+              }}
+              aria-label="Sort by"
+              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+            >
+              <option value="">Sort: as listed</option>
+              {sortableColumns.flatMap((col) => {
+                const label = typeof col.header === 'string' ? col.header : col.key;
+                return [
+                  <option key={`${col.key}:asc`} value={`${col.key}:asc`}>{label} ↑</option>,
+                  <option key={`${col.key}:desc`} value={`${col.key}:desc`}>{label} ↓</option>,
+                ];
+              })}
+            </select>
+          )}
         </div>
       )}
 
@@ -142,7 +174,7 @@ export default function DataTable<T extends Record<string, any>>({
           description={emptyDescription}
           action={emptyAction}
         />
-      ) : mobileRow && isPhone ? (
+      ) : mobileRow && phoneList ? (
         <ul className="overflow-hidden rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
           {filtered.map((row, idx) => (
             <li key={idx}>{mobileRow(row)}</li>

@@ -7067,6 +7067,17 @@ quote-version trust-marker route intact, so these were stale fingerprints, not d
 that migration applies. The candidate digest was captured from a disposable PostgreSQL replica that first reproduced
 every live digest. Still open until: review, merge, and a fresh live sweep after the candidate migration is applied.
 
+### Closed sub-item 2026-11-05 — KI-31 stale total acres after a boundary or override save
+
+Original text: "After saving a boundary the page does not refresh total acres, so a later attribute-only save can revert legacy
+acres" (`src/pages/FieldSetup.tsx`).
+
+Fixed in `src/pages/FieldSetup.tsx` (branch `claude/fieldsetup-acres-refresh-26a603`; frontend only, no migration): after a
+successful `set_field_boundary` or `set_field_override_acres` the page copies the returned `billable_acres` into its
+`total_acres` (and `measured_acres` after a boundary), and makes that the page's clean baseline, so a later attribute-only
+save sends the stored acres. Proven on the local test app: before the fix, setting 55 acres to bill and then saving only
+the crop left `total_acres` 12 beside `override_acres` 55; after it, `total_acres` stayed 55. The rest of KI-31 stays open.
+
 ### Closed 2026-11-05 — KI-27
 
 Closed by branch `claude/uncertain-intent-admin-clear-5591c7`. `useUncertainMutationIntent` gained `clearExpiredIntent()`, which refuses while any stored copy (IndexedDB coordinator, localStorage mirror, or this tab's acknowledgement) could still be retried or is damaged, and otherwise removes the expired request; a resolved tombstone is kept and damaged state stays locked for manual reconciliation. The shared `ClearExpiredIntentButton` shows it to admins only, only after expiry, behind a `ConfirmModal`, and logs each clear to Sentry. It is wired into every dialog that uses the hook (Quick Receive, Receiving Hub, Inventory receive/adjust/hold, Batch Adjust, Purchase Order receive, New Vendor Bill, Vendor Bill payment). Limit: the saved request is keyed to the signed-in user, so a non-admin who is locked out still needs browser storage cleared for that site.

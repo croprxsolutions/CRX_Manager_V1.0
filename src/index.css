@@ -329,6 +329,52 @@
   .phone-section-body > :only-child > :first-child > h3:not(:only-child) {
     display: none;
   }
+  /* Style D phone list for a plain table (docs/workflows/UI_PATTERNS.md): each row becomes one
+     entry of a divided list. The first cell is its bold title; every other cell is a label-left
+     line named by its `data-label`. */
+  table.phone-stack,
+  table.phone-stack :is(tbody, tfoot) {
+    display: block;
+  }
+  /* Hidden from sight only, so screen readers keep the column headings. */
+  table.phone-stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  table.phone-stack tr {
+    display: block;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--color-gray-100);
+  }
+  table.phone-stack td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.125rem 0;
+    text-align: right;
+  }
+  table.phone-stack td[data-label]::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-family: var(--font-sans);
+    color: var(--color-gray-600);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    text-align: left;
+  }
+  table.phone-stack td:first-child {
+    padding-bottom: 0.25rem;
+    font-family: var(--font-heading);
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--color-nav-dark);
+    text-align: left;
+  }
 }
 
 /* Utility: hide scrollbar while keeping scroll functionality */

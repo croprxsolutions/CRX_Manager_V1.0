@@ -138,6 +138,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Nothing was changed. This delivery, its invoices or the order\'s drafts changed while you were looking. Check the updated plan and try again'],
   [/^DELIVERY_ORDER_BUSY_RETRY\b/,
    'Nothing was changed. This order is being updated elsewhere. Wait a moment and retry'],
+  // void_delivery (20261107120000, KI-102): voiding the order already put this delivery's stock back.
+  [/^ORDER_VOIDED_DELIVERY_LOCKED\b/,
+   'Nothing was changed. This delivery\'s order is voided, which already put its stock back, so the delivery cannot be voided too. Fix its invoice from the invoice page if needed'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
   // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
   [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,
@@ -274,6 +277,13 @@ export function sanitizeError(error: unknown): string {
   const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG):\s*(.+)$/s)?.[1];
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;
+  }
+  // Setup workbook (20261107080000): a table check refused one product; name it, then explain the check.
+  const refusedRow = message.match(/^PRODUCT_SETUP_ROW_REFUSED:\s*(.+?):\s+(.+)$/s);
+  if (refusedRow) return `Nothing was saved. ${refusedRow[1]}: ${sanitizeError(refusedRow[2])}`;
+  const setupRefusal = message.match(/^(?:PRODUCT_SETUP_STALE|PRODUCT_SETUP_INVALID|PRODUCT_SETUP_DUPLICATE_PRODUCT|PRODUCT_SETUP_ROW_SHAPE_INVALID):\s*(.+)$/s)?.[1];
+  if (setupRefusal && !CONSTRAINT_PATTERNS.some(([pattern]) => pattern.test(message))) {
+    return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }
   if (/^PRODUCT_ACTIVE_REVIEW_STALE(?::|$)/.test(message)) {
     return 'Product details changed since the review. Review the selection again.';

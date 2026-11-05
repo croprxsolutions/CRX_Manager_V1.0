@@ -1,10 +1,10 @@
--- Smoke chain: retire_uncertain_request (REQUIRES 20261107150000).
+-- Smoke chain: retire_uncertain_request (REQUIRES 20261107160000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so the receipts it seeds and the
 -- retired-request rows the function writes are all rolled back. It needs one active
 -- admin profile: every receipt it reads it seeds itself. Proves, as a real signed-in
 -- session (role authenticated with that profile's claims) and with those claims cleared:
 --   * the installed bodies (the function and the receipt insert guard) are
---     20261107150000's, only authenticated can execute the function, and no client role
+--     20261107160000's and 20261107150000's, only authenticated can execute the function, and no client role
 --     can reach the signing-key or retired-request tables;
 --   * a request key recorded under the operation it names is safe ('recorded'), even
 --     when the receipt has expired; a receipt under another operation is not;
@@ -20,8 +20,9 @@
 --     operation that starts with a retired key, still save, and a retry of a
 --     retired request that still has a live receipt keeps its replay handling
 --     (allocate_payment's claim-row replay included);
---   * a non-admin (when one exists), another user's key, a row key, a wrong idempotency
---     key and a signed-out session are refused.
+--   * an active non-admin staff member (when one exists) is answered for their own key
+--     and refused another user's key; a service profile (when one exists), another
+--     user's key, a row key, a wrong idempotency key and a signed-out session are refused.
 -- The 'in_progress' answer and the wait of a row save behind a retire need two sessions,
 -- so they are proven on the local test database instead
 -- (docs/changelog.d/2026-11-05-uncertain-request-clear-check.md).
@@ -30,6 +31,7 @@ DECLARE
   v_fn regprocedure := 'public.retire_uncertain_request(text,text,text)'::regprocedure;
   v_actor uuid;
   v_other uuid;
+  v_service uuid;
   v_recorded text;
   v_expired text;
   v_foreign text;
@@ -48,8 +50,8 @@ DECLARE
   v_refused boolean;
   v_role text;
 BEGIN
-  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_fn), chr(13), '')) <> '482ac2199575547aac2899e6621d9168' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: retire_uncertain_request is not the body of 20261107150000';
+  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = v_fn), chr(13), '')) <> 'addf6df43b0e9d23c91e88dba315a1d0' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: retire_uncertain_request is not the body of 20261107160000';
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._guard_idempotency_key_insert()'::regprocedure), chr(13), ''))
      <> 'a9e47f3ea8b2b5b76b15ed1d745a8140' THEN
@@ -68,7 +70,8 @@ BEGIN
   SELECT signing_key INTO STRICT v_signing FROM public.uncertain_request_clear_check_key;
   SELECT id INTO v_actor FROM public.profiles WHERE is_active AND role = 'admin' ORDER BY created_at LIMIT 1;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'SMOKE_FAIL: need one active admin profile'; END IF;
-  SELECT id INTO v_other FROM public.profiles WHERE is_active AND role <> 'admin' ORDER BY created_at LIMIT 1;
+  SELECT id INTO v_other FROM public.profiles WHERE is_active AND role IN ('sales_rep', 'driver', 'applicator') ORDER BY created_at LIMIT 1;
+  SELECT id INTO v_service FROM public.profiles WHERE is_active AND role = 'entity_recipient' ORDER BY created_at LIMIT 1;
 
   -- Seeded receipts (rolled back).
   v_recorded := 'save_vendor:' || v_actor || ':' || gen_random_uuid();
@@ -103,21 +106,45 @@ BEGIN
   v_tok_future := split_part(v_bad, ',', 3);
   v_tok_other := split_part(v_bad, ',', 4);
 
-  -- A signed-in non-admin is refused before anything is read.
+  -- A signed-in non-admin staff member is answered for their own key (20261107160000);
+  -- an unrecorded key only starts the wait, so nothing is written. Another user's key
+  -- is still refused.
   IF v_other IS NOT NULL THEN
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_other, 'role', 'authenticated')::text, true);
     PERFORM set_config('request.jwt.claim.sub', v_other::text, true);
     EXECUTE 'SET LOCAL ROLE authenticated';
+    v_r := public.retire_uncertain_request('save_vendor:' || v_other || ':' || gen_random_uuid());
+    IF (v_r->>'safe')::boolean IS NOT FALSE OR v_r->>'reason' <> 'first_check' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: a staff member was not answered for their own key: %', v_r;
+    END IF;
     v_refused := false;
     BEGIN
-      PERFORM public.retire_uncertain_request('save_vendor:' || v_other || ':' || gen_random_uuid());
+      PERFORM public.retire_uncertain_request('save_vendor:' || v_actor || ':' || gen_random_uuid());
     EXCEPTION WHEN OTHERS THEN
-      IF SQLERRM NOT LIKE 'NOT_AUTHORIZED%' THEN
-        RAISE EXCEPTION 'SMOKE_FAIL: a non-admin failed oddly: % %', SQLSTATE, SQLERRM;
+      IF SQLERRM NOT LIKE 'REQUEST_KEY_NOT_OWNED%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: a staff member using another key failed oddly: % %', SQLSTATE, SQLERRM;
       END IF;
       v_refused := true;
     END;
-    IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a non-admin was answered'; END IF;
+    IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a staff member was answered for another user''s key'; END IF;
+    EXECUTE 'RESET ROLE';
+  END IF;
+
+  -- A service profile is refused before anything is read.
+  IF v_service IS NOT NULL THEN
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_service, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_service::text, true);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_refused := false;
+    BEGIN
+      PERFORM public.retire_uncertain_request('save_vendor:' || v_service || ':' || gen_random_uuid());
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'NOT_AUTHORIZED%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: a service profile failed oddly: % %', SQLSTATE, SQLERRM;
+      END IF;
+      v_refused := true;
+    END;
+    IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a service profile was answered'; END IF;
     EXECUTE 'RESET ROLE';
   END IF;
 

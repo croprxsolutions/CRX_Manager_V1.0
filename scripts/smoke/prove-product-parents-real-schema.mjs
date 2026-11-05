@@ -419,6 +419,9 @@ function main() {
   const ed = call(ADMIN, upd({ category: 'Fungicide', use_timings: [], nickname: 'Alfa' }, 'is a fungicide', 'k-u4'));
   assert.equal(ed.sizes.length, 3);
   for (const pid of [A1, A2, A3]) assert.equal(prod(pid, "category, use_timings, coalesce(use_timing, '-')"), 'Fungicide|{}|-');
+  const vNoop = version(PA);
+  refused(ADMIN, upd({ nickname: ' Alfa ', category: 'Fungicide' }, 'same again', 'k-u5'), /PRODUCT_PARENT_NO_CHANGE/);
+  assert.equal(version(PA), vNoop, 'a no-change edit keeps the version');
   assert.equal(scalar(`SELECT count(*) FROM public.product_change_history WHERE change_type = 'parent_copy' AND field_name = 'category' AND parent_event_id = ${ed.event_id};`), '3');
   console.log('[prover] a parent category change asks to clear timings, then copies to every size with one parent_copy entry each');
 
@@ -440,8 +443,10 @@ function main() {
   const fpBeforeMove = setupFp(A1);
   const m = mp(A1, B.parent_id);
   assert.equal(m.refusal, null);
-  const move = (pid, to, p, key, evidence = 'label photo') => `SELECT public.move_product_size('${pid}', '${to}', ${p.from_parent_version}, ${p.to_parent_version}, ${lit(p.size_fingerprint)}, 'wrong group', ${lit(evidence)}, '${key}');`;
+  const move = (pid, to, p, key, evidence = 'label photo') => `SELECT public.move_product_size('${pid}', '${to}', ${p.from_parent_version}, ${p.to_parent_version}, ${lit(p.size_fingerprint)}, 'wrong group', ${lit(evidence)}, ${J(p.prices)}, '${key}');`;
   refused(ADMIN, move(A1, B.parent_id, m, 'k-m0', null), /EVIDENCE_REQUIRED/);
+  // The move saves only the per-acre prices the preview showed.
+  refused(ADMIN, move(A1, B.parent_id, { ...m, prices: { ...m.prices, tier1_price_per_acre: '999.99' } }, 'k-m0p'), /PRODUCT_RATE_PREVIEW_CHANGED/);
   refused(ADMIN, move(A1, B.parent_id, { ...m, size_fingerprint: 'x' }, 'k-m1'), /PRODUCT_PARENT_SIZE_STALE/);
   const moved = call(ADMIN, move(A1, B.parent_id, m, 'k-m2'));
   assert.equal(moved.from_parent_inactive, false);
@@ -467,6 +472,20 @@ function main() {
   assert.equal(mp(A1, D.parent_id).prices, null);
   call(ADMIN, move(F.product_id, E.parent_id, mf, 'k-m4'));
   assert.equal(prod(F.product_id, 'epa_registration'), '200-1');
+  // A size typed with a spaced EPA number stores the parent's normalized one.
+  const E2 = call(ADMIN, addSize(E.parent_id, version(E.parent_id), { product_name: '[PROVER] Epsilon 2', sku: 'EP-2', inventory_unit: 'Gal',
+    epa_registration: '200 - 1' }, 'k-e-add')).product_id;
+  assert.equal(prod(E2, 'epa_registration'), '200-1');
+  // A seed parent's rates preview and save in each size's stock unit.
+  const S = call(ADMIN, create({ name: '[PROVER] Sigma Seed', product_form: 'seed', category: 'Seed' },
+    { product_name: '[PROVER] Sigma 50 Lb', sku: 'SG-50', inventory_unit: 'Lb', unit_size: '50' }, 'k-create-s'));
+  asOwner(`UPDATE public.products SET tier1_price = 100.00, tier2_price = 90.00, tier3_price = 80.00 WHERE id = '${S.product_id}';`);
+  const ps = previewRates(S.parent_id, 30, null, null);
+  assert.notEqual(ps.sizes[0].prices.tier1_price_per_acre, null, 'the seed preview prices in the stock unit');
+  call(ADMIN, setRates([{ parent_id: S.parent_id, expected_parent_version: ps.parent_version, rate_per_acre: '30', rate_unit: null,
+    suggested_rate: null, sizes: ps.sizes }], 'k-r-seed'));
+  assert.equal(prod(S.product_id, 'rate_per_acre, rate_unit'), '30|Lb');
+  assert.equal(prices(S.product_id), previewed(ps.sizes[0]));
   // Every size carries its parent's EPA number, or none does.
   const G = call(ADMIN, create({ name: '[PROVER] Gnoepa', product_form: 'liquid', category: 'Fungicide' },
     { product_name: '[PROVER] Gnoepa 1', sku: 'GN-1', inventory_unit: 'Gal' }, 'k-create-g'));

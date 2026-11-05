@@ -706,7 +706,8 @@ BEGIN
       COALESCE('EPA number ' || p_parent.generic_epa_registration, 'no EPA number; set it on the parent first');
   END IF;
   v_fields := (p_size - 'size_role') || jsonb_build_object('product_form', p_parent.product_form, 'category', p_parent.category);
-  IF public._normalize_epa_registration(p_size->>'epa_registration') IS NULL AND p_parent.generic_epa_registration IS NOT NULL THEN
+  -- The size stores the parent's normalized number, never a spaced or lower-case spelling of it.
+  IF p_parent.generic_epa_registration IS NOT NULL THEN
     v_fields := v_fields || jsonb_build_object('epa_registration', p_parent.generic_epa_registration);
   END IF;
   -- A fresh key: a retry is answered by the caller's own receipt before it gets here, so no setup
@@ -906,6 +907,12 @@ BEGIN
         COALESCE(v_category, 'no category');
     END IF;
   END IF;
+  -- An edit that changes nothing would only bump the version and stale every open preview.
+  IF (NOT (p_changes ? 'name') OR NULLIF(btrim(p_changes->>'name'), '') IS NOT DISTINCT FROM v_before.name)
+     AND (NOT (p_changes ? 'nickname') OR NULLIF(btrim(p_changes->>'nickname'), '') IS NOT DISTINCT FROM v_before.nickname)
+     AND v_category IS NOT DISTINCT FROM v_before.category AND v_timings IS NOT DISTINCT FROM v_before.use_timings THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_NO_CHANGE: nothing to save; "%" already has these values', v_before.name;
+  END IF;
 
   UPDATE public.product_parents SET
     name = CASE WHEN p_changes ? 'name' THEN NULLIF(btrim(p_changes->>'name'), '') ELSE name END,
@@ -965,8 +972,10 @@ BEGIN
       'inventory_unit', v_size.inventory_unit, 'product_form', v_size.product_form,
       'rate_per_acre', v_size.rate_per_acre::text, 'rate_unit', v_size.rate_unit,
       'suggested_rate', v_size.suggested_rate)
-      || jsonb_build_object('prices', public.preview_product_rate_correction(v_size.id, p_rate_per_acre, p_rate_unit)->'after',
-                            'before_prices', public.preview_product_rate_correction(v_size.id, p_rate_per_acre, p_rate_unit)->'before'));
+      || (SELECT jsonb_build_object('prices', c->'after', 'before_prices', c->'before')
+            -- Seed and each sizes save their stock unit as rate unit, so preview with it too.
+            FROM public.preview_product_rate_correction(v_size.id, p_rate_per_acre,
+                   CASE WHEN v_size.product_form IN ('seed', 'each') THEN v_size.inventory_unit ELSE p_rate_unit END) c));
   END LOOP;
   RETURN jsonb_build_object('parent_id', p_parent_id, 'parent_version', v_parent.parent_version,
     'rates_locked', COALESCE((SELECT is_locked FROM public.product_rate_lock WHERE id), true),
@@ -1234,7 +1243,9 @@ BEGIN
   v_refusal := public._product_size_move_refusal(p_product_id, p_to_parent_id);
   -- The per-acre prices the destination's rates would save (only for an allowed move).
   IF v_refusal IS NULL THEN
-    v_prices := public.preview_product_rate_correction(p_product_id, v_to.rate_per_acre, v_to.rate_unit);
+    v_prices := public.preview_product_rate_correction(p_product_id, v_to.rate_per_acre,
+      (SELECT CASE WHEN p.product_form IN ('seed', 'each') THEN p.inventory_unit ELSE v_to.rate_unit END
+         FROM public.products p WHERE p.id = p_product_id));
   END IF;
   RETURN jsonb_build_object(
     'refusal', v_refusal,
@@ -1257,7 +1268,7 @@ GRANT EXECUTE ON FUNCTION public.preview_move_product_size(uuid, uuid) TO authen
 
 CREATE FUNCTION public.move_product_size(p_product_id uuid, p_to_parent_id uuid, p_expected_from_version bigint,
   p_expected_to_version bigint, p_expected_size_fingerprint text, p_reason text, p_evidence text,
-  p_idempotency_key text DEFAULT NULL)
+  p_expected_prices jsonb, p_idempotency_key text DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
@@ -1265,7 +1276,9 @@ DECLARE
   v_actor uuid := public._product_parent_require_admin();
   v_fp text := md5(jsonb_build_object('actor_id', auth.uid(), 'product_id', p_product_id, 'to_parent_id', p_to_parent_id,
     'from_version', p_expected_from_version, 'to_version', p_expected_to_version,
-    'size_fingerprint', p_expected_size_fingerprint, 'reason', btrim(p_reason), 'evidence', btrim(p_evidence))::text);
+    'size_fingerprint', p_expected_size_fingerprint, 'reason', btrim(p_reason), 'evidence', btrim(p_evidence),
+    'expected_prices', p_expected_prices)::text);
+  v_tier text;
   v_existing jsonb;
   v_reason text;
   v_evidence text;
@@ -1280,6 +1293,9 @@ BEGIN
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
   v_reason := public._product_parent_reason(p_reason, 'reason', true);
   v_evidence := public._product_parent_reason(p_evidence, 'evidence', true);
+  IF p_expected_prices IS NULL OR jsonb_typeof(p_expected_prices) <> 'object' THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_INVALID: send the preview''s prices';
+  END IF;
   SELECT parent_id INTO v_from FROM public.product_parent_members WHERE product_id = p_product_id;
   IF v_from IS NULL THEN RAISE EXCEPTION 'PRODUCT_PARENT_NOT_GROUPED: this size has no parent'; END IF;
   -- Both parents in ID order, then the size.
@@ -1307,6 +1323,13 @@ BEGIN
   v_copy := public._copy_parent_to_size(p_to_parent_id, p_product_id, v_event, true, false,
     (SELECT public._normalize_epa_registration(p.epa_registration) IS NULL AND pp.generic_epa_registration IS NOT NULL
        FROM public.products p, public.product_parents pp WHERE p.id = p_product_id AND pp.id = p_to_parent_id));
+  -- A unit conversion changed since the preview moves the prices but no version or fingerprint.
+  FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
+    IF NOT (p_expected_prices ? v_tier) OR (v_copy->'after'->v_tier) IS DISTINCT FROM (p_expected_prices->v_tier) THEN
+      RAISE EXCEPTION 'PRODUCT_RATE_PREVIEW_CHANGED: the per-acre prices changed since the preview; preview again: %',
+        v_copy->'after'->>'product_name' USING ERRCODE = 'check_violation';
+    END IF;
+  END LOOP;
   PERFORM public._product_parent_event(v_event, p_to_parent_id, 'size_moved', v_reason, v_evidence,
     jsonb_build_object('from_parent_id', v_from), jsonb_build_object('to_parent_id', p_to_parent_id), jsonb_build_array(v_copy));
   -- The old parent's log records the move too.
@@ -1322,9 +1345,9 @@ BEGIN
   RETURN v_receipt;
 END;
 $function$;
-ALTER FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, text) FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, text) TO authenticated;
+ALTER FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, jsonb, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, jsonb, text) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, jsonb, text) TO authenticated;
 
 -- ---------------------------------------------------------------------------------------------
 -- Identity correction (DECISION_LOG 2026-10-30)

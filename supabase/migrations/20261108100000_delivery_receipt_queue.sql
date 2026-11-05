@@ -27,7 +27,7 @@
 --      (attempt_to), and claims nothing new. A finish key is bound to its receipt, token, outcome and proof.
 --      A sent finish whose delivery, customer or customer email changed while sending is kept as needs_check
 --      (with the send recorded) so the office follows up. A row whose own earlier
---      attempt is logged sent (its finish was lost) is recorded sent, never sent again.
+--      attempt is logged sent (its finish was lost) is recorded sent (needs_check if the customer's email has changed since), never sent again.
 --      The worker logs its sends as key 'delivery-receipt-queue:<queue id>:attempt-<n>' with created_by NULL.
 --      send-email cannot write that (it scopes every key as '<email_type>:<resource>:<key>' and sets created_by),
 --      so no staff send can pass as the worker's; the email_log trigger also refuses any API user (an admin
@@ -502,10 +502,20 @@ BEGIN
      ORDER BY e.created_at DESC
      LIMIT 1;
     IF FOUND THEN
-      UPDATE public.delivery_receipt_queue
-         SET status = 'sent', claim_token = NULL, claimed_at = NULL, last_error = NULL, sent_at = now(),
-             sent_to = left(v_log_to, 320), resend_message_id = left(v_log_msg, 200)
-       WHERE id = v_row.id;
+      -- Sent to an address that is no longer the customer's: the office follows up (never sent again).
+      IF EXISTS (SELECT 1 FROM public.customers c WHERE c.id = v_row.customer_id
+                  AND lower(btrim(COALESCE(c.email, ''))) = lower(btrim(COALESCE(v_log_to, '')))) THEN
+        UPDATE public.delivery_receipt_queue
+           SET status = 'sent', claim_token = NULL, claimed_at = NULL, last_error = NULL, sent_at = now(),
+               sent_to = left(v_log_to, 320), resend_message_id = left(v_log_msg, 200)
+         WHERE id = v_row.id;
+      ELSE
+        UPDATE public.delivery_receipt_queue
+           SET status = 'needs_check', claim_token = NULL, claimed_at = NULL, sent_at = NULL,
+               sent_to = left(v_log_to, 320), resend_message_id = left(v_log_msg, 200),
+               last_error = 'The receipt was emailed, but the customer''s email changed while it was sending; check with the customer.'
+         WHERE id = v_row.id;
+      END IF;
       CONTINUE;
     END IF;
 

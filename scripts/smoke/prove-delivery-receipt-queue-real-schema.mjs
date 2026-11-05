@@ -530,6 +530,15 @@ function main() {
   due(15); assert.equal(claim().length, 0);
   assert.equal(row(15, "status || ' ' || resend_message_id || ' ' || sent_to"), 'sent msg-own ki25-farm@example.invalid');
   console.log("[prover] the receipt's own logged send is recorded sent, not sent twice");
+  // Its own logged send went to an address the customer no longer has: the office follows up, not sent again.
+  seedDelivery(19); assert.equal(complete(19, { emailReceipt: 'true' }).status, 0);
+  const q19 = row(19, 'id');
+  log(`delivery-receipt-queue:${q19}:attempt-1`, 'sent');
+  psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}';`);
+  due(19); assert.equal(claim().length, 0);
+  assert.match(row(19, "status || ' ' || sent_to || ' ' || last_error"), /^needs_check ki25-farm@example.invalid The receipt was emailed, but/);
+  psql(`UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
+  console.log('[prover] its own logged send to a changed address goes to the office list');
 
   // The delivery now belongs to another customer: the office checks who gets the receipt.
   seedDelivery(16); assert.equal(complete(16, { emailReceipt: 'true' }).status, 0);

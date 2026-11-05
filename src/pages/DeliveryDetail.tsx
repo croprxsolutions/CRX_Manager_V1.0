@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState, useCallback, useLayoutEffect, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useCallback, useLayoutEffect, type ComponentProps } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Phone, MapPin, CheckCircle2, Package, Download, WifiOff,
+  Phone, MapPin, CheckCircle2, Package, Download, WifiOff,
   Minus, Plus, Pencil, Ban, Camera, UserPlus, AlertTriangle, RefreshCw,
   PlayCircle, Lock, Zap, FileText, Mail, RotateCcw, MessageSquarePlus, Wrench, Undo2,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
+import PhoneHeader from '../components/ui/PhoneHeader';
+import SectionCard from '../components/ui/SectionCard';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import HelpTip from '../components/ui/HelpTip';
 import Button from '../components/ui/Button';
@@ -1557,9 +1559,10 @@ export default function DeliveryDetail() {
     );
   }
 
-  const fullAddress = address
-    ? [address.address_line, address.city, address.state, address.zip].filter(Boolean).join(', ')
-    : customer?.billing_address || 'No address on file';
+  const addressText = address
+    ? [address.address_line, address.city, address.state, address.zip].map((part) => part?.trim()).filter(Boolean).join(', ')
+    : customer?.billing_address?.trim() || '';
+  const fullAddress = addressText || 'No address on file';
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
 
@@ -1603,52 +1606,37 @@ export default function DeliveryDetail() {
     return (
       // `.phone-touch` stretches each HelpTip trigger to 44px; centre its icon in that box.
       <div className="phone-touch -m-4 sm:-m-6 min-h-screen bg-cream pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6 [&_[role=button]]:inline-flex [&_[role=button]]:items-center [&_[role=button]]:justify-center">
-        {/* Style D phone header */}
-        <header className="bg-nav-dark px-4 pt-2 pb-4 sm:px-6">
-          <button
-            type="button"
-            onClick={() => navigate('/deliveries')}
-            aria-label="Back to deliveries"
-            className="-ml-2 flex h-11 w-11 items-center justify-center rounded-lg text-gray-300 hover:text-white transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm text-gray-400">{delivery.delivery_number}</p>
-            {delivery.is_quick_delivery && (
-              <Badge variant="warning" size="sm">
-                <span className="flex items-center gap-1"><Zap className="w-3 h-3" />Quick</span>
+        <PhoneHeader
+          title={customer?.farm_name ?? ''}
+          eyebrow={
+            <span className="flex flex-wrap items-center gap-2 text-sm text-gray-400">
+              {delivery.delivery_number}
+              {delivery.is_quick_delivery && (
+                <Badge variant="warning" size="sm">
+                  <span className="flex items-center gap-1"><Zap className="w-3 h-3" />Quick</span>
+                </Badge>
+              )}
+              {delivery.priority && delivery.priority !== 'normal' && (
+                <Badge variant={PRIORITY_BADGE[delivery.priority] || 'default'} size="sm">
+                  {PRIORITY_LABELS[delivery.priority]}
+                </Badge>
+              )}
+              <Badge variant={statusToBadgeVariant[delivery.status] || 'default'} size="sm">
+                {delivery.status.replace('_', ' ')}
               </Badge>
-            )}
-            {delivery.priority && delivery.priority !== 'normal' && (
-              <Badge variant={PRIORITY_BADGE[delivery.priority] || 'default'} size="sm">
-                {PRIORITY_LABELS[delivery.priority]}
-              </Badge>
-            )}
-            <Badge variant={statusToBadgeVariant[delivery.status] || 'default'} size="sm">
-              {delivery.status.replace('_', ' ')}
-            </Badge>
-          </div>
-          <h1 title={customer?.farm_name} className="mt-1 line-clamp-2 break-words font-heading text-[2rem] font-bold leading-tight text-white">{customer?.farm_name}</h1>
-          <p className="mt-1 text-sm text-gray-300">
+            </span>
+          }
+          back={{ label: 'Deliveries', onClick: () => navigate('/deliveries') }}
+          steps={stepIndex >= 0 ? { labels: DRIVER_STEPS.map((step) => step.label), current: stepIndex } : undefined}
+          className="sm:px-6"
+        >
+          <p className="mt-2 text-sm text-gray-300">
             {parseLocalDate(delivery.scheduled_date).toLocaleDateString()}
             {delivery.scheduled_time && ` at ${delivery.scheduled_time}`}
             {delivery.delivery_window_start && delivery.delivery_window_end &&
               ` (${delivery.delivery_window_start} - ${delivery.delivery_window_end})`}
           </p>
-          {stepIndex >= 0 && (
-            <ol aria-label="Delivery progress" className="mt-4 grid grid-cols-3 gap-2">
-              {DRIVER_STEPS.map((step, i) => (
-                <li key={step.status} aria-current={i === stepIndex ? 'step' : undefined}>
-                  <span className={`block h-1.5 rounded-full ${i <= stepIndex ? 'bg-crx-green-on-dark' : 'bg-gray-600'}`} />
-                  <span className={`mt-1.5 block text-xs ${i === stepIndex ? 'font-bold text-white' : i < stepIndex ? 'text-crx-green-on-dark' : 'text-gray-400'}`}>
-                    {step.label}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </header>
+        </PhoneHeader>
 
         <div className="space-y-4 p-4 sm:p-6">
           {/* Take, call and navigate: one list */}
@@ -1683,20 +1671,33 @@ export default function DeliveryDetail() {
                 </span>
               </a>
             )}
-            <a
-              href={mapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 px-4 py-3 hover:bg-crx-green-tint transition-colors"
-            >
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-crx-green-light text-crx-green">
-                <MapPin className="w-5 h-5" />
-              </span>
-              <span className="min-w-0">
-                <span className="block font-semibold text-nav-dark">Navigate to Address</span>
-                <span className="block text-sm text-secondary">{fullAddress}</span>
-              </span>
-            </a>
+            {addressText ? (
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 px-4 py-3 hover:bg-crx-green-tint transition-colors"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-crx-green-light text-crx-green">
+                  <MapPin className="w-5 h-5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-semibold text-nav-dark">Navigate to Address</span>
+                  <span className="block text-sm text-secondary">{fullAddress}</span>
+                </span>
+              </a>
+            ) : (
+              // Maps with an empty search opens nowhere useful, so there is nothing to tap.
+              <div aria-disabled="true" className="flex items-center gap-3 px-4 py-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-400">
+                  <MapPin className="w-5 h-5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-semibold text-secondary">Navigate to Address</span>
+                  <span className="block text-sm text-secondary">{fullAddress}</span>
+                </span>
+              </div>
+            )}
           </div>
 
           {/* RUP Compliance Warning */}
@@ -3179,27 +3180,12 @@ const DRIVER_FIELD_CLASS =
 const DRIVER_MAIN_ACTION_CLASS =
   'flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-crx-green font-heading text-xl font-bold text-white hover:bg-crx-green-hover disabled:opacity-50 transition-colors';
 
-/** Style D section: a cream band with a green icon tile, a bold heading and the section's main action. */
-function SectionBand({ id, icon, title, action, children }: {
-  id: string;
-  icon: ReactNode;
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
+/** The shared Style D section band with this screen's padded body. */
+function SectionBand({ children, ...band }: ComponentProps<typeof SectionCard>) {
   return (
-    <Card id={id} padding={false} className="scroll-mt-32 overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-cream-dark px-4 py-3">
-        <div className="flex items-center gap-3">
-          <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-crx-green text-white">
-            {icon}
-          </span>
-          <h2 className="font-heading text-2xl font-bold leading-none text-nav-dark">{title}</h2>
-        </div>
-        {action}
-      </div>
+    <SectionCard {...band}>
       <div className="p-5">{children}</div>
-    </Card>
+    </SectionCard>
   );
 }
 

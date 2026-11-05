@@ -289,19 +289,19 @@ export async function generateYearEndSummaryPdf(
         3: { halign: 'right', cellWidth: 'auto' },
       },
       alternateRowStyles: { fillColor: ALT_ROW_BG },
-      didDrawCell: (hookData: CellHookData) => {
+      // Colour must be set before the cell is drawn; didDrawCell runs after the text is on the page.
+      didParseCell: (hookData: CellHookData) => {
         try {
           // Color the Change column green/red
           if (hookData.section === 'body' && hookData.column.index === 3) {
             const pctVal = yoyRows[hookData.row.index]?.[3];
             if (pctVal !== null && pctVal !== undefined) {
-              const color = (pctVal as number) >= 0 ? CRX_GREEN : RED;
-              doc.setTextColor(...color);
+              hookData.cell.styles.textColor = (pctVal as number) >= 0 ? CRX_GREEN : RED;
             }
           }
         } catch (e) {
           // eslint-disable-next-line no-console
-          console.error('yearEndSummaryPdf: didDrawCell failed', e);
+          console.error('yearEndSummaryPdf: didParseCell failed', e);
         }
       },
       didDrawPage: drawPageFooter,

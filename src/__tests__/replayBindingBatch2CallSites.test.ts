@@ -143,13 +143,13 @@ describe('replay-binding batch 2 call sites keep the key on a receipt refusal', 
 });
 
 // KI-93 (owner decision 2026-11-04): blend tickets are recorded through application records and billed
-// with a direct invoice, so create_order_from_blend_ticket is refused by the database and has no caller.
-describe('create_order_from_blend_ticket has no frontend caller', () => {
-  it('no source file under src/ calls it (the generated types keep the definition)', () => {
+// with a direct invoice, so the three ticket-to-order RPCs are refused by the database and have no caller.
+describe('the blend-ticket order RPCs have no frontend caller', () => {
+  it('no source file under src/ calls them (the generated types keep the definitions)', () => {
     const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
       e.isDirectory() ? walk(`${dir}/${e.name}`) : /\.(ts|tsx)$/.test(e.name) ? [`${dir}/${e.name}`] : []);
     const callers = walk('src').filter((f) =>
-      !/(\.test\.tsx?|types\/supabase\.ts)$/.test(f) && /create_order_from_blend_ticket/.test(read(f)));
+      !/(\.test\.tsx?|types\/supabase\.ts)$/.test(f) && /create_order_from_blend_ticket|link_blend_ticket_to_order|unlink_blend_ticket_from_order/.test(read(f)));
     expect(callers).toEqual([]);
   });
 });

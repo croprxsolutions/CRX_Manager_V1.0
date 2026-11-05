@@ -856,6 +856,16 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     }
   });
 
+  it('shows the payment status in the ticket header', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'blend_tickets') return buildChain({ data: { ...baseTicket, payment_status: 'no_charge' }, error: null });
+      return buildChain({ data: [], error: null });
+    });
+    renderTicket();
+    await screen.findByRole('heading', { name: 'BT-2001' });
+    expect(screen.getByText('no charge')).toBeInTheDocument();
+  });
+
   it('keeps the ticket usable when one image cannot be signed', async () => {
     const images = [
       { id: 'image-1', storage_path: 'tk-1/1.jpg', image_url: 'legacy-1', upload_order: 1 },
@@ -893,7 +903,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
 
     renderTicket();
 
-    expect(await screen.findByText('This blend ticket is linked to a sales order. Bill through the order path instead of creating a direct invoice.')).toBeInTheDocument();
+    expect(await screen.findByText('This blend ticket is still marked as linked to a sales order from before order linking was switched off. Ask an admin to clear it before creating an invoice.')).toBeInTheDocument();
     const createInvoiceButton = screen.getByRole('button', { name: 'Create Invoice' });
     expect(createInvoiceButton).toBeDisabled();
     fireEvent.click(createInvoiceButton);
@@ -1075,7 +1085,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     fireEvent.click(within(picker).getByRole('button', { name: 'Save price' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error',
-      'This ticket has already been billed or linked to an order, so its prices can no longer be picked.',
+      'This ticket has already been billed, so its prices can no longer be picked.',
     ));
     expect(screen.getByRole('dialog', { name: 'Pick the quoted price' })).toBeInTheDocument();
     expect(mockResetKeyFor).not.toHaveBeenCalled();

@@ -22,8 +22,10 @@
 --   _blend_ticket_orders_disabled() on blend_ticket_to_order_items (BEFORE INSERT OR UPDATE): refuses every
 --     link row from any writer (the internal create-order impl, owner rights, a future function). It ignores
 --     app.admin_override. Deleting a link row stays possible (there are none; a delete only frees a ticket).
---   A ticket cannot be set to order_link_status = 'linked' by hand: trg_linked_blend_ticket_header_lock
---     already refuses it without link rows (BLEND_TICKET_LINK_STATE_INVALID).
+--   A ticket cannot be updated to order_link_status = 'linked': trg_linked_blend_ticket_header_lock
+--     already refuses it without link rows (BLEND_TICKET_LINK_STATE_INVALID). Signed-in users cannot insert
+--     tickets directly (create_blend_ticket writes the 'unlinked' default); an owner-rights insert of a
+--     linked ticket could only strand that ticket, never move stock.
 --   Not covered (business rule, not detectable): someone typing an ordinary order for the same products.
 --
 -- ROLLBACK: forward repair only. Never restore the old bodies or drop the trigger without first building the
@@ -117,7 +119,7 @@ BEGIN
        WHERE t.tgname = 'trigger_a_blend_ticket_orders_disabled' AND NOT t.tgisinternal AND t.tgenabled = 'O'
          AND t.tgrelid = 'public.blend_ticket_to_order_items'::regclass
          AND t.tgfoid = 'public._blend_ticket_orders_disabled()'::regprocedure
-         AND (t.tgtype & 4) <> 0 AND (t.tgtype & 16) <> 0) THEN  -- fires on INSERT (4) and UPDATE (16)
+         AND (t.tgtype & 3) = 3 AND (t.tgtype & 4) <> 0 AND (t.tgtype & 16) <> 0) THEN  -- BEFORE, FOR EACH ROW, on INSERT and UPDATE
     RAISE EXCEPTION 'POSTFLIGHT_BLEND_TICKET_ORDERS_TRIGGER';
   END IF;
   IF EXISTS (SELECT 1 FROM public.blend_ticket_to_order_items)

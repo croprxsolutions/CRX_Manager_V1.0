@@ -168,7 +168,7 @@ export function BlendTicketDetail() {
       : hasActiveInvoice
         ? 'This blend ticket already has an active invoice. Void or cancel it before creating another invoice.'
         : ticket.order_link_status === 'linked'
-          ? 'This blend ticket is linked to a sales order. Bill through the order path instead of creating a direct invoice.'
+          ? 'This blend ticket is still marked as linked to a sales order from before order linking was switched off. Ask an admin to clear it before creating an invoice.'
           : !ticket.customer_id
             ? 'Assign a customer before creating an invoice.'
             : customerRowMissing
@@ -499,7 +499,7 @@ export function BlendTicketDetail() {
       return;
     }
     if (contentLocked) {
-      toast('error', 'Ticket details are locked after billing or order linkage.');
+      toast('error', 'Ticket details are locked after billing.');
       return;
     }
     if (catalogLoadFailed) {
@@ -774,7 +774,7 @@ export function BlendTicketDetail() {
 
   function updateProduct(index: number, field: keyof BlendTicketProduct, value: BlendTicketProduct[keyof BlendTicketProduct]) {
     if (contentLocked) {
-      toast('error', 'Ticket details are locked after billing, order linkage, or application record creation.');
+      toast('error', 'Ticket details are locked after billing or application record creation.');
       return;
     }
     // Functional updater: the product-select onChange fires updateProduct twice back-to-back
@@ -795,7 +795,7 @@ export function BlendTicketDetail() {
       return;
     }
     if (contentLocked) {
-      toast('error', 'Ticket details are locked after billing, order linkage, or application record creation.');
+      toast('error', 'Ticket details are locked after billing or application record creation.');
       return;
     }
 
@@ -824,7 +824,7 @@ export function BlendTicketDetail() {
 
   function removeProduct(index: number) {
     if (contentLocked) {
-      toast('error', 'Ticket details are locked after billing, order linkage, or application record creation.');
+      toast('error', 'Ticket details are locked after billing or application record creation.');
       return;
     }
     setRemoveProductConfirmOpen(false);

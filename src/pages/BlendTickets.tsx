@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, Upload, Search, CheckCircle, Clock, AlertCircle, XCircle, X, Plus, LinkIcon, Download, Trash2 } from 'lucide-react';
+import { FileText, Upload, Search, CheckCircle, Clock, AlertCircle, XCircle, X, Plus, Download, Trash2 } from 'lucide-react';
 import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,7 +44,6 @@ export function BlendTickets() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [reviewFilter, setReviewFilter] = useState<string>('all');
-  const [linkFilter, setLinkFilter] = useState<string>('all');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -156,10 +155,9 @@ export function BlendTickets() {
 
     const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
     const matchesReview = reviewFilter === 'all' || ticket.review_status === reviewFilter;
-    const matchesLink = linkFilter === 'all' || ticket.order_link_status === linkFilter;
     const matchesPayment = paymentFilter === 'all' || ticket.payment_status === paymentFilter;
 
-    return matchesSearch && matchesStatus && matchesReview && matchesLink && matchesPayment;
+    return matchesSearch && matchesStatus && matchesReview && matchesPayment;
   });
 
   // E6: Detect duplicate ticket numbers across all tickets
@@ -193,7 +191,6 @@ export function BlendTickets() {
       { key: 'driver_name', header: 'Driver' },
       { key: 'status', header: 'Status' },
       { key: 'review_status', header: 'Review' },
-      { key: 'order_link_status', header: 'Order Link' },
       { key: 'payment_status', header: 'Payment' },
       { key: 'ocr_confidence_score', header: 'Confidence %' },
     ], 'blend_tickets');
@@ -237,7 +234,7 @@ export function BlendTickets() {
       ticket.status === 'processing'
     );
     if (lifecycleLocked.length > 0) {
-      toast('error', 'Unlink, unbill, and finish OCR before deleting the selected blend tickets.');
+      toast('error', 'Unbill and finish OCR before deleting the selected blend tickets.');
       setDeleteModalOpen(false);
       return;
     }
@@ -484,19 +481,6 @@ export function BlendTickets() {
       render: (ticket: BlendTicket) => getReviewBadge(ticket.review_status),
     },
     {
-      key: 'order_link_status',
-      header: 'Order Link',
-      render: (ticket: BlendTicket) => (
-        <Badge variant={ticket.order_link_status === 'linked' ? 'success' : 'default'}>
-          {ticket.order_link_status === 'linked' ? (
-            <><LinkIcon className="h-3 w-3" /> Linked</>
-          ) : (
-            'Unlinked'
-          )}
-        </Badge>
-      ),
-    },
-    {
       key: 'payment_status',
       header: 'Payment',
       render: (ticket: BlendTicket) => {
@@ -658,9 +642,9 @@ export function BlendTickets() {
                   Duplicates ({dupeCount})
                 </button>
               )}
-              {(statusFilter !== 'all' || reviewFilter !== 'all' || linkFilter !== 'all' || paymentFilter !== 'all') && (
+              {(statusFilter !== 'all' || reviewFilter !== 'all' || paymentFilter !== 'all') && (
                 <button
-                  onClick={() => { setStatusFilter('all'); setReviewFilter('all'); setLinkFilter('all'); setPaymentFilter('all'); setSearchTerm(''); }}
+                  onClick={() => { setStatusFilter('all'); setReviewFilter('all'); setPaymentFilter('all'); setSearchTerm(''); }}
                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors"
                 >
                   <X className="w-3 h-3" />
@@ -715,19 +699,6 @@ export function BlendTickets() {
                 <option value="unreviewed">Unreviewed</option>
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
-              </select>
-            </div>
-
-            <div className="w-48">
-              <select
-                value={linkFilter}
-                onChange={(e) => setLinkFilter(e.target.value)}
-                aria-label="Filter by order link status"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">All Link Status</option>
-                <option value="unlinked">Unlinked</option>
-                <option value="linked">Linked</option>
               </select>
             </div>
 

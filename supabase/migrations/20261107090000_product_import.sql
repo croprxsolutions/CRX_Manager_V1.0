@@ -15,7 +15,11 @@
 --   * Duplicates are refused: a SKU any product already has (case and spaces ignored), a name an active
 --     product already has, or the same SKU or name twice in one file. The same EPA number under another
 --     name is an allowed variant (the same chemical in another size). Inserts take a transaction
---     advisory lock, so two imports cannot both add the same SKU.
+--     advisory lock, so two imports cannot both add the same SKU. Only spaces at either end and case
+--     are ignored, and the product page and Setup-tab renames do not take this lock: a table-wide
+--     unique SKU index is a separate follow-up.
+--   * A row's vendor text links a vendor as the product page's insert does (link_new_product_vendor).
+--   * The screen previews at most 500 rows (preview_product_import's cap), so an import is 500 rows.
 -- New:
 --   * preview_product_import(rows): admin. For each row, runs the real insert-mode save (and, with
 --     rates, set_product_rates) inside a subtransaction that is always rolled back, and reports the
@@ -88,6 +92,9 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_SETUP_ROWS_REQUIRED: send 1 to 2000 rows';
   END IF;
 
+  -- One import at a time, taken before the receipt lookup: an identical retry that waited here
+  -- then finds the first one's receipt instead of tripping over its products as duplicates.
+  PERFORM pg_advisory_xact_lock(hashtext('crx.product_setup_insert'));
   v_request_fp := md5(jsonb_build_object('actor_id', v_actor, 'rows', p_rows)::text);
   v_existing := public.check_idempotency(p_idempotency_key, 'apply_product_setup');
   IF v_existing IS NOT NULL THEN
@@ -144,8 +151,7 @@ BEGIN
       array_to_string(v_invalid[1:20], ', ');
   END IF;
 
-  -- One import at a time, so the duplicate check below still holds when the inserts commit.
-  PERFORM pg_advisory_xact_lock(hashtext('crx.product_setup_insert'));
+  -- The advisory lock above keeps this duplicate check true until the inserts commit.
   SELECT array_agg(DISTINCT n) INTO v_dupes FROM (
     SELECT btrim(r->'insert'->>'product_name') AS n
       FROM jsonb_array_elements(p_rows) r
@@ -178,7 +184,9 @@ BEGIN
         NULLIF(btrim(v_f->>'unit_size'), ''), NULLIF(btrim(v_f->>'container_unit'), ''),
         NULLIF(btrim(v_f->>'container_type'), ''), NULLIF(btrim(v_f->>'epa_registration'), ''),
         NULLIF(btrim(v_f->>'signal_word'), ''), NULLIF(btrim(v_f->>'max_label_rate_unit'), ''),
-        NULLIF(btrim(v_f->>'use_timing'), ''), NULLIF(btrim(v_f->>'notes'), ''),
+        NULLIF(btrim(v_f->>'use_timing'), ''),
+        -- A note keeps its own spacing and line breaks; only a blank one is empty.
+        CASE WHEN btrim(v_f->>'notes') <> '' THEN v_f->>'notes' END,
         NULLIF(btrim(v_f->>'container_size'), '')::numeric, NULLIF(btrim(v_f->>'max_label_rate'), '')::numeric,
         (v_f->>'rei_hours')::integer, (v_f->>'phi_days')::integer, COALESCE((v_f->>'is_rup')::boolean, false))
       RETURNING * INTO v_product;

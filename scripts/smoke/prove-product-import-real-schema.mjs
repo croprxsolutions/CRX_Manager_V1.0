@@ -262,7 +262,7 @@ const good = [
   { insert: { product_name: '[PROVER] New Liquid', sku: 'IM-1', category: 'Herbicide', product_form: 'liquid', inventory_unit: 'Gal',
     container_size: '2.5', container_type: 'Jug', epa_registration: '100-1234', is_rup: true, signal_word: 'Caution',
     rei_hours: 12, phi_days: 30, max_label_rate: '32', max_label_rate_unit: 'oz', use_timing: 'pre-emerge; Post-Emergence',
-    vendor: 'Acme Supply', manufacturer: 'Acme', notes: 'line one\nline two, "quoted"' },
+    vendor: 'Acme Supply', manufacturer: 'Acme', notes: '  line one\nline two, "quoted"\n' },
     rates: { rate_per_acre: '4', rate_unit: 'oz', suggested_rate: '4 oz/A' } },
   { insert: { product_name: '[PROVER] New Seed', sku: 'IM-2', category: 'Seed', product_form: 'seed', inventory_unit: 'Lb' },
     rates: { rate_per_acre: '2', rate_unit: null, suggested_rate: null } },
@@ -303,6 +303,11 @@ function main() {
 
   // Preview: every bad row is named with its reason; nothing is saved.
   const before = count();
+  // Everything a save writes besides products: retry receipts, change history, vendor links, cost history.
+  const leftovers = () => scalar(`SELECT concat_ws('|', (SELECT count(*) FROM public.idempotency_keys),
+    (SELECT count(*) FROM public.product_change_history), (SELECT count(*) FROM public.product_supplier_links),
+    (SELECT count(*) FROM public.cost_history));`);
+  const leftBefore = leftovers();
   const file = [...good, ...bad.map(([r]) => r)];
   const p = preview(file);
   assert.equal(p.rates_locked, false);
@@ -315,7 +320,7 @@ function main() {
   assert.equal(p.rows[good.length + 8].sku_matches[0].product_name, '[PROVER] Existing Herb', 'the duplicate SKU names the product');
   assert.equal(p.rows[3].epa_matches[0].product_name, '[PROVER] Existing Herb', 'same EPA, another name: shown, allowed');
   assert.equal(count(), before, 'a preview saves nothing');
-  // Per-acre prices to the cent: a new product carries no price, so tier 1-3 per acre are $0.00 once a rate is set.
+  assert.equal(leftovers(), leftBefore, 'a preview leaves no receipt, history, vendor link or cost history');  // Per-acre prices to the cent: a new product carries no price, so tier 1-3 per acre are $0.00 once a rate is set.
   for (const t of TIERS) {
     assert.equal(cents(p.rows[0].expected_prices[t]), '0.00');
     assert.equal(cents(p.rows[0].after[t]), '0.00');
@@ -345,7 +350,7 @@ function main() {
   assert.equal(count(), String(Number(before) + 5));
   assert.equal(field('[PROVER] New Liquid', "sku, category, product_form, inventory_unit, container_size, container_type, epa_registration, is_rup, signal_word, rei_hours, phi_days, max_label_rate, max_label_rate_unit, array_to_string(use_timings, ','), use_timing, vendor, manufacturer, rate_per_acre, rate_unit, suggested_rate, is_active"),
     'IM-1|Herbicide|liquid|Gal|2.5|Jug|100-1234|t|Caution|12|30|32|oz|pre_emerge,post_emergence|Pre-Emerge; Post-Emergence|Acme Supply|Acme|4|oz|4 oz/A|t');
-  assert.equal(scalar("SELECT notes = E'line one\\nline two, \"quoted\"' FROM public.products WHERE product_name = '[PROVER] New Liquid';"), 't', 'a note with a line break saves intact');
+  assert.equal(scalar("SELECT notes = E'  line one\\nline two, \"quoted\"\\n' FROM public.products WHERE product_name = '[PROVER] New Liquid';"), 't', 'a note keeps its spacing and line breaks');
   assert.equal(field('[PROVER] New Seed', 'rate_per_acre, rate_unit'), '2|Lb');
   assert.equal(field('[PROVER] New Dry', "coalesce(rate_per_acre::text, '-'), coalesce(rate_unit, '-')"), '-|-');
   for (const r of saved.rows.filter((x) => x.rate_per_acre !== null)) {

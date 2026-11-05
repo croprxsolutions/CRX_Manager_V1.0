@@ -193,6 +193,43 @@ export interface InvoicePdfShare {
   amount_cents: number;
   price_per_acre_cents?: number | null;
   pricing_note?: string | null;
+  /** A Bill Split payer's own invoice, printed as its reference on Old Print. */
+  invoice_number?: string | null;
+}
+
+/** One payer of a Bill Split sale (billing plan M2): their invoice and their share of the whole sale. */
+export interface BillSplitPayer extends InvoicePdfShare {
+  invoice_id: string;
+}
+
+export function billSplitPayerShares(rows: Array<{
+  id: string;
+  invoice_number: string | null;
+  total_amount_cents: number | null;
+  customer?: { farm_name?: string | null } | null;
+}>): BillSplitPayer[] {
+  const total = rows.reduce((sum, r) => sum + (r.total_amount_cents ?? 0), 0);
+  return rows.map((r) => ({
+    invoice_id: r.id,
+    invoice_number: r.invoice_number,
+    customer_name: r.customer?.farm_name || 'Unknown',
+    split_percentage: total > 0 ? Math.round(((r.total_amount_cents ?? 0) / total) * 1000000) / 10000 : 0,
+    acres: null,
+    amount_cents: r.total_amount_cents ?? 0,
+  }));
+}
+
+/** Read from each group's invoices, not invoice_shares: those rows split one invoice, and a re-save rescales them to it. */
+export async function loadBillSplitPayers(db: SupabaseClient, invoiceGroupId: string): Promise<BillSplitPayer[]> {
+  const { data, error } = await db
+    .from('invoices')
+    .select('id, invoice_number, total_amount_cents, customer:customers!invoices_customer_id_fkey(farm_name)')
+    .eq('invoice_group_id', invoiceGroupId)
+    .is('deleted_at', null)
+    .not('status', 'in', '("voided","cancelled")')
+    .order('invoice_number');
+  if (error || !Array.isArray(data)) throw new InvoiceDetailsUnavailableError();
+  return billSplitPayerShares(data as unknown as Parameters<typeof billSplitPayerShares>[0]);
 }
 
 export interface InvoicePdfData {
@@ -431,6 +468,9 @@ export async function buildInvoicePdfDataFromRow(
     header_notes?: string | null; footer_notes?: string | null; due_date?: string | null;
     diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null;
   } | null;
+  const billSplitPayers = inv.invoice_type === 'chemical_sale' && billingRow?.invoice_group_id && shares.length === 0
+    ? await loadBillSplitPayers(db, billingRow.invoice_group_id)
+    : [];
   const pickPo = inv.purchase_order_ref !== undefined ? inv.purchase_order_ref : billingRow?.purchase_order_ref;
   const pickTerms = inv.payment_terms !== undefined ? inv.payment_terms : billingRow?.payment_terms;
   const pickDue = inv.due_date !== undefined ? inv.due_date : billingRow?.due_date;
@@ -496,7 +536,7 @@ export async function buildInvoicePdfDataFromRow(
           price_per_acre_cents: s.price_per_acre_cents ?? null,
           pricing_note: s.pricing_note ?? null,
         }))
-      : undefined,
+      : billSplitPayers.length > 0 ? billSplitPayers : undefined,
     items: pdfItems,
     total_amount_cents: inv.total_amount_cents || 0,
     total_cost_cents: inv.total_cost_cents || 0,

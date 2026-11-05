@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Save, Send, Ban, Plus, Trash2, Search, DollarSign, FileText, Printer, Truck, Mail, RotateCcw, AlertTriangle,
 } from 'lucide-react';
@@ -28,7 +28,7 @@ import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyM
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
-import { assertInvoiceLinesLoaded, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
+import { assertInvoiceLinesLoaded, loadBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
@@ -247,6 +247,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Print dialog
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [shares, setShares] = useState<InvoiceShare[]>([]);
+  const [billSplitPayers, setBillSplitPayers] = useState<BillSplitPayer[]>([]);
 
   // Void modal
   const [showVoidModal, setShowVoidModal] = useState(false);
@@ -815,6 +816,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     if (shareError) throw shareError;
     if (!Array.isArray(shareData)) throw new Error('The invoice share read returned no list');
     setShares(shareData as InvoiceShare[]);
+
+    // A chemical sale split across payers: every payer's invoice shows the whole sale's share table.
+    const payers = data.invoice_type === 'chemical_sale' && data.invoice_group_id && shareData.length === 0
+      ? await loadBillSplitPayers(supabase, data.invoice_group_id)
+      : [];
+    if (isStale()) return;
+    setBillSplitPayers(payers);
 
     // Fetch write-offs
     const { data: woData, error: woError } = await supabase
@@ -1796,7 +1804,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         split_percentage: s.split_percentage,
         acres: s.acres,
         amount_cents: s.amount_cents,
-      })) : undefined,
+      })) : billSplitPayers.length > 0 ? billSplitPayers : undefined,
       items: groupReturnCreditDisplayItems(invoice.invoice_type, enrichedItems.map(mapInvoicePdfItem)),
       total_amount_cents: printedTotalCents,
       total_cost_cents: invoice.total_cost_cents ?? items.reduce((s, i) => s + (i.is_application_fee ? i.cost_cents : Math.round(i.cost_cents * i.quantity)), 0),
@@ -2403,6 +2411,30 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         </Card>
       </div>
 
+      {billSplitPayers.length > 1 && (
+        <Card>
+          <h2 className="text-sm font-semibold text-nav-dark mb-3">Bill Split</h2>
+          <div className="space-y-2">
+            {billSplitPayers.map((payer) => (
+              <div key={payer.invoice_id} className="flex items-center justify-between gap-3 text-sm">
+                <span className="min-w-0">
+                  <span className="font-medium text-nav-dark">{payer.customer_name}</span>
+                  {payer.invoice_id === id ? (
+                    <span className="ml-2 text-xs text-secondary">{payer.invoice_number} (this invoice)</span>
+                  ) : (
+                    <Link to={`/invoices/${payer.invoice_id}`} className="ml-2 text-xs text-crx-green hover:underline">{payer.invoice_number}</Link>
+                  )}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  <span className="text-secondary mr-3">{payer.split_percentage}%</span>
+                  <span className="font-semibold">{fmt(payer.amount_cents)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Line Items */}
       <Card>
         <div className="flex items-center justify-between mb-4">
@@ -2847,10 +2879,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
       {/* Print Dialog */}
       <InvoicePrintDialog
+        key={billSplitPayers.length > 1 ? 'bill-split' : 'plain'}
+        sharesOnByDefault={billSplitPayers.length > 1}
         open={showPrintDialog}
         onClose={() => setShowPrintDialog(false)}
         invoiceType={invoice.invoice_type || 'chemical_sale'}
-        hasShares={shares.length > 1}
+        hasShares={shares.length > 1 || billSplitPayers.length > 1}
         onPrint={handlePrint}
         loading={printing}
       />

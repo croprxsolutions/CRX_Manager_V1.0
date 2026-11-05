@@ -17,6 +17,7 @@ import { readOrderEditSnapshot } from '../lib/orderEditSnapshot';
 import Input from '../components/ui/Input';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
+import LineBillSplit, { type LineShare } from '../components/orders/LineBillSplit';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
@@ -121,6 +122,7 @@ export default function OrderDetail() {
 
   // Field/acre split state (multi-field split invoicing — entered on the order, billed by acres).
   type AllocField = { id: string; field_name: string; total_acres: number | null; customer_id: string; owners: { customer_id: string; split_pct: number }[] };
+  const [lineShares, setLineShares] = useState<LineShare[]>([]);
   const [allocations, setAllocations] = useState<OrderItemFieldAllocation[]>([]);
   const [allocFields, setAllocFields] = useState<AllocField[]>([]);
   const [custNames, setCustNames] = useState<Record<string, string>>({});
@@ -307,6 +309,16 @@ export default function OrderDetail() {
         if (readFailed(shareRes, 'shares')) return false;
         if (isStale()) return false;
         setShares(shareRes.data as OrderShare[]);
+
+        // A line's own payers, overriding the card for that line (billing plan M2).
+        const lineShareRes = await supabase
+          .from('order_item_shares')
+          .select('id, order_item_id, customer_id, split_percentage, customer:customers(farm_name), order_items!inner(order_id)')
+          .eq('order_items.order_id', id!)
+          .order('created_at');
+        if (readFailed(lineShareRes, 'line shares')) return false;
+        if (isStale()) return false;
+        setLineShares((lineShareRes.data || []) as unknown as LineShare[]);
 
         // Field/acre split: existing per-line allocations for this order, the active fields to pick
         // from (with their owner splits), and a customer-id → name map for the live preview.
@@ -948,7 +960,9 @@ export default function OrderDetail() {
   const openShareEditor = () => {
     setNewShareCustomerId('');
     setNewShareCustomerName('');
-    setNewSharePct('');
+    // The card should reach 100%, so the next share starts at what's left.
+    const left = Math.round((100 - shares.reduce((sum, sh) => sum + sh.split_percentage, 0)) * 100) / 100;
+    setNewSharePct(shares.length > 0 && left > 0 ? String(left) : '');
     setShowShareEditor(true);
   };
 
@@ -1344,12 +1358,10 @@ export default function OrderDetail() {
   // editing the order_shares row would drift from the invoice's historical
   // invoice_shares snapshot. Enforced at DB level by the
   // prevent_order_shares_edit_after_post() trigger; this is just the UI half.
-  const sharesLocked = invoices.some((inv) =>
-    ['posted', 'paid', 'overdue'].includes(inv.status)
-  );
-  const lockingInvoice = sharesLocked
-    ? invoices.find((inv) => ['posted', 'paid', 'overdue'].includes(inv.status))
-    : null;
+  const lockingInvoice = invoices.find((inv) => ['posted', 'paid', 'overdue'].includes(inv.status)) ?? null;
+  // The split also freezes at the first completed delivery (BILL_SPLIT_FROZEN), so what's billed can't move.
+  const lockingDelivery = deliveries.find((d) => d.status === 'completed' && !d.deleted_at) ?? null;
+  const sharesLocked = !!lockingInvoice || !!lockingDelivery;
 
   return (
     <div className="space-y-4">
@@ -2010,7 +2022,7 @@ export default function OrderDetail() {
       ))}
 
       {/* Order Shares (Bill Splitting) */}
-      {(shares.length > 0 || canEdit) && (
+      {(shares.length > 0 || lineShares.length > 0 || canEdit) && (
         <Card>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -2030,11 +2042,22 @@ export default function OrderDetail() {
           {sharesLocked && (
             <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>
-                Bill split is locked because invoice <strong>{lockingInvoice?.invoice_number}</strong> is already posted.
-                Void the invoice first to change the split.
-              </span>
+              {lockingInvoice ? (
+                <span>
+                  Bill split is locked because invoice <strong>{lockingInvoice.invoice_number}</strong> is already posted.
+                  Void the invoice first to change the split.
+                </span>
+              ) : (
+                <span>
+                  Bill split is locked because delivery <strong>{lockingDelivery?.delivery_number}</strong> is complete.
+                  Void the delivery to change the split.
+                </span>
+              )}
             </div>
+          )}
+
+          {hasAllocations && (
+            <p className="mb-3 text-xs text-amber-700">This order is split by field below, so the field split bills it, not this card.</p>
           )}
 
           {shares.length === 0 && !showShareEditor && (
@@ -2070,7 +2093,7 @@ export default function OrderDetail() {
                   {shares.reduce((s, sh) => s + sh.split_percentage, 0)}%
                   {shares.reduce((s, sh) => s + sh.split_percentage, 0) < 100 && (
                     <span className="text-amber-600 ml-2">
-                      ({100 - shares.reduce((s, sh) => s + sh.split_percentage, 0)}% unallocated)
+                      (the other {Math.round((100 - shares.reduce((s, sh) => s + sh.split_percentage, 0)) * 100) / 100}% stays with {customer?.farm_name || 'the main customer'})
                     </span>
                   )}
                 </span>
@@ -2116,6 +2139,18 @@ export default function OrderDetail() {
                 </Button>
               </div>
             </div>
+          )}
+
+          {!hasAllocations && items.length > 0 && (
+            <LineBillSplit
+              items={items}
+              lineShares={lineShares}
+              hasCard={shares.length > 0}
+              mainCustomerName={customer?.farm_name || 'the main customer'}
+              canEdit={canEdit}
+              locked={sharesLocked}
+              onChanged={() => void fetchOrder()}
+            />
           )}
         </Card>
       )}

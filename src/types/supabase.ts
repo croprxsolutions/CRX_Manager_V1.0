@@ -6677,6 +6677,45 @@ export type Database = {
           },
         ]
       }
+      order_item_shares: {
+        Row: {
+          created_at: string
+          customer_id: string
+          id: string
+          order_item_id: string
+          split_percentage: number
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          id?: string
+          order_item_id: string
+          split_percentage: number
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          id?: string
+          order_item_id?: string
+          split_percentage?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_item_shares_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_item_shares_order_item_id_fkey"
+            columns: ["order_item_id"]
+            isOneToOne: false
+            referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       order_items: {
         Row: {
           acres: number | null

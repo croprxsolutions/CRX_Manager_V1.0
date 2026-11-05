@@ -40,6 +40,13 @@ describe('InvoicePrintDialog', () => {
     expect(screen.getByText('Show grower shares')).toBeInTheDocument();
   });
 
+  it('prints a Bill Split invoice with its shares unless someone unticks them', () => {
+    const onPrint = vi.fn();
+    render(<InvoicePrintDialog {...defaultProps} invoiceType="chemical_sale" hasShares sharesOnByDefault onPrint={onPrint} />);
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
+    expect(onPrint).toHaveBeenCalledWith(expect.objectContaining({ show_shares: true }));
+  });
+
   it('hides grower shares checkbox when hasShares=false', () => {
     render(<InvoicePrintDialog {...defaultProps} hasShares={false} />);
     expect(screen.queryByText('Show grower shares')).not.toBeInTheDocument();

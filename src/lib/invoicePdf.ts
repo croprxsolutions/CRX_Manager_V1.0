@@ -33,11 +33,14 @@ import {
 
 export {
   assertInvoiceLinesLoaded,
+  billSplitPayerShares,
   groupReturnCreditDisplayItems,
   InvoiceDetailsUnavailableError,
+  loadBillSplitPayers,
   InvoiceLinesUnavailableError,
   isFuelSurchargeLine,
   mapInvoicePdfItem,
+  type BillSplitPayer,
   type InvoicePdfData,
   type InvoicePdfItem,
   type InvoicePdfShare,
@@ -356,7 +359,7 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
       ? [['Ref', 'Grower', '$/Acre', 'Share', 'Acres', 'Amount']]
       : [['Ref', 'Grower', 'Share', 'Acres', 'Amount']];
     const shareBody = data.shares.map((s, idx) => {
-      const ref = deriveSplitRef(base, idx, true);
+      const ref = s.invoice_number || deriveSplitRef(base, idx, true);
       const name = s.pricing_note ? `${s.customer_name} (${s.pricing_note})` : s.customer_name;
       return hasPerAcre
         ? [ref, name, s.price_per_acre_cents != null ? fmt(s.price_per_acre_cents) : '', `${fmtNum(s.split_percentage, 2)}%`, s.acres != null ? fmtNum(s.acres, 2) : '', fmt(s.amount_cents)]

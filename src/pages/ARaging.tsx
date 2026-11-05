@@ -50,6 +50,20 @@ function statementKey(customerId: string, start: string, end: string): string {
   return `${customerId}|${start}|${end}`;
 }
 
+/** " — N FAILED to send, M not confirmed (...)" for a batch email toast; empty when neither. */
+function sendProblemsNote(failed: number, unconfirmed: number): string {
+  const failedNote = failed > 0 ? ` — ${failed} FAILED to send` : '';
+  const unconfirmedNote = unconfirmed > 0
+    ? `, ${unconfirmed} not confirmed (may have reached the customer — check the email log before resending)`
+    : '';
+  return failedNote + unconfirmedNote;
+}
+
+/** An unconfirmed send may have reached the customer, so it is never counted as failed. */
+function sendErrorKind(err: unknown): 'failed' | 'unconfirmed' {
+  return err instanceof EmailUnconfirmedError ? 'unconfirmed' : 'failed';
+}
+
 export default function ARaging() {
   const { toast } = useToast();
   const { profile } = useAuth();
@@ -711,9 +725,9 @@ export default function ARaging() {
 
         logActivity({ event: 'ar_reminders_sent', description: `Sent ${sent} AR reminder(s) to overdue customers (${skipped} skipped/deduped, ${failed} failed, ${heldForCredit} held: credit on file covers balance)`, performedBy: profile.id, entityType: 'system' });
         const heldNote = heldForCredit > 0 ? `, ${heldForCredit} held (credit on file covers balance — apply it)` : '';
-        const unconfirmedNote = unconfirmed > 0 ? `, ${unconfirmed} not confirmed (may have reached the customer — check the email log before resending)` : '';
-        if (failed > 0 || unconfirmed > 0) {
-          toast('error', `Sent ${sent} AR reminder(s)${failed > 0 ? ` — ${failed} FAILED to send` : ''}${unconfirmedNote}${skipped > 0 ? `, ${skipped} skipped (already sent today)` : ''}${heldNote}`);
+        const problems = sendProblemsNote(failed, unconfirmed);
+        if (problems) {
+          toast('error', `Sent ${sent} AR reminder(s)${problems}${skipped > 0 ? `, ${skipped} skipped (already sent today)` : ''}${heldNote}`);
         } else {
           toast('success', `Sent ${sent} AR reminder(s)${skipped > 0 ? `, ${skipped} skipped (already sent today)` : ''}${heldNote}`);
         }
@@ -731,8 +745,7 @@ export default function ARaging() {
       action: async () => {
         let sent = 0;
         let noEmail = 0;
-        let emailFailed = 0;
-        let emailUnconfirmed = 0;
+        const sendProblems = { failed: 0, unconfirmed: 0 };
         let statementsDeduped = 0;
         const statementQueue: Array<{ custId: string; stmtData: DetailedStatementData }> = [];
 
@@ -798,25 +811,23 @@ export default function ARaging() {
                 sent++;
               }
             } else {
-              emailFailed++;
+              sendProblems.failed++;
               Sentry.captureMessage(`Statement email send returned failure for customer ${custId}`, { level: 'error', tags: { action: 'email_batch_statements' } });
             }
           } catch (sendErr) {
-            // Unconfirmed may have reached the customer: never report it as failed.
-            if (sendErr instanceof EmailUnconfirmedError) emailUnconfirmed++;
             // A failed statement email must be counted and reported — a customer
             // who never received their statement was previously undetectable.
-            else emailFailed++;
+            sendProblems[sendErrorKind(sendErr)]++;
             Sentry.captureException(sendErr, { tags: { action: 'email_batch_statements', customer_id: custId } });
           }
         }
 
         if (profile) {
-          logActivity({ event: 'batch_statements_emailed', description: `Emailed ${sent} statement(s)${statementsDeduped > 0 ? ` (${statementsDeduped} already sent — deduped)` : ''}${noEmail > 0 ? ` (${noEmail} had no email)` : ''}${emailFailed > 0 ? ` (${emailFailed} FAILED)` : ''}`, performedBy: profile.id, entityType: 'system' });
+          logActivity({ event: 'batch_statements_emailed', description: `Emailed ${sent} statement(s)${statementsDeduped > 0 ? ` (${statementsDeduped} already sent — deduped)` : ''}${noEmail > 0 ? ` (${noEmail} had no email)` : ''}${sendProblemsNote(sendProblems.failed, sendProblems.unconfirmed)}`, performedBy: profile.id, entityType: 'system' });
         }
-        const stmtUnconfirmedNote = emailUnconfirmed > 0 ? `, ${emailUnconfirmed} not confirmed (may have reached the customer — check the email log before resending)` : '';
-        if (emailFailed > 0 || emailUnconfirmed > 0) {
-          toast('error', `Emailed ${sent} statement(s)${emailFailed > 0 ? ` — ${emailFailed} FAILED to send` : ''}${stmtUnconfirmedNote}${statementsDeduped > 0 ? `, ${statementsDeduped} already sent` : ''}${noEmail > 0 ? `, ${noEmail} had no email on file` : ''}`);
+        const stmtProblems = sendProblemsNote(sendProblems.failed, sendProblems.unconfirmed);
+        if (stmtProblems) {
+          toast('error', `Emailed ${sent} statement(s)${stmtProblems}${statementsDeduped > 0 ? `, ${statementsDeduped} already sent` : ''}${noEmail > 0 ? `, ${noEmail} had no email on file` : ''}`);
         } else {
           toast('success', `Emailed ${sent} statement(s)${statementsDeduped > 0 ? ` — ${statementsDeduped} already sent (deduped)` : ''}${noEmail > 0 ? ` — ${noEmail} customer(s) had no email on file` : ''}`);
         }

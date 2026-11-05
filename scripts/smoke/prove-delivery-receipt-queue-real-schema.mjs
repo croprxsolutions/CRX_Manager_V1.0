@@ -473,7 +473,9 @@ function main() {
   fresh(9);
   assert.equal(claim('ki25-claim-recheck-2').length, 1);
   psql(`SET session_replication_role = replica; UPDATE public.deliveries SET status = 'cancelled' WHERE id = '${D(9)}';`);
-  assert.equal(claim('ki25-claim-recheck-2').length, 0); assert.equal(row(9, 'status'), 'cancelled');
+  assert.equal(claim('ki25-claim-recheck-2').length, 0);
+  // It was claimed (the send may have gone out), so the office checks instead of "cancelled, nothing sent".
+  assert.match(row(9, "status || ' ' || last_error"), /^needs_check The delivery is no longer completed, but an earlier send/);
   // The customer's email changed since the claim: the retried claim does not send to the old address.
   seedDelivery(20); assert.equal(complete(20, { emailReceipt: 'true' }).status, 0);
   due(20);

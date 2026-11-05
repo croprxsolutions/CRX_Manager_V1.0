@@ -18,7 +18,8 @@
 --   3. claim_delivery_receipts / finish_delivery_receipt (service_role only): the worker claims due rows with a
 --      fresh claim token (FOR UPDATE SKIP LOCKED, a 10-minute lease) and reports sent / retry / check against
 --      that token. Five attempts, backoff 2, 4, 8, 16 minutes; then the row goes to needs_check (the office list).
---      Before claiming, a row is settled without sending when: the delivery is no longer completed (cancelled);
+--      Before claiming, a row is settled without sending when: the delivery is no longer completed (cancelled, or needs_check
+--      after an earlier attempt that may have gone out);
 --      it now belongs to another customer (needs_check); a delivery confirmation for it (or, with no key, for
 --      that customer) is still pending in email_log from before the receipt was owed (needs_check: it may have
 --      gone out); the customer has no email now (needs_check); or a retry would fall outside the email
@@ -517,10 +518,18 @@ BEGIN
     SELECT d.customer_id INTO v_customer FROM public.deliveries d
      WHERE d.id = v_row.delivery_id AND d.status = 'completed' AND d.deleted_at IS NULL;
     IF NOT FOUND THEN
-      UPDATE public.delivery_receipt_queue
-         SET status = 'cancelled', claim_token = NULL, claimed_at = NULL,
-             last_error = 'The delivery is no longer completed; no receipt was sent.'
-       WHERE id = v_row.id;
+      -- An earlier attempt may have gone out without being logged sent (worker stopped mid-send): the office checks.
+      IF v_row.attempts > 0 THEN
+        UPDATE public.delivery_receipt_queue
+           SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
+               last_error = 'The delivery is no longer completed, but an earlier send of its receipt may have gone out; check with the customer.'
+         WHERE id = v_row.id;
+      ELSE
+        UPDATE public.delivery_receipt_queue
+           SET status = 'cancelled', claim_token = NULL, claimed_at = NULL,
+               last_error = 'The delivery is no longer completed; no receipt was sent.'
+         WHERE id = v_row.id;
+      END IF;
       CONTINUE;
     END IF;
     IF v_customer IS DISTINCT FROM v_row.customer_id THEN

@@ -273,7 +273,15 @@ BEGIN
   END IF;
   v_sizes := public._lock_product_parent(p_parent_id, p_expected_parent_version);
   SELECT * INTO v_before FROM public.product_parents WHERE id = p_parent_id;
-  IF v_before.product_form IN ('seed', 'each') THEN v_unit := NULL; END IF;
+  -- A seed or each rate is in each size's stock unit; a different supplied unit is refused, never swapped.
+  IF v_before.product_form IN ('seed', 'each') THEN
+    IF v_unit IS NOT NULL AND EXISTS (SELECT 1 FROM public.products p WHERE p.id = ANY(v_sizes)
+                                       AND lower(btrim(coalesce(p.inventory_unit, ''))) <> lower(v_unit)) THEN
+      RAISE EXCEPTION 'PRODUCT_RATE_UNIT_MISMATCH: "%" is stocked in %; send the rate in that unit or leave the unit blank',
+        v_before.name, (SELECT p.inventory_unit FROM public.products p WHERE p.id = ANY(v_sizes) LIMIT 1);
+    END IF;
+    v_unit := NULL;
+  END IF;
   IF (SELECT count(*) FROM jsonb_array_elements(p_expected_sizes)) <> cardinality(v_sizes)
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(p_expected_sizes) e
                 WHERE jsonb_typeof(e) <> 'object' OR NOT ((e->>'product_id') = ANY(v_sizes::text[]))

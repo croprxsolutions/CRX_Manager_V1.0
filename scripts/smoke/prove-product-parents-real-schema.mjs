@@ -526,6 +526,10 @@ function main() {
   asOwner(`UPDATE public.products SET tier1_price = 100.00, tier2_price = 90.00, tier3_price = 80.00 WHERE id = '${S.product_id}';`);
   const ps = previewRates(S.parent_id, 30, null, null);
   assert.notEqual(ps.sizes[0].prices.tier1_price_per_acre, null, 'the seed preview prices in the stock unit');
+  // A seed rate sent in another unit is refused, never saved in the stock unit.
+  refused(ADMIN, setRates([{ parent_id: S.parent_id, expected_parent_version: ps.parent_version, rate_per_acre: '30', rate_unit: 'Unit',
+    suggested_rate: '30 Unit/acre', sizes: ps.sizes }], 'k-r-seed-unit'),
+    /PRODUCT_RATE_UNIT_MISMATCH: "\[PROVER\] Sigma Seed" is stocked in Lb/);
   call(ADMIN, setRates([{ parent_id: S.parent_id, expected_parent_version: ps.parent_version, rate_per_acre: '30', rate_unit: null,
     suggested_rate: null, sizes: ps.sizes }], 'k-r-seed'));
   assert.equal(prod(S.product_id, 'rate_per_acre, rate_unit'), '30|Lb');

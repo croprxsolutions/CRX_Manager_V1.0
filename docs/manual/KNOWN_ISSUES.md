@@ -456,11 +456,6 @@ invoice, five empty deliveries). Counts are older records' claims, not re-measur
 sales rep (older counts).
 WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup checks. They stay unchanged and keep working; the list is in Mason's private Product Master review notes.
 
-### KI-31 — Field Setup and field-save loose ends
-**LOW · OPEN · UI/database · unassigned**
-`save_field` reports success for a missing id (`20260729222311:80`, no `FOUND` check). (The stale-acres and
-delete-every-polygon sub-items were closed 2026-11-05; see the archive.)
-
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
 **MED · PARTIAL · UI/database · Mason (Goal 4)**
 Most lists now page through every row (PRs #959, #1017, #1048). The order, job and purchase-order pickers now search

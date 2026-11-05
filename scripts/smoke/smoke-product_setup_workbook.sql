@@ -1,9 +1,10 @@
--- Smoke chain: the product setup workbook (REQUIRES 20261107080000).
+-- Smoke chain: the product setup workbook (REQUIRES 20261107080000 and 20261107130000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so every product and log row it writes is rolled
 -- back. Proves, as a real signed-in browser session (role authenticated with each live profile's
 -- claims) and as a signed-out visitor (role anon), on an invented product:
---   * the installed bodies are exactly 20261107080000's; anon cannot execute any of the four functions
---     and a signed-in user cannot call the fingerprint helper;
+--   * the installed bodies are exactly 20261107080000's (apply_product_setup's update body renamed
+--     _apply_product_setup_update by 20261107130000, which owns apply_product_setup); anon cannot execute
+--     any of the five functions and a signed-in user cannot call the fingerprint helper or the update body;
 --   * an admin downloads the product, previews a rate change for it, saves a setup change with
 --     apply_product_setup, a same-key replay answers the same, and the downloaded (now old) row is
 --     refused PRODUCT_SETUP_STALE;
@@ -28,9 +29,10 @@ BEGIN
     ('public._product_setup_fingerprint(public.products)', '5e4d5ae6d5f8b7ce2186531f6f1ba806'),
     ('public.get_product_setup_workbook()', '219acbf55ec555a29af3fe96250784a7'),
     ('public.preview_product_rates(jsonb)', '001a9d34bb4125c43daa4c22742415ab'),
-    ('public.apply_product_setup(jsonb,uuid,text)', '9c1385aa3c9ce2c40f48415195db79b5')) AS pins(sig, body_md5) LOOP
+    ('public._apply_product_setup_update(jsonb,uuid,text)', '9c1385aa3c9ce2c40f48415195db79b5'),
+    ('public.apply_product_setup(jsonb,uuid,text)', '3d1f5d5d1fc8c8d046a388a23ee3f408')) AS pins(sig, body_md5) LOOP
     IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM v_md5 THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: % is not the body of 20261107080000', v_sig;
+      RAISE EXCEPTION 'SMOKE_FAIL: % is not the pinned body', v_sig;
     END IF;
     IF has_function_privilege('anon', v_sig, 'EXECUTE') THEN
       RAISE EXCEPTION 'SMOKE_FAIL: anon can execute %', v_sig;
@@ -38,6 +40,9 @@ BEGIN
   END LOOP;
   IF has_function_privilege('authenticated', 'public._product_setup_fingerprint(public.products)', 'EXECUTE') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a signed-in user can call the fingerprint helper';
+  END IF;
+  IF has_function_privilege('authenticated', 'public._apply_product_setup_update(jsonb,uuid,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a signed-in user can call the update body directly';
   END IF;
 
   SELECT p.id INTO v_admin FROM public.profiles p WHERE p.role = 'admin' AND p.is_active ORDER BY p.created_at LIMIT 1;

@@ -7110,6 +7110,14 @@ for a decline, unchanged when there is no prior-season value. A test covers it i
 Proof: a Year-End Summary rendered from test data showed +23.3% and +25.0% green, −25.0% red, "—" in the normal colour,
 and no other text changed colour. With the quote-PDF part closed by PR #1480, KI-39 is fully closed. No database change.
 
+### Closed 2026-11-05 — KI-31 Field Setup and field-save loose ends (last sub-item: save_field reported success for a missing id)
+`save_field` updated nothing for an id that matched no field, yet wrote a `field_saved` activity row and returned the id as
+if the save had worked. Migration `20261107140000_save_field_refuses_missing_field` (applied live 2026-11-05, ledger
+`20261105140110`, PR #1489) adds an `IF NOT FOUND` check: a missing id now raises `FIELD_NOT_FOUND` and writes nothing.
+The disposable PostgreSQL proof failed without the migration and passed with it; the live smoke chain (rolled back)
+expects the refusal. Two older `field_saved` activity rows that name a missing field were left as they are. With the
+stale-acres and delete-every-polygon sub-items closed earlier the same day, KI-31 is fully closed.
+
 ### Closed 2026-11-05 — KI-27
 
 Closed by branch `claude/uncertain-intent-admin-clear-5591c7`. `useUncertainMutationIntent` gained `clearExpiredIntent()`, which refuses while any stored copy (IndexedDB coordinator, localStorage mirror, or this tab's acknowledgement) could still be retried or is damaged, and otherwise removes the expired request; a resolved tombstone is kept and damaged state stays locked for manual reconciliation. The shared `ClearExpiredIntentButton` shows it to admins only, only after expiry, behind a `ConfirmModal`, and logs each clear to Sentry. It is wired into every dialog that uses the hook (Quick Receive, Receiving Hub, Inventory receive/adjust/hold, Batch Adjust, Purchase Order receive, New Vendor Bill, Vendor Bill payment). Limit: the saved request is keyed to the signed-in user, so a non-admin who is locked out still needs browser storage cleared for that site.

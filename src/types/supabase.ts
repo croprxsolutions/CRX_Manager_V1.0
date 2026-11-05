@@ -15082,6 +15082,10 @@ export type Database = {
         }
         Returns: Json
       }
+      preview_product_import: {
+        Args: { p_rows: Json }
+        Returns: Json
+      }
       preview_product_rates: {
         Args: { p_rows: Json }
         Returns: Json

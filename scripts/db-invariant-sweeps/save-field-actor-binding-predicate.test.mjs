@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PREDICATE = path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'save-field-actor-binding.sql');
 const MIGRATION = path.join(ROOT, 'supabase', 'migrations', '20260729222311_bind_save_field_actor.sql');
+// The reviewed live body: applied on top of MIGRATION, whose body it pins (KI-31).
+const CURRENT_MIGRATION = path.join(ROOT, 'supabase', 'migrations', '20261107140000_save_field_refuses_missing_field.sql');
 const PREFIX = 'crx-save-field-actor-predicate-';
 const CONTAINER = `${PREFIX}${process.pid}-${Date.now().toString(36)}`.toLowerCase();
 const VIOLATION = 'save_field(uuid, jsonb, jsonb, uuid, text)';
@@ -72,6 +74,7 @@ $function$;
 try {
   assert.ok(existsSync(PREDICATE), `missing predicate: ${PREDICATE}`);
   assert.ok(existsSync(MIGRATION), `missing migration: ${MIGRATION}`);
+  assert.ok(existsSync(CURRENT_MIGRATION), `missing migration: ${CURRENT_MIGRATION}`);
 
   docker([
     'run', '--detach', '--name', CONTAINER, '--network', 'none',
@@ -153,6 +156,11 @@ INSERT INTO public.profiles VALUES (
   assert.deepEqual(predicateRows(), [VIOLATION], 'guard after caller-trusted write must fail closed');
 
   psql(readFileSync(MIGRATION, 'utf8'));
+  assert.deepEqual(predicateRows(), [VIOLATION], 'the superseded 20260729222311 body must fail closed');
+  psql(`BEGIN;
+${readFileSync(CURRENT_MIGRATION, 'utf8')}
+COMMIT;
+`);
   assert.equal(
     psql("SELECT encode(sha256(convert_to(prosrc, 'UTF8')), 'hex') FROM pg_proc WHERE oid = 'public.save_field(uuid,jsonb,jsonb,uuid,text)'::regprocedure").stdout.trim(),
     EXPECTED_HASH,

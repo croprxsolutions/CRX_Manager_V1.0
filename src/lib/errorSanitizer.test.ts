@@ -280,6 +280,18 @@ describe('sanitizeError', () => {
     )).toBe('A record with this information already exists');
   });
 
+  it('names a repeated product SKU', () => {
+    expect(sanitizeError(
+      'duplicate key value violates unique constraint "products_sku_unique"'
+    )).toBe('Another product already has this SKU');
+  });
+
+  it('names a repeated active product name', () => {
+    expect(sanitizeError(
+      'duplicate key value violates unique constraint "products_active_name_unique"'
+    )).toBe('Another active product already has this name');
+  });
+
   it('sanitizes foreign key constraint violations', () => {
     expect(sanitizeError(
       'insert or update on table "invoices" violates foreign key constraint "invoices_customer_id_fkey"'

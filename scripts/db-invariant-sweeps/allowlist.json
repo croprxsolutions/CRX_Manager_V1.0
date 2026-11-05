@@ -624,12 +624,12 @@
     {
       "predicate": "actor-forgery",
       "violation_key": "get_receiving_log(p_limit integer, p_offset integer, p_vendor text, p_condition text, p_received_by uuid, p_date_from date, p_date_to date)",
-      "justification": "Live pg_get_functiondef semantic review 2026-09-12, independently traced by RLS/migration reviewers for mutators and inspected by coordinator for the two read-only grouping reports. Matched p_received_by is only nullable UUID read-only receiving-record filter (rr.received_by = p_received_by). Function separately requires active admin/sales_rep from auth.uid(); no attribution write or role lookup based on filter. This is scanner noise, not an accepted actor-forgery hole. Exception matches only the reviewed suspect parameter and exact function/dependency definition, owner, and effective EXECUTE contracts; missing or changed contracts leave the finding visible.",
+      "justification": "Live pg_get_functiondef semantic review 2026-09-12, independently traced by RLS/migration reviewers for mutators and inspected by coordinator for the two read-only grouping reports. Matched p_received_by is only nullable UUID read-only receiving-record filter (rr.received_by = p_received_by). Function separately requires active admin/sales_rep from auth.uid(); no attribution write or role lookup based on filter. This is scanner noise, not an accepted actor-forgery hole. Exception matches only the reviewed suspect parameter and exact function/dependency definition, owner, and effective EXECUTE contracts; missing or changed contracts leave the finding visible. Re-keyed 2026-11-05 for 20261111110000 (Goal 4 part 4): the new body only adds rr.id DESC as the last ORDER BY key; columns, filters, role check, grants and security mode are unchanged. Post-apply value computed on the replayed scratch database (auth.uid() reproduces its live pin there); it shows until that migration is applied.",
       "dated": "2026-09-12",
       "suspect_param": "p_received_by",
       "reviewed_contracts": {
         "auth.uid()": "d0f4a847e4284ab3265335fd66ce2a12",
-        "public.get_receiving_log(p_limit integer, p_offset integer, p_vendor text, p_condition text, p_received_by uuid, p_date_from date, p_date_to date)": "b0fdf3ca1e08db8664875f2cf274d8a9"
+        "public.get_receiving_log(p_limit integer, p_offset integer, p_vendor text, p_condition text, p_received_by uuid, p_date_from date, p_date_to date)": "b73c8a82e1b2c2f447fe42dc03869c06"
       }
     },
     {
@@ -1181,8 +1181,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_receiving_log(p_limit integer, p_offset integer, p_vendor text, p_condition text, p_received_by uuid, p_date_from date, p_date_to date)#f125bf7fc492",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "get_receiving_log(p_limit integer, p_offset integer, p_vendor text, p_condition text, p_received_by uuid, p_date_from date, p_date_to date)#6cbc6447a19a",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: NO-COST. Callable by: various; counts, quantities, revenue, dates. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-05 for 20261111110000 (Goal 4 part 4): the new body only adds rr.id DESC as the last ORDER BY key; columns, filters, role check, grants and security mode are unchanged. Post-apply value computed on the replayed scratch database (auth.uid() reproduces its live pin there); it shows until that migration is applied.",
       "dated": "2026-11-02"
     },
     {

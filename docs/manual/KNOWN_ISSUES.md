@@ -464,10 +464,9 @@ WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup chec
 
 ### KI-31 — Field Setup and field-save loose ends
 **LOW · OPEN · UI/database · unassigned**
-After saving a boundary the page does not refresh total acres, so a later attribute-only save can revert legacy
-acres; deleting every drawn polygon of a multi-part field falls back to the old boundary
-(`src/pages/FieldSetup.tsx:572`). `save_field` reports success for a missing id (`20260729222311:80`, no `FOUND`
-check).
+Deleting every drawn polygon of a multi-part field falls back to the old boundary
+(`src/pages/FieldSetup.tsx:672`). `save_field` reports success for a missing id (`20260729222311:80`, no `FOUND`
+check). (The stale-acres sub-item was fixed 2026-11-05; see the archive.)
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
 **MED · PARTIAL · UI/database · Mason (Goal 4)**

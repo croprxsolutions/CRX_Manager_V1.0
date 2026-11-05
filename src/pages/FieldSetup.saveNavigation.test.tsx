@@ -207,3 +207,34 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_field_override_acres', expect.objectContaining({ p_field_id: 'field-1', p_override_acres: 35 })));
   });
 });
+
+describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockHasKey.mockReturnValue(false);
+    mockFrom.mockImplementation((table: string) => chain(
+      table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 } : null,
+    ));
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field') return Promise.resolve({ data: true, error: null });
+      if (name === 'set_field_boundary') return Promise.resolve({ data: { measured_acres: 40, billable_acres: 40 }, error: null });
+      return Promise.resolve({ data: [], error: null });
+    });
+  });
+
+  it('sends the acres the boundary save stored, not the acres loaded at the start', async () => {
+    const router = createMemoryRouter([{ path: '/fields/:id', element: <FieldSetup /> }], { initialEntries: ['/fields/field-1'] });
+    render(<RouterProvider router={router} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Draw boundary' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
+    expect(saveFieldCalls()[0][1].p_field_payload).toMatchObject({ total_acres: 12 });
+
+    fireEvent.change(screen.getByDisplayValue('Select crop...'), { target: { value: 'corn' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(saveFieldCalls()).toHaveLength(2));
+    expect(saveFieldCalls()[1][1].p_field_payload).toMatchObject({ crop_type: 'corn', total_acres: 40 });
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'set_field_boundary')).toHaveLength(1);
+    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+  });
+});

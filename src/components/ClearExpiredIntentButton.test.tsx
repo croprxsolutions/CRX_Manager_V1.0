@@ -66,7 +66,7 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
     await waitFor(() => expect(intent.clearExpiredIntent).toHaveBeenCalledWith('receive_po_items:admin:key-1'));
     expect(mockLog).toHaveBeenCalledWith(expect.objectContaining({
-      event: 'uncertain_request_cleared',
+      event: 'uncertain_request_clear_approved',
       performedBy: 'admin-1',
       description: expect.stringContaining('receive_po_items:admin:key-1'),
     }));

@@ -30,10 +30,11 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
 
   const handleClear = async () => {
     setClearing(true);
-    // The audit row is written first: no clear may happen without a record of it.
+    // The approval is recorded first, so no clear can happen without an audit row;
+    // the clear itself may still refuse (retryable or damaged saved data).
     const logged = await logActivity({
-      event: 'uncertain_request_cleared',
-      description: `Admin cleared an expired ${operation} request saved ${new Date(request.createdAtMs).toISOString()} `
+      event: 'uncertain_request_clear_approved',
+      description: `Admin approved clearing an expired ${operation} request saved ${new Date(request.createdAtMs).toISOString()} `
         + `on ${request.surface}${request.scope ? ` (record ${request.scope})` : ''}; request key ${request.idempotencyKey}`,
       performedBy: profile.id,
     });

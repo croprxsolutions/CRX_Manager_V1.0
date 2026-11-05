@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import type { LockedRequestDetails } from '../hooks/useUncertainMutationIntent';
+import { logActivity } from '../lib/activityLogger';
 import { Sentry } from '../lib/sentry';
 import ConfirmModal from './ui/ConfirmModal';
 import { useToast } from './ui/Toast';
@@ -15,13 +16,13 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
   intent: ExpiredIntentLock;
   operation: string;
 }) {
-  const { role } = useAuth();
+  const { role, profile } = useAuth();
   const { toast } = useToast();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
 
   const request = intent.clearableExpiredRequest;
-  if (role !== 'admin' || !request) return null;
+  if (role !== 'admin' || !profile || !request) return null;
 
   const savedAt = new Date(request.createdAtMs).toLocaleString();
   const screen = request.surface.replace(/-/g, ' ');
@@ -29,6 +30,18 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
 
   const handleClear = async () => {
     setClearing(true);
+    // The audit row is written first: no clear may happen without a record of it.
+    const logged = await logActivity({
+      event: 'uncertain_request_cleared',
+      description: `Admin cleared an expired ${operation} request saved ${new Date(request.createdAtMs).toISOString()} `
+        + `on ${request.surface}${request.scope ? ` (record ${request.scope})` : ''}; request key ${request.idempotencyKey}`,
+      performedBy: profile.id,
+    });
+    if (!logged) {
+      toast('error', 'Could not record this clear in the activity log, so nothing was cleared. Try again.');
+      setClearing(false);
+      return;
+    }
     try {
       await intent.clearExpiredIntent(request.idempotencyKey);
     } catch {
@@ -49,7 +62,7 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
       // Flush first so the log survives the reload.
       await Sentry.flush(2000);
     } catch {
-      // Logging must never stop the reload below.
+      // The activity log already holds the audit row; Sentry must never stop the reload below.
     }
     // Reload so no screen keeps the recovered form values: resubmitting them would
     // send the same change again under a new key.

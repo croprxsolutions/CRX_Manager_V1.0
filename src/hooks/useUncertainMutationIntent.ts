@@ -734,8 +734,10 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   const [retryNotAfterMs, setRetryNotAfterMs] = useState<number | null>(
     initialPending ? initialVisible.retryNotAfterMs : null,
   );
+  // Only the screen that saved the request can clear it: that screen shows the
+  // saved values staff need to find the real record.
   const [lockedRequest, setLockedRequest] = useState<DurableMutationIntentRecord<T> | null>(
-    initialPending ? initialVisible : null,
+    initialOwned ? initialVisible : null,
   );
   const [, setExpiryRevision] = useState(0);
 
@@ -759,7 +761,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     setHasUnresolvedRecord(pending);
     setIsForeignIntentLocked(Boolean(pending && !owned));
     setRetryNotAfterMs(pending ? visible.retryNotAfterMs : null);
-    setLockedRequest(pending ? visible : null);
+    setLockedRequest(owned ? visible : null);
   }, [scope, surface]);
 
   const activateCurrentIdentity = useCallback((force = false) => {
@@ -1099,6 +1101,8 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     const isClearable = (record: DurableMutationIntentRecord<T> | null) => !record
       || record.status === 'resolved'
       || (record.idempotencyKey === expectedIdempotencyKey
+        && record.surface === surface
+        && record.scope === scope
         && hasKnownRetryDeadline(record)
         && Date.now() >= record.retryNotAfterMs);
     const mirror = readDurableRecord<T>(storageKey, options);
@@ -1153,7 +1157,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     attemptRecordRef.current = null;
     persistedAcknowledgmentIdentityRef.current = null;
     applyRecord(readDurableRecord<T>(storageKey, options));
-  }, [acknowledgmentKey, applyRecord, options, storageKey]);
+  }, [acknowledgmentKey, applyRecord, options, scope, storageKey, surface]);
 
   // Same value as `unresolvedIntent`, read from the ref instead of state.
   // `unresolvedIntent` is React state, so a caller that awaits classifyFailure()

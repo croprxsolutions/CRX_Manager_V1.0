@@ -440,6 +440,12 @@ describe('useUncertainMutationIntent', () => {
     mirrorless.unmount();
 
     nowMs += 23 * 60 * 60 * 1000;
+    // Another screen sees the lock but cannot clear it: only the saving screen shows the saved values.
+    const foreign = renderHook(() => useUncertainMutationIntent<{ amount: number }>({ ...options, scope: 'bill-other' }));
+    expect(foreign.result.current.isIntentLocked).toBe(true);
+    expect(foreign.result.current.clearableExpiredRequest).toBeNull();
+    await expect(foreign.result.current.clearExpiredIntent(originalKey)).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    foreign.unmount();
     const expired = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
     expect(expired.result.current.isRetryExpired).toBe(true);
     expect(expired.result.current.clearableExpiredRequest).toMatchObject({

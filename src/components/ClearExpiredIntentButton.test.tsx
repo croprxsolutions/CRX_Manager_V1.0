@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { mockAuth, mockToast, mockCapture, mockFlush, mockReload } = vi.hoisted(() => ({
-  mockAuth: { role: 'admin' as string | null },
+const { mockAuth, mockToast, mockCapture, mockFlush, mockReload, mockLog } = vi.hoisted(() => ({
+  mockAuth: { role: 'admin' as string | null, profile: { id: 'admin-1' } },
+  mockLog: vi.fn(async (_params: unknown) => true),
   mockToast: vi.fn(),
   mockCapture: vi.fn(),
   mockFlush: vi.fn(async () => true),
@@ -11,6 +12,7 @@ const { mockAuth, mockToast, mockCapture, mockFlush, mockReload } = vi.hoisted((
 
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => mockAuth }));
 vi.mock('./ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
+vi.mock('../lib/activityLogger', () => ({ logActivity: mockLog }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureMessage: mockCapture, flush: mockFlush } }));
 
 import ClearExpiredIntentButton from './ClearExpiredIntentButton';
@@ -35,6 +37,8 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     mockToast.mockReset();
     mockCapture.mockReset();
     mockReload.mockReset();
+    mockLog.mockReset();
+    mockLog.mockResolvedValue(true);
     vi.stubGlobal('location', { ...window.location, reload: mockReload });
   });
 
@@ -61,6 +65,11 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     expect(intent.clearExpiredIntent).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
     await waitFor(() => expect(intent.clearExpiredIntent).toHaveBeenCalledWith('receive_po_items:admin:key-1'));
+    expect(mockLog).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'uncertain_request_cleared',
+      performedBy: 'admin-1',
+      description: expect.stringContaining('receive_po_items:admin:key-1'),
+    }));
     // The page reloads so the recovered form values cannot be resubmitted.
     await waitFor(() => expect(mockReload).toHaveBeenCalledTimes(1));
     expect(mockToast).not.toHaveBeenCalled();
@@ -81,6 +90,17 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
     await waitFor(() => expect(mockReload).toHaveBeenCalledTimes(1));
     expect(mockToast).not.toHaveBeenCalled();
+  });
+
+  it('clears nothing when the audit row cannot be written', async () => {
+    mockLog.mockResolvedValueOnce(false);
+    const intent = lock();
+    render(<ClearExpiredIntentButton intent={intent} operation="receive_po_items" />);
+    fireEvent.click(screen.getByText(LABEL));
+    fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('activity log')));
+    expect(intent.clearExpiredIntent).not.toHaveBeenCalled();
+    expect(mockReload).not.toHaveBeenCalled();
   });
 
   it('does not reload when the clear is refused', async () => {

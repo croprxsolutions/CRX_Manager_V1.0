@@ -27,7 +27,9 @@ import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
-import type { Product, ProductCategory, SalesSheetFormat } from '../types';
+import ProductRateLockControl from '../components/products/ProductRateLockControl';
+import { loadProductRateLock } from '../lib/productRateLock';
+import type { Product, ProductCategory, ProductRateLock, SalesSheetFormat } from '../types';
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
@@ -154,6 +156,7 @@ export default function Products() {
   const [products, setProducts] = useState<ProductListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [rateLock, setRateLock] = useState<ProductRateLock | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [vendorFilter, setVendorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
@@ -287,6 +290,18 @@ export default function Products() {
       toast('error', 'Could not load product categories. Refresh before editing a category.');
     });
   }, [toast]);
+
+  const [rateLockFailed, setRateLockFailed] = useState(false);
+  const loadRateLock = useCallback(() => {
+    setRateLockFailed(false);
+    loadProductRateLock().then(setRateLock).catch((error: unknown) => {
+      Sentry.captureException(error);
+      // An older state may be out of date: show "Couldn't check" instead.
+      setRateLock(null);
+      setRateLockFailed(true);
+    });
+  }, []);
+  useEffect(loadRateLock, [loadRateLock]);
 
   const retryProducts = () => {
     setLoading(true);
@@ -1218,7 +1233,8 @@ export default function Products() {
               />
             </div>
           )}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+          <ProductRateLockControl lock={rateLock} loadFailed={rateLockFailed} onRetry={loadRateLock} isAdmin={isAdmin} profileId={profile?.id ?? ''} onChanged={setRateLock} />
           {/* Download All dropdown. Exports wait while a failed load hides the rows: they would
               export the old catalog as if it were current. */}
           <div className="relative">

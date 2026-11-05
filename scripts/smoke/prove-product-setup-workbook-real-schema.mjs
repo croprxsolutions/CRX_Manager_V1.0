@@ -310,8 +310,11 @@ const rateRow = (e, rate, unit, suggested) => ({ product_id: e.product_id, rate_
   suggested_rate: suggested, expected: { rate_per_acre: e.rate_per_acre, rate_unit: e.rate_unit,
     suggested_rate: e.suggested_rate, pricing_version: e.pricing_version, unit_size: e.unit_size,
     inventory_unit: e.inventory_unit, product_form: e.product_form } });
-const previewRates = (rows, uid = ADMIN) =>
-  JSON.parse(ok(uid, `SELECT public.preview_product_rates('${JSON.stringify(rows).replaceAll("'", "''")}'::jsonb);`));
+// `raw` keeps each number as the database's own text, so a fractional cent cannot parse into whole cents.
+const previewRates = (rows, uid = ADMIN) => {
+  const text = ok(uid, `SELECT public.preview_product_rates('${JSON.stringify(rows).replaceAll("'", "''")}'::jsonb);`);
+  return { ...JSON.parse(text), raw: JSON.parse(text, (k, v, c) => (typeof v === 'number' ? c.source : v)) };
+};
 // The save: the previewed after-prices become each row's expected.prices, as the screen does.
 const saveFromPreview = (rows, preview) => rows.map((r) => {
   const p = preview.rows.find((x) => x.product_id === r.product_id);
@@ -352,7 +355,7 @@ function main() {
   const preview = previewRates(rows);
   assert.equal(preview.rows.filter((r) => r.status === 'change').length, 20);
   for (const b of BATCH) {
-    const p = preview.rows.find((r) => r.product_id === b.id);
+    const p = preview.raw.rows.find((r) => r.product_id === b.id);
     assert.equal(p.before.tier1_price_per_acre, null);
     assert.equal(exactCents(p.after.tier1_price_per_acre), cents(perAcre(b.t1, b.rate10)), `tier 1 preview for ${b.id}`);
     assert.equal(exactCents(p.after.tier2_price_per_acre), cents(perAcre(b.t2, b.rate10)), `tier 2 preview for ${b.id}`);
@@ -438,6 +441,20 @@ function main() {
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { use_timings: 'bad' } }], 'k-setup-ut-scalar'), /PRODUCT_SETUP_INVALID/);
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { container_size: '0' } }], 'k-setup-cs'), /PRODUCT_SETUP_INVALID: .*Batch 5/);
   refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { rei_hours: 'twelve' } }], 'k-setup-rei'), /PRODUCT_SETUP_INVALID/);
+  // A label maximum needs a unit the field screens can compare: unknown, blank or missing units are refused.
+  refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { max_label_rate: '2.5', max_label_rate_unit: 'furlong' } }], 'k-setup-mlu-bad'), /PRODUCT_SETUP_INVALID: a maximum label rate needs a unit.*Batch 5/);
+  refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { max_label_rate: '2.5', max_label_rate_unit: ' ' } }], 'k-setup-mlu-blank'), /PRODUCT_SETUP_INVALID: a maximum label rate needs a unit/);
+  refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { max_label_rate: '2.5' } }], 'k-setup-mlu-none'), /PRODUCT_SETUP_INVALID: a maximum label rate needs a unit/);
+  // The product saved above with 32 oz: clearing or garbling only its unit is refused too; per acre spellings save.
+  const g2 = byId(exportRows(), g.product_id);
+  refused(ADMIN, setup([{ product_id: g2.product_id, setup_fingerprint: g2.setup_fingerprint, changes: { max_label_rate_unit: null } }], 'k-setup-mlu-clear'), /PRODUCT_SETUP_INVALID: a maximum label rate needs a unit/);
+  ok(ADMIN, setup([{ product_id: g2.product_id, setup_fingerprint: g2.setup_fingerprint, changes: { max_label_rate_unit: 'fl oz/acre' } }], 'k-setup-mlu-acre'));
+  assert.equal(field(g2.product_id, 'max_label_rate_unit'), 'fl oz/acre');
+  // An older product saved elsewhere with an unknown label unit still takes an unrelated edit.
+  asOwner(`UPDATE public.products SET max_label_rate = 3, max_label_rate_unit = 'oz/100 gal' WHERE id = '${m.product_id}';`);
+  const m2 = byId(exportRows(), m.product_id);
+  ok(ADMIN, setup([{ product_id: m2.product_id, setup_fingerprint: m2.setup_fingerprint, changes: { manufacturer: 'Legacy unit ok' } }], 'k-setup-mlu-legacy'));
+  assert.equal(field(m2.product_id, 'manufacturer'), 'Legacy unit ok');
   // Fields the Setup tab never writes: vendor, rates, prices, cost, active, form, stock unit, pack size.
   for (const forbidden of ['vendor', 'rate_per_acre', 'rate_unit', 'suggested_rate', 'tier1_price', 'current_cost', 'is_active', 'product_form', 'inventory_unit', 'unit_size', 'container_unit']) {
     refused(ADMIN, setup([{ product_id: m.product_id, setup_fingerprint: m.setup_fingerprint, changes: { [forbidden]: 'x' } }], `k-forbid-${forbidden}`), /PRODUCT_SETUP_ROW_SHAPE_INVALID/);

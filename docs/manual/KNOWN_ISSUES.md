@@ -415,7 +415,7 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
 ### KI-100 — An open product page learns of a lock change only on reload or a refused save
-**LOW · product UI · LOCAL CANDIDATE `20261107060000` — NOT APPLIED**
+**LOW · product UI · `20261107060000` — APPLIED LIVE 2026-11-04**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
 
 ---
@@ -544,33 +544,37 @@ Residual: a line completed before the migration has no record and still restores
 `requires_review` with a note to check reserved stock. Live
 read-only 2026-11-04: one delivery with stock has ever been voided (DEL-00028, 2026-03-20); nothing is corrected.
 
-### KI-100 — A spray job can leave a booking with a remainder no Partial Order can take
-**MED · OPEN (deferred from PR #1362) · database · Taha**
+### KI-100 — A spray job could leave a booking with a remainder no Partial Order can take
+**MED · FIXED: migration `20261107070000` APPLIED LIVE 2026-11-04 (ledger `20261105032430`, PR #1451) · database · found 2026-11-04 (PR #1362 review)**
 Since `20261106110000` (S02) a Partial Order must be in whole hundredths, but `_sync_quote_job_reservations`
-stores a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking leaves 9.9921875 gal,
-which no draw can take, so the booking never closes. Live impact on 2026-11-04: none (`job_product_draws` has 0 rows).
-- **Next step.** A small migration rounding job reservations to 0.01 (Sol-listed: inventory), before spray jobs
-  reserve from bookings in earnest.
+drew a job reservation unrounded (`field_app_priced_quantity`): 1 fl oz from a 10 gal booking left 9.9921875 gal,
+which no draw can take, so the booking never closed. The fix keeps a booking's job draws in whole hundredths that
+together match the real total applied, rounded once, and holds at least each draw in the shed. Live had no job draws on 2026-11-04, so no booking was stranded. Proof:
+`scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs`.
 
 ### KI-101 — Voiding a delivery on a cancelled order reopens the order
-**MED · OPEN (found 2026-11-04, KI-93 design review; live function body read) · database/lifecycle · unassigned**
-`_void_delivery_replay_impl_20261015` recomputes the order's status (`fulfilled`, `confirmed` or
-`partially_fulfilled`) and writes it under the admin override without checking whether the order was cancelled,
-so voiding a delivery of a cancelled, part-delivered order brings it back to life after the cancel already closed
-out its commissions, reservations and invoices. Admin-only. Separately, signed-in admins hold a direct UPDATE grant
-on `orders.status`, so they can move an order between allowed statuses (for example confirmed to fulfilled) with no
-delivery; no stock moves.
-- **Next step.** Its own Sol-listed PR: keep `cancelled` when voiding a delivery of a cancelled order, decide whether
-  the voided quantity's reservation is released, and consider revoking the direct `orders.status` grant.
+**MED · FIX IN REVIEW: migration `20261107120000` (NOT APPLIED) · database/lifecycle · found 2026-11-04 (KI-93 design review)**
+`_void_delivery_replay_impl_20261015` recomputed the order's status and wrote it under the admin override without
+checking for `cancelled`, so voiding a delivery of a cancelled, part-delivered order reopened it and put back the
+reservation the cancel had released. Reproduced 2026-11-04 on the throwaway copy. Such orders come from cancels before
+2026-07-21 (today a cancel of a part-delivered order closes the remainder and marks it fulfilled) or from the direct
+status change below. The fix keeps the order `cancelled`: the voided goods go back on the shelf, the reservation is
+not put back (a full cancel released it and nobody will deliver a cancelled order), the line keeps nothing left to
+deliver, and the stock-ledger note says so. An order cancelled through the direct status change released nothing;
+its reservation is left as it was. Live 2026-11-04: 4 cancelled orders, none with a completed delivery or
+delivered quantity. Proof: `scripts/smoke/prove-void-delivery-order-status-guards-real-schema.mjs`.
+- **Still open (needs Mason's yes: a permissions change).** Signed-in admins hold a direct UPDATE grant on
+  `orders.status`, so they can move an order between allowed statuses (for example confirmed to fulfilled, or
+  partially fulfilled to cancelled) with no delivery and no stock movement. Revoking it is its own PR.
 
 ### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice
-**MED · OPEN, TRACED NOT REPRODUCED (found 2026-11-04, KI-93 design review, Sol r2 #8) · database/inventory · unassigned**
+**MED · FIX IN REVIEW: migration `20261107120000` (NOT APPLIED) · database/inventory · found 2026-11-04 (KI-93 design review, Sol r2 #8)**
 `_void_order_impl_20260714` restores delivered stock but leaves the order's completed deliveries `completed`, and
-`void_delivery` checks only the delivery's own status. So voiding a fulfilled order and then one of its deliveries
-would put that delivery's stock back a second time and reopen the voided order. Live exposure 2026-11-04: 0 voided
-orders and 0 completed deliveries on voided orders.
-- **Next step.** Reproduce on the throwaway real-schema copy, then a small Sol-listed migration: `void_delivery`
-  refuses when its order is voided.
+`void_delivery` checked only the delivery's own status, so voiding a fulfilled order and then one of its deliveries
+put that stock back a second time and reopened the voided order. Reproduced 2026-11-04 on the throwaway copy (100 on
+hand, deliver 10, void the order, void the delivery: 110 on hand, order `confirmed`). The fix refuses that delivery
+void (`ORDER_VOIDED_DELIVERY_LOCKED`); nothing moves. Live 2026-11-04: 0 voided orders, 0 completed deliveries on
+voided orders. Proof: as KI-101.
 
 ## Database and release process
 

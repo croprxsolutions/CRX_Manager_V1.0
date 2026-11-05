@@ -1816,6 +1816,28 @@ try {
     runGh: () => featurePrJson,
   }).blocked, false, "gh PR merge to a non-production base is allowed");
 
+  // staging gets every main gate (Mason on #1363, 2026-11-04: "yes with the guard
+  // updates first"); a migration still lands only through a PR into main.
+  {
+    const stagingPrJson = JSON.stringify({ ...mainPr, baseRefName: "staging" });
+    const ghFor = (files) => (args) => (args[0] === "api" && String(args[1]).includes("/compare/")
+      ? JSON.stringify({ status: "ahead", ahead_by: 1, head: risky.sha, files })
+      : stagingPrJson);
+    const merge = (runGh, pin = PIN) => evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 123 --squash${pin}` }, repoDir: risky.repo, nowMs: now, runGh,
+    });
+    const appFile = [{ filename: "src/lib/db.ts", status: "modified" }];
+    unlinkSync(proofPath(risky.repo));
+    assert.equal(merge(ghFor(appFile)).blocked, true, "a merge into staging on the Sol list needs Sol, as into main");
+    writeProof(risky.repo, valid);
+    assert.equal(merge(ghFor(appFile)).blocked, false, "with the Sol proof, a merge into staging lands");
+    assert.equal(merge(ghFor(appFile), "").blocked, true, "a merge into staging must pin the head, as into main");
+    const migration = merge(ghFor([{ filename: "supabase/migrations/20261107000000_x.sql", status: "added" }]));
+    assert.equal(migration.blocked, true, "a migration cannot merge into staging");
+    assert.match(migration.reason, /into main/, "...and the denial says where it goes instead");
+    assert.equal(merge(() => { throw new Error("offline"); }).blocked, true, "an unreadable staging PR is denied (fail closed)");
+  }
+
   // ── Sol covers the listed files only (Mason, 2026-10-30) ───────────────────
   // A merge-ready pull request with NO Sol proof. The list decides alone whether it
   // merges, so every case below differs only in what GitHub's comparison lists or in

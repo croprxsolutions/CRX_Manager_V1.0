@@ -947,6 +947,12 @@ assert.equal(
     true,
     "carried proof from a clean collision check passes",
   );
+  // Post-apply carry (Mason, 2026-11-04): one records-only commit, so the base never moves.
+  const postApply = { ...carriedProof, carry: { ...carriedProof.carry, mode: "post_apply", from_base: base } };
+  assert.equal(proofValid(postApply, sha, now, base), true, "post-apply carry on the same base passes");
+  assert.equal(proofValid({ ...postApply, carry: { ...postApply.carry, from_base: "e".repeat(40) } }, sha, now, base), false, "post-apply carry that moved the base fails");
+  assert.equal(proofValid(postApply, sha, now, "f".repeat(40)), false, "post-apply carry on another base fails");
+  assert.equal(proofValid({ ...postApply, carry: { ...postApply.carry, root_review: { ...postApply.carry.root_review, timestamp: new Date(now - SOL_PROOF_MAX_AGE_MS - 1).toISOString() } } }, sha, now, base), false, "post-apply carry past its full review's 24 hours fails");
   assert.equal(proofValid(carriedProof, sha, now, "f".repeat(40)), false, "carried proof on a moved base fails");
   assert.equal(proofValid(carriedProof, "b".repeat(40), now, base), false, "carried proof for another head fails");
   assert.equal(

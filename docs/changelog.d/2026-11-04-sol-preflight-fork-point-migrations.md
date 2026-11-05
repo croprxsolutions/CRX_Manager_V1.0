@@ -1,0 +1,5 @@
+## 2026-11-04 - Sol pre-flight reviews migration branches from the fork point too
+
+- `scripts/write-codex-push-proof.mjs` `solReviewBase()` no longer makes a branch that adds a migration review against the latest `origin/main`. Like every other branch, it is reviewed from the single commit where it left main, so a peer's merge to main no longer blocks the Sol run.
+- Why: PR #1442 lost three Sol runs to "does not contain the latest main" refusals while other PRs merged (2026-11-04). The same happened on #1452 and #1437. Mason approved this narrowing in the #1442 retro.
+- Remaining enforcement is unchanged. The live apply's landing gate still needs the PR head to contain GitHub's current base, with a Sol proof bound to that base. That means merging main and then running `--carry-forward`, whose collision check runs a model review whenever main added database files. The merge gate's base checks are also unchanged. A branch with several split points from main still refuses. The test is in `scripts/write-codex-push-proof.test.mjs`.

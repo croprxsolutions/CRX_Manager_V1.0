@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Pre-push asks: does this push change anything the app type check or build reads?
 // Reads git's pre-push ref lines on stdin and prints "build" or "skip". Any doubt
-// prints "build", so a broken diff never skips the check. CI builds every PR either way
+// prints "build", so a broken diff never skips the check. With --map it asks the same
+// about the workflow map generator's inputs and prints "check" or "skip". CI builds every PR either way
 // (2026-11-03 retro: three scripts/docs pushes spent ~13 minutes rebuilding the app).
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -12,6 +13,13 @@ const APP_FILES = new Set(['index.html', 'vite.config.ts', 'package.json', 'pack
 export function needsAppBuild(paths) {
   return paths.some((file) => file.startsWith('src/') || file.startsWith('public/')
     || /^tsconfig[^/]*\.json$/.test(file) || APP_FILES.has(file));
+}
+
+// Everything scripts/generate-workflow-map.mjs reads, plus the generator itself.
+const MAP_FILES = new Set(['docs/app-workflow-map.html', 'docs/reference/rpc-functions.md', 'scripts/generate-workflow-map.mjs']);
+
+export function needsMapCheck(paths) {
+  return paths.some((file) => file.startsWith('src/') || MAP_FILES.has(file));
 }
 
 function changedPaths(refLines) {
@@ -30,10 +38,11 @@ function changedPaths(refLines) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  let verdict = 'build';
+  const map = process.argv.includes('--map');
+  let verdict = map ? 'check' : 'build';
   try {
     const refs = readFileSync(0, 'utf8');
-    if (refs.trim() && !needsAppBuild(changedPaths(refs))) verdict = 'skip';
+    if (refs.trim() && !(map ? needsMapCheck : needsAppBuild)(changedPaths(refs))) verdict = 'skip';
   } catch { /* keep build */ }
   console.log(verdict);
 }

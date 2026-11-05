@@ -415,7 +415,7 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
 
 ### KI-100 — An open product page learns of a lock change only on reload or a refused save
-**LOW · product UI · LOCAL CANDIDATE `20261107060000` — NOT APPLIED**
+**LOW · product UI · `20261107060000` — APPLIED LIVE 2026-11-04**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
 
 ---

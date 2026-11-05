@@ -202,7 +202,9 @@ export function recalcItem<T extends CalcItem>(
   const actualRate = item.actual_rate || 0;
   const acres = item.acres || 0;
 
-  const rateUnitFactorOz = getConversionFactor(rateUnitOf(item.rate_unit, product), conversions);
+  // The line's own rate unit, as save_quote reads it: a blank one counts as 1 oz (the form refuses
+  // to save a blank one). Only the catalog's per-acre price reads a blank seed unit as the stock unit.
+  const rateUnitFactorOz = getConversionFactor(item.rate_unit, conversions);
   const billed = inventoryUnitFactorOz > 0
     ? billedLine(pricePerUnit, cost, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
     : billedLine(pricePerUnit, cost, [0]);

@@ -36,7 +36,7 @@ import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult
 import { fetchAllRows } from '../lib/pagedRead';
 import { fetchOpenBookings, type OpenBooking } from '../lib/openBookings';
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
-import { getQuoteTierPrice, isTierPriceMissing, pricedLine } from '../lib/quoteCalc';
+import { exactRound2, getQuoteTierPrice, isTierPriceMissing, pricedLine } from '../lib/quoteCalc';
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
@@ -341,7 +341,7 @@ export default function NewOrder() {
         total_price: line.totalPrice,
         profit: line.profit,
         // The database's order-line margin: from the unit price and cost, not the rounded line.
-        net_margin: pricePerUnit > 0 ? Math.round(((pricePerUnit - cost) / pricePerUnit) * 10000) / 100 : 0,
+        net_margin: pricePerUnit > 0 ? exactRound2([Number((pricePerUnit - cost).toFixed(6)), 100], [pricePerUnit]) : 0,
       };
     },
     [products, getTierPrice]

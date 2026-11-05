@@ -225,7 +225,14 @@ PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invo
 `update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
 `create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, applied live 2026-11-03, ledger `20261103013009`) binds
 `price_order`, `update_order_items` and `mark_inventory_row_verified` (MED, PR #1042 follow-up 3; Mason: "batch
-it"). Remaining: notification RPCs and about 45 MED/LOW functions (batches 4c and 4d).
+it"). Batch 4e (`20261111210000`, not yet applied; apply after batch 4c `20261110160000` and only once the app
+PR that sends a key on the six keyless notification and applied-info calls is live) binds 15 operations
+functions and requires a key on each: `confirm_job_notification_sent`, `record_job_pre_notifications`,
+`record_job_post_notifications`, `log_failed_notification`, `assign_job_applicator`, `dispatch_job_locations`,
+`undispatch_job_locations`, `start_job`, `create_job_from_quote_section`, `update_field_app_applied_info`,
+`create_quote_from_template`, `rollover_quote_to_season`, `save_quote_template`, and the two disabled bulk
+prepayment functions `apply_remaining_prepayments` and `batch_apply_all_prepayments` (still always refused).
+Remaining: batches 4c and 4d.
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
 **HIGH on money paths · FIXED IN CODE 2026-11-02 (branch `claude/crx-idempotency-keys-4a3741`; live once merged) · money**
@@ -262,7 +269,9 @@ a reload and Finish it left one order and 100 gal drawn. Other screens still kee
 **Remaining risk:** for the unbound functions, a create retried with different details after a lost reply opens
 the record already created without the later edits, and an edited retry of an existing record applies the new edit
 after the old one. Neither makes a second record or moves money twice; a clear refusal needs server-side binding
-(KI-10 batches 4c/4d), not a screen change. Quotes' Convert to Order
+(KI-10 batches 4c/4d), not a screen change. Once batch 4e is applied, `assign_job_applicator`,
+`create_quote_from_template` and `rollover_quote_to_season` are bound: a changed retry with the same key is
+refused and changes nothing, instead of replaying the record already made; a refresh shows that record. Quotes' Convert to Order
 starts a new key each time its dialog opens, which is accepted: the server answers a repeat with
 `already_converted` and opens the existing order. `KNOWN_UNFIXED_SITES` in
 `src/__tests__/idempotency-reset-order.test.ts` lists only three documented scanner false positives (CustomerDetail,

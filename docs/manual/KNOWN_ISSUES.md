@@ -299,7 +299,7 @@ can make old splits refuse to save (LOW-MED).
 
 ### KI-14 — Transfer-created field invoices are always Net 30
 **MED · PARTIAL · money · screen half unassigned**
-- Database half: candidate `20261108150000` (not yet live) stops the transfer stamping invoice date + 30 days;
+- Database half: candidate `20261112090000` (not yet live) stops the transfer stamping invoice date + 30 days;
   posting then stamps the invoice's terms, else the customer's (every posting route ends in
   `_post_invoice_impl_20260714`, which fills the due date only when blank, so the old +30 always survived).
   Saved invoices keep their dates; on 2026-11-05 none disagreed with its customer's terms (all customers Net 30).

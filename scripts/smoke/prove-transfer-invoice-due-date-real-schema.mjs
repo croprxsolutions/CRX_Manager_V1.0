@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261108150000_transfer_invoice_due_date_follows_terms (KI-14).
+ * Real-schema proof for 20261112090000_transfer_invoice_due_date_follows_terms (KI-14).
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container and replays
  * every migration before the candidate. With customers on Net 15, Net 30 and Due on receipt, it
@@ -32,7 +32,7 @@ let started = false;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261108150000_transfer_invoice_due_date_follows_terms.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261112090000_transfer_invoice_due_date_follows_terms.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

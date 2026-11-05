@@ -15,6 +15,33 @@
       "covers": ["admin_update_profile", "batch_approve_blend_tickets", "batch_reject_blend_tickets", "bulk_create_label_drafts", "commit_label_draft", "create_label_draft", "create_blend_ticket", "save_blend_ticket", "save_blend_ticket_fields", "dismiss_watchdog_flag", "delete_vendor", "reactivate_vendor", "save_vendor", "link_fields_to_parent", "unlink_field_from_parent", "review_customer_fact", "supersede_customer_fact", "save_blend_recipe", "save_field", "save_field_crop_history", "save_field_geometry", "save_field_polygons", "set_application_record_lots", "set_field_boundary", "set_field_override_acres"],
       "area": ["idempotency", "security", "regression"]
     },
+    "create_product_with_parent": {
+      "chain": "smoke-product_parents.sql",
+      "container_prover": "prove-product-parents-real-schema.mjs",
+      "description": "REQUIRES 20261108120000. Product parents (PAR-1): anon cannot execute the twelve public parent functions; on invented parents an admin creates a parent with its first size (a same-key retry answers the same), adds a bulk size whose spaced EPA number is stored normalized, edits the nickname and is refused a no-change edit; a direct browser edit of a grouped size category is refused PRODUCT_PARENT_VALUE; unlocked the parent rates reach every size at the previewed prices, locked a correction with a reason does too and logs a corrected rate event per size; a size moves to another parent at its previewed prices with reason and evidence; the identity correction saves; both reads find the parents with no cost or price; every copied size change is a parent_copy history entry; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED.",
+      "covers": [
+        "create_product_with_parent",
+        "add_product_size",
+        "update_product_parent",
+        "preview_parent_rates",
+        "set_parent_rates",
+        "correct_parent_rates",
+        "preview_move_product_size",
+        "move_product_size",
+        "preview_product_parent_identity_correction",
+        "correct_product_parent_identity",
+        "get_product_parents",
+        "search_product_parents",
+        "normalize_product_category",
+        "write_product_change_history",
+        "guard_product_parent_values",
+        "guard_product_parent_timings"
+      ],
+      "area": [
+        "pricing",
+        "security"
+      ]
+    },
     "apply_product_setup": {
       "chain": "smoke-product_setup_workbook.sql",
       "container_prover": "prove-product-setup-workbook-real-schema.mjs",

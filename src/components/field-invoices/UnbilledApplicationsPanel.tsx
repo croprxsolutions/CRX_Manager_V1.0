@@ -21,6 +21,7 @@ import { Sentry } from '../../lib/sentry';
 import { SkeletonCard } from '../ui/Skeleton';
 import { LoadFailedState } from '../ui/EmptyState';
 import { formatCents as fmt } from '../../lib/money';
+import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 
 // Phase 2 of the As-Applied / Field-Invoice build (read-only reconciliation).
 // Surfaces the TWO reliable, actionable "applied but not yet billed" backlogs so
@@ -40,8 +41,6 @@ import { formatCents as fmt } from '../../lib/money';
 // Job rows can be billed here through the same guarded RPC as JobDetail. Blend-ticket
 // rows remain navigate-only because that billing path has a parked commission follow-up.
 // (Lives under /field-invoices/* so it inherits the Field Invoices permission.)
-
-const QUERY_LIMIT = 500;
 
 interface UnbilledRow {
   id: string;
@@ -180,23 +179,26 @@ export default function UnbilledApplicationsPanel() {
     };
 
     try {
+      // The whole backlog, page by page (Goal 4): a 500-row cap hid the newest work.
       const [jobsRes, ticketsRes] = await Promise.all([
-        supabase
+        fetchAllRows((from, to) => pageWithList(supabase
           .from('jobs')
-          .select('id, job_number, job_date, total_acres, total_price_cents, customer:customers(farm_name)')
+          .select('id, job_number, job_date, total_acres, total_price_cents, customer:customers(farm_name)', { count: 'exact' })
           .eq('status', 'completed')
           .is('invoice_id', null)
           .is('deleted_at', null)
           .order('job_date', { ascending: true })
-          .limit(QUERY_LIMIT),
-        supabase
+          .order('id')
+          .range(from, to))),
+        fetchAllRows((from, to) => pageWithList(supabase
           .from('blend_tickets')
-          .select('id, ticket_number, ticket_date, total_acres, customer:customers(farm_name)')
+          .select('id, ticket_number, ticket_date, total_acres, customer:customers(farm_name)', { count: 'exact' })
           .eq('review_status', 'approved')
           .eq('payment_status', 'unbilled')
           .is('deleted_at', null)
           .order('ticket_date', { ascending: true })
-          .limit(QUERY_LIMIT),
+          .order('id')
+          .range(from, to))),
       ]);
       if (seq !== fetchSeqRef.current) return false;
 
@@ -480,11 +482,6 @@ export default function UnbilledApplicationsPanel() {
                     ))}
                   </tbody>
                 </table>
-                {s.rows.length === QUERY_LIMIT && (
-                  <p className="text-xs text-secondary mt-2">
-                    Showing the first {QUERY_LIMIT} — open “View all” for the full list.
-                  </p>
-                )}
               </div>
             )}
           </div>

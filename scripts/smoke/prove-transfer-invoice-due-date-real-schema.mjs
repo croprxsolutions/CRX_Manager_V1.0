@@ -217,7 +217,7 @@ const [J15, J30, JRCPT, JSPLIT] = ['e1', 'e2', 'e3', 'e4'].map((s) => `7c6c0000-
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const LIVE_IMPL_MD5 = 'a72cf3a5cff53d4024ad52b832985724';
-const NEW_IMPL_MD5 = '5c19463275cd267eb0dd1f292ae1a8bd';
+const NEW_IMPL_MD5 = 'a01005fb8a38cf5b23478029efd62d43';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data)
@@ -261,7 +261,7 @@ ${asAdmin}
 SELECT public.transfer_job_to_invoice('${job}', '${ADMIN}', 'prover-' || gen_random_uuid()) IS NOT NULL;
 RESET ROLE;
 CREATE TEMP TABLE prover_made ON COMMIT DROP AS
-  SELECT i.id, i.invoice_group_id, i.status AS made_status, i.due_date AS made_due,
+  SELECT i.id, i.invoice_group_id, i.status AS made_status, i.due_date AS made_due, i.due_date - i.invoice_date AS made_days,
          public._invoice_post_version(i.id) AS ver,
          to_jsonb(i) - 'id' - 'invoice_number' - 'created_at' - 'updated_at' - 'invoice_group_id' - 'due_date' AS made_row,
          (SELECT jsonb_agg(to_jsonb(ii) - 'id' - 'invoice_id' - 'created_at' - 'updated_at' ORDER BY ii.sort_order, ii.description)
@@ -274,7 +274,7 @@ SELECT count(public.post_invoice_group(g, '${ADMIN}', v, 'prover-group-' || g))
   FROM (SELECT invoice_group_id g, jsonb_object_agg(id::text, ver) v FROM prover_made WHERE invoice_group_id IS NOT NULL GROUP BY 1) x;
 RESET ROLE;
 SELECT 'SNAP|' || jsonb_agg(jsonb_build_object(
-    'owner', i.customer_id, 'made_status', m.made_status, 'made_due', m.made_due, 'status', i.status,
+    'owner', i.customer_id, 'made_status', m.made_status, 'made_due', m.made_due, 'made_days', m.made_days, 'status', i.status,
     'posted_days', i.due_date - i.invoice_date, 'split', m.invoice_group_id IS NOT NULL,
     'row', m.made_row, 'items', m.made_items)
   ORDER BY i.customer_id)::text
@@ -324,7 +324,7 @@ try {
   }
   console.log('[prover] APPLY: new body pinned; owner-only ACL and the public wrapper unchanged');
 
-  // 3. After: blank at transfer, the customer's terms at posting; nothing else moves.
+  // 3. After: the transfer stamps the owner's terms, posting keeps them; nothing else moves.
   const after = Object.fromEntries(JOBS.map((j) => [j, transferAndPost(j)]));
   assert.equal(days(after[J15]), 'Net 15=+15');
   assert.equal(days(after[J30]), 'Net 30=+30');
@@ -334,14 +334,16 @@ try {
     assert.equal(after[j].length, before[j].length, 'invoice count changed');
     after[j].forEach((a, i) => {
       const b = before[j][i];
-      assert.equal(a.made_due, null, 'AFTER: the transfer still stamped a due date');
+      // An unposted invoice can be emailed (the server PDF prints a NULL due date as "On receipt"),
+      // so the transfer itself must stamp the terms' date, and posting must keep it.
+      assert.equal(a.made_days, a.posted_days, `AFTER: ${NAMES[a.owner]} transfer stamp (+${a.made_days}) differs from the posted date`);
       assert.equal(a.owner, b.owner);
       assert.equal(a.made_status, b.made_status, 'the transfer left a different status');
       assert.deepEqual(a.row, b.row, `${NAMES[a.owner]}: an invoice column other than due_date changed`);
       assert.deepEqual(a.items, b.items, `${NAMES[a.owner]}: an invoice line changed`);
     });
   }
-  console.log(`[prover] AFTER: ${JOBS.map((j) => days(after[j])).join(' | ')}; every other invoice and line column unchanged`);
+  console.log(`[prover] AFTER (stamped at transfer, kept by posting): ${JOBS.map((j) => days(after[j])).join(' | ')}; every other invoice and line column unchanged`);
 
   // 4. Re-apply refuses on the source pin.
   const again = apply('candidate.sql');

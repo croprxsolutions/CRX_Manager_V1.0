@@ -6,9 +6,12 @@
 -- whatever the customer's payment terms said. Posting (_post_invoice_impl_20260714, reached by
 -- post_invoice, post_invoice_group and batch_post_invoices) fills due_date only when it is NULL,
 -- so that +30 always survived. Both inserts (the multi-owner split and the single invoice) now
--- leave due_date NULL, as every other invoice creator does; posting then stamps
--- invoice_date + parse_payment_terms_days(the invoice's terms, else the customer's terms):
--- Net 15 -> +15, Net 30 or blank -> +30, due on receipt -> +0. Nothing else in the body changes.
+-- stamp invoice_date + parse_payment_terms_days(that invoice's customer's terms), the date
+-- posting itself would stamp (the transfer sets no invoice-level terms): Net 15 -> +15,
+-- Net 30 or blank -> +30, due on receipt -> +0. The date is stamped at transfer, not left NULL,
+-- because an unposted invoice can be emailed and the server PDF prints a NULL due date as
+-- "On receipt". Saving terms on either invoice screen clears due_date, so posting re-derives it.
+-- Nothing else in the body changes.
 -- Already-saved invoices keep their due dates (live 2026-11-05: one transfer invoice, matching
 -- its customer's terms).
 --
@@ -267,7 +270,9 @@ BEGIN
         application_service_id, invoice_group_id
       ) VALUES (
         v_invoice_number, v_owner_ids[v_oidx], 'field_application', 'draft',
-        (now() AT TIME ZONE 'America/Chicago')::date, NULL,  -- KI-14: posting stamps invoice_date + the terms' days, as for every other invoice
+        (now() AT TIME ZONE 'America/Chicago')::date,
+        (now() AT TIME ZONE 'America/Chicago')::date
+          + parse_payment_terms_days((SELECT c.payment_terms FROM customers c WHERE c.id = v_owner_ids[v_oidx])),  -- KI-14: the owner's terms, as posting would stamp
         0, 0, 0, 0,
         COALESCE(v_member_field_names, v_field_names), v_crop_type, v_member_acres, v_applicator_name, v_vehicle_name,
         v_job.job_date, v_job.notes,
@@ -500,7 +505,9 @@ BEGIN
     -- insert as 'draft' (DELTA-1) — trg_invoice_draft_insert rejects non-draft,
     -- non-credit_memo inserts; DELTA-4 flips to 'unposted' once fully built.
     v_invoice_number, v_job.customer_id, 'field_application', 'draft',
-    (now() AT TIME ZONE 'America/Chicago')::date, NULL,  -- KI-14: posting stamps invoice_date + the terms' days, as for every other invoice
+    (now() AT TIME ZONE 'America/Chicago')::date,
+    (now() AT TIME ZONE 'America/Chicago')::date
+      + parse_payment_terms_days((SELECT c.payment_terms FROM customers c WHERE c.id = v_job.customer_id)),  -- KI-14: the customer's terms, as posting would stamp
     COALESCE(v_job.total_price_cents, 0), 0, 0, 0,
     v_field_names, v_crop_type, v_total_acres, v_applicator_name, v_vehicle_name,
     v_job.job_date, v_job.notes,
@@ -770,7 +777,7 @@ BEGIN
        AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
        AND pg_get_userbyid(p.proowner) = 'postgres'
        AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]
-       AND md5(p.prosrc) = '5c19463275cd267eb0dd1f292ae1a8bd'
+       AND md5(p.prosrc) = 'a01005fb8a38cf5b23478029efd62d43'
   ) THEN
     RAISE EXCEPTION 'TRANSFER_DUE_DATE_POSTFLIGHT: the new private transfer body, owner, settings or ACL did not land as reviewed';
   END IF;

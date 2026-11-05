@@ -292,6 +292,19 @@ function main() {
   const installed = apply('cand.sql');
   assert.equal(installed.status, 0, installed.output);
   ledger(path.basename(CANDIDATE, '.sql'));
+  // The stock-unit follow-up refuses to install over a seed parent that already mixes units.
+  const [mixP, mixLb, mixUnit] = [id('d1'), id('d2'), id('d3')];
+  asOwner(`INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, is_active)
+      VALUES ('${mixLb}', '[PROVER] Mix Lb', 'MX-LB', 'seed', 'Lb', true), ('${mixUnit}', '[PROVER] Mix Unit', 'MX-U', 'seed', 'Unit', true);
+    INSERT INTO public.product_parents (id, name, product_form, created_by, updated_by) VALUES ('${mixP}', '[PROVER] Mix', 'seed', '${ADMIN}', '${ADMIN}');
+    INSERT INTO public.product_parent_members (product_id, parent_id, added_by) VALUES ('${mixLb}', '${mixP}', '${ADMIN}'), ('${mixUnit}', '${mixP}', '${ADMIN}');`);
+  stageText('follow.sql', lf(FOLLOW_UPS[0]));
+  const mixed = apply('follow.sql');
+  assert.notEqual(mixed.status, 0, 'the follow-up installed over a mixed-unit seed parent');
+  assert.match(mixed.output, /PREFLIGHT_PRODUCT_PARENT_MIXED_UNITS/);
+  asOwner(`DELETE FROM public.product_parent_members WHERE parent_id = '${mixP}'; DELETE FROM public.product_parents WHERE id = '${mixP}';
+    DELETE FROM public.products WHERE id IN ('${mixLb}', '${mixUnit}');`);
+  console.log('[prover] the stock-unit follow-up refuses to install over a seed parent that already mixes units');
   for (const file of FOLLOW_UPS) {
     stageText('follow.sql', lf(file));
     const followed = apply('follow.sql');

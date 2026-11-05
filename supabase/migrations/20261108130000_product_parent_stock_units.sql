@@ -9,7 +9,8 @@
 --
 -- New: _product_parent_unit_refusal (private; no API-role EXECUTE). Re-issued: _insert_parent_size and
 -- _product_size_move_refusal (both private; same signatures, grants re-asserted). No table, row, grant
--- on an existing object, or public function changes. Live had no parents when this was written.
+-- on an existing object, or public function changes. Live had no parents when this was written; the
+-- preflight refuses the apply if a seed or each parent already mixes stock units.
 --
 -- Rollback: re-issue both functions from 20261108120000_product_parents.sql, then
 -- DROP FUNCTION public._product_parent_unit_refusal(public.product_parents, text, uuid);
@@ -21,6 +22,15 @@ BEGIN
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public._product_size_move_refusal(uuid,uuid)'::regprocedure) IS DISTINCT FROM '0b850586f48a49ff47122b6b1573726b' THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_PARENT_HELPERS_CHANGED: re-base this on the installed bodies';
+  END IF;
+  -- The new check guards adds and moves; a seed or each parent that already mixes units must be fixed first.
+  IF EXISTS (SELECT 1 FROM public.product_parent_members m
+               JOIN public.product_parents pp ON pp.id = m.parent_id
+               JOIN public.products p ON p.id = m.product_id
+              WHERE pp.product_form IN ('seed', 'each')
+              GROUP BY m.parent_id
+             HAVING count(DISTINCT lower(btrim(coalesce(p.inventory_unit, '')))) > 1) THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRODUCT_PARENT_MIXED_UNITS: a seed or each parent already holds sizes in different stock units';
   END IF;
 END;
 $preflight$;

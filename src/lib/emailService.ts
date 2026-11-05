@@ -122,7 +122,10 @@ export async function sendEmail(params: SendEmailParams): Promise<SendEmailResul
   }
   if (!resp.ok) {
     const message = (result.error as string) || 'Email send failed';
-    throw result.needs_reconciliation === true ? new EmailUnconfirmedError(message) : new Error(message);
+    // A definite refusal says success: false. A 5xx without it (a gateway timeout, a
+    // server error) does not say whether the email went out.
+    const unconfirmed = result.needs_reconciliation === true || (resp.status >= 500 && result.success !== false);
+    throw unconfirmed ? new EmailUnconfirmedError(message) : new Error(message);
   }
   return result as unknown as SendEmailResult;
 }

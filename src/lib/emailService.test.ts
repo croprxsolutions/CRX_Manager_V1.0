@@ -159,9 +159,15 @@ describe('sendEmail', () => {
     await expect(sendEmail(validParams)).rejects.toBeInstanceOf(EmailUnconfirmedError);
   });
 
+  it('a gateway 504 without the server answer is unconfirmed', async () => {
+    mockGetSession.mockResolvedValue(mockSession);
+    mockFetch.mockResolvedValue({ ok: false, status: 504, json: async () => ({ message: 'upstream timed out' }) });
+    await expect(sendEmail(validParams)).rejects.toBeInstanceOf(EmailUnconfirmedError);
+  });
+
   it('a plain failure is not an EmailUnconfirmedError', async () => {
     mockGetSession.mockResolvedValue(mockSession);
-    mockFetch.mockResolvedValue({ ok: false, status: 502, json: async () => ({ error: 'Invalid `to` field' }) });
+    mockFetch.mockResolvedValue({ ok: false, status: 502, json: async () => ({ success: false, error: 'Invalid `to` field' }) });
     const err = await sendEmail(validParams).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(EmailUnconfirmedError);

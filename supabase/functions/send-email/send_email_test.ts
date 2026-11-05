@@ -40,7 +40,7 @@ interface ResendCall {
   body: Record<string, unknown>;
 }
 
-// Minimal PostgREST: eq / neq / in / gte filters, exact counts, unique email_log keys,
+// Minimal PostgREST: eq / neq / is.null / in / gte filters, exact counts, unique email_log keys,
 // and object replies with the 406 "0 rows" error postgrest-js turns into null.
 function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Promise<Response>) {
   const tables: Record<string, Row[]> = {
@@ -75,6 +75,7 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
       if (op === "eq" && cell?.toLowerCase() !== value.toLowerCase()) return false;
       if (op === "gte" && (cell == null || cell < value)) return false;
       if (op === "neq" && cell === value) return false;
+      if (op === "is" && value === "null" && cell != null) return false;
       if (op === "like") {
         const pattern = value.replace(/\\(.)|([%_])|([^\\%_]+)/g, (_m, esc, wild, lit) =>
           esc ? esc.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -351,16 +352,20 @@ Deno.test("every new pending row names its email in send_lock_key", async () => 
   assertEquals(world.tables.email_log[0].send_lock_key, quoteLock);
 });
 
-Deno.test("a retry that claims a failed row logged before the lock gives it the lock key", async () => {
+Deno.test("a retry of a failed row logged before the lock keeps that row and sends under the lock", async () => {
   const world = makeWorld(okResend);
   world.tables.email_log.push({
     id: "old-failed", idempotency_key: `quote:quote:${QUOTE}:old-key`, send_lock_key: null,
     email_type: "quote", customer_id: CUSTOMER, status: "failed", created_by: REP,
   });
   assertEquals((await send(world, ADMIN, quoteEmail(QUOTE, "old-key"))).status, 200);
-  assertEquals(world.tables.email_log.length, 1, "the failed row was reused");
-  assertEquals(world.tables.email_log[0].send_lock_key, quoteLock);
-  assertEquals(world.tables.email_log[0].created_by, ADMIN, "the retry counts toward the hourly limit of whoever sent it");
+  const [old, retry] = world.tables.email_log;
+  assertEquals(old.status, "failed", "the failed attempt stays on record as it was");
+  assertEquals(old.created_by, REP);
+  assertEquals(old.idempotency_key, `quote:quote:${QUOTE}:old-key:retired:old-failed`);
+  assertEquals(retry.status, "sent");
+  assertEquals(retry.send_lock_key, quoteLock);
+  assertEquals(retry.created_by, ADMIN, "the retry counts toward the hourly limit of whoever sent it");
 });
 
 // --- Two retries at the same moment (item 3) ---------------------------------
@@ -387,7 +392,8 @@ Deno.test("two retries of the same failed email at the same moment send it once"
   assertEquals(world.resendCalls.length, 1, "Resend calls");
   assertEquals(results.map((r) => r.status).sort(), [200, 409]);
   assertEquals(results.find((r) => r.status === 409)!.body.needs_reconciliation, true);
-  assertEquals(world.tables.email_log[0].status, "sent");
+  assertEquals(world.tables.email_log[0].status, "failed", "the failed attempt stays on record");
+  assertEquals(world.tables.email_log.filter((r) => r.status === "sent").length, 1);
 });
 
 Deno.test("a racing send that finds the email already sent reports it as sent", async () => {
@@ -531,65 +537,82 @@ Deno.test("an OK reply that cannot be read stays pending, not sent and not faile
   assertEquals(world.tables.email_log[0].status, "pending");
 });
 
+// The first send runs through the handler, so its stored row is exactly what this
+// email looks like; `ageMs` moves its start back to place it before a second request.
+async function sentAlready(world: ReturnType<typeof makeWorld>, key: string, ageMs: number) {
+  assertEquals((await send(world, ADMIN, quoteEmail(QUOTE, key))).status, 200);
+  const row = world.tables.email_log[world.tables.email_log.length - 1];
+  row.created_at = new Date(Date.now() - ageMs).toISOString();
+  return row;
+}
+
 Deno.test("a send of the same email confirmed after the early check stops this one", async () => {
   const world = makeWorld(okResend);
   // Another request sent it moments ago, under its own key: no pending row is left
   // for the early check or the unique index to see.
-  world.tables.email_log.push({
-    id: "sent-now", idempotency_key: "other-click-key", send_lock_key: quoteLock,
-    email_type: "quote", customer_id: CUSTOMER, status: "sent", resend_message_id: "re_0",
-    created_at: new Date().toISOString(),
-  });
+  const first = await sentAlready(world, "other-click-key", 0);
   const res = await send(world, ADMIN, quoteEmail(QUOTE, "second-click-key"));
   assertEquals(res.status, 200);
   assertEquals(res.body.deduplicated, true);
-  assertEquals(res.body.email_log_id, "sent-now");
-  assertEquals(world.resendCalls.length, 0, "Resend calls");
-  assertEquals(world.tables.email_log[1].status, "sent", "this request's row gives up the lock as a deduplicated send");
-  assertEquals(world.tables.email_log[1].resend_message_id, "re_0");
-  // Replayed after the few-second window (its first answer lost): still no second email.
-  world.tables.email_log[0].created_at = new Date(Date.now() - 60_000).toISOString();
+  assertEquals(res.body.email_log_id, first.id);
+  assertEquals(world.resendCalls.length, 1, "Resend calls");
+  const mine = world.tables.email_log[1];
+  assertEquals(mine.status, "sent", "this request's row gives up the lock as a deduplicated send");
+  assertEquals(mine.resend_message_id, first.resend_message_id);
+  // Replayed after the window (its first answer lost): still no second email.
+  first.created_at = new Date(Date.now() - 60_000).toISOString();
   const replay = await send(world, ADMIN, quoteEmail(QUOTE, "second-click-key"));
   assertEquals(replay.status, 200);
   assertEquals(replay.body.deduplicated, true);
-  assertEquals(world.resendCalls.length, 0, "Resend calls after replay");
+  assertEquals(world.resendCalls.length, 1, "Resend calls after replay");
 });
 
-Deno.test("a corrected email sent again two seconds later goes out", async () => {
+Deno.test("a corrected email at the same moment still goes out", async () => {
   const world = makeWorld(okResend);
-  world.tables.email_log.push({
-    id: "sent-2s", idempotency_key: "first-click-key", send_lock_key: quoteLock,
-    email_type: "quote", customer_id: CUSTOMER, status: "sent", resend_message_id: "re_0",
-    created_at: new Date(Date.now() - 2000).toISOString(),
-  });
-  const res = await send(world, ADMIN, quoteEmail(QUOTE, "corrected-key"));
+  await sentAlready(world, "first-key", 0);
+  const corrected = { ...quoteEmail(QUOTE, "corrected-key"), html: "<p>Corrected quote</p>" };
+  const res = await send(world, ADMIN, corrected);
   assertEquals(res.status, 200);
   assertEquals(res.body.deduplicated, undefined);
-  assertEquals(world.resendCalls.length, 1, "Resend calls");
+  assertEquals(world.resendCalls.length, 2, "Resend calls");
 });
 
-Deno.test("an earlier confirmed send of the same email does not block a new one", async () => {
+Deno.test("the same email sent again two seconds later goes out", async () => {
   const world = makeWorld(okResend);
-  world.tables.email_log.push({
-    id: "sent-earlier", idempotency_key: "yesterday-key", send_lock_key: quoteLock,
-    email_type: "quote", customer_id: CUSTOMER, status: "sent", resend_message_id: "re_0",
-    created_at: new Date(Date.now() - 60_000).toISOString(),
-  });
-  const res = await send(world, ADMIN, quoteEmail(QUOTE, "today-key"));
+  await sentAlready(world, "first-click-key", 2000);
+  const res = await send(world, ADMIN, quoteEmail(QUOTE, "again-key"));
   assertEquals(res.status, 200);
   assertEquals(res.body.deduplicated, undefined);
-  assertEquals(world.resendCalls.length, 1, "Resend calls");
+  assertEquals(world.resendCalls.length, 2, "Resend calls");
 });
 
-Deno.test("a bounced send is retried with its original key", async () => {
+Deno.test("a bounced send is retried with its original key; the bounced row is kept", async () => {
   const world = makeWorld(okResend);
   world.tables.email_log.push({
     id: "bounced-1", idempotency_key: `quote:quote:${QUOTE}:bounce-key`, send_lock_key: quoteLock,
-    email_type: "quote", customer_id: CUSTOMER, status: "bounced",
+    email_type: "quote", customer_id: CUSTOMER, status: "bounced", created_by: REP,
     created_at: new Date(Date.now() - 60_000).toISOString(),
   });
   const res = await send(world, ADMIN, quoteEmail(QUOTE, "bounce-key"));
   assertEquals(res.status, 200);
-  assertEquals(world.tables.email_log[0].status, "sent");
   assertEquals(world.resendCalls.length, 1, "Resend calls");
+  assertEquals(world.tables.email_log[0].status, "bounced", "the bounce stays on record");
+  assertEquals(world.tables.email_log[0].created_by, REP);
+  assertEquals(world.tables.email_log[1].status, "sent");
+  // A replay of the key now finds the new, sent row.
+  const replay = await send(world, ADMIN, quoteEmail(QUOTE, "bounce-key"));
+  assertEquals(replay.body.deduplicated, true);
+  assertEquals(world.resendCalls.length, 1, "Resend calls after replay");
+});
+
+Deno.test("a pending send logged before the lock column blocks a new one of that type", async () => {
+  const world = makeWorld(okResend);
+  world.tables.email_log.push({
+    id: "legacy-pending", idempotency_key: `quote-${QUOTE}`, send_lock_key: null,
+    email_type: "quote", customer_id: CUSTOMER, status: "pending",
+  });
+  const res = await send(world, ADMIN, quoteEmail(QUOTE, "new-key"));
+  assertEquals(res.status, 409);
+  assertEquals(res.body.email_log_id, "legacy-pending");
+  assertEquals(world.resendCalls.length, 0, "Resend calls");
 });

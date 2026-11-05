@@ -874,12 +874,18 @@ Deno.serve(async (req: Request) => {
     const isLockConflict = (err: { code?: string; message?: string } | null) =>
       err?.code === "23505" && (err.message ?? "").includes("email_log_one_pending_send");
     const lockHolder = async () => {
-      const { data } = await adminClient
+      const { data, error } = await adminClient
         .from("email_log")
         .select("id")
         .eq("send_lock_key", sendLockKey)
         .eq("status", "pending")
         .limit(1);
+      if (error) {
+        return jsonResponse({
+          error: `Another send of this email holds it, and finding its email_log row failed: ${error.message}`,
+          needs_reconciliation: true,
+        }, 503);
+      }
       return unconfirmedSend(data?.[0]?.id ?? null);
     };
 
@@ -910,56 +916,60 @@ Deno.serve(async (req: Request) => {
       if (unsettled && unsettled.length > 0) {
         return unconfirmedSend(unsettled[0].id);
       }
+      // A pending row logged before send_lock_key existed may carry any key format;
+      // any such row of this type for this customer blocks the send until checked.
+      const legacyQuery = adminClient
+        .from("email_log")
+        .select("id")
+        .eq("status", "pending")
+        .eq("email_type", email_type)
+        .is("send_lock_key", null);
+      const { data: legacyPending, error: legacyErr } = await (customer_id
+        ? legacyQuery.eq("customer_id", customer_id)
+        : legacyQuery.is("customer_id", null)).limit(1);
+      if (legacyErr) {
+        return jsonResponse({ error: `Pending-send check failed: ${legacyErr.message}` }, 503);
+      }
+      if (legacyPending && legacyPending.length > 0) {
+        return unconfirmedSend(legacyPending[0].id);
+      }
     }
 
     if (emailLogId) {
-      // Existing failed row from a prior attempt — reset it to pending and
-      // record THIS attempt's content, so the log shows what was actually sent.
-      // Only a row still 'failed' (or 'bounced') is claimed: of two retries at the same moment,
-      // the second finds it 'pending' and stops (PR #1302 review, finding 3).
-      const { data: claimedRow, error: updateErr } = await adminClient
+      // A retry of a failed (or bounced) send: the old row keeps its record of who
+      // sent what and when; its key is retired so this attempt gets a row of its own.
+      // Only a row still holding the key is retired: of two retries at the same
+      // moment, the second finds nothing to retire and stops (PR #1302 review, finding 3).
+      const { data: retiredRow, error: retireErr } = await adminClient
         .from("email_log")
-        .update({
-          status: "pending",
-          resend_message_id: null,
-          error_message: null,
-          idempotency_key: scopedIdempotencyKey,
-          send_lock_key: sendLockKey,
-          recipient_email: to,
-          subject,
-          html_body: html,
-          attachment_name: attachments?.[0]?.filename || null,
-          // This attempt's time and sender: the re-check and the hourly limit read them.
-          created_at: new Date().toISOString(),
-          created_by: caller.id,
-        })
+        .update({ idempotency_key: `${scopedIdempotencyKey}:retired:${emailLogId}` })
         .eq("id", emailLogId)
+        .eq("idempotency_key", scopedIdempotencyKey!)
         .in("status", ["failed", "bounced"])
         .select("id")
         .maybeSingle();
-      if (!updateErr && !claimedRow) {
+      if (!retireErr && !retiredRow) {
         return await alreadyInProgress();
       }
-      if (isLockConflict(updateErr)) {
-        return await lockHolder();
-      }
-      if (updateErr) {
+      if (retireErr) {
         await captureEdgeException(
-          new Error(`email_log pre-send reset failed: ${updateErr.message}`),
+          new Error(`email_log retry retire failed: ${retireErr.message}`),
           {
             function: "send-email",
             level: "error",
-            tags: { email_type, phase: "pre-send-log-reset" },
+            tags: { email_type, phase: "pre-send-log-retire" },
             extra: { customer_id, idempotency_key, email_log_id: emailLogId },
             user: { id: caller.id },
           },
         );
         return jsonResponse(
-          { error: `Email pre-flight log reset failed: ${updateErr.message}` },
+          { error: `Email pre-flight log update failed: ${retireErr.message}` },
           500,
         );
       }
-    } else {
+      emailLogId = null;
+    }
+    {
       // Fresh send — insert new pending row.
       const { data: newRow, error: insertErr } = await adminClient
         .from("email_log")
@@ -1012,23 +1022,26 @@ Deno.serve(async (req: Request) => {
     {
       const { data: justSent, error: justSentErr } = await adminClient
         .from("email_log")
-        .select("id, resend_message_id")
+        .select("id, resend_message_id, recipient_email, subject, html_body")
         .eq("send_lock_key", sendLockKey)
         .eq("status", "sent")
         .gte("created_at", lockCheckFrom)
         .neq("id", emailLogId)
-        .limit(1);
-      if (justSentErr || (justSent && justSent.length > 0)) {
+        .limit(5);
+      // Only the same message counts: a corrected email always goes out.
+      const sameEmail = (justSent ?? []).filter((row) =>
+        row.recipient_email === to && row.subject === subject && row.html_body === html);
+      if (justSentErr || sameEmail.length > 0) {
         const reason = justSentErr
           ? `Not sent: checking for a send of this email at the same moment failed: ${justSentErr.message}`
-          : `Not sent again: the same email went out at the same moment as email_log ${justSent![0].id}.`;
+          : `Not sent again: the same email went out at the same moment as email_log ${sameEmail[0].id}.`;
         // A deduplicated row is stored as sent, with the other send's message id, so a
         // replay of this key returns that send instead of sending again.
         const { error: releaseErr } = await adminClient
           .from("email_log")
           .update(justSentErr
             ? { status: "failed", error_message: reason }
-            : { status: "sent", resend_message_id: justSent![0].resend_message_id, error_message: reason })
+            : { status: "sent", resend_message_id: sameEmail[0].resend_message_id, error_message: reason })
           .eq("id", emailLogId)
           .eq("status", "pending");
         if (justSentErr || releaseErr) {
@@ -1037,8 +1050,8 @@ Deno.serve(async (req: Request) => {
         }
         return jsonResponse({
           success: true,
-          email_log_id: justSent![0].id,
-          resend_message_id: justSent![0].resend_message_id,
+          email_log_id: sameEmail[0].id,
+          resend_message_id: sameEmail[0].resend_message_id,
           deduplicated: true,
         });
       }

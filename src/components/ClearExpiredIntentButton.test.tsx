@@ -52,7 +52,7 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     expect(screen.getByText(/purchase order detail screen for record po-1/)).toBeTruthy();
     expect(intent.clearExpiredIntent).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
-    await waitFor(() => expect(intent.clearExpiredIntent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(intent.clearExpiredIntent).toHaveBeenCalledWith('receive_po_items:admin:key-1'));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.any(String)));
     expect(mockCapture).toHaveBeenCalledWith(
       'Admin cleared an expired uncertain mutation',

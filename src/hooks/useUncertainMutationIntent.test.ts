@@ -425,7 +425,7 @@ describe('useUncertainMutationIntent', () => {
     const originalKey = first.result.current.getIdempotencyKey();
 
     expect(first.result.current.clearableExpiredRequest).toBeNull();
-    await expect(first.result.current.clearExpiredIntent()).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    await expect(first.result.current.clearExpiredIntent(originalKey)).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
     expect(first.result.current.isIntentLocked).toBe(true);
     expect(first.result.current.getIdempotencyKey()).toBe(originalKey);
 
@@ -434,7 +434,7 @@ describe('useUncertainMutationIntent', () => {
     window.sessionStorage.clear();
     first.unmount();
     const mirrorless = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
-    await expect(mirrorless.result.current.clearExpiredIntent()).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    await expect(mirrorless.result.current.clearExpiredIntent(originalKey)).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
     expect(await mirrorless.result.current.beginIntent({ amount: 9000 })).toEqual({ amount: 9000 });
     expect(mirrorless.result.current.getIdempotencyKey()).toBe(originalKey);
     mirrorless.unmount();
@@ -447,7 +447,11 @@ describe('useUncertainMutationIntent', () => {
       scope: 'bill-ki27',
       idempotencyKey: originalKey,
     });
-    await act(async () => expired.result.current.clearExpiredIntent());
+    // A different request than the one reviewed is refused, even though it expired.
+    await expect(expired.result.current.clearExpiredIntent('record_vendor_payment:admin-ki27:other'))
+      .rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    expect(expired.result.current.isIntentLocked).toBe(true);
+    await act(async () => expired.result.current.clearExpiredIntent(originalKey));
     expect(expired.result.current.isIntentLocked).toBe(false);
     expect(expired.result.current.isRetryExpired).toBe(false);
     expect(window.localStorage.getItem(storageKey)).toBeNull();
@@ -471,6 +475,7 @@ describe('useUncertainMutationIntent', () => {
     const storageKey = `crx:uncertain-mutation:v4:${JSON.stringify([options.operation, options.userId])}`;
     const first = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
     await act(async () => first.result.current.beginIntent({ amount: 9000 }));
+    const originalKey = first.result.current.getIdempotencyKey();
     first.unmount();
     await new Promise<void>((resolve, reject) => {
       const open = indexedDB.open('crx_durable_mutation_intents', 1);
@@ -486,7 +491,7 @@ describe('useUncertainMutationIntent', () => {
     nowMs += 23 * 60 * 60 * 1000;
     const expired = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
     expect(expired.result.current.isRetryExpired).toBe(true);
-    await expect(expired.result.current.clearExpiredIntent()).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    await expect(expired.result.current.clearExpiredIntent(originalKey)).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
     expect(expired.result.current.isIntentLocked).toBe(true);
     expect(window.localStorage.getItem(storageKey)).not.toBeNull();
     expired.unmount();
@@ -522,7 +527,7 @@ describe('useUncertainMutationIntent', () => {
       .toThrow('DURABLE_MUTATION_INTENT_RETRY_EXPIRED');
     // KI-27: an unknown deadline is never clearable; only manual reconciliation unlocks it.
     expect(restored.result.current.clearableExpiredRequest).toBeNull();
-    await expect(restored.result.current.clearExpiredIntent()).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    await expect(restored.result.current.clearExpiredIntent('receive_po_items:admin-6:legacy')).rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
     expect(restored.result.current.isIntentLocked).toBe(true);
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
     expect(window.localStorage.getItem(

@@ -1089,7 +1089,8 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   // retried and would lock this operation in this browser forever. After staff
   // verify the authoritative record, this drops the expired request from every
   // store this tab can reach. It refuses while any copy could still be retried.
-  const clearExpiredIntent = useCallback(async () => {
+  // expectedIdempotencyKey is the request staff reviewed; any other request is refused.
+  const clearExpiredIntent = useCallback(async (expectedIdempotencyKey: string) => {
     if (!options || !storageKey) throw new Error('DURABLE_MUTATION_INTENT_IDENTITY_MISSING');
     // Only an intact request past a known deadline is clearable; damaged or
     // legacy state proves nothing about its deadline, so it stays locked.
@@ -1097,7 +1098,9 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     // the confirm shows the saved time so staff can spot a wrong clock.
     const isClearable = (record: DurableMutationIntentRecord<T> | null) => !record
       || record.status === 'resolved'
-      || (hasKnownRetryDeadline(record) && Date.now() >= record.retryNotAfterMs);
+      || (record.idempotencyKey === expectedIdempotencyKey
+        && hasKnownRetryDeadline(record)
+        && Date.now() >= record.retryNotAfterMs);
     const mirror = readDurableRecord<T>(storageKey, options);
     const attempt = readAcknowledgmentRecord<T>(acknowledgmentKey, options);
     if (!isClearable(mirror) || !isClearable(attempt)) throw new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT);

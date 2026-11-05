@@ -7,7 +7,7 @@ import { useToast } from './ui/Toast';
 
 type ExpiredIntentLock = {
   clearableExpiredRequest: LockedRequestDetails | null;
-  clearExpiredIntent: () => Promise<void>;
+  clearExpiredIntent: (expectedIdempotencyKey: string) => Promise<void>;
 };
 
 // KI-27: the only way out of an expired uncertain-mutation lock in this browser.
@@ -30,7 +30,7 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
   const handleClear = async () => {
     setClearing(true);
     try {
-      await intent.clearExpiredIntent();
+      await intent.clearExpiredIntent(request.idempotencyKey);
       Sentry.captureMessage('Admin cleared an expired uncertain mutation', {
         level: 'info',
         tags: { operation, surface: request.surface },

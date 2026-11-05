@@ -423,6 +423,17 @@ ALTER TABLE public.orders ENABLE TRIGGER USER;`),
   }
   console.log('[prover] AFTER: a direct call on a posted, paid or overdue invoice writes its row; the same key replays its receipt');
 
+  // AFTER: a saved key does not replay a cached success once the invoice is no longer posted (Luna round 3).
+  expect(scenario([
+    { key: 'posted with key', as: U.ADMIN, call: GEN('ki05-reuse') },
+    { key: 'back to draft', as: U.ADMIN, stmt: `RESET ROLE; ALTER TABLE public.invoices DISABLE TRIGGER USER;
+      UPDATE public.invoices SET status = 'draft' WHERE id = '${invId}'; ALTER TABLE public.invoices ENABLE TRIGGER USER; v := 'draft';` },
+    { key: 'reused key on draft', as: U.ADMIN, call: GEN('ki05-reuse') },
+  ], ownerSet(`UPDATE public.invoices SET status = 'posted', posted_at = now(), posted_by = '${U.ADMIN}' WHERE id = '${invId}';`)),
+  { 'posted with key': /^ok\|1$/, 'back to draft': /^ok\|draft$/, 'reused key on draft': NOT_POSTED('draft'),
+    rows: /^ok\|1:compliant\/PROVER-LIC-05\/false$/ });
+  console.log('[prover] AFTER: a key saved on a posted invoice is refused, not replayed, once that invoice is a draft');
+
   console.log('RUP_RECORDS_REQUIRE_POSTED_INVOICE_PROOF_PASS');
 }
 

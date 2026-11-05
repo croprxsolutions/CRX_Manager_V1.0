@@ -46,7 +46,7 @@ BEGIN
   FROM pg_proc p
   WHERE p.oid = 'public.generate_rup_sales_records(uuid,text)'::regprocedure;
   -- The body applied by 20260707040000 (read live 2026-11-05), or this file's own body (a re-run).
-  IF v_md5 NOT IN ('18802cbdbbd8a91334dcad11e5303e70', '346ee47158c1f1ac0dde6a5e2d73806d') THEN
+  IF v_md5 NOT IN ('18802cbdbbd8a91334dcad11e5303e70', 'b3c5e302402b8f54f34a547f2c9ad3d3') THEN
     RAISE EXCEPTION 'RUP_POSTED_PREFLIGHT: live body changed (md5 %); re-read it before applying', v_md5;
   END IF;
 END;
@@ -78,13 +78,6 @@ BEGIN
     RAISE EXCEPTION 'Not authorized to generate RUP sales records';
   END IF;
 
-  IF p_idempotency_key IS NOT NULL THEN
-    v_existing := check_idempotency(p_idempotency_key, 'generate_rup_sales_records');
-    IF v_existing IS NOT NULL THEN
-      RETURN (v_existing->>'count')::integer;
-    END IF;
-  END IF;
-
   SELECT i.id, i.order_id, o.customer_id, c.farm_name, i.created_at,
          i.invoice_number, i.status, i.deleted_at
   INTO v_invoice
@@ -102,6 +95,14 @@ BEGIN
     RAISE EXCEPTION 'RUP_INVOICE_NOT_POSTED: invoice % is % and not posted; RUP sales records are written only for a posted invoice',
       v_invoice.invoice_number,
       CASE WHEN v_invoice.deleted_at IS NOT NULL THEN 'deleted' ELSE coalesce(v_invoice.status, 'without a status') END;
+  END IF;
+
+  -- Replay only after the posted check, so a key reused for an unposted invoice cannot return a cached success.
+  IF p_idempotency_key IS NOT NULL THEN
+    v_existing := check_idempotency(p_idempotency_key, 'generate_rup_sales_records');
+    IF v_existing IS NOT NULL THEN
+      RETURN (v_existing->>'count')::integer;
+    END IF;
   END IF;
 
   v_season := CASE

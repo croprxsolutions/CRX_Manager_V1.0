@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote } from 'lucide-react';
+import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket } from 'lucide-react';
+import type { ReactNode } from 'react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -110,6 +111,49 @@ const makeBlankCustomer = (salesRepId: string | undefined): Partial<Customer> =>
   default_application_service_id: null,
 });
 
+type CustomerSection = 'contacts' | 'knowledge' | 'documents' | 'timeline' | 'fields' | 'quotes' | 'orders' | 'deliveries' | 'financials' | 'history';
+
+// Info is always open; every other section folds and loads only when opened.
+const FOLD_SECTIONS: { id: CustomerSection; title: string; icon: ReactNode }[] = [
+  { id: 'contacts', title: 'Contacts', icon: <Users className="h-5 w-5" /> },
+  { id: 'knowledge', title: 'Knowledge', icon: <Lightbulb className="h-5 w-5" /> },
+  { id: 'documents', title: 'Documents', icon: <FolderOpen className="h-5 w-5" /> },
+  { id: 'timeline', title: 'Timeline', icon: <History className="h-5 w-5" /> },
+  { id: 'fields', title: 'Fields', icon: <Map className="h-5 w-5" /> },
+  { id: 'quotes', title: 'Quotes', icon: <FileText className="h-5 w-5" /> },
+  { id: 'orders', title: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
+  { id: 'deliveries', title: 'Deliveries', icon: <Package className="h-5 w-5" /> },
+  { id: 'financials', title: 'Financials', icon: <Wallet className="h-5 w-5" /> },
+  { id: 'history', title: 'History', icon: <ShoppingBasket className="h-5 w-5" /> },
+];
+
+const sectionAnchor = (section: CustomerSection | 'info') => `customer-section-${section}`;
+
+function scrollToSection(section: CustomerSection | 'info') {
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  document.getElementById(sectionAnchor(section))?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+}
+
+/** Style D band that opens or folds one section of the customer page. */
+function FoldBand({ section, open, onToggle }: { section: (typeof FOLD_SECTIONS)[number]; open: boolean; onToggle: () => void }) {
+  return (
+    <h2 id={sectionAnchor(section.id)} className="scroll-mt-32">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex min-h-11 w-full items-center gap-3 rounded-xl bg-cream-dark px-4 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2"
+      >
+        <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-crx-green text-white">
+          {section.icon}
+        </span>
+        <span className="flex-1 font-heading text-2xl font-bold leading-none text-nav-dark">{section.title}</span>
+        <ChevronDown aria-hidden="true" className={`h-5 w-5 shrink-0 text-nav-dark transition-transform motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} />
+      </button>
+    </h2>
+  );
+}
+
 export default function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -164,7 +208,7 @@ export default function CustomerDetail() {
   // Narrow local structural state: generated types are refreshed only after apply.
   const customerRowVersionRef = useRef<number | null>(null);
   const [staleSaveOpen, setStaleSaveOpen] = useState(false);
-  const [tab, setTab] = useState<'info' | 'contacts' | 'knowledge' | 'documents' | 'timeline' | 'fields' | 'quotes' | 'orders' | 'deliveries' | 'financials' | 'history'>('info');
+  const [openSections, setOpenSections] = useState<ReadonlySet<CustomerSection>>(() => new Set());
   const [timeline, setTimeline] = useState<ActivityFeedItem[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
 
@@ -176,7 +220,15 @@ export default function CustomerDetail() {
   // The last purchase-history load failed: an error shows instead of "no history".
   const [historyFailed, setHistoryFailed] = useState(false);
   const [customerRemainders, setCustomerRemainders] = useState<DeliveryRemainder[]>([]);
-  const [tabLoading, setTabLoading] = useState(false);
+  const [loadingSections, setLoadingSections] = useState<ReadonlySet<CustomerSection>>(() => new Set());
+  const setSectionLoading = useCallback((section: CustomerSection, on: boolean) => {
+    setLoadingSections((prev) => {
+      if (prev.has(section) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(section); else next.delete(section);
+      return next;
+    });
+  }, []);
   const [emailError, setEmailError] = useState('');
   const [phoneError, setPhoneError] = useState('');
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
@@ -463,10 +515,15 @@ export default function CustomerDetail() {
   // Same discipline the CRM child components got via `key={id}` (Sol 2.G r2):
   // an in-flight tab load for customer A must never write into customer B's
   // view, and B must never render A's leftover rows while its own load runs.
+  // Several sections can load at once, so each keeps the number of its own latest
+  // load. Numbers come from one counter and are never reused, so emptying the map
+  // on a route change makes every load still in flight for the last customer stale.
   const tabRequestSeq = useRef(0);
+  const latestSectionLoad = useRef<Partial<Record<CustomerSection, number>>>({});
 
   useEffect(() => {
-    tabRequestSeq.current += 1;
+    latestSectionLoad.current = {};
+    setLoadingSections(new Set());
     setQuotes([]);
     setOrders([]);
     setDeliveries([]);
@@ -521,7 +578,7 @@ export default function CustomerDetail() {
     setLoading(!isNew);
   }, [id, isNew, salesRepIdRef]);
 
-  const fetchTabData = useCallback(async (selectedTab: string) => {
+  const fetchTabData = useCallback(async (selectedTab: CustomerSection) => {
     // `id` is closed over per route, so it names the customer this load was
     // started FOR; the ref always holds the one the route is on NOW.
     const routeLeftThisCustomer = () => currentIdRef.current !== id;
@@ -539,13 +596,15 @@ export default function CustomerDetail() {
     // Refusing at the door rather than after the first await matters twice over.
     // Such a call would otherwise burn a sequence — invalidating the load that
     // legitimately belongs to the customer now on screen, which then returns
-    // having installed nothing AND without clearing `tabLoading` — and it would
+    // having installed nothing AND without clearing its loading flag — and it would
     // have already flipped this tab into a loading state nothing goes on to
     // clear. Either way the open customer is stranded behind a permanent spinner.
     if (routeLeftThisCustomer()) return;
 
     const seq = ++tabRequestSeq.current;
-    const supersededByNewerLoad = () => seq !== tabRequestSeq.current;
+    latestSectionLoad.current[selectedTab] = seq;
+    // Only a newer load of THIS section supersedes it; other sections load alongside.
+    const supersededByNewerLoad = () => latestSectionLoad.current[selectedTab] !== seq;
     // The route half is re-checked after each await as well. The door check
     // cannot cover a route change that happens while this load is in flight, and
     // the sequence bump that normally covers it lives in a passive effect, which
@@ -553,7 +612,7 @@ export default function CustomerDetail() {
     // layout effect, at the commit. A reply landing in that gap is superseded by
     // a route the sequence does not know about yet.
     const isStale = () => supersededByNewerLoad() || routeLeftThisCustomer();
-    setTabLoading(true);
+    setSectionLoading(selectedTab, true);
     if (selectedTab === 'fields') {
       const { data, error: fieldError } = await supabase.rpc('get_fields_with_geojson', { p_customer_id: id });
       // Before the error branch, not after: a superseded load must not toast over
@@ -671,7 +730,7 @@ export default function CustomerDetail() {
       if (isStale()) return;
       setCustomerRemainders(remainders as unknown as DeliveryRemainder[]);
     } else if (selectedTab === 'financials') {
-      if (financialsFetched.current) { setTabLoading(false); return; }
+      if (financialsFetched.current) { setSectionLoading(selectedTab, false); return; }
       setFinancialsLoading(true);
       // Set once this customer's balance is read; a later read failing leaves it on screen.
       let agingRead = false;
@@ -799,7 +858,7 @@ export default function CustomerDetail() {
           toast('error', 'Failed to load purchase history');
           setHistory([]);
           setHistoryFailed(true);
-          setTabLoading(false);
+          setSectionLoading(selectedTab, false);
           return;
         }
         // Aggregate by product
@@ -822,15 +881,48 @@ export default function CustomerDetail() {
       }
     }
     if (isStale()) return;
-    setTabLoading(false);
+    setSectionLoading(selectedTab, false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isAdmin]);
 
+  // Sections left open stay open on a switch to another customer and reload for it.
+  // Declared after the route-change reset above, so it runs once that has cleared.
+  const openSectionsRef = useLatestRef(openSections);
   useEffect(() => {
-    if (!isNew && id && tab !== 'info') {
-      fetchTabData(tab);
+    if (!isNew && id) openSectionsRef.current.forEach((section) => void fetchTabData(section));
+  }, [id, isNew, fetchTabData, openSectionsRef]);
+
+  const openSection = (section: CustomerSection) => {
+    if (openSections.has(section)) return;
+    setOpenSections((prev) => new Set(prev).add(section));
+    if (!isNew && id) void fetchTabData(section);
+  };
+
+  const toggleSection = (section: CustomerSection) => {
+    if (!openSections.has(section)) { openSection(section); return; }
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      next.delete(section);
+      return next;
+    });
+  };
+
+  // A folded section near the bottom has too little page below it to scroll to the
+  // top, so a jump to one waits until it has unfolded.
+  const pendingJumpRef = useRef<CustomerSection | null>(null);
+  useEffect(() => {
+    const section = pendingJumpRef.current;
+    if (section && openSections.has(section)) {
+      pendingJumpRef.current = null;
+      scrollToSection(section);
     }
-  }, [tab, id, isNew, fetchTabData]);
+  }, [openSections]);
+
+  const jumpTo = (section: CustomerSection | 'info') => {
+    if (section === 'info' || openSections.has(section)) { scrollToSection(section); return; }
+    pendingJumpRef.current = section;
+    openSection(section);
+  };
 
   const handleSave = async () => {
     if (saving) return;
@@ -1130,8 +1222,6 @@ export default function CustomerDetail() {
     );
   }
 
-  const tabs = ['info', 'contacts', 'knowledge', 'documents', 'timeline', 'fields', 'quotes', 'orders', 'deliveries', 'financials', 'history'] as const;
-
   const handleGenerateSummary = async (season: number, options: YearEndSummaryOptions) => {
     if (!id || isNew) return;
     setSummaryLoading(true);
@@ -1225,34 +1315,29 @@ export default function CustomerDetail() {
         </div>
       </div>
 
-      {!isNew && id && <CustomerSummaryBar customerId={id} onCardClick={(t) => setTab(t as typeof tab)} />}
+      {!isNew && id && <CustomerSummaryBar customerId={id} onCardClick={(t) => jumpTo(t as CustomerSection | 'info')} />}
 
       {!isNew && (
-        // Style D pills. Each view still loads only when opened, so these switch views rather than scroll.
-        <nav aria-label="Customer views" className="flex items-center gap-2 border-b border-gray-200 pb-2">
-          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-secondary">View</span>
+        // Style D pills: open the section if it is folded, then scroll to it.
+        <nav aria-label="Customer sections" className="flex items-center gap-2 border-b border-gray-200 pb-2">
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-secondary">Jump to</span>
           <div className="flex min-w-0 gap-1.5 overflow-x-auto [-webkit-overflow-scrolling:touch]">
-            {tabs.map((t) => (
+            {[{ id: 'info' as const, title: 'Info' }, ...FOLD_SECTIONS].map((section) => (
               <button
-                key={t}
+                key={section.id}
                 type="button"
-                onClick={() => setTab(t)}
-                aria-pressed={tab === t}
-                className={`inline-flex min-h-11 shrink-0 items-center rounded-full border px-4 text-sm font-semibold capitalize whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 md:min-h-9 ${
-                  tab === t
-                    ? 'border-nav-dark bg-nav-dark text-white'
-                    : 'border-gray-300 bg-white text-nav-dark hover:bg-cream-dark'
-                }`}
+                onClick={() => jumpTo(section.id)}
+                className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-gray-300 bg-white px-4 text-sm font-semibold whitespace-nowrap text-nav-dark transition-colors hover:bg-cream-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 md:min-h-9"
               >
-                {t}
+                {section.title}
               </button>
             ))}
           </div>
         </nav>
       )}
 
-      {(tab === 'info' || isNew) && (
-        <fieldset disabled={isNew && saving} className="min-w-0 space-y-4">
+      {(
+        <fieldset id={sectionAnchor('info')} disabled={isNew && saving} className="min-w-0 scroll-mt-32 space-y-4">
           {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
           {/* key remounts on customer switch — in-flight loads/mutations from the previous customer must never write into this one's view (Sol 2.G r2) */}
           {/* interactionRefresh in the key: logging a call remounts the prep card so "Last conversation" is never stale (Sol final gauntlet) */}
@@ -1523,23 +1608,27 @@ export default function CustomerDetail() {
         </fieldset>
       )}
 
-      {tab === 'contacts' && !isNew && id && profile && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[0]} open={openSections.has('contacts')} onToggle={() => toggleSection('contacts')} />}
+      {openSections.has('contacts') && !isNew && id && profile && (
         <CustomerContacts key={id} customerId={id} performedBy={profile.id} />
       )}
 
       {/* key remounts on customer switch — see the CustomerPrepCard note above */}
-      {tab === 'knowledge' && !isNew && id && profile && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[1]} open={openSections.has('knowledge')} onToggle={() => toggleSection('knowledge')} />}
+      {openSections.has('knowledge') && !isNew && id && profile && (
         <CustomerFacts key={id} customerId={id} userId={profile.id} />
       )}
 
       {/* key remounts on customer switch — see the CustomerPrepCard note above */}
-      {tab === 'documents' && !isNew && id && profile && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[2]} open={openSections.has('documents')} onToggle={() => toggleSection('documents')} />}
+      {openSections.has('documents') && !isNew && id && profile && (
         <CustomerDocuments key={id} customerId={id} userId={profile.id} />
       )}
 
-      {tab === 'timeline' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[3]} open={openSections.has('timeline')} onToggle={() => toggleSection('timeline')} />}
+      {openSections.has('timeline') && !isNew && (
         <div className="space-y-4">
-          {timelineLoading || tabLoading ? (
+          {timelineLoading || loadingSections.has('timeline') ? (
             <div className="text-center py-8 text-sm text-gray-400">Loading timeline...</div>
           ) : timeline.length === 0 ? (
             <div className="text-center py-8 text-sm text-gray-400">No activity recorded yet</div>
@@ -1571,10 +1660,11 @@ export default function CustomerDetail() {
         </div>
       )}
 
-      {tab === 'fields' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[4]} open={openSections.has('fields')} onToggle={() => toggleSection('fields')} />}
+      {openSections.has('fields') && !isNew && (
         <>
           {/* Mini map showing this customer's fields */}
-          {!tabLoading && fields.some((f) => f.centroid_geojson) && (
+          {!loadingSections.has('fields') && fields.some((f) => f.centroid_geojson) && (
             <Card>
               <CardHeader title="Field" accent="Locations" />
               <Suspense fallback={<div className="h-[250px] w-full rounded-lg bg-gray-50 flex items-center justify-center text-sm text-gray-400">Loading map…</div>}>
@@ -1600,7 +1690,7 @@ export default function CustomerDetail() {
                 }
               />
             </div>
-            {tabLoading ? (
+            {loadingSections.has('fields') ? (
               <div className="px-5 pb-5 space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -1661,7 +1751,8 @@ export default function CustomerDetail() {
         </>
       )}
 
-      {tab === 'quotes' && !isNew && (() => {
+      {!isNew && <FoldBand section={FOLD_SECTIONS[5]} open={openSections.has('quotes')} onToggle={() => toggleSection('quotes')} />}
+      {openSections.has('quotes') && !isNew && (() => {
         const filteredQuotes = quotePlannedFilter ? quotes.filter((q) => q.is_planned) : quotes;
         return (
         <Card padding={false}>
@@ -1709,7 +1800,7 @@ export default function CustomerDetail() {
               }
             />
           </div>
-          {tabLoading ? (
+          {loadingSections.has('quotes') ? (
             <div className="px-5 pb-5 space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -1768,12 +1859,13 @@ export default function CustomerDetail() {
         );
       })()}
 
-      {tab === 'orders' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[6]} open={openSections.has('orders')} onToggle={() => toggleSection('orders')} />}
+      {openSections.has('orders') && !isNew && (
         <Card padding={false}>
           <div className="p-5">
             <CardHeader title="Customer" accent="Orders" />
           </div>
-          {tabLoading ? (
+          {loadingSections.has('orders') ? (
             <div className="px-5 pb-5 space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -1834,13 +1926,14 @@ export default function CustomerDetail() {
         </Card>
       )}
 
-      {tab === 'deliveries' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[7]} open={openSections.has('deliveries')} onToggle={() => toggleSection('deliveries')} />}
+      {openSections.has('deliveries') && !isNew && (
         <div className="space-y-4">
           <Card padding={false}>
             <div className="p-5">
               <CardHeader title="Customer" accent="Deliveries" />
             </div>
-            {tabLoading ? (
+            {loadingSections.has('deliveries') ? (
               <div className="px-5 pb-5 space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -1919,7 +2012,7 @@ export default function CustomerDetail() {
           </Card>
 
           {/* Pending Remainders for this customer */}
-          {!tabLoading && customerRemainders.length > 0 && (
+          {!loadingSections.has('deliveries') && customerRemainders.length > 0 && (
             <Card>
               <CardHeader
                 title="Pending"
@@ -1974,9 +2067,10 @@ export default function CustomerDetail() {
       )}
 
       {/* Financials Tab — Customer 360 */}
-      {tab === 'financials' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[8]} open={openSections.has('financials')} onToggle={() => toggleSection('financials')} />}
+      {openSections.has('financials') && !isNew && (
         <div className="space-y-4">
-          {financialsLoading || tabLoading ? (
+          {financialsLoading || loadingSections.has('financials') ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-24 bg-gray-100 rounded-lg animate-pulse" />
@@ -2152,13 +2246,14 @@ export default function CustomerDetail() {
       )}
 
       {/* GAP FIX #15: Purchase History Tab */}
-      {tab === 'history' && !isNew && (
+      {!isNew && <FoldBand section={FOLD_SECTIONS[9]} open={openSections.has('history')} onToggle={() => toggleSection('history')} />}
+      {openSections.has('history') && !isNew && (
         <Card padding={false}>
           <div className="p-5">
             <CardHeader title="Purchase" accent="History" />
             <p className="text-xs text-secondary mt-1">Products ordered by this customer, aggregated across all orders</p>
           </div>
-          {tabLoading ? (
+          {loadingSections.has('history') ? (
             <div className="px-5 pb-5 space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
@@ -2230,7 +2325,7 @@ export default function CustomerDetail() {
       />
 
       {!isNew && id && profile && (
-        <LogInteractionModal open={logInteractionOpen} onClose={() => setLogInteractionOpen(false)} customerId={id} userId={profile.id} customerName={customer.farm_name || 'customer'} onLogged={() => { setInteractionRefresh((k) => k + 1); if (tab === 'timeline') void fetchTabData('timeline'); }} />
+        <LogInteractionModal open={logInteractionOpen} onClose={() => setLogInteractionOpen(false)} customerId={id} userId={profile.id} customerName={customer.farm_name || 'customer'} onLogged={() => { setInteractionRefresh((k) => k + 1); if (openSections.has('timeline')) void fetchTabData('timeline'); }} />
       )}
 
       {!isNew && id && (

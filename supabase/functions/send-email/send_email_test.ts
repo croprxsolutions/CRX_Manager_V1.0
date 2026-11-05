@@ -71,7 +71,8 @@ function makeWorld(resend: (call: ResendCall, signal: AbortSignal | null) => Pro
       const op = raw.slice(0, dot);
       const value = raw.slice(dot + 1);
       const cell = row[col] == null ? null : String(row[col]);
-      if (op === "eq" && cell !== value) return false;
+      // uuid columns compare without regard to case, as in Postgres
+      if (op === "eq" && cell?.toLowerCase() !== value.toLowerCase()) return false;
       if (op === "gte" && (cell == null || cell < value)) return false;
       if (op === "like") {
         const pattern = value.replace(/\\(.)|([%_])|([^\\%_]+)/g, (_m, esc, wild, lit) =>
@@ -287,29 +288,21 @@ Deno.test("two retries of the same failed email at the same moment send it once"
     await gate;
     return new Response(JSON.stringify({ id: "re_retry" }), { status: 200 });
   });
-  // Hold the first send at Resend until the second request has been stopped:
-  // either by the unconfirmed-send check finding the claimed row or, having lost the
-  // claim, by looking up who holds the row.
-  const realFakeFetch = world.fakeFetch;
-  world.fakeFetch = async (input, init) => {
-    const res = await realFakeFetch(input, init);
-    const url = new Request(input, init).url;
-    if (url.includes("/email_log?select=id%2Cstatus%2Cresend_message_id%2Ccustomer_id&")) release();
-    if (url.includes("/email_log?select=id&status=eq.pending") && (await res.clone().json()).length > 0) release();
-    return res;
-  };
   const key = `quote-${QUOTE}`;
   world.tables.email_log.push({
     id: "log-failed", idempotency_key: `quote:quote:${QUOTE}:${key}`, email_type: "quote",
     customer_id: CUSTOMER, status: "failed", resend_message_id: null,
   });
-  const results = await Promise.all([
-    send(world, ADMIN, quoteEmail(QUOTE, key)),
-    send(world, ADMIN, quoteEmail(QUOTE, key)),
-  ]);
+  // The first send is held at Resend until the other request has answered (or,
+  // if both wrongly reached Resend, for half a second), so they overlap.
+  const sends = [send(world, ADMIN, quoteEmail(QUOTE, key)), send(world, ADMIN, quoteEmail(QUOTE, key))];
+  Promise.race(sends).then(() => release());
+  const fallback = setTimeout(() => release(), 500);
+  const results = await Promise.all(sends);
+  clearTimeout(fallback);
+  assertEquals(world.resendCalls.length, 1, "Resend calls");
   assertEquals(results.map((r) => r.status).sort(), [200, 409]);
   assertEquals(results.find((r) => r.status === 409)!.body.needs_reconciliation, true);
-  assertEquals(world.resendCalls.length, 1, "Resend calls");
   assertEquals(world.tables.email_log[0].status, "sent");
 });
 
@@ -371,6 +364,50 @@ Deno.test("a provider that never answers stops the request in time and blocks a 
   } finally {
     AbortSignal.timeout = realTimeout;
   }
+});
+
+function withNoAnswerProvider<T>(run: (world: ReturnType<typeof makeWorld>) => Promise<T>): Promise<T> {
+  const realTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = () => realTimeout.call(AbortSignal, 20);
+  const world = makeWorld((_call, signal) =>
+    new Promise((_resolve, reject) => {
+      if (signal?.aborted) return reject(signal.reason);
+      signal?.addEventListener("abort", () => reject(signal.reason));
+    })
+  );
+  return run(world).finally(() => (AbortSignal.timeout = realTimeout));
+}
+
+Deno.test("a send with no key, or with the record id in capitals, is still held back by an unconfirmed send", async () => {
+  await withNoAnswerProvider(async (world) => {
+    assertEquals((await send(world, ADMIN, quoteEmail(QUOTE))).status, 504);
+    assert(String(world.tables.email_log[0].idempotency_key).startsWith(`quote:quote:${QUOTE}:auto-`), "keyless row is tagged with its record");
+    const again = await send(world, ADMIN, quoteEmail(QUOTE));
+    assertEquals(again.status, 409);
+    const capitals = await send(world, ADMIN, quoteEmail(QUOTE.toUpperCase(), "another-key"));
+    assertEquals(capitals.status, 409);
+    assertEquals(world.resendCalls.length, 1, "Resend calls");
+  });
+});
+
+Deno.test("one customer's unconfirmed job notice does not hold back another customer's notice for the same job", async () => {
+  await withNoAnswerProvider(async (world) => {
+    const job = "eeeeeeee-0000-4000-8000-000000000001";
+    world.tables.job_notifications = [
+      { idempotency_key: "notice-a", job_id: job, customer_id: CUSTOMER, notification_type: "pre" },
+      { idempotency_key: "notice-b", job_id: job, customer_id: OTHER_CUSTOMER, notification_type: "pre" },
+    ];
+    const notice = (customer: string, to: string, key: string) => ({
+      to, email_type: "pre_application_notice", customer_id: customer,
+      subject: "Application planned", html: "<p>We plan to apply soon.</p>", idempotency_key: key,
+    });
+    assertEquals((await send(world, ADMIN, notice(CUSTOMER, "farmer@example.com", "notice-a"))).status, 504);
+    world.resend = okResend;
+    const other = await send(world, ADMIN, notice(OTHER_CUSTOMER, "other@example.com", "notice-b"));
+    assertEquals(other.status, 200, JSON.stringify(other.body));
+    const sameCustomerAgain = await send(world, ADMIN, notice(CUSTOMER, "farmer@example.com", "notice-a"));
+    assertEquals(sameCustomerAgain.status, 409);
+  });
 });
 
 Deno.test("a refused request (4xx) marks the email failed, and a retry may send it", async () => {

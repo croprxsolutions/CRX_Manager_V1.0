@@ -749,9 +749,14 @@ Deno.serve(async (req: Request) => {
     //    any other raw-key row is refused as ambiguous rather than reported
     //    as already sent.
     let emailLogId: string | null = null;
+    // Record ids are UUIDs: one spelling, so an upper-case retry finds the same email.
+    recordRef = recordRef.toLowerCase();
     const scopedIdempotencyKey = idempotency_key
       ? `${email_type}:${recordRef}:${idempotency_key}`
       : null;
+    // A send without a key is still stored under its type + record, so the
+    // unconfirmed-send check below can see it.
+    const storedIdempotencyKey = scopedIdempotencyKey ?? `${email_type}:${recordRef}:auto-${crypto.randomUUID()}`;
 
     if (scopedIdempotencyKey) {
       const { data: keyRows, error: existingErr } = await adminClient
@@ -854,13 +859,16 @@ Deno.serve(async (req: Request) => {
     // shortcut: two first sends with different keys in the same instant can both pass; a partial unique index would close it.
     {
       const recordKeyPrefix = `${email_type}:${recordRef}:`.replace(/[\\%_]/g, (c) => "\\" + c);
-      const { data: unsettled, error: unsettledErr } = await adminClient
+      const unsettledQuery = adminClient
         .from("email_log")
         .select("id")
         .eq("status", "pending")
         .eq("email_type", email_type)
-        .like("idempotency_key", `${recordKeyPrefix}%`)
-        .limit(1);
+        .like("idempotency_key", `${recordKeyPrefix}%`);
+      // One job's notices go to several customers (split billing); each is its own email.
+      const { data: unsettled, error: unsettledErr } = await (customer_id
+        ? unsettledQuery.eq("customer_id", customer_id)
+        : unsettledQuery.is("customer_id", null)).limit(1);
       if (unsettledErr) {
         return jsonResponse({ error: `Pending-send check failed: ${unsettledErr.message}` }, 503);
       }
@@ -929,7 +937,7 @@ Deno.serve(async (req: Request) => {
           resend_message_id: null,
           status: "pending",
           error_message: null,
-          idempotency_key: scopedIdempotencyKey,
+          idempotency_key: storedIdempotencyKey,
           created_by: caller.id,
         })
         .select("id")

@@ -85,7 +85,7 @@ const DURABLE_INTENT_LIVE_CLAIM_TTL_MS = 15 * 60 * 1000;
 const DURABLE_INTENT_LIVE_CLAIM_HEARTBEAT_MS = 60 * 1000;
 export const UNCERTAIN_MUTATION_RETRY_EXPIRED = 'DURABLE_MUTATION_INTENT_RETRY_EXPIRED';
 export const UNCERTAIN_MUTATION_INTENT_CONFLICT = 'DURABLE_MUTATION_INTENT_CONFLICT';
-export const UNCERTAIN_MUTATION_CLEAR_NOT_YET = 'DURABLE_MUTATION_INTENT_CLEAR_NOT_YET';
+const UNCERTAIN_MUTATION_CLEAR_NOT_YET = 'DURABLE_MUTATION_INTENT_CLEAR_NOT_YET';
 
 // KI-27: the server refused a clear because the request might still save.
 // reason is the server's ('in_progress', 'first_check' or 'waiting'); waitUntil is
@@ -107,6 +107,44 @@ type ClearCheckVerdict = {
   wait_until?: string;
   first_check_token?: string;
 };
+
+// KI-27: resolves only when the server says the request can be cleared (and retires it
+// there), returning the stored first-check token's key; otherwise throws
+// UncertainClearNotYetError. Never trusts this device's clock.
+async function confirmClearWithServer(expectedIdempotencyKey: string): Promise<string> {
+  // Safe only when the server says the request saved, or it was unsaved on two
+  // checks 15+ minutes apart by server time (it can no longer commit). The first
+  // check's time comes back as a token the server signed; it is stored as-is.
+  const checkKey = `${CLEAR_CHECK_PREFIX}${expectedIdempotencyKey}`;
+  let firstCheckToken: string | null = clearCheckTokens.get(checkKey) ?? null;
+  try {
+    firstCheckToken = window.localStorage.getItem(checkKey) ?? firstCheckToken;
+  } catch {
+    // Without the token the server simply starts the wait again.
+  }
+  // A safe answer also retires the request in the database, so a late copy of it, or of
+  // any batch row sent under "<key>:<row id>", is refused from any tab after this clear.
+  const { data, error } = await supabase.rpc('retire_uncertain_request', {
+    p_request_key: expectedIdempotencyKey,
+    p_idempotency_key: expectedIdempotencyKey,
+    ...(firstCheckToken ? { p_first_check_token: firstCheckToken } : {}),
+  });
+  if (error) throw error;
+  const verdict = assertRpcResult<ClearCheckVerdict>(data, 'retire_uncertain_request');
+  if (verdict.safe !== true) {
+    if (verdict.reason === 'first_check' && verdict.first_check_token) {
+      clearCheckTokens.set(checkKey, verdict.first_check_token);
+      try {
+        window.localStorage.setItem(checkKey, verdict.first_check_token);
+      } catch {
+        // The next try starts the wait again.
+      }
+    }
+    throw new UncertainClearNotYetError(verdict.reason, verdict.wait_until ?? null);
+  }
+  return checkKey;
+}
+
 export const UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE =
   'The safe automatic retry window expired. Do not submit this mutation again. Verify the authoritative record and reconcile it manually.';
 export const UNCERTAIN_MUTATION_OTHER_SURFACE_MESSAGE =
@@ -1135,36 +1173,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     const mirror = readDurableRecord<T>(storageKey, options);
     const attempt = readAcknowledgmentRecord<T>(acknowledgmentKey, options);
     if (!isClearable(mirror) || !isClearable(attempt)) throw new Error(UNCERTAIN_MUTATION_INTENT_CONFLICT);
-    // Safe only when the server says the request saved, or it was unsaved on two
-    // checks 15+ minutes apart by server time (it can no longer commit). The first
-    // check's time comes back as a token the server signed; it is stored as-is.
-    const checkKey = `${CLEAR_CHECK_PREFIX}${expectedIdempotencyKey}`;
-    let firstCheckToken: string | null = clearCheckTokens.get(checkKey) ?? null;
-    try {
-      firstCheckToken = window.localStorage.getItem(checkKey) ?? firstCheckToken;
-    } catch {
-      // Without the token the server simply starts the wait again.
-    }
-    // A safe answer also retires the request in the database, so a late copy of it, or of
-    // any batch row sent under "<key>:<row id>", is refused from any tab after this clear.
-    const { data, error } = await supabase.rpc('retire_uncertain_request', {
-      p_request_key: expectedIdempotencyKey,
-      p_idempotency_key: expectedIdempotencyKey,
-      ...(firstCheckToken ? { p_first_check_token: firstCheckToken } : {}),
-    });
-    if (error) throw error;
-    const verdict = assertRpcResult<ClearCheckVerdict>(data, 'retire_uncertain_request');
-    if (verdict.safe !== true) {
-      if (verdict.reason === 'first_check' && verdict.first_check_token) {
-        clearCheckTokens.set(checkKey, verdict.first_check_token);
-        try {
-          window.localStorage.setItem(checkKey, verdict.first_check_token);
-        } catch {
-          // The next try starts the wait again.
-        }
-      }
-      throw new UncertainClearNotYetError(verdict.reason, verdict.wait_until ?? null);
-    }
+    const checkKey = await confirmClearWithServer(expectedIdempotencyKey);
     const db = await openDurableIntentDb();
     try {
       await new Promise<void>((resolve, reject) => {

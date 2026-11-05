@@ -7129,3 +7129,13 @@ Original text:
 If a stock receive/adjust or vendor-bill save loses its reply and 23 hours pass, the dialog locks in that browser
 with a "do not submit again" message and no way to dismiss it (`src/hooks/useUncertainMutationIntent.ts:69`). Fix
 is an admin-only "I checked, clear this" control.
+
+### Closed 2026-11-05 — KI-103 Bulk product import: a large file with per-acre rates timed out at Check File
+PR #1502 (merged 2026-11-05 12:46 PM Central, merge `48ff46a7f`): Check File sends 100 rows per request and joins
+the answers in order; a reply with the wrong row count is refused, and so is a check where rates were locked or
+unlocked between requests. In-file duplicates are still refused across the whole file first; Import stays one
+all-or-nothing save. Proved live 2026-11-05 12:52 PM Central on bundle `index-Cxon6mgH.js` (read-only: Check File
+then Cancel; the save call was blocked in the page): 500 rows that all carry a per-acre rate were checked in 5
+requests (1.6 to 2.7 s each, about 10 s in all), all ready; products, change history and supplier links unchanged
+afterwards. Before the fix, 500 such rows failed after 9.2 s on the signed-in role's 8 s statement limit. The
+unknown-extra-field quirk stays open under KI-103.

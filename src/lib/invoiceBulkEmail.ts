@@ -20,12 +20,23 @@ export function isBulkEmailable(inv: { status?: string | null; send_disposition?
 }
 
 /**
- * The retry key comes from the record (To-Do 9.8): the invoice id plus the time it last
- * changed. Retrying a lost or failed send reuses it, so the server never mails the same
- * version twice; once the invoice changes (a payment, an edit), it can be sent again.
+ * The retry key comes from the record (To-Do 9.8): the invoice id, the time it last changed,
+ * and the address. Retrying a lost or failed send reuses it, so the server never mails the same
+ * version to the same address twice; an edit, a payment or a corrected address sends again.
  */
-export function bulkInvoiceEmailKey(inv: { id: string; updated_at: string }): string {
-  return `invoice-email-${inv.id}-v${inv.updated_at}`;
+export function bulkInvoiceEmailKey(inv: { id: string; updated_at: string }, to: string): string {
+  return `invoice-email-${inv.id}-v${inv.updated_at}-to-${to.trim().toLowerCase()}`;
+}
+
+/** An invoice email already sent to this address since the invoice last changed, from any screen. */
+export function sentSinceLastChange(
+  log: { recipient_email: string | null; created_at: string | null }[],
+  to: string,
+  updatedAt: string,
+): boolean {
+  const changed = Date.parse(updatedAt);
+  return log.some((l) => (l.recipient_email ?? '').trim().toLowerCase() === to.trim().toLowerCase()
+    && Date.parse(l.created_at ?? '') >= changed);
 }
 
 export function summarizeBulkEmail(results: BulkEmailResult[]): { type: 'success' | 'warning' | 'error'; message: string } {

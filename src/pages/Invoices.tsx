@@ -45,12 +45,12 @@ import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
 import { assertInvoiceSendDisposition } from '../lib/invoiceSendDisposition';
 import { logActivity } from '../lib/activityLogger';
-import { bulkInvoiceEmailKey, isBulkEmailable, summarizeBulkEmail, type BulkEmailResult } from '../lib/invoiceBulkEmail';
+import { bulkInvoiceEmailKey, isBulkEmailable, sentSinceLastChange, summarizeBulkEmail, type BulkEmailResult } from '../lib/invoiceBulkEmail';
 
 type InvoiceRow = Invoice & { customer_name: string; salesman_name: string | null; order_number: string | null };
 
 // Only these statuses get a row checkbox, so only these can be part of a selection.
-const SELECTABLE_STATUSES: readonly InvoiceStatus[] = ['draft', 'unposted', 'posted', 'voided'];
+const SELECTABLE_STATUSES: readonly InvoiceStatus[] = ['draft', 'unposted', 'posted', 'overdue', 'voided'];
 const SEARCH_KEYS = ['invoice_number', 'customer_name', 'salesman_name'];
 
 type InvoiceStatusFilter = InvoiceStatus | '' | 'ready_to_post';
@@ -137,6 +137,37 @@ function invoicePdfShares(shares: InvoiceShareRow[]) {
     price_per_acre_cents: s.price_per_acre_cents || null,
     pricing_note: s.pricing_note || null,
   }));
+}
+
+// Re-read the server-owned gate and the version the retry key names: an invoice unposted or
+// edited since the list loaded is refused, never sent under its old key.
+async function assertStillSendable(inv: InvoiceRow): Promise<void> {
+  const { data: live, error } = await supabase
+    .from('invoices')
+    .select('send_disposition, status, deleted_at, updated_at')
+    .eq('id', inv.id)
+    .maybeSingle();
+  if (error) throw error;
+  assertInvoiceSendDisposition(live?.send_disposition, live?.status, live?.deleted_at);
+  if (live?.status !== 'posted' && live?.status !== 'overdue') {
+    throw new Error('This invoice is no longer posted. Reload the list.');
+  }
+  if (live.updated_at !== inv.updated_at) {
+    throw new Error('This invoice changed since the list loaded. Reload the list and email it again.');
+  }
+}
+
+// A send from the invoice page uses its own key, so check the log too: never mail the same
+// version to the same address twice from either screen.
+async function wasSentSinceLastChange(inv: InvoiceRow, to: string): Promise<boolean> {
+  const { data: log, error } = await supabase
+    .from('email_log')
+    .select('recipient_email, created_at')
+    .eq('email_type', 'invoice')
+    .eq('status', 'sent')
+    .like('idempotency_key', `invoice:invoice:${inv.id}:%`);
+  if (error) throw error;
+  return sentSinceLastChange(log ?? [], to, inv.updated_at);
 }
 
 export default function Invoices() {
@@ -541,17 +572,10 @@ export default function Invoices() {
           }
           // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
           const pdfData = await loadInvoicePdfData(inv);
-          // Re-read the server-owned gate and the version the retry key names: an invoice
-          // edited since this list loaded is refused, never sent under its old key.
-          const { data: live, error: liveError } = await supabase
-            .from('invoices')
-            .select('send_disposition, status, deleted_at, updated_at')
-            .eq('id', inv.id)
-            .maybeSingle();
-          if (liveError) throw liveError;
-          assertInvoiceSendDisposition(live?.send_disposition, live?.status, live?.deleted_at);
-          if (live?.updated_at !== inv.updated_at) {
-            throw new Error('This invoice changed since the list loaded. Reload the list and email it again.');
+          await assertStillSendable(inv);
+          if (await wasSentSinceLastChange(inv, to)) {
+            results.push({ ...base, outcome: 'already_sent', detail: `Already emailed to ${to}; not sent again` });
+            continue;
           }
           const result = await sendEmail({
             to,
@@ -561,7 +585,7 @@ export default function Invoices() {
             customer_id: inv.customer_id,
             resource_type: 'invoice',
             resource_id: inv.id,
-            idempotency_key: bulkInvoiceEmailKey(inv),
+            idempotency_key: bulkInvoiceEmailKey(inv, to),
             invoice_snapshot: invoiceEmailSnapshot(pdfData),
           });
           if (!result.success) throw new Error(result.error || 'Failed to send email');

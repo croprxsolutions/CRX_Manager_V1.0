@@ -51,16 +51,23 @@ function type(name: string, value: string) {
 }
 
 describe('OrderSearchPicker', () => {
-  it('finds an order past the old 1,000-row list by customer name, in the old statuses only', async () => {
-    results.customers = [{ data: [{ id: 'c-7' }, { id: 'c-8' }], error: null }];
-    results.orders = [{ data: [{ id: 'o-1099', order_number: 'SEED-ORD-1099', customer_id: 'c-7', status: 'confirmed', customer: { farm_name: 'Seed Farm, North' } }], error: null }];
+  // KI-32: the name match ran on the first 50 matching customers only. Each search is now two
+  // reads (number, then customer name through an inner join); `results.orders` answers them in that order.
+  it('finds an order by any matching customer name, in the old statuses only', async () => {
+    results.orders = [
+      { data: [], error: null },
+      { data: [{ id: 'o-1099', order_number: 'SEED-ORD-1099', customer_id: 'c-7', status: 'confirmed', customer: { farm_name: 'Seed Farm, North' } }], error: null },
+    ];
     const onSelect = vi.fn();
     render(<OrderSearchPicker value="" selectedLabel="" onSelect={onSelect} statuses={['confirmed', 'partially_fulfilled']} customerId="c-7" ariaLabel="Order" />);
     type('Order', 'Farm, North');
     fireEvent.click(await screen.findByRole('option', { name: /SEED-ORD-1099 - Seed Farm, North/ }));
-    expect(calls.customers).toContainEqual(['or', 'farm_name.ilike."%Farm, North%"']);
+    // No separate customer lookup, so no cap on how many customers can match.
+    expect(calls.customers).toBeUndefined();
     expect(calls.orders).toEqual(expect.arrayContaining([
-      ['or', 'order_number.ilike."%Farm, North%",customer_id.in.(c-7,c-8)'],
+      ['or', 'order_number.ilike."%Farm, North%"'],
+      ['select', expect.stringContaining('customer:customers!inner(farm_name)')],
+      ['or', 'farm_name.ilike."%Farm, North%"', { referencedTable: 'customer' }],
       ['in', 'status', ['confirmed', 'partially_fulfilled']],
       ['is', 'deleted_at', null],
       ['eq', 'customer_id', 'c-7'],
@@ -69,21 +76,29 @@ describe('OrderSearchPicker', () => {
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'o-1099' }));
   });
 
-  it('searches by order number alone when no customer name matches', async () => {
-    results.orders = [{ data: [], error: null }];
+  it('merges the two reads newest first and lists an order matching both once', async () => {
+    const older = { id: 'o-a', order_number: 'ORD-A', customer_id: 'c', status: 'confirmed', order_date: '2026-01-01', customer: { farm_name: 'ORD Farm' } };
+    const newer = { id: 'o-b', order_number: 'X-B', customer_id: 'c', status: 'confirmed', order_date: '2026-03-01', customer: { farm_name: 'ORD Farm' } };
+    results.orders = [{ data: [older], error: null }, { data: [newer, older], error: null }];
     render(<OrderSearchPicker value="" selectedLabel="" onSelect={vi.fn()} statuses={['confirmed']} ariaLabel="Order" />);
-    type('Order', 'ORD-12');
-    expect(await screen.findByText('No matching orders')).toBeInTheDocument();
-    expect(calls.orders).toContainEqual(['or', 'order_number.ilike."%ORD-12%"']);
+    type('Order', 'ORD');
+    await screen.findByRole('option', { name: /X-B/ });
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      expect.stringContaining('X-B'),
+      expect.stringContaining('ORD-A'),
+    ]);
   });
 
-  it('shows a failed customer-name lookup as a failed search with Retry, never as no matches', async () => {
-    results.customers = [{ data: null, error: { message: 'down' } }, { data: [], error: null }];
-    results.orders = [{ data: [{ id: 'o-1', order_number: 'ORD-1', customer_id: 'c', status: 'confirmed' }], error: null }];
+  it('shows a failed customer-name read as a failed search with Retry, never as no matches', async () => {
+    results.orders = [
+      { data: [], error: null },
+      { data: null, error: { message: 'down' } },
+      { data: [{ id: 'o-1', order_number: 'ORD-1', customer_id: 'c', status: 'confirmed' }], error: null },
+      { data: [], error: null },
+    ];
     render(<OrderSearchPicker value="" selectedLabel="" onSelect={vi.fn()} statuses={['confirmed']} ariaLabel="Order" />);
     type('Order', 'ORD-1');
     expect(await screen.findByText('Order search failed.')).toBeInTheDocument();
-    expect(calls.orders).toBeUndefined();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByRole('option', { name: /ORD-1/ })).toBeInTheDocument();
   });

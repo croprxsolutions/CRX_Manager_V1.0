@@ -363,6 +363,8 @@ function parseSetupValue(
   field: SetupField, text: string, options: readonly UseTimingOption[],
 ): { value: SetupValue } | { problem: string } {
   const trimmed = text.trim();
+  // The database requires a name, so a cleared one is named here instead of refusing the whole save.
+  if (field === 'product_name' && trimmed === '') return { problem: 'product_name cannot be blank' };
   if ((SETUP_TEXT_FIELDS as readonly string[]).includes(field)) return { value: trimmed === '' ? null : trimmed };
   if ((SETUP_DECIMAL_FIELDS as readonly string[]).includes(field)) {
     if (trimmed === '') return { value: null };

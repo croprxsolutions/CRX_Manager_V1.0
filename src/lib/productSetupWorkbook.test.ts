@@ -85,6 +85,7 @@ describe('setup workbook', () => {
       const headers = (ws.getRow(1).values as string[]).slice(1);
       ws.getCell(3, headers.indexOf('use_timings') + 1).value = 'Sometime';
       ws.getCell(3, headers.indexOf('phi_days') + 1).value = '-1';
+      ws.getCell(3, headers.indexOf('product_name') + 1).value = ' ';
     });
     const now = exported([product({ setup_fingerprint: 'b'.repeat(32) }), exp.rows[1]]);
     const preview = buildSetupPreview(parsed.setupRows, now, OPTIONS, CATEGORIES);
@@ -93,6 +94,7 @@ describe('setup workbook', () => {
     expect(preview.invalid[0].product_name).toBe('Other');
     expect(preview.invalid[0].problem).toMatch(/phi_days must be a whole number/);
     expect(preview.invalid[0].problem).toMatch(/unknown use timing "Sometime"/);
+    expect(preview.invalid[0].problem).toMatch(/product_name cannot be blank/);
   });
 
   it('sends edited rates with the downloaded values as expected, and saves only previewed changes with their prices', async () => {

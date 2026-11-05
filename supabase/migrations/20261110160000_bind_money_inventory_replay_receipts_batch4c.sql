@@ -30,8 +30,8 @@
 --        purchase order wrappers first take the same global purchase-order lock (73492009) their
 --        bodies take first, so the lock order (global, then per key) is unchanged. duplicate_quote
 --        calls the same _begin_below_cost_money_write its body calls first (pinned below).
---        confirm_delivery's body looks up its receipt BEFORE its role check; the wrapper keeps that
---        order (see KNOWN LIMITS);
+--        confirm_delivery's body looks up its receipt BEFORE its role check; the wrapper re-runs
+--        that role check (same message) before handing back any replay;
 --     2. computes a SHA-256 fingerprint of the actor and every request argument except the key and
 --        p_performed_by (which step 1 has already proved equals the actor, or is NULL).
 --        duplicate_quote's below-cost reason is left out, as in 4b: it is transport metadata that an
@@ -108,14 +108,11 @@
 --   * The binding runs before the body's record checks, so a caller who retries THEIR OWN key with an
 --     edited request inside 24 hours sees their own earlier result in the refusal DETAIL (batch 1 has
 --     the same shape; another user never sees it).
---   * confirm_delivery replays a caller's OWN exact retry before its role check, as it does today; a
---     driver taken off the delivery between the two calls gets their own earlier answer back.
---     Nothing new is started.
 --   * A retry under the same key with a DIFFERENT below-cost reason replays the first answer: the
 --     reason only records the approval of a request that already committed.
 --
--- ORDERING: live high-water when stamped (read 2026-11-05): ledger 20261105174225
---   (20261108120000_product_parents). Branch stamps up to 20261109110000 exist; none of them touches
+-- ORDERING: live high-water when restamped (read 2026-11-05): ledger 20261105213209
+--   (20261110140000_rup_records_require_posted_invoice). Other stamps up to 20261110150000 exist; none touches
 --   these functions, their implementations or the guard trigger. Re-read the live ledger before
 --   applying.
 --

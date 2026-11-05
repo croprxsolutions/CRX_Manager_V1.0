@@ -1,6 +1,6 @@
 ## 2026-11-05 — Freight and other charges on a delivered chemical sale (billing plan M1)
 
-- New migration `20261108110000_delivery_invoice_charge_lines.sql` (not applied; record in
+- New migration `20261108160000_delivery_invoice_charge_lines.sql` (not applied; record in
   `docs/reference/migrations.d/`). A delivery invoice now accepts typed charge lines (freight,
   application fee, service, other) beside its products. Before, the delivered-quantity guard
   refused every line with no product on a delivery invoice, so freight had to be billed on a

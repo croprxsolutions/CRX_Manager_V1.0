@@ -230,7 +230,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'An internal error occurred. Please try again.'],
 ];
 
-// The exact reasons 20261010120000 (and 20261108110000, typed charge lines) write after `DELIVERY_INVOICE_EXCEEDS_DELIVERED: `.
+// The exact reasons 20261010120000 (and 20261108160000, typed charge lines) write after `DELIVERY_INVOICE_EXCEEDS_DELIVERED: `.
 const DOC_NUMBER = String.raw`[A-Za-z0-9][A-Za-z0-9-]{0,40}`;
 const QUANTITY = String.raw`\d{1,12}(?:\.\d{1,8})?`;
 const DELIVERY_CAP_REASONS: Array<{ shape: RegExp; labelGroup?: number }> = [

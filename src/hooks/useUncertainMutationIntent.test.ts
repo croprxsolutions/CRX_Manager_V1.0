@@ -582,14 +582,13 @@ describe('useUncertainMutationIntent', () => {
     now.mockRestore();
   });
 
-  it('sends the keys a batch was really sent under, so the server checks and retires each row (KI-27)', async () => {
+  it('sends only the batch key; the server finds and retires the rows under it (KI-27)', async () => {
     let nowMs = Date.parse('2026-08-26T12:00:00Z');
     const now = vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
     const options = {
       operation: 'adjust_inventory_batch',
       userId: 'admin-ki27-batch',
       surface: 'inventory-batch-adjust',
-      getSentRequestKeys: (intent: { rows: string[] }, key: string) => intent.rows.map((row) => `${key}:${row}`),
     };
     const first = renderHook(() => useUncertainMutationIntent<{ rows: string[] }>(options));
     await act(async () => first.result.current.beginIntent({ rows: ['row-a', 'row-b'] }));
@@ -597,12 +596,11 @@ describe('useUncertainMutationIntent', () => {
     first.unmount();
     nowMs += 24 * 60 * 60 * 1000;
     const expired = renderHook(() => useUncertainMutationIntent<{ rows: string[] }>(options));
-    clearCheck.mockResolvedValueOnce({ data: { safe: true, reason: 'recorded', checked_at: '2026-08-27T12:00:00+00:00', retired_keys: 2 }, error: null });
+    clearCheck.mockResolvedValueOnce({ data: { safe: true, reason: 'recorded', checked_at: '2026-08-27T12:00:00+00:00' }, error: null });
     await act(async () => expired.result.current.clearExpiredIntent(key));
     expect(clearCheck).toHaveBeenLastCalledWith('retire_uncertain_request', {
       p_request_key: key,
       p_idempotency_key: key,
-      p_row_keys: [`${key}:row-a`, `${key}:row-b`],
     });
     expect(expired.result.current.isIntentLocked).toBe(false);
     expired.unmount();

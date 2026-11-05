@@ -11,9 +11,6 @@ export type DurableMutationIntentOptions<T> = {
   surface: string;
   scope?: string;
   getIntentIdentity?: (intent: T) => unknown;
-  // Keys the request was actually sent under when it is not sent under its own key
-  // (a batch sends each row as "<key>:<row id>"); the clear check covers and retires them.
-  getSentRequestKeys?: (intent: T, idempotencyKey: string) => string[];
 };
 
 type DurableMutationIntentRecord<T> = {
@@ -109,7 +106,6 @@ type ClearCheckVerdict = {
   checked_at: string;
   wait_until?: string;
   first_check_token?: string;
-  retired_keys?: number;
 };
 export const UNCERTAIN_MUTATION_RECONCILIATION_MESSAGE =
   'The safe automatic retry window expired. Do not submit this mutation again. Verify the authoritative record and reconcile it manually.';
@@ -1149,17 +1145,11 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     } catch {
       // Without the token the server simply starts the wait again.
     }
-    // A safe answer also retires every key the request could still be sent under, so a
-    // late copy from any tab is refused by the database after this clear.
-    const pending = [mirror, attempt].find((record) => record?.status === 'pending'
-      && record.idempotencyKey === expectedIdempotencyKey);
-    const rowKeys = pending && options.getSentRequestKeys
-      ? options.getSentRequestKeys(pending.intent, expectedIdempotencyKey)
-      : [];
+    // A safe answer also retires the request in the database, so a late copy of it, or of
+    // any batch row sent under "<key>:<row id>", is refused from any tab after this clear.
     const { data, error } = await supabase.rpc('retire_uncertain_request', {
       p_request_key: expectedIdempotencyKey,
       p_idempotency_key: expectedIdempotencyKey,
-      ...(rowKeys.length > 0 ? { p_row_keys: rowKeys } : {}),
       ...(firstCheckToken ? { p_first_check_token: firstCheckToken } : {}),
     });
     if (error) throw error;

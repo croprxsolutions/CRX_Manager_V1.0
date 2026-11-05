@@ -15322,7 +15322,6 @@ export type Database = {
           p_first_check_token?: string
           p_idempotency_key?: string
           p_request_key: string
-          p_row_keys?: string[]
         }
         Returns: Json
       }

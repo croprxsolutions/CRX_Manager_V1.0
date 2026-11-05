@@ -212,3 +212,58 @@ describe('DataTable', () => {
     expect(screen.getByText('Filter Active')).toBeInTheDocument();
   });
 });
+
+describe('DataTable phone layout', () => {
+  const phoneRow = (row: TestRow) => <span>phone {row.name}</span>;
+
+  const stubPhone = () => vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === '(max-width: 767px)',
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+
+  it('renders the table, not the phone list, on a wide screen', () => {
+    render(<DataTable data={data} columns={columns} mobileRow={phoneRow} />);
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.queryByText('phone Alice')).not.toBeInTheDocument();
+  });
+
+  it('keeps the table on a phone when no phone layout is given', () => {
+    stubPhone();
+    try {
+      render(<DataTable data={data} columns={columns} />);
+      expect(screen.getByRole('table')).toBeInTheDocument();
+      expect(screen.queryByRole('combobox', { name: 'Sort by' })).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('renders only the phone list on a phone-width screen, with search and a sort select', () => {
+    stubPhone();
+    try {
+      render(<DataTable data={data} columns={columns} mobileRow={phoneRow} searchable searchKeys={['name']} />);
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+      const names = () => screen.getAllByText(/^phone /).map((el) => el.textContent);
+      expect(names()).toEqual(['phone Alice', 'phone Bob', 'phone Charlie']);
+      fireEvent.change(screen.getByRole('combobox', { name: 'Sort by' }), { target: { value: 'age:asc' } });
+      expect(names()).toEqual(['phone Bob', 'phone Alice', 'phone Charlie']);
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'bob' } });
+      expect(names()).toEqual(['phone Bob']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('works where the media query only has the older addListener (Safari before 14)', () => {
+    const addListener = vi.fn();
+    vi.stubGlobal('matchMedia', () => ({ matches: true, addListener, removeListener: vi.fn() }));
+    try {
+      render(<DataTable data={data} columns={columns} mobileRow={phoneRow} />);
+      expect(screen.getByText('phone Alice')).toBeInTheDocument();
+      expect(addListener).toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall } from 'lucide-react';
+import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -19,6 +19,8 @@ import { supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpc
 import { isPricedAgingRow } from '../lib/arAging';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
+import SectionCard from '../components/ui/SectionCard';
+import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { parseLocalDate, localToday, localDatePlusDays, todayInBusinessTz } from '../lib/dateUtils';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import RelatedNotes from '../components/team/RelatedNotes';
@@ -1169,11 +1171,14 @@ export default function CustomerDetail() {
         }}
         onReload={reloadAfterStaleSave}
       />
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold font-heading text-nav-dark">
-          {isNew ? 'New Customer' : customer.farm_name}
-        </h2>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-secondary">Customer</p>
+          <h1 className="font-heading text-3xl font-bold leading-tight break-words text-nav-dark md:text-4xl">
+            {isNew ? 'New Customer' : customer.farm_name}
+          </h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
           {!isNew && (
             <Button variant="secondary" size="sm" icon={<PhoneCall className="w-4 h-4" />} showChevron={false} onClick={() => setLogInteractionOpen(true)}>
               Log Call
@@ -1223,21 +1228,27 @@ export default function CustomerDetail() {
       {!isNew && id && <CustomerSummaryBar customerId={id} onCardClick={(t) => setTab(t as typeof tab)} />}
 
       {!isNew && (
-        <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
-          {tabs.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-2.5 text-sm font-medium capitalize transition-colors ${
-                tab === t
-                  ? 'text-crx-green border-b-2 border-crx-green'
-                  : 'text-secondary hover:text-nav-dark'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+        // Style D pills. Each view still loads only when opened, so these switch views rather than scroll.
+        <nav aria-label="Customer views" className="flex items-center gap-2 border-b border-gray-200 pb-2">
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-secondary">View</span>
+          <div className="flex min-w-0 gap-1.5 overflow-x-auto [-webkit-overflow-scrolling:touch]">
+            {tabs.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                aria-pressed={tab === t}
+                className={`inline-flex min-h-11 shrink-0 items-center rounded-full border px-4 text-sm font-semibold capitalize whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 md:min-h-9 ${
+                  tab === t
+                    ? 'border-nav-dark bg-nav-dark text-white'
+                    : 'border-gray-300 bg-white text-nav-dark hover:bg-cream-dark'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </nav>
       )}
 
       {(tab === 'info' || isNew) && (
@@ -1245,9 +1256,20 @@ export default function CustomerDetail() {
           {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
           {/* key remounts on customer switch — in-flight loads/mutations from the previous customer must never write into this one's view (Sol 2.G r2) */}
           {/* interactionRefresh in the key: logging a call remounts the prep card so "Last conversation" is never stale (Sol final gauntlet) */}
+          <SectionJumpBar
+            sections={[
+              { id: 'customer-contact', label: 'Contact' },
+              { id: 'customer-acreage', label: 'Acreage' },
+              ...(!isNew && id ? [{ id: 'customer-crops', label: 'Crops' }] : []),
+              { id: 'customer-addresses', label: 'Addresses', count: addresses.length },
+              { id: 'customer-commission', label: 'Commission' },
+              { id: 'customer-service', label: 'Service' },
+              { id: 'customer-notes', label: 'Notes' },
+            ]}
+          />
           {!isNew && id && <CustomerPrepCard key={`${id}:${interactionRefresh}`} customerId={id} />}
-          <Card>
-            <CardHeader title="Contact" accent="Information" />
+          <SectionCard id="customer-contact" icon={<User className="w-5 h-5" />} title="Contact">
+            <div className="p-4 sm:p-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input label="Farm Name" required value={customer.farm_name || ''} onChange={(e) => update('farm_name', e.target.value)} />
               <Input label="Contact Name" value={customer.contact_name || ''} onChange={(e) => update('contact_name', e.target.value)} />
@@ -1336,21 +1358,23 @@ export default function CustomerDetail() {
                 <p className="text-xs text-secondary mt-1">Link this customer to a parent farm group</p>
               </div>
             </div>
-          </Card>
+          </div>
+          </SectionCard>
 
-          <Card>
-            <CardHeader title="Farm" accent="Acreage" />
+          <SectionCard id="customer-acreage" icon={<Ruler className="w-5 h-5" />} title="Acreage">
+            <div className="p-4 sm:p-5">
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
               <Input label="Total Acres" type="number" value={customer.total_acres ?? ''} onChange={(e) => update('total_acres', e.target.value ? parseFloat(e.target.value) : null)} />
               <Input label="Corn Acres" type="number" value={customer.corn_acres ?? ''} onChange={(e) => update('corn_acres', e.target.value ? parseFloat(e.target.value) : null)} />
               <Input label="Soybean Acres" type="number" value={customer.soybean_acres ?? ''} onChange={(e) => update('soybean_acres', e.target.value ? parseFloat(e.target.value) : null)} />
               <Input label="Other Acres" type="number" value={customer.other_acres ?? ''} onChange={(e) => update('other_acres', e.target.value ? parseFloat(e.target.value) : null)} />
             </div>
-          </Card>
+          </div>
+          </SectionCard>
 
           {!isNew && id && (
-            <Card>
-              <CardHeader title="Farm" accent="Crops" />
+            <SectionCard id="customer-crops" icon={<Sprout className="w-5 h-5" />} title="Crops">
+              <div className="p-4 sm:p-5">
               <p className="text-xs text-secondary mb-2">Tap to toggle — saves immediately, no need to hit Save Changes.</p>
               <div className="flex flex-wrap gap-2">
                 {ALLOWED_CROPS.map((option) => {
@@ -1373,14 +1397,15 @@ export default function CustomerDetail() {
                   );
                 })}
               </div>
-            </Card>
+            </div>
+            </SectionCard>
           )}
 
-          <Card>
-            <CardHeader
-              title="Delivery"
-              accent="Addresses"
-              action={
+          <SectionCard
+            id="customer-addresses"
+            icon={<MapPin className="w-5 h-5" />}
+            title="Delivery addresses"
+            action={
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1391,7 +1416,8 @@ export default function CustomerDetail() {
                   Add Address
                 </Button>
               }
-            />
+          >
+            <div className="p-4 sm:p-5">
             {addresses.length === 0 ? (
               <p className="text-sm text-secondary">No delivery addresses added</p>
             ) : (
@@ -1418,10 +1444,11 @@ export default function CustomerDetail() {
                 ))}
               </div>
             )}
-          </Card>
+          </div>
+          </SectionCard>
 
-          <Card>
-            <CardHeader title="Default" accent="Commission Split" />
+          <SectionCard id="customer-commission" icon={<Percent className="w-5 h-5" />} title="Commission split">
+            <div className="p-4 sm:p-5">
             {canEditDefaultSplit ? (
               <CommissionSplitEditor
                 value={(customer.default_commission_split as CommissionSplit) || { splits: [{ recipient: '', percentage: 100 }] }}
@@ -1452,10 +1479,11 @@ export default function CustomerDetail() {
             <p className="text-xs text-secondary mt-2">
               This default split is applied to new quotes for this customer.
             </p>
-          </Card>
+          </div>
+          </SectionCard>
 
-          <Card>
-            <CardHeader title="Default" accent="Application Service" />
+          <SectionCard id="customer-service" icon={<SprayCan className="w-5 h-5" />} title="Application service">
+            <div className="p-4 sm:p-5">
             <ApplicationServicePicker
               value={customer.default_application_service_id ?? null}
               onChange={(val) => update('default_application_service_id', val)}
@@ -1463,10 +1491,11 @@ export default function CustomerDetail() {
             <p className="text-xs text-secondary mt-2">
               Pre-fills the application service on new jobs created for this customer.
             </p>
-          </Card>
+          </div>
+          </SectionCard>
 
-          <Card>
-            <CardHeader title="Notes" accent="" />
+          <SectionCard id="customer-notes" icon={<StickyNote className="w-5 h-5" />} title="Notes">
+            <div className="p-4 sm:p-5">
             <textarea
               value={customer.notes || ''}
               onChange={(e) => update('notes', e.target.value)}
@@ -1474,7 +1503,8 @@ export default function CustomerDetail() {
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               placeholder="General notes about this customer..."
             />
-          </Card>
+          </div>
+          </SectionCard>
 
           <div className="flex justify-end">
             <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
@@ -1582,7 +1612,7 @@ export default function CustomerDetail() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="phone-stack w-full text-sm">
                   <thead>
                     <tr className="border-t border-b border-gray-100">
                       <th className="px-5 py-3 text-left font-medium text-secondary">Field Name</th>
@@ -1606,17 +1636,17 @@ export default function CustomerDetail() {
                             <span className="font-medium text-nav-dark">{f.field_name}</span>
                           </div>
                         </td>
-                        <td className="px-4 py-3">{f.total_acres?.toLocaleString() || '-'}</td>
-                        <td className="px-4 py-3">
+                        <td data-label="Acres" className="px-4 py-3">{f.total_acres?.toLocaleString() || '-'}</td>
+                        <td data-label="Crop" className="px-4 py-3">
                           {f.crop_type ? (
                             <Badge variant="info">{f.crop_type}</Badge>
                           ) : '-'}
                         </td>
-                        <td className="px-4 py-3 text-secondary">{f.county || '-'}</td>
-                        <td className="px-4 py-3 text-secondary text-xs truncate max-w-[200px]">
+                        <td data-label="County" className="px-4 py-3 text-secondary">{f.county || '-'}</td>
+                        <td data-label="Legal desc." className="px-4 py-3 text-secondary text-xs truncate max-w-[200px]">
                           {f.legal_description || '-'}
                         </td>
-                        <td className="px-4 py-3">
+                        <td data-label="Status" className="px-4 py-3">
                           <Badge variant={f.is_active ? 'success' : 'default'}>
                             {f.is_active ? 'Active' : 'Inactive'}
                           </Badge>
@@ -1691,7 +1721,7 @@ export default function CustomerDetail() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="phone-stack w-full text-sm">
                 <thead>
                   <tr className="border-t border-b border-gray-100">
                     <th className="px-5 py-3 text-left font-medium text-secondary">Quote #</th>
@@ -1710,7 +1740,7 @@ export default function CustomerDetail() {
                       className="border-b border-gray-50 hover:bg-crx-green-tint cursor-pointer transition-colors"
                     >
                       <td className="px-5 py-3 font-medium text-nav-dark">{q.quote_number}</td>
-                      <td className="px-4 py-3">
+                      <td data-label="Status" className="px-4 py-3">
                         <>
                           <Badge variant={statusToBadgeVariant[q.status] || 'default'}>
                             {q.status === 'closed_by_application' ? 'Fulfilled (Applied)' : q.status === 'closed_short' ? 'Closed — Short' : q.status}
@@ -1722,10 +1752,10 @@ export default function CustomerDetail() {
                           )}
                         </>
                       </td>
-                      <td className="px-4 py-3">T{q.tier}</td>
-                      <td className="px-4 py-3 font-mono">{fmt(q.total_price)}</td>
-                      {isAdmin && <td className="px-4 py-3 font-mono text-emerald-600">{q.total_margin_pct == null ? '—' : `${q.total_margin_pct.toFixed(1)}%`}</td>}
-                      <td className="px-4 py-3 text-secondary">
+                      <td data-label="Tier" className="px-4 py-3">T{q.tier}</td>
+                      <td data-label="Total" className="px-4 py-3 font-mono">{fmt(q.total_price)}</td>
+                      {isAdmin && <td data-label="Margin" className="px-4 py-3 font-mono text-emerald-600">{q.total_margin_pct == null ? '—' : `${q.total_margin_pct.toFixed(1)}%`}</td>}
+                      <td data-label="Created" className="px-4 py-3 text-secondary">
                         {new Date(q.created_at).toLocaleDateString()}
                       </td>
                     </tr>
@@ -1755,7 +1785,7 @@ export default function CustomerDetail() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="phone-stack w-full text-sm">
                 <thead>
                   <tr className="border-t border-b border-gray-100">
                     <th className="px-5 py-3 text-left font-medium text-secondary">Order #</th>
@@ -1774,18 +1804,18 @@ export default function CustomerDetail() {
                       className="border-b border-gray-50 hover:bg-crx-green-tint cursor-pointer transition-colors"
                     >
                       <td className="px-5 py-3 font-medium text-nav-dark">{o.order_number}</td>
-                      <td className="px-4 py-3">
+                      <td data-label="Status" className="px-4 py-3">
                         <Badge variant={statusToBadgeVariant[o.status] || 'default'}>
                           {o.status.replace('_', ' ')}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3 font-mono">{fmt(o.total_price)}</td>
-                      {isAdmin && <td className="px-4 py-3 font-mono text-emerald-600">{o.total_profit == null ? '—' : fmt(o.total_profit)}</td>}
-                      <td className="px-4 py-3 text-secondary">
+                      <td data-label="Total" className="px-4 py-3 font-mono">{fmt(o.total_price)}</td>
+                      {isAdmin && <td data-label="Profit" className="px-4 py-3 font-mono text-emerald-600">{o.total_profit == null ? '—' : fmt(o.total_profit)}</td>}
+                      <td data-label="Date" className="px-4 py-3 text-secondary">
                         {new Date(o.order_date + 'T00:00:00').toLocaleDateString()}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                      <td data-label="Fulfillment" className="px-4 py-3">
+                        <div className="flex w-40 max-w-full items-center gap-2 md:w-auto">
                           <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div
                               className="h-full bg-crx-green rounded-full transition-all"
@@ -1822,7 +1852,7 @@ export default function CustomerDetail() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="phone-stack w-full text-sm">
                   <thead>
                     <tr className="border-t border-b border-gray-100">
                       <th className="px-5 py-3 text-left font-medium text-secondary">Delivery #</th>
@@ -1850,19 +1880,19 @@ export default function CustomerDetail() {
                               <span className="font-medium text-nav-dark">{d.delivery_number}</span>
                             </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td data-label="Status" className="px-4 py-3">
                             <Badge variant={statusToBadgeVariant[d.status] || 'default'}>
                               {d.status.replace('_', ' ')}
                             </Badge>
                           </td>
-                          <td className="px-4 py-3">{d.driver_name}</td>
-                          <td className="px-4 py-3 text-secondary">
+                          <td data-label="Driver" className="px-4 py-3">{d.driver_name}</td>
+                          <td data-label="Scheduled" className="px-4 py-3 text-secondary">
                             {parseLocalDate(d.scheduled_date).toLocaleDateString()}
                           </td>
-                          <td className="px-4 py-3 text-secondary">
+                          <td data-label="Completed" className="px-4 py-3 text-secondary">
                             {d.completed_at ? new Date(d.completed_at).toLocaleDateString() : '-'}
                           </td>
-                          <td className="px-4 py-3">
+                          <td data-label="Signature" className="px-4 py-3">
                             {/* How the completion was confirmed (completion_evidence, migration 20261022075000):
                                 a no-proof record's signer is office text, never a customer signature. */}
                             {d.completion_evidence === 'no_proof' ? (
@@ -1907,7 +1937,7 @@ export default function CustomerDetail() {
                 }
               />
               <div className="overflow-x-auto mt-3">
-                <table className="w-full text-sm">
+                <table className="phone-stack w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100">
                       <th className="px-4 py-2 text-left font-medium text-secondary">Product</th>
@@ -1920,9 +1950,9 @@ export default function CustomerDetail() {
                     {customerRemainders.map((r) => (
                       <tr key={r.id} className="border-b border-gray-50">
                         <td className="px-4 py-2 font-medium text-nav-dark">{r.product_name || 'Unknown'}</td>
-                        <td className="px-4 py-2 text-amber-600 font-semibold">{r.quantity_remaining}</td>
-                        <td className="px-4 py-2 text-secondary">{r.unit_size || '-'}</td>
-                        <td className="px-4 py-2">
+                        <td data-label="Qty remaining" className="px-4 py-2 text-amber-600 font-semibold">{r.quantity_remaining}</td>
+                        <td data-label="Unit" className="px-4 py-2 text-secondary">{r.unit_size || '-'}</td>
+                        <td data-label="Original delivery" className="px-4 py-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -2058,7 +2088,7 @@ export default function CustomerDetail() {
                   <div className="px-5 pb-5"><p className="text-sm text-secondary">No transactions in the last 90 days.</p></div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="phone-stack w-full text-sm">
                       <thead>
                         <tr className="border-t border-b border-gray-100">
                           <th className="px-5 py-3 text-left font-medium text-secondary">Date</th>
@@ -2074,12 +2104,12 @@ export default function CustomerDetail() {
                         {transactions.slice(-RECENT_TRANSACTIONS_SHOWN).map((txn, idx) => (
                           <tr key={idx} className="border-b border-gray-50">
                             <td className="px-5 py-3">{parseLocalDate(txn.transaction_date).toLocaleDateString()}</td>
-                            <td className="px-4 py-3 capitalize">{txn.transaction_type}</td>
-                            <td className="px-4 py-3 font-mono text-xs">{txn.reference_number}</td>
-                            <td className={`px-4 py-3 text-right ${txn.amount_cents < 0 ? 'text-red-600' : 'text-nav-dark'}`}>
+                            <td data-label="Type" className="px-4 py-3 capitalize">{txn.transaction_type}</td>
+                            <td data-label="Reference" className="px-4 py-3 font-mono text-xs">{txn.reference_number}</td>
+                            <td data-label="Amount" className={`px-4 py-3 text-right ${txn.amount_cents < 0 ? 'text-red-600' : 'text-nav-dark'}`}>
                               {fmt(txn.amount_cents / 100)}
                             </td>
-                            <td className="px-4 py-3 text-right">{fmt(txn.running_balance / 100)}</td>
+                            <td data-label="Balance" className="px-4 py-3 text-right">{fmt(txn.running_balance / 100)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2095,7 +2125,7 @@ export default function CustomerDetail() {
                     <CardHeader title="Prepay" accent="Credits" />
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="phone-stack w-full text-sm">
                       <thead>
                         <tr className="border-t border-b border-gray-100">
                           <th className="px-5 py-3 text-left font-medium text-secondary">Bucket</th>
@@ -2107,8 +2137,8 @@ export default function CustomerDetail() {
                         {prepayCredits.map((c) => (
                           <tr key={c.id} className="border-b border-gray-50">
                             <td className="px-5 py-3 font-medium text-nav-dark">{c.bucket_label}</td>
-                            <td className="px-4 py-3 text-right">{fmt(c.original_amount_cents / 100)}</td>
-                            <td className="px-4 py-3 text-right text-crx-green font-medium">{fmt(c.balance_cents / 100)}</td>
+                            <td data-label="Original" className="px-4 py-3 text-right">{fmt(c.original_amount_cents / 100)}</td>
+                            <td data-label="Remaining" className="px-4 py-3 text-right text-crx-green font-medium">{fmt(c.balance_cents / 100)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2145,7 +2175,7 @@ export default function CustomerDetail() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="phone-stack w-full text-sm">
                 <thead>
                   <tr className="border-t border-b border-gray-100">
                     <th className="px-5 py-3 text-left font-medium text-secondary">Product</th>
@@ -2159,10 +2189,10 @@ export default function CustomerDetail() {
                   {history.map((h, idx) => (
                     <tr key={idx} className="border-b border-gray-50">
                       <td className="px-5 py-3 font-medium text-nav-dark">{h.product_name}</td>
-                      <td className="px-4 py-3">{h.order_count}</td>
-                      <td className="px-4 py-3">{h.total_units.toLocaleString()}</td>
-                      <td className="px-4 py-3">{h.total_delivered.toLocaleString()}</td>
-                      <td className="px-4 py-3 font-mono text-crx-green">
+                      <td data-label="Times ordered" className="px-4 py-3">{h.order_count}</td>
+                      <td data-label="Total units" className="px-4 py-3">{h.total_units.toLocaleString()}</td>
+                      <td data-label="Units delivered" className="px-4 py-3">{h.total_delivered.toLocaleString()}</td>
+                      <td data-label="Total spent" className="px-4 py-3 font-mono text-crx-green">
                         {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(h.total_spent)}
                       </td>
                     </tr>
@@ -2171,10 +2201,10 @@ export default function CustomerDetail() {
                 <tfoot>
                   <tr className="border-t border-gray-200 bg-gray-50">
                     <td className="px-5 py-3 font-semibold text-nav-dark">Total</td>
-                    <td className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.order_count, 0)}</td>
-                    <td className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_units, 0).toLocaleString()}</td>
-                    <td className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_delivered, 0).toLocaleString()}</td>
-                    <td className="px-4 py-3 font-semibold font-mono text-crx-green">
+                    <td data-label="Times ordered" className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.order_count, 0)}</td>
+                    <td data-label="Total units" className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_units, 0).toLocaleString()}</td>
+                    <td data-label="Units delivered" className="px-4 py-3 font-semibold">{history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_delivered, 0).toLocaleString()}</td>
+                    <td data-label="Total spent" className="px-4 py-3 font-semibold font-mono text-crx-green">
                       {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(history.reduce((s: number, h: PurchaseHistoryItem) => s + h.total_spent, 0))}
                     </td>
                   </tr>

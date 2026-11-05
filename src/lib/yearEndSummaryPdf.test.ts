@@ -51,6 +51,7 @@ import { DEFAULT_COMPANY_INFO } from './companyInfo';
 companyInfo.load.mockResolvedValue(DEFAULT_COMPANY_INFO);
 
 import autoTable from 'jspdf-autotable';
+import { CRX_GREEN, RED } from './pdfTheme';
 
 import {
   generateYearEndSummaryPdf,
@@ -233,6 +234,30 @@ describe('generateYearEndSummaryPdf', () => {
       },
     }));
     expect(doc).toBe(mockDoc);
+  });
+
+  it('colours the year-over-year Change column green for growth and red for decline', async () => {
+    await generateYearEndSummaryPdf(makeSummaryData({
+      prior_season: {
+        total_invoiced_cents: 150000, // up
+        total_paid_cents: 200000, // down
+        invoice_count: 0, // no prior value: "—"
+        total_acres: 400,
+      },
+    }));
+    const yoyCall = vi.mocked(autoTable).mock.calls.find(
+      ([, opts]) => (opts as { head?: string[][] }).head?.[0]?.[3] === 'Change',
+    );
+    const { didParseCell } = yoyCall![1] as { didParseCell: (h: unknown) => void };
+    const colourFor = (rowIndex: number, columnIndex = 3) => {
+      const cell = { styles: {} as { textColor?: unknown } };
+      didParseCell({ section: 'body', column: { index: columnIndex }, row: { index: rowIndex }, cell });
+      return cell.styles.textColor;
+    };
+    expect(colourFor(0)).toEqual(CRX_GREEN);
+    expect(colourFor(1)).toEqual(RED);
+    expect(colourFor(2)).toBeUndefined();
+    expect(colourFor(0, 1)).toBeUndefined();
   });
 
   it('handles options to hide sections', async () => {

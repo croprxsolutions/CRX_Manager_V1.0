@@ -11,6 +11,8 @@ const mockOff = vi.fn();
 const mockIsEmpty = vi.fn(() => false);
 const mockToDataURL = vi.fn(() => 'data:image/png;base64,abc');
 const mockAddEventListener = vi.fn();
+const mockToData = vi.fn((): unknown[] => []);
+const mockFromData = vi.fn();
 
 vi.mock('signature_pad', () => {
   // Must be a regular function so `new SignaturePad(...)` works
@@ -21,6 +23,8 @@ vi.mock('signature_pad', () => {
       isEmpty: mockIsEmpty,
       toDataURL: mockToDataURL,
       addEventListener: mockAddEventListener,
+      toData: mockToData,
+      fromData: mockFromData,
     };
   }
   return { default: MockSignaturePad };
@@ -70,13 +74,41 @@ describe('SignatureCanvas', () => {
     render(<SignatureCanvas {...defaultProps} width={300} height={100} />);
     const canvas = document.querySelector('canvas') as HTMLCanvasElement;
     expect(canvas.style.width).toBe('300px');
-    expect(canvas.style.height).toBe('100px');
+    // Shrinks to fit a narrow phone while keeping the 300:100 shape
+    expect(canvas.style.maxWidth).toBe('100%');
+    expect(canvas.style.aspectRatio).toBe('300 / 100');
   });
 
   it('uses default width/height when not specified', () => {
     render(<SignatureCanvas {...defaultProps} />);
     const canvas = document.querySelector('canvas') as HTMLCanvasElement;
     expect(canvas.style.width).toBe('400px');
-    expect(canvas.style.height).toBe('150px');
+    expect(canvas.style.aspectRatio).toBe('400 / 150');
+  });
+
+  it('rescales drawn strokes when the box resizes (phone rotation)', () => {
+    let boxWidth = 300;
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(() => boxWidth);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(() => boxWidth / 2.5);
+    let onResize = () => {};
+    vi.stubGlobal('ResizeObserver', function (cb: () => void) {
+      onResize = cb;
+      return { observe: vi.fn(), disconnect: vi.fn() };
+    });
+    try {
+      render(<SignatureCanvas {...defaultProps} />);
+      expect(mockFromData).not.toHaveBeenCalled();
+
+      mockToData.mockReturnValue([{ penColor: 'rgb(0, 0, 0)', points: [{ x: 100, y: 40 }] }]);
+      boxWidth = 600;
+      onResize();
+
+      expect(mockFromData).toHaveBeenCalledWith([{ penColor: 'rgb(0, 0, 0)', points: [{ x: 200, y: 80 }] }]);
+      expect(defaultProps.onSignatureChange).toHaveBeenCalledWith('data:image/png;base64,abc');
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+      mockToData.mockReturnValue([]);
+    }
   });
 });

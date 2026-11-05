@@ -43,6 +43,8 @@ import {
 //        admin            -> every type, including purchase_order
 //        sales_rep        -> every customer type (purchase cost is admin-only)
 //        driver           -> only delivery_completed (with proof of assignment)
+//        (statement and ar_reminder are admin-only, like the A/R Aging page;
+//        Mason, 2026-11-02)
 //   3. Drivers must supply resource_type='delivery' + resource_id and be the
 //      assigned driver of that delivery; the delivery's customer_id must
 //      match the request's customer_id.
@@ -115,13 +117,17 @@ const JOB_NOTICE_TYPE_BY_EMAIL_TYPE: Record<string, string> = {
   post_application_notice: "post",
 };
 
+// Account-wide money emails. Statements and A/R are admin-only elsewhere (the
+// A/R Aging page), so only admins may send them (Mason, 2026-11-02, PR #1302 review).
+const ADMIN_ONLY_CUSTOMER_EMAIL_TYPES = new Set(["statement", "ar_reminder"]);
+
 // What email types each role may send.
 //   admin     -> all types in ALL_EMAIL_TYPES (incl. purchase_order)
-//   sales_rep -> the customer types (incl. pre_application_notice)
+//   sales_rep -> the customer types except statement and ar_reminder
 //   driver    -> only delivery_completed
 const EMAIL_TYPES_BY_ROLE: Record<string, Set<string>> = {
   admin: ALL_EMAIL_TYPES,
-  sales_rep: CUSTOMER_EMAIL_TYPES,
+  sales_rep: new Set([...CUSTOMER_EMAIL_TYPES].filter((t) => !ADMIN_ONLY_CUSTOMER_EMAIL_TYPES.has(t))),
   driver: new Set(["delivery_completed"]),
 };
 
@@ -131,6 +137,9 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB after base64 decod
 
 // Rate limit
 const RATE_LIMIT_PER_HOUR = 50;
+
+// How long to wait for the email provider before marking the send failed.
+const RESEND_TIMEOUT_MS = 30_000;
 
 // jsPDF's data URI is "data:application/pdf;filename=...;base64,<data>".
 function pdfBase64(doc: { output: (type: "datauristring") => string }): string {
@@ -806,10 +815,17 @@ Deno.serve(async (req: Request) => {
     //     email_log row to status='pending' BEFORE calling Resend. If this
     //     write fails, we DON'T send — otherwise the customer could receive
     //     an email with no audit record and no idempotency replay marker.
+    const alreadyInProgress = () => jsonResponse({
+      success: false,
+      error: "Another send of this email is already in progress. Wait a minute, then check whether it was sent.",
+      email_log_id: emailLogId,
+    }, 409);
     if (emailLogId) {
       // Existing failed row from a prior attempt — reset it to pending and
       // record THIS attempt's content, so the log shows what was actually sent.
-      const { error: updateErr } = await adminClient
+      // Only a row still 'failed' is claimed: of two retries at the same moment,
+      // the second finds it 'pending' and stops (PR #1302 review, finding 3).
+      const { data: claimedRow, error: updateErr } = await adminClient
         .from("email_log")
         .update({
           status: "pending",
@@ -821,7 +837,13 @@ Deno.serve(async (req: Request) => {
           html_body: html,
           attachment_name: attachments?.[0]?.filename || null,
         })
-        .eq("id", emailLogId);
+        .eq("id", emailLogId)
+        .eq("status", "failed")
+        .select("id")
+        .maybeSingle();
+      if (!updateErr && !claimedRow) {
+        return alreadyInProgress();
+      }
       if (updateErr) {
         await captureEdgeException(
           new Error(`email_log pre-send reset failed: ${updateErr.message}`),
@@ -857,6 +879,10 @@ Deno.serve(async (req: Request) => {
         })
         .select("id")
         .single();
+      // email_log.idempotency_key is unique: a first send racing this one already holds the key.
+      if (insertErr?.code === "23505") {
+        return alreadyInProgress();
+      }
       if (insertErr || !newRow) {
         await captureEdgeException(
           new Error(`email_log pre-send insert failed: ${insertErr?.message || 'no row returned'}`),
@@ -1031,19 +1057,44 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const resendResp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${resendApiKey}`,
-      },
-      body: JSON.stringify(resendBody),
-    });
-
-    const resendResult = await resendResp.json();
-    const success = resendResp.ok;
-    const resendMessageId = resendResult.id || null;
-    const errorMessage = success ? null : (resendResult.message || JSON.stringify(resendResult));
+    // A slow or broken reply ends as 'failed', never stuck on 'pending' (PR #1302
+    // review, finding 4). The email may still have gone out, so Resend gets this
+    // log row's id as its idempotency key: a retry reuses the row, and Resend
+    // returns the first send instead of mailing it twice (it keeps keys 24 hours
+    // and never stores a failed request).
+    let resendStatus = 0;
+    let success = false;
+    let resendMessageId: string | null = null;
+    let errorMessage: string | null = null;
+    try {
+      const resendResp = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${resendApiKey}`,
+          "Idempotency-Key": emailLogId!,
+        },
+        body: JSON.stringify(resendBody),
+        signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
+      });
+      resendStatus = resendResp.status;
+      const resendText = await resendResp.text();
+      let resendResult: { id?: string; message?: string } | null = null;
+      try {
+        resendResult = JSON.parse(resendText);
+      } catch {
+        resendResult = null;
+      }
+      success = resendResp.ok && typeof resendResult?.id === "string";
+      resendMessageId = resendResult?.id ?? null;
+      errorMessage = success
+        ? null
+        : (resendResult?.message || `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`);
+    } catch (err) {
+      errorMessage = (err as Error)?.name === "TimeoutError"
+        ? `Email provider did not answer within ${RESEND_TIMEOUT_MS / 1000} seconds. It may still have been sent; check the email log before sending again.`
+        : `Email provider request failed: ${(err as Error)?.message ?? String(err)}`;
+    }
 
     // 12. Update the pending row to sent/failed. Even if this update fails,
     //     the pending row exists for idempotency replay — durability is
@@ -1074,7 +1125,7 @@ Deno.serve(async (req: Request) => {
       await captureEdgeException(new Error(errorMessage || "Resend send failed"), {
         function: "send-email",
         level: "error",
-        tags: { email_type, status_code: String(resendResp.status) },
+        tags: { email_type, status_code: String(resendStatus) },
         extra: { customer_id, email_log_id: emailLogId, resend_message_id: resendMessageId },
         user: { id: caller.id },
       });

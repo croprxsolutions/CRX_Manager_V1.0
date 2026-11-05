@@ -435,7 +435,7 @@ jobs:
 
       - name: Edge Function unit tests (Deno)
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' && steps.edge-scope.outputs.changed == 'true' }}
-        run: deno test --no-prompt --node-modules-dir=none supabase/functions
+        run: deno test --no-prompt --allow-env --node-modules-dir=none supabase/functions
 
       - name: Documentation consistency
         env:

@@ -377,7 +377,7 @@ The required **SQL Migration Validation** check also runs `scripts/check-migrati
 A migration newer than the high-water mark is in the pending band and may still be revised (a notice is printed). An unreadable registry closes the band. The RLS rule honors the same `-- rls-check: exempt` comment marker as the local `rls-on-new-tables` hook, and prints a warning naming the file so reviewers confirm the written reason. Run `npm run check:migration-hard-rules` to audit every migration on disk for the RLS rule, and `npm run test:migration-hard-rules` for the checker's own tests.
 
 ### Edge Functions (automatic, added 2026-09-03)
-When a PR changes anything under `supabase/functions/`, the main CI job installs Deno and runs `deno check --node-modules-dir=none supabase/functions/*/index.ts` and `deno test --no-prompt --node-modules-dir=none supabase/functions`. The same two commands work locally with Deno 2.x installed. When no function changed the steps are skipped, not passed.
+When a PR changes anything under `supabase/functions/`, the main CI job installs Deno and runs `deno check --node-modules-dir=none supabase/functions/*/index.ts` and `deno test --no-prompt --allow-env --node-modules-dir=none supabase/functions` (`--allow-env` because the send-email tests set the settings the function reads; they reach no network). The same two commands work locally with Deno 2.x installed. When no function changed the steps are skipped, not passed.
 
 ### Known Dead RPCs
 These RPCs are defined in migrations but have NO frontend callers (test stubs only in `rpcContracts.test.ts`):

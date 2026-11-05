@@ -41,10 +41,10 @@ import {
 //      vendor (To-Do 0.15; _shared/purchaseOrderEmailGate.ts).
 //   2. email_type is allowlisted per role:
 //        admin            -> every type, including purchase_order
-//        sales_rep        -> the customer types except statement and ar_reminder
+//        sales_rep        -> the customer types except ar_reminder
 //        driver           -> only delivery_completed (with proof of assignment)
-//        (statement and ar_reminder are admin-only, like the A/R Aging page;
-//        Mason, 2026-11-02)
+//        (ar_reminder is admin-only; reps send invoices and statements;
+//        Mason, 2026-11-05)
 //   3. Drivers must supply resource_type='delivery' + resource_id and be the
 //      assigned driver of that delivery; the delivery's customer_id must
 //      match the request's customer_id.
@@ -117,13 +117,13 @@ const JOB_NOTICE_TYPE_BY_EMAIL_TYPE: Record<string, string> = {
   post_application_notice: "post",
 };
 
-// Account-wide money emails. Statements and A/R are admin-only elsewhere (the
-// A/R Aging page), so only admins may send them (Mason, 2026-11-02, PR #1302 review).
-const ADMIN_ONLY_CUSTOMER_EMAIL_TYPES = new Set(["statement", "ar_reminder"]);
+// Collection reminders are admin-only; reps may send invoices and statements
+// (Mason, 2026-11-05, revising the 2026-11-02 #1302 answer).
+const ADMIN_ONLY_CUSTOMER_EMAIL_TYPES = new Set(["ar_reminder"]);
 
 // What email types each role may send.
 //   admin     -> all types in ALL_EMAIL_TYPES (incl. purchase_order)
-//   sales_rep -> the customer types except statement and ar_reminder
+//   sales_rep -> the customer types except ar_reminder
 //   driver    -> only delivery_completed
 const EMAIL_TYPES_BY_ROLE: Record<string, Set<string>> = {
   admin: ALL_EMAIL_TYPES,

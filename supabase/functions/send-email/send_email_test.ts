@@ -196,25 +196,25 @@ const quoteEmail = (quoteId: string, key?: string) => ({
 
 // --- Who may send what (item 1) ----------------------------------------------
 
-Deno.test("a sales rep is refused a statement and an A/R reminder; nothing is logged or sent", async () => {
+Deno.test("a sales rep is refused an A/R reminder; nothing is logged or sent", async () => {
   const world = makeWorld(okResend);
-  for (const email_type of ["statement", "ar_reminder"]) {
-    const res = await send(world, REP, { ...statementEmail, email_type });
-    assertEquals(res.status, 403, email_type);
-    assertEquals(res.body.error, `Role 'sales_rep' is not permitted to send '${email_type}' emails`);
-  }
+  const res = await send(world, REP, { ...statementEmail, email_type: "ar_reminder" });
+  assertEquals(res.status, 403);
+  assertEquals(res.body.error, "Role 'sales_rep' is not permitted to send 'ar_reminder' emails");
   assertEquals(world.resendCalls.length, 0, "Resend calls");
   assertEquals(world.tables.email_log.length, 0, "email_log rows");
 });
 
-Deno.test("an admin may send a statement", async () => {
-  const world = makeWorld(okResend);
-  const res = await send(world, ADMIN, statementEmail);
-  assertEquals(res.status, 200);
-  assertEquals(res.body.success, true);
-  assertEquals(world.resendCalls.length, 1, "Resend calls");
-  assertEquals(world.tables.email_log[0].status, "sent");
-});
+for (const [who, caller] of [["an admin", ADMIN], ["a sales rep", REP]]) {
+  Deno.test(`${who} may send a statement`, async () => {
+    const world = makeWorld(okResend);
+    const res = await send(world, caller, statementEmail);
+    assertEquals(res.status, 200);
+    assertEquals(res.body.success, true);
+    assertEquals(world.resendCalls.length, 1, "Resend calls");
+    assertEquals(world.tables.email_log[0].status, "sent");
+  });
+}
 
 Deno.test("a sales rep may still send a quote for the quote's customer", async () => {
   const world = makeWorld(okResend);

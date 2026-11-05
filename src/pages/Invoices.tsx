@@ -45,7 +45,7 @@ import Modal from '../components/ui/Modal';
 import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
 import { assertInvoiceSendDisposition } from '../lib/invoiceSendDisposition';
 import { logActivity } from '../lib/activityLogger';
-import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, isBulkEmailable, isEmailRateLimit, summarizeBulkEmail, type BulkEmailResult } from '../lib/invoiceBulkEmail';
+import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, invoiceEmailLogPrefix, isBulkEmailable, isEmailRateLimit, sentSinceInvoiceChanged, summarizeBulkEmail, type BulkEmailResult, type InvoiceEmailLogRow } from '../lib/invoiceBulkEmail';
 
 type InvoiceRow = Invoice & { customer_name: string; salesman_name: string | null; order_number: string | null };
 
@@ -555,6 +555,19 @@ export default function Invoices() {
           const to = cust?.email?.trim() || '';
           if (!to) {
             results.push({ ...base, outcome: 'skipped', detail: 'No email address on file' });
+            continue;
+          }
+          // Sent since it last changed, under any key (KI-104, option A2): skip before the send, so the
+          // hourly cap cannot turn an already-sent invoice into "Not sent". A read error sends nothing.
+          const { data: logRows, error: logError } = await supabase
+            .from('email_log')
+            .select('idempotency_key, recipient_email, status, created_at')
+            .eq('email_type', 'invoice')
+            .like('idempotency_key', `${invoiceEmailLogPrefix(inv.id)}%`)
+            .gte('created_at', inv.updated_at);
+          if (logError) throw logError;
+          if (sentSinceInvoiceChanged((logRows ?? []) as InvoiceEmailLogRow[], inv, to)) {
+            results.push({ ...base, outcome: 'already_sent', detail: `Already emailed to ${to} since it last changed; not sent again` });
             continue;
           }
           // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).

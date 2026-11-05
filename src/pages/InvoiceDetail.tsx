@@ -236,6 +236,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const [emailing, setEmailing] = useState(false);
   // The address an unchanged invoice already went to: asks before mailing another copy.
   const [resendTo, setResendTo] = useState<string | null>(null);
+  // The extra copy's retry key, kept for the version-and-address key it follows until that copy is
+  // confirmed sent, so a retry after a lost reply cannot mail a second copy.
+  const copyKeyRef = useRef<{ forKey: string; key: string } | null>(null);
   const emailingRef = useRef(false);
 
   // Write-off modal + write-off list
@@ -1889,6 +1892,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         const liveVersion = await assertInvoiceSendable(id!);
         if (!liveVersion) throw new Error('Could not read this invoice. Reload and try again.');
         const version = { id: id!, updated_at: liveVersion };
+        const versionKey = await invoiceEmailKey(version, cust.email!, billTo);
+        if (copyKeyRef.current?.forKey !== versionKey) {
+          copyKeyRef.current = { forKey: versionKey, key: `invoice-email-${id}-copy-${crypto.randomUUID()}` };
+        }
+        const copyKey = copyKeyRef.current.key;
         const result = await sendEmail({
           to: cust.email!,
           subject: `Invoice ${invoice.invoice_number || ''} from Crop RX Solutions`,
@@ -1897,23 +1905,27 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           customer_id: invoice.customer_id!,
           resource_type: 'invoice',
           resource_id: id,
-          idempotency_key: resend ? `invoice-email-${id}-copy-${Date.now()}` : await invoiceEmailKey(version, cust.email!, billTo),
+          idempotency_key: resend ? copyKey : versionKey,
           invoice_snapshot: invoiceEmailSnapshot(pdfData),
         });
 
         if (!result.success) throw new Error(result.error || 'Failed to send email');
         // This version already went to this address (from either screen), so the server sent nothing:
         // ask before mailing a deliberate extra copy, which gets its own key.
-        if (result.deduplicated) {
+        if (result.deduplicated && !resend) {
           setResendTo(cust.email!);
           return 'ask' as const;
         }
+        if (resend) copyKeyRef.current = null;
+        // A copy key the server already used means that copy went on an earlier try.
+        if (result.deduplicated) return 'copy_already_sent' as const;
         logActivity({ event: 'invoice_emailed', description: `Invoice ${invoice.invoice_number} emailed to ${cust.email}`, performedBy: profile.id, entityType: 'invoice', entityId: id, customerId: invoice.customer_id });
         return 'sent' as const;
       },
       toast,
       onSuccess: (outcome) => {
         if (outcome === 'sent') toast('success', `Invoice emailed to ${cust.email}`);
+        if (outcome === 'copy_already_sent') toast('info', `The extra copy already went to ${cust.email} on an earlier try; not sent again.`);
       },
       sentryTag: 'email_invoice',
     });

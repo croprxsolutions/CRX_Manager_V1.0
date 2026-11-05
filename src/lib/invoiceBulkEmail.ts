@@ -46,6 +46,37 @@ export async function invoiceEmailKey(inv: { id: string; updated_at: string }, t
   return `invoice-email-${inv.id}-v${inv.updated_at}-to-${code}`;
 }
 
+/**
+ * The start of every key send-email writes for an invoice email: `invoice:invoice:<invoice id>:`.
+ * The server builds it from the invoice it checked, so a caller cannot put another invoice's id
+ * there (KI-104, Mason's option A2, 2026-11-05).
+ */
+export function invoiceEmailLogPrefix(invoiceId: string): string {
+  return `invoice:invoice:${invoiceId}:`;
+}
+
+export interface InvoiceEmailLogRow {
+  idempotency_key: string | null;
+  recipient_email: string | null;
+  status: string | null;
+  created_at: string;
+}
+
+/**
+ * Bulk only: true when the log shows this invoice was emailed to this address since it last
+ * changed. It catches sends made under the old clock keys, which the record key cannot match.
+ * Strict: the key must START with the server-written prefix for this exact invoice.
+ */
+export function sentSinceInvoiceChanged(rows: InvoiceEmailLogRow[], inv: { id: string; updated_at: string }, to: string): boolean {
+  const prefix = invoiceEmailLogPrefix(inv.id);
+  const changedAt = Date.parse(inv.updated_at);
+  const address = to.trim().toLowerCase();
+  return rows.some((r) => r.status === 'sent'
+    && !!r.idempotency_key?.startsWith(prefix)
+    && (r.recipient_email ?? '').trim().toLowerCase() === address
+    && Date.parse(r.created_at) >= changedAt);
+}
+
 /** The server's hourly cap (50 per user): later sends in the batch would be refused too. */
 export function isEmailRateLimit(message: string): boolean {
   return message.startsWith('Rate limit:');

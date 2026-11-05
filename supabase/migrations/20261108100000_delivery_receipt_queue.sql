@@ -27,7 +27,7 @@
 --      (attempt_to), and claims nothing new. A finish key is bound to its receipt, token, outcome and proof.
 --      A sent finish whose delivery, customer or customer email changed while sending is kept as needs_check
 --      (with the send recorded) so the office follows up. A row whose own earlier
---      attempt is logged sent (its finish was lost) is recorded sent (needs_check if the customer's email has changed since), never sent again.
+--      attempt is logged sent (its finish was lost) is recorded sent (needs_check if the delivery was voided or moved, or the customer's email changed since), never sent again.
 --      The worker logs its sends as key 'delivery-receipt-queue:<queue id>:attempt-<n>' with created_by NULL.
 --      send-email cannot write that (it scopes every key as '<email_type>:<resource>:<key>' and sets created_by),
 --      so no staff send can pass as the worker's; the email_log trigger also refuses any API user (an admin
@@ -476,6 +476,35 @@ BEGIN
      LIMIT CASE WHEN v_replay THEN 50 ELSE p_limit END
      FOR UPDATE SKIP LOCKED
   LOOP
+    -- This receipt's own earlier attempt is logged sent (its finish was lost): record it, never send again.
+    -- Checked first: if the delivery was voided or moved, or the customer's email changed since, the office
+    -- follows up (the send stays recorded) instead of the row reading as cancelled or sent.
+    SELECT e.recipient_email, e.resend_message_id INTO v_log_to, v_log_msg
+      FROM public.email_log e
+     WHERE e.email_type = 'delivery_completed' AND e.status = 'sent'
+       AND left(e.idempotency_key, 60) = 'delivery-receipt-queue:' || v_row.id::text || ':'
+       AND e.created_by IS NULL
+     ORDER BY e.created_at DESC
+     LIMIT 1;
+    IF FOUND THEN
+      IF EXISTS (SELECT 1 FROM public.deliveries d JOIN public.customers c ON c.id = v_row.customer_id
+                  WHERE d.id = v_row.delivery_id AND d.status = 'completed' AND d.deleted_at IS NULL
+                    AND d.customer_id = v_row.customer_id
+                    AND lower(btrim(COALESCE(c.email, ''))) = lower(btrim(COALESCE(v_log_to, '')))) THEN
+        UPDATE public.delivery_receipt_queue
+           SET status = 'sent', claim_token = NULL, claimed_at = NULL, last_error = NULL, sent_at = now(),
+               sent_to = left(v_log_to, 320), resend_message_id = left(v_log_msg, 200)
+         WHERE id = v_row.id;
+      ELSE
+        UPDATE public.delivery_receipt_queue
+           SET status = 'needs_check', claim_token = NULL, claimed_at = NULL, sent_at = NULL,
+               sent_to = left(v_log_to, 320), resend_message_id = left(v_log_msg, 200),
+               last_error = 'The receipt was emailed, but the delivery, its customer or the customer''s email changed while it was sending; check with the customer.'
+         WHERE id = v_row.id;
+      END IF;
+      CONTINUE;
+    END IF;
+
     SELECT d.customer_id INTO v_customer FROM public.deliveries d
      WHERE d.id = v_row.delivery_id AND d.status = 'completed' AND d.deleted_at IS NULL;
     IF NOT FOUND THEN
@@ -490,32 +519,6 @@ BEGIN
          SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
              last_error = 'The delivery now belongs to another customer; check who should get the receipt.'
        WHERE id = v_row.id;
-      CONTINUE;
-    END IF;
-
-    -- This receipt's own earlier attempt is logged sent (its finish was lost): record it, never send again.
-    SELECT e.recipient_email, e.resend_message_id INTO v_log_to, v_log_msg
-      FROM public.email_log e
-     WHERE e.email_type = 'delivery_completed' AND e.status = 'sent'
-       AND left(e.idempotency_key, 60) = 'delivery-receipt-queue:' || v_row.id::text || ':'
-       AND e.created_by IS NULL
-     ORDER BY e.created_at DESC
-     LIMIT 1;
-    IF FOUND THEN
-      -- Sent to an address that is no longer the customer's: the office follows up (never sent again).
-      IF EXISTS (SELECT 1 FROM public.customers c WHERE c.id = v_row.customer_id
-                  AND lower(btrim(COALESCE(c.email, ''))) = lower(btrim(COALESCE(v_log_to, '')))) THEN
-        UPDATE public.delivery_receipt_queue
-           SET status = 'sent', claim_token = NULL, claimed_at = NULL, last_error = NULL, sent_at = now(),
-               sent_to = left(v_log_to, 320), resend_message_id = left(v_log_msg, 200)
-         WHERE id = v_row.id;
-      ELSE
-        UPDATE public.delivery_receipt_queue
-           SET status = 'needs_check', claim_token = NULL, claimed_at = NULL, sent_at = NULL,
-               sent_to = left(v_log_to, 320), resend_message_id = left(v_log_msg, 200),
-               last_error = 'The receipt was emailed, but the customer''s email changed while it was sending; check with the customer.'
-         WHERE id = v_row.id;
-      END IF;
       CONTINUE;
     END IF;
 

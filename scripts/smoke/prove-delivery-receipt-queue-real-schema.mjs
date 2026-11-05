@@ -538,7 +538,14 @@ function main() {
   due(19); assert.equal(claim().length, 0);
   assert.match(row(19, "status || ' ' || sent_to || ' ' || last_error"), /^needs_check ki25-farm@example.invalid The receipt was emailed, but/);
   psql(`UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
-  console.log('[prover] its own logged send to a changed address goes to the office list');
+  // Its own logged send for a delivery voided since: the office follows up, not "cancelled, nothing sent".
+  seedDelivery(23); assert.equal(complete(23, { emailReceipt: 'true' }).status, 0);
+  const q23 = row(23, 'id');
+  log(`delivery-receipt-queue:${q23}:attempt-1`, 'sent');
+  psql(`SET session_replication_role = replica; UPDATE public.deliveries SET status = 'cancelled' WHERE id = '${D(23)}';`);
+  due(23); assert.equal(claim().length, 0);
+  assert.match(row(23, "status || ' ' || sent_to || ' ' || last_error"), /^needs_check ki25-farm@example.invalid The receipt was emailed, but/);
+  console.log('[prover] its own logged send to a changed address or a voided delivery goes to the office list');
 
   // The delivery now belongs to another customer: the office checks who gets the receipt.
   seedDelivery(16); assert.equal(complete(16, { emailReceipt: 'true' }).status, 0);

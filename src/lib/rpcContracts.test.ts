@@ -2846,6 +2846,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261106150000',
   '20261107060000',
   '20261107150000',
+  '20261108120000',
 ]);
 
 /**
@@ -3039,9 +3040,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // required-key public wrapper. Prune once the registry high-water passes 20261102200000.
   '_manual_inventory_add_replay_impl_20261015',
   '_complete_job_replay_impl_20261015',
-  // 20261108120000 (PAR-1) local migration: admin-only parent writers; each replays through
+  // 20261108120000 (PAR-1, applied live 2026-11-05): admin-only parent writers; each replays through
   // _product_parent_replay (check_idempotency + actor/fingerprint match) and saves its receipt.
-  // Prune after live type regeneration.
+  // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
   'add_product_size',
   'correct_parent_rates',
   'correct_product_parent_identity',
@@ -3102,8 +3103,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Local candidate 20261107060000 (WP-PM-11a-1): internal helper behind the two rate writers.
   _write_product_rates:
     'internal rate writer (20261107060000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',
-  // Local candidate 20261108120000 (PAR-1): private helpers behind the keyed parent writers, and the
-  // trigger-only history writer it re-issues. Prune once that migration is live and below the high-water.
+  // 20261108120000 (PAR-1, applied live 2026-11-05): private helpers behind the keyed parent writers, and the
+  // trigger-only history writer it re-issues. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
   _apply_parent_rates: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
   _copy_parent_to_size: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
   _insert_parent_size: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',

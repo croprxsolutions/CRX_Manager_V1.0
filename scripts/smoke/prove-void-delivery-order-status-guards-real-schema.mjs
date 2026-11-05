@@ -335,7 +335,12 @@ const NORMAL = {
 };
 
 function main() {
-  if (!REUSE) buildContainer();
+  if (REUSE) {
+    // Only this proof's own throwaway container, checked before any write: its name, pinned image, no network.
+    assert.match(NAME, /^crx-void-order-status-\d+-[a-z0-9]+$/, 'CRX_PROVER_REUSE_CONTAINER must name a container this proof created');
+    assert.equal(docker(['inspect', '--format', '{{.Config.Image}} {{.HostConfig.NetworkMode}}', NAME]).stdout.trim(),
+      `${IMAGE} none`, 'the reused container is not a network-disabled prover container');
+  } else buildContainer();
   grantsLikeLive();
   // The replay reproduces live's body exactly (read live 2026-11-04; the candidate's preflight pins it too).
   assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = '${IMPL}'::regprocedure;`), '5ed655f54d8bf169b8986dbe2184c0d0');

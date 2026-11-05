@@ -10,7 +10,7 @@
 --      and a retry count. RLS on; active admins and sales reps may read it; no API role may write it.
 --   2. complete_delivery gains a trailing p_email_receipt boolean DEFAULT NULL. TRUE (with any proof other than
 --      no_proof) records the receipt after the evidence is recorded, in the same transaction: pending, or needs_check
---      when the customer has no email on file by then. NULL and FALSE are today's behaviour exactly: the request fingerprint carries the new value
+--      when the customer has no email on file by then, or while the sender is not switched on (its two Vault secrets missing). NULL and FALSE are today's behaviour exactly: the request fingerprint carries the new value
 --      only when it is TRUE, so a completion committed before this file still replays with its saved fingerprint. A
 --      replay never records a receipt (the first commit did); a NULL-evidence (pre-20261022075000) replay ignores
 --      p_email_receipt, since no current app sends one without evidence. start_and_complete_delivery and
@@ -178,6 +178,7 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_delivery record;
+  v_worker_on boolean;
 BEGIN
   SELECT d.id, d.delivery_number, d.customer_id, d.signed_by, d.completed_at,
          NULLIF(btrim(COALESCE(c.email, '')), '') AS email
@@ -187,14 +188,18 @@ BEGIN
   IF v_delivery.id IS NULL THEN
     RETURN;
   END IF;
-  -- No customer email on file now (removed after the screen checked): the office follows up instead.
+  -- No customer email on file now (removed after the screen checked), or the sender is not switched on yet (its two
+  -- Vault secrets, as the timer reads them): the office follows up instead, and no pending row holds the send lock.
+  v_worker_on := EXISTS (SELECT 1 FROM vault.decrypted_secrets s WHERE s.name = 'delivery_receipt_worker_url')
+             AND EXISTS (SELECT 1 FROM vault.decrypted_secrets s WHERE s.name = 'delivery_receipt_worker_secret');
   INSERT INTO public.delivery_receipt_queue (delivery_id, customer_id, requested_by, status, last_error, receipt)
   VALUES (
     p_delivery_id,
     v_delivery.customer_id,
     p_actor,
-    CASE WHEN v_delivery.email IS NULL THEN 'needs_check' ELSE 'pending' END,
-    CASE WHEN v_delivery.email IS NULL THEN 'The customer has no email on file; the receipt was not sent.' END,
+    CASE WHEN v_delivery.email IS NULL OR NOT v_worker_on THEN 'needs_check' ELSE 'pending' END,
+    CASE WHEN v_delivery.email IS NULL THEN 'The customer has no email on file; the receipt was not sent.'
+         WHEN NOT v_worker_on THEN 'The receipt sender is not switched on; the receipt was not sent.' END,
     jsonb_build_object(
       'delivery_number', COALESCE(v_delivery.delivery_number, ''),
       'delivered_on', to_char((v_delivery.completed_at AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD'),

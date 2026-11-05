@@ -314,6 +314,14 @@ function main() {
     '*/2 * * * * SELECT public._wake_delivery_receipt_worker()');
   console.log('[prover] candidate applied once; a second apply refuses at the preflight; cron job scheduled');
 
+  // Before the sender is switched on (its two Vault secrets), an asked-for receipt goes to the office list and
+  // holds no send lock; then switch it on for the rest of the proof (the timer test switches it off again).
+  seedDelivery(25); assert.equal(complete(25, { emailReceipt: 'true' }).status, 0);
+  assert.match(row(25, "status || ' ' || last_error"), /^needs_check The receipt sender is not switched on/);
+  psql(`SELECT vault.create_secret('http://127.0.0.1:9/functions/v1/send-delivery-receipts', 'delivery_receipt_worker_url');
+    SELECT vault.create_secret('[PROVER] not a real secret', 'delivery_receipt_worker_secret');`);
+  console.log('[prover] before the sender is switched on, a receipt goes to the office list');
+
   // Legacy replay: the same request (no p_email_receipt) returns the saved answer and records nothing.
   const replayLegacy = complete(0, { key: 'ki25-legacy-0' });
   assert.equal(replayLegacy.status, 0, replayLegacy.err);
@@ -366,7 +374,7 @@ function main() {
 
   // Access: staff read only; drivers see nothing; nobody but service_role runs the worker calls.
   const asUser = (uid, sql) => q(`BEGIN;\n${claims(uid)}\nSET LOCAL ROLE authenticated; ${sql}; COMMIT;`, { allowFailure: true });
-  assert.equal(asUser(ADMIN, 'SELECT count(*) FROM public.delivery_receipt_queue').out, '2', 'D2 pending and D6 to check');
+  assert.equal(asUser(ADMIN, 'SELECT count(*) FROM public.delivery_receipt_queue').out, '3', 'D2 pending, D6 and D25 to check');
   assert.equal(asUser(DRIVER, 'SELECT count(*) FROM public.delivery_receipt_queue').out, '0');
   assert.match(asUser(ADMIN, "UPDATE public.delivery_receipt_queue SET status = 'sent'").err, /permission denied/);
   // An admin may write the email log directly, but never a row in the worker's namespace.
@@ -642,6 +650,8 @@ function main() {
   // pg_net's worker moves a queued call to net._http_response once tried (here: no network, so it fails).
   const posts = () => scalar('SELECT (SELECT count(*) FROM net.http_request_queue) + (SELECT count(*) FROM net._http_response);');
   psql("UPDATE public.delivery_receipt_queue SET next_attempt_at = now() + interval '1 day' WHERE status = 'pending';");
+  psql(`DELETE FROM vault.secrets WHERE name IN ('delivery_receipt_worker_url', 'delivery_receipt_worker_secret');
+    DELETE FROM net.http_request_queue; DELETE FROM net._http_response;`);
   psql('SELECT public._wake_delivery_receipt_worker();'); assert.equal(posts(), '0');
   fresh(2);
   psql('SELECT public._wake_delivery_receipt_worker();'); assert.equal(posts(), '0', 'no Vault secrets: the timer stays off');

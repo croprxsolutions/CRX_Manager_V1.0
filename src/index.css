@@ -336,8 +336,14 @@
   table.phone-stack :is(tbody, tfoot) {
     display: block;
   }
+  /* Hidden from sight only, so screen readers keep the column headings. */
   table.phone-stack thead {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   table.phone-stack tr {
     display: block;

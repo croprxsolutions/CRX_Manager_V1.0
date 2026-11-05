@@ -1764,7 +1764,8 @@ export default function CustomerDetail() {
                   onClick={async () => {
                     try {
                       const lastQuote = quotes[0];
-                      const idemKey = duplicateQuoteIdem.getKey();
+                      // Keyed per source quote: the server binds the key to the quote it copies (KI-10 batch 4c).
+                      const idemKey = duplicateQuoteIdem.getKeyFor(lastQuote.id);
                       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('duplicate_quote', withBelowCostReason('duplicate_quote', {
                         p_source_quote_id: lastQuote.id,
                         p_performed_by: profile?.id as string,
@@ -1772,7 +1773,7 @@ export default function CustomerDetail() {
                       }, reason)));
                       if (error) { toast('error', 'Failed to duplicate quote'); return; }
                       const result = assertRpcResult<{ quote_id: string }>(data, 'duplicate_quote');
-                      duplicateQuoteIdem.resetKey();
+                      duplicateQuoteIdem.resetKeyFor(lastQuote.id);
                       navigate(`/quotes/${result.quote_id}`);
                     } catch (error: unknown) {
                       if (!isBelowCostApprovalHandledError(error)) toast('error', 'Failed to duplicate quote');

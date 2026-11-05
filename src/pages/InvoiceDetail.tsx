@@ -1836,7 +1836,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   };
 
   // Email invoice with PDF attachment
-  const handleEmailInvoice = async (resend = false) => {
+  // resend: the address the "Email Another Copy?" dialog named; the copy goes only there.
+  const handleEmailInvoice = async (resend: string | false = false) => {
     setResendTo(null);
     if (!profile) {
       toast('error', 'Cannot email invoice — profile not loaded. Please refresh.');
@@ -1859,7 +1860,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     }
   };
 
-  const sendInvoiceEmail = async (resend: boolean) => {
+  const sendInvoiceEmail = async (resend: string | false) => {
     if (!profile) return;
     // Read the billed customer by id: the picker list skips inactive customers and may not have
     // loaded, so a customer missing from it would read as "no email on file".
@@ -1882,6 +1883,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     const cust = { email: custEmail };
     if (!cust.email) {
       toast('error', 'Customer does not have an email address on file');
+      return;
+    }
+    if (resend && cust.email.trim().toLowerCase() !== resend.trim().toLowerCase()) {
+      setResendTo(null);
+      toast('error', `The customer's email changed to ${cust.email} since you were asked. Nothing was sent; click Email again.`);
       return;
     }
     await runCriticalAction({
@@ -2896,7 +2902,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       <ConfirmModal
         open={resendTo != null}
         onClose={() => setResendTo(null)}
-        onConfirm={() => handleEmailInvoice(true)}
+        onConfirm={() => handleEmailInvoice(resendTo ?? false)}
         title="Email Another Copy?"
         message={`This invoice was already emailed to ${resendTo ?? ''} and has not changed since. Send another copy?`}
         confirmLabel="Send Another Copy"

@@ -561,6 +561,8 @@ export default function Invoices() {
             results.push({ ...base, outcome: 'skipped', detail: 'No email address on file' });
             continue;
           }
+          // The log check below trusts the list's version, so confirm it is still current first (Sol 9.6 r2).
+          await assertStillSendable(inv);
           // Sent since it last changed, under any key (KI-104, option A2): skip before the send, so the
           // hourly cap cannot turn an already-sent invoice into "Not sent". A read error sends nothing.
           const { data: logRows, error: logError } = await supabase

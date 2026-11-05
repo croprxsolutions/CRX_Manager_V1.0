@@ -228,6 +228,9 @@ describe('product pricing workbook', () => {
     expect(worksheet.getCell(2, quotingNotesColumn).value).toBe('Sales guidance');
     expect(worksheet.getCell(2, quotingNotesColumn).protection.locked).toBe(false);
     expect(worksheet.getCell(2, ratePerAcreColumn).numFmt).toBe('@');
+    for (const header of ['suggested_rate', 'rate_per_acre', 'rate_unit'] as const) {
+      expect(worksheet.getCell(2, PRICING_WORKBOOK_HEADERS.indexOf(header) + 1).protection?.locked).not.toBe(false);
+    }
     expect(manifest.getCell(5, 2).value).toBe('2');
     expect(worksheet.getCell(2, modeColumn).dataValidation).toMatchObject({
       type: 'list',

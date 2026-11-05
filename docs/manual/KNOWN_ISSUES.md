@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-04 for the live ledger only (see the 2026-11-04 retro-split-guard changelog note); other evidence retains its stated dates.
+**Last verified:** 2026-11-04 for the live ledger only (see the WP-PM-11a-1 and 2026-11-04 retro-split-guard changelog notes); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -40,6 +40,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
 | Closed as FIXED, with proof (bottom of file and archive) | 8 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
+| WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
@@ -412,6 +413,10 @@ not in the balance. It flags, never shows a wrong amount, and before this fix it
 **Payment half — fixed by `20261103220000_period_check_takes_month_lock`:** `allocate_payment` refuses a
 `p_payment_date` after today in Central time (`PAYMENT_DATE_IN_FUTURE`), so a payment can no longer make a customer
 unrebuildable on a current-date report. Neither payment screen sends a date. Proof: the KI-19 prover above.
+
+### KI-100 — An open product page learns of a lock change only on reload or a refused save
+**LOW · product UI · LOCAL CANDIDATE `20261107060000` — NOT APPLIED**
+If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
 
 ---
 

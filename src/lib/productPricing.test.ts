@@ -17,6 +17,7 @@ import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
   assertPricingPreviewRowsSafe,
+  assertWorkbookLeavesRatesAlone,
   createPricingWorkbookExport,
   defaultPricingMode,
   formatPricingMarginPercent,
@@ -183,6 +184,24 @@ describe('pricingMarginTextIsValid', () => {
 
   it.each(['.5', '100', '1e1', ''])('rejects %s', (text) => {
     expect(pricingMarginTextIsValid(text)).toBe(false);
+  });
+});
+
+describe('assertWorkbookLeavesRatesAlone', () => {
+  const preview = (changes: Record<string, { before: unknown; after: unknown }> | undefined) => ({
+    rows: [{ sequence: 1, product_id: 'p1', submitted_row: {}, row_status: 'ready', error_code: null,
+      effect: { product_id: 'p1', product_name: 'Alpha', product_info_changes: changes } }],
+  }) as unknown as Parameters<typeof assertWorkbookLeavesRatesAlone>[0];
+
+  it('refuses an upload that changed a rate cell, naming the product', () => {
+    expect(() => assertWorkbookLeavesRatesAlone(preview({ rate_per_acre: { before: 13, after: 16 } })))
+      .toThrow(/Rates are read-only in the price workbook.*Alpha/);
+    expect(() => assertWorkbookLeavesRatesAlone(preview({ suggested_rate: { before: null, after: 'x' } }))).toThrow();
+  });
+
+  it('lets other product details through', () => {
+    expect(() => assertWorkbookLeavesRatesAlone(preview({ quoting_notes: { before: '', after: 'x' } }))).not.toThrow();
+    expect(() => assertWorkbookLeavesRatesAlone(preview(undefined))).not.toThrow();
   });
 });
 

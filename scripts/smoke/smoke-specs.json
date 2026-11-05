@@ -1946,6 +1946,12 @@
       "description": "REQUIRES 20261110120000. KI-27 server check, and retire, before a staff member clears their own stuck request. Self-seeding (needs one active admin profile; everything is rolled back): the function and receipt-guard bodies are pinned, only authenticated can execute the function and no client role reaches either new table; a key recorded under its own operation is safe (expired too) and one under another operation is not; an unrecorded key needs two checks 15+ minutes apart by server time in a token signed for that exact request (no, forged, borrowed and future tokens start a new wait; 5 minutes refused, 16 minutes safe, then retired); a batch with a row saved under adjust_inventory is recorded and a row under another operation or not ending in a UUID is not; after a safe answer the database refuses a later save of the request, of any batch row under it (any ending) and of an expired key, while an unrelated key still saves and a retired request with a live receipt still replays (allocate_payment's claim row included); an active non-admin staff member (when one exists) is answered for their own key and refused another user's; a service profile (when one exists), another user's key, a row key, a wrong idempotency key and a signed-out session are refused. The in-progress answer needs two sessions and is proven on the local test database.",
       "covers": ["retire_uncertain_request"],
       "area": ["idempotency", "regression"]
+    },
+    "sale_line_vendor": {
+      "chain": "smoke-sale-line-vendor.sql",
+      "description": "Migration 20261112130000 (billing plan M3): a new order line is filled from the product's preferred vendor; a line created with a vendor keeps it; a line's vendor changed on the sale reaches its invoice and doesn't touch the product; an older line with no vendor invoices with the preferred vendor; a re-save that sends no vendor keeps it and one that sends a vendor changes it; a product with no preferred vendor stays blank; only the vendor column is open to UPDATE. Terminal rollback.",
+      "covers": ["_fill_order_line_vendor", "_fill_invoice_line_vendor", "save_invoice", "complete_delivery"],
+      "area": ["billing", "regression"]
     }
   }
 }

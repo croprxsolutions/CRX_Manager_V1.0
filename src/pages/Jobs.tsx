@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download, FileText, Trash2, ChevronDown, ChevronRight, Tag, Tags, Search, SlidersHorizontal, Users, Layers, Pencil, Settings2, Truck, FlaskConical, ClipboardList, PackageOpen, Beaker, Printer, Map as MapIcon, Info } from 'lucide-react';
+import { Plus, Download, FileText, Trash2, ChevronDown, ChevronRight, Tag, Tags, Search, SlidersHorizontal, Users, Layers, Pencil, Settings2, Truck, FlaskConical, ClipboardList, PackageOpen, Beaker, Printer, Map as MapIcon } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge, { type BadgeVariant } from '../components/ui/Badge';
@@ -16,6 +16,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
 import { JOB_COLUMNS } from '../lib/costFields';
 import { fetchAllRows } from '../lib/pagedRead';
+import { chunkIds } from '../lib/dispatchDisplay';
+import { newestFirst } from '../lib/customerNameSearch';
 import { logActivity } from '../lib/activityLogger';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
@@ -231,23 +233,12 @@ function OverflowChips({ items, expanded, onToggle, jobId, field }: {
   );
 }
 
-// The newest-N cap on the jobs fetch. Client-side Crop/Chemical/County/State/
-// Field-name filters run AFTER this cap, so a match older than the newest
-// JOBS_FETCH_LIMIT jobs is never in the window. When the fetch returns exactly
-// this many rows we surface an honest banner telling the user older jobs aren't
-// searched (and how to include them).
-const JOBS_FETCH_LIMIT = 500;
-
 export default function Jobs() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role, profile } = useAuth();
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [loading, setLoading] = useState(true);
-  // Field-app parity (P3 remediation): true when fetchJobs hit the newest-N cap
-  // (data.length === JOBS_FETCH_LIMIT) — drives the "older jobs aren't searched"
-  // banner so client-side filters running after the cap aren't silently lossy.
-  const [atFetchCap, setAtFetchCap] = useState(false);
   // The newest jobs read failed: show "could not be loaded", never "No jobs found" (To-Do 10.5).
   const [loadError, setLoadError] = useState(false);
   // Field-app parity #6: the FULL filter set, AND-combined. Two copies:
@@ -464,34 +455,46 @@ export default function Jobs() {
     // PR-07 follow-up: dropped applicator FK embed; resolve via profile_public_view.
     // Field-app parity #6: county/state pulled on the joined field so the
     // client-side County/State filters can read them.
-    let query = supabase
-      .from('jobs')
-      .select(`
-        ${JOB_COLUMNS},
-        customer:customers(farm_name, account_number, phone),
-        vehicle:vehicles(vehicle_name),
-        job_fields(crop, field:fields(field_name, crop_type, county, state)),
-        job_chemicals(rate_per_acre, rate_unit, product:products(product_name)),
-        job_tag_assignments(tag:job_tags(id, name, color, created_by, created_at, updated_at)),
-        batch:job_batches(name),
-        job_location_dispatches(applicator_id, crew_id, dispatch_status)
-      `)
-      .is('deleted_at', null)
-      .order('job_date', { ascending: false })
-      .limit(JOBS_FETCH_LIMIT);
+    // A fresh query per page: fetchAllRows reads every job, page by page (KI-32).
+    const baseQuery = (options: { count: 'exact' }) => {
+      let query = supabase
+        .from('jobs')
+        .select(`
+          ${JOB_COLUMNS},
+          customer:customers(farm_name, account_number, phone),
+          vehicle:vehicles(vehicle_name),
+          job_fields(crop, field:fields(field_name, crop_type, county, state)),
+          job_chemicals(rate_per_acre, rate_unit, product:products(product_name)),
+          job_tag_assignments(tag:job_tags(id, name, color, created_by, created_at, updated_at)),
+          batch:job_batches(name),
+          job_location_dispatches(applicator_id, crew_id, dispatch_status)
+        `, options)
+        .is('deleted_at', null);
 
-    // ---- SERVER-side filters (indexed scalar columns on jobs) ----
-    if (applied.statuses.length > 0) query = query.in('status', applied.statuses);
-    if (applied.startDate) query = query.gte('job_date', applied.startDate);
-    if (applied.endDate) query = query.lte('job_date', applied.endDate);
-    if (applied.jobNumber.trim()) query = query.ilike('job_number', `%${applied.jobNumber.trim()}%`);
+      // ---- SERVER-side filters (indexed scalar columns on jobs) ----
+      if (applied.statuses.length > 0) query = query.in('status', applied.statuses);
+      if (applied.startDate) query = query.gte('job_date', applied.startDate);
+      if (applied.endDate) query = query.lte('job_date', applied.endDate);
+      if (applied.jobNumber.trim()) query = query.ilike('job_number', `%${applied.jobNumber.trim()}%`);
+      if (applied.vehicleIds.length > 0) query = query.in('vehicle_id', applied.vehicleIds);
+      if (applied.typeIds.length > 0) query = query.in('application_service_id', applied.typeIds);
+      if (applied.groundCrewIds.length > 0) query = query.in('ground_crew_id', applied.groundCrewIds);
+      // Field-app parity #3: filter by named batch (server-side on jobs.batch_ref).
+      if (applied.batchIds.length > 0) query = query.in('batch_ref', applied.batchIds);
+      return query;
+    };
+    type JobsQuery = ReturnType<typeof baseQuery>;
+    // The Applicators and Customers filters each match a column OR a list of job ids.
+    // A long id list would overflow the request URL, so each filter becomes one
+    // `.or()` per chunk of ids, and the list is the union of every chunk's read.
+    let applicatorFilters: Array<(q: JobsQuery) => JobsQuery> = [(q) => q];
+    let customerFilters: Array<(q: JobsQuery) => JobsQuery> = [(q) => q];
     // U13 (Codex R2 #2): the Applicators filter must match jobs assigned via
     // EITHER the legacy whole-job applicator_id OR an ACTIVE per-location
     // dispatch — filtering only jobs.applicator_id would drop a job whose
     // selected applicator appears solely through the dispatch wizard. Pull the
     // matching dispatch job_ids first (single indexed query), then OR them in
-    // SERVER-side — same pattern as the customer-share filter below, so the
-    // newest-N fetch cap applies to the correct (union) match set.
+    // SERVER-side — same pattern as the customer-share filter below.
     if (applied.applicatorIds.length > 0) {
       // Every matching dispatch, page by page; a failed read stops the load
       // rather than quietly dropping dispatched jobs (Goal 4 N4).
@@ -514,16 +517,11 @@ export default function Jobs() {
       }
       const dispJobIds = [...new Set(((dispJobs || []) as { job_id: string }[]).map((d) => d.job_id))];
       const appList = applied.applicatorIds.join(',');
-      query = dispJobIds.length > 0
-        ? query.or(`applicator_id.in.(${appList}),id.in.(${dispJobIds.join(',')})`)
-        : query.in('applicator_id', applied.applicatorIds);
+      applicatorFilters = dispJobIds.length > 0
+        ? chunkIds(dispJobIds).map((chunk) => (q: JobsQuery) => q.or(`applicator_id.in.(${appList}),id.in.(${chunk.join(',')})`))
+        : [(q) => q.in('applicator_id', applied.applicatorIds)];
     }
-    if (applied.vehicleIds.length > 0) query = query.in('vehicle_id', applied.vehicleIds);
-    if (applied.typeIds.length > 0) query = query.in('application_service_id', applied.typeIds);
-    if (applied.groundCrewIds.length > 0) query = query.in('ground_crew_id', applied.groundCrewIds);
-    // Field-app parity #3: filter by named batch (server-side on jobs.batch_ref).
-    if (applied.batchIds.length > 0) query = query.in('batch_ref', applied.batchIds);
-    // Customer filter is applied SERVER-side (before the 500-row limit) and matches
+    // Customer filter is applied SERVER-side and matches
     // the primary jobs.customer_id OR any job carrying a per-field share for one of
     // the selected customers — so an older job billed to a share customer isn't
     // truncated away (Codex). Pull the share job_ids first, then OR them in.
@@ -547,13 +545,39 @@ export default function Jobs() {
       }
       const shareJobIds = [...new Set(((shareJobs || []) as { job_id: string }[]).map((s) => s.job_id))];
       const custList = applied.customerIds.join(',');
-      query = shareJobIds.length > 0
-        ? query.or(`customer_id.in.(${custList}),id.in.(${shareJobIds.join(',')})`)
-        : query.in('customer_id', applied.customerIds);
+      customerFilters = shareJobIds.length > 0
+        ? chunkIds(shareJobIds).map((chunk) => (q: JobsQuery) => q.or(`customer_id.in.(${custList}),id.in.(${chunk.join(',')})`))
+        : [(q) => q.in('customer_id', applied.customerIds)];
     }
 
-    const { data, error } = await query;
-    if (superseded()) return;
+    let data: unknown[] | null = [];
+    let error: unknown = null;
+    const seen = new Set<unknown>();
+    for (const byApplicator of applicatorFilters) {
+      for (const byCustomer of customerFilters) {
+        const read = await fetchAllRows((from, to) => byCustomer(byApplicator(baseQuery({ count: 'exact' })))
+          .order('job_date', { ascending: false })
+          .order('id')
+          .range(from, to));
+        if (superseded()) return;
+        if (read.error || !Array.isArray(read.data)) {
+          error = read.error;
+          data = null;
+          break;
+        }
+        // A job matching two chunks (its applicator and an id) is kept once.
+        for (const row of read.data as Array<{ id?: unknown }>) {
+          if (seen.has(row.id)) continue;
+          seen.add(row.id);
+          data.push(row);
+        }
+      }
+      if (data === null) break;
+    }
+    if (data && applicatorFilters.length * customerFilters.length > 1) {
+      // The server's order (`job_date DESC, id`) across the merged reads.
+      (data as Array<{ id: string } & Record<string, unknown>>).sort((a, b) => newestFirst(a, b, 'job_date'));
+    }
 
     // No list is not "No jobs found": treat it as a failed read.
     if (error || !Array.isArray(data)) {
@@ -581,9 +605,6 @@ export default function Jobs() {
       last_printed_by?: string | null;
     };
     const raw = (data || []) as RawJob[];
-    // Honest cap flag: exactly JOBS_FETCH_LIMIT rows means the server truncated to
-    // the newest window, so older jobs are NOT in scope for the client-side filters.
-    setAtFetchCap(raw.length === JOBS_FETCH_LIMIT);
 
     // U13 (Codex R2 #1): the batch must ALSO include the ACTIVE per-location
     // dispatch applicator_ids — a dispatch-only/split assignee isn't in any of
@@ -628,10 +649,16 @@ export default function Jobs() {
     const billedByJob = new Map<string, JobCustomerSummary[]>();
     if (jobIds.length > 0) {
       try {
-        const { data: billed, error: billedErr } = await supabase.rpc('get_jobs_billed_customers', { p_job_ids: jobIds });
-        if (billedErr) throw billedErr;
         type BilledRow = { job_id: string | null; farm_name: string | null; account_number: string | null };
-        const billedRows = assertRpcResult<BilledRow[]>(billed, 'get_jobs_billed_customers');
+        const billedRows: BilledRow[] = [];
+        // 100 jobs per call keeps each reply (one row per billed customer) under the
+        // server's 1,000-row cap now that the list holds every job (KI-32).
+        for (const chunk of chunkIds(jobIds, 100)) {
+          const { data: billed, error: billedErr } = await supabase.rpc('get_jobs_billed_customers', { p_job_ids: chunk });
+          if (billedErr) throw billedErr;
+          for (const row of assertRpcResult<BilledRow[]>(billed, 'get_jobs_billed_customers')) billedRows.push(row);
+        }
+        if (superseded()) return;
         billedRows.forEach((b) => {
           if (!b.job_id) return;
           const list = billedByJob.get(b.job_id) ?? [];
@@ -2061,19 +2088,6 @@ export default function Jobs() {
           </div>
         </div>
       </Card>
-
-      {/* P3 remediation: client-side Crop/Chemical/County/State/Field-name filters
-          run AFTER the newest-N server cap, so a match older than the window is
-          never shown. Be honest about it when the cap is hit. */}
-      {atFetchCap && !loadError && (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <Info className="w-4 h-4 mt-0.5 shrink-0" />
-          <span>
-            Showing the most recent {JOBS_FETCH_LIMIT} jobs — older jobs aren&apos;t searched.
-            Narrow by date or customer to include them.
-          </span>
-        </div>
-      )}
 
       <Card padding={false}>
         <div className="p-5">

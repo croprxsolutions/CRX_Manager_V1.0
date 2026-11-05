@@ -1410,11 +1410,12 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     let columns: string[] | null = null;
     const self: Record<string, unknown> = {};
     const passthrough = (..._args: unknown[]) => self;
-    for (const m of ['eq', 'order', 'limit', 'in', 'maybeSingle', 'single']) self[m] = passthrough;
+    for (const m of ['eq', 'order', 'limit', 'range', 'in', 'maybeSingle', 'single']) self[m] = passthrough;
     self.select = (cols: string) => { columns = cols.split(',').map((c) => c.trim()); return self; };
     const result = () => ({
       data: rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => columns?.includes(key)))),
       error: null,
+      count: rows.length,
     });
     self.then = (onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) =>
       Promise.resolve(result()).then(onFulfilled, onRejected);
@@ -1437,7 +1438,7 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     expect(savedItems[0]).toMatchObject({ product_id: 'product-tier-uuid', unit_price_cents: expectedCents });
   });
 
-  // The picker list holds only active customers (capped at 500) and may not have loaded yet. A
+  // The picker list holds only active customers and may not have loaded yet. A
   // customer missing from it must still be priced at their own tier, read by id (CodeRabbit and
   // the Codex connector on PR #908).
   it('reads the tier by id when the invoice customer is not in the picker list', async () => {

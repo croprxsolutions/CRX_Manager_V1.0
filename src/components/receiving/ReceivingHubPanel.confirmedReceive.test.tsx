@@ -8,6 +8,7 @@ import { Sentry } from '../../lib/sentry';
 const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), toast: vi.fn() }));
 const toastContext = { toast: mocks.toast };
 let receiptCommitted = false;
+const poOrderCalls: unknown[][] = [];
 
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'receiver-1' } }) }));
 vi.mock('../ui/Toast', () => ({ useToast: () => toastContext }));
@@ -21,16 +22,18 @@ describe('ReceivingHubPanel confirmed receipt', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     receiptCommitted = false;
+    poOrderCalls.length = 0;
     window.sessionStorage.clear();
     window.localStorage.clear();
     globalThis.indexedDB = new IDBFactory();
     mocks.from.mockImplementation(() => {
       const chain: Record<string, unknown> = {};
-      for (const method of ['select', 'in', 'order', 'limit']) chain[method] = () => chain;
+      for (const method of ['select', 'in', 'range']) chain[method] = () => chain;
+      chain.order = (...args: unknown[]) => { poOrderCalls.push(args); return chain; };
       const result = Promise.resolve({ data: [{
         id: 'po-a', po_number: 'PO-A', vendor: 'Vendor A', status: 'submitted', expected_delivery_date: null,
         items: [{ id: 'line-a', product_id: 'product-a', product_name: 'Product A', quantity_ordered: 3, quantity_received: receiptCommitted ? 3 : 0, unit_size: 'GAL' }],
-      }], error: null });
+      }], error: null, count: 1 });
       chain.then = result.then.bind(result);
       return chain;
     });
@@ -69,6 +72,12 @@ describe('ReceivingHubPanel confirmed receipt', () => {
     expect(screen.queryByRole('dialog', { name: 'Receive Stock' })).not.toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem(sharedKey)!)).toEqual(peerRecord);
     expect(mocks.rpc.mock.calls.filter(([name]) => name === 'receive_po_items')).toHaveLength(1);
+  });
+
+  it('orders each PO items list by the embed alias, which PostgREST requires', async () => {
+    render(<MemoryRouter><ReceivingHubPanel /></MemoryRouter>);
+    await screen.findAllByText('PO-A');
+    expect(poOrderCalls).toContainEqual(['id', { referencedTable: 'items' }]);
   });
 
   it('refreshes the committed line off the board while keeping the same frozen receipt retryable', async () => {

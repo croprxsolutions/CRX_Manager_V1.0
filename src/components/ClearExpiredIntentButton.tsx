@@ -11,7 +11,7 @@ type ExpiredIntentLock = {
   clearExpiredIntent: (expectedIdempotencyKey: string) => Promise<void>;
 };
 
-// The staff roles retire_uncertain_request accepts (20261108170000).
+// The staff roles retire_uncertain_request accepts (20261110120000).
 const CLEAR_ROLES: readonly string[] = ['admin', 'sales_rep', 'driver', 'applicator'];
 
 // KI-27: the only way out of an expired uncertain-mutation lock in this browser.

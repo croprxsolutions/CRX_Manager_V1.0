@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261108170000 (KI-27 follow-up: any active staff member may clear their own stuck
+ * Real-schema proof for 20261110120000 (KI-27 follow-up: any active staff member may clear their own stuck
  * request). Builds the checked-in schema baseline in a network-disabled PostgreSQL container and replays
  * migrations up to the candidate (retire_uncertain_request then has 20261107150000's body, md5 482ac219...).
  * With invented profiles (an admin, a sales rep, a driver, an applicator, an inactive sales rep and a service
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261108170000_uncertain_request_clear_any_staff.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261110120000_uncertain_request_clear_any_staff.sql');
 const SMOKE = path.join(ROOT, 'scripts', 'smoke', 'smoke-uncertain-request-clear-check.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

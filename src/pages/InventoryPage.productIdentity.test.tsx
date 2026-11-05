@@ -409,4 +409,24 @@ describe('InventoryPage Product identity writers', () => {
     expect(screen.getByRole('button', { name: 'Show all' })).toBeInTheDocument();
     expect(within(screen.getByTestId('inventory-mobile-cards')).getByText('No inventory records')).toBeInTheDocument();
   });
+
+  it('reads only turned-off product ids on mount to label Inactive rows, not the catalog (KI-88)', async () => {
+    const reads: Array<{ select: unknown; eq: unknown[] }> = [];
+    mocks.from.mockImplementation((table: string) => {
+      if (table !== 'products') return query([]);
+      const builder = query([{ id: 'product-a' }]) as Record<string, ReturnType<typeof vi.fn>>;
+      const read = { select: undefined as unknown, eq: [] as unknown[] };
+      reads.push(read);
+      builder.select = vi.fn((columns: unknown) => { read.select = columns; return builder; });
+      builder.eq = vi.fn((...args: unknown[]) => { read.eq.push(args); return builder; });
+      return builder;
+    });
+    mocks.rpc.mockImplementation(async (name: string) => name === 'get_inventory_position'
+      ? { data: [inventoryPosition()], error: null } : { data: [], error: null });
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
+    expect((await screen.findAllByText('Inactive')).length).toBeGreaterThan(0);
+    // The paging helper may repeat its read to confirm the list; every read stays the narrow one.
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) expect(read).toEqual({ select: 'id', eq: [['is_active', false]] });
+  });
 });

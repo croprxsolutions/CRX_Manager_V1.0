@@ -43,9 +43,24 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
       setClearing(false);
       return;
     }
+    // Best-effort second row with the real outcome; it never rejects and never gates
+    // anything (the approval row above is the hard audit gate).
+    const logOutcome = (event: string, outcome: string): Promise<unknown> => Promise.resolve()
+      .then(() => logActivity({
+        event,
+        description: `Clearing an expired ${operation} request on ${request.surface} ${outcome}; request key ${request.idempotencyKey}`,
+        performedBy: profile.id,
+      }))
+      .catch(() => false);
     try {
       await intent.clearExpiredIntent(request.idempotencyKey);
     } catch (err) {
+      // Supabase errors are plain objects with a message, not Error instances.
+      const message = (err as { message?: unknown } | null)?.message;
+      const reason = err instanceof UncertainClearNotYetError
+        ? `server not ready: ${err.reason}`
+        : `error: ${String(typeof message === 'string' ? message : err).slice(0, 200)}`;
+      void logOutcome('uncertain_request_clear_refused', `was refused (${reason})`);
       if (err instanceof UncertainClearNotYetError) {
         toast('warning', err.reason === 'in_progress'
           ? 'This request is being saved right now, so nothing was cleared. Wait a minute, reload the page and check the record again.'
@@ -54,6 +69,14 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
         setConfirmOpen(false);
         return;
       }
+      try {
+        Sentry.captureException(err, {
+          tags: { operation, surface: request.surface, action: 'clear_expired_intent' },
+          extra: { scope: request.scope, idempotencyKey: request.idempotencyKey },
+        });
+      } catch {
+        // Reporting must never break the error message below.
+      }
       toast('error', 'Could not clear this saved request: it may still be retryable, or its saved data is damaged. Reload the page; if it stays locked, report it.');
       setClearing(false);
       return;
@@ -61,6 +84,8 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
     // The clear unlocks the screen, but it may still hold the recovered form values:
     // block every click and key until the reload, or they could be resent under a new key.
     document.body.inert = true;
+    const outcomeLogged = logOutcome('uncertain_request_cleared', 'succeeded');
+    let flushed: Promise<unknown> = Promise.resolve();
     try {
       Sentry.captureMessage('Admin cleared an expired uncertain mutation', {
         level: 'info',
@@ -72,10 +97,16 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
         },
       });
       // Flush first so the log survives the reload.
-      await Sentry.flush(2000);
+      flushed = Sentry.flush(2000);
     } catch {
       // The activity log already holds the audit row; Sentry must never stop the reload below.
     }
+    // A reload cancels in-flight requests, so give the outcome row and the Sentry flush
+    // the same 2-second window the flush always had; neither can hold the reload longer.
+    await Promise.race([
+      Promise.allSettled([outcomeLogged, flushed]),
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]);
     // Reload so no screen keeps the recovered form values: resubmitting them would
     // send the same change again under a new key.
     window.location.reload();

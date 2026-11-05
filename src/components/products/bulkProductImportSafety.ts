@@ -209,7 +209,7 @@ export function buildProductImportRow(
   const numberError = parseImportNumbers(raw, insert);
   const rupError = parseImportRup(raw.is_rup, insert);
   const error = (insert.product_name ? undefined : 'Missing product name.') ?? numberError ?? rupError;
-  const { rates, error: rateError } = importRates(raw, insert.product_form);
+  const { rates, error: rateError } = importRates(raw, insert.product_form, insert.inventory_unit);
   const firstError = error ?? rateError;
   return { row, insert, ...(rates ? { rates } : {}), fixes, ...(firstError ? { error: firstError } : {}) };
 }
@@ -245,9 +245,12 @@ function parseImportRup(value: string | undefined, insert: ProductImportInsert):
   return undefined;
 }
 
-function importRates(raw: RawImportRow, productForm: string | undefined): { rates?: ProductImportRates; error?: string } {
-  // A seed or each product's rate unit is its stock unit, so a unit alone there is not a rate.
+function importRates(raw: RawImportRow, productForm: string | undefined, inventoryUnit: string | undefined): { rates?: ProductImportRates; error?: string } {
+  // A seed or each product's rate unit is its stock unit, so a unit alone there is not a rate, but a different one is a mistake.
   const seedOrEach = ['seed', 'each'].includes(productForm ?? '');
+  if (seedOrEach && raw.rate_unit !== undefined && inventoryUnit !== undefined && raw.rate_unit.toLowerCase() !== inventoryUnit.toLowerCase()) {
+    return { error: `A ${productForm} product's rate unit must match its stock unit (${inventoryUnit}), not ${raw.rate_unit}.` };
+  }
   if (raw.rate_per_acre === undefined && raw.suggested_rate === undefined && (raw.rate_unit === undefined || seedOrEach)) return {};
   const rates = { rate_per_acre: raw.rate_per_acre ?? null, rate_unit: raw.rate_unit ?? null, suggested_rate: raw.suggested_rate ?? null };
   if (raw.rate_per_acre !== undefined && !DECIMAL.test(raw.rate_per_acre)) {

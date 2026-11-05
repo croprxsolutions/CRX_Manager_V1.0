@@ -123,6 +123,11 @@ describe('row building', () => {
   });
   it('a seed unit alone is not a rate', () => {
     expect(build(['product_name', 'product_form', 'rate_unit'], ['Corn', 'seed', 'Lb']).rates).toBeUndefined();
+    expect(build(['product_name', 'product_form', 'inventory_unit', 'rate_unit'], ['Corn', 'seed', 'Lb', 'lb']).error).toBeUndefined();
+  });
+  it('refuses a seed or each rate unit that contradicts the stock unit instead of dropping it', () => {
+    expect(build(['product_name', 'product_form', 'inventory_unit', 'rate_unit'], ['Corn', 'seed', 'Lb', 'Gal']).error)
+      .toMatch(/rate unit must match its stock unit \(Lb\), not Gal/);
   });
   it.each([
     [['product_name'], [''], /Missing product name/],

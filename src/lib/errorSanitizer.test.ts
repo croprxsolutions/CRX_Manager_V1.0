@@ -192,6 +192,12 @@ describe('sanitizeError', () => {
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
+    expect(sanitizeError('TIER_ADMIN_ONLY: only an admin can change a customer\'s price tier'))
+      .toBe("Only an admin can set or change a customer's price tier");
+    expect(sanitizeError('CREDIT_LIMIT_ADMIN_ONLY: only an admin can change a customer\'s credit limit'))
+      .toBe("Only an admin can set or change a customer's credit limit");
+    expect(sanitizeError('QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE: a booking\'s tier and planned flag change only by saving the quote'))
+      .toBe("A booking's tier and planned flag change only by saving the quote");
     expect(sanitizeError('SALESMAN_SCOPE_DENIED')).toBe("Sales reps work under their own name: choose yourself as the salesman, or ask an admin to handle another salesman's work");
     expect(sanitizeError('INVOICE_SCOPE_DENIED')).toBe('You can only change or post invoices under your own name');
     // Replay-binding refusals (20261016060000): nothing changed, and the operator is told why.

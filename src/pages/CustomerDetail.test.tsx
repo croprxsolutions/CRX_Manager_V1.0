@@ -927,6 +927,29 @@ describe('CustomerDetail stale whole-record save', () => {
     }
   });
 
+  it('a sales rep sees the price tier and credit limit read-only; an admin can change them (Mason 2026-11-01)', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') return customerQuery(() => original);
+      return query({ data: [], error: null });
+    });
+    mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep One' };
+    try {
+      const { unmount } = renderDetail();
+      await screen.findByDisplayValue('Original Farm');
+      expect(screen.getByLabelText('Pricing Tier')).toBeDisabled();
+      expect(screen.getByLabelText('Credit Limit ($)')).toBeDisabled();
+      expect(screen.getByText(/only an admin can change a customer.s price tier and credit limit/i)).toBeInTheDocument();
+      unmount();
+    } finally {
+      mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' };
+    }
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    expect(screen.getByLabelText('Pricing Tier')).toBeEnabled();
+    expect(screen.getByLabelText('Credit Limit ($)')).toBeEnabled();
+    expect(screen.queryByText(/only an admin can change a customer.s price tier and credit limit/i)).not.toBeInTheDocument();
+  });
+
   it('restores the create-form defaults on that jump, not an empty form', async () => {
     // The clear above went too far in its first revision: it reset to `{}`, which
     // drops the defaults `useState` seeds a fresh /customers/new with. The form

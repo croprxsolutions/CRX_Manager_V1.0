@@ -19,9 +19,12 @@
 --      that token. Five attempts, backoff 2, 4, 8, 16 minutes; then the row goes to needs_check (the office list).
 --      Before claiming, a row is settled without sending when: the delivery is no longer completed (cancelled);
 --      another delivery_completed email for it already went out, e.g. the office's Email Confirmation
---      (sent_elsewhere); one is still pending in email_log (needs_check: it may have gone out); the customer has
---      no email now (needs_check); or a retry would fall outside the email provider's 24-hour duplicate guard
---      (needs_check).
+--      (sent_elsewhere); one is still pending in email_log (needs_check: it may have gone out); a delivery
+--      confirmation without a delivery reference (no key, or an unscoped one) reached this customer since the
+--      day before the receipt was owed (needs_check: it may be this receipt); the customer has no email now
+--      (needs_check); or a retry would fall outside the email provider's 24-hour duplicate guard (needs_check).
+--      A retried claim (same key) re-runs the first three checks, returns the address that claim fixed
+--      (attempt_to), and claims nothing new. A finish key is bound to its receipt, token and outcome.
 --   4. pg_net is enabled and a pg_cron job (every 2 minutes) runs _wake_delivery_receipt_worker(), which posts to
 --      the worker only when a row is due AND both Vault secrets delivery_receipt_worker_url and
 --      delivery_receipt_worker_secret exist. Neither is created here: until they are stored (a separate approved
@@ -114,6 +117,7 @@ CREATE TABLE public.delivery_receipt_queue (
   claimed_at timestamptz,
   last_error text,
   sent_to text,
+  attempt_to text, -- the address the latest claim fixed; a retried claim returns this, never a newer email
   resend_message_id text,
   sent_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -433,30 +437,26 @@ DECLARE
   v_token uuid;
   v_scoped text;
   v_saved jsonb;
+  v_replay boolean;
 BEGIN
   IF p_limit IS NULL OR p_limit < 1 OR p_limit > 50 THEN
     RAISE EXCEPTION 'CLAIM_LIMIT_INVALID: p_limit must be 1 to 50' USING ERRCODE = '22023';
   END IF;
-  -- A retry with the same key (its answer was lost) gets back the receipts that call claimed and still holds,
-  -- with the same tokens, and claims nothing new. Only ids and tokens are saved, never the customer email.
+  -- A retry with the same key (its answer was lost) re-checks the receipts that call claimed and still holds,
+  -- returns them with the same tokens and the address that claim fixed, and claims nothing new.
+  -- Only ids and tokens are saved in idempotency_keys, never the customer email.
   v_saved := public.check_idempotency(p_idempotency_key, 'claim_delivery_receipts');
-  IF v_saved IS NOT NULL THEN
-    SELECT COALESCE(jsonb_agg(jsonb_build_object(
-             'id', q.id, 'claim_token', q.claim_token, 'delivery_id', q.delivery_id, 'customer_id', q.customer_id,
-             'requested_by', q.requested_by, 'attempt', q.attempts, 'to', NULLIF(btrim(COALESCE(c.email, '')), ''),
-             'contact_name', c.contact_name, 'receipt', q.receipt) ORDER BY q.next_attempt_at, q.id), '[]'::jsonb)
-      INTO v_out
-      FROM jsonb_to_recordset(v_saved) AS s(id uuid, claim_token uuid)
-      JOIN public.delivery_receipt_queue q ON q.id = s.id AND q.claim_token = s.claim_token AND q.status = 'sending'
-      LEFT JOIN public.customers c ON c.id = q.customer_id;
-    RETURN v_out;
-  END IF;
+  v_replay := v_saved IS NOT NULL;
   FOR v_row IN
     SELECT * FROM public.delivery_receipt_queue q
-     WHERE (q.status = 'pending' AND q.next_attempt_at <= now())
-        OR (q.status = 'sending' AND q.claimed_at < now() - interval '10 minutes')
+     WHERE CASE WHEN v_replay
+                THEN q.status = 'sending'
+                     AND EXISTS (SELECT 1 FROM jsonb_to_recordset(v_saved) AS s(id uuid, claim_token uuid)
+                                  WHERE s.id = q.id AND s.claim_token = q.claim_token)
+                ELSE (q.status = 'pending' AND q.next_attempt_at <= now())
+                     OR (q.status = 'sending' AND q.claimed_at < now() - interval '10 minutes') END
      ORDER BY q.next_attempt_at, q.id
-     LIMIT p_limit
+     LIMIT CASE WHEN v_replay THEN 50 ELSE p_limit END
      FOR UPDATE SKIP LOCKED
   LOOP
     IF NOT EXISTS (SELECT 1 FROM public.deliveries d
@@ -494,6 +494,32 @@ BEGIN
       CONTINUE;
     END IF;
 
+    -- send-email allows a delivery confirmation with no key, and only a scoped key names its delivery. Such a
+    -- send to this customer around this receipt may be this receipt, so the office checks before any resend.
+    IF EXISTS (SELECT 1 FROM public.email_log e
+                WHERE e.email_type = 'delivery_completed'
+                  AND e.customer_id = v_row.customer_id
+                  AND e.status IN ('sent', 'pending')
+                  AND e.created_at >= v_row.created_at - interval '1 day'
+                  AND (e.idempotency_key IS NULL
+                       OR left(e.idempotency_key, 28) <> 'delivery_completed:delivery:')) THEN
+      UPDATE public.delivery_receipt_queue
+         SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
+             last_error = 'A delivery confirmation without a delivery reference went to this customer; check whether it was this receipt.'
+       WHERE id = v_row.id;
+      CONTINUE;
+    END IF;
+
+    IF v_replay THEN
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'id', v_row.id, 'claim_token', v_row.claim_token, 'delivery_id', v_row.delivery_id,
+        'customer_id', v_row.customer_id, 'requested_by', v_row.requested_by, 'attempt', v_row.attempts,
+        'to', v_row.attempt_to,
+        'contact_name', (SELECT c.contact_name FROM public.customers c WHERE c.id = v_row.customer_id),
+        'receipt', v_row.receipt));
+      CONTINUE;
+    END IF;
+
     -- A retry after an attempt whose outcome may be unknown is safe only inside the provider's 24-hour
     -- duplicate guard; the cap stops a sixth attempt after an expired lease.
     IF v_row.attempts >= 5 OR (v_row.attempts > 0 AND v_row.first_attempt_at < now() - interval '23 hours') THEN
@@ -517,7 +543,7 @@ BEGIN
 
     v_token := gen_random_uuid();
     UPDATE public.delivery_receipt_queue
-       SET status = 'sending', claim_token = v_token, claimed_at = now(), attempts = attempts + 1,
+       SET status = 'sending', claim_token = v_token, claimed_at = now(), attempts = attempts + 1, attempt_to = v_email,
            first_attempt_at = COALESCE(first_attempt_at, now())
      WHERE id = v_row.id;
     v_out := v_out || jsonb_build_array(jsonb_build_object(
@@ -532,7 +558,7 @@ BEGIN
       'receipt', v_row.receipt
     ));
   END LOOP;
-  IF p_idempotency_key IS NOT NULL THEN
+  IF p_idempotency_key IS NOT NULL AND NOT v_replay THEN
     PERFORM public.save_idempotency(p_idempotency_key, 'claim_delivery_receipts', COALESCE(
       (SELECT jsonb_agg(jsonb_build_object('id', e -> 'id', 'claim_token', e -> 'claim_token')) FROM jsonb_array_elements(v_out) e),
       '[]'::jsonb));
@@ -544,7 +570,7 @@ ALTER FUNCTION public.claim_delivery_receipts(integer, text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.claim_delivery_receipts(integer, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.claim_delivery_receipts(integer, text) TO service_role;
 COMMENT ON FUNCTION public.claim_delivery_receipts(integer, text) IS
-  'KI-25 worker (service_role only): settles rows that must not be sent, then claims up to p_limit due receipts with a fresh claim token (10-minute lease) and returns them with the customer''s current email.';
+  'KI-25 worker (service_role only): settles rows that must not be sent, then claims up to p_limit due receipts with a fresh claim token (10-minute lease) and returns them with the customer''s current email; a retried key re-checks and returns the same claims and address.';
 
 CREATE FUNCTION public.finish_delivery_receipt(
   p_id uuid,
@@ -572,9 +598,15 @@ BEGIN
     RAISE EXCEPTION 'RECEIPT_SENT_PROOF_REQUIRED: a sent receipt needs the provider message id and address'
       USING ERRCODE = '22023';
   END IF;
-  -- A retry with the same key gets the answer the first call recorded.
+  -- A retry with the same key gets the answer the first call recorded; the key is bound to that receipt,
+  -- claim and outcome, so reusing it for anything else is refused rather than answered from the cache.
   v_saved := public.check_idempotency(p_idempotency_key, 'finish_delivery_receipt');
   IF v_saved IS NOT NULL THEN
+    IF v_saved ->> 'id' IS DISTINCT FROM p_id::text
+       OR v_saved ->> 'claim_token' IS DISTINCT FROM p_claim_token::text
+       OR v_saved ->> 'outcome' IS DISTINCT FROM p_outcome THEN
+      RAISE EXCEPTION 'IDEMPOTENCY_KEY_REUSED: this key finished a different receipt or outcome' USING ERRCODE = '22023';
+    END IF;
     RETURN v_saved ->> 'status';
   END IF;
   UPDATE public.delivery_receipt_queue q
@@ -602,7 +634,7 @@ BEGIN
   -- No row: the lease expired and another run owns (or finished) this receipt. Nothing changes.
   v_status := COALESCE(v_status, 'stale');
   IF p_idempotency_key IS NOT NULL THEN
-    PERFORM public.save_idempotency(p_idempotency_key, 'finish_delivery_receipt', jsonb_build_object('status', v_status));
+    PERFORM public.save_idempotency(p_idempotency_key, 'finish_delivery_receipt', jsonb_build_object('id', p_id, 'claim_token', p_claim_token, 'outcome', p_outcome, 'status', v_status));
   END IF;
   RETURN v_status;
 END;

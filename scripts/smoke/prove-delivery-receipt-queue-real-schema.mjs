@@ -452,6 +452,49 @@ function main() {
   fresh(8); assert.equal(claim().length, 0); assert.equal(row(8, 'status'), 'cancelled');
   console.log('[prover] settled without sending: sent elsewhere, pending elsewhere, no email now, delivery no longer completed');
 
+  // A claim retried with its key returns the address that claim fixed, and re-checks: sent elsewhere or a
+  // voided delivery since the claim settles the row instead of returning it.
+  seedDelivery(9); assert.equal(complete(9, { emailReceipt: 'true' }).status, 0);
+  due(9);
+  const k1 = claim('ki25-claim-recheck-1');
+  assert.equal(k1.length, 1);
+  psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}';`);
+  assert.deepEqual(claim('ki25-claim-recheck-1').map((c) => [c.id, c.claim_token, c.attempt, c.to]),
+    [[k1[0].id, k1[0].claim_token, 1, 'ki25-farm@example.invalid']], 'a retried claim keeps its address');
+  psql(`UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
+  log(`delivery_completed:delivery:${D(9)}:office-confirmation-1`, 'sent');
+  assert.equal(claim('ki25-claim-recheck-1').length, 0); assert.equal(row(9, 'status'), 'sent_elsewhere');
+  psql(`DELETE FROM public.email_log WHERE idempotency_key = 'delivery_completed:delivery:${D(9)}:office-confirmation-1';`);
+  fresh(9);
+  assert.equal(claim('ki25-claim-recheck-2').length, 1);
+  psql(`SET session_replication_role = replica; UPDATE public.deliveries SET status = 'cancelled' WHERE id = '${D(9)}';`);
+  assert.equal(claim('ki25-claim-recheck-2').length, 0); assert.equal(row(9, 'status'), 'cancelled');
+  console.log('[prover] a retried claim keeps its address and re-checks sent-elsewhere and voided deliveries');
+
+  // A finish key is bound to its receipt, claim and outcome: reusing it elsewhere is refused, not answered.
+  seedDelivery(10); assert.equal(complete(10, { emailReceipt: 'true' }).status, 0);
+  seedDelivery(11); assert.equal(complete(11, { emailReceipt: 'true' }).status, 0);
+  psql(`UPDATE public.delivery_receipt_queue SET next_attempt_at = now() - interval '1 second' WHERE delivery_id IN ('${D(10)}', '${D(11)}');`);
+  const [fa, fb] = claim();
+  assert.ok(fa && fb);
+  assert.equal(finish(fa, 'sent', "NULL, 'msg-a', 'ki25-farm@example.invalid', 'ki25-finish-bound'").out, 'sent');
+  assert.match(finish(fb, 'sent', "NULL, 'msg-b', 'ki25-farm@example.invalid', 'ki25-finish-bound'").err, /IDEMPOTENCY_KEY_REUSED/);
+  assert.equal(q(`SELECT status FROM public.delivery_receipt_queue WHERE id = '${fb.id}';`).out, 'sending', 'B is untouched');
+  assert.match(finish(fa, 'retry', "'x', NULL, NULL, 'ki25-finish-bound'").err, /IDEMPOTENCY_KEY_REUSED/);
+  assert.equal(finish(fa, 'sent', "NULL, 'msg-a', 'ki25-farm@example.invalid', 'ki25-finish-bound'").out, 'sent');
+  assert.equal(finish(fb, 'sent', "NULL, 'msg-b', 'ki25-farm@example.invalid', 'ki25-finish-b'").out, 'sent');
+  console.log('[prover] a finish key reused for another receipt or outcome is refused');
+
+  // A delivery confirmation with no key (send-email allows it) names no delivery: one sent to this customer
+  // around the receipt may be it, so the receipt goes to the office list instead of sending. Runs last: the
+  // row stays and would settle every later receipt for this customer.
+  seedDelivery(12); assert.equal(complete(12, { emailReceipt: 'true' }).status, 0);
+  psql(`INSERT INTO public.email_log (customer_id, recipient_email, email_type, subject, status, idempotency_key)
+    VALUES ('${CUST}', 'ki25-farm@example.invalid', 'delivery_completed', '[PROVER]', 'sent', NULL);`);
+  due(12); assert.equal(claim().length, 0);
+  assert.match(row(12, "status || ' ' || last_error"), /^needs_check A delivery confirmation without a delivery reference/);
+  console.log('[prover] a keyless delivery confirmation to the customer sends the receipt to the office list');
+
   // The timer: nothing due -> nothing posted; due but not switched on -> nothing posted; switched on -> one post.
   // pg_net's worker moves a queued call to net._http_response once tried (here: no network, so it fails).
   const posts = () => scalar('SELECT (SELECT count(*) FROM net.http_request_queue) + (SELECT count(*) FROM net._http_response);');

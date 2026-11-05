@@ -2945,6 +2945,7 @@ export type Database = {
       }
       delivery_receipt_queue: {
         Row: {
+          attempt_to: string | null
           attempts: number
           claim_token: string | null
           claimed_at: string | null
@@ -2964,6 +2965,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          attempt_to?: string | null
           attempts?: number
           claim_token?: string | null
           claimed_at?: string | null
@@ -2983,6 +2985,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          attempt_to?: string | null
           attempts?: number
           claim_token?: string | null
           claimed_at?: string | null

@@ -3079,9 +3079,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // types, so it is discovered again even though its migration is below the high-water.
   _bind_replay_receipt_20261015:
     'idempotency infrastructure helper (20261016060000, replay-binding batch 1): stamps the actor and request fingerprint on the receipt its calling wrapper just wrote; every API-role EXECUTE is revoked',
-  // Local candidate 20261107090000 (WP-PM-10): a dry run, so it keeps nothing to replay.
+  // Local candidate 20261107130000 (WP-PM-10): a dry run, so it keeps nothing to replay.
   preview_product_import:
-    'import preview (20261107090000): runs the keyed apply_product_setup insert save per row inside a subtransaction it always rolls back (SQLSTATE CRXPV), so nothing it writes is kept; the real save is keyed',
+    'import preview (20261107130000): runs the keyed apply_product_setup insert save per row inside a subtransaction it always rolls back (SQLSTATE CRXPV), so nothing it writes is kept; the real save is keyed',
   // Local candidate 20261107060000 (WP-PM-11a-1): internal helper behind the two rate writers.
   _write_product_rates:
     'internal rate writer (20261107060000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',

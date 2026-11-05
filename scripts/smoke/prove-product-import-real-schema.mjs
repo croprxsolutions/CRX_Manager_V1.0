@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for WP-PM-10 (20261107090000): bulk product import through the setup save's insert
+ * Real-schema proof for WP-PM-10 (20261107130000): bulk product import through the setup save's insert
  * mode. Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays
  * migrations up to the candidate (including the rate lock 20261107060000 and the setup workbook
  * 20261107080000), seeds invented rows, and checks: the preview and the insert are admin-only; the
@@ -28,7 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261107090000_product_import.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261107130000_product_import.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -257,7 +257,7 @@ const field = (name, cols) => scalar(`SELECT concat_ws('|', ${cols}) FROM public
 const cents = (v) => { assert.match(String(v), /^[0-9]+([.][0-9]{1,2})?$/, `${v} is not whole cents`); return Number(v).toFixed(2); };
 const TIERS = ['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'];
 
-// A test file: five good rows and ten known-bad rows, as the screen sends them after parsing.
+// A test file: five good rows and eleven known-bad rows, as the screen sends them after parsing.
 const good = [
   { insert: { product_name: '[PROVER] New Liquid', sku: 'IM-1', category: 'Herbicide', product_form: 'liquid', inventory_unit: 'Gal',
     container_size: '2.5', container_type: 'Jug', epa_registration: '100-1234', is_rup: true, signal_word: 'Caution',
@@ -282,6 +282,7 @@ const bad = [
   [{ insert: { product_name: '[PROVER] No Unit', product_form: 'liquid', inventory_unit: 'Gal' }, rates: { rate_per_acre: '3', rate_unit: null, suggested_rate: null } }, /PRODUCT_RATE_UNIT_INVALID/],
   [{ insert: { product_name: '[PROVER] Dup SKU', sku: 'ex-1 ' } }, /PRODUCT_SETUP_DUPLICATE: .*Dup SKU/],
   [{ insert: { product_name: '[proVER] existing herb' } }, /PRODUCT_SETUP_DUPLICATE/],
+  [{ insert: { product_name: '[PROVER] Label Unit', max_label_rate: '2', max_label_rate_unit: 'acres' } }, /maximum label rate needs a unit.*Label Unit/],
 ];
 
 function main() {
@@ -326,7 +327,7 @@ function main() {
     assert.equal(cents(p.rows[0].after[t]), '0.00');
   }
   assert.equal(p.rows[1].after.rate_unit, 'Lb', 'a seed rate takes its stock unit');
-  console.log('[prover] preview: 10 known-bad rows each refused with its reason; 5 good rows previewed with per-acre prices; nothing saved');
+  console.log('[prover] preview: 11 known-bad rows each refused with its reason; 5 good rows previewed with per-acre prices; nothing saved');
 
   // A file with a bad row is refused whole, naming it.
   refused(ADMIN, save([good[4], { insert: { product_name: '[PROVER] Bad Category', category: 'Nope' } }], 'k-mixed'),

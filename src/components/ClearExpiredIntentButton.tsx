@@ -31,6 +31,12 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
     setClearing(true);
     try {
       await intent.clearExpiredIntent(request.idempotencyKey);
+    } catch {
+      toast('error', 'Could not clear this saved request: it may still be retryable, or its saved data is damaged. Reload the page; if it stays locked, report it.');
+      setClearing(false);
+      return;
+    }
+    try {
       Sentry.captureMessage('Admin cleared an expired uncertain mutation', {
         level: 'info',
         tags: { operation, surface: request.surface },
@@ -40,15 +46,14 @@ export default function ClearExpiredIntentButton({ intent, operation }: {
           createdAt: new Date(request.createdAtMs).toISOString(),
         },
       });
-      // Reload so no screen keeps the recovered form values: resubmitting them would
-      // send the same change again under a new key. Flush first so the log survives.
-      await Promise.resolve(Sentry.flush(2000)).catch(() => false);
-      window.location.reload();
+      // Flush first so the log survives the reload.
+      await Sentry.flush(2000);
     } catch {
-      toast('error', 'Could not clear this saved request: it may still be retryable, or its saved data is damaged. Reload the page; if it stays locked, report it.');
-    } finally {
-      setClearing(false);
+      // Logging must never stop the reload below.
     }
+    // Reload so no screen keeps the recovered form values: resubmitting them would
+    // send the same change again under a new key.
+    window.location.reload();
   };
 
   return (

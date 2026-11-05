@@ -73,6 +73,16 @@ describe('ClearExpiredIntentButton (KI-27)', () => {
     );
   });
 
+  it('still reloads when logging fails after a successful clear', async () => {
+    mockCapture.mockImplementationOnce(() => { throw new Error('sentry down'); });
+    const intent = lock();
+    render(<ClearExpiredIntentButton intent={intent} operation="receive_po_items" />);
+    fireEvent.click(screen.getByText(LABEL));
+    fireEvent.click(screen.getByRole('button', { name: /clear it/i }));
+    await waitFor(() => expect(mockReload).toHaveBeenCalledTimes(1));
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+
   it('does not reload when the clear is refused', async () => {
     const intent = lock();
     intent.clearExpiredIntent.mockRejectedValueOnce(new Error('DURABLE_MUTATION_INTENT_CONFLICT'));

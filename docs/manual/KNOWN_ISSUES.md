@@ -36,9 +36,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 58 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
-| Closed as FIXED, with proof (bottom of file and archive) | 9 |
+| Closed as FIXED, with proof (bottom of file and archive) | 10 |
 | WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
@@ -448,12 +448,6 @@ Following `20261022075000` (PR #1024): old app versions are refused until reload
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
 abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test, and
 Mason's approval to narrow four older signature policies.
-
-### KI-27 — An expired uncertain request locks its dialog
-**MED · OPEN · UI/inventory · unassigned (PR #624 closed)**
-If a stock receive/adjust or vendor-bill save loses its reply and 23 hours pass, the dialog locks in that browser
-with a "do not submit again" message and no way to dismiss it (`src/hooks/useUncertainMutationIntent.ts:69`). Fix
-is an admin-only "I checked, clear this" control.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
 **MED · OPEN · database · unassigned**
@@ -949,6 +943,7 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 8. **KI-85, stale sweep fingerprints on quote functions** — closed 2026-11-01 by the pin-refresh change on branch `fix/refresh-quote-sweep-pins-2026-11-01`; the 2026-11-01 live sweep adjudicated all 29 predicates `ok: true`, `complete: true`.
 
 9. **KI-39, customer-facing PDF polish** — closed 2026-11-05: quote-PDF section notes wrap instead of overprinting (PR #1480); the year-end "Change" column shows green/red again (PR #1477). Both checked on a rendered PDF; original text appended to the archive.
+10. **KI-27, an expired uncertain request locked its dialog** — closed 2026-11-05 by branch `claude/uncertain-intent-admin-clear-5591c7`: an admin-only "I checked the records — clear this" control (with a confirm) appears only once the safe retry window has passed, removes that browser's expired saved request, and is logged to Sentry. Proven on the local test app (admin clears and the form works again; a sales rep and a still-retryable request show no control) and by hook and component tests.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

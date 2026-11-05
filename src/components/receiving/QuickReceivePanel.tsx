@@ -40,6 +40,7 @@ import { ProductOptionDetails, type ProductOptionPresentationModel } from '../pr
 import { ProductSearchResultRow } from '../products/ProductSearchResultRow';
 import { PRODUCT_COLUMNS } from '../../lib/costFields';
 import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
+import ClearExpiredIntentButton from '../ClearExpiredIntentButton';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
 
@@ -835,6 +836,7 @@ export default function QuickReceivePanel() {
                   : receiptCleanupFailed
                   ? 'These goods were recorded once. Browser cleanup failed; retry this same receipt unchanged. If it stays locked after reloading, report it before recording another shipment on this device.'
                   : 'This saved receiving request needs reconciliation before another shipment can be recorded. Retry it unchanged so inventory cannot be received twice.'}
+                <ClearExpiredIntentButton intent={receiveIntent} operation="receive_po_items" />
               </div>
             )}
 

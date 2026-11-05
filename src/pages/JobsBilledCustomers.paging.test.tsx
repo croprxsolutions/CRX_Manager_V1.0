@@ -105,6 +105,22 @@ describe('Jobs billed-customer read (KI-32 follow-ups)', () => {
     expect(sentryActions()).toEqual([]);
   });
 
+  it('reads billed customers past the 1,000-row server cap', async () => {
+    const pad = (i: number) => String(i).padStart(4, '0');
+    H.rpcReply = {
+      data: Array.from({ length: 1005 }, (_, i) => ({
+        job_id: 'job-1', customer_id: `c-${pad(i)}`, farm_name: `Owner ${pad(i)}`, account_number: null, is_primary: i === 0,
+      })),
+      error: null,
+    };
+    renderJobs();
+    expect((await screen.findAllByText(/Owner 1004/)).length).toBeGreaterThan(0);
+    // One request per page: the second starts where the first stopped.
+    expect(H.rpcChains.length).toBeGreaterThanOrEqual(2);
+    expect((H.rpcChains[1] as unknown as { range: { mock: { calls: unknown[][] } } }).range.mock.calls[0][0]).toBe(1000);
+    expect(sentryActions()).toEqual([]);
+  });
+
   it('a reply with no list is reported and the job keeps its primary customer', async () => {
     H.rpcReply = { data: null, error: null };
     renderJobs();

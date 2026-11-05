@@ -82,6 +82,8 @@ describe('CSV reader', () => {
     expect(csvRecordProblem(stray, 2)).toMatch(/Text follows a closing quote/);
     expect(csvRecordProblem(blanks, 2)).toBeUndefined();
     expect(csvRecordProblem(spaced, 2)).toBeUndefined();
+    const [, twoQuoted] = parseCsvRecords('product_name,notes\n"" "Chem",n\n');
+    expect(csvRecordProblem(twoQuoted, 2)).toMatch(/Text follows a closing quote/);
     expect(spaced.cells[0].trim()).toBe('2,4-D');
   });
 });
@@ -185,6 +187,16 @@ describe('BulkProductImport screen', () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     globalThis.indexedDB = new IDBFactory();
+  });
+
+  it('refuses a new import too large for browser storage before anything is saved or locked', async () => {
+    rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
+    render(<BulkProductImport {...props} />);
+    await upload(`product_name,notes\nBig,${'x'.repeat(1_000_001)}\n`);
+    fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/too large to import safely/)));
+    expect(rpc).not.toHaveBeenCalledWith('apply_product_setup', expect.anything());
+    expect(screen.queryByText(/was not confirmed/)).not.toBeInTheDocument();
   });
 
   it('skips a row with more values than columns before anything is sent', async () => {

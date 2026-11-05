@@ -52,6 +52,8 @@ interface Row extends ProductImportRow { preview?: PreviewResult }
 interface ImportIntent { rows: Json; count: number }
 
 const MAX_ROWS = 500;
+// Browser storage holds about 5 million characters per site, and the retry record is written twice (local and session).
+const MAX_IMPORT_CHARS = 1_000_000;
 // Per-acre prices are whole cents in the database (a CHECK), so pad the digits as sent; never round a float.
 const money = (v: number | null) => {
   if (v == null) return '—';
@@ -340,6 +342,11 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       count: ready.length,
     });
     if (!candidate) return;
+    // A new import too big for browser storage would lock the screen once its retry record failed to save.
+    if (!importIntent.isIntentLocked && JSON.stringify(candidate.rows).length > MAX_IMPORT_CHARS) {
+      toast('error', 'This file is too large to import safely in one go. Split it into smaller files and import each one.');
+      return;
+    }
     const gen = generation.current;
     setSaving(true);
     try {

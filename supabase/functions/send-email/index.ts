@@ -259,15 +259,18 @@ Deno.serve(async (req: Request) => {
     const {
       to,
       email_type,
-      customer_id,
+      customer_id: rawCustomerId,
       resource_type,
-      resource_id,
+      resource_id: rawResourceId,
       idempotency_key,
       // Renamed from purchase_order_snapshot with KI-98, so a send-email from before
       // KI-98 refuses this app's PO copy instead of mailing it with no PDF.
       purchase_order_screen,
       invoice_snapshot,
     } = body;
+    // Postgres answers uuids in lowercase; compare like with like (Luna r6).
+    const customer_id = typeof rawCustomerId === "string" ? rawCustomerId.toLowerCase() : rawCustomerId;
+    const resource_id = typeof rawResourceId === "string" ? rawResourceId.toLowerCase() : rawResourceId;
     // An invoice email's subject, body and attachment name are replaced below (step 6c).
     let { subject, html, attachments } = body;
     const isInvoiceEmail = email_type === "invoice";

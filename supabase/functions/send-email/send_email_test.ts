@@ -279,6 +279,18 @@ Deno.test("the same key on a different record is a separate email", async () => 
   assertEquals(world.resendCalls.length, 2, "Resend calls");
 });
 
+Deno.test("a retry spelling the customer and record ids in capitals still dedupes", async () => {
+  const world = makeWorld(okResend);
+  assertEquals((await send(world, ADMIN, quoteEmail(QUOTE, "caps-key"))).status, 200);
+  const res = await send(world, ADMIN, {
+    ...quoteEmail(QUOTE.toUpperCase(), "caps-key"),
+    customer_id: CUSTOMER.toUpperCase(),
+  });
+  assertEquals(res.status, 200);
+  assertEquals(res.body.deduplicated, true);
+  assertEquals(world.resendCalls.length, 1, "Resend calls");
+});
+
 // --- Two retries at the same moment (item 3) ---------------------------------
 
 Deno.test("two retries of the same failed email at the same moment send it once", async () => {

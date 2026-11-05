@@ -1022,15 +1022,17 @@ Deno.serve(async (req: Request) => {
     {
       const { data: justSent, error: justSentErr } = await adminClient
         .from("email_log")
-        .select("id, resend_message_id, recipient_email, subject, html_body")
+        .select("id, resend_message_id, recipient_email, subject, html_body, attachment_name")
         .eq("send_lock_key", sendLockKey)
         .eq("status", "sent")
         .gte("created_at", lockCheckFrom)
         .neq("id", emailLogId)
-        .limit(5);
+        .order("created_at", { ascending: false })
+        .limit(20);
       // Only the same message counts: a corrected email always goes out.
       const sameEmail = (justSent ?? []).filter((row) =>
-        row.recipient_email === to && row.subject === subject && row.html_body === html);
+        row.recipient_email === to && row.subject === subject && row.html_body === html &&
+        row.attachment_name === (attachments?.[0]?.filename || null));
       if (justSentErr || sameEmail.length > 0) {
         const reason = justSentErr
           ? `Not sent: checking for a send of this email at the same moment failed: ${justSentErr.message}`

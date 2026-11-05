@@ -194,7 +194,9 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const userId = profile?.id ?? '';
   const { getKeyFor, resetKeyFor } = useIdempotencyKey('apply_product_setup', userId);
   const [file, setFile] = useState<File | null>(null);
-  const [parsing, setParsing] = useState(false);
+  // The generation being checked (0 = none), so only that check can clear it.
+  const [checking, setChecking] = useState(0);
+  const parsing = checking !== 0;
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [ignored, setIgnored] = useState<string[]>([]);
@@ -247,7 +249,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
   const handleParse = async () => {
     if (!file) return;
     const gen = ++generation.current;
-    setParsing(true);
+    setChecking(gen);
     setRatesLocked(false);
     try {
       const [header, ...data] = parseCsvRecords(await file.text());
@@ -296,7 +298,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       Sentry.captureException(error);
       if (gen === generation.current) toast('error', `Could not check the file: ${sanitizeError(error)}`);
     } finally {
-      setParsing(false);
+      setChecking((c) => (c === gen ? 0 : c));
     }
   };
 

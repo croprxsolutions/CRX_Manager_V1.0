@@ -27,8 +27,9 @@
 --
 -- NOT CHANGED: a hold whose demand is above its draw (still the full demand); the FIFO order and
 --   the cap at the open booking balance; the kept draws of jobs already completed or invoiced; every caller;
---   owner, SECURITY DEFINER, search_path and grants. No table, column, grant or row is added,
---   changed or deleted; a job's draw is rebuilt only when it or its booking next syncs (live had no
+--   owner, SECURITY DEFINER, search_path and grants of the two re-emitted functions. No table,
+--   column or row is added, changed or deleted; the only new grant is EXECUTE on the new
+--   _trg_mark_job_completing to service_role (see NEW below); a job's draw is rebuilt only when it or its booking next syncs (live had no
 --   job draws on 2026-11-04).
 --
 -- ALSO RE-EMITTED: _trg_release_job_holds_on_lifecycle (20260702174000 body). On a scheduled or

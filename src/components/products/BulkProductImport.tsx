@@ -212,8 +212,9 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
     generation.current += 1;
     setFile(null); setRows(null); setIgnored([]); setImported(null); setRatesLocked(false);
   };
-  const resetUnlessUnconfirmed = () => { if (!unconfirmed) reset(); };
-  useResetOnClose(open, resetUnlessUnconfirmed);
+  // Never wipe an import mid-check or mid-save, so a late reply lands on the import it belongs to.
+  const resetIfSettled = () => { if (!unconfirmed && !busy) reset(); };
+  useResetOnClose(open, resetIfSettled);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -293,7 +294,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       setRows(built);
     } catch (error) {
       Sentry.captureException(error);
-      toast('error', `Could not check the file: ${sanitizeError(error)}`);
+      if (gen === generation.current) toast('error', `Could not check the file: ${sanitizeError(error)}`);
     } finally {
       setParsing(false);
     }
@@ -317,8 +318,8 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       });
       if (error) throw error;
       const result = assertRpcResult<{ inserted_count: number }>(data, 'apply_product_setup');
-      resetKeyFor(previewId);
       if (gen !== generation.current) return;
+      resetKeyFor(previewId);
       setUnconfirmed(false);
       setImported(result.inserted_count);
       toast('success', `Imported ${result.inserted_count} product(s)`);
@@ -337,7 +338,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
     }
   };
 
-  const handleClose = () => { if (busy) return; resetUnlessUnconfirmed(); onClose(); };
+  const handleClose = () => { if (busy) return; resetIfSettled(); onClose(); };
 
   return (
     <Modal open={open} onClose={handleClose} closeDisabled={busy} title="Bulk Product" accent="Import" maxWidth="max-w-4xl">

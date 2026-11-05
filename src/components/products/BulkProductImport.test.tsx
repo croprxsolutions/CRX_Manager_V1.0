@@ -265,7 +265,7 @@ describe('BulkProductImport screen', () => {
     expect(screen.queryByText(/The last import was not confirmed/)).not.toBeInTheDocument();
   });
 
-  it('a refused save frees the screen; a save reply that arrives after the import was closed is ignored', async () => {
+  it('a refused save frees the screen; closing mid-save keeps the import, so the late success is still confirmed', async () => {
     let answer!: (v: unknown) => void;
     rpc.mockImplementation((name: string) => (name === 'preview_product_import'
       ? Promise.resolve({ data: { rates_locked: false, rows: [okRow()] }, error: null })
@@ -283,8 +283,19 @@ describe('BulkProductImport screen', () => {
     rerender(<BulkProductImport {...props} open={false} />);
     rerender(<BulkProductImport {...props} />);
     answer({ data: { inserted_count: 1, rows: [] }, error: null });
-    await waitFor(() => expect(screen.getByLabelText('Select File')).toBeEnabled());
-    expect(props.onSuccess).not.toHaveBeenCalled();
-    expect(screen.queryByText('Import Complete')).not.toBeInTheDocument();
+    expect(await screen.findByText('Import Complete')).toBeInTheDocument();
+    expect(props.onSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a check error for a file that was since replaced', async () => {
+    let fail!: (e: unknown) => void;
+    rpc.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
+    render(<BulkProductImport {...props} />);
+    await upload('product_name\nFromA\n');
+    await waitFor(() => expect(rpc).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [new File(['x'], 'b.csv')] } });
+    fail(new Error('boom'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Check File/ })).toBeEnabled());
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringMatching(/Could not check the file/));
   });
 });

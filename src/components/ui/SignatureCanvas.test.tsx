@@ -70,13 +70,15 @@ describe('SignatureCanvas', () => {
     render(<SignatureCanvas {...defaultProps} width={300} height={100} />);
     const canvas = document.querySelector('canvas') as HTMLCanvasElement;
     expect(canvas.style.width).toBe('300px');
-    expect(canvas.style.height).toBe('100px');
+    // Shrinks to fit a narrow phone while keeping the 300:100 shape
+    expect(canvas.style.maxWidth).toBe('100%');
+    expect(canvas.style.aspectRatio).toBe('300 / 100');
   });
 
   it('uses default width/height when not specified', () => {
     render(<SignatureCanvas {...defaultProps} />);
     const canvas = document.querySelector('canvas') as HTMLCanvasElement;
     expect(canvas.style.width).toBe('400px');
-    expect(canvas.style.height).toBe('150px');
+    expect(canvas.style.aspectRatio).toBe('400 / 150');
   });
 });

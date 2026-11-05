@@ -72,7 +72,8 @@ export default function SignatureCanvas({
       </div>
       <canvas
         ref={canvasRef}
-        style={{ width, height }}
+        // Shrinks on narrow phones but keeps the desktop shape, so the saved PNG is never squashed.
+        style={{ width, maxWidth: '100%', height: 'auto', aspectRatio: `${width} / ${height}` }}
         className="border border-gray-200 rounded-lg cursor-crosshair touch-none w-full"
       />
     </div>

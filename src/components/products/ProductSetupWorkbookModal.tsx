@@ -69,9 +69,9 @@ function SetupTabPreview({ setup, saved, busy, blocked, onConfirm }: {
   );
 }
 
-function RatesTabPreview({ locked, edited, changes, problems, saved, busy, blocked, onConfirm }: {
+function RatesTabPreview({ locked, edited, changes, problems, saved, busy, blocked, previewMissing, onConfirm, onRetry }: {
   locked: boolean; edited: number; changes: RatePreviewRow[]; problems: RatePreviewRow[];
-  saved: number | null; busy: boolean; blocked: boolean; onConfirm: () => void;
+  saved: number | null; busy: boolean; blocked: boolean; previewMissing: boolean; onConfirm: () => void; onRetry: () => void;
 }) {
   return (
     <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Rates tab preview">
@@ -102,6 +102,9 @@ function RatesTabPreview({ locked, edited, changes, problems, saved, busy, block
         </div>
       )}
       {edited === 0 && <p className="text-secondary">No rate edits in this file.</p>}
+      {previewMissing && edited > 0 && saved == null && (
+        <Button variant="secondary" onClick={onRetry} loading={busy}>Preview rates again</Button>
+      )}
       {saved != null
         ? <p className="text-green-700">Saved rates for {plural(saved)}.</p>
         : <Button onClick={onConfirm} loading={busy} disabled={blocked}>Confirm Rates tab</Button>}
@@ -122,7 +125,6 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const [fileName, setFileName] = useState('');
   const [setup, setSetup] = useState<SetupPreview | null>(null);
   const [rates, setRates] = useState<{ rows: RateUploadRow[]; preview: RatePreview | null } | null>(null);
   const [setupSaved, setSetupSaved] = useState<string[] | null>(null);
@@ -132,7 +134,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
   const ratesKey = useIdempotencyKey('set_product_rates', profileId, JSON.stringify([rates?.rows, rates?.preview]));
 
   const reset = () => {
-    setSetup(null); setRates(null); setSetupSaved(null); setRatesSaved(null); setFileName('');
+    setSetup(null); setRates(null); setSetupSaved(null); setRatesSaved(null);
   };
   const close = () => {
     reset();
@@ -170,12 +172,28 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
       }
       setSetup(setupPreview);
       setRates({ rows: rateRows, preview: rateRows.length > 0 ? await previewProductRates(rateRows) : null });
-      setFileName(file.name);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  // The rows are kept before the preview is read, so a failed read leaves them ready to preview again.
+  const previewRates = async (rows: RateUploadRow[]) => {
+    setRates({ rows, preview: null });
+    setRates({ rows, preview: await previewProductRates(rows) });
+  };
+  const retryRatesPreview = async () => {
+    if (!rates) return;
+    setBusy(true);
+    try {
+      await previewRates(rates.rows);
+    } catch (error) {
+      toast('error', sanitizeError(error));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -190,8 +208,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
       toast('success', `Saved setup changes to ${saved.changed_count} products`);
       // Rates not yet saved: carry over this save's own version moves and show their preview again.
       if (rates && rates.rows.length > 0 && ratesSaved == null) {
-        const rows = rebaseRateRowsAfterSetup(rates.rows, saved);
-        setRates({ rows, preview: await previewProductRates(rows) });
+        await previewRates(rebaseRateRowsAfterSetup(rates.rows, saved));
       }
     } catch (error) {
       toast('error', sanitizeError(error));
@@ -246,7 +263,8 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
         )}
         {rates && (
           <RatesTabPreview locked={Boolean(rates.preview?.rates_locked)} edited={rates.rows.length} changes={rateChanges}
-            problems={rateProblems} saved={ratesSaved} busy={busy} blocked={ratesBlocked} onConfirm={() => void confirmRates()} />
+            problems={rateProblems} saved={ratesSaved} busy={busy} blocked={ratesBlocked} previewMissing={!rates.preview}
+            onConfirm={() => void confirmRates()} onRetry={() => void retryRatesPreview()} />
         )}
       </div>
     </Modal>

@@ -105,13 +105,9 @@ async function filterByApplicator() {
 describe('Jobs applicator filter past the 1,000-row server cap (N4)', () => {
   it('matches the jobs of all 1,005 dispatches', async () => {
     await filterByApplicator();
-    await waitFor(() => expect(H.jobsLog.orExpressions).toHaveLength(1));
-    const expr = H.jobsLog.orExpressions[0];
-    const idList = /id\.in\.\(([^)]*)\)$/.exec(expr)?.[1].split(',') ?? [];
-    // A read stopped at 1,000 dispatches leaves out the last five jobs.
-    expect(idList).toEqual(Array.from({ length: TOTAL }, (_, i) => `job-${pad(i)}`));
-    expect(expr.startsWith('applicator_id.in.(app-1),')).toBe(true);
+    // KI-32: the 1,005 job ids are matched on the rows read, not sent in the request URL.
     await waitFor(() => expect(screen.queryByText('JOB-OTHER')).not.toBeInTheDocument());
+    expect(H.jobsLog.orExpressions).toEqual([]);
     expect(screen.getByText('JOB-LAST')).toBeInTheDocument();
     expect(H.toast).not.toHaveBeenCalledWith('error', expect.anything());
   });

@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE, not applied.** `20261107020000_product_setup_workbook.sql` (LF SQL sha256: `8c1c2a88494891b94e91cbdfefb49070475af4b4da77fe314d55afd00a28cec5`). WP-PM-11a-2. REQUIRES `20261107010000_product_rate_lock` (its preflight checks `set_product_rates`, `preview_product_rate_correction`, the rate value and unit helpers and `product_rate_lock`); without them the one-transaction apply changes nothing.
+**LOCAL CANDIDATE, not applied.** `20261107080000_product_setup_workbook.sql` (LF SQL sha256: `8c1c2a88494891b94e91cbdfefb49070475af4b4da77fe314d55afd00a28cec5`). WP-PM-11a-2. REQUIRES `20261107060000_product_rate_lock` (its preflight checks `set_product_rates`, `preview_product_rate_correction`, the rate value and unit helpers and `product_rate_lock`); without them the one-transaction apply changes nothing.
 
 What it does:
 - New `get_product_setup_workbook()`: admin only, read-only. Every product's setup fields, rates (as exact text), pricing version, pack size, stock unit, form and tier 1–3 per-acre prices, plus a per-row `setup_fingerprint` and whether rates are locked. Never vendor or cost.
@@ -12,4 +12,4 @@ Rollback: drop the four functions. Nothing else to undo; setup changes saved thr
 
 Proof: `node scripts/smoke/prove-product-setup-workbook-real-schema.mjs` prints `PRODUCT_SETUP_WORKBOOK_PROOF_PASS`.
 
-Live ledger preflight, read 2026-11-04 (`list_migrations`): high-water `20261106233000_void_delivery_flags_legacy_reservation` (re-read 2026-11-04 evening); WP-PM-11a-1 is restamped to `20261107010000_product_rate_lock` (PR #1442) and applies before this file. Read the ledger again at apply time.
+Live ledger preflight, read 2026-11-04 (`list_migrations`): high-water `20261107050000_blend_tickets_application_records_only` (re-read 2026-11-04 evening); WP-PM-11a-1 is restamped to `20261107060000_product_rate_lock` (PR #1442) and applies before this file. Read the ledger again at apply time.

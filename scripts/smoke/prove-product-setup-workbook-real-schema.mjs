@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for WP-PM-11a-2 (20261107020000): the setup workbook's database half. Builds the
+ * Real-schema proof for WP-PM-11a-2 (20261107080000): the setup workbook's database half. Builds the
  * checked-in schema baseline in a network-disabled PostgreSQL container, replays migrations up to the
  * candidate (including WP-PM-11a-1's rate lock), seeds invented rows, and checks: the download, rate
  * preview and setup save are admin-only; with the lock off a Rates-tab upload changes 20 rates after
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261107020000_product_setup_workbook.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261107080000_product_setup_workbook.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -332,7 +332,7 @@ function main() {
   const installed = apply('cand.sql');
   assert.equal(installed.status, 0, installed.output);
   ledger(path.basename(CANDIDATE, '.sql'));
-  console.log('[prover] installs on top of the rate lock (20261107010000)');
+  console.log('[prover] installs on top of the rate lock (20261107060000)');
 
   // The download: admins only.
   const exp = exportRows();

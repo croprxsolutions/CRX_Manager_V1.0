@@ -187,6 +187,17 @@ The only sanctioned way to apply a migration to the live database:
 6. After a successful schema change, run the `regen-schema-registry` workflow against
    that same database source. Do not use stamp-only mode as a substitute for live
    introspection; the schema-aware hooks must see the new columns and constraints.
+7. **Plan one follow-up commit if the migration adds or replaces a function.** Three checks
+   compare files with the live database, so they pass before the apply and fail only after it
+   (WP-PM-10, #1486/#1494, 2026-11-05). Name this commit in the PR plan and push it right
+   after the apply, before the merge:
+   - **Smoke body pins** (`scripts/smoke/`): re-pin any smoke or prover that pins the old
+     function body, then run that smoke live.
+   - **Sweep allowlist** (`scripts/db-invariant-sweeps/allowlist.json`): run
+     `npm run db-sweeps:live`; a new or changed function a sweep flags needs a reviewed entry
+     (or a fix), never a blanket one.
+   - **Live function list** (`src/lib/rpcFixtureLiveDiff.test.ts`): a new function name needs
+     the saved list, count and md5 refreshed from live.
 
 ---
 

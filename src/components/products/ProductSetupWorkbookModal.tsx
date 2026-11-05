@@ -171,7 +171,8 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
         throw new Error(`Save at most ${MAX_SETUP_WORKBOOK_SAVE_ROWS} changed rows per tab at a time.`);
       }
       setSetup(setupPreview);
-      setRates({ rows: rateRows, preview: rateRows.length > 0 ? await previewProductRates(rateRows) : null });
+      if (rateRows.length > 0) await previewRates(rateRows);
+      else setRates({ rows: rateRows, preview: null });
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {

@@ -2,7 +2,7 @@
 
 **Last verified:** 2026-11-05 for the live ledger only (see the void-delivery-order-status-guards-applied-live note); other evidence retains its stated dates.
 
-**WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
+**WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
@@ -38,8 +38,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 |---|---|
 | Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
 | Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
-| Closed as FIXED, with proof (bottom of file and archive) | 10 |
-| WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
+| Closed as FIXED, with proof (bottom of file and archive) | 13 |
+| WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
@@ -498,18 +498,6 @@ ship. A live check on 2026-11-02 found all 117 inventory rows at Main Warehouse,
 Fix: list active `warehouses` rows only, refuse unknown locations on the server, and print the real location.
 Multi-warehouse support stays (`docs/manual/DECISION_LOG.md`, 2026-11-02; checklist in `docs/workflows/INVENTORY_RULES.md`).
 
-### KI-86 — Direct admin turn-off skips warnings
-**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
-Direct admin updates of `products.is_active` bypass the preview warning step; database blockers still refuse unsafe turn-off.
-
-### KI-87 — Refused turn-off uses the stale-review message
-**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
-A blocked turn-off is reported as “Product details changed,” hiding the actual blocker in that dialog.
-
-### KI-88 — Inventory loads the full catalog on mount
-**LOW · UNVERIFIED · inventory UI · LOCAL CANDIDATE — NOT APPLIED**
-Inventory pages through all products on mount to label inactive rows; product status could instead come from the position RPC.
-
 ### KI-89 — Inventory position uses UTC dates
 **LOW · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
 The re-emitted position body still uses `CURRENT_DATE` for season start and hold expiry, unchanged from its prior body.
@@ -947,6 +935,9 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 
 9. **KI-39, customer-facing PDF polish** — closed 2026-11-05: quote-PDF section notes wrap instead of overprinting (PR #1480); the year-end "Change" column shows green/red again (PR #1477). Both checked on a rendered PDF; original text appended to the archive.
 10. **KI-27, an expired uncertain request locked its dialog** — closed 2026-11-05 by branch `claude/uncertain-intent-admin-clear-5591c7`: an admin-only "I checked the records — clear this" control (with a confirm) appears only once the safe retry window has passed, removes that browser's expired saved request, and is logged to Sentry. Proven on the local test app (admin clears and the form works again; a sales rep and a still-retryable request show no control) and by hook and component tests.
+11. **KI-86, a direct admin turn-off skipped the warnings** — closed 2026-11-05: already fixed by `20261103100000_product_active_guard` (PR #1315, applied live 2026-11-02), whose trigger refuses any `is_active` change outside `set_product_active` with `PRODUCT_ACTIVE_RPC_REQUIRED`, so every turn-off passes the preview. Proven on the local test app: an admin's turn-off showed the "stock remains on hand" warning, and a direct admin `UPDATE` was refused.
+12. **KI-87, a refused turn-off said "Product details changed"** — closed 2026-11-05: already fixed by PR #1321, which shows the database's blocker text. Proven on the local test app: a draft purchase order added after the review made Confirm show "purchase order TEST-KI87-PO" and reopen the review naming it.
+13. **KI-88, Inventory loaded the whole catalog on mount** — closed 2026-11-05 by branch `claude/ki86-88-product-turnoff`: on mount the page reads only the ids of turned-off products (`select=id&is_active=eq.false`) for the Inactive label; the full catalog loads only when the Add Inventory or Create Hold picker opens. No migration. Proven on the local test app's network log (2,116 products: no catalog read until a picker opened) and by a component test.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

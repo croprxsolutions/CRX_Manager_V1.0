@@ -7,12 +7,18 @@
 -- now refuse a size whose stock unit differs from the parent's other sizes, case and spaces ignored:
 -- PRODUCT_PARENT_UNIT_MISMATCH. Liquid and dry parents are unchanged (their rate unit converts).
 --
+-- move_product_size (public; same signature, grants re-asserted) now stores the new parent's normalized
+-- EPA number on a moved size whenever the parent has one, as an added size does; before, a size typed
+-- "100 - 1" kept that spelling under a "100-1" parent (the move refusal already requires the size's
+-- normalized number to be absent or the parent's).
+--
 -- New: _product_parent_unit_refusal (private; no API-role EXECUTE). Re-issued: _insert_parent_size and
--- _product_size_move_refusal (both private; same signatures, grants re-asserted). No table, row, grant
--- on an existing object, or public function changes. Live had no parents when this was written; the
+-- _product_size_move_refusal (both private; same signatures, grants re-asserted), and move_product_size as
+-- above. No table, row or grant on an existing object changes. Live had no parents when this was written; the
 -- preflight refuses the apply if a seed or each parent already mixes stock units.
 --
--- Rollback: re-issue both functions from 20261108120000_product_parents.sql, then
+-- Rollback: re-issue _insert_parent_size, _product_size_move_refusal and move_product_size from
+-- 20261108120000_product_parents.sql, then
 -- DROP FUNCTION public._product_parent_unit_refusal(public.product_parents, text, uuid);
 
 DO $preflight$
@@ -20,7 +26,9 @@ BEGIN
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
        WHERE oid = 'public._insert_parent_size(public.product_parents,jsonb,text)'::regprocedure) IS DISTINCT FROM 'c021bf98575667d32d15d3e723ad51e8'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
-       WHERE oid = 'public._product_size_move_refusal(uuid,uuid)'::regprocedure) IS DISTINCT FROM '0b850586f48a49ff47122b6b1573726b' THEN
+       WHERE oid = 'public._product_size_move_refusal(uuid,uuid)'::regprocedure) IS DISTINCT FROM '0b850586f48a49ff47122b6b1573726b'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
+       WHERE oid = 'public.move_product_size(uuid,uuid,bigint,bigint,text,text,text,jsonb,text)'::regprocedure) IS DISTINCT FROM 'aeb4c51b18b8d786b36b6afbd6dbb7ec' THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_PARENT_HELPERS_CHANGED: re-base this on the installed bodies';
   END IF;
   -- The new check guards adds and moves; a seed or each parent that already mixes units must be fixed first.
@@ -140,12 +148,99 @@ $function$;
 ALTER FUNCTION public._product_size_move_refusal(uuid, uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_size_move_refusal(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
 
+CREATE OR REPLACE FUNCTION public.move_product_size(p_product_id uuid, p_to_parent_id uuid, p_expected_from_version bigint,
+  p_expected_to_version bigint, p_expected_size_fingerprint text, p_reason text, p_evidence text,
+  p_expected_prices jsonb, p_idempotency_key text DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_receipt jsonb;
+  v_actor uuid := public._product_parent_require_admin();
+  v_fp text := md5(jsonb_build_object('actor_id', auth.uid(), 'product_id', p_product_id, 'to_parent_id', p_to_parent_id,
+    'from_version', p_expected_from_version, 'to_version', p_expected_to_version,
+    'size_fingerprint', p_expected_size_fingerprint, 'reason', btrim(p_reason), 'evidence', btrim(p_evidence),
+    'expected_prices', p_expected_prices)::text);
+  v_tier text;
+  v_existing jsonb;
+  v_reason text;
+  v_evidence text;
+  v_from uuid;
+  v_refusal text;
+  v_event bigint;
+  v_copy jsonb;
+  v_to_version bigint;
+  v_from_left integer;
+BEGIN
+  v_existing := public._product_parent_replay(p_idempotency_key, 'move_product_size', v_fp);
+  IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  v_reason := public._product_parent_reason(p_reason, 'reason', true);
+  v_evidence := public._product_parent_reason(p_evidence, 'evidence', true);
+  IF p_expected_prices IS NULL OR jsonb_typeof(p_expected_prices) <> 'object' THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_INVALID: send the preview''s prices';
+  END IF;
+  SELECT parent_id INTO v_from FROM public.product_parent_members WHERE product_id = p_product_id;
+  IF v_from IS NULL THEN RAISE EXCEPTION 'PRODUCT_PARENT_NOT_GROUPED: this size has no parent'; END IF;
+  -- Both parents in ID order, then the size.
+  PERFORM 1 FROM public.product_parents WHERE id IN (v_from, p_to_parent_id) ORDER BY id FOR UPDATE;
+  IF (SELECT parent_version FROM public.product_parents WHERE id = v_from) IS DISTINCT FROM p_expected_from_version
+     OR (SELECT parent_version FROM public.product_parents WHERE id = p_to_parent_id) IS DISTINCT FROM p_expected_to_version
+     OR (SELECT parent_id FROM public.product_parent_members WHERE product_id = p_product_id) IS DISTINCT FROM v_from THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_STALE: a parent changed since the preview; preview again';
+  END IF;
+  PERFORM 1 FROM public.products WHERE id = p_product_id FOR UPDATE;
+  IF public._product_size_fingerprint(p_product_id) IS DISTINCT FROM p_expected_size_fingerprint THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_SIZE_STALE: the size changed since the preview; preview again';
+  END IF;
+  v_refusal := public._product_size_move_refusal(p_product_id, p_to_parent_id);
+  IF v_refusal IS NOT NULL THEN RAISE EXCEPTION '%', v_refusal; END IF;
+
+  UPDATE public.product_parent_members SET parent_id = p_to_parent_id, updated_at = now() WHERE product_id = p_product_id;
+  UPDATE public.product_parents SET parent_version = parent_version + 1, updated_by = v_actor, updated_at = now()
+   WHERE id IN (v_from, p_to_parent_id);
+  SELECT count(*) INTO v_from_left FROM public.product_parent_members WHERE parent_id = v_from;
+  -- A parent left with no sizes is kept, inactive.
+  IF v_from_left = 0 THEN UPDATE public.product_parents SET is_active = false WHERE id = v_from; END IF;
+  v_event := public._next_product_parent_event_id();
+  -- The refusal above leaves a size with no EPA number or one whose normalized number is the parent's; either way
+  -- it stores the parent's normalized spelling, as an added size does.
+  v_copy := public._copy_parent_to_size(p_to_parent_id, p_product_id, v_event, true, false,
+    (SELECT pp.generic_epa_registration IS NOT NULL FROM public.product_parents pp WHERE pp.id = p_to_parent_id));
+  -- A unit conversion changed since the preview moves the prices but no version or fingerprint.
+  FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
+    IF NOT (p_expected_prices ? v_tier) OR (v_copy->'after'->v_tier) IS DISTINCT FROM (p_expected_prices->v_tier) THEN
+      RAISE EXCEPTION 'PRODUCT_RATE_PREVIEW_CHANGED: the per-acre prices changed since the preview; preview again: %',
+        v_copy->'after'->>'product_name' USING ERRCODE = 'check_violation';
+    END IF;
+  END LOOP;
+  PERFORM public._product_parent_event(v_event, p_to_parent_id, 'size_moved', v_reason, v_evidence,
+    jsonb_build_object('from_parent_id', v_from), jsonb_build_object('to_parent_id', p_to_parent_id), jsonb_build_array(v_copy));
+  -- The old parent's log records the move too.
+  PERFORM public._product_parent_event(NULL, v_from, 'size_moved', v_reason, v_evidence,
+    jsonb_build_object('from_parent_id', v_from, 'product_id', p_product_id, 'is_active', true),
+    jsonb_build_object('to_parent_id', p_to_parent_id, 'is_active', v_from_left > 0),
+    jsonb_build_array(v_copy));
+  SELECT parent_version INTO v_to_version FROM public.product_parents WHERE id = p_to_parent_id;
+  v_receipt := jsonb_build_object('product_id', p_product_id, 'from_parent_id', v_from, 'to_parent_id', p_to_parent_id,
+      'to_parent_version', v_to_version, 'from_parent_inactive', v_from_left = 0, 'event_id', v_event, 'size', v_copy);
+  PERFORM public.save_idempotency(p_idempotency_key, 'move_product_size',
+    jsonb_build_object('actor_id', auth.uid(), 'request_fingerprint', v_fp, 'response', v_receipt));
+  RETURN v_receipt;
+END;
+$function$;
+ALTER FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, jsonb, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, jsonb, text) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.move_product_size(uuid, uuid, bigint, bigint, text, text, text, jsonb, text) TO authenticated;
+
 DO $postflight$
 BEGIN
   IF has_function_privilege('authenticated', 'public._product_parent_unit_refusal(public.product_parents,text,uuid)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._insert_parent_size(public.product_parents,jsonb,text)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._product_size_move_refusal(uuid,uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_UNIT_GRANTS_WRONG';
+  END IF;
+  IF NOT has_function_privilege('authenticated', 'public.move_product_size(uuid,uuid,bigint,bigint,text,text,text,jsonb,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.move_product_size(uuid,uuid,bigint,bigint,text,text,text,jsonb,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_MOVE_PRODUCT_SIZE_GRANTS_WRONG';
   END IF;
 END;
 $postflight$;

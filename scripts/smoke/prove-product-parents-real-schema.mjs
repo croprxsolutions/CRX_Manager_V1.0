@@ -500,6 +500,14 @@ function main() {
   const E2 = call(ADMIN, addSize(E.parent_id, version(E.parent_id), { product_name: '[PROVER] Epsilon 2', sku: 'EP-2', inventory_unit: 'Gal',
     epa_registration: '200 - 1' }, 'k-e-add')).product_id;
   assert.equal(prod(E2, 'epa_registration'), '200-1');
+  // A size moved in with a spaced spelling of the parent's EPA number stores the normalized one too (20261108130000).
+  const P = call(ADMIN, create({ name: '[PROVER] Psi', product_form: 'liquid', category: 'Fungicide' },
+    { product_name: '[PROVER] Psi 1', sku: 'PS-1', inventory_unit: 'Gal' }, 'k-create-p'));
+  asOwner(`UPDATE public.products SET epa_registration = '200 - 1' WHERE id = '${P.product_id}';`);
+  const mpsi = mp(P.product_id, E.parent_id);
+  assert.equal(mpsi.refusal, null);
+  call(ADMIN, move(P.product_id, E.parent_id, mpsi, 'k-m5'));
+  assert.equal(prod(P.product_id, 'epa_registration'), '200-1');
   // A seed parent's rates preview and save in each size's stock unit.
   const S = call(ADMIN, create({ name: '[PROVER] Sigma Seed', product_form: 'seed', category: 'Seed' },
     { product_name: '[PROVER] Sigma 50 Lb', sku: 'SG-50', inventory_unit: 'Lb', unit_size: '50' }, 'k-create-s'));

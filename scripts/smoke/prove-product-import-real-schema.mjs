@@ -345,8 +345,9 @@ function main() {
   preview([good[4], good[4]]).rows.forEach((r) => { assert.equal(r.status, 'refused'); assert.match(r.error, /appears twice/); });
   // The SKU index holds for the product page's own insert, which takes no import lock.
   refused(ADMIN, `INSERT INTO public.products (product_name, sku, category, product_form, inventory_unit) VALUES ('[PROVER] Page Dup', 'ex-1', 'Herbicide', 'liquid', 'Gal');`, /products_sku_unique/);
+  refused(ADMIN, `INSERT INTO public.products (product_name, category, product_form, inventory_unit, is_active) VALUES ('[prover] EXISTING HERB', 'Herbicide', 'liquid', 'Gal', true);`, /products_active_name_unique/);
   assert.equal(count(), before);
-  console.log('[prover] a bad row refuses the whole file by name; moved prices, missing prices, direct rate or price columns, mixed modes and in-file duplicates are refused (in the preview too); the product page cannot repeat a SKU');
+  console.log('[prover] a bad row refuses the whole file by name; moved prices, missing prices, direct rate or price columns, mixed modes and in-file duplicates are refused (in the preview too); the product page cannot repeat a SKU or an active name');
 
   // Save the confirmed rows from the preview.
   const confirmed = fromPreview(good, p);

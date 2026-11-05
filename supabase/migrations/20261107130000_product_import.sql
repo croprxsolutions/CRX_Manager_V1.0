@@ -14,13 +14,14 @@
 --     Rate columns are never written by the insert. A refusal names the product.
 --   * Duplicates are refused: a SKU any product already has (case and spaces ignored), a name an active
 --     product already has, or the same SKU or name twice in one file. The same EPA number under another
---     name is an allowed variant (the same chemical in another size). Inserts take a transaction
---     advisory lock, so two imports cannot both add the same name. Only spaces at either end and case
---     are ignored. The product page and Setup-tab renames do not take this lock, so an active name
---     they save at the same moment can still repeat; a SKU cannot (next point).
---   * New unique index products_sku_unique on lower(btrim(sku)) for non-blank SKUs: no two products,
---     active or not, share a SKU from any screen. Live had no duplicate SKU on 2026-11-05 (3 blank
---     SKUs, which the index ignores); the preflight refuses the apply if one appeared since.
+--     name is an allowed variant (the same chemical in another size). Only spaces at either end and
+--     case are ignored. Inserts take a transaction advisory lock, so an identical retry finds the
+--     first one's receipt.
+--   * Two new unique indexes hold the same rule from every screen, including a product-page save at
+--     the same moment as an import: products_sku_unique on lower(btrim(sku)) for non-blank SKUs (no two
+--     products, active or not, share one) and products_active_name_unique on lower(btrim(product_name))
+--     for active products. Live had neither kind of duplicate on 2026-11-05 (3 blank SKUs, which the
+--     index ignores); the preflight refuses the apply if one appeared since.
 --   * A row's vendor text links a vendor as the product page's insert does (link_new_product_vendor).
 --   * The screen previews at most 500 rows (preview_product_import's cap), so an import is 500 rows.
 -- New:
@@ -28,7 +29,7 @@
 --     rates, set_product_rates) inside a subtransaction that is always rolled back, and reports the
 --     refusal or the resulting rate and tier 1-3 per-acre prices, plus duplicate and same-EPA matches.
 --     Nothing it does is kept.
--- No existing row is changed; the one new index is products_sku_unique. Grants: EXECUTE on apply_product_setup (unchanged) and
+-- No existing row is changed; the new indexes are products_sku_unique and products_active_name_unique. Grants: EXECUTE on apply_product_setup (unchanged) and
 -- preview_product_import to authenticated; the renamed body has no API-role grant.
 
 SET LOCAL lock_timeout = '10s';
@@ -47,19 +48,27 @@ BEGIN
      OR to_regprocedure('public.save_idempotency(text,text,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_IMPORT_DEPENDENCY_MISSING';
   END IF;
-  IF to_regclass('public.products_sku_unique') IS NOT NULL THEN
-    RAISE EXCEPTION 'PREFLIGHT_PRODUCT_SKU_INDEX_EXISTS';
+  IF to_regclass('public.products_sku_unique') IS NOT NULL
+     OR to_regclass('public.products_active_name_unique') IS NOT NULL THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRODUCT_UNIQUE_INDEX_EXISTS';
   END IF;
   IF EXISTS (SELECT 1 FROM public.products WHERE NULLIF(btrim(sku), '') IS NOT NULL
              GROUP BY lower(btrim(sku)) HAVING count(*) > 1) THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_DUPLICATE_SKU: two products share a SKU; fix it before applying';
   END IF;
+  IF EXISTS (SELECT 1 FROM public.products WHERE is_active
+             GROUP BY lower(btrim(product_name)) HAVING count(*) > 1) THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRODUCT_DUPLICATE_ACTIVE_NAME: two active products share a name; fix it before applying';
+  END IF;
 END;
 $preflight$;
 
--- No two products share a SKU, from any screen (the import's duplicate check alone covers only imports).
+-- No two products share a SKU, and no two active products a name, from any screen (the import's
+-- duplicate check alone covers only imports).
 CREATE UNIQUE INDEX products_sku_unique ON public.products (lower(btrim(sku)))
   WHERE NULLIF(btrim(sku), '') IS NOT NULL;
+CREATE UNIQUE INDEX products_active_name_unique ON public.products (lower(btrim(product_name)))
+  WHERE is_active;
 
 ALTER FUNCTION public.apply_product_setup(jsonb, uuid, text) RENAME TO _apply_product_setup_update;
 REVOKE ALL ON FUNCTION public._apply_product_setup_update(jsonb, uuid, text)
@@ -110,6 +119,7 @@ BEGIN
 
   -- One import at a time, taken before the receipt lookup: an identical retry that waited here
   -- then finds the first one's receipt instead of tripping over its products as duplicates.
+  -- The unique indexes, not this lock, keep SKUs and active names distinct against other screens.
   PERFORM pg_advisory_xact_lock(hashtext('crx.product_setup_insert'));
   v_request_fp := md5(jsonb_build_object('actor_id', v_actor, 'rows', p_rows)::text);
   v_existing := public.check_idempotency(p_idempotency_key, 'apply_product_setup');
@@ -357,8 +367,8 @@ GRANT EXECUTE ON FUNCTION public.preview_product_import(jsonb) TO authenticated;
 
 DO $postflight$
 BEGIN
-  IF to_regclass('public.products_sku_unique') IS NULL THEN
-    RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_SKU_INDEX_MISSING';
+  IF to_regclass('public.products_sku_unique') IS NULL OR to_regclass('public.products_active_name_unique') IS NULL THEN
+    RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_UNIQUE_INDEX_MISSING';
   END IF;
   IF has_function_privilege('anon', 'public.apply_product_setup(jsonb,uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.preview_product_import(jsonb)', 'EXECUTE')

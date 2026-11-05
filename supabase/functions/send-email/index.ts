@@ -41,7 +41,7 @@ import {
 //      vendor (To-Do 0.15; _shared/purchaseOrderEmailGate.ts).
 //   2. email_type is allowlisted per role:
 //        admin            -> every type, including purchase_order
-//        sales_rep        -> every customer type (purchase cost is admin-only)
+//        sales_rep        -> the customer types except statement and ar_reminder
 //        driver           -> only delivery_completed (with proof of assignment)
 //        (statement and ar_reminder are admin-only, like the A/R Aging page;
 //        Mason, 2026-11-02)

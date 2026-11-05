@@ -72,7 +72,6 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
-  Truck,
   PlayCircle,
   CheckCircle2,
   ShieldAlert,
@@ -85,6 +84,7 @@ import CRXMap from '../components/map/CRXMap';
 import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
 import ErrorBoundary from '../components/ErrorBoundary';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import PhoneHeader from '../components/ui/PhoneHeader';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -644,31 +644,29 @@ export default function FieldView() {
     return (
       <div
         key={card.job_id}
-        className={`rounded-xl border bg-slate-900 transition-colors ${
-          expanded ? 'border-crx-green-on-dark ring-1 ring-crx-green-on-dark/40' : 'border-slate-800'
-        }`}
+        className={`transition-colors ${expanded ? 'border-l-4 border-crx-green bg-white' : 'bg-white'}`}
       >
         {/* Card header — the always-visible summary row (tap to expand). */}
         <button
           onClick={() => toggleExpand(card)}
           aria-expanded={expanded}
-          className="w-full flex items-start justify-between gap-3 p-4 text-left min-h-[44px]"
+          className="w-full flex items-start justify-between gap-3 px-4 pt-3 pb-3 text-left min-h-[44px] hover:bg-cream/60"
         >
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-base font-semibold text-crx-green-on-dark">{card.job_number}</span>
-              <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tracking-wide ${badge.className}`}>
+              <span className="font-heading text-xl font-bold leading-tight text-nav-dark">{card.job_number}</span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-bold tracking-wide ${lightBadgeClass(card.job_status)}`}>
                 {badge.label}
               </span>
               {dateLabel && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
-                  <Calendar className="w-3 h-3" /> {dateLabel}
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                  <Calendar className="w-3 h-3" aria-hidden="true" /> {dateLabel}
                 </span>
               )}
             </div>
-            <p className="mt-1 text-sm text-slate-200 font-medium truncate">{card.customer_name || 'Unknown'}</p>
-            <p className="flex items-center gap-1.5 text-xs text-slate-500 truncate">
-              <MapPin className="w-3.5 h-3.5 shrink-0" />
+            <p className="mt-1 text-base text-nav-dark font-semibold break-words">{card.customer_name || 'Unknown'}</p>
+            <p className="flex items-center gap-1.5 text-sm text-secondary">
+              <MapPin className="w-4 h-4 shrink-0" aria-hidden="true" />
               {/* A legacy whole-job assignment (jobs.applicator_id, no per-location
                   dispatch rows) has no locations array — "0 locations assigned to
                   you" would read as a bug, so name what it actually is. */}
@@ -678,68 +676,68 @@ export default function FieldView() {
             </p>
           </div>
           <div className="flex flex-col items-end gap-0.5 shrink-0">
-            <span className="text-lg font-bold text-white tabular-nums leading-tight">
+            <span className="font-heading text-xl font-bold text-nav-dark tabular-nums leading-tight whitespace-nowrap">
               {formatAppliedOfTotal(card.job_applied_acres, card.job_total_acres)}
             </span>
-            <span className="text-[10px] uppercase tracking-wider text-slate-500">job total</span>
-            {expanded ? <ChevronUp className="w-5 h-5 text-slate-400 mt-0.5" /> : <ChevronDown className="w-5 h-5 text-slate-400 mt-0.5" />}
+            <span className="text-xs text-secondary">job total</span>
+            {expanded ? <ChevronUp className="w-5 h-5 text-secondary mt-0.5" aria-hidden="true" /> : <ChevronDown className="w-5 h-5 text-secondary mt-0.5" aria-hidden="true" />}
           </div>
         </button>
 
         {/* Quick actions — visible on the card face, no expand required for Start. */}
         {!isTerminal && (
-          <div className="px-4 pb-4 -mt-1 flex gap-2">
+          <div className="px-4 pb-3 flex gap-2">
             {card.job_status === 'scheduled' && (
               <button
                 type="button"
                 onClick={() => requestStart(card)}
                 disabled={!isOnline}
-                className="flex-1 inline-flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-lg py-2.5 text-sm active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100"
+                className={ROW_ACTION}
               >
-                <PlayCircle className="w-4 h-4" /> Start Job
+                <PlayCircle className="w-5 h-5" aria-hidden="true" /> Start Job
               </button>
             )}
             {card.job_status === 'in_progress' && (
               <button
                 type="button"
                 onClick={() => openCompleteForm(card)}
-                className="flex-1 inline-flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-lg py-2.5 text-sm active:scale-[0.99]"
+                className={ROW_ACTION}
               >
-                <CheckCircle2 className="w-4 h-4" /> Complete Job
+                <CheckCircle2 className="w-5 h-5" aria-hidden="true" /> Complete Job
               </button>
             )}
           </div>
         )}
         {!isOnline && card.job_status === 'scheduled' && (
-          <p className="px-4 pb-3 -mt-2 flex items-center gap-1.5 text-[11px] text-amber-400">
-            <WifiOff className="w-3.5 h-3.5" /> Connect to the internet to start this job.
+          <p className="px-4 pb-3 -mt-1 flex items-center gap-1.5 text-sm text-amber-800">
+            <WifiOff className="w-4 h-4" aria-hidden="true" /> Connect to the internet to start this job.
           </p>
         )}
 
         {/* Expanded card — the read-only detail sections + (when in_progress) the
             Complete Job form. */}
         {expanded && (
-          <div className="border-t border-slate-800 px-4 py-4 space-y-4">
+          <div className="border-t border-gray-100 bg-cream/50 px-4 py-4 space-y-4">
             {isDetailLoading && !detail ? (
-              <div className="flex items-center gap-2 text-sm text-slate-400">
-                <Loader2 className="w-4 h-4 animate-spin" /> Loading job details…
+              <div className="flex items-center gap-2 text-sm text-secondary">
+                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> Loading job details…
               </div>
             ) : detail ? (
               <>
-                <Section icon={<Users className="w-4 h-4 text-crx-green-on-dark" />} title="Customer">
-                  <p className="text-sm text-slate-100 font-medium">{card.customer_name || 'Unknown'}</p>
+                <Section icon={<Users className="w-4 h-4" />} title="Customer">
+                  <p className="text-base text-nav-dark font-medium">{card.customer_name || 'Unknown'}</p>
                 </Section>
 
-                <Section icon={<MapPin className="w-4 h-4 text-crx-green-on-dark" />} title="Locations">
+                <Section icon={<MapPin className="w-4 h-4" />} title="Locations">
                   {detail.fields.length === 0 ? (
-                    <p className="text-sm text-slate-500">No locations.</p>
+                    <p className="text-sm text-secondary">No locations.</p>
                   ) : (
-                    <ul className="space-y-1">
+                    <ul className="divide-y divide-gray-100">
                       {detail.fields.map((f) => (
-                        <li key={f.id} className="flex items-center justify-between gap-3 text-sm">
-                          <span className="text-slate-100 truncate">{f.field_name || 'Field'}</span>
+                        <li key={f.id} className="flex items-center justify-between gap-3 py-1.5 text-base">
+                          <span className="text-nav-dark truncate">{f.field_name || 'Field'}</span>
                           {f.acres_to_treat != null && (
-                            <span className="text-slate-500 tabular-nums shrink-0">{f.acres_to_treat} ac</span>
+                            <span className="text-secondary tabular-nums shrink-0">{f.acres_to_treat} ac</span>
                           )}
                         </li>
                       ))}
@@ -747,13 +745,13 @@ export default function FieldView() {
                   )}
                 </Section>
 
-                <Section icon={<Sprout className="w-4 h-4 text-crx-green-on-dark" />} title="Crops">
+                <Section icon={<Sprout className="w-4 h-4" />} title="Crops">
                   {cropList(detail).length === 0 ? (
-                    <p className="text-sm text-slate-500">No crop recorded.</p>
+                    <p className="text-sm text-secondary">No crop recorded.</p>
                   ) : (
                     <div className="flex flex-wrap gap-1.5">
                       {cropList(detail).map((crop) => (
-                        <span key={crop} className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-xs text-slate-200">
+                        <span key={crop} className="px-2.5 py-0.5 rounded-full bg-crx-green-light text-sm text-crx-green font-medium">
                           {crop}
                         </span>
                       ))}
@@ -762,16 +760,16 @@ export default function FieldView() {
                 </Section>
 
                 {/* Chemicals — rate/quantity ONLY, no pricing (U12 owner decision). */}
-                <Section icon={<FlaskConical className="w-4 h-4 text-crx-green-on-dark" />} title="Chemicals">
-                  <p className="text-[11px] text-slate-500 -mt-1 mb-1.5">Applies to the whole job.</p>
+                <Section icon={<FlaskConical className="w-4 h-4" />} title="Chemicals">
+                  <p className="text-xs text-secondary -mt-1 mb-1.5">Applies to the whole job.</p>
                   {detail.chemicals.length === 0 ? (
-                    <p className="text-sm text-slate-500">No chemicals listed.</p>
+                    <p className="text-sm text-secondary">No chemicals listed.</p>
                   ) : (
-                    <ul className="divide-y divide-slate-800">
+                    <ul className="divide-y divide-gray-100">
                       {detail.chemicals.map((c) => (
                         <li key={c.id} className="py-2 first:pt-0 last:pb-0">
-                          <p className="text-sm text-slate-100 truncate">{c.product_name || 'Product'}</p>
-                          <p className="text-xs text-slate-500">
+                          <p className="text-base text-nav-dark font-medium truncate">{c.product_name || 'Product'}</p>
+                          <p className="text-sm text-secondary">
                             {c.rate_per_acre != null ? `${c.rate_per_acre}${c.rate_unit ? ' ' + c.rate_unit : ''}/ac` : '—'}
                             {c.quantity != null ? ` · ${c.quantity}${c.unit ? ' ' + c.unit : ''}` : ''}
                           </p>
@@ -783,13 +781,13 @@ export default function FieldView() {
 
                 {/* REI/PHI — only when at least one product has that label data on file. */}
                 {(reiPhi.reiHours != null || reiPhi.phiDays != null) && (
-                  <Section icon={<ShieldAlert className="w-4 h-4 text-amber-400" />} title="Re-Entry / Harvest">
-                    <div className="flex flex-wrap gap-4 text-sm">
+                  <Section icon={<ShieldAlert className="w-4 h-4" />} title="Re-Entry / Harvest" tone="amber">
+                    <div className="flex flex-wrap gap-4 text-base">
                       {reiPhi.reiHours != null && (
-                        <div><span className="text-slate-500">REI</span> <span className="text-slate-100 font-medium">{reiPhi.reiHours}h</span></div>
+                        <div><span className="text-secondary">REI</span> <span className="text-nav-dark font-semibold">{reiPhi.reiHours}h</span></div>
                       )}
                       {reiPhi.phiDays != null && (
-                        <div><span className="text-slate-500">PHI</span> <span className="text-slate-100 font-medium">{reiPhi.phiDays}d</span></div>
+                        <div><span className="text-secondary">PHI</span> <span className="text-nav-dark font-semibold">{reiPhi.phiDays}d</span></div>
                       )}
                     </div>
                   </Section>
@@ -797,10 +795,10 @@ export default function FieldView() {
 
                 {/* Complete Job form — only for an in_progress job the applicator opened. */}
                 {showingCompleteForm && card.job_status === 'in_progress' && (
-                  <Section icon={<CheckCircle2 className="w-4 h-4 text-crx-green-on-dark" />} title="Complete Job">
+                  <Section icon={<CheckCircle2 className="w-4 h-4" />} title="Complete Job">
                     {!isOnline && (
-                      <p className="flex items-center gap-1.5 text-[11px] text-amber-400 mb-2">
-                        <WifiOff className="w-3.5 h-3.5" /> You're offline &mdash; this will save now and sync when you reconnect.
+                      <p className="flex items-center gap-1.5 text-sm text-amber-800 mb-2">
+                        <WifiOff className="w-4 h-4" aria-hidden="true" /> You're offline &mdash; this will save now and sync when you reconnect.
                       </p>
                     )}
                     <div className="grid grid-cols-2 gap-2 mb-3">
@@ -817,29 +815,30 @@ export default function FieldView() {
                     </div>
                     {card.locations.length > 0 && (
                       <div className="mb-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Applied Acres (per location)</p>
-                        <div className="space-y-1.5">
+                        <p className="text-sm font-semibold text-nav-dark mb-1.5">Applied acres (per location)</p>
+                        <div className="divide-y divide-gray-100">
                           {card.locations.map((loc) => (
-                            <div key={loc.job_field_id} className="flex items-center justify-between gap-3">
-                              <span className="text-sm text-slate-300 truncate">{loc.field_name || 'Field'}</span>
+                            <label key={loc.job_field_id} className="flex items-center justify-between gap-3 py-1.5">
+                              <span className="text-base text-nav-dark truncate">{loc.field_name || 'Field'}</span>
                               <input
                                 type="number" inputMode="decimal" step="any" min={0}
                                 value={completeForm.fieldAcres[loc.job_field_id] ?? ''}
                                 onChange={(e) => setCompleteForm((p) => ({ ...p, fieldAcres: { ...p.fieldAcres, [loc.job_field_id]: e.target.value } }))}
-                                className="w-24 text-right tabular-nums bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-slate-100"
+                                className="h-11 w-28 text-right font-heading text-xl font-bold tabular-nums bg-white border border-gray-300 rounded-lg px-2 text-nav-dark"
                               />
-                            </div>
+                            </label>
                           ))}
                         </div>
                       </div>
                     )}
                     <div className="mb-3">
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Notes</label>
+                      <label htmlFor={`complete-notes-${card.job_id}`} className="block text-sm font-semibold text-nav-dark mb-1">Notes</label>
                       <textarea
+                        id={`complete-notes-${card.job_id}`}
                         value={completeForm.notes}
                         onChange={(e) => setCompleteForm((p) => ({ ...p, notes: e.target.value }))}
                         rows={2}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                        className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-base text-nav-dark"
                       />
                     </div>
                     <div className="flex gap-2">
@@ -847,14 +846,14 @@ export default function FieldView() {
                         type="button"
                         disabled={!canSubmitComplete}
                         onClick={() => requestComplete(card)}
-                        className="flex-1 inline-flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-xl py-3 text-sm active:scale-[0.99] disabled:opacity-50"
+                        className="flex-1 inline-flex h-14 items-center justify-center gap-2 bg-crx-green text-white font-heading text-xl font-bold rounded-xl hover:bg-crx-green-hover active:scale-[0.99] disabled:opacity-50"
                       >
-                        <CheckCircle2 className="w-5 h-5" /> {completing ? 'Completing…' : 'Complete Job'}
+                        <CheckCircle2 className="w-6 h-6" aria-hidden="true" /> {completing ? 'Completing…' : 'Complete Job'}
                       </button>
                       <button
                         type="button"
                         onClick={() => setCompleteFormOpenFor(null)}
-                        className="px-4 rounded-xl border border-slate-700 text-slate-300 text-sm font-medium active:scale-[0.99]"
+                        className="h-14 px-4 rounded-xl border border-gray-300 bg-white text-nav-dark text-base font-semibold active:scale-[0.99]"
                       >
                         Cancel
                       </button>
@@ -862,14 +861,14 @@ export default function FieldView() {
                   </Section>
                 )}
 
-                <p className="text-[11px] text-slate-600 pt-1">
+                <p className="text-sm text-secondary pt-1">
                   {isTerminal
                     ? 'This job is finished — pricing and invoicing are handled in the office app.'
                     : 'Pricing and job setup are managed in the office app.'}
                 </p>
               </>
             ) : (
-              <p className="text-sm text-slate-500">Tap again to retry loading details.</p>
+              <p className="text-sm text-secondary">Tap again to retry loading details.</p>
             )}
           </div>
         )}
@@ -878,67 +877,68 @@ export default function FieldView() {
   }
 
   return (
-    <div className="-m-4 lg:-m-6 min-h-[calc(100vh-4rem)] bg-slate-950 text-slate-100">
+    <div className="phone-touch -m-4 lg:-m-6 min-h-[calc(100vh-4rem)] bg-cream">
       {/* Header — title + view toggle. Touch-friendly; sized for a phone width. */}
-      <div className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border-b border-slate-800">
-        <div className="flex items-center gap-2 px-4 py-3">
-          <Truck className="w-6 h-6 text-crx-green-on-dark shrink-0" />
-          <h1 className="text-base font-semibold tracking-wide shrink-0">My Day</h1>
-          <div className="ml-auto inline-flex rounded-lg bg-slate-800 p-0.5">
+      <PhoneHeader
+        title="My Day"
+        eyebrow={parseLocalDate(today).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+        action={
+          <div className="inline-flex shrink-0 rounded-lg bg-white/10 p-0.5">
             <button
               onClick={() => setView('list')}
               aria-pressed={view === 'list'}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium min-h-[40px] ${
-                view === 'list' ? 'bg-crx-green text-white' : 'text-slate-300 hover:text-white'
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-semibold min-h-[44px] ${
+                view === 'list' ? 'bg-crx-green text-white' : 'text-gray-300 hover:text-white'
               }`}
             >
-              <ListIcon className="w-4 h-4" /> List
+              <ListIcon className="w-4 h-4" aria-hidden="true" /> List
             </button>
             <button
               onClick={() => setView('map')}
               aria-pressed={view === 'map'}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium min-h-[40px] ${
-                view === 'map' ? 'bg-crx-green text-white' : 'text-slate-300 hover:text-white'
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-semibold min-h-[44px] ${
+                view === 'map' ? 'bg-crx-green text-white' : 'text-gray-300 hover:text-white'
               }`}
             >
-              <MapIcon className="w-4 h-4" /> Map
+              <MapIcon className="w-4 h-4" aria-hidden="true" /> Map
             </button>
           </div>
-        </div>
-
+        }
+      >
         {/* Search + reload (list mode) */}
         {view === 'list' && (
-          <div className="flex items-center gap-2 px-4 pb-3">
+          <div className="flex items-center gap-2 mt-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" aria-hidden="true" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search job # or customer…"
-                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark/40 focus:border-crx-green-on-dark min-h-[44px]"
+                aria-label="Search job number or customer"
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-white border border-transparent text-base text-nav-dark placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green-on-dark min-h-[44px]"
               />
             </div>
             <button
               onClick={fetchCards}
               aria-label="Reload my jobs"
-              className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 shrink-0"
+              className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-white/10 hover:bg-white/20 text-white shrink-0"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className="w-5 h-5" aria-hidden="true" />
             </button>
           </div>
         )}
-      </div>
+      </PhoneHeader>
 
       {/* CONTENT */}
       {loading ? (
-        <div className="p-4 space-y-3">
+        <div className="p-3 sm:p-4 space-y-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-24 rounded-xl bg-slate-800/60 animate-pulse" />
+            <div key={i} className="h-24 rounded-xl bg-gray-200/70 animate-pulse" />
           ))}
         </div>
       ) : view === 'map' ? (
-        <div className="h-[calc(100vh-9rem)] m-3 rounded-xl overflow-hidden border border-slate-800">
+        <div className="h-[calc(100vh-9rem)] m-3 rounded-xl overflow-hidden border border-gray-200">
           <ErrorBoundary inline>
             <CRXMap
               className="h-full min-h-[360px]"
@@ -960,39 +960,43 @@ export default function FieldView() {
           </ErrorBoundary>
         </div>
       ) : fetchError && visibleCards.length === 0 ? (
-        <div className="p-4">
-          <div className="rounded-xl border border-amber-900/60 bg-amber-950/30 p-10 text-center">
-            <AlertCircle className="w-9 h-9 text-amber-500 mx-auto" />
-            <p className="mt-3 text-amber-200 font-medium">Couldn't load your jobs</p>
-            <p className="mt-1 text-xs text-amber-500/80">Check your connection and try again.</p>
+        <div className="p-3 sm:p-4">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-10 text-center">
+            <AlertCircle className="w-9 h-9 text-amber-600 mx-auto" aria-hidden="true" />
+            <p className="mt-3 font-heading text-xl font-bold text-amber-900">Couldn't load your jobs</p>
+            <p className="mt-1 text-sm text-amber-800">Check your connection and try again.</p>
             <button
               onClick={fetchCards}
-              className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-900/40 hover:bg-amber-900/60 text-amber-200 text-sm font-medium"
+              className="mt-4 inline-flex items-center gap-2 px-4 min-h-[44px] rounded-lg bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-sm font-semibold"
             >
-              <RefreshCw className="w-4 h-4" /> Retry
+              <RefreshCw className="w-4 h-4" aria-hidden="true" /> Retry
             </button>
           </div>
         </div>
       ) : visibleCards.length === 0 ? (
-        <div className="p-4">
-          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-10 text-center">
-            <MapPin className="w-9 h-9 text-slate-600 mx-auto" />
-            <p className="mt-3 text-slate-300 font-medium">No jobs assigned to you right now.</p>
-            <p className="mt-1 text-xs text-slate-500">
+        <div className="p-3 sm:p-4">
+          <div className="rounded-xl border border-gray-200 bg-white p-10 text-center">
+            <MapPin className="w-9 h-9 text-gray-400 mx-auto" aria-hidden="true" />
+            <p className="mt-3 font-heading text-xl font-bold text-nav-dark">No jobs assigned to you right now.</p>
+            <p className="mt-1 text-sm text-secondary">
               When a dispatcher hands you a field location, it shows up here.
             </p>
           </div>
         </div>
       ) : (
-        <div className="p-3 sm:p-4 space-y-3">
-          {activeCards.map(renderCard)}
+        <div className="p-3 sm:p-4 space-y-4 max-w-3xl">
+          {activeCards.length > 0 && (
+            <div className={JOB_LIST}>
+              {activeCards.map(renderCard)}
+            </div>
+          )}
 
           {doneCards.length > 0 && (
-            <div className="pt-2">
-              <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <div>
+              <h2 className="px-1 pb-2 font-heading text-lg font-semibold text-nav-dark">
                 Done ({doneCards.length})
-              </p>
-              <div className="space-y-3">
+              </h2>
+              <div className={JOB_LIST}>
                 {doneCards.map(renderCard)}
               </div>
             </div>
@@ -1029,32 +1033,48 @@ export default function FieldView() {
   );
 }
 
+const JOB_LIST = 'bg-white rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100';
+const ROW_ACTION = 'flex-1 inline-flex h-12 items-center justify-center gap-2 bg-crx-green text-white font-heading text-lg font-bold rounded-xl hover:bg-crx-green-hover active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100';
+
+/** Light status chips; the badge labels still come from jobStatusToDispatchBadge (shared with the dark Dispatch Board). */
+function lightBadgeClass(status: string): string {
+  switch (status) {
+    case 'scheduled': return 'bg-amber-100 text-amber-800';
+    case 'in_progress': return 'bg-crx-green-light text-crx-green';
+    case 'completed': return 'bg-sky-100 text-sky-800';
+    case 'invoiced': return 'bg-violet-100 text-violet-800';
+    default: return 'bg-gray-100 text-gray-700';
+  }
+}
+
 /** A labeled section inside the expanded card. */
-function Section({ icon, title, children }: { icon: JSX.Element; title: string; children: React.ReactNode }) {
+function Section({ icon, title, tone = 'green', children }: { icon: JSX.Element; title: string; tone?: 'green' | 'amber'; children: React.ReactNode }) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-1.5">
-        {icon}
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</span>
+        <span aria-hidden="true" className={`flex h-7 w-7 items-center justify-center rounded-md text-white ${tone === 'amber' ? 'bg-amber-500' : 'bg-crx-green'}`}>
+          {icon}
+        </span>
+        <h3 className="font-heading text-base font-semibold text-nav-dark">{title}</h3>
       </div>
-      <div className="pl-6">{children}</div>
+      <div className="pl-9">{children}</div>
     </div>
   );
 }
 
-/** Compact labeled number input for the Complete Job form (dark theme). */
+/** Compact labeled number input for the Complete Job form. */
 function FieldInput({
   label, value, onChange, placeholder,
 }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
   return (
     <label className="block">
-      <span className="block text-[11px] text-slate-400 mb-1">{label}</span>
+      <span className="block text-sm font-semibold text-nav-dark mb-1">{label}</span>
       <input
         type={placeholder ? 'text' : 'number'}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-100"
+        className="h-11 w-full bg-white border border-gray-300 rounded-lg px-3 text-base text-nav-dark placeholder:text-gray-500"
       />
     </label>
   );

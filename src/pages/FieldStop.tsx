@@ -15,9 +15,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, MapPin, PlayCircle, WifiOff, Minus, Plus, AlertTriangle, ChevronRight,
-  Camera, PenLine, CheckCircle2, ClipboardCheck, FileText,
+  MapPin, PlayCircle, WifiOff, Minus, Plus, AlertTriangle, ChevronRight,
+  Camera, CheckCircle2, ClipboardCheck, FileText,
 } from 'lucide-react';
+import PhoneHeader from '../components/ui/PhoneHeader';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
 import { supabase, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
@@ -583,9 +584,9 @@ export default function FieldStop() {
 
   if (loading) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-6">
-        <div className="h-8 w-32 bg-gray-100 rounded animate-pulse mb-4" />
-        <div className="h-40 bg-gray-100 rounded-xl animate-pulse" />
+      <div className="max-w-2xl mx-auto">
+        <div className="-mx-4 -mt-4 h-36 bg-nav-dark md:mx-0 md:mt-0 md:rounded-xl" />
+        <div className="mt-4 h-40 bg-gray-100 rounded-xl animate-pulse" />
       </div>
     );
   }
@@ -595,69 +596,64 @@ export default function FieldStop() {
   const shortCount = items.filter((it) => (deliveryQtys[it.id] ?? it.quantity) < it.quantity).length;
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-4">
-      <button
-        type="button"
-        onClick={() => navigate('/my-route')}
-        className="flex items-center gap-1 text-sm text-gray-500 mb-3 hover:text-gray-700"
-      >
-        <ArrowLeft className="w-4 h-4" /> My Route
-      </button>
-
-      <h1 className="text-lg font-bold text-gray-900">{farmName}</h1>
-      {delivery.delivery_number && <p className="text-xs text-gray-500 mb-3">{delivery.delivery_number}</p>}
-
-      {/* Step progress */}
-      <div className="flex gap-1 mb-4">
-        {STEP_ORDER.map((s, i) => {
-          const active = STEP_ORDER.indexOf(step) >= i;
-          return <span key={s} className={`flex-1 h-1.5 rounded-full ${active ? 'bg-crx-green' : 'bg-gray-200'}`} />;
-        })}
-      </div>
+    <div className="phone-touch max-w-2xl mx-auto">
+      <PhoneHeader
+        title={farmName}
+        eyebrow={delivery.delivery_number}
+        back={{ label: 'My Route', onClick: () => navigate('/my-route') }}
+        steps={{ labels: STEP_LABELS, current: STEP_ORDER.indexOf(step) }}
+        className="-mx-4 -mt-4 mb-4 md:mx-0 md:mt-0 md:rounded-xl"
+      />
 
       {step === 'arrive' && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          {addressLine && (
-            <p className="flex items-start gap-2 text-sm text-gray-700 mb-3">
-              <MapPin className="w-4 h-4 mt-0.5 text-gray-400 shrink-0" /> {addressLine}
-            </p>
-          )}
-          {delivery.delivery_notes && (
-            <div className="bg-amber-50 text-amber-900 text-sm rounded-lg px-3 py-2 mb-4">{delivery.delivery_notes}</div>
-          )}
-          {!isOnline && (
-            <p className="flex items-center gap-2 text-sm text-amber-700 mb-3">
-              <WifiOff className="w-4 h-4" /> You're offline — connect to start this stop.
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={handleArrive}
-            disabled={confirming || !isOnline}
-            className="w-full flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-xl py-4 text-lg active:scale-[0.99] disabled:opacity-50"
-          >
-            <PlayCircle className="w-6 h-6" />
+        <>
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
+            {addressLine && (
+              <p className="flex items-start gap-2 px-4 py-3 text-base text-nav-dark">
+                <MapPin className="w-5 h-5 mt-0.5 text-crx-green shrink-0" aria-hidden="true" /> {addressLine}
+              </p>
+            )}
+            {delivery.delivery_notes && (
+              <p className="bg-amber-50 border-l-4 border-amber-500 px-4 py-3 text-sm text-amber-800">{delivery.delivery_notes}</p>
+            )}
+            {!isOnline && (
+              <p className="flex items-center gap-2 px-4 py-3 text-sm text-amber-800">
+                <WifiOff className="w-4 h-4 shrink-0" aria-hidden="true" /> You're offline — connect to start this stop.
+              </p>
+            )}
+            {!addressLine && !delivery.delivery_notes && isOnline && (
+              <p className="px-4 py-3 text-sm text-secondary">Tap Start Delivery when you arrive.</p>
+            )}
+          </div>
+          <MainAction onClick={handleArrive} disabled={confirming || !isOnline}>
+            <PlayCircle className="w-6 h-6" aria-hidden="true" />
             {confirming ? 'Starting…' : "I'm Here — Start Delivery"}
-          </button>
-        </div>
+          </MainAction>
+        </>
       )}
 
       {step === 'verify' && (
-        <div>
-          <p className="text-xs text-gray-500 mb-2">Confirm what's being delivered</p>
-          <ul className="space-y-2">
+        <>
+          <h2 className="font-heading text-lg font-semibold text-nav-dark mb-2">Confirm what's being delivered</h2>
+          <ul className="bg-white border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
             {items.map((it) => {
               const delivered = deliveryQtys[it.id] ?? it.quantity;
               const short = delivered < it.quantity;
+              const name = it.product?.product_name || 'Product';
               return (
-                <li key={it.id} className="bg-white border border-gray-200 rounded-xl p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-medium text-gray-900 truncate">{it.product?.product_name || 'Product'}</p>
-                      <p className="text-xs text-gray-500">Ordered {it.quantity}</p>
+                <li key={it.id} className={`px-4 py-3 ${short ? 'bg-amber-50 border-l-4 border-amber-500' : ''}`}>
+                  <p className="font-semibold text-nav-dark break-words">{name}</p>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <div className="min-w-0 text-sm">
+                      <p className="text-secondary">Ordered {it.quantity}</p>
+                      {short && (
+                        <p className="flex items-center gap-1 font-medium text-amber-800">
+                          <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" /> {it.quantity - delivered} short → remainder
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <button type="button" aria-label="Decrease quantity" onClick={() => updateQty(it.id, delivered - 1, it.quantity)} className="w-9 h-9 rounded-lg border border-gray-300 flex items-center justify-center active:scale-95"><Minus className="w-4 h-4" /></button>
+                      <button type="button" aria-label="Decrease quantity" onClick={() => updateQty(it.id, delivered - 1, it.quantity)} className={STEPPER_BUTTON}><Minus className="w-6 h-6" aria-hidden="true" /></button>
                       <input
                         type="number"
                         inputMode="decimal"
@@ -667,191 +663,215 @@ export default function FieldStop() {
                         value={delivered}
                         onChange={(e) => updateQty(it.id, parseFloat(e.target.value) || 0, it.quantity)}
                         aria-label={`Delivered quantity for ${it.product?.product_name || 'item'}`}
-                        className="w-16 text-center font-semibold tabular-nums border border-gray-300 rounded-lg py-1.5"
+                        className="h-12 w-20 rounded-xl border border-gray-300 bg-white text-center font-heading text-[1.75rem] font-bold tabular-nums text-nav-dark"
                       />
-                      <button type="button" aria-label="Increase quantity" onClick={() => updateQty(it.id, delivered + 1, it.quantity)} className="w-9 h-9 rounded-lg border border-gray-300 flex items-center justify-center active:scale-95"><Plus className="w-4 h-4" /></button>
+                      <button type="button" aria-label="Increase quantity" onClick={() => updateQty(it.id, delivered + 1, it.quantity)} className={STEPPER_BUTTON}><Plus className="w-6 h-6" aria-hidden="true" /></button>
                     </div>
                   </div>
-                  {short && (
-                    <span className="inline-flex items-center gap-1 mt-2 text-xs bg-amber-50 text-amber-800 px-2 py-0.5 rounded-md">
-                      <AlertTriangle className="w-3 h-3" /> {it.quantity - delivered} short → remainder
-                    </span>
-                  )}
                 </li>
               );
             })}
             {items.length === 0 && (
-              <li className="text-sm text-center py-6">
+              <li className="text-sm text-center px-4 py-6">
                 {itemsError
-                  ? <span className="text-amber-700">Could not load items — refresh before completing.</span>
-                  : <span className="text-gray-500">No items on this delivery.</span>}
+                  ? <span className="text-amber-800">Could not load items — refresh before completing.</span>
+                  : <span className="text-secondary">No items on this delivery.</span>}
               </li>
             )}
           </ul>
-          <button type="button" disabled={!hasAnyQty} onClick={() => setStep('sign')} className="w-full mt-4 flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-xl py-4 text-lg active:scale-[0.99] disabled:opacity-50">
+          {!hasAnyQty && <p className="text-sm text-amber-800 mt-3 text-center">At least one item needs a quantity above zero.</p>}
+          <MainAction disabled={!hasAnyQty} onClick={() => setStep('sign')}>
             {isPartial ? 'Continue with Partial' : 'All Full — Continue'}
-            <ChevronRight className="w-5 h-5" />
-          </button>
-          {!hasAnyQty && <p className="text-xs text-amber-700 mt-2 text-center">At least one item needs a quantity above zero.</p>}
-        </div>
+            <ChevronRight className="w-6 h-6" aria-hidden="true" />
+          </MainAction>
+        </>
       )}
 
       {step === 'sign' && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
-            <input
-              type="checkbox"
-              checked={noOnePresent}
-              onChange={(e) => {
-                const checked = e.target.checked;
-                setNoOnePresent(checked);
-                setSignedBy(checked ? 'No one present — left at site' : '');
-                if (checked) { setSignatureDataUrl(null); setUsePaperTicket(false); }
-              }}
-              className="w-4 h-4"
-            />
-            No one present — left at site
-          </label>
-          {!noOnePresent && (
-            <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
+        <>
+          <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <label className="flex items-center gap-3 text-base text-nav-dark mb-2">
               <input
                 type="checkbox"
-                checked={usePaperTicket}
+                checked={noOnePresent}
                 onChange={(e) => {
-                  setUsePaperTicket(e.target.checked);
-                  if (e.target.checked) setSignatureDataUrl(null);
+                  const checked = e.target.checked;
+                  setNoOnePresent(checked);
+                  setSignedBy(checked ? 'No one present — left at site' : '');
+                  if (checked) { setSignatureDataUrl(null); setUsePaperTicket(false); }
                 }}
-                className="w-4 h-4"
+                className={CHECKBOX}
               />
-              Customer signed a paper ticket (no signal at the site)
+              No one present — left at site
             </label>
-          )}
-          <label htmlFor="signed-by" className="block text-sm font-medium text-gray-700 mb-1">Signed by (name)</label>
-          <input
-            id="signed-by"
-            type="text"
-            value={signedBy}
-            onChange={(e) => setSignedBy(e.target.value)}
-            placeholder="Who received the delivery?"
-            disabled={noOnePresent}
-            className={`w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 ${noOnePresent ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
-            autoComplete="off"
-          />
-          {usePaperTicket && !noOnePresent ? (
-            <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-              <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
-              {hasPaperTicketPhoto(photos) ? (
-                <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the signed ticket saved</p>
-              ) : (
-                <p className="text-sm text-amber-700">Take a photo of the signed paper ticket. It replaces the on-screen signature.</p>
-              )}
-                  <div>
-                    <label htmlFor="paper-delivered-on" className="block text-sm font-medium text-gray-700 mb-1">Delivered on (date on the ticket)</label>
-                    <input
-                      id="paper-delivered-on"
-                      type="date"
-                      value={paperDeliveredOn}
-                      max={todayInBusinessTz()}
-                      onChange={(e) => setPaperDeliveredOn(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-              <button type="button" disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS} onClick={() => paperTicketInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
-                <Camera className="w-5 h-5" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Signed Ticket'}
-              </button>
-            </div>
-          ) : (
-            <div className={noOnePresent ? 'pointer-events-none opacity-50' : ''} aria-disabled={noOnePresent}>
-              <SignatureCanvas key={noOnePresent ? 'signature-skipped' : 'signature-capture'} onSignatureChange={setSignatureDataUrl} label="Customer signs with their finger" height={160} disabled={noOnePresent} />
-            </div>
-          )}
-          {noOnePresent && (
-            <div className="border border-gray-200 rounded-lg p-3 space-y-2 mt-3">
-              <input ref={leftAtSiteInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, LEFT_AT_SITE_PHOTO_CAPTION)} className="hidden" />
-              {hasLeftAtSitePhoto(photos) ? (
-                <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" /> Photo of the drop location saved</p>
-              ) : (
-                <p className="text-sm text-amber-700">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
-              )}
-              <button type="button" disabled={uploadingPhoto || !isOnline || countLeftAtSitePhotos(photos) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
-                <Camera className="w-5 h-5" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Drop Location'}
-              </button>
-            </div>
-          )}
-          <button type="button" disabled={!signedBy.trim() || !evidenceReady} onClick={() => setStep('review')} className="w-full mt-4 flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-xl py-4 text-lg active:scale-[0.99] disabled:opacity-50">
-            <PenLine className="w-5 h-5" /> Continue to Review
-          </button>
-          {!signedBy.trim() && <p className="text-xs text-amber-700 mt-2 text-center">Enter who signed or choose no one present to continue.</p>}
-          {signedBy.trim() && usePaperTicket && !hasPaperTicketPhoto(photos) && <p className="text-xs text-amber-700 mt-2 text-center">Take the photo of the signed ticket to continue.</p>}
-          {signedBy.trim() && usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn) && <p className="text-xs text-amber-700 mt-2 text-center">Enter the delivery date from the paper ticket (today or earlier) to continue.</p>}
-          {signedBy.trim() && completionEvidence === 'signature' && !signatureDataUrl && <p className="text-xs text-amber-700 mt-2 text-center">Have the customer sign above to continue.</p>}
-          {noOnePresent && !hasLeftAtSitePhoto(photos) && <p className="text-xs text-amber-700 mt-2 text-center">Take the drop-location photo to continue.</p>}
-        </div>
+            {!noOnePresent && (
+              <label className="flex items-center gap-3 text-base text-nav-dark mb-2">
+                <input
+                  type="checkbox"
+                  checked={usePaperTicket}
+                  onChange={(e) => {
+                    setUsePaperTicket(e.target.checked);
+                    if (e.target.checked) setSignatureDataUrl(null);
+                  }}
+                  className={CHECKBOX}
+                />
+                Customer signed a paper ticket (no signal at the site)
+              </label>
+            )}
+            <label htmlFor="signed-by" className="block text-sm font-semibold text-nav-dark mt-2 mb-1">Signed by (name)</label>
+            <input
+              id="signed-by"
+              type="text"
+              value={signedBy}
+              onChange={(e) => setSignedBy(e.target.value)}
+              placeholder="Who received the delivery?"
+              disabled={noOnePresent}
+              className={`${TEXT_INPUT} mb-4 ${noOnePresent ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+              autoComplete="off"
+            />
+            {usePaperTicket && !noOnePresent ? (
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3">
+                <input ref={paperTicketInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, PAPER_TICKET_PHOTO_CAPTION)} className="hidden" />
+                {hasPaperTicketPhoto(photos) ? (
+                  <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the signed ticket saved</p>
+                ) : (
+                  <p className="text-sm text-amber-800">Take a photo of the signed paper ticket. It replaces the on-screen signature.</p>
+                )}
+                <div>
+                  <label htmlFor="paper-delivered-on" className="block text-sm font-semibold text-nav-dark mb-1">Delivered on (date on the ticket)</label>
+                  <input
+                    id="paper-delivered-on"
+                    type="date"
+                    value={paperDeliveredOn}
+                    max={todayInBusinessTz()}
+                    onChange={(e) => setPaperDeliveredOn(e.target.value)}
+                    className={TEXT_INPUT}
+                  />
+                </div>
+                <button type="button" disabled={uploadingPhoto || !isOnline || countPaperTicketPhotos(photos) >= MAX_PAPER_TICKET_PHOTOS} onClick={() => paperTicketInputRef.current?.click()} className={SECONDARY_BUTTON}>
+                  <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Signed Ticket'}
+                </button>
+              </div>
+            ) : (
+              <div className={noOnePresent ? 'pointer-events-none opacity-50' : ''} aria-disabled={noOnePresent}>
+                <SignatureCanvas key={noOnePresent ? 'signature-skipped' : 'signature-capture'} onSignatureChange={setSignatureDataUrl} label="Customer signs with their finger" height={160} disabled={noOnePresent} />
+              </div>
+            )}
+            {noOnePresent && (
+              <div className="border border-gray-200 rounded-xl p-3 space-y-3 mt-3">
+                <input ref={leftAtSiteInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoUpload(e, LEFT_AT_SITE_PHOTO_CAPTION)} className="hidden" />
+                {hasLeftAtSitePhoto(photos) ? (
+                  <p className="flex items-center gap-2 text-sm text-green-700"><CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Photo of the drop location saved</p>
+                ) : (
+                  <p className="text-sm text-amber-800">Signature skipped because no one was present. Take a photo of where you left the delivery.</p>
+                )}
+                <button type="button" disabled={uploadingPhoto || !isOnline || countLeftAtSitePhotos(photos) >= MAX_LEFT_AT_SITE_PHOTOS} onClick={() => leftAtSiteInputRef.current?.click()} className={SECONDARY_BUTTON}>
+                  <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo of Drop Location'}
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="mt-3 space-y-1 text-center text-sm text-amber-800 empty:hidden">
+            {!signedBy.trim() && <p>Enter who signed or choose no one present to continue.</p>}
+            {signedBy.trim() && usePaperTicket && !hasPaperTicketPhoto(photos) && <p>Take the photo of the signed ticket to continue.</p>}
+            {signedBy.trim() && usePaperTicket && !isValidPaperDeliveredOn(paperDeliveredOn) && <p>Enter the delivery date from the paper ticket (today or earlier) to continue.</p>}
+            {signedBy.trim() && completionEvidence === 'signature' && !signatureDataUrl && <p>Have the customer sign above to continue.</p>}
+            {noOnePresent && !hasLeftAtSitePhoto(photos) && <p>Take the drop-location photo to continue.</p>}
+          </div>
+          <MainAction disabled={!signedBy.trim() || !evidenceReady} onClick={() => setStep('review')}>
+            Continue to Review <ChevronRight className="w-6 h-6" aria-hidden="true" />
+          </MainAction>
+        </>
       )}
 
       {step === 'review' && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <section className="mb-4">
-            <h2 className="text-sm font-medium text-gray-700 mb-2">Add photo (optional)</h2>
-            <input ref={fileInputRef} type="file" accept="image/*" capture="environment" multiple onChange={handlePhotoUpload} className="hidden" />
-            {photos.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {photos.map((p) => (
-                  <PrivatePhoto key={p.id} bucket="delivery-photos" path={deliveryPhotoPath(p)} alt={p.caption || 'Delivery photo'} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
-                ))}
-              </div>
+        <>
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <section className="px-4 py-3">
+              <h2 className="font-heading text-lg font-semibold text-nav-dark mb-2">Add photo (optional)</h2>
+              <input ref={fileInputRef} type="file" accept="image/*" capture="environment" multiple onChange={handlePhotoUpload} className="hidden" />
+              {photos.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {photos.map((p) => (
+                    <PrivatePhoto key={p.id} bucket="delivery-photos" path={deliveryPhotoPath(p)} alt={p.caption || 'Delivery photo'} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
+                  ))}
+                </div>
+              )}
+              {isOnline ? (
+                <button type="button" disabled={uploadingPhoto || countOrdinaryPhotos(photos) >= MAX_ORDINARY_DELIVERY_PHOTOS} onClick={() => fileInputRef.current?.click()} className={SECONDARY_BUTTON}>
+                  <Camera className="w-5 h-5" aria-hidden="true" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo'}
+                </button>
+              ) : (
+                <p className="flex items-center gap-2 text-sm text-amber-800"><WifiOff className="w-4 h-4 shrink-0" aria-hidden="true" /> Photos can only be uploaded while online — reconnect to add photos.</p>
+              )}
+            </section>
+            <dl className="border-t border-gray-200 divide-y divide-gray-100 text-base">
+              <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Delivery</dt><dd className={isPartial ? 'font-semibold text-amber-800' : 'text-nav-dark'}>{isPartial ? `Partial — ${shortCount} short` : 'Full delivery'}</dd></div>
+              <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Signed by</dt><dd className="text-nav-dark text-right break-words">{signedBy || '—'}</dd></div>
+              <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Photos</dt><dd className="text-nav-dark">{photos.length}</dd></div>
+            </dl>
+            {receiptEmail && (
+              <label className="flex items-center gap-3 border-t border-gray-100 px-4 py-2.5 text-base text-nav-dark">
+                <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className={CHECKBOX} />
+                Email a receipt to the customer
+              </label>
             )}
-            {isOnline ? (
-              <button type="button" disabled={uploadingPhoto || countOrdinaryPhotos(photos) >= MAX_ORDINARY_DELIVERY_PHOTOS} onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 font-medium rounded-xl py-3 active:scale-[0.99] disabled:opacity-50">
-                <Camera className="w-5 h-5" /> {uploadingPhoto ? 'Uploading…' : 'Take Photo'}
-              </button>
-            ) : (
-              <p className="flex items-center gap-2 text-sm text-amber-700"><WifiOff className="w-4 h-4" /> Photos can only be uploaded while online — reconnect to add photos.</p>
-            )}
-          </section>
-          <dl className="text-sm space-y-1.5 mb-4">
-            <div className="flex justify-between"><dt className="text-gray-500">Delivery</dt><dd className="font-medium">{isPartial ? `Partial — ${shortCount} short` : 'Full delivery'}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">Signed by</dt><dd className="font-medium">{signedBy || '—'}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">Photos</dt><dd className="font-medium">{photos.length}</dd></div>
-          </dl>
-
-          {receiptEmail && (
-            <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
-              <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className="w-4 h-4" />
-              Email a receipt to the customer
-            </label>
-          )}
+          </div>
 
           {!isOnline && (
-            <div className="bg-amber-50 text-amber-800 text-xs rounded-lg px-3 py-2 mb-4">
+            <div className="bg-amber-50 border-l-4 border-amber-500 text-amber-800 text-sm rounded-lg px-3 py-2 mt-3">
               No signal. A delivery can only be completed with signal; <strong>nothing is saved offline</strong>. If the customer is signing now, go back and use a paper ticket, then complete here once you have signal.
             </div>
           )}
 
-          <p className="text-sm text-gray-600 mb-3">Inventory will be deducted and a draft invoice created.</p>
+          <p className="text-sm text-secondary mt-3 text-center">Inventory will be deducted and a draft invoice created.</p>
 
-          <button type="button" disabled={completing} onClick={requestComplete} className="w-full flex items-center justify-center gap-2 bg-crx-green text-white font-semibold rounded-xl py-4 text-lg active:scale-[0.99] disabled:opacity-50">
-            <ClipboardCheck className="w-6 h-6" /> {completing ? 'Completing…' : 'Complete Delivery'}
-          </button>
-        </div>
+          <MainAction disabled={completing} onClick={requestComplete}>
+            <ClipboardCheck className="w-6 h-6" aria-hidden="true" /> {completing ? 'Completing…' : 'Complete Delivery'}
+          </MainAction>
+        </>
       )}
 
       {step === 'done' && (
-        <div className="bg-white border border-gray-200 rounded-xl p-6 text-center">
-          <CheckCircle2 className="w-14 h-14 text-green-600 mx-auto mb-3" />
-          <p className="text-lg font-semibold text-gray-900">Delivery complete</p>
-          <p className="text-sm text-gray-500 mt-1">Signed by {signedBy}</p>
-          {autoInvoiceNumber && (
-            <p className="inline-flex items-center gap-1 text-sm text-gray-700 mt-3">
-              <FileText className="w-4 h-4 text-gray-400" /> Draft invoice {autoInvoiceNumber} created
-            </p>
-          )}
-          <button type="button" onClick={() => navigate('/my-route')} className="w-full mt-5 flex items-center justify-center gap-2 border border-crx-green text-crx-green font-semibold rounded-xl py-3 active:scale-[0.99]">
-            Next Stop <ChevronRight className="w-5 h-5" />
-          </button>
-        </div>
+        <>
+          <div className="bg-white border border-gray-200 rounded-xl p-6 text-center">
+            <CheckCircle2 className="w-14 h-14 text-crx-green mx-auto mb-3" aria-hidden="true" />
+            <p className="font-heading text-2xl font-bold text-nav-dark">Delivery complete</p>
+            <p className="text-sm text-secondary mt-1">Signed by {signedBy}</p>
+            {autoInvoiceNumber && (
+              <p className="inline-flex items-center gap-1 text-sm text-nav-dark mt-3">
+                <FileText className="w-4 h-4 text-secondary" aria-hidden="true" /> Draft invoice {autoInvoiceNumber} created
+              </p>
+            )}
+          </div>
+          <MainAction onClick={() => navigate('/my-route')}>
+            Next Stop <ChevronRight className="w-6 h-6" aria-hidden="true" />
+          </MainAction>
+        </>
       )}
 
+    </div>
+  );
+}
+
+const STEP_LABELS = ['Arrive', 'Items', 'Sign', 'Review', 'Done'];
+const STEPPER_BUTTON = 'flex h-12 w-12 items-center justify-center rounded-xl bg-crx-green-light text-crx-green active:scale-95';
+const CHECKBOX = 'h-5 w-5 shrink-0 rounded border-gray-300 text-crx-green';
+const TEXT_INPUT = 'h-12 w-full rounded-xl border border-gray-300 px-3 text-base text-nav-dark placeholder:text-gray-500';
+const SECONDARY_BUTTON = 'flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white font-semibold text-nav-dark active:scale-[0.99] disabled:opacity-50';
+
+/** The one main button of a step: full width, 56px, pinned above the phone's bottom navigation. */
+function MainAction({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 -mx-4 mt-4 bg-cream/95 px-4 py-2 backdrop-blur md:static md:mx-0 md:bg-transparent md:px-0 md:backdrop-blur-none">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-crx-green font-heading text-xl font-bold text-white hover:bg-crx-green-hover active:scale-[0.99] disabled:opacity-50"
+      >
+        {children}
+      </button>
     </div>
   );
 }

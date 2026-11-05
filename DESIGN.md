@@ -252,5 +252,5 @@ Chosen 2026-11-02. Label-left rows, a Save per sub-part, Cream Shadow section ba
 - About a dozen component and page files type hex colours directly, mostly maps and charts.
 - Three tab mechanisms coexist: `Tabs`, the `WorkspaceTabs` link bar, and hand-rolled tab buttons on about seven pages.
 - Map layers (Mapbox paint in `src/components/map/` and `src/components/fields/ImportPreviewMap.tsx`) need literal hex colours. They sit on dark satellite imagery, so they repeat crx-green-on-dark (#28A26A), not crx-green, and must change with that token.
-- The Dispatch Board, Field View and the driver delivery view are full dark screens (slate/gray), an exception to the light theme kept for outdoor and in-cab use.
+- The Dispatch Board and the driver delivery view are full dark screens (slate/gray), an exception to the light theme kept for outdoor and in-cab use. Field View moved to style D (a dark header over a light list) on 2026-11-04.
 - The phone bottom nav uses 10px labels; don't use text that small elsewhere.

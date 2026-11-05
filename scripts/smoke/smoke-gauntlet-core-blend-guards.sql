@@ -59,6 +59,9 @@ DECLARE
   v_quantity numeric;
   v_updated_at timestamptz;
 BEGIN
+  -- current_date must be the Chicago business date: after 6 pm Central the UTC date is already
+  -- tomorrow, and enforce_commission_payment_business_date refuses a payment dated after today.
+  PERFORM set_config('TimeZone', 'America/Chicago', true);
   SELECT id INTO v_admin
     FROM public.profiles
    WHERE role = 'admin' AND is_active = true

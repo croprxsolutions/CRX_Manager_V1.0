@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-06 — Duplicate ingredients are replaced, never linked (DM-1)
+
+**Decision (Mason, 2026-11-06: "Yes, use replace"):** when two active-ingredient entries turn out to be the same chemical, an admin swaps the duplicate out on each product through the normal reviewed chemistry correction, then retires the unused entry. No merge, alias or "merged into" link exists.
+**Why:** in the DM-1 plan, Sol found new HIGHs from the merge alias three rounds running (a decision race, an undo that broke its own rule, a CAS moved by the merge). Duplicates will be rare: a typed CAS number already reuses the existing entry (D-AA-1). Removing the link deletes the whole class of bugs, at the cost of a few more clicks per duplicate.
+**What this forbids/implies:** this refines D-AA (2026-08-27). D-AA-1 now means "a CAS match reuses the entry", and a CAS that already belongs to another entry is refused rather than joined. D-AA-2's side-by-side approval is the possible-duplicates list, which Mason resolves by correction. Plan: `docs/plans/2026-11-06-product-DM1-BUILD-SHEET.md`.
+
 ## 2026-11-06 — A Deliveries export may miss a delivery cancelled or reactivated while it runs
 
 **Decision:** Mason accepted that a multi-page Deliveries read (export, load sheet, calendar, driver view) includes every delivery that matches for the whole read exactly once, but a delivery cancelled, reactivated or moved in or out of the filters while it runs may or may not appear, and rows near an edit can sit a place out of order (Mason, 2026-11-06: "A: accept it").

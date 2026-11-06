@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for 20261116120000_orders_list_page.sql (Goal 4) and its keyset follow-up
- * 20261121100000_orders_list_keyset_page.sql (get_orders_keyset_page; get_orders_page now wraps it). Builds the checked-in baseline plus
+ * 20261125100000_orders_list_keyset_page.sql (get_orders_keyset_page; get_orders_page now wraps it). Builds the checked-in baseline plus
  * every post-baseline migration on this checkout (the candidate included) in a network-disabled PostgreSQL
  * container (scripts/smoke/undo-paths/harness.mjs), seeds 5,250 orders (5,200 in the season, some deleted,
  * 50 before it) with lines, invoices (active, voided, credit memo, over-billed) and deliveries, then checks
@@ -96,7 +96,7 @@ const { buildContainer, removeContainer, seedUsers, psql, scalar, USERS, ROOT, N
 const { applyTableSearchSort } = await import(pathToFileURL(path.join(ROOT, 'src', 'lib', 'tableSearchSort.ts')).href);
 
 const FIRST = '20261116120000_orders_list_page.sql';
-const CANDIDATE = '20261121100000_orders_list_keyset_page.sql';
+const CANDIDATE = '20261125100000_orders_list_keyset_page.sql';
 const FROM = '2026-10-01';
 const TO = '2027-09-30';
 const reuse = process.env.ORDERS_PAGE_PROOF_REUSE === '1';

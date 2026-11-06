@@ -1,6 +1,6 @@
 -- Rolled-back smoke chain (Goal 4 follow-up): the Orders list bookmark (keyset) paging on live data.
 --
--- Covers get_orders_keyset_page after 20261121100000_orders_list_keyset_page.sql.
+-- Covers get_orders_keyset_page after 20261125100000_orders_list_keyset_page.sql.
 --
 -- Read only: signs in as the oldest active admin (and the oldest active driver, when one exists), calls
 -- the function under the authenticated role so row security applies, and writes nothing.

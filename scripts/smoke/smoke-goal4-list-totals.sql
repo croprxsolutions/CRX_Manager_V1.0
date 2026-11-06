@@ -2,7 +2,7 @@
 -- live data.
 --
 -- Covers the five get_call_list_* functions and get_dispatch_board_jobs after
--- 20261113120000_list_true_totals.sql.
+-- 20261114080000_list_true_totals.sql.
 --
 -- Read only: signs in as the oldest active admin and writes nothing.
 -- Proves:

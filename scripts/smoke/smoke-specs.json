@@ -10,7 +10,7 @@
     "get_dispatch_board_jobs": {
       "chain": "smoke-goal4-list-totals.sql",
       "area": ["regression"],
-      "description": "REQUIRES 20261113120000. Goal 4 list totals, read only: as the oldest active admin, each of the five call lists returns success, at most 200 rows and a total_count that is at least the rows shown (equal when fewer than 200); for the applicator with the most jobs, every dispatch board row carries one _total_count, the board shows min(total, 500) rows in (job_date, id) DESC order and no row carries total_cost_cents; an active driver, when one exists, is refused every call list.",
+      "description": "REQUIRES 20261114080000. Goal 4 list totals, read only: as the oldest active admin, each of the five call lists returns success, at most 200 rows and a total_count that is at least the rows shown (equal when fewer than 200); for the applicator with the most jobs, every dispatch board row carries one _total_count, the board shows min(total, 500) rows in (job_date, id) DESC order and no row carries total_cost_cents; an active driver, when one exists, is refused every call list.",
       "covers": [
         "get_dispatch_board_jobs",
         "get_call_list_prepay_prospects",

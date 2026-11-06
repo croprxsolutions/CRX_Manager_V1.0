@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261113120000_list_true_totals.sql (Goal 4). Builds the checked-in baseline plus
+ * Real-schema proof for 20261114080000_list_true_totals.sql (Goal 4). Builds the checked-in baseline plus
  * every post-baseline migration on this checkout (the candidate included) in a network-disabled PostgreSQL
  * container (scripts/smoke/undo-paths/harness.mjs), seeds 250 unassigned customers and 520 jobs for one
  * applicator (both past the 200 / 500 cuts), then checks, signed in as admin:
@@ -23,7 +23,7 @@ import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, psql, scalar, attempt, asUser, refuse, claims, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = '20261113120000_list_true_totals.sql';
+const CANDIDATE = '20261114080000_list_true_totals.sql';
 const reuse = process.env.LIST_TOTALS_PROOF_REUSE === '1';
 const read = (f) => readFileSync(path.join(MIGRATIONS, f), 'utf8').replaceAll('\r\n', '\n');
 const candidate = read(CANDIDATE);

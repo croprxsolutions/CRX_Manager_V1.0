@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261106135401",
+    "migrations_high_water": "20261106145427",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -529,6 +529,7 @@
       "20261116120000_orders_list_page",
       "20261117130000_tote_fill_from_bulk",
       "20261118110000_sale_line_vendor",
+      "20261120100000_field_invoice_due_date_follows_owner_terms",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -3673,6 +3674,12 @@
     },
     {
       "table": "invoices",
+      "constraint": "invoices_custom_due_date_present",
+      "def": "CHECK (((NOT due_date_is_custom) OR (due_date IS NOT NULL)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "invoices",
       "constraint": "invoices_discount_earned_nonneg",
       "def": "CHECK ((discount_earned_cents >= 0))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
@@ -5824,7 +5831,8 @@
         "pricing_pending",
         "discount_earned_cents",
         "credit_applied_cents",
-        "send_disposition"
+        "send_disposition",
+        "due_date_is_custom"
       ]
     },
     "job_applied_info": {
@@ -8379,7 +8387,8 @@
       "credit_applied_cents",
       "balance_cents",
       "send_disposition",
-      "field_app_billing_set_id"
+      "field_app_billing_set_id",
+      "due_date_is_custom"
     ],
     "job_applied_info": [
       "id",

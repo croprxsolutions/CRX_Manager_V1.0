@@ -183,8 +183,9 @@ gate. List each deferral explicitly when you report SHIP-WITH-FOLLOWUPS, then pr
 **The last round reads the whole branch (Mason, 2026-11-06).** Rounds on a single fix may use
 `--commit <sha>`, but the round that clears the change for the PR (and for Sol) must be the default
 branch scope against `origin/main`, run on the committed head that will be pushed. Its `Reviewed:`
-line names that head; quote it when you report the result. If a later commit changes code, run the
-whole-branch round again. Why: on PR #1494 Luna came back clean on five fix commits while Sol found
+line names that head; quote it when you report the result. If a later commit changes anything
+but notes or docs, run the whole-branch round again; if it changes only notes or docs, say so and
+name both heads. Why: on PR #1494 Luna came back clean on five fix commits while Sol found
 new bugs in how the pieces worked together each time. If the whole branch is too large and the
 script falls back to per-commit commands, say so: that does not count as the whole-branch round.
 

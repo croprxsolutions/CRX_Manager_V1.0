@@ -68,6 +68,7 @@ export const SOL_REQUIRED_PATHS = Object.freeze([
   "scripts/write-apply-proofs.mjs",
   "scripts/apply-migration-file.mjs",
   "scripts/owner-approve-migration.mjs",
+  "scripts/check-agent-workflows.mjs",
 ]);
 
 // GitHub's compare lists at most 300 files and says nothing when it stops.

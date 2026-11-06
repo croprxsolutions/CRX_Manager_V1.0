@@ -50,10 +50,11 @@ land on green checks alone. `.claude/hooks/sol-risk-lib.mjs`, `.claude/hooks/cod
 `.claude/hooks/migration-landing-gate-lib.mjs`, `.claude/hooks/migration-access-lib.mjs`,
 `.claude/hooks/owner-approval-lib.mjs`, `.codex/hooks/production-action-guard.mjs`,
 `scripts/write-codex-push-proof.mjs`, `scripts/write-apply-proofs.mjs`,
-`scripts/apply-migration-file.mjs`, `scripts/owner-approve-migration.mjs`. Their tests and
-every other hook stay off the list. Known gap, left off on purpose: the hook wiring in
-`.claude/settings.json` and `.codex/hooks.json` changes too often for routine reasons to put
-behind Sol, so unwiring a gate there still lands on green checks.
+`scripts/apply-migration-file.mjs`, `scripts/owner-approve-migration.mjs`, and
+`scripts/check-agent-workflows.mjs`, which fails CI if a gate hook is unwired from
+`.claude/settings.json` or `.codex/hooks.json`. Those two wiring files change too often for
+routine reasons to put behind Sol, so that CI check guards them instead. The gate files' tests and every
+other hook stay off the list.
 
 ## What stays separate
 

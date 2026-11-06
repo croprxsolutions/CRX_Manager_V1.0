@@ -91,6 +91,12 @@ requireIncludes(".codex/hooks.json", codexHooksText, ".claude/hooks/sql-safety.m
 requireIncludes(".claude/settings.json", claudeSettingsText, "review-proof-guard.mjs");
 requireIncludes(".codex/hooks.json", codexHooksText, "review-proof-guard.mjs");
 requireIncludes(".codex/hooks.json", codexHooksText, "production-action-guard.mjs");
+// The gate hooks must stay wired (Mason, 2026-11-06): unwiring one is how a gate could be
+// switched off without touching a file on the Sol list.
+for (const gate of ["pr-merge-guard.mjs", "merge-guard-launcher.mjs", "codex-push-guard.mjs", "migration-apply-guard.mjs"]) {
+  requireIncludes(".claude/settings.json", claudeSettingsText, gate);
+}
+requireIncludes(".codex/hooks.json", codexHooksText, "migration-apply-guard.mjs");
 // Scope to the [mcp_servers.supabase] url line, parsed line-by-line so a
 // commented heading, a commented url, a backup_url key, or a url in a later
 // TOML table can never satisfy the check; the read_only flag is matched at

@@ -38,7 +38,7 @@ const LEDGER_ONLY = new Set([
   '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(product_parent|product_brand|_copy_parent_to_size|_product_size_values|_normalize_epa_registration|product_rate_lock|guard_product_category|FUNCTION\s+(public\.)?"?(preview_product_rate_correction|product_price_per_acre|validate_product_units|is_admin|is_active_profile|check_idempotency|save_idempotency))/i;
+const TOUCHED = /(product_parent|product_brand|_copy_parent_to_size|_product_size_values|_normalize_epa_registration|product_rate_lock|guard_product_category|FUNCTION\s+(public\.)?"?(preview_product_rate_correction|product_price_per_acre|validate_product_units|is_admin|is_active_profile|check_idempotency|save_idempotency)\b)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -633,6 +633,19 @@ async function main() {
   }
   console.log('[case] label facts and prices: no EPA number, label fact, list price, name or active flag changed; only the re-rated size has new per-acre prices');
 
+  // [case] live smoke chain: the post-apply chain runs here first, with one active profile per probed role.
+  const others = [['a3', 'driver'], ['a4', 'applicator'], ['a5', 'entity_recipient']];
+  psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ${others.map(([n, r]) =>
+    `('${id(n)}', 'pp2-${r}@example.invalid', '{"full_name":"[PROVER] ${r}","role":"${r}"}'::jsonb)`).join(', ')};`);
+  asOwner(others.map(([n, r]) => `UPDATE public.profiles SET role = '${r}', is_active = true WHERE id = '${id(n)}';`).join('\n'));
+  const chain = docker([...psqlArgs(), '-f', '-'], { input: lf(path.join(ROOT, 'scripts/smoke/smoke-product_parent_proposals.sql')), allowFailure: true });
+  assert.match(`${chain.stdout}\n${chain.stderr}`, /SMOKE_PASS_ROLLBACK/, `${chain.stdout}\n${chain.stderr}`);
+  console.log('[case] live smoke chain: smoke-product_parent_proposals.sql passes on the post-apply schema');
+  // Cost-exposure keys after the apply, for the allowlist re-key (ship.md step 5): printed, not asserted.
+  const costRows = docker([...psqlArgs(), '-A', '-t', '-f', '-'], { input: lf(path.join(ROOT, 'scripts/db-invariant-sweeps/predicates/cost-exposure-review.sql')) })
+    .stdout.split(/\r?\n/).filter((l) => /parent|brand/i.test(l));
+  for (const row of costRows) console.log(`[cost-exposure] ${row}`);
+
   // [case] rollback
   // The active "Brandy A" takes the retired variant's name after the move: each size keeps its own mapped row,
   // so the frozen "Brandy B" row there has to be archived and renamed aside, not collided with.
@@ -645,8 +658,10 @@ async function main() {
     '16a6d86bb6d935cdce42f9fa618a22d0');
   for (const fn of ['build_product_parent_proposal(text)', 'get_product_brands(uuid)', '_product_parent_base_name(text)']) assert.equal(scalar(`SELECT to_regprocedure('public.${fn}') IS NULL;`), 't');
   const legacy = (pid) => scalar(`SELECT string_agg(concat_ws('|', brand_name, epa_registration, manufacturer), ',' ORDER BY brand_name) FROM public.product_brands WHERE product_id = '${pid}';`);
-  assert.match(legacy(L1), /^Brandy B|264-829|Maker One,Brandy B (archived [0-9]+)|Maker Two,Brandy C|264-829|Maker One$/);
-  assert.match(legacy(L2), /^Brandy B|264-829|Maker One,Brandy B (archived [0-9]+)|Maker Two,Brandy C|264-829|Maker One$/);
+  const archiveId = (bid) => scalar(`SELECT id FROM public.product_brand_rollback_archive WHERE legacy_brand_id = '${bid}';`);
+  for (const [pid, bid] of [[L1, BB1], [L2, BB2]]) {
+    assert.equal(legacy(pid), `Brandy B|264-829|Maker One,Brandy B (archived ${archiveId(bid)})|Maker Two,Brandy C|264-829|Maker One`);
+  }
   assert.equal(scalar(`SELECT string_agg(legacy_row->>'brand_name', ',') FROM public.product_brand_rollback_archive WHERE legacy_brand_id IN ('${BB1}', '${BB2}');`), 'Brandy B,Brandy B');
   assert.equal(scalar("SELECT count(*) FROM public.product_brands WHERE brand_name LIKE '~rollback %';"), '0');
   assert.equal(legacy(S2), 'Spready|700-7|Maker Four');

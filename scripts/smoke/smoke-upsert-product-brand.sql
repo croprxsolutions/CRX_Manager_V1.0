@@ -30,7 +30,10 @@ BEGIN
   SELECT id INTO v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY created_at LIMIT 1;
   SELECT id INTO v_wrong FROM public.profiles WHERE role IN ('driver', 'applicator', 'sales_rep') AND is_active
    ORDER BY CASE role WHEN 'driver' THEN 0 WHEN 'applicator' THEN 1 ELSE 2 END, created_at LIMIT 1;
-  SELECT id INTO v_product FROM public.products WHERE is_active ORDER BY created_at LIMIT 1;
+  -- A grouped size's brands belong to its parent (PAR-2); this chain edits an ungrouped size.
+  SELECT p.id INTO v_product FROM public.products p WHERE p.is_active
+     AND NOT EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = p.id)
+   ORDER BY p.created_at LIMIT 1;
   IF v_admin IS NULL OR v_wrong IS NULL OR v_product IS NULL THEN
     RAISE EXCEPTION 'SMOKE_SETUP: need an active admin, an active non-admin and an active product';
   END IF;

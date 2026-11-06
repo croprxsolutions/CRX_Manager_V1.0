@@ -4,7 +4,8 @@
 -- counts in the browser. At volume that is slow and every number depends on the whole read succeeding.
 -- get_deliveries_page returns one page of matching rows plus the true totals, all from one snapshot:
 --   rows         the page, each row the full delivery plus customer_name, driver_name, item_count and
---                farm_group_name, exactly as the screen builds them today
+--                farm_group_name, exactly as the screen builds them today, and sort_position (its place in
+--                the chosen order)
 --   total_count  every row matching the search and filters
 --   summary      the screen's cards and 7-day strip over every visible delivery that is not cancelled or
 --                voided (independent of the list's search and filters)
@@ -20,7 +21,7 @@
 
 DO $preflight$
 BEGIN
-  IF to_regprocedure('public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer)') IS NOT NULL THEN
+  IF to_regprocedure('public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer,uuid)') IS NOT NULL THEN
     RAISE EXCEPTION 'DELIVERIES_PAGE_ALREADY_EXISTS: get_deliveries_page is already installed';
   END IF;
 END;
@@ -39,7 +40,8 @@ CREATE FUNCTION public.get_deliveries_page(
   p_sort_key text DEFAULT NULL,
   p_sort_desc boolean DEFAULT false,
   p_limit integer DEFAULT 50,
-  p_offset integer DEFAULT 0
+  p_offset integer DEFAULT 0,
+  p_after_id uuid DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -62,6 +64,13 @@ BEGIN
   END IF;
   IF p_offset IS NULL OR p_offset < 0 THEN
     RAISE EXCEPTION 'DELIVERIES_PAGE_BAD_ARGS: p_offset must be 0 or more';
+  END IF;
+  -- p_after_id reads the matching rows in delivery id order, the p_limit after that id (the nil uuid
+  -- starts at the beginning). Ids never change, so a full read made this way skips or repeats no
+  -- delivery that exists for the whole read, whatever is edited meanwhile; the caller then sorts the
+  -- rows by sort_position.
+  IF p_after_id IS NOT NULL AND p_offset <> 0 THEN
+    RAISE EXCEPTION 'DELIVERIES_PAGE_BAD_ARGS: p_after_id pages by id, so p_offset must be 0';
   END IF;
   IF p_sort_key IS NOT NULL AND p_sort_key NOT IN
       ('delivery_number', 'customer_name', 'driver_name', 'scheduled_date', 'priority', 'status', 'item_count') THEN
@@ -157,11 +166,18 @@ BEGIN
                  'customer_name', o.customer_name,
                  'driver_name', o.driver_name,
                  'item_count', o.item_count,
-                 'farm_group_name', o.farm_group_name) ORDER BY o.ord)
-        FROM ordered o
+                 'farm_group_name', o.farm_group_name,
+                 -- The row's place in the chosen order, so a caller reading by id can put the rows back in it.
+                 'sort_position', o.ord) ORDER BY CASE WHEN p_after_id IS NULL THEN o.ord END, o.id)
+        FROM (
+          SELECT o1.* FROM ordered o1
+           WHERE p_after_id IS NULL AND o1.ord > p_offset AND o1.ord <= p_offset::bigint + p_limit
+          UNION ALL
+          SELECT k.* FROM (
+            SELECT o2.* FROM ordered o2 WHERE p_after_id IS NOT NULL AND o2.id > p_after_id ORDER BY o2.id LIMIT p_limit
+          ) k
+        ) o
         JOIN public.deliveries d ON d.id = o.id
-        WHERE o.ord > p_offset
-          AND o.ord <= p_offset::bigint + p_limit
       ), '[]'::jsonb),
       'summary', jsonb_build_object(
         'visible_count', (SELECT count(*) FROM visible),
@@ -187,13 +203,13 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer) FROM anon;
-GRANT EXECUTE ON FUNCTION public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer,uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer,uuid) FROM anon;
+GRANT EXECUTE ON FUNCTION public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer,uuid) TO authenticated, service_role;
 
 DO $postflight$
 DECLARE
-  v_fn regprocedure := to_regprocedure('public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer)');
+  v_fn regprocedure := to_regprocedure('public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer,uuid)');
 BEGIN
   IF v_fn IS NULL THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: get_deliveries_page was not created';

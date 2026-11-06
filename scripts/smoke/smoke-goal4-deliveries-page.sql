@@ -12,7 +12,10 @@
 --     summary's visible_count and open_count equal direct counts;
 --   * searching the delivery number of the last row of the default order finds that row;
 --   * a driver sees only deliveries assigned to them;
---   * a bad page size is refused, and so is a request for every row at once (p_limit NULL).
+--   * the whole-list read the screen makes (pages of 500 in delivery id order, each after the last id) returns
+--     the same rows as the full read, in id order;
+--   * a bad page size is refused, and so is a request for every row at once (p_limit NULL) and an id
+--     cursor with an offset.
 --
 -- Always ends by raising SMOKE_PASS_ROLLBACK: nothing is ever committed.
 
@@ -30,6 +33,8 @@ DECLARE
   v_desc boolean;
   v_last text;
   v_refused boolean;
+  v_after uuid;
+  v_byid text;
   v_today date := (now() AT TIME ZONE 'America/Chicago')::date;
 BEGIN
   SELECT id INTO v_admin FROM public.profiles WHERE role = 'admin' AND is_active ORDER BY created_at, id LIMIT 1;
@@ -78,6 +83,18 @@ BEGIN
     IF (SELECT count(DISTINCT e->>'id') FROM jsonb_array_elements(v_all->'rows') e) <> v_total THEN
       RAISE EXCEPTION 'SMOKE_FAIL: sort % repeats an id', v_sort;
     END IF;
+    -- The read by id: same rows, in id order.
+    v_byid := NULL;
+    v_after := '00000000-0000-0000-0000-000000000000';
+    LOOP
+      v_r := public.get_deliveries_page(v_today, v_today - 6, p_sort_key => v_sort, p_sort_desc => v_desc, p_limit => 500, p_after_id => v_after);
+      v_byid := concat_ws(',', v_byid, (SELECT string_agg(e->>'id', ',' ORDER BY o) FROM jsonb_array_elements(v_r->'rows') WITH ORDINALITY q(e, o)));
+      EXIT WHEN jsonb_array_length(v_r->'rows') < 500;
+      v_after := (v_r->'rows'->-1->>'id')::uuid;
+    END LOOP;
+    IF v_byid IS DISTINCT FROM (SELECT string_agg(e->>'id', ',' ORDER BY (e->>'id')::uuid) FROM jsonb_array_elements(v_all->'rows') e) THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: sort % read by id differs from the full read', v_sort;
+    END IF;
     RAISE NOTICE 'get_deliveries_page sort %: % rows, pages of 50 match', COALESCE(v_sort, 'default'), v_total;
   END LOOP;
 
@@ -98,7 +115,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- 4. A bad page size is refused, and so is a request for every row at once.
+  -- 4. A bad page size is refused, and so is a request for every row at once, and an id cursor with an offset.
   v_refused := false;
   BEGIN
     v_r := public.get_deliveries_page(v_today, v_today - 6, p_limit => 501);
@@ -113,6 +130,14 @@ BEGIN
     IF SQLERRM LIKE 'DELIVERIES_PAGE_BAD_ARGS%' THEN v_refused := true; ELSE RAISE; END IF;
   END;
   IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: p_limit NULL was not refused'; END IF;
+  v_refused := false;
+  BEGIN
+    v_r := public.get_deliveries_page(v_today, v_today - 6, p_limit => 50, p_offset => 50,
+                                      p_after_id => '00000000-0000-0000-0000-000000000000');
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'DELIVERIES_PAGE_BAD_ARGS%' THEN v_refused := true; ELSE RAISE; END IF;
+  END;
+  IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: an id cursor with an offset was not refused'; END IF;
 
   -- 5. A driver sees only their own deliveries.
   IF v_driver IS NOT NULL THEN

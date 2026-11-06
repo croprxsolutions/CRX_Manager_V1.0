@@ -104,6 +104,18 @@ function callAll(uid, o) {
   return first;
 }
 
+const NIL = '00000000-0000-0000-0000-000000000000';
+/** The whole-list read the screen makes: pages of 500 in delivery id order, each after the last id. */
+function callById(uid, o) {
+  const rows = [];
+  for (let after = NIL; ;) {
+    const page = call(uid, { ...o, limit: 500, after_id: after });
+    rows.push(...page.rows);
+    if (page.rows.length < 500) return { ...page, rows };
+    after = page.rows.at(-1).id;
+  }
+}
+
 /** Reads every page of `size` and checks it against the full read. Returns the full read. */
 function pagesMatch(uid, o, size = 37) {
   const all = callAll(uid, o);
@@ -117,6 +129,10 @@ function pagesMatch(uid, o, size = 37) {
     paged.push(...ids(page));
   }
   assert.deepEqual(paged, ids(all), `${JSON.stringify(o)}: pages of ${size} differ from the full read`);
+  const byId = callById(uid, o);
+  assert.deepEqual(ids(byId), sorted(ids(all)), `${JSON.stringify(o)}: the read by id is not the same rows in id order`);
+  assert.deepEqual(ids({ rows: [...byId.rows].sort((a, b) => a.sort_position - b.sort_position) }), ids(all),
+    `${JSON.stringify(o)}: the read by id sorted by sort_position is not the full read's order`);
   return all;
 }
 
@@ -252,15 +268,53 @@ try {
   assert.equal(lastAfter, 'DP-99999', 'the older new row lands at the end of the default order');
   console.log('[deliveries-page] edit + older insert: first 100 rows unchanged, new row last');
 
+  // 6b. A read by id that sees edits between its pages (Sol, 2026-11-06): after page 1, a page-1 delivery is
+  // cancelled and two cancelled ones come back, one on each side of the cursor. Every delivery visible before
+  // and after must appear exactly once, and nothing that was never visible may appear.
+  const drift = probe(USERS.admin, `
+    CREATE TEMP TABLE kb (id uuid); CREATE TEMP TABLE km (id uuid); CREATE TEMP TABLE ka (id uuid);
+    u := '${NIL}';
+    LOOP ${asUser(`r := public.get_deliveries_page(p_today => '${TODAY}', p_week_start => '${WEEK}', p_limit => 500, p_after_id => u);`)}
+      INSERT INTO kb SELECT (e->>'id')::uuid FROM jsonb_array_elements(r->'rows') e;
+      EXIT WHEN jsonb_array_length(r->'rows') < 500; u := (r->'rows'->-1->>'id')::uuid;
+    END LOOP;
+    u := '${NIL}';
+    ${asUser(`r := public.get_deliveries_page(p_today => '${TODAY}', p_week_start => '${WEEK}', p_limit => 500, p_after_id => u);`)}
+    INSERT INTO km SELECT (e->>'id')::uuid FROM jsonb_array_elements(r->'rows') e;
+    u := (r->'rows'->-1->>'id')::uuid;
+    SET LOCAL session_replication_role = replica;
+    UPDATE public.deliveries SET status = 'cancelled' WHERE id = (r->'rows'->0->>'id')::uuid;
+    UPDATE public.deliveries SET status = 'scheduled' WHERE id IN (
+      (SELECT id FROM public.deliveries WHERE delivery_number LIKE 'DP-%' AND status = 'cancelled' AND id < u ORDER BY id DESC LIMIT 1),
+      (SELECT id FROM public.deliveries WHERE delivery_number LIKE 'DP-%' AND status = 'cancelled' AND id > u ORDER BY id DESC LIMIT 1));
+    SET LOCAL session_replication_role = origin;
+    LOOP ${asUser(`r := public.get_deliveries_page(p_today => '${TODAY}', p_week_start => '${WEEK}', p_limit => 500, p_after_id => u);`)}
+      INSERT INTO km SELECT (e->>'id')::uuid FROM jsonb_array_elements(r->'rows') e;
+      EXIT WHEN jsonb_array_length(r->'rows') < 500; u := (r->'rows'->-1->>'id')::uuid;
+    END LOOP;
+    u := '${NIL}';
+    LOOP ${asUser(`r := public.get_deliveries_page(p_today => '${TODAY}', p_week_start => '${WEEK}', p_limit => 500, p_after_id => u);`)}
+      INSERT INTO ka SELECT (e->>'id')::uuid FROM jsonb_array_elements(r->'rows') e;
+      EXIT WHEN jsonb_array_length(r->'rows') < 500; u := (r->'rows'->-1->>'id')::uuid;
+    END LOOP;
+    v := concat_ws('|', (SELECT count(*) FROM kb), (SELECT count(*) FROM ka),
+      (SELECT count(*) - count(DISTINCT id) FROM km),
+      (SELECT count(*) FROM ((SELECT id FROM kb INTERSECT SELECT id FROM ka) EXCEPT SELECT id FROM km) missing),
+      (SELECT count(*) FROM (SELECT id FROM km EXCEPT (SELECT id FROM kb UNION SELECT id FROM ka)) stray));`);
+  const [before, after, repeated, missing, stray] = drift.split('|').map(Number);
+  assert.equal(after, before + 1, `the edits should leave one more visible delivery (${before} -> ${after})`);
+  assert.deepEqual({ repeated, missing, stray }, { repeated: 0, missing: 0, stray: 0 }, 'a read by id skipped or repeated a delivery across edits');
+  console.log(`[deliveries-page] read by id across a cancel and two reactivations: ${before} -> ${after}, none skipped or repeated`);
+
   // 7. Bad arguments refused; anon cannot execute.
   for (const bad of ["p_today => NULL, p_week_start => '2026-06-14'", `${args()}, p_limit => 0`, `${args()}, p_limit => 501`, `${args()}, p_limit => NULL`,
-    `${args()}, p_offset => -1`, `${args()}, p_sort_key => 'id'`, `${args()}, p_sort_desc => NULL`, `${args()}, p_search => repeat('a', 201)`]) {
+    `${args()}, p_offset => -1`, `${args()}, p_after_id => '${NIL}', p_offset => 1`, `${args()}, p_sort_key => 'id'`, `${args()}, p_sort_desc => NULL`, `${args()}, p_search => repeat('a', 201)`]) {
     const refused = attempt(USERS.admin, `${refuse(`PERFORM public.get_deliveries_page(${bad});`)} v := t;`);
     assert.match(refused, /DELIVERIES_PAGE_BAD_ARGS/, `not refused: ${bad}`);
   }
-  assert.equal(scalar("SELECT has_function_privilege('anon', 'public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer)', 'EXECUTE');"), 'f');
+  assert.equal(scalar("SELECT has_function_privilege('anon', 'public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer,uuid)', 'EXECUTE');"), 'f');
   assert.equal(scalar("SELECT prosecdef FROM pg_proc WHERE proname = 'get_deliveries_page';"), 'f');
-  console.log('[deliveries-page] 8 bad argument sets refused; anon cannot execute; SECURITY INVOKER');
+  console.log('[deliveries-page] 9 bad argument sets refused; anon cannot execute; SECURITY INVOKER');
 
   // 8. The live smoke chain passes here first (it must end in SMOKE_PASS_ROLLBACK).
   const chain = readFileSync(path.join(ROOT, 'scripts', 'smoke', 'smoke-goal4-deliveries-page.sql'), 'utf8');

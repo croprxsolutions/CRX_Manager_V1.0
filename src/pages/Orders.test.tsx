@@ -195,6 +195,39 @@ describe('Orders list pages through the database', () => {
     await screen.findByText(/of 120 orders · \$1,200\.00 total/);
     expect(screen.queryByText('120 selected')).not.toBeInTheDocument();
   });
+
+  it('"Select All" does nothing while a new filter is still loading (the rows shown are the old query\'s)', async () => {
+    serveOrders(Array.from({ length: 30 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–30 of 30 orders · $300.00 total');
+
+    mockRpc.mockImplementation(() => new Promise(() => {}));
+    fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
+    await waitFor(() => expect(screen.queryByText(/Showing/)).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it('Deselect while a "Select All" read is still running wins: the late read selects nothing', async () => {
+    const all = Array.from({ length: 120 }, (_, i) => order(i));
+    serveOrders(all);
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    await screen.findByText('1 selected');
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    mockRpc.mockImplementation(async (_fn: string, args: { p_limit: number; p_offset: number }) => {
+      if (args.p_limit === 1000) await gate;
+      return { data: { rows: all.slice(args.p_offset, args.p_offset + args.p_limit), total_count: all.length, total_price_cents: all.length * 1000 }, error: null };
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect' }));
+    release();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Select All 120' })).toBeEnabled());
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
 });
 
 describe('Orders bulk-delete lifecycle guard', () => {

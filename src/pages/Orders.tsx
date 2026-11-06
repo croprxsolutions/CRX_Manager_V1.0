@@ -138,7 +138,10 @@ export default function Orders() {
   useEffect(() => {
     clearSelection();
   }, [queryKey, page, clearSelection]);
+  // Bumped by every deselect and query change: a "select all" read that finishes later is dropped.
+  const selectAllSeq = useRef(0);
   useEffect(() => {
+    selectAllSeq.current += 1;
     setAllMatchingState(null);
   }, [queryKey]);
 
@@ -161,6 +164,7 @@ export default function Orders() {
   }, [allMatching, orders, queryKey, toggleSelect]);
 
   const clearBulkSelection = useCallback(() => {
+    selectAllSeq.current += 1;
     setAllMatchingState(null);
     clearSelection();
   }, [clearSelection]);
@@ -179,15 +183,19 @@ export default function Orders() {
       clearBulkSelection();
       return;
     }
+    // The rows on screen may still be the previous query's until its own read lands.
+    if (!totals) return;
     if (!moreThanThisPage) {
       toggleAll();
       return;
     }
     // Every matching order, read page by page; a list that changed mid-read is an error, not a short list.
     const key = queryKey;
+    const seq = ++selectAllSeq.current;
     setSelectingAll(true);
     const { data, error } = await fetchAllMatchingOrders(query);
     setSelectingAll(false);
+    if (seq !== selectAllSeq.current) return;
     if (error || !data) {
       toast('error', 'Could not select every matching order. Please try again.');
       return;

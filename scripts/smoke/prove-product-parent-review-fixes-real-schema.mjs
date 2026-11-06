@@ -443,7 +443,11 @@ async function main() {
   assert.match(`${b.stdout}\n${b.stderr}`, /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Omega" already has EPA number 500-1/);
   assert.ok(waitedB >= 1000, `the second writer did not wait for the first (${waitedB} ms)`);
   assert.equal(scalar(`SELECT count(*) FROM public.product_parents WHERE is_active AND generic_epa_registration = '500-1';`), '1');
-  console.log(`[case] one parent per product: a hand-made duplicate (also one carrying approval's "(EPA ...)" suffix) is refused PRODUCT_PARENT_EPA_HAS_PARENT, another name with the same EPA number is allowed, and of two writers at once the second waits (${waitedB} ms) and is refused`);
+  // A whole-transaction snapshot would not see a parent committed while it waited for the lock: refused.
+  const rr = psql(`BEGIN ISOLATION LEVEL REPEATABLE READ;\n${parentRow('[PROVER] Psi').replace("'500-1'", "'800-1'")}\nCOMMIT;\n`, { allowFailure: true });
+  assert.notEqual(rr.status, 0);
+  assert.match(`${rr.stdout}\n${rr.stderr}`, /PRODUCT_PARENT_READ_COMMITTED_REQUIRED/);
+  console.log(`[case] one parent per product: a hand-made duplicate (also one carrying approval's "(EPA ...)" suffix) is refused PRODUCT_PARENT_EPA_HAS_PARENT, another name with the same EPA number is allowed, of two writers at once the second waits (${waitedB} ms) and is refused, and a REPEATABLE READ writer is refused`);
 
   // [case] rejection carried (Taha finding 4)
   const xeno = groupOf(G, X1);
@@ -494,6 +498,14 @@ async function main() {
   call(ADMIN, brand(mu.parent_id, 'Other', 'Other Co', false, 'Caution', 'k-b-other-fix', { id: otherRup.id, version: 1 }));
   m = preview(mu.product_id, mu2.parent_id);
   assert.equal(m.refusal, null, 'equal brand lists must allow the move');
+  // A whole-transaction snapshot could compare stale brand lists after the locks: refused before anything moves.
+  const rrMove = psql(`BEGIN ISOLATION LEVEL REPEATABLE READ;
+    SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+    SET LOCAL ROLE authenticated;
+    ${move(mu.product_id, mu2.parent_id, m, 'k-move-rr')}
+    COMMIT;`, { allowFailure: true });
+  assert.notEqual(rrMove.status, 0);
+  assert.match(`${rrMove.stdout}\n${rrMove.stderr}`, /PRODUCT_PARENT_READ_COMMITTED_REQUIRED/);
   const moved = call(ADMIN, move(mu.product_id, mu2.parent_id, m, 'k-move-2'));
   assert.equal(moved.from_parent_inactive, true);
   assert.equal(moved.from_parent_brands_retired, 1);
@@ -504,7 +516,7 @@ async function main() {
     'retired|the parent has no sizes left after its last size moved: wrong group|active|retired');
   assert.equal(scalar(`SELECT string_agg(brand_name || ':' || status, ',') FROM public.product_parent_brands WHERE parent_id = '${mu2.parent_id}';`), 'Other:active');
   assert.deepEqual(call(REP, `SELECT public.get_product_brands('${mu.product_id}');`).brands.map((b) => b.brand_name), ['Other']);
-  console.log("[case] move: a different brand list (another brand, or the same name with another RUP flag) is refused PRODUCT_PARENT_BRANDS_DIFFER in the preview and the move; with equal lists the move runs, and the emptied parent's brands are retired with a logged event");
+  console.log("[case] move: a different brand list (another brand, or the same name with another RUP flag) is refused PRODUCT_PARENT_BRANDS_DIFFER in the preview and the move; with equal lists the move runs (refused under REPEATABLE READ), and the emptied parent's brands are retired with a logged event");
 
   // [case] live smoke chains: the post-apply chains run here first, with one active profile per probed role.
   const others = [['a3', 'driver'], ['a4', 'applicator'], ['a5', 'entity_recipient']];

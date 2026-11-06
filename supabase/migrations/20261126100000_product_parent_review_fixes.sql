@@ -34,7 +34,9 @@
 --      a 'retired' brand event. The receipt adds from_parent_brands_retired.
 -- 5. One parent per product (new trigger guard_product_parent_epa_duplicate on product_parents): any write that
 --    leaves two active parents with one EPA number and one base name is refused PRODUCT_PARENT_EPA_HAS_PARENT,
---    under a lock per EPA number, so two admins working at once cannot both make one. Every second-parent check
+--    under a lock per EPA number, so two admins working at once cannot both make one. It and move_product_size
+--    refuse a REPEATABLE READ or SERIALIZABLE transaction (PRODUCT_PARENT_READ_COMMITTED_REQUIRED), whose old
+--    snapshot would hide a row committed while it waited; the app's calls are READ COMMITTED. Every second-parent check
 --    (build, approval, trigger) compares _product_parent_identity_name (new helper): the base name without the
 --    " (EPA ...)", " (form)" and " #n" suffixes approval adds to keep names unique.
 -- Same signatures, owners and grants for every re-issued function (CREATE OR REPLACE keeps them; the postflight
@@ -456,7 +458,12 @@ BEGIN
   SELECT parent_id INTO v_from FROM public.product_parent_members WHERE product_id = p_product_id;
   IF v_from IS NULL THEN RAISE EXCEPTION 'PRODUCT_PARENT_NOT_GROUPED: this size has no parent'; END IF;
   -- Both parents in ID order, then the size. (upsert_parent_brand takes its parent FOR SHARE first, so no brand
-  -- edit on either parent can slip between the brand-list check below and the move.)
+  -- edit on either parent can slip between the brand-list check below and the move.) The check reads after the
+  -- locks, so it needs a fresh snapshot per statement: a whole-transaction snapshot is refused.
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_READ_COMMITTED_REQUIRED: parents are written only in READ COMMITTED transactions'
+      USING ERRCODE = '55000';
+  END IF;
   PERFORM 1 FROM public.product_parents WHERE id IN (v_from, p_to_parent_id) ORDER BY id FOR UPDATE;
   IF (SELECT parent_version FROM public.product_parents WHERE id = v_from) IS DISTINCT FROM p_expected_from_version
      OR (SELECT parent_version FROM public.product_parents WHERE id = p_to_parent_id) IS DISTINCT FROM p_expected_to_version
@@ -530,6 +537,12 @@ DECLARE
   v_other text;
 BEGIN
   IF NEW.is_active AND NEW.generic_epa_registration IS NOT NULL THEN
+    -- The check below must read rows committed after this transaction began (the lock's point); a snapshot
+    -- kept for the whole transaction (REPEATABLE READ or SERIALIZABLE) would not, so those are refused.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_READ_COMMITTED_REQUIRED: parents are written only in READ COMMITTED transactions'
+        USING ERRCODE = '55000';
+    END IF;
     PERFORM pg_advisory_xact_lock(hashtext('crx.product_parent_epa:' || NEW.generic_epa_registration));
     SELECT pp.name INTO v_other FROM public.product_parents pp
      WHERE pp.is_active AND pp.id <> NEW.id AND pp.generic_epa_registration = NEW.generic_epa_registration

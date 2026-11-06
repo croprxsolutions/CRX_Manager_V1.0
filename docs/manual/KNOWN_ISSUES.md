@@ -522,7 +522,8 @@ Most lists now page through every row (PRs #959, #1017, #1048). The order, job a
 the database, and cycle-count locations read every row (PR #1048). The Customers and Jobs lists now read every row,
 the Jobs Applicators/Customers filters match their job-id lists on the rows read (no URL-size risk), and the order and job
 pickers match a customer name in the database instead of only the first 50 matching names (2026-11-05). Crop
-Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Dispatch
+Programs was not capped: its programs are one settings record and its product picker searches (PR #944).
+The Orders list pages in the database with the true count and total of every match (`get_orders_page`, PR #1550). Dispatch
 Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1538; rest waits on KI-28, issue
 #1497); Call Lists say how many customers match beyond their 200 (same PRs). Still capped: the blend-ticket scanner
 Edge Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
@@ -927,7 +928,8 @@ per order, and a payload change is refused with a conflict dialog that reloads t
 **MED/LOW · OPEN · UI/database**
 Still row-capped: the Invoice Detail customer selector, Bulk PO Import products, bulk-import name matching,
 Label Data Quality choices, Product Detail choice lists (MED). Paging caveats: two identical reads can still miss
-concurrent changes, load/count cost grows on large tables, more than 20 identical-name search results are hard to
+concurrent changes, load/count cost grows on large tables (the Orders list now reads one page at a time, but each page
+still recomputes the season's line, invoice and delivery totals), more than 20 identical-name search results are hard to
 reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer
 one fails (LOW). `SelectLocationsModal` map/list split stays 50/50 on tablets (LOW). CRM gaps: applicator-license
 visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate-customer detection, bulk

@@ -46,7 +46,7 @@
 --   AH An inactive customer can't become a payer, on the card or on a line
 --   AI A line with its own shares can't move to another sale (ORDER_ITEM_SHARES_LINE_MOVE)
 --   AJ A payer's share under 0.01 of quantity worth cents refuses the split (option B); the delivery completes,
---      the office is told, and Create Invoice refuses too
+--      the office is told, Create Invoice refuses too, and the card stays open so the office can fix it
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -585,12 +585,13 @@ BEGIN
   PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
   PERFORM pg_temp.smk_done(v_d, 't' || v_suffix);
   INSERT INTO fields (customer_id, field_name, total_acres) VALUES (v_main, '[SMOKE] Split T ' || v_suffix, 10) RETURNING id INTO v_inv2;
-  PERFORM void_invoice_group((SELECT invoice_group_id FROM invoices WHERE delivery_id = v_d LIMIT 1), 'Rolled-back smoke; bill split', 'smk-spl-tv-' || v_suffix);
   BEGIN
     INSERT INTO order_item_field_allocations (order_item_id, field_id, acres) VALUES (v_l1, v_inv2, 5);
     v_fails := v_fails || ' (T) a field split took over a frozen bill split;';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT LIKE 'BILL_SPLIT_FROZEN:%' THEN v_fails := v_fails || ' (T) wrong refusal: ' || SQLERRM || ';'; END IF;
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_FROZEN:%' AND SQLERRM NOT LIKE 'ORDER_ALLOCATION_INVOICE_CONFLICT:%' THEN
+      v_fails := v_fails || ' (T) wrong refusal: ' || SQLERRM || ';';
+    END IF;
   END;
   v_l2 := v_l1;
   PERFORM pg_temp.smk_new_sale('t2' || v_suffix);
@@ -600,7 +601,16 @@ BEGIN
     UPDATE order_item_field_allocations SET order_item_id = v_l2 WHERE order_item_id = v_l1;
     v_fails := v_fails || ' (T) moving an allocation took over a frozen bill split;';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT LIKE 'BILL_SPLIT_FROZEN:%' THEN v_fails := v_fails || ' (T) wrong refusal on a move: ' || SQLERRM || ';'; END IF;
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_FROZEN:%' AND SQLERRM NOT LIKE 'ORDER_ALLOCATION_INVOICE_CONFLICT:%' THEN
+      v_fails := v_fails || ' (T) wrong refusal on a move: ' || SQLERRM || ';';
+    END IF;
+  END;
+  -- Nor can a line with a field allocation move onto the frozen sale (Sol, 6 Nov).
+  BEGIN
+    UPDATE order_items SET order_id = (SELECT order_id FROM order_items WHERE id = v_l2) WHERE id = v_l1;
+    v_fails := v_fails || ' (T) a field-allocated line moved onto a frozen bill split;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_FROZEN:%' THEN v_fails := v_fails || ' (T) wrong refusal on a line move: ' || SQLERRM || ';'; END IF;
   END;
 
   -- U: a completion with no quantity drafts nothing, and Create Invoice says so.
@@ -838,6 +848,16 @@ BEGIN
     v_fails := v_fails || ' (AJ) Create Invoice billed a share under 0.01 of a unit;';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'BILL_SPLIT_QUANTITY_TOO_SMALL:%' THEN v_fails := v_fails || ' (AJ) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+  -- Nothing was billed, so the card stays open: the office takes the payer off and Create Invoice bills.
+  BEGIN
+    DELETE FROM order_shares WHERE order_id = v_o AND customer_id = v_payer2;
+    PERFORM create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-aj-fixed-' || v_suffix);
+    IF (SELECT count(*) FROM invoices WHERE delivery_id = v_d AND customer_id = v_main AND deleted_at IS NULL) <> 1 THEN
+      v_fails := v_fails || ' (AJ) after the payer was removed, Create Invoice did not bill the main customer;';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (AJ) the refused sale had no way to fix the shares: ' || SQLERRM || ';';
   END;
 
   -- AE: a payer draft's unit and tote follow the split too, and re-saving a tote line as read still works.

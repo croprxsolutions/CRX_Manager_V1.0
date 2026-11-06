@@ -187,7 +187,7 @@ CREATE POLICY order_shares_select ON public.order_shares FOR SELECT TO authentic
                   WHERE o.id = order_shares.order_id AND o.deleted_at IS NULL
                     AND (public.is_admin() OR public.is_sales_rep())));
 
--- Refuses a split change once an invoice is posted or a delivery is complete, or while a one-customer
+-- Refuses a split change once an invoice is posted or a completed delivery is billed, or while a one-customer
 -- draft is on the sale (it would post without the new payer). Locks the order, so a change and a delivery
 -- completing can't pass each other.
 CREATE FUNCTION public._refuse_bill_split_change(p_order_id uuid)
@@ -215,16 +215,21 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
 
+  -- A completed delivery freezes the split once it is billed. One the split refused (a share too small to
+  -- return, Mason 2026-11-06 option B, or a price-later sale) stays open, so the office can fix the shares.
   SELECT d.delivery_number INTO v_blocking
     FROM deliveries d
    WHERE d.order_id = p_order_id
      AND d.status = 'completed'
      AND d.deleted_at IS NULL
+     AND EXISTS (SELECT 1 FROM invoices i
+                  WHERE i.delivery_id = d.id AND i.deleted_at IS NULL
+                    AND i.status NOT IN ('voided', 'cancelled') AND i.invoice_type <> 'credit_memo')
    ORDER BY d.completed_at
    LIMIT 1;
   IF v_blocking IS NOT NULL THEN
     RAISE EXCEPTION
-      'BILL_SPLIT_FROZEN: delivery % is complete, so this sale''s bill split can''t change. Void the delivery to change it.',
+      'BILL_SPLIT_FROZEN: delivery % is complete and billed, so this sale''s bill split can''t change. Void its invoices or the delivery to change it.',
       v_blocking
       USING ERRCODE = 'check_violation';
   END IF;
@@ -363,6 +368,12 @@ BEGIN
      AND EXISTS (SELECT 1 FROM order_item_shares WHERE order_item_id = OLD.id) THEN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split; remove its shares before moving it to another order'
       USING ERRCODE = 'check_violation';
+  END IF;
+  -- A line with a field allocation would switch the sale it joins to the field split, as adding one does.
+  IF NEW.order_id IS DISTINCT FROM OLD.order_id
+     AND EXISTS (SELECT 1 FROM order_item_field_allocations WHERE order_item_id = OLD.id)
+     AND public._order_has_bill_split(NEW.order_id) THEN
+    PERFORM public._refuse_bill_split_change(NEW.order_id);
   END IF;
   RETURN NEW;
 END;

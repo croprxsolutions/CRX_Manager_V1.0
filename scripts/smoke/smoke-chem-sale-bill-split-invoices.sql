@@ -551,6 +551,9 @@ BEGIN
     PERFORM complete_delivery(v_d, 'No proof — recorded by office', v_admin,
       (SELECT jsonb_object_agg(di.id::text, 0) FROM delivery_items di WHERE di.delivery_id = v_d),
       NULL, NULL, 'smk-spl-u-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
+    IF EXISTS (SELECT 1 FROM activity_feed WHERE event_type = 'split_invoices_auto_created' AND related_entity_id = v_o) THEN
+      v_fails := v_fails || ' (U) a record says invoices were drafted when none were;';
+    END IF;
     IF (SELECT status FROM deliveries WHERE id = v_d) = 'completed' THEN
       BEGIN
         v_r := create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-u2-' || v_suffix);

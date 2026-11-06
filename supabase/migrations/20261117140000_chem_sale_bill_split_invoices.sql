@@ -477,6 +477,10 @@ BEGIN
     RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: delivery % delivered too little to bill', v_delivery.delivery_number
       USING ERRCODE = 'check_violation';
   END IF;
+  IF cardinality(v_ids) = 0 THEN
+    DELETE FROM split_invoice_creation_claims WHERE transaction_id = pg_current_xact_id();
+    RETURN v_ids;
+  END IF;
 
   -- Cost is the sum of each payer's own lines, as on every invoice and in the month-end report (Mason,
   -- 2026-11-05: Option 1). See the header for how far it can top the line's cost across payers.

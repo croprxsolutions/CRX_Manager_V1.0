@@ -21,5 +21,6 @@ describe('paymentTermsDays mirrors parse_payment_terms_days', () => {
   it('gives no date (never throws) while the invoice date is half-typed', () => {
     expect(dueDateFromTerms('20261-11-06', 'Net 30')).toBe('');
     expect(dueDateFromTerms('', 'Net 30')).toBe('');
+    expect(dueDateFromTerms('2026-02-30', 'Net 15')).toBe('');
   });
 });

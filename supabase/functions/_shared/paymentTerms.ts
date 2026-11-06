@@ -17,7 +17,9 @@ export function paymentTermsDays(terms: string | null | undefined): number {
 /** invoiceDate (YYYY-MM-DD) plus the terms' days, as YYYY-MM-DD; '' while the date is not a valid one. */
 export function dueDateFromTerms(invoiceDate: string, terms: string | null | undefined): string {
   const d = new Date(`${invoiceDate}T00:00:00Z`);
+  // A half-typed date (year 20261) is Invalid Date, and toISOString() would throw mid-render;
+  // an impossible one (Feb 30) rolls over, so it must read back unchanged.
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== invoiceDate) return '';
   d.setUTCDate(d.getUTCDate() + paymentTermsDays(terms));
-  // A half-typed date (e.g. year 20261) is Invalid Date; toISOString() would throw mid-render.
-  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+  return d.toISOString().slice(0, 10);
 }

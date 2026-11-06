@@ -2598,6 +2598,12 @@ export default function FieldApplicationInvoice() {
       return;
     }
     if (discountInputRefused()) return;
+    // KI-14: a custom due date with no date would otherwise print the terms' date.
+    const printTerms = termsFor(customerForThisInvoice ?? pdfSnapshot.customer_id);
+    if (printTerms.choice === CUSTOM_DUE && !printTerms.dueDate) {
+      toast('error', 'Choose a custom due date before printing.');
+      return;
+    }
     setPrinting(true);
     try {
       const pdfData = await buildEditorPdfData(format);

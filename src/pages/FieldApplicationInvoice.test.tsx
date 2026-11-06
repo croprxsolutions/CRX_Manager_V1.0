@@ -580,6 +580,32 @@ describe('FieldApplicationInvoice — #33 discount on a NEW invoice reaches the 
     expect(screen.getByRole('button', { name: new RegExp(`^${button}$`) })).not.toBeDisabled();
   });
 
+  it('KI-14: Print refuses a Custom due date left blank instead of printing the terms date', async () => {
+    mockUseParams.mockReturnValue({ id: 'inv-saved' });
+    mockFrom.mockImplementation(
+      makeFromMock({
+        invoices: {
+          data: [{
+            id: 'inv-saved', invoice_number: 'INV-2001', invoice_type: 'field_application', invoice_date: '2026-09-15',
+            season: 2026, header_notes: '', status: 'draft', application_service_id: null, invoice_group_id: null,
+            customer_id: 'cust-A', total_amount_cents: 100000, discount_earned_cents: null,
+          }],
+        },
+        field_app_locations: { data: [] },
+        invoice_items: { data: [] },
+        invoice_shares: { data: [] },
+      }),
+    );
+    await renderPage();
+    await screen.findByText(/Field Application INV-2001/);
+    fireEvent.change(await screen.findByLabelText('Payment Terms'), { target: { value: 'Custom date…' } });
+    const fromCallsBefore = mockFrom.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: /^Print$/ }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Choose a custom due date before printing.');
+    await act(async () => { await Promise.resolve(); });
+    expect(mockFrom.mock.calls.length).toBe(fromCallsBefore);
+  });
+
   // The transaction date decides the SEASON, and the season selects the
   // customer_application_rates row — so it changes the PRICE exactly as much as locations,
   // chemicals and the service selector do, all of which already invalidate the preview.

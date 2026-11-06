@@ -49,6 +49,8 @@ const SEASON_START = `make_date(extract(year from (now() AT TIME ZONE 'America/C
 const G4O_IN_SEASON = 5147;
 
 let matching = 0;
+// Only the run that loaded the rows deletes them, so two runs never delete each other's.
+let seeded = false;
 
 test.beforeAll(() => {
   if (localSql(`SELECT count(*) FROM pg_proc WHERE proname = 'get_orders_page'`) === '0') {
@@ -58,14 +60,20 @@ test.beforeAll(() => {
   const admin = localSql(`SELECT id FROM auth.users WHERE email = '${email}'`);
   const from = localSql(`SELECT ${SEASON_START}`);
   const seed = execFileSync(process.execPath, ['scripts/smoke/prove-orders-list-page-real-schema.mjs', '--print-seed', from, admin, admin], { cwd: root, encoding: 'utf8' });
-  localSql(`${CLEAN}\nBEGIN;\n${seed}\nCOMMIT;`);
+  if (localSql(`SELECT count(*) FROM public.orders WHERE id = md5('g4o-order-1')::uuid`) !== '0') {
+    throw new Error('Invented G4O orders are already in the local copy: another run is using them, or one stopped early. '
+      + 'If no run is going, delete them by running the CLEAN statement in this file against the local copy.');
+  }
+  // The seed's fixed ids make a second run started at the same moment fail here instead of sharing rows.
+  localSql(`BEGIN;\n${seed}\nCOMMIT;`);
+  seeded = true;
   const others = Number(localSql(`SELECT count(*) FROM public.orders WHERE deleted_at IS NULL AND order_number NOT LIKE 'G4O-%'
     AND order_date >= ${SEASON_START} AND order_date < ${SEASON_START} + interval '1 year'`));
   matching = G4O_IN_SEASON + others;
 });
 
 test.afterAll(() => {
-  localSql(CLEAN);
+  if (seeded) localSql(CLEAN);
 });
 
 test('Orders list: true totals, selection cleared on every read, Select All greyed out while loading', async ({ page }) => {

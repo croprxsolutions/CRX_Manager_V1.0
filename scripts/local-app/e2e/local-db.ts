@@ -5,14 +5,13 @@ import { PROJECT, Refused, assertLocalDockerEndpoint } from '../target.mjs';
 
 const here = fileURLToPath(new URL('..', import.meta.url));
 
-let targetChecked = false;
-
-// The same checks app.mjs runs before it touches the database: Docker on this computer, and the
-// crx-local-app stack started from a local-app compose file, not some other stack of that name.
-function assertLocalTarget() {
-  if (targetChecked) return;
-  const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8' }).trim();
-  assertLocalDockerEndpoint(docker(['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']));
+// The same checks app.mjs runs before it touches the database, on every call: Docker on this computer,
+// and the crx-local-app stack started from a local-app compose file. Returns that Docker address, which the
+// SQL call then uses, so a context switch in between cannot send it elsewhere.
+function localDockerHost(): string {
+  const host = execFileSync('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'], { encoding: 'utf8' }).trim();
+  assertLocalDockerEndpoint(host);
+  const docker = (args: string[]) => execFileSync('docker', ['-H', host, ...args], { encoding: 'utf8' }).trim();
   const ids = docker(['ps', '-aq', '--filter', `label=com.docker.compose.project=${PROJECT}`]);
   if (!ids) throw new Refused('The local test copy is not running.');
   for (const container of JSON.parse(docker(['inspect', ...ids.split(/\s+/)]))) {
@@ -20,14 +19,13 @@ function assertLocalTarget() {
       throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
     }
   }
-  targetChecked = true;
+  return host;
 }
 
 /** Runs SQL in the local test database as its owner, after the target checks, and returns the output. */
 export function localSql(input: string): string {
-  assertLocalTarget();
   return execFileSync('docker', [
-    'compose', '-p', PROJECT, '-f', resolve(here, 'compose.yaml'), '--env-file', resolve(here, '.state/local.env'),
+    '-H', localDockerHost(), 'compose', '-p', PROJECT, '-f', resolve(here, 'compose.yaml'), '--env-file', resolve(here, '.state/local.env'),
     'exec', '-T', 'db', 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1',
   ], { input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
 }

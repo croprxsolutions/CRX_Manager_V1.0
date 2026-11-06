@@ -731,7 +731,7 @@ export default function Orders() {
             }
           />
           {totals && !loadFailed && (
-            <OrdersPager totals={totals} page={page} rowsShown={orders.length} busy={pageLoading} goToPage={goToPage} />
+            <OrdersPager totals={totals} page={page} rowsShown={orders.length} busy={listBusy} goToPage={goToPage} />
           )}
         </div>
       </Card>

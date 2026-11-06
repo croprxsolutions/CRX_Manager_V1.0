@@ -240,6 +240,7 @@ describe('Orders list pages through the database', () => {
     expect(screen.getByText('rows loading')).toBeInTheDocument();
     expect(screen.queryByText('ORD-0')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select All 120' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
   it('a refresh that fails drops "Select All": no bulk action is offered over rows nobody can see', async () => {

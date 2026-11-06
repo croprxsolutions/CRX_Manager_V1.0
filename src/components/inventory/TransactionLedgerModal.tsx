@@ -57,6 +57,8 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.El
   void_delivery_reversal:      { label: 'Void Delivery', color: 'text-red-500', icon: Undo2 },
   job_applied:                 { label: 'Job Applied', color: 'text-orange-600', icon: FlaskConical },
   prebook_reconciliation:      { label: 'Prebook Reconciliation', color: 'text-indigo-600', icon: Lock },
+  tote_fill_out:               { label: 'Tote Fill (from Bulk)', color: 'text-teal-600', icon: ArrowRightLeft },
+  tote_fill_in:                { label: 'Tote Fill (into Tote)', color: 'text-teal-600', icon: ArrowRightLeft },
 };
 
 /**
@@ -64,7 +66,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.El
  * Convention matches reconciliation.ts:
  *   positive → adds to inventory (received, returned, released, reversals)
  *   negative → subtracts from inventory (delivered, booked, prebooked, job_applied)
- *   signed   → already has correct sign (adjusted, transferred)
+ *   signed   → already has correct sign (adjusted, transferred, tote_fill_out, tote_fill_in)
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function signedQuantity(qty: number, type: string): number {

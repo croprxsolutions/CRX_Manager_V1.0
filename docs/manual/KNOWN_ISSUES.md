@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-06 for the live ledger only (KI-06 snapshots applied, ledger `20261106060243`); other evidence retains its stated dates.
+**Last verified:** 2026-11-06 for the live ledger only (permission tightening applied, ledger `20261106062807`); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -36,8 +36,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
-| Accepted by Mason (KI-60 to KI-71, KI-79, KI-80, KI-104) | 15 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
+| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104) | 16 |
 | Closed as FIXED, with proof (bottom of file and archive) | 14 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
@@ -144,8 +144,8 @@ nothing is back-filled or deleted without his approval. A database owner who dis
 
 ### KI-07 — Other small security gaps
 **MED/LOW · mixed · unassigned**
-- `profiles` still grants `TRUNCATE`/`TRIGGER` to signed-in users (no revoking migration found; confirmed live
-  read-only 2026-10-25 with `has_table_privilege('authenticated', ...)`) — OPEN, LOW-MED.
+- `profiles` grants `TRUNCATE`/`TRIGGER` to signed-in users (confirmed live read-only 2026-10-25 and
+  2026-11-05) — revoked by `20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`), LOW-MED.
 - Customer-document post-apply check (browser storage policies removed, Documents tab still works) was never
   recorded; and a removed document cannot be reopened even by an admin — UNVERIFIED, LOW.
 - Three older "reps work any customer" leftovers: signed-in rep click-through of `customer-document-files`
@@ -157,8 +157,8 @@ nothing is back-filled or deleted without his approval. A database owner who dis
   `get_fields_with_geojson`, `get_job_fields_with_geojson`, `get_job_proof_data`, `save_field_geometry`,
   `save_field_polygons`, `set_field_boundary`, `set_field_override_acres` (read-only `execute_sql`, 2026-10-26 UTC; same 12 re-read
   2026-10-25 10:52 PM Central).
-  They need `extensions` for PostGIS. Either document a PostGIS exception to the rule or schema-qualify the
-  PostGIS calls and drop `extensions` from the path. Promised to CodeRabbit on PR #1065 (thread 4373018174) — LOW.
+  They need `extensions` for PostGIS. DOCUMENTED 2026-11-05 (Mason): `docs/workflows/RLS_SECURITY_GUIDE.md`
+  records the PostGIS exception; live has sixteen (these twelve plus four internal helpers). No function changed — CLOSED.
 
 ---
 
@@ -367,12 +367,6 @@ can make old splits refuse to save (LOW-MED).
   in dollars, not integer cents. Found by CodeRabbit on PR #1078 (2026-10-23) and deferred: moving it to cents
   changes rounding on every quote line, so it needs its own money PR. LOW.
 
-### KI-17 — Blend-ticket linkage picks one order line per product
-**MED · PARTIAL · money · automatic matching unassigned**
-`link_blend_ticket_to_order` still takes `ORDER BY sort_order, id LIMIT 1`. The invoice side now refuses to guess
-when tier prices differ and asks staff to pick (PRs #982, #995, #1020). Automatic matching or splitting across
-tiers is not built; the linkage field is not used for money today.
-
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock
 **MED / LOW · OPEN · money/UI · unassigned (the pre-harvest warning part is fixed, see the archive)**
 - Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
@@ -479,11 +473,13 @@ receipt; the driver is warned and the office can resend by hand. A queue table p
 and not built (needs a new Edge Function deploy). No `delivery_receipt_queue` exists in `supabase/`.
 
 ### KI-26 — Delivery completion-evidence leftovers
-**LOW · OPEN · UI/database/process · Mason for the access-policy item**
+**LOW · OPEN · UI/database/process · airplane-mode test owed (Mason)**
 Following `20261022075000` (PR #1024): old app versions are refused until reloaded; offline completions queued
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
-abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test, and
-Mason's approval to narrow four older signature policies.
+abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test.
+The four older signature policies (fixed path `signatures/<id>.png`) are narrowed by
+`20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`): insert, update and delete dropped,
+and reading needs the file to be the delivery's recorded signature.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
 **MED · OPEN · database · unassigned**
@@ -581,7 +577,7 @@ together match the real total applied, rounded once, and holds at least each dra
 `scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs`.
 
 ### KI-101 — Voiding a delivery on a cancelled order reopens the order
-**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471); the grant item below is still open · database/lifecycle · found 2026-11-04 (KI-93 design review)**
+**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471); the grant item below is in `20261116100000` · database/lifecycle · found 2026-11-04 (KI-93 design review)**
 `_void_delivery_replay_impl_20261015` recomputed the order's status and wrote it under the admin override without
 checking for `cancelled`, so voiding a delivery of a cancelled, part-delivered order reopened it and put back the
 reservation the cancel had released. Reproduced 2026-11-04 on the throwaway copy. Such orders come from cancels before
@@ -591,9 +587,11 @@ not put back (a full cancel released it and nobody will deliver a cancelled orde
 deliver, and the stock-ledger note says so. An order cancelled through the direct status change released nothing;
 its reservation is left as it was. Live 2026-11-04: 4 cancelled orders, none with a completed delivery or
 delivered quantity. Proof: `scripts/smoke/prove-void-delivery-order-status-guards-real-schema.mjs`.
-- **Still open (needs Mason's yes: a permissions change).** Signed-in admins hold a direct UPDATE grant on
-  `orders.status`, so they can move an order between allowed statuses (for example confirmed to fulfilled, or
-  partially fulfilled to cancelled) with no delivery and no stock movement. Revoking it is its own PR.
+- **Grant item (Mason 2026-11-05).** Signed-in admins held a direct UPDATE grant on `orders.status`, so they
+  could move an order between allowed statuses with no delivery and no stock movement.
+  `20261116100000_permission_tightening.sql` revokes it, and the matching INSERT grant so an order cannot be created
+  already fulfilled (APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`); the order screen's unreachable direct
+  status write is removed.
 
 ### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice
 **MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471) · database/inventory · found 2026-11-04 (KI-93 design review, Sol r2 #8)**
@@ -793,6 +791,7 @@ Delete with a grep of every reference first; keep one copy of each helper.
 
 | ID | What | Why accepted |
 |---|---|---|
+| KI-17 | Blend-ticket linkage picks one order line per product: `link_blend_ticket_to_order` still takes `ORDER BY sort_order, id LIMIT 1`; automatic matching or splitting across tiers is not built | ACCEPTED limit (Mason 2026-11-05): the linkage is not used for money; the invoice side asks staff to pick (PRs #982, #995, #1020) |
 | KI-60 | A permitted staff member can mint a temporary link to a private photo | Mason, option A, 2026-10-14 |
 | KI-61 | A `LOCK TABLE` in a migration does not stop an already-running call of the OLD function body | Mason 2026-09-03; both instances applied with zero activity; future migrations of that shape need a quiet rollout and a concurrency proof |
 | KI-62 | Live migration ledger has older entries with no file on `main` | Pre-existing drift, not new |

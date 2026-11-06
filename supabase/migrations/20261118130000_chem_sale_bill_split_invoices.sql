@@ -36,6 +36,7 @@
 --     them to unpost_invoice_group, which calls the inner function and isn't changed.
 --   - A line bills in the order line's unit, as the return checks compare it, so every payer can return it.
 --   - A line too small to show (under 0.00005) and worth no cents is left off; the rest of the delivery bills.
+--     A restricted-use line that small refuses instead, since the register reads invoice lines (Mason, 2026-11-06).
 --     If it is worth cents, or nothing else bills, the split refuses, so no billed money is dropped.
 --   - A price-later (rush) sale drafts nothing until it is priced (PRICING_INCOMPLETE, as for field
 --     splits): the delivery completes, the office is told, and Create Invoice drafts per payer after.
@@ -470,7 +471,7 @@ BEGIN
   FOR v_item IN
     SELECT di.product_id, di.quantity_delivered, di.unit_size, di.order_item_id, di.tote_number,
            oi.price_per_unit, oi.cost_per_unit, oi.product_name AS oi_product_name, oi.unit_size AS oi_unit_size,
-           p.product_name AS p_name
+           p.product_name AS p_name, p.is_rup
       FROM delivery_items di
       JOIN order_items oi ON oi.id = di.order_item_id
       JOIN products p ON p.id = di.product_id
@@ -481,8 +482,9 @@ BEGIN
     v_line_cents := _allocated_delivery_cents(v_item.order_item_id, v_item.quantity_delivered, NULL);
     v_line_units := round(v_item.quantity_delivered * 10000)::bigint;
     -- An invoice line holds four decimals of quantity, so this line can't be shown or shared. Worth no
-    -- cents, it stays off the invoices; worth cents, it refuses, so no billed money is dropped.
-    IF v_line_units = 0 AND v_line_cents = 0 THEN
+    -- cents, it stays off the invoices; worth cents, it refuses, so no billed money is dropped. A
+    -- restricted-use line always refuses: the register reads invoice lines (Mason, 2026-11-06).
+    IF v_line_units = 0 AND v_line_cents = 0 AND NOT v_item.is_rup THEN
       v_too_small := true;
       CONTINUE;
     END IF;

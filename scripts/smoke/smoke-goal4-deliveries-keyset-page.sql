@@ -84,16 +84,15 @@ BEGIN
       COALESCE(v_sort, 'default'), v_desc, v_total, v_pages;
   END LOOP;
 
-  v_first := public.get_deliveries_keyset_page(v_today, v_today - 6, p_limit => 1);
-  IF jsonb_typeof(v_first->'next_cursor') = 'object' THEN
-    BEGIN
-      PERFORM public.get_deliveries_keyset_page(v_today, v_today - 6, p_sort_key => 'status', p_limit => 1, p_after => v_first->'next_cursor');
-    EXCEPTION WHEN OTHERS THEN
-      v_refused := SQLERRM LIKE 'DELIVERIES_PAGE_STALE_CURSOR%';
-    END;
-    IF NOT v_refused THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: a bookmark from another sort was not refused';
-    END IF;
+  -- A bookmark made for the default order, read with the status sort (built here, so it runs on any data).
+  BEGIN
+    PERFORM public.get_deliveries_keyset_page(v_today, v_today - 6, p_sort_key => 'status', p_limit => 1,
+      p_after => jsonb_build_object('k', NULL, 'dir', 'asc', 'today', to_char(v_today, 'YYYY-MM-DD'), 'v', NULL, 's', to_char(v_today, 'YYYY-MM-DD'), 'n', 'SMOKE', 'id', gen_random_uuid()));
+  EXCEPTION WHEN OTHERS THEN
+    v_refused := SQLERRM LIKE 'DELIVERIES_PAGE_STALE_CURSOR%';
+  END;
+  IF NOT v_refused THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a bookmark from another sort was not refused';
   END IF;
   EXECUTE 'RESET ROLE';
 
@@ -109,8 +108,12 @@ BEGIN
         EXECUTE 'RESET ROLE';
         RAISE EXCEPTION 'SMOKE_FAIL: a driver''s bookmark page holds a delivery assigned to someone else';
       END IF;
-      EXIT WHEN jsonb_typeof(v_r->'next_cursor') IS DISTINCT FROM 'object' OR v_pages > 100000;
+      EXIT WHEN jsonb_typeof(v_r->'next_cursor') IS DISTINCT FROM 'object';
       v_after := v_r->'next_cursor';
+      IF v_pages > 100000 THEN
+        EXECUTE 'RESET ROLE';
+        RAISE EXCEPTION 'SMOKE_FAIL: the driver''s next_cursor never ended';
+      END IF;
     END LOOP;
     EXECUTE 'RESET ROLE';
     RAISE NOTICE 'get_deliveries_keyset_page: the busiest active driver''s % bookmark pages hold only their own deliveries', v_pages;

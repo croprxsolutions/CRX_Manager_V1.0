@@ -137,7 +137,10 @@
 --                    AND NOT EXISTS (SELECT 1 FROM rollback_claimed c WHERE c.id = b.id)
 --                  ORDER BY b.id LOOP
 --     INSERT INTO public.product_brand_rollback_archive (legacy_brand_id, legacy_row, parent_brand_id, replaced_by_parent_brand_id, reason)
---     VALUES (v_block.id, to_jsonb(v_block), (SELECT s.parent_brand_id FROM public.product_parent_brand_sources s WHERE s.legacy_brand_id = v_block.id),
+--     -- A stepped-aside row is archived under its original name, not the temporary one.
+--     VALUES (v_block.id, to_jsonb(v_block) || COALESCE((SELECT jsonb_build_object('brand_name', n.brand_name)
+--                                                           FROM rollback_brand_names n WHERE n.id = v_block.id), '{}'::jsonb),
+--             (SELECT s.parent_brand_id FROM public.product_parent_brand_sources s WHERE s.legacy_brand_id = v_block.id),
 --             NULL, 'not a current brand of this size''s parent (retired, or the size moved); marked not sourced at rollback');
 --     UPDATE public.product_brands SET is_currently_sourced = false, row_version = row_version + 1 WHERE id = v_block.id;
 --   END LOOP;

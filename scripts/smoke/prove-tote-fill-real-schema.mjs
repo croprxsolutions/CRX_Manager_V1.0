@@ -41,7 +41,7 @@ const LEDGER_ONLY = new Set([
   '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(tote_fill|inventory_transactions_transaction_type_check|product_parent_members|_product_parent_replay|_product_parent_require_admin|_product_parent_reason|FUNCTION\s+(public\.)?"?(is_admin|is_active_profile|check_idempotency|save_idempotency))/i;
+const TOUCHED = /(tote_fill|inventory_transactions_transaction_type_check|product_parent_members|_product_parent_replay|_product_parent_require_admin|_product_parent_reason|FUNCTION\s+(public\.)?"?(is_admin|is_active_profile|check_idempotency|save_idempotency)\b)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -489,6 +489,15 @@ async function main() {
   const raceFill = await Promise.all([bg(ADMIN, `${fillSql(TOTE, 1, p, 'k-h7')} SELECT pg_sleep(1.5);`), pause(500).then(() => bg(ADMIN, undoSql(h6.fill_id, 'k-h8')))]);
   assert.equal(raceFill[0].status, 0, raceFill[0].output);
   assert.match(raceFill[1].output, /TOTE_FILL_STOCK_MOVED/);
+  // Two writers that began before a fill and cancel out (+1, -1) leave stock as the fill left it.
+  const early2 = bg(ADMIN, `SELECT pg_sleep(2); ${adjustSql(TOTE, 1, 'k-adj7')} ${adjustSql(TOTE, -1, 'k-adj8')}`);
+  await pause(500);
+  p = preview(TOTE);
+  const h9 = fill(TOTE, 1, p, 'k-h9');
+  const early2Done = await early2;
+  assert.equal(early2Done.status, 0, early2Done.output);
+  assert.equal(stock(TOTE), p.tote_after, 'the offsetting writers did not cancel out');
+  refused(ADMIN, undoSql(h9.fill_id, 'k-h10'), /TOTE_FILL_STOCK_MOVED/);
   ledgerMatchesStock();
   console.log('[prover] undo racing a stock writer or a new fill reverses before it or is refused after it, never across it (including a writer that began before the fill)');
 

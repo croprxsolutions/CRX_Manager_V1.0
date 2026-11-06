@@ -120,6 +120,10 @@ CREATE TABLE public.tote_fills (
   tote_before numeric NOT NULL,
   tote_after numeric NOT NULL,
   shortfall_quantity numeric NOT NULL DEFAULT 0 CHECK (shortfall_quantity >= 0),
+  -- Ledger rows on each product once this row's own pair was written (under the stock locks). The
+  -- ledger is append-only, so a higher count later means stock moved, whatever its timestamps.
+  bulk_ledger_rows bigint NOT NULL,
+  tote_ledger_rows bigint NOT NULL,
   out_transaction_id uuid NOT NULL UNIQUE REFERENCES public.inventory_transactions(id) ON DELETE RESTRICT,
   in_transaction_id uuid NOT NULL UNIQUE REFERENCES public.inventory_transactions(id) ON DELETE RESTRICT,
   reverses_fill_id uuid UNIQUE REFERENCES public.tote_fills(id) ON DELETE RESTRICT,
@@ -251,7 +255,7 @@ BEGIN
   IF v_bulk.current_cost IS NULL OR v_tote.current_cost IS NULL THEN
     v_cost_check := 'missing';
   ELSE
-    v_cost_check := CASE WHEN v_bulk.current_cost * 128 * v_each_gal = v_tote.current_cost * v_bulk_oz
+    v_cost_check := CASE WHEN v_bulk.current_cost * v_tote.container_size * v_size_oz = v_tote.current_cost * v_bulk_oz
                          THEN 'equal' ELSE 'differ' END;
     v_before_cents := round((v_bulk_before * v_bulk.current_cost + v_tote_before * v_tote.current_cost) * 100);
     v_after_cents := round(((v_bulk_before - v_bulk_qty) * v_bulk.current_cost
@@ -364,10 +368,14 @@ BEGIN
           format('Tote fill: %s tote(s) from %s %s of bulk', p_totes, v_qty, v_now->>'bulk_unit'))
   RETURNING id INTO v_in;
   INSERT INTO public.tote_fills (tote_product_id, bulk_product_id, totes, gallons, bulk_unit, bulk_quantity,
-    bulk_before, bulk_after, tote_before, tote_after, shortfall_quantity, out_transaction_id, in_transaction_id, performed_by)
+    bulk_before, bulk_after, tote_before, tote_after, shortfall_quantity, bulk_ledger_rows, tote_ledger_rows,
+    out_transaction_id, in_transaction_id, performed_by)
   VALUES (p_tote_product_id, v_bulk, p_totes, (v_now->>'gallons')::numeric, v_now->>'bulk_unit', v_qty,
     (v_now->>'bulk_before')::numeric, (v_now->>'bulk_after')::numeric,
-    (v_now->>'tote_before')::numeric, (v_now->>'tote_after')::numeric, v_short, v_out, v_in, v_actor)
+    (v_now->>'tote_before')::numeric, (v_now->>'tote_after')::numeric, v_short,
+    (SELECT count(*) FROM public.inventory_transactions WHERE product_id = v_bulk),
+    (SELECT count(*) FROM public.inventory_transactions WHERE product_id = p_tote_product_id),
+    v_out, v_in, v_actor)
   RETURNING id INTO v_fill;
 
   v_receipt := jsonb_build_object('fill_id', v_fill, 'out_transaction_id', v_out, 'in_transaction_id', v_in,
@@ -417,13 +425,14 @@ BEGIN
    WHERE product_id = v_fill.bulk_product_id AND location = 'Main Warehouse';
   SELECT quantity_available INTO v_tote_now FROM public.inventory
    WHERE product_id = v_fill.tote_product_id AND location = 'Main Warehouse';
-  -- Conservative: nothing else may have touched either product since the fill. The stock check also
-  -- catches a writer that started before the fill (earlier created_at) but committed after it.
+  -- Conservative: nothing else may have touched either product since the fill. Ledger rows are counted,
+  -- not dated: a writer that started before the fill but committed after it has an earlier created_at,
+  -- and two such writers can cancel out in stock.
   IF v_bulk_now IS DISTINCT FROM v_fill.bulk_after OR v_tote_now IS DISTINCT FROM v_fill.tote_after
-     OR EXISTS (SELECT 1 FROM public.inventory_transactions t
-                 WHERE t.product_id IN (v_fill.tote_product_id, v_fill.bulk_product_id)
-                   AND t.id NOT IN (v_fill.out_transaction_id, v_fill.in_transaction_id)
-                   AND t.created_at >= v_fill.created_at) THEN
+     OR (SELECT count(*) FROM public.inventory_transactions WHERE product_id = v_fill.bulk_product_id)
+          <> v_fill.bulk_ledger_rows
+     OR (SELECT count(*) FROM public.inventory_transactions WHERE product_id = v_fill.tote_product_id)
+          <> v_fill.tote_ledger_rows THEN
     RAISE EXCEPTION 'TOTE_FILL_STOCK_MOVED: stock of the tote or its bulk has moved since this fill; adjust stock instead';
   END IF;
 
@@ -440,11 +449,11 @@ BEGIN
           format('Undo tote fill: %s tote(s) removed. Reason: %s', v_fill.totes, v_reason))
   RETURNING id INTO v_in;
   INSERT INTO public.tote_fills (tote_product_id, bulk_product_id, totes, gallons, bulk_unit, bulk_quantity,
-    bulk_before, bulk_after, tote_before, tote_after, shortfall_quantity, out_transaction_id, in_transaction_id,
-    reverses_fill_id, reason, performed_by)
+    bulk_before, bulk_after, tote_before, tote_after, shortfall_quantity, bulk_ledger_rows, tote_ledger_rows,
+    out_transaction_id, in_transaction_id, reverses_fill_id, reason, performed_by)
   VALUES (v_fill.tote_product_id, v_fill.bulk_product_id, v_fill.totes, v_fill.gallons, v_fill.bulk_unit,
     v_fill.bulk_quantity, v_bulk_now, v_bulk_now + v_fill.bulk_quantity, v_tote_now, v_tote_now - v_fill.totes,
-    0, v_out, v_in, p_fill_id, v_reason, v_actor)
+    0, v_fill.bulk_ledger_rows + 1, v_fill.tote_ledger_rows + 1, v_out, v_in, p_fill_id, v_reason, v_actor)
   RETURNING id INTO v_undo;
 
   v_receipt := jsonb_build_object('undo_fill_id', v_undo, 'fill_id', p_fill_id, 'out_transaction_id', v_out,

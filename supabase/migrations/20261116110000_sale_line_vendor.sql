@@ -1,5 +1,5 @@
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261112130000_sale_line_vendor.md.
+-- docs/reference/migrations.d/20261116110000_sale_line_vendor.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M3, Mason 4 Nov: vendor "auto-filled from the product's preferred vendor; Mason

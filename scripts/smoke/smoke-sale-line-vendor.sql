@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: an order line carries a vendor through to its invoice
 -- ----------------------------------------------------------------------------
--- Migration 20261112130000_sale_line_vendor (billing plan M3).
+-- Migration 20261116110000_sale_line_vendor (billing plan M3).
 --   A  A new order line is filled from the product's preferred vendor
 --   B  A line created with a vendor keeps it
 --   C  A line's vendor changed on the sale reaches its invoice, and the product isn't touched
@@ -84,6 +84,9 @@ BEGIN
   PERFORM complete_delivery(v_d, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
     'smk-vnd-done-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; sale line vendor');
   v_inv := (SELECT id FROM invoices WHERE delivery_id = v_d AND invoice_type <> 'credit_memo');
+  IF v_inv IS NULL THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: completing the delivery drafted no invoice';
+  END IF;
 
   IF (SELECT vendor FROM invoice_items WHERE invoice_id = v_inv AND order_item_id = v_l2) IS DISTINCT FROM '[SMOKE] Changed Supply' THEN
     v_fails := v_fails || ' (C) the changed vendor did not reach the invoice;';

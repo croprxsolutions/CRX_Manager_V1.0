@@ -275,6 +275,21 @@ BEGIN
   v_result := to_jsonb(public.admin_update_profile(v_admin,'invalid',NULL,NULL,NULL,NULL,v_key));
   IF v_result->>'error' IS NULL OR EXISTS(SELECT 1 FROM public.idempotency_keys WHERE idempotency_key=v_key) THEN RAISE EXCEPTION 'SMOKE_FAIL: admin_update_profile receiptless return'; END IF;
 
+  -- A p_performed_by naming someone else is refused before any receipt is read or written.
+  FOREACH v_op IN ARRAY ARRAY['link_fields_to_parent','unlink_field_from_parent','save_field_polygons'] LOOP
+    v_key := 'smk-4d-forged-'||v_op||'-'||v_suffix;
+    BEGIN
+      IF v_op='link_fields_to_parent' THEN PERFORM public.link_fields_to_parent(v_field,ARRAY[v_field_b],v_admin_b,v_key);
+      ELSIF v_op='unlink_field_from_parent' THEN PERFORM public.unlink_field_from_parent(v_field_b,v_admin_b,v_key);
+      ELSE PERFORM public.save_field_polygons(v_field,'[]'::jsonb,v_admin_b,v_key); END IF;
+      RAISE EXCEPTION 'SMOKE_FAIL: % accepted a forged p_performed_by',v_op;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+      IF SQLERRM <> 'ACTOR_MISMATCH' THEN RAISE EXCEPTION 'SMOKE_FAIL: % forged p_performed_by gave %',v_op,SQLERRM; END IF;
+    END;
+    IF EXISTS(SELECT 1 FROM public.idempotency_keys WHERE idempotency_key=v_key) THEN RAISE EXCEPTION 'SMOKE_FAIL: % forged actor left a receipt',v_op; END IF;
+  END LOOP;
+
   -- An applicator must fail the copied role checks before a bound receipt is read.
   PERFORM set_config('request.jwt.claims',json_build_object('sub',v_no_role,'role','authenticated')::text,true);
   FOREACH v_op IN ARRAY ARRAY['save_vendor','save_field','batch_approve_blend_tickets'] LOOP

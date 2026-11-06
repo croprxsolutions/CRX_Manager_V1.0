@@ -1037,6 +1037,8 @@ BEGIN
   BEGIN
   PERFORM require_admin_or_sales_rep();
   END;
+  -- Added (apply-review HIGH): the pinned body never reads p_performed_by; refuse a forged one.
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object('actor_id', v_actor, 'p_parent_id', p_parent_id, 'p_child_ids', p_child_ids, 'p_performed_by', p_performed_by));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'link_fields_to_parent', v_actor, v_fingerprint);
   PERFORM public._link_fields_to_parent_replay_impl_20261015(p_parent_id, p_child_ids, p_performed_by, p_idempotency_key);
@@ -1076,6 +1078,8 @@ BEGIN
   BEGIN
   PERFORM require_admin_or_sales_rep();
   END;
+  -- Added (apply-review HIGH): the pinned body never reads p_performed_by; refuse a forged one.
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object('actor_id', v_actor, 'p_field_id', p_field_id, 'p_performed_by', p_performed_by));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'unlink_field_from_parent', v_actor, v_fingerprint);
   PERFORM public._unlink_field_from_parent_replay_impl_20261015(p_field_id, p_performed_by, p_idempotency_key);
@@ -1435,6 +1439,8 @@ BEGIN
   BEGIN
   PERFORM require_admin_or_sales_rep();
   END;
+  -- Added (apply-review HIGH): the pinned body never reads p_performed_by; refuse a forged one.
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object('actor_id', v_actor, 'p_field_id', p_field_id, 'p_polygons', p_polygons, 'p_performed_by', p_performed_by));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'save_field_polygons', v_actor, v_fingerprint);
   PERFORM public._save_field_polygons_replay_impl_20261015(p_field_id, p_polygons, p_performed_by, p_idempotency_key);

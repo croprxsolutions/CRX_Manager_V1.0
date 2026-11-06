@@ -241,6 +241,8 @@ functions and requires a key on each: `admin_update_profile`, `batch_approve_ble
 `supersede_customer_fact`, `save_blend_recipe`, `save_field`, `save_field_crop_history`, `save_field_geometry`,
 `save_field_polygons`, `set_application_record_lots`, `set_field_boundary`, `set_field_override_acres`.
 It also limits `save_blend_recipe` to an active admin or sales rep, as both app recipe screens already were.
+`link_fields_to_parent`, `unlink_field_from_parent` and `save_field_polygons` also refuse a "performed by" naming someone
+other than the signed-in user (the app always sends the signed-in user).
 Remaining: notification RPCs and the other operations functions (batch 4e).
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)

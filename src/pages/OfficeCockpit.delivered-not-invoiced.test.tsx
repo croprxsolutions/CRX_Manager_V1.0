@@ -71,14 +71,27 @@ vi.mock('../lib/deliveryInvoiceCoverage', async () => ({
   ...(await vi.importActual<typeof import('../lib/deliveryInvoiceCoverage')>('../lib/deliveryInvoiceCoverage')),
   fetchActiveInvoiceCoveragePages: vi.fn(() => Promise.resolve({ data: [], error: null })),
 }));
+// RPC reads are paged (rpc → order → range): wrap a reply in a builder that resolves to {data, error, count}.
+const { paged } = vi.hoisted(() => ({
+  paged: (reply: unknown) => {
+    const q: Record<string, unknown> = {
+      order: () => q,
+      range: () => q,
+      then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+        Promise.resolve(reply).then((x) => resolve({ ...(x as object), count: Array.isArray((x as { data?: unknown }).data) ? (x as { data: unknown[] }).data.length : null }), reject),
+    };
+    return q;
+  },
+}));
+
 vi.mock('../lib/db', async () => ({
   supabase: {
     from: vi.fn((table: string) => query(table)),
-    rpc: vi.fn((name: string) => Promise.resolve({ data: name === 'operational_dashboard_summary' ? {} : [], error: null })),
+    rpc: vi.fn((name: string) => paged({ data: name === 'operational_dashboard_summary' ? {} : [], error: null })),
   },
   supabaseUntyped: {
     from: vi.fn((table: string) => query(table)),
-    rpc: vi.fn(() => Promise.resolve({ data: [], error: null })),
+    rpc: vi.fn(() => paged({ data: [], error: null })),
   },
   assertRpcResult: vi.fn((data: unknown) => data),
   hasRpcCode: vi.fn(() => false),

@@ -996,8 +996,14 @@ export default function FieldApplicationInvoice() {
     for (const o of [...shares, ...siblings]) {
       if (!byId.get(o.customer_id)?.customer_name) byId.set(o.customer_id, { customer_id: o.customer_id, customer_name: o.customer_name });
     }
+    // A saved un-split invoice that stays single-owner keeps its own billed customer (the save
+    // never changes it and sends that customer's terms), even when its share names another grower.
+    const billedId = pdfSnapshot?.customer_id;
+    if (id && siblings.length === 0 && byId.size <= 1 && billedId) {
+      return [{ customer_id: billedId, customer_name: byId.get(billedId)?.customer_name || pdfSnapshot?.customer_name || '' }];
+    }
     return [...byId.values()];
-  }, [shares, siblings, termsByCustomer]);
+  }, [shares, siblings, termsByCustomer, id, pdfSnapshot?.customer_id, pdfSnapshot?.customer_name]);
   const setOwnerTerms = useCallback((custId: string, patch: Partial<OwnerTerms>) => {
     setTermsByCustomer((prev) => ({ ...prev, [custId]: { ...(prev[custId] ?? OWNER_TERMS_DEFAULT), ...patch } }));
     setDirty(true);

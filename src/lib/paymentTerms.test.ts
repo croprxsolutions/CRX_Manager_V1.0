@@ -17,4 +17,9 @@ describe('paymentTermsDays mirrors parse_payment_terms_days', () => {
     expect(dueDateFromTerms('2026-11-20', '2/10 Net 30')).toBe('2026-12-20');
     expect(dueDateFromTerms('2026-11-20', 'Due on receipt')).toBe('2026-11-20');
   });
+
+  it('gives no date (never throws) while the invoice date is half-typed', () => {
+    expect(dueDateFromTerms('20261-11-06', 'Net 30')).toBe('');
+    expect(dueDateFromTerms('', 'Net 30')).toBe('');
+  });
 });

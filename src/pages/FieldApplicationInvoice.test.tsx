@@ -468,6 +468,48 @@ describe('FieldApplicationInvoice — #33 discount on a NEW invoice reaches the 
     });
   });
 
+  it('KI-14: a saved un-split invoice keys its terms picker to its own billed customer, even when its field names another grower (Taha, PR #1556)', async () => {
+    mockUseParams.mockReturnValue({ id: 'inv-saved' });
+    mockFrom.mockImplementation(
+      makeFromMock({
+        invoices: {
+          data: [{
+            id: 'inv-saved', invoice_number: 'INV-2002', invoice_type: 'field_application', invoice_date: '2026-09-15',
+            season: 2026, header_notes: '', status: 'draft', application_service_id: null, invoice_group_id: null,
+            customer_id: 'cust-B', payment_terms: 'Net 30', total_amount_cents: 100000, discount_earned_cents: null,
+          }],
+        },
+        field_app_locations: { data: [] },
+        invoice_items: { data: [] },
+        invoice_shares: { data: [] },
+      }),
+    );
+    const routed = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((name: string, args: unknown) =>
+      name === 'save_field_app_invoice'
+        ? Promise.resolve({ data: { invoice_ids: ['inv-saved'], invoice_group_id: null }, error: null })
+        : routed(name, args));
+    await renderPage();
+    await screen.findByText(/Field Application INV-2002/);
+    fireEvent.click(screen.getByRole('button', { name: /Select Locations/i }));
+    fireEvent.click(await screen.findByTestId('mock-select-one-field'));
+    await waitFor(() =>
+      expect(mockRpc.mock.calls.some((c) => c[0] === 'derive_customer_shares_from_fields')).toBe(true),
+    );
+    // One picker (the share names cust-A, the invoice stays billed to cust-B), showing cust-B's Net 30.
+    const pickers = screen.getAllByLabelText(/^Payment Terms/) as HTMLSelectElement[];
+    expect(pickers).toHaveLength(1);
+    expect(pickers[0].value).toBe('Net 30');
+    fireEvent.change(pickers[0], { target: { value: 'Net 15' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => {
+      const billingCall = mockRpc.mock.calls.find((c) => c[0] === 'update_field_app_invoice_billing');
+      expect(billingCall).toBeDefined();
+      expect((billingCall![1] as Record<string, unknown>).p_terms_by_invoice)
+        .toEqual({ 'inv-saved': { payment_terms: 'Net 15', due_date: null } });
+    });
+  });
+
   it.each([
     ['1.005', null],
     ['1e2', null],

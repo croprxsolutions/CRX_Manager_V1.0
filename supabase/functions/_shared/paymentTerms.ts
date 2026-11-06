@@ -1,4 +1,4 @@
-// Mirrors public.parse_payment_terms_days (migration 20261117100000_field_invoice_due_date_follows_owner_terms).
+// Mirrors public.parse_payment_terms_days (migration 20261118100000_field_invoice_due_date_follows_owner_terms).
 // Keep the two in step: src/lib/paymentTerms.test.ts and the real-schema proof check the same case table.
 
 export const RECEIPT_TERMS = ['due on receipt', 'due upon receipt', 'receipt', 'immediately'];
@@ -14,9 +14,10 @@ export function paymentTermsDays(terms: string | null | undefined): number {
   return n >= 1 && n <= 365 ? n : 30;
 }
 
-/** invoiceDate (YYYY-MM-DD) plus the terms' days, as YYYY-MM-DD. */
+/** invoiceDate (YYYY-MM-DD) plus the terms' days, as YYYY-MM-DD; '' while the date is not a valid one. */
 export function dueDateFromTerms(invoiceDate: string, terms: string | null | undefined): string {
   const d = new Date(`${invoiceDate}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + paymentTermsDays(terms));
-  return d.toISOString().slice(0, 10);
+  // A half-typed date (e.g. year 20261) is Invalid Date; toISOString() would throw mid-render.
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 }

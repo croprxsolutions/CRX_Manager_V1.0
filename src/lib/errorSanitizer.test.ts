@@ -212,7 +212,7 @@ describe('sanitizeError', () => {
     expect(intent).toContain('Nothing was changed');
     expect(intent).toContain('different, earlier request');
     expect(intent).toContain('Refresh');
-    const retired = sanitizeError({ message: 'IDEMPOTENCY_REQUEST_RETIRED: idempotency_key adjust_inventory_batch:u:1:2 belongs to a request an admin cleared; it cannot be saved' });
+    const retired = sanitizeError({ message: 'IDEMPOTENCY_REQUEST_RETIRED: idempotency_key adjust_inventory_batch:u:1:2 belongs to a request that was cleared after it got stuck; it cannot be saved' });
     expect(retired).toContain('Nothing was changed');
     expect(retired).toContain('This request was cleared');
     expect(retired).not.toMatch(/adjust_inventory|IDEMPOTENCY/);

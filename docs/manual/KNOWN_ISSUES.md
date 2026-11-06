@@ -472,9 +472,10 @@ Most lists now page through every row (PRs #959, #1017, #1048). The order, job a
 the database, and cycle-count locations read every row (PR #1048). The Customers and Jobs lists now read every row,
 the Jobs Applicators/Customers filters match their job-id lists on the rows read (no URL-size risk), and the order and job
 pickers match a customer name in the database instead of only the first 50 matching names (2026-11-05). Crop
-Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Still
-capped: Dispatch Board (500, waits on KI-28 work, issue #1497); the blend-ticket scanner Edge Function (needs a
-deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
+Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Dispatch
+Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1538; rest waits on KI-28, issue
+#1497); Call Lists say how many customers match beyond their 200 (same PRs). Still capped: the blend-ticket scanner
+Edge Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
 Label Data Quality, Product Detail choice lists, bulk import name matching, and the Field Customer Assignment
 dropdown. Past a cap, a record cannot be chosen.
 

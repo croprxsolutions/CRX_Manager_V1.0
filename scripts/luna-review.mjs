@@ -378,6 +378,15 @@ export function main(argv = process.argv.slice(2), codexDeps = {}) {
     if (root.status !== 0) throw new Error("Not inside a git checkout.");
     const rootDir = root.stdout.trim();
     const git = gitRunner(rootDir);
+    // A stopped merge leaves a checkout that is neither the old branch nor the merged one, so any
+    // review of it is of the wrong code (a chained `merge && luna` ran on one, 2026-11-05).
+    const unmerged = gitOutput(git, ["diff", "--name-only", "--diff-filter=U"]).split(/\r?\n/).filter(Boolean);
+    if (unmerged.length) {
+      return reportDidNotRun(
+        `Unfinished merge: ${unmerged.length} file(s) still have conflicts:\n${unmerged.map((f) => `  ${f}`).join("\n")}`,
+        "Next: resolve and commit the merge (or abort it), then run Luna again.",
+      );
+    }
     const frozen = freezeDiff(git, opts);
 
     if (!frozen.diff.trim()) return reportDidNotRun(`Empty diff for ${frozen.label}: nothing was reviewed.`);

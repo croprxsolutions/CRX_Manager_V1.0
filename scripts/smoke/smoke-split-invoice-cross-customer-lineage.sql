@@ -44,6 +44,8 @@ DECLARE
   v_split_order uuid;
   v_plain_order uuid;
   v_item uuid;
+  v_fixture_order uuid;
+  v_fixture_delivery uuid;
   v_ids uuid[];
   v_group uuid;
   v_plain_invoice uuid;
@@ -142,7 +144,8 @@ BEGIN
   INSERT INTO public.order_item_field_allocations (order_item_id, field_id, acres)
   VALUES (v_item, v_x_field, 10);
 
-  -- An unsplit order for A.
+  -- An unsplit order for A, with a zero-quantity line: create_invoice_from_order can no longer bill a
+  -- product line (it refuses any delivery, and the cap refuses none).
   INSERT INTO public.orders (order_number, customer_id, order_date, status, booking_draw, salesman_id)
   VALUES ('E2E-LINEAGE-PLAIN-' || v_suffix, v_a, v_today, 'confirmed', false, NULL)
   RETURNING id INTO v_plain_order;
@@ -151,8 +154,25 @@ BEGIN
     total_units_needed, total_price, profit, net_margin,
     quantity_delivered, quantity_remaining
   ) VALUES (
-    v_plain_order, v_product, '[E2E] lineage plain line', 10, 5, 2, 20, 10, 50, 0, 2
+    v_plain_order, v_product, '[E2E] lineage plain line', 10, 5, 0, 0, 0, 50, 0, 0
   );
+
+  -- Completed deliveries for the orders this chain bills: an invoice is capped at what was delivered
+  -- (20261029160000). Direct, under the completion marker, so no automatic invoice is drafted first.
+  FOREACH v_fixture_order IN ARRAY ARRAY[v_split_order] LOOP
+    INSERT INTO public.deliveries (delivery_number, order_id, customer_id, scheduled_date, status, created_by)
+    SELECT 'E2E-LIN-' || right(v_fixture_order::text, 8) || '-' || v_suffix, o.id, o.customer_id, CURRENT_DATE, 'scheduled', v_admin
+      FROM public.orders o WHERE o.id = v_fixture_order
+    RETURNING id INTO v_fixture_delivery;
+    INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
+    SELECT v_fixture_delivery, oi.id, oi.product_id, oi.total_units_needed, oi.total_units_needed, 'GL'
+      FROM public.order_items oi WHERE oi.order_id = v_fixture_order;
+    PERFORM set_config('crx.delivery_completion_evidence', v_fixture_delivery::text, true);
+    PERFORM set_config('app.admin_override', 'true', true);
+    UPDATE public.deliveries SET status = 'completed', signed_by = 'E2E Signer' WHERE id = v_fixture_delivery;
+    PERFORM set_config('app.admin_override', 'false', true);
+    UPDATE public.order_items SET quantity_delivered = total_units_needed, quantity_remaining = 0 WHERE order_id = v_fixture_order;
+  END LOOP;
 
   -- 1. The split bills A, B, C and Y. FAIL-FIRST: before 20261021150000 the first draft for a
   --    customer other than A rolls the

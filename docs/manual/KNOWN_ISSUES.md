@@ -307,9 +307,28 @@ hold sub-cent values, adding the checks is Mason's call (LOW-MED); the old name-
 can make old splits refuse to save (LOW-MED).
 
 ### KI-14 — Transfer-created field invoices are always Net 30
-**MED · OPEN · money · unassigned**
-`20260914100500` lines ~2587 and 2820 stamp invoice date + 30 days regardless of the customer's terms. The post
-path was not traced.
+**MED · PARKED (Mason, 2026-11-05) · money · needs one database-plus-screen fix**
+- The transfer (`_transfer_job_to_invoice_intent_impl_20260908`) stamps due date = invoice date + 30 days whatever
+  the customer's terms say. Every posting route ends in `_post_invoice_impl_20260714`, which fills the due date only
+  when blank, so the +30 survives posting.
+- Not reachable today: on 2026-11-05 every live customer was Net 30 or blank, so +30 days is right for all of them,
+  and no saved invoice disagreed with its customer's terms. Fix this before any customer gets other terms.
+- A database-only fix is parked on branch `claude/ki14-transfer-due-date-terms` (candidate `20261112090000`, never
+  applied; real-schema proof `scripts/smoke/prove-transfer-invoice-due-date-real-schema.mjs`). Sol blocked four
+  versions, each for a gap outside the database:
+  1. A blank due date until posting: an unposted invoice can be emailed, and the server PDF prints a blank due date
+     as "On receipt".
+  2. Stamping the date from the customer's terms without copying them: the PDF falls back to the customer's later
+     terms beside the older date.
+  3. Copying the terms onto the invoice: the field-application split editor saves one set of terms (and a blank due
+     date) over every owner of a split.
+  4. Refusing a mixed-terms split save in the database: the screen saves the invoice date before the billing call,
+     so a refusal leaves stale due dates, and adding an owner (blank terms) is refused.
+- Every version was also flagged because `parse_payment_terms_days` reads the first number, so `2/10 Net 30` is due
+  in 2 days on every posting route.
+- The redo needs, as one planned piece (database PR first, then the screen): per-owner terms in the split editor, a
+  terms parser that reads "Net N", a PDF due-date fallback from terms, and the field-application screen not writing
+  Net 30 onto invoices with no terms of their own.
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**
@@ -845,7 +864,7 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   for the same product (LOW).
 - `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (applied live 2026-11-03, ledger `20261103003731`) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
-- Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
+- Transfer Net 30 (KI-14): traced 2026-11-05; posting keeps the +30. Parked; see KI-14.
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).

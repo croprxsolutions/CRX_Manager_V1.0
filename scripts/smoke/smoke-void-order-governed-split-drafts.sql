@@ -124,8 +124,8 @@ BEGIN
     VALUES (v_id, v_oi, v_product, 4, 0, 'GL')
     RETURNING id INTO v_di;
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_id;
-    v_res := public.complete_delivery(v_id, '[SMOKE] Receiver', v_admin, jsonb_build_object(v_di::text, 4),
-                                      NULL, NULL, v_prefix || 'complete-' || v_i, NULL);
+    v_res := public.complete_delivery(v_id, 'No proof — recorded by office', v_admin, jsonb_build_object(v_di::text, 4),
+                                      NULL, NULL, v_prefix || 'complete-' || v_i, NULL, 'no_proof', 'Rolled-back smoke fixture');
     IF v_res->>'status' IS DISTINCT FROM 'completed' THEN
       RAISE EXCEPTION 'SMOKE_SETUP: complete_delivery fixture failed for order %: %', v_i, v_res;
     END IF;

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ProductSearchPicker from './ProductSearchPicker';
+import { textFromIlikePattern } from '../../lib/productSearch';
+import { ilikeOrPattern } from '../../lib/recordSearch';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -8,7 +10,11 @@ const mocks = vi.hoisted(() => ({
   limit: vi.fn(),
   toast: vi.fn(),
   captureException: vi.fn(),
+  searchProductParents: vi.fn(),
+  eq: vi.fn(),
 }));
+
+vi.mock('../../lib/productParents', () => ({ searchProductParents: mocks.searchProductParents }));
 
 vi.mock('../../lib/db', () => ({ supabase: { from: mocks.from } }));
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: mocks.captureException } }));
@@ -22,7 +28,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.limit.mockReset();
   const builder: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'order']) builder[m] = vi.fn(() => builder);
+  mocks.searchProductParents.mockResolvedValue([]);
+  for (const m of ['select', 'order']) builder[m] = vi.fn(() => builder);
+  builder.eq = mocks.eq.mockImplementation(() => builder);
   builder.or = mocks.or.mockImplementation(() => builder);
   builder.limit = mocks.limit;
   mocks.from.mockReturnValue(builder);
@@ -34,6 +42,34 @@ function renderPicker(onSelect = vi.fn()) {
 }
 
 describe('ProductSearchPicker', () => {
+  it.each(['2,4-D', '34%', 'a_b', 'say "hi"', 'back\\slash', '\\%', 'a\\_b\\\\'])('reads the typed text %s back from its search pattern', (text) => {
+    expect(textFromIlikePattern(ilikeOrPattern(text))).toBe(text);
+  });
+
+  it("finds a parent's sizes by its nickname and still asks for active products only", async () => {
+    mocks.searchProductParents.mockResolvedValue([{ name: 'Atrazine 4L', nickname: 'Atz', sizes: [
+      { product_id: '00000000-0000-0000-0000-000000000001' }, { product_id: '00000000-0000-0000-0000-000000000002' }] }]);
+    mocks.limit.mockResolvedValue({ data: [product(1)], error: null });
+    const { input } = renderPicker();
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'Atz' } });
+    await waitFor(() => expect(mocks.or).toHaveBeenCalled());
+    expect(mocks.searchProductParents).toHaveBeenCalledWith('Atz');
+    expect(mocks.or).toHaveBeenCalledWith('product_name.ilike."%Atz%",sku.ilike."%Atz%",id.in.(00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002)');
+    expect(mocks.eq).toHaveBeenCalledWith('is_active', true);
+  });
+
+  it('still searches names and SKUs when the parent search fails', async () => {
+    mocks.searchProductParents.mockRejectedValue(new Error('down'));
+    mocks.limit.mockResolvedValue({ data: [product(3)], error: null });
+    const { input } = renderPicker();
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'Prod' } });
+    expect(await screen.findByRole('option', { name: /Product 3/ })).toBeInTheDocument();
+    expect(mocks.or).toHaveBeenCalledWith('product_name.ilike."%Prod%",sku.ilike."%Prod%"');
+    expect(mocks.captureException).toHaveBeenCalled();
+  });
+
   it('searches active products in the database and returns the picked product', async () => {
     mocks.limit.mockResolvedValue({ data: [product(596)], error: null });
     const { input, onSelect } = renderPicker();

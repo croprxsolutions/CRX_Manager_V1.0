@@ -8,7 +8,8 @@ import { render, screen } from '@testing-library/react';
 
 // The Vendors section has its own tests; these page tests do not mock its reads.
 vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
-vi.mock('../lib/db', () => {
+vi.mock('../lib/db', async () => {
+  const { hasRpcCode, RpcErrorCodes } = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   const mockProduct = {
     id: 'test-product-id',
     product_name: 'Test Product',
@@ -77,8 +78,16 @@ vi.mock('../lib/db', () => {
       rpc: vi.fn(() => chainable()),
     },
     checkMutationResult: vi.fn(),
+    hasRpcCode,
+    RpcErrorCodes,
   };
 });
+
+// PAR-1: the page asks for the product's parent; this product has none.
+vi.mock('../lib/productParents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productParents')>()),
+  getParentOfProduct: async () => null,
+}));
 
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: vi.fn() }),

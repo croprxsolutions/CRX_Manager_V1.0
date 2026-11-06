@@ -3,6 +3,7 @@ import { DollarSign, Search } from 'lucide-react';
 import type { MobileProduct } from '../../types';
 import { formatUSD } from '../../lib/money';
 import { matchesProductSearch } from '../../lib/productSearch';
+import type { ParentSearchIndex } from '../../lib/productParents';
 import { isSetupIncomplete, type SetupFilter } from '../../lib/productSetup';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
@@ -27,6 +28,8 @@ type Props = {
   onChangePrice?: (product: MobileProduct) => void;
   loadError?: boolean;
   onRetry?: () => void;
+  /** Size id → parent name and nickname, so a parent's name finds its sizes. */
+  parentIndex?: ParentSearchIndex;
 };
 
 function formatTierPrice(price: number | null): string {
@@ -49,6 +52,7 @@ export default function ProductsMobileList({
   onChangePrice,
   loadError = false,
   onRetry,
+  parentIndex,
 }: Props) {
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(MOBILE_PAGE_SIZE);
@@ -58,8 +62,8 @@ export default function ProductsMobileList({
     if (vendorFilter && product.vendor !== vendorFilter) return false;
     if (statusFilter === 'active' && !product.is_active) return false;
     if (statusFilter === 'inactive' && product.is_active) return false;
-    return !search || matchesProductSearch(product, search);
-  }), [categoryFilter, products, search, statusFilter, vendorFilter]);
+    return !search || matchesProductSearch(product, search, parentIndex);
+  }), [categoryFilter, parentIndex, products, search, statusFilter, vendorFilter]);
   const incompleteCount = useMemo(() => listProducts.filter(isSetupIncomplete).length, [listProducts]);
   const filteredProducts = setupFilter === 'incomplete' ? listProducts.filter(isSetupIncomplete) : listProducts;
 

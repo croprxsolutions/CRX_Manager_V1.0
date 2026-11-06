@@ -6,19 +6,24 @@ import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { sanitizeError } from '../../lib/db';
 import { formatExactUSD } from '../../lib/money';
+import { getProductParents, previewParentRates, setParentRates, type ParentRatePreview } from '../../lib/productParents';
 import { listProductCategories } from '../../lib/productSetup';
 import { listProductUseTimingOptions } from '../../lib/productUseTimings';
 import {
   applyProductSetup,
   buildSetupPreview,
+  editedParentRateRows,
   editedRateRows,
   generateSetupWorkbook,
+  groupedParentNames,
   loadSetupWorkbookExport,
   MAX_SETUP_WORKBOOK_SAVE_ROWS,
   parseSetupWorkbook,
   previewProductRates,
   rebaseRateRowsAfterSetup,
   saveProductRates,
+  setupMembershipHash,
+  type ParentRateUploadRow,
   type RatePreview,
   type RatePreviewRow,
   type RateUploadRow,
@@ -37,6 +42,60 @@ const rateText = (r: RatePreviewRow['before']) =>
   r ? `${r.rate_per_acre ?? '(blank)'} ${r.rate_unit ?? ''}${r.suggested_rate ? ` · "${r.suggested_rate}"` : ''}`.trim() : '';
 
 const plural = (n: number) => `${n} ${n === 1 ? 'product' : 'products'}`;
+const GROUPING_CHANGED = 'Products were grouped or moved since this workbook was downloaded. Download a new workbook.';
+const parentRateText = (r: { rate_per_acre: string | null; rate_unit: string | null; suggested_rate: string | null }) =>
+  `${r.rate_per_acre ?? '(blank)'} ${r.rate_unit ?? ''}${r.suggested_rate ? ` · "${r.suggested_rate}"` : ''}`.trim();
+
+/** Previews for edited parents; a parent changed since the download is named, not saved. */
+function ParentRatesTabPreview({ rows, previews, saved, busy, blocked, onConfirm, onRetry }: {
+  rows: ParentRateUploadRow[]; previews: ParentRatePreview[] | null; saved: number | null; busy: boolean; blocked: boolean;
+  onConfirm: () => void; onRetry: () => void;
+}) {
+  const locked = previews?.some((p) => p.rates_locked) ?? false;
+  return (
+    <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Parent Rates tab preview">
+      <h3 className="font-semibold text-nav-dark">Parent Rates tab: {rows.length} {rows.length === 1 ? 'parent' : 'parents'} to change</h3>
+      {locked && (
+        <p className="text-red-700">Rates are locked. An admin can correct one parent at a time from its product page, with a reason.</p>
+      )}
+      {previews?.map((preview, index) => (preview.parent_version !== rows[index].expected.parent_version ? (
+        <p key={preview.parent_id} className="text-red-700">{rows[index].parent_name}: changed by someone else since you downloaded it</p>
+      ) : null))}
+      {previews && (
+        <div className="max-h-64 overflow-auto">
+          <table className="w-full text-left">
+            <thead><tr className="text-secondary"><th className="font-medium">Parent and size</th><th className="font-medium">Rate now → new</th>
+              {TIERS.map((t) => <th key={t} className="font-medium">Tier {t} per acre</th>)}</tr></thead>
+            <tbody>
+              {previews.flatMap((preview, index) => [
+                <tr key={preview.parent_id}>
+                  <td className="font-medium">{rows[index].parent_name}</td>
+                  <td>{parentRateText(preview.before)} → <span className="font-medium text-nav-dark">{parentRateText(preview.after)}</span></td>
+                  {TIERS.map((t) => <td key={t} />)}
+                </tr>,
+                ...preview.sizes.map((size) => (
+                  <tr key={`${preview.parent_id}-${size.product_id}`}>
+                    <td className="pl-4">{size.product_name}</td>
+                    <td />
+                    {TIERS.map((t) => (
+                      <td key={t}>{money(size.before_prices[`tier${t}_price_per_acre`])} → <span className="font-medium text-nav-dark">{money(size.prices[`tier${t}_price_per_acre`])}</span></td>
+                    ))}
+                  </tr>
+                )),
+              ])}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {!previews && saved == null && (
+        <Button variant="secondary" onClick={onRetry} loading={busy}>Preview parent rates again</Button>
+      )}
+      {saved != null
+        ? <p className="text-green-700">Saved rates for {saved} {saved === 1 ? 'parent' : 'parents'}.</p>
+        : <Button onClick={onConfirm} loading={busy} disabled={blocked}>Confirm Parent Rates tab</Button>}
+    </section>
+  );
+}
 
 function SetupTabPreview({ setup, saved, busy, blocked, onConfirm }: {
   setup: SetupPreview; saved: string[] | null; busy: boolean; blocked: boolean; onConfirm: () => void;
@@ -129,12 +188,16 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
   const [rates, setRates] = useState<{ rows: RateUploadRow[]; preview: RatePreview | null } | null>(null);
   const [setupSaved, setSetupSaved] = useState<string[] | null>(null);
   const [ratesSaved, setRatesSaved] = useState<number | null>(null);
+  const [parentRates, setParentRatesState] = useState<{ rows: ParentRateUploadRow[]; previews: ParentRatePreview[] | null } | null>(null);
+  const [parentRatesSaved, setParentRatesSaved] = useState<number | null>(null);
   // Scoped to the whole save payload: an exact retry reuses its key, a revised file gets a new one.
   const setupKey = useIdempotencyKey('apply_product_setup', profileId, JSON.stringify(setup?.changes));
   const ratesKey = useIdempotencyKey('set_product_rates', profileId, JSON.stringify([rates?.rows, rates?.preview]));
+  const parentRatesKey = useIdempotencyKey('set_parent_rates', profileId, JSON.stringify([parentRates?.rows, parentRates?.previews]));
 
   const reset = () => {
     setSetup(null); setRates(null); setSetupSaved(null); setRatesSaved(null);
+    setParentRatesState(null); setParentRatesSaved(null);
   };
   const close = () => {
     reset();
@@ -144,8 +207,9 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
   const download = async () => {
     setBusy(true);
     try {
-      const [exported, options] = await Promise.all([loadSetupWorkbookExport(), listProductUseTimingOptions()]);
-      const blob = await generateSetupWorkbook(exported, options);
+      // A failed parents load stops the download: grouped sizes must not be offered as ungrouped.
+      const [exported, options, parents] = await Promise.all([loadSetupWorkbookExport(), listProductUseTimingOptions(), getProductParents(null)]);
+      const blob = await generateSetupWorkbook(exported, options, parents);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -164,15 +228,23 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
     setBusy(true);
     try {
       const parsed = await parseSetupWorkbook(await file.arrayBuffer());
-      const [current, options, categories] = await Promise.all([loadSetupWorkbookExport(), listProductUseTimingOptions(), listProductCategories()]);
-      const setupPreview = buildSetupPreview(parsed.setupRows, current, options, categories.filter((c) => c.is_active).map((c) => c.name));
+      const [current, options, categories, parents] = await Promise.all([
+        loadSetupWorkbookExport(), listProductUseTimingOptions(), listProductCategories(), getProductParents(null),
+      ]);
+      if (await setupMembershipHash(parsed.setupRows.map((row) => row.product_id), parents) !== parsed.membershipHash) {
+        throw new Error(GROUPING_CHANGED);
+      }
+      const setupPreview = buildSetupPreview(parsed.setupRows, current, options, categories.filter((c) => c.is_active).map((c) => c.name), groupedParentNames(parents));
       const rateRows = editedRateRows(parsed.rateRows);
-      if (setupPreview.changes.length > MAX_SETUP_WORKBOOK_SAVE_ROWS || rateRows.length > MAX_SETUP_WORKBOOK_SAVE_ROWS) {
+      const parentRows = editedParentRateRows(parsed.parentRateRows);
+      if (setupPreview.changes.length > MAX_SETUP_WORKBOOK_SAVE_ROWS || rateRows.length > MAX_SETUP_WORKBOOK_SAVE_ROWS
+          || parentRows.length > MAX_SETUP_WORKBOOK_SAVE_ROWS) {
         throw new Error(`Save at most ${MAX_SETUP_WORKBOOK_SAVE_ROWS} changed rows per tab at a time.`);
       }
       setSetup(setupPreview);
       if (rateRows.length > 0) await previewRates(rateRows);
       else setRates({ rows: rateRows, preview: null });
+      if (parentRows.length > 0) await previewParents(parentRows);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
@@ -185,6 +257,22 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
   const previewRates = async (rows: RateUploadRow[]) => {
     setRates({ rows, preview: null });
     setRates({ rows, preview: await previewProductRates(rows) });
+  };
+  // One preview per edited parent; its sizes are the snapshot the save checks.
+  const previewParents = async (rows: ParentRateUploadRow[]) => {
+    setParentRatesState({ rows, previews: null });
+    setParentRatesState({ rows, previews: await Promise.all(rows.map((row) => previewParentRates(row.parent_id, row))) });
+  };
+  const retryParentPreview = async () => {
+    if (!parentRates) return;
+    setBusy(true);
+    try {
+      await previewParents(parentRates.rows);
+    } catch (error) {
+      toast('error', sanitizeError(error));
+    } finally {
+      setBusy(false);
+    }
   };
   const retryRatesPreview = async () => {
     if (!rates) return;
@@ -211,6 +299,8 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
       if (rates && rates.rows.length > 0 && ratesSaved == null) {
         await previewRates(rebaseRateRowsAfterSetup(rates.rows, saved));
       }
+      // A notes save moves a size's version, so parent previews are read again before their save.
+      if (parentRates && parentRatesSaved == null) await previewParents(parentRates.rows);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
@@ -234,10 +324,32 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
     }
   };
 
+  const confirmParentRates = async () => {
+    const previews = parentRates?.previews;
+    if (!parentRates || !previews) return;
+    setBusy(true);
+    try {
+      const saved = await setParentRates(parentRates.rows.map((row, index) => ({
+        preview: previews[index],
+        rates: { rate_per_acre: row.rate_per_acre, rate_unit: row.rate_unit, suggested_rate: row.suggested_rate },
+      })), parentRatesKey.getKey());
+      parentRatesKey.resetKey();
+      onSaved();
+      setParentRatesSaved(saved.changed_count);
+      toast('success', `Saved rates for ${saved.changed_count} ${saved.changed_count === 1 ? 'parent' : 'parents'}`);
+    } catch (error) {
+      toast('error', sanitizeError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const rateChanges = rates?.preview?.rows.filter((r) => r.status === 'change') ?? [];
   const rateProblems = rates?.preview?.rows.filter((r) => r.status !== 'change' && r.status !== 'unchanged') ?? [];
   const setupBlocked = !setup || setup.changes.length === 0 || setup.stale.length > 0 || setup.invalid.length > 0;
   const ratesBlocked = rateChanges.length === 0 || rateProblems.length > 0 || Boolean(rates?.preview?.rates_locked);
+  const parentRatesBlocked = !parentRates?.previews || parentRates.previews.some((preview, index) => (
+    preview.rates_locked || preview.parent_version !== parentRates.rows[index].expected.parent_version));
 
   return (
     <Modal open={open} onClose={close} closeDisabled={busy} title="Setup workbook" size="large"
@@ -266,6 +378,10 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
           <RatesTabPreview locked={Boolean(rates.preview?.rates_locked)} edited={rates.rows.length} changes={rateChanges}
             problems={rateProblems} saved={ratesSaved} busy={busy} blocked={ratesBlocked} previewMissing={!rates.preview}
             onConfirm={() => void confirmRates()} onRetry={() => void retryRatesPreview()} />
+        )}
+        {parentRates && (
+          <ParentRatesTabPreview rows={parentRates.rows} previews={parentRates.previews} saved={parentRatesSaved} busy={busy}
+            blocked={parentRatesBlocked} onConfirm={() => void confirmParentRates()} onRetry={() => void retryParentPreview()} />
         )}
       </div>
     </Modal>

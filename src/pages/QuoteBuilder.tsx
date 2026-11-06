@@ -93,6 +93,7 @@ import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { rateUnitOptionsForProduct } from '../lib/units';
+import { useProductParents } from '../lib/productParents';
 import { QuoteLineCost } from '../components/quotes/QuoteLineCost';
 import type {
   Quote,
@@ -4077,6 +4078,8 @@ export default function QuoteBuilder() {
     }
   };
 
+  // A parent's name or nickname finds its sizes (PAR-1).
+  const { index: parentIndex } = useProductParents();
   const filteredProducts = useMemo(() => {
     if (!productQuery.trim()) return products;
     const q = productQuery.toLowerCase();
@@ -4085,9 +4088,11 @@ export default function QuoteBuilder() {
         p.product_name.toLowerCase().includes(q) ||
         (p.sku && p.sku.toLowerCase().includes(q)) ||
         (p.category && p.category.toLowerCase().includes(q)) ||
-        (p.vendor && p.vendor.toLowerCase().includes(q))
+        (p.vendor && p.vendor.toLowerCase().includes(q)) ||
+        parentIndex.get(p.id)?.name.toLowerCase().includes(q) ||
+        parentIndex.get(p.id)?.nickname?.toLowerCase().includes(q)
     );
-  }, [products, productQuery]);
+  }, [parentIndex, products, productQuery]);
 
   const fmt = formatUSD; // quote math is dollar-denominated (not cents)
 

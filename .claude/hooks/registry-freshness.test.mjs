@@ -202,13 +202,13 @@ process.exit(summary.status === 0 && summary.inheritedNames.length > 0 && summar
     tool_name: "Write",
     tool_input: { file_path: "supabase/migrations/20990101000001_exempt.sql", content: "-- sql-safety: exempt-registry (test justification)\nSELECT 1;" },
   }, dirD);
-  ok(r.stdout.includes('"allow"'), "exempt-registry marker bypasses the stale gate");
+  ok(r.status === 0 && !r.stdout.includes('"permissionDecision"'), "exempt-registry marker bypasses the stale gate (silent pass)");
 
   // No flag → the same write passes
   const dirE = path.join(tmpRoot, "e");
   mkdirSync(dirE, { recursive: true });
   r = benignMigrationWrite(dirE);
-  ok(r.stdout.includes('"allow"'), "sql-safety allows the same write when no flag exists");
+  ok(r.status === 0 && !r.stdout.includes('"permissionDecision"'), "sql-safety passes the same write silently when no flag exists");
   ok(!r.stdout.includes('"deny"'), "no deny without the flag");
 
   // ── FIX 3 (2026-07-13) — DROP CONSTRAINT / DROP SEQUENCE now flag the registry ──

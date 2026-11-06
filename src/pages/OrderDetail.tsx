@@ -31,6 +31,7 @@ import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { runCriticalAction } from '../lib/criticalAction';
 import { parseLocalDate } from '../lib/dateUtils';
 import { formatUSD as fmt } from '../lib/money';
+import { exactRound2 } from '../lib/quoteCalc';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import HelpTip from '../components/ui/HelpTip';
@@ -842,24 +843,10 @@ export default function OrderDetail() {
             return;
           }
         } else {
-          // Simple status change (no inventory impact) — validate allowed transitions
-          // Manual status changes — partially_fulfilled/fulfilled happen via delivery RPCs, not manual update
-          const validTransitions: Record<string, string[]> = {
-            confirmed: ['cancelled'],
-            partially_fulfilled: ['cancelled'],
-          };
-          const allowed = validTransitions[order.status] || [];
-          if (!allowed.includes(targetStatus)) {
-            toast('error', `Cannot change status from '${order.status}' to '${targetStatus}'`);
-            return;
-          }
-          const statusResult = await supabase
-            .from('orders')
-            .update({ status: targetStatus, updated_at: new Date().toISOString() })
-            .eq('id', id!)
-            .select('id');
-          checkMutationResult(statusResult, 'Update order status');
-          toast('success', `Status changed to ${targetStatus.replace('_', ' ')}`);
+          // Cancel (above) is the only manual status change; delivery, void and pricing RPCs set the
+          // rest, and signed-in users have no direct UPDATE on orders.status (20261116100000).
+          toast('error', `Cannot change status from '${order.status}' to '${targetStatus}'`);
+          return;
         }
 
         logActivity({ event: 'order_status_changed', description: `Order ${order.order_number} status changed to ${targetStatus}`, performedBy: profile.id, entityType: 'order', entityId: order.id, customerId: order.customer_id });
@@ -1994,9 +1981,9 @@ export default function OrderDetail() {
                         New Total:
                       </td>
                       <td colSpan={5} className="px-4 py-3 font-semibold text-nav-dark">
+                        {/* Each line as the order functions store it, exact to the cent (To-Do 1.7). */}
                         {fmt(
-                          editItems.reduce((s, i) => s + i.price_per_unit * i.total_units_needed, 0) +
-                          newItems.reduce((s, i) => s + i.price_per_unit * i.total_units_needed, 0)
+                          [...editItems, ...newItems].reduce((cents, i) => cents + Math.round(exactRound2([i.price_per_unit, i.total_units_needed]) * 100), 0) / 100
                         )}
                       </td>
                     </tr>

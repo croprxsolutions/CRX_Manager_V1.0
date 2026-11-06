@@ -11,6 +11,7 @@ import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection'
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult, assertRpcResult } from '../lib/db';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV } from '../lib/csvExport';
 import { downloadReportPdf } from '../lib/reportPdf';
@@ -74,7 +75,12 @@ export default function Fields() {
     // override/measured acres live on the fields table. Pull them alongside (the
     // fields_select RLS policy allows it) so the list shows the acres that actually
     // BILL — override ?? measured ?? legacy total — instead of the legacy total alone.
-    const { data, error } = await supabase.rpc('get_fields_with_geojson');
+    // Every page: the server cuts a function's rows off at 1,000.
+    const { data, error } = await fetchAllRows<FieldWithCustomer>((from, to) => pageWithList(supabase
+      .rpc('get_fields_with_geojson', undefined, { count: 'exact' })
+      .order('field_name')
+      .order('id')
+      .range(from, to)));
     if (seq !== loadSeqRef.current) return false;
 
     if (error) {
@@ -87,7 +93,8 @@ export default function Fields() {
 
     // Pull the two-acre columns separately (kept sequential, not Promise.all, so the
     // assertRpcResult coverage check still pairs the rpc capture above with its assert).
-    const acreRes = await supabase.from('fields').select('id, override_acres, measured_acres, acres_source');
+    // Every field's acres, page by page (Goal 4): one read stops silently at 1000 rows.
+    const acreRes = await fetchAllRows((from, to) => pageWithList(supabase.from('fields').select('id, override_acres, measured_acres, acres_source', { count: 'exact' }).order('id').range(from, to)));
     if (seq !== loadSeqRef.current) return false;
     if (acreRes.error) {
       // Without these columns the list would quietly show legacy acres instead of the acres that bill.

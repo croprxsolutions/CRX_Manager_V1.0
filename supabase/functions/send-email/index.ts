@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { jsPDF } from "npm:jspdf@4.2.1";
 import { autoTable } from "npm:jspdf-autotable@5.0.9";
-import { captureEdgeException } from "../_shared/sentry.ts";
+import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sentry.ts";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import {
@@ -41,8 +41,10 @@ import {
 //      vendor (To-Do 0.15; _shared/purchaseOrderEmailGate.ts).
 //   2. email_type is allowlisted per role:
 //        admin            -> every type, including purchase_order
-//        sales_rep        -> every customer type (purchase cost is admin-only)
+//        sales_rep        -> the customer types except ar_reminder
 //        driver           -> only delivery_completed (with proof of assignment)
+//        (ar_reminder is admin-only; reps send invoices and statements;
+//        Mason, 2026-11-05)
 //   3. Drivers must supply resource_type='delivery' + resource_id and be the
 //      assigned driver of that delivery; the delivery's customer_id must
 //      match the request's customer_id.
@@ -115,13 +117,17 @@ const JOB_NOTICE_TYPE_BY_EMAIL_TYPE: Record<string, string> = {
   post_application_notice: "post",
 };
 
+// Collection reminders are admin-only; reps may send invoices and statements
+// (Mason, 2026-11-05, revising the 2026-11-02 #1302 answer).
+const ADMIN_ONLY_CUSTOMER_EMAIL_TYPES = new Set(["ar_reminder"]);
+
 // What email types each role may send.
 //   admin     -> all types in ALL_EMAIL_TYPES (incl. purchase_order)
-//   sales_rep -> the customer types (incl. pre_application_notice)
+//   sales_rep -> the customer types except ar_reminder
 //   driver    -> only delivery_completed
 const EMAIL_TYPES_BY_ROLE: Record<string, Set<string>> = {
   admin: ALL_EMAIL_TYPES,
-  sales_rep: CUSTOMER_EMAIL_TYPES,
+  sales_rep: new Set([...CUSTOMER_EMAIL_TYPES].filter((t) => !ADMIN_ONLY_CUSTOMER_EMAIL_TYPES.has(t))),
   driver: new Set(["delivery_completed"]),
 };
 
@@ -131,6 +137,11 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB after base64 decod
 
 // Rate limit
 const RATE_LIMIT_PER_HOUR = 50;
+
+// How long to wait for the email provider before marking the send failed.
+const RESEND_TIMEOUT_MS = 30_000;
+// Resend's documented error replies for a request it refused (nothing sent).
+const RESEND_REFUSAL_STATUSES = new Set([400, 401, 403, 404, 405, 409, 422, 429]);
 
 // jsPDF's data URI is "data:application/pdf;filename=...;base64,<data>".
 function pdfBase64(doc: { output: (type: "datauristring") => string }): string {
@@ -205,6 +216,8 @@ async function checkPurchaseOrderEmail(
   return decision.ok ? { ok: true, order, lines: poLines } : decision;
 }
 
+warnIfSentryMisconfigured("send-email");
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return preflightResponse(req);
@@ -248,17 +261,22 @@ Deno.serve(async (req: Request) => {
     const {
       to,
       email_type,
-      customer_id,
+      customer_id: rawCustomerId,
       resource_type,
-      resource_id,
+      resource_id: rawResourceId,
       idempotency_key,
       // Renamed from purchase_order_snapshot with KI-98, so a send-email from before
       // KI-98 refuses this app's PO copy instead of mailing it with no PDF.
       purchase_order_screen,
       invoice_snapshot,
     } = body;
+    // Postgres answers uuids in lowercase; compare like with like (Luna r6).
+    const customer_id = typeof rawCustomerId === "string" ? rawCustomerId.toLowerCase() : rawCustomerId;
+    const resource_id = typeof rawResourceId === "string" ? rawResourceId.toLowerCase() : rawResourceId;
     // An invoice email's subject, body and attachment name are replaced below (step 6c).
     let { subject, html, attachments } = body;
+    // A PDF drawn here gets a random file id each time, so its fingerprint is taken from the saved data it is drawn from.
+    let drawnPdfSource: string | null = null;
     const isInvoiceEmail = email_type === "invoice";
 
     if (!to || !email_type || (!isInvoiceEmail && (!subject || !html))) {
@@ -340,11 +358,9 @@ Deno.serve(async (req: Request) => {
       } catch (err) {
         return jsonResponse({ error: `Company details lookup failed: ${(err as Error).message}` }, 503);
       }
-      const poPdf = drawPurchaseOrderPdf(
-        { jsPDF, autoTable },
-        buildPurchaseOrderPdfData(poGate.order, vendor, poGate.lines),
-        company,
-      );
+      const poPdfData = buildPurchaseOrderPdfData(poGate.order, vendor, poGate.lines);
+      const poPdf = drawPurchaseOrderPdf({ jsPDF, autoTable }, poPdfData, company);
+      drawnPdfSource = JSON.stringify([poPdfData, company]);
       attachments = [{ filename: purchaseOrderPdfFilename(poGate.order.po_number), content: pdfBase64(poPdf) }];
     } else {
       // 5. Customer email match — recipient is validated server-side from customer_id
@@ -683,6 +699,7 @@ Deno.serve(async (req: Request) => {
       subject = built.subject;
       html = built.html;
       attachments = [{ filename: built.filename, content: pdfBase64(drawInvoicePdf({ jsPDF, autoTable }, invoicePdfData)) }];
+      drawnPdfSource = JSON.stringify(invoicePdfData);
     }
 
     // 7. Attachment limits
@@ -738,9 +755,17 @@ Deno.serve(async (req: Request) => {
     //    any other raw-key row is refused as ambiguous rather than reported
     //    as already sent.
     let emailLogId: string | null = null;
+    // Record ids are UUIDs: one spelling, so an upper-case retry finds the same email.
+    recordRef = recordRef.toLowerCase();
     const scopedIdempotencyKey = idempotency_key
       ? `${email_type}:${recordRef}:${idempotency_key}`
       : null;
+    // A send without a key is still stored under its type + record, so the
+    // unconfirmed-send check below can see it.
+    const storedIdempotencyKey = scopedIdempotencyKey ?? `${email_type}:${recordRef}:auto-${crypto.randomUUID()}`;
+    // Names this email; the database allows one pending row per value
+    // (email_log_one_pending_send, migration 20261110110000).
+    const sendLockKey = `${email_type}:${recordRef}:${customer_id ?? "none"}`;
 
     if (scopedIdempotencyKey) {
       const { data: keyRows, error: existingErr } = await adminClient
@@ -806,39 +831,157 @@ Deno.serve(async (req: Request) => {
     //     email_log row to status='pending' BEFORE calling Resend. If this
     //     write fails, we DON'T send — otherwise the customer could receive
     //     an email with no audit record and no idempotency replay marker.
-    if (emailLogId) {
-      // Existing failed row from a prior attempt — reset it to pending and
-      // record THIS attempt's content, so the log shows what was actually sent.
-      const { error: updateErr } = await adminClient
+    // Another request holds this email. If it already sent it to this customer,
+    // report that send as this one's result; if it already failed, say so; while
+    // it is pending, it may still be sending.
+    const alreadyInProgress = async () => {
+      const { data: holder, error: holderErr } = await adminClient
         .from("email_log")
-        .update({
-          status: "pending",
-          resend_message_id: null,
-          error_message: null,
-          idempotency_key: scopedIdempotencyKey,
-          recipient_email: to,
-          subject,
-          html_body: html,
-          attachment_name: attachments?.[0]?.filename || null,
-        })
-        .eq("id", emailLogId);
-      if (updateErr) {
+        .select("id, status, resend_message_id, customer_id")
+        .eq("idempotency_key", scopedIdempotencyKey!)
+        .maybeSingle<{ id: string; status: string; resend_message_id: string | null; customer_id: string | null }>();
+      if (holderErr) {
+        return jsonResponse({ error: `Another send of this email is under way, and checking it failed: ${holderErr.message}` }, 503);
+      }
+      if (holder?.status === "sent" && holder.customer_id === (customer_id ?? null)) {
+        return jsonResponse({
+          success: true,
+          email_log_id: holder.id,
+          resend_message_id: holder.resend_message_id,
+          deduplicated: true,
+        });
+      }
+      if (holder?.status === "failed") {
+        return jsonResponse({ error: "Another send of this email just failed. Send it again.", email_log_id: holder.id }, 409);
+      }
+      return jsonResponse({
+        success: false,
+        error: "Another send of this email is already in progress. Wait a minute, then check whether it was sent.",
+        email_log_id: holder?.id ?? emailLogId,
+        needs_reconciliation: true,
+      }, 409);
+    };
+
+    // An earlier send of this same email whose outcome is unknown blocks a new one
+    // under ANY key: some screens make a new key on every click, and the customer
+    // may already have the first.
+    const unconfirmedSend = (heldBy: string | null) => jsonResponse({
+      success: false,
+      error: "An earlier send of this email has not been confirmed and may have reached the customer. " +
+        "Check Resend, then mark that email_log row 'sent' or 'failed' before sending again.",
+      email_log_id: heldBy,
+      needs_reconciliation: true,
+    }, 409);
+    // The database refused a second pending row for this email: a send that
+    // started at the same instant holds it.
+    const isLockConflict = (err: { code?: string; message?: string } | null) =>
+      err?.code === "23505" && (err.message ?? "").includes("email_log_one_pending_send");
+    const lockHolder = async () => {
+      const { data, error } = await adminClient
+        .from("email_log")
+        .select("id")
+        .eq("send_lock_key", sendLockKey)
+        .eq("status", "pending")
+        .limit(1);
+      if (error) {
+        return jsonResponse({
+          error: `Another send of this email holds it, and finding its email_log row failed: ${error.message}`,
+          needs_reconciliation: true,
+        }, 503);
+      }
+      return unconfirmedSend(data?.[0]?.id ?? null);
+    };
+
+    // The stored and sent body ends with an invisible fingerprint of the attachments,
+    // so two sends that differ only in their PDF never count as the same message below.
+    const htmlBeforeFingerprint = html; // the final invoice check rebuilds the unfingerprinted body
+    if (attachments?.length) {
+      const bytes = new TextEncoder().encode(attachments.map((a: { filename: string; content: string }) => `${a.filename}\n${drawnPdfSource ?? a.content}`).join("\n"));
+      const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
+      html = `${html}\n<!-- attachments-sha256:${digest} -->`;
+    }
+
+    // A send of this email that STARTS after this check, and is confirmed before this
+    // request takes the lock, is found by the re-check below. Each attempt stamps
+    // created_at from this clock just before its row is written; the 1s margin
+    // covers that gap and clock skew. A send that started more than 1s earlier is a separate
+    // send (a corrected quote mailed again) and is never deduplicated.
+    const lockCheckFrom = new Date(Date.now() - 1000).toISOString();
+    // Early check; the unique index above is what holds when two arrive together.
+    // It also sees pending rows logged before send_lock_key existed (scoped keys
+    // begin with type + record).
+    {
+      const recordKeyPrefix = `${email_type}:${recordRef}:`.replace(/[\\%_]/g, (c) => "\\" + c);
+      const unsettledQuery = adminClient
+        .from("email_log")
+        .select("id")
+        .eq("status", "pending")
+        .eq("email_type", email_type)
+        .like("idempotency_key", `${recordKeyPrefix}%`);
+      // One job's notices go to several customers (split billing); each is its own email.
+      const { data: unsettled, error: unsettledErr } = await (customer_id
+        ? unsettledQuery.eq("customer_id", customer_id)
+        : unsettledQuery.is("customer_id", null)).limit(1);
+      if (unsettledErr) {
+        return jsonResponse({ error: `Pending-send check failed: ${unsettledErr.message}` }, 503);
+      }
+      if (unsettled && unsettled.length > 0) {
+        return unconfirmedSend(unsettled[0].id);
+      }
+      // A pending row logged before send_lock_key existed may carry any key format;
+      // any such row of this type for this customer blocks the send until checked.
+      const legacyQuery = adminClient
+        .from("email_log")
+        .select("id")
+        .eq("status", "pending")
+        .eq("email_type", email_type)
+        .is("send_lock_key", null);
+      const { data: legacyPending, error: legacyErr } = await (customer_id
+        ? legacyQuery.eq("customer_id", customer_id)
+        : legacyQuery.is("customer_id", null)).limit(1);
+      if (legacyErr) {
+        return jsonResponse({ error: `Pending-send check failed: ${legacyErr.message}` }, 503);
+      }
+      if (legacyPending && legacyPending.length > 0) {
+        return unconfirmedSend(legacyPending[0].id);
+      }
+    }
+
+    if (emailLogId) {
+      // A retry of a failed (or bounced) send: the old row keeps its record of who
+      // sent what and when; its key is retired so this attempt gets a row of its own.
+      // Only a row still holding the key is retired: of two retries at the same
+      // moment, the second finds nothing to retire and stops (PR #1302 review, finding 3).
+      const { data: retiredRow, error: retireErr } = await adminClient
+        .from("email_log")
+        .update({ idempotency_key: `${scopedIdempotencyKey}:retired:${emailLogId}` })
+        .eq("id", emailLogId)
+        .eq("idempotency_key", scopedIdempotencyKey!)
+        .in("status", ["failed", "bounced"])
+        .select("id")
+        .maybeSingle();
+      if (!retireErr && !retiredRow) {
+        return await alreadyInProgress();
+      }
+      if (retireErr) {
         await captureEdgeException(
-          new Error(`email_log pre-send reset failed: ${updateErr.message}`),
+          new Error(`email_log retry retire failed: ${retireErr.message}`),
           {
             function: "send-email",
             level: "error",
-            tags: { email_type, phase: "pre-send-log-reset" },
+            tags: { email_type, phase: "pre-send-log-retire" },
             extra: { customer_id, idempotency_key, email_log_id: emailLogId },
             user: { id: caller.id },
           },
         );
         return jsonResponse(
-          { error: `Email pre-flight log reset failed: ${updateErr.message}` },
+          { error: `Email pre-flight log update failed: ${retireErr.message}` },
           500,
         );
       }
-    } else {
+      emailLogId = null;
+    }
+    {
       // Fresh send — insert new pending row.
       const { data: newRow, error: insertErr } = await adminClient
         .from("email_log")
@@ -852,11 +995,20 @@ Deno.serve(async (req: Request) => {
           resend_message_id: null,
           status: "pending",
           error_message: null,
-          idempotency_key: scopedIdempotencyKey,
+          idempotency_key: storedIdempotencyKey,
+          send_lock_key: sendLockKey,
           created_by: caller.id,
+          created_at: new Date().toISOString(),
         })
         .select("id")
         .single();
+      if (isLockConflict(insertErr)) {
+        return await lockHolder();
+      }
+      // email_log.idempotency_key is unique: a first send racing this one already holds the key.
+      if (insertErr?.code === "23505") {
+        return await alreadyInProgress();
+      }
       if (insertErr || !newRow) {
         await captureEdgeException(
           new Error(`email_log pre-send insert failed: ${insertErr?.message || 'no row returned'}`),
@@ -874,6 +1026,49 @@ Deno.serve(async (req: Request) => {
         );
       }
       emailLogId = newRow.id;
+    }
+
+    // The unique index stops only a second PENDING row. A send of the same email
+    // that began after the early check and was confirmed before this request took
+    // the lock is caught here: give up the lock and report that send.
+    {
+      const { data: justSent, error: justSentErr } = await adminClient
+        .from("email_log")
+        .select("id, resend_message_id, recipient_email, subject, html_body, attachment_name")
+        .eq("send_lock_key", sendLockKey)
+        .eq("status", "sent")
+        .gte("created_at", lockCheckFrom)
+        .neq("id", emailLogId)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      // Only the same message counts: a corrected email always goes out.
+      const sameEmail = (justSent ?? []).filter((row) =>
+        row.recipient_email === to && row.subject === subject && row.html_body === html &&
+        row.attachment_name === (attachments?.[0]?.filename || null));
+      if (justSentErr || sameEmail.length > 0) {
+        const reason = justSentErr
+          ? `Not sent: checking for a send of this email at the same moment failed: ${justSentErr.message}`
+          : `Not sent again: the same email went out at the same moment as email_log ${sameEmail[0].id}.`;
+        // A deduplicated row is stored as sent, with the other send's message id, so a
+        // replay of this key returns that send instead of sending again.
+        const { error: releaseErr } = await adminClient
+          .from("email_log")
+          .update(justSentErr
+            ? { status: "failed", error_message: reason }
+            : { status: "sent", resend_message_id: sameEmail[0].resend_message_id, error_message: reason })
+          .eq("id", emailLogId)
+          .eq("status", "pending");
+        if (justSentErr || releaseErr) {
+          // A row left pending blocks new sends until someone checks it: safe.
+          return jsonResponse({ error: releaseErr ? `${reason}; releasing its log row also failed: ${releaseErr.message}` : reason }, 503);
+        }
+        return jsonResponse({
+          success: true,
+          email_log_id: sameEmail[0].id,
+          resend_message_id: sameEmail[0].resend_message_id,
+          deduplicated: true,
+        });
+      }
     }
 
     // 11. Resend send
@@ -964,7 +1159,7 @@ Deno.serve(async (req: Request) => {
         if (!rebuilt.ok) {
           finalGateRefusal = rebuilt.error;
           finalGateStatus = rebuilt.status;
-        } else if (rebuilt.subject !== subject || rebuilt.html !== html) {
+        } else if (rebuilt.subject !== subject || rebuilt.html !== htmlBeforeFingerprint) {
           finalGateRefusal = "Invoice changed before send";
         }
       }
@@ -1031,28 +1226,72 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const resendResp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${resendApiKey}`,
-      },
-      body: JSON.stringify(resendBody),
-    });
+    // The call to Resend gives up after RESEND_TIMEOUT_MS, so a slow reply can no
+    // longer hold the request until the platform kills it (PR #1302 review,
+    // finding 4). Only a documented refusal marks the row 'failed', so a retry
+    // may send it. No answer, a dropped connection, a 408 or 5xx reply or an
+    // unreadable success may mean the customer already
+    // has the email, so the row stays 'pending' with the reason written on it:
+    // the pending check above then refuses a re-send under the same key until
+    // someone checks Resend and settles the row.
+    let resendStatus = 0;
+    let success = false;
+    let outcomeUnknown = false;
+    let resendMessageId: string | null = null;
+    let errorMessage: string | null = null;
+    try {
+      const resendResp = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${resendApiKey}`,
+        },
+        body: JSON.stringify(resendBody),
+        signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
+      });
+      resendStatus = resendResp.status;
+      const resendText = await resendResp.text();
+      let resendResult: { id?: unknown; message?: unknown } | null = null;
+      try {
+        resendResult = JSON.parse(resendText);
+      } catch {
+        resendResult = null;
+      }
+      success = resendResp.ok && typeof resendResult?.id === "string" && resendResult.id !== "";
+      resendMessageId = success ? resendResult!.id as string : null;
+      if (success) {
+        // Confirmed: no error message.
+      } else if (resendResp.ok) {
+        outcomeUnknown = true;
+        errorMessage = `Email provider accepted the request but its reply was unreadable: ${resendText.slice(0, 200)}`;
+      } else if (!RESEND_REFUSAL_STATUSES.has(resendResp.status)) {
+        // Only Resend's documented refusals prove the email was not sent; a
+        // timeout (408), a server or gateway error, or anything else does not.
+        outcomeUnknown = true;
+        errorMessage = `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`;
+      } else {
+        errorMessage = typeof resendResult?.message === "string"
+          ? resendResult.message
+          : `Email provider replied ${resendResp.status}: ${resendText.slice(0, 200)}`;
+      }
+    } catch (err) {
+      outcomeUnknown = true;
+      errorMessage = (err as Error)?.name === "TimeoutError"
+        ? `Email provider did not answer within ${RESEND_TIMEOUT_MS / 1000} seconds`
+        : `Email provider request failed: ${(err as Error)?.message ?? String(err)}`;
+    }
+    if (outcomeUnknown) {
+      errorMessage += ". It may still have been sent: check Resend, then mark this email_log row 'sent' or 'failed' before sending again.";
+    }
 
-    const resendResult = await resendResp.json();
-    const success = resendResp.ok;
-    const resendMessageId = resendResult.id || null;
-    const errorMessage = success ? null : (resendResult.message || JSON.stringify(resendResult));
-
-    // 12. Update the pending row to sent/failed. Even if this update fails,
-    //     the pending row exists for idempotency replay — durability is
-    //     already achieved.
+    // 12. Update the pending row to sent/failed (or leave it pending, with the
+    //     reason, when the outcome is unknown). Even if this update fails, the
+    //     pending row exists for idempotency replay — durability is already achieved.
     const { error: postUpdateErr } = await adminClient
       .from("email_log")
       .update({
         resend_message_id: resendMessageId,
-        status: success ? "sent" : "failed",
+        status: success ? "sent" : outcomeUnknown ? "pending" : "failed",
         error_message: errorMessage,
       })
       .eq("id", emailLogId);
@@ -1074,15 +1313,18 @@ Deno.serve(async (req: Request) => {
       await captureEdgeException(new Error(errorMessage || "Resend send failed"), {
         function: "send-email",
         level: "error",
-        tags: { email_type, status_code: String(resendResp.status) },
+        tags: { email_type, status_code: String(resendStatus) },
         extra: { customer_id, email_log_id: emailLogId, resend_message_id: resendMessageId },
         user: { id: caller.id },
       });
       return jsonResponse({
         success: false,
-        error: errorMessage,
+        error: outcomeUnknown
+          ? `Not confirmed: this email may have reached the customer. Check before sending it again. (${errorMessage})`
+          : errorMessage,
         email_log_id: emailLogId,
-      }, 502);
+        ...(outcomeUnknown ? { needs_reconciliation: true } : {}),
+      }, outcomeUnknown ? 504 : 502);
     }
 
     return jsonResponse({

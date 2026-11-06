@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-05",
+    "generated_at": "2026-11-06",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261105032430",
+    "migrations_high_water": "20261106135401",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -505,6 +505,30 @@
       "20261107050000_blend_tickets_application_records_only",
       "20261107060000_product_rate_lock",
       "20261107070000_job_reservation_whole_hundredths",
+      "20261107080000_product_setup_workbook",
+      "20261107120000_void_delivery_respects_voided_and_cancelled_orders",
+      "20261107130000_product_import",
+      "20261107140000_save_field_refuses_missing_field",
+      "20261107150000_uncertain_request_clear_check",
+      "20261108120000_product_parents",
+      "20261108160000_delivery_invoice_charge_lines",
+      "20261109120000_dashboard_action_true_counts",
+      "20261110110000_email_log_one_pending_send",
+      "20261110120000_uncertain_request_clear_any_staff",
+      "20261110140000_rup_records_require_posted_invoice",
+      "20261110150000_product_parent_stock_units",
+      "20261110160000_bind_money_inventory_replay_receipts_batch4c",
+      "20261111100000_tiers_credit_limits_admin_only",
+      "20261111120000_uncertain_request_cleared_message_neutral",
+      "20261113110000_paged_read_tiebreakers",
+      "20261113140000_delivery_receipt_queue",
+      "20261114080000_list_true_totals",
+      "20261114200000_bind_records_replay_receipts_batch4d",
+      "20261115160000_financial_delete_snapshots",
+      "20261116100000_permission_tightening",
+      "20261116120000_orders_list_page",
+      "20261117130000_tote_fill_from_bulk",
+      "20261118110000_sale_line_vendor",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1238,6 +1262,13 @@
       "cancelled",
       "voided"
     ],
+    "delivery_receipt_queue.status": [
+      "pending",
+      "sending",
+      "sent",
+      "needs_check",
+      "cancelled"
+    ],
     "delivery_remainders.status": [
       "pending",
       "scheduled",
@@ -1488,6 +1519,8 @@
     "product_form_units",
     "product_info_change_set_rows",
     "product_margin_floor_changes",
+    "product_parent_copy_passes",
+    "product_parent_events",
     "product_rate_correction_passes",
     "product_rate_events",
     "product_rate_lock",
@@ -1505,6 +1538,7 @@
     "rebate_claim_counters",
     "receiving_photos",
     "receiving_records",
+    "retired_uncertain_requests",
     "return_credit_customer_claims",
     "return_items",
     "rup_sales_records",
@@ -1514,6 +1548,8 @@
     "supplier_price_observations",
     "team_note_attachments",
     "team_note_tags",
+    "tote_fills",
+    "uncertain_request_clear_check_key",
     "unit_conversions",
     "vendor_alias_stage_receipts",
     "vendor_payments",
@@ -1918,6 +1954,18 @@
         "deliveries_status_check"
       ]
     },
+    "delivery_receipt_queue.status": {
+      "values": [
+        "pending",
+        "sending",
+        "sent",
+        "needs_check",
+        "cancelled"
+      ],
+      "constraints": [
+        "delivery_receipt_queue_status_check"
+      ]
+    },
     "delivery_remainders.status": {
       "values": [
         "pending",
@@ -2062,7 +2110,9 @@
         "vendor_payment_recorded",
         "vendor_payment_voided",
         "rup_sales_voided",
-        "receiving_reversed"
+        "receiving_reversed",
+        "payment_deleted",
+        "allocation_set_deleted"
       ],
       "constraints": [
         "financial_audit_log_operation_type_check"
@@ -2104,7 +2154,9 @@
         "void_delivery_reversal",
         "prebooked",
         "released",
-        "prebook_reconciliation"
+        "prebook_reconciliation",
+        "tote_fill_out",
+        "tote_fill_in"
       ],
       "constraints": [
         "inventory_transactions_transaction_type_check"
@@ -2478,7 +2530,8 @@
     "product_change_history.change_type": {
       "values": [
         "created",
-        "updated"
+        "updated",
+        "parent_copy"
       ],
       "constraints": [
         "product_change_history_change_type_check"
@@ -2558,6 +2611,41 @@
       ],
       "constraints": [
         "product_label_drafts_status_check"
+      ]
+    },
+    "product_parent_events.event_type": {
+      "values": [
+        "created",
+        "updated",
+        "size_added",
+        "size_moved",
+        "identity_corrected",
+        "rates_set",
+        "rates_corrected"
+      ],
+      "constraints": [
+        "product_parent_events_event_type_check"
+      ]
+    },
+    "product_parent_members.size_role": {
+      "values": [
+        "package",
+        "bulk",
+        "fixed_tote"
+      ],
+      "constraints": [
+        "product_parent_members_size_role_check"
+      ]
+    },
+    "product_parents.product_form": {
+      "values": [
+        "liquid",
+        "dry",
+        "seed",
+        "each"
+      ],
+      "constraints": [
+        "product_parents_product_form_check"
       ]
     },
     "product_rate_events.event_type": {
@@ -2764,6 +2852,15 @@
       ],
       "constraints": [
         "receiving_records_condition_check"
+      ]
+    },
+    "retired_uncertain_requests.reason": {
+      "values": [
+        "recorded",
+        "not_recorded_after_wait"
+      ],
+      "constraints": [
+        "retired_uncertain_requests_reason_check"
       ]
     },
     "return_items.condition": {
@@ -3398,6 +3495,30 @@
       "table": "delivery_items",
       "constraint": "delivery_items_quantity_prebooked_released_check",
       "def": "CHECK ((quantity_prebooked_released >= (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_receipt_queue",
+      "constraint": "delivery_receipt_queue_attempts_check",
+      "def": "CHECK (((attempts >= 0) AND (attempts <= 5)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_receipt_queue",
+      "constraint": "delivery_receipt_queue_check",
+      "def": "CHECK (((status = 'sending'::text) = ((claim_token IS NOT NULL) AND (claimed_at IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_receipt_queue",
+      "constraint": "delivery_receipt_queue_check1",
+      "def": "CHECK (((status <> 'sent'::text) OR (sent_at IS NOT NULL)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_receipt_queue",
+      "constraint": "delivery_receipt_queue_receipt_check",
+      "def": "CHECK (((jsonb_typeof(receipt) = 'object'::text) AND (COALESCE(jsonb_typeof((receipt -> 'lines'::text)), ''::text) = 'array'::text)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -4069,8 +4190,14 @@
     {
       "table": "product_change_history",
       "constraint": "product_change_history_check",
-      "def": "CHECK ((((change_type = 'created'::text) AND (field_name IS NULL)) OR ((change_type = 'updated'::text) AND (field_name IS NOT NULL))))",
+      "def": "CHECK ((((change_type = 'created'::text) AND (field_name IS NULL)) OR ((change_type = ANY (ARRAY['updated'::text, 'parent_copy'::text])) AND (field_name IS NOT NULL))))",
       "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_change_history",
+      "constraint": "product_change_history_parent_event_chk",
+      "def": "CHECK (((change_type = 'parent_copy'::text) = (parent_event_id IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
       "table": "product_cost_basis",
@@ -4190,6 +4317,42 @@
       "table": "product_margin_floors",
       "constraint": "product_margin_floors_reason_length",
       "def": "CHECK (((set_reason IS NULL) OR ((char_length(set_reason) >= 1) AND (char_length(set_reason) <= 500))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_members",
+      "constraint": "product_parent_members_check",
+      "def": "CHECK (((fill_source_product_id IS NULL) OR (size_role = 'fixed_tote'::text)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_formulation_type_check",
+      "def": "CHECK (((formulation_type IS NULL) OR ((btrim(formulation_type) <> ''::text) AND (length(formulation_type) <= 100))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_generic_epa_registration_check",
+      "def": "CHECK (((generic_epa_registration IS NULL) OR ((generic_epa_registration ~ '^[A-Z0-9-]+$'::text) AND (length(generic_epa_registration) <= 40))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_name_check",
+      "def": "CHECK (((btrim(name) <> ''::text) AND (name = btrim(name)) AND (length(name) <= 200)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_nickname_check",
+      "def": "CHECK (((nickname IS NULL) OR ((btrim(nickname) <> ''::text) AND (nickname = btrim(nickname)) AND (length(nickname) <= 200))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_safener_check",
+      "def": "CHECK (((safener IS NULL) OR ((btrim(safener) <> ''::text) AND (length(safener) <= 200))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -4475,6 +4638,12 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "retired_uncertain_requests",
+      "constraint": "retired_uncertain_requests_request_key_check",
+      "def": "CHECK ((request_key ~ '^[a-z0-9_]+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
       "table": "return_items",
       "constraint": "return_items_positive_quantity_check",
       "def": "CHECK ((quantity > (0)::numeric))",
@@ -4605,6 +4774,60 @@
       "constraint": "supplier_price_observations_price_unit_check",
       "def": "CHECK ((btrim(price_unit) <> ''::text))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_bulk_quantity_check",
+      "def": "CHECK ((bulk_quantity > (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_check",
+      "def": "CHECK ((tote_product_id <> bulk_product_id))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_check1",
+      "def": "CHECK (((reverses_fill_id IS NULL) = (reason IS NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_check2",
+      "def": "CHECK (((reverses_fill_id IS NULL) OR (shortfall_quantity = (0)::numeric)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_gallons_check",
+      "def": "CHECK ((gallons > (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_shortfall_quantity_check",
+      "def": "CHECK ((shortfall_quantity >= (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_totes_check",
+      "def": "CHECK ((totes >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "uncertain_request_clear_check_key",
+      "constraint": "uncertain_request_clear_check_key_signing_key_check",
+      "def": "CHECK ((octet_length(signing_key) = 32))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "uncertain_request_clear_check_key",
+      "constraint": "uncertain_request_clear_check_key_singleton_check",
+      "def": "CHECK (singleton)",
+      "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
       "table": "user_list_settings",
@@ -5187,6 +5410,21 @@
         "id",
         "uploaded_at",
         "sort_order"
+      ]
+    },
+    "delivery_receipt_queue": {
+      "no_default": [
+        "delivery_id",
+        "customer_id",
+        "receipt"
+      ],
+      "with_default": [
+        "id",
+        "status",
+        "attempts",
+        "next_attempt_at",
+        "created_at",
+        "updated_at"
       ]
     },
     "delivery_remainders": {
@@ -6209,6 +6447,54 @@
         "updated_at"
       ]
     },
+    "product_parent_copy_passes": {
+      "no_default": [
+        "txid",
+        "product_id",
+        "parent_event_id"
+      ],
+      "with_default": []
+    },
+    "product_parent_events": {
+      "no_default": [
+        "parent_id",
+        "event_type",
+        "changed_by"
+      ],
+      "with_default": [
+        "id",
+        "affected",
+        "changed_at"
+      ]
+    },
+    "product_parent_members": {
+      "no_default": [
+        "product_id",
+        "parent_id",
+        "added_by"
+      ],
+      "with_default": [
+        "size_role",
+        "added_at",
+        "updated_at"
+      ]
+    },
+    "product_parents": {
+      "no_default": [
+        "name",
+        "product_form",
+        "created_by",
+        "updated_by"
+      ],
+      "with_default": [
+        "id",
+        "use_timings",
+        "parent_version",
+        "is_active",
+        "created_at",
+        "updated_at"
+      ]
+    },
     "product_rate_correction_passes": {
       "no_default": [
         "txid",
@@ -6554,6 +6840,16 @@
         "is_non_returnable"
       ]
     },
+    "retired_uncertain_requests": {
+      "no_default": [
+        "request_key",
+        "retired_by",
+        "reason"
+      ],
+      "with_default": [
+        "retired_at"
+      ]
+    },
     "return_credit_customer_claims": {
       "no_default": [
         "return_id",
@@ -6751,6 +7047,38 @@
         "is_pinned",
         "created_at",
         "updated_at"
+      ]
+    },
+    "tote_fills": {
+      "no_default": [
+        "tote_product_id",
+        "bulk_product_id",
+        "totes",
+        "gallons",
+        "bulk_unit",
+        "bulk_quantity",
+        "bulk_before",
+        "bulk_after",
+        "tote_before",
+        "tote_after",
+        "bulk_ledger_rows",
+        "tote_ledger_rows",
+        "out_transaction_id",
+        "in_transaction_id",
+        "performed_by"
+      ],
+      "with_default": [
+        "id",
+        "shortfall_quantity",
+        "created_at"
+      ]
+    },
+    "uncertain_request_clear_check_key": {
+      "no_default": [
+        "signing_key"
+      ],
+      "with_default": [
+        "singleton"
       ]
     },
     "unit_conversions": {
@@ -7543,6 +7871,27 @@
       "file_size",
       "sort_order"
     ],
+    "delivery_receipt_queue": [
+      "id",
+      "delivery_id",
+      "customer_id",
+      "requested_by",
+      "receipt",
+      "status",
+      "attempts",
+      "next_attempt_at",
+      "claim_token",
+      "claimed_at",
+      "attempt_to",
+      "send_authorized_at",
+      "send_confirmed_token",
+      "last_error",
+      "sent_to",
+      "resend_message_id",
+      "sent_at",
+      "created_at",
+      "updated_at"
+    ],
     "delivery_remainders": [
       "id",
       "original_delivery_id",
@@ -7573,7 +7922,8 @@
       "error_message",
       "idempotency_key",
       "created_by",
-      "created_at"
+      "created_at",
+      "send_lock_key"
     ],
     "external_identities": [
       "id",
@@ -8382,7 +8732,8 @@
       "cost_at_time_cents",
       "pricing_pending",
       "suggested_price",
-      "price_tier_at_sale"
+      "price_tier_at_sale",
+      "vendor"
     ],
     "order_line_allocations": [
       "id",
@@ -8616,7 +8967,8 @@
       "new_value",
       "changed_by",
       "changed_by_name",
-      "changed_at"
+      "changed_at",
+      "parent_event_id"
     ],
     "product_cost_basis": [
       "id",
@@ -8713,6 +9065,53 @@
       "set_by",
       "set_reason",
       "created_at",
+      "updated_at"
+    ],
+    "product_parent_copy_passes": [
+      "txid",
+      "product_id",
+      "parent_event_id"
+    ],
+    "product_parent_events": [
+      "id",
+      "parent_id",
+      "event_type",
+      "reason",
+      "evidence",
+      "before_values",
+      "after_values",
+      "affected",
+      "changed_by",
+      "changed_by_name",
+      "changed_at"
+    ],
+    "product_parent_members": [
+      "product_id",
+      "parent_id",
+      "size_role",
+      "fill_source_product_id",
+      "added_by",
+      "added_at",
+      "updated_at"
+    ],
+    "product_parents": [
+      "id",
+      "name",
+      "nickname",
+      "product_form",
+      "formulation_type",
+      "safener",
+      "generic_epa_registration",
+      "category",
+      "use_timings",
+      "rate_per_acre",
+      "rate_unit",
+      "suggested_rate",
+      "parent_version",
+      "is_active",
+      "created_by",
+      "created_at",
+      "updated_by",
       "updated_at"
     ],
     "product_rate_correction_passes": [
@@ -9098,6 +9497,12 @@
       "created_at",
       "is_non_returnable"
     ],
+    "retired_uncertain_requests": [
+      "request_key",
+      "retired_by",
+      "retired_at",
+      "reason"
+    ],
     "return_credit_customer_claims": [
       "return_id",
       "order_id",
@@ -9319,6 +9724,32 @@
       "linked_entity_type",
       "linked_entity_id",
       "last_escalated_at"
+    ],
+    "tote_fills": [
+      "id",
+      "tote_product_id",
+      "bulk_product_id",
+      "totes",
+      "gallons",
+      "bulk_unit",
+      "bulk_quantity",
+      "bulk_before",
+      "bulk_after",
+      "tote_before",
+      "tote_after",
+      "shortfall_quantity",
+      "bulk_ledger_rows",
+      "tote_ledger_rows",
+      "out_transaction_id",
+      "in_transaction_id",
+      "reverses_fill_id",
+      "reason",
+      "performed_by",
+      "created_at"
+    ],
+    "uncertain_request_clear_check_key": [
+      "singleton",
+      "signing_key"
     ],
     "unit_conversions": [
       "id",

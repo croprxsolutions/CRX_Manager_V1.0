@@ -14,6 +14,8 @@ import {
   ListTodo,
 } from 'lucide-react';
 import { supabase, assertRpcResult } from '../../lib/db';
+import { Sentry } from '../../lib/sentry';
+import { LoadFailedState } from '../ui/EmptyState';
 import { useAuth } from '../../contexts/AuthContext';
 import QuickTaskModal from '../team/QuickTaskModal';
 import type { ActionQueueItem, LinkedEntityType } from '../../types';
@@ -171,12 +173,28 @@ const CATEGORIES: CategoryConfig[] = [
 ];
 
 const DEFAULT_VISIBLE = 5;
+// Example rows the dashboard asks for per group; the true size comes from the server's `counts`.
+const ITEM_LIMIT = 10;
+
+type ActionGroups = Record<string, ActionQueueItem[]>;
+
+/**
+ * How many items a group holds, less the ones dismissed this session. The server sends a true count
+ * per group (H36). Without one (an older server) a full group of examples is a lower bound, shown as
+ * "10+", never as a complete-looking 10.
+ */
+function groupCount(serverCount: number | undefined, loaded: number, dismissed: number): { count: number; atLeast: boolean } {
+  if (typeof serverCount === 'number') return { count: Math.max(serverCount - dismissed, 0), atLeast: false };
+  return { count: loaded - dismissed, atLeast: loaded >= ITEM_LIMIT };
+}
 
 export default function ActionQueue() {
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const [data, setData] = useState<Record<string, ActionQueueItem[]>>({});
+  const [data, setData] = useState<ActionGroups>({});
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [taskModal, setTaskModal] = useState<{ open: boolean; entityType: LinkedEntityType; entityId: string; title: string; priority: 'high' | 'medium' }>({
     open: false, entityType: 'delivery', entityId: '', title: '', priority: 'medium',
@@ -190,13 +208,20 @@ export default function ActionQueue() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
-      const { data: result, error } = await supabase.rpc('get_dashboard_action_items', { p_limit: 10 });
+      const { data: result, error } = await supabase.rpc('get_dashboard_action_items', { p_limit: ITEM_LIMIT });
       if (error) throw error;
-      const parsed = assertRpcResult<Record<string, ActionQueueItem[]>>(result, 'get_dashboard_action_items');
-      setData(parsed);
-    } catch {
+      const { counts: serverCounts, ...groups } = assertRpcResult<ActionGroups & { counts?: Record<string, number> }>(
+        result, 'get_dashboard_action_items');
+      setData(groups as ActionGroups);
+      setCounts(serverCounts ?? {});
+    } catch (err) {
+      // A failed read must not look like "All Clear" (To-Do 10.5, Goal 4).
+      Sentry.captureException(err, { tags: { source: 'fetch', action: 'load_action_queue' } });
       setData({});
+      setCounts({});
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -241,20 +266,32 @@ export default function ActionQueue() {
     );
   }
 
+  if (loadFailed) {
+    return (
+      <div>
+        <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-3">Action Queue</h2>
+        <LoadFailedState title="The action queue could not be loaded" onRetry={fetchData} />
+      </div>
+    );
+  }
+
   const visibleCategories = CATEGORIES
     .map((cat) => {
-      const items = (data[cat.key] || []).filter((item) => !dismissed.has(item.id));
-      return { ...cat, items };
+      const loaded = data[cat.key] || [];
+      const items = loaded.filter((item) => !dismissed.has(item.id));
+      const { count, atLeast } = groupCount(counts[cat.key], loaded.length, loaded.length - items.length);
+      return { ...cat, items, count, plus: atLeast ? '+' : '' };
     })
     .filter((cat) => cat.items.length > 0);
 
-  const totalItems = visibleCategories.reduce((sum, cat) => sum + cat.items.length, 0);
+  const totalItems = visibleCategories.reduce((sum, cat) => sum + cat.count, 0);
+  const totalPlus = visibleCategories.some((cat) => cat.plus) ? '+' : '';
 
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide">
-          Action Queue {totalItems > 0 && <span className="text-xs font-normal ml-1">({totalItems})</span>}
+          Action Queue {totalItems > 0 && <span className="text-xs font-normal ml-1">({totalItems}{totalPlus})</span>}
         </h2>
       </div>
 
@@ -268,7 +305,7 @@ export default function ActionQueue() {
           {visibleCategories.map((cat) => {
             const isExpanded = expanded[cat.key] !== false;
             const visibleItems = isExpanded ? cat.items.slice(0, DEFAULT_VISIBLE) : [];
-            const hasMore = cat.items.length > DEFAULT_VISIBLE;
+            const moreCount = cat.count - visibleItems.length;
 
             return (
               <div key={cat.key} className={`${cat.bg} border ${cat.border} rounded-xl overflow-hidden`}>
@@ -278,7 +315,7 @@ export default function ActionQueue() {
                 >
                   <span className={cat.iconColor}>{cat.icon}</span>
                   <span className={`text-sm font-semibold ${cat.textColor} flex-1`}>
-                    {cat.label} ({cat.items.length})
+                    {cat.label} ({cat.count}{cat.plus})
                   </span>
                   {isExpanded
                     ? <ChevronDown className={`w-4 h-4 ${cat.iconColor}`} />
@@ -328,9 +365,9 @@ export default function ActionQueue() {
                         </button>
                       </div>
                     ))}
-                    {hasMore && (
+                    {moreCount > 0 && (
                       <div className={`text-center text-xs font-medium ${cat.iconColor} py-2`}>
-                        +{cat.items.length - DEFAULT_VISIBLE} more items
+                        {cat.plus ? `${moreCount}+` : `+${moreCount}`} more items
                       </div>
                     )}
                   </div>

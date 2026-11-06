@@ -21,6 +21,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/product_setup_category_fk/, 'Choose a category from the product category list'],
   [/product_setup_name_check/, 'Enter a product name without spaces at either end'],
   [/product_setup_sku_check/, 'Enter a SKU without spaces at either end, or leave it blank'],
+  [/products_sku_unique/, 'Another product already has this SKU'],
+  [/products_container_type_check/, 'Choose a container type: Jug, Drum, Pallet, Mini-Bulk, Shuttle, Bag, Tote, Ea or Jar'],
+  [/products_active_name_unique/, 'Another active product already has this name'],
   [/product_setup_rate_check/, 'Rate Per Acre must be zero or greater'],
   [/product_setup_epa_check/, 'Enter an EPA number like 524-475 or 100-1234-5905. This checks format only'],
   [/product_setup_rei_check/, 'REI (hours) must be zero or greater'],
@@ -34,6 +37,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // The first attempt committed under this key, usually a lost reply followed by an edit.
   [/^IDEMPOTENCY_ARGUMENT_MISMATCH\b/,
    'This attempt was not saved, but an earlier attempt with different details may have saved. Check the record before entering it again'],
+  // KI-27: this stuck request was cleared, so the database refuses to save it now.
+  [/^IDEMPOTENCY_REQUEST_RETIRED\b/,
+   'Nothing was changed. This request was cleared after it got stuck. Check the record, then enter it again as a new request if it is still needed'],
   [/^IDEMPOTENCY_(?:RESULT_INVALID|RECEIPT_MISSING)\b/,
    'Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again'],
   // A completion retried under a fresh key after an earlier attempt already completed the record.
@@ -78,6 +84,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Admin-only since 2026-10-14 (migration 20261027080200).
   [/^COMMISSION_SPLIT_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's default commission split"],
+  // Admin-only since 2026-11-01 (migration 20261111100000).
+  [/^TIER_ADMIN_ONLY\b/i,
+   "Only an admin can set or change a customer's price tier"],
+  [/^CREDIT_LIMIT_ADMIN_ONLY\b/i,
+   "Only an admin can set or change a customer's credit limit"],
+  [/^QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE\b/i,
+   "A booking's tier and planned flag change only by saving the quote"],
   [/^SALESMAN_SCOPE_DENIED\b/i,
    "Sales reps work under their own name: choose yourself as the salesman, or ask an admin to handle another salesman's work"],
   [/^INVOICE_SCOPE_DENIED\b/i,
@@ -227,13 +240,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'An internal error occurred. Please try again.'],
 ];
 
-// The exact reasons 20261010120000 writes after `DELIVERY_INVOICE_EXCEEDS_DELIVERED: `.
+// The exact reasons 20261010120000 (and 20261108160000, typed charge lines) write after `DELIVERY_INVOICE_EXCEEDS_DELIVERED: `.
 const DOC_NUMBER = String.raw`[A-Za-z0-9][A-Za-z0-9-]{0,40}`;
 const QUANTITY = String.raw`\d{1,12}(?:\.\d{1,8})?`;
 const DELIVERY_CAP_REASONS: Array<{ shape: RegExp; labelGroup?: number }> = [
   { shape: new RegExp(`^invoice ${DOC_NUMBER} bills ${QUANTITY} of (.{1,120}), but delivery ${DOC_NUMBER} allows ${QUANTITY}$`), labelGroup: 1 },
   { shape: new RegExp(`^invoice ${DOC_NUMBER} bills (.{1,120}) from an order line delivery ${DOC_NUMBER} did not carry$`), labelGroup: 1 },
-  { shape: new RegExp(`^invoice ${DOC_NUMBER} has a line with no product or a negative quantity; a delivery invoice bills only the products delivery ${DOC_NUMBER} delivered$`) },
+  { shape: new RegExp(`^invoice ${DOC_NUMBER} has a line with no product and no charge type, or a negative quantity; a delivery invoice bills the products delivery ${DOC_NUMBER} delivered, plus typed charges \\(freight, application fee, service, other\\)$`) },
   { shape: new RegExp(`^invoice ${DOC_NUMBER} cannot be posted before delivery ${DOC_NUMBER} is completed$`) },
   { shape: new RegExp(`^invoice ${DOC_NUMBER} names a delivery that does not exist$`) },
 ];
@@ -278,10 +291,10 @@ export function sanitizeError(error: unknown): string {
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;
   }
-  // Setup workbook (20261107080000): a table check refused one product; name it, then explain the check.
+  // Setup save and import (20261107080000, 20261107130000): a table check refused one product; name it, then explain the check.
   const refusedRow = message.match(/^PRODUCT_SETUP_ROW_REFUSED:\s*(.+?):\s+(.+)$/s);
   if (refusedRow) return `Nothing was saved. ${refusedRow[1]}: ${sanitizeError(refusedRow[2])}`;
-  const setupRefusal = message.match(/^(?:PRODUCT_SETUP_STALE|PRODUCT_SETUP_INVALID|PRODUCT_SETUP_DUPLICATE_PRODUCT|PRODUCT_SETUP_ROW_SHAPE_INVALID):\s*(.+)$/s)?.[1];
+  const setupRefusal = message.match(/^(?:PRODUCT_SETUP_STALE|PRODUCT_SETUP_INVALID|PRODUCT_SETUP_DUPLICATE_PRODUCT|PRODUCT_SETUP_ROW_SHAPE_INVALID|PRODUCT_SETUP_DUPLICATE|PRODUCT_SETUP_ROWS_REQUIRED):\s*(.+)$/s)?.[1];
   if (setupRefusal && !CONSTRAINT_PATTERNS.some(([pattern]) => pattern.test(message))) {
     return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }
@@ -344,6 +357,10 @@ export function sanitizeError(error: unknown): string {
   // shapes the database writes, with plain document numbers, quantities and a product label that
   // carries no identifier; anything else gets the generic sentence.
   const deliveryCapDetail = deliveryCapReason(message);
+  if (deliveryCapDetail?.includes(' has a line with no product and no charge type')) {
+    return 'Nothing was changed. Every line on this invoice needs a product, or a charge type (freight, application fee, service or other), and no quantity can be negative'
+      + ` (${deliveryCapDetail.split(' has a line')[0]})`;
+  }
   if (deliveryCapDetail?.includes(' cannot be posted before delivery ')) {
     return `Nothing was posted. This invoice is for one delivery, so it can be posted only after that delivery is completed (${deliveryCapDetail})`;
   }

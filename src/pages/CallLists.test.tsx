@@ -319,6 +319,15 @@ describe('Call Lists adoption workspace', () => {
     expect(profileOptionsChain!.eq).not.toHaveBeenCalledWith('is_active', true);
   });
 
+  it('says how many customers match beyond the rows the database returned', async () => {
+    rpcImplementations.get_call_list_no_recent_contact = async () => ({
+      data: { success: true, rows: [baseRow({ days_since_last_interaction: 35 })], total_count: 250 },
+      error: null,
+    });
+    renderCallLists('/call-lists?list=no-recent-contact');
+    expect(await screen.findByText(/Showing 1 of 1 customers \(the first 1 of 250 matching/)).toBeInTheDocument();
+  });
+
   it('falls back safely from invalid and role-forbidden query values', async () => {
     rpcRows.get_call_list_prepay_prospects = [baseRow({ prior_season_spend_cents: 100000, current_season_prepay_cents: 0 })];
     renderCallLists(`/call-lists?list=unassigned-accounts&min_prior_spend_cents=-5&no_contact_days=not-a-number&stale_quote_days=999999999999999999999&rep=${REP_A}&tier=9&crop=not-a-crop`);

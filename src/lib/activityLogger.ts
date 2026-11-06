@@ -14,8 +14,9 @@ export interface LogActivityParams {
 /**
  * Log an event to the activity_feed table.
  * Call this whenever something important happens in the app.
+ * Returns whether the row was written, for callers that must not proceed unlogged.
  */
-export async function logActivity(params: LogActivityParams) {
+export async function logActivity(params: LogActivityParams): Promise<boolean> {
   try {
     const { error: logErr } = await supabase.from('activity_feed').insert({
       event_type: params.event,
@@ -26,9 +27,11 @@ export async function logActivity(params: LogActivityParams) {
       customer_id: params.customerId || null,
     });
     if (logErr) Sentry.captureException(logErr, { tags: { source: 'activity_logger', action: 'log_activity' } });
+    return !logErr;
   } catch (err) {
     // Activity logging should never break the main flow
     Sentry.captureException(err, { tags: { source: 'activity_logger', action: 'log_activity' } });
+    return false;
   }
 }
 

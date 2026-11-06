@@ -36,6 +36,8 @@ vi.mock('../hooks/usePageMeta', () => ({ usePageMeta: vi.fn() }));
 // Stable toast object — a fresh { toast } each render would change fetchData's
 // identity every render and re-fire its effect forever (skeleton never clears).
 const { stableToast } = vi.hoisted(() => ({ stableToast: { toast: () => {} } }));
+// The exact count the jobs query reports (null = the database sent none).
+const jobsCount = vi.hoisted(() => ({ value: null as number | null }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => stableToast }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
@@ -101,7 +103,7 @@ vi.mock('../lib/db', () => {
   // Plain functions (NOT vi.fn) so vi.clearAllMocks() in beforeEach can't strip the
   // chain's implementations between tests — that leak made later tests see undefined
   // from .select()/.order() and hang on the loading skeleton.
-  const makeChain = (data: unknown[]) => {
+  const makeChain = (data: unknown[], count: number | null = null) => {
     const chain: Record<string, unknown> = {};
     const self = () => chain;
     for (const m of ['select', 'is', 'eq', 'in', 'gte', 'lte', 'or', 'order', 'limit']) {
@@ -115,8 +117,8 @@ vi.mock('../lib/db', () => {
       then: (resolve: (v: { data: unknown[]; error: null }) => unknown) =>
         resolve({ data: from === 0 ? data : [], error: null }),
     });
-    chain.then = (resolve: (v: { data: unknown[]; error: null }) => unknown) =>
-      resolve({ data, error: null });
+    chain.then = (resolve: (v: { data: unknown[]; error: null; count: number | null }) => unknown) =>
+      resolve({ data, error: null, count });
     return chain;
   };
   const dataForTable = (table: string): unknown[] => {
@@ -129,7 +131,7 @@ vi.mock('../lib/db', () => {
   };
   return {
     supabase: {
-      from: (table: string) => makeChain(dataForTable(table)),
+      from: (table: string) => makeChain(dataForTable(table), table === 'jobs' ? jobsCount.value : null),
       // No applicator filter is set in these tests, so get_dispatch_board_jobs is
       // never called; a benign default keeps the mock total.
       rpc: vi.fn().mockResolvedValue({ data: [], error: null }),
@@ -159,6 +161,19 @@ function renderDispatchBoard() {
 describe('DispatchBoard (dark field/tablet view)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    jobsCount.value = null;
+  });
+
+  it('says how many jobs match when the database holds more than it returned', async () => {
+    jobsCount.value = 742;
+    renderDispatchBoard();
+    expect(await screen.findByText(new RegExp(`Showing the newest ${JOBS.length} of 742 matching jobs`))).toBeInTheDocument();
+  });
+
+  it('adds no count line when every matching job is shown', async () => {
+    renderDispatchBoard();
+    expect(await screen.findByText('FJOB-002')).toBeInTheDocument();
+    expect(screen.queryByText(/matching jobs/)).not.toBeInTheDocument();
   });
 
   it('renders the two nav groups: Jobs (View Map / View List) and Dispatch (Dispatch Jobs / View Dispatched List)', async () => {

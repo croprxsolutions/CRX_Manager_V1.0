@@ -2277,6 +2277,8 @@ function mintSingleCommitCarry(root, options, facts, mode, carryExtra = {}) {
 const POST_APPLY_EDITABLE_RE = /^(?:docs\/reference\/migrations\.d\/[^/]+\.md|docs\/changelog\.d\/[^/]+\.md|docs\/manual\/KNOWN_ISSUES\.md|\.claude\/schema-registry\.json)$/;
 const POST_APPLY_ADDABLE_RE = /^docs\/(?:reference\/migrations\.d|changelog\.d)\/[^/]+\.md$/;
 const POST_APPLY_ALLOWLIST = "scripts/db-invariant-sweeps/allowlist.json";
+const POST_APPLY_CONTRACTS = "src/lib/rpcContracts.test.ts";
+const AWAITING_REGEN_OPEN = "const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([";
 const REKEYED_KEY_RE = /^(.+)#([0-9a-f]{12})$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -2330,6 +2332,33 @@ export function allowlistRekeyProblem(before, after) {
   return null;
 }
 
+// The registry refresh after an apply requires one test edit (regen-schema-registry
+// Step 7): this PR's own migration timestamps join MIGRATIONS_AWAITING_TYPE_REGENERATION.
+// null when that is the whole change to rpcContracts.test.ts (KI-27 retro, 2026-11-05).
+export function awaitingRegenProblem(before, after, prMigrations = []) {
+  const own = new Set(prMigrations.map((sql) => /^supabase\/migrations\/(\d{14})_/.exec(sql)?.[1]).filter(Boolean));
+  const lines = (text) => text.replace(/\r\n/g, "\n").split("\n");
+  const block = (all) => {
+    const start = all.indexOf(AWAITING_REGEN_OPEN);
+    return start < 0 ? null : { start, end: all.indexOf("]);", start) };
+  };
+  const oldLines = lines(before);
+  const newLines = lines(after);
+  const oldBlock = block(oldLines);
+  const newBlock = block(newLines);
+  const refusal = `${POST_APPLY_CONTRACTS} changed more than adding this PR's migration timestamps to MIGRATIONS_AWAITING_TYPE_REGENERATION`;
+  if (!oldBlock || !newBlock || oldBlock.end < 0 || newBlock.end < 0) return refusal;
+  const oldEntries = new Set(oldLines.slice(oldBlock.start + 1, oldBlock.end));
+  let added = 0;
+  const kept = newLines.filter((line, i) => {
+    const stamp = /^ {2}'(\d{14})',$/.exec(line)?.[1];
+    const isAddition = i > newBlock.start && i < newBlock.end && stamp && own.has(stamp) && !oldEntries.has(line);
+    if (isAddition) added += 1;
+    return !isAddition;
+  });
+  return added > 0 && kept.join("\n") === oldLines.join("\n") ? null : refusal;
+}
+
 // null when `entries` (gitChangedEntries of reviewed head → HEAD) is only
 // post-apply paperwork, otherwise why not. `readFile` is as in restampProblem.
 // `prMigrations` lists the `supabase/migrations/*.sql` paths the reviewed PR adds:
@@ -2354,6 +2383,12 @@ export function postApplyProblem({ entries, readFile, prMigrations = [] }) {
       const after = readFile("new", file);
       if (before === null || after === null) return `${file} could not be read`;
       const problem = allowlistRekeyProblem(Buffer.from(before, "latin1").toString("utf8"), Buffer.from(after, "latin1").toString("utf8"));
+      if (problem) return problem;
+    } else if (file === POST_APPLY_CONTRACTS) {
+      const before = readFile("old", file);
+      const after = readFile("new", file);
+      if (before === null || after === null) return `${file} could not be read`;
+      const problem = awaitingRegenProblem(before, after, prMigrations);
       if (problem) return problem;
     } else if (!POST_APPLY_EDITABLE_RE.test(file)) {
       return `${file} is not post-apply paperwork`;

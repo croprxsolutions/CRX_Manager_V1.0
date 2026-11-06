@@ -26,6 +26,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from '../lib/db';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { localToday } from '../lib/dateUtils';
 import { formatExactUSD } from '../lib/money';
 import { lookupEpaRegistration } from '../lib/epaLookupClient';
@@ -476,7 +477,8 @@ export default function ProductDetail() {
       toast('error', 'Could not load use timings. Refresh before changing them.');
     });
     // Vendor and manufacturer remain free-text choices.
-    supabase.from('products').select('vendor, manufacturer').then(({ data, error }) => {
+    // Every product's choices, page by page (Goal 4): one read stops silently at 1000 rows.
+    void fetchAllRows((from, to) => pageWithList(supabase.from('products').select('id, vendor, manufacturer', { count: 'exact' }).order('id').range(from, to))).then(({ data, error }) => {
       if (error) { Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_product_options' } }); return; }
       if (!data) return;
       const vends = [...new Set(data.map((p) => p.vendor).filter(Boolean) as string[])].sort();

@@ -497,7 +497,7 @@ describe('CustomerDetail stale whole-record save', () => {
 
     renderDetail();
     await screen.findByDisplayValue('Original Farm');
-    fireEvent.click(screen.getByRole('button', { name: 'history' }));
+    fireEvent.click(screen.getByRole('button', { name: 'History', expanded: false }));
 
     const row = (await screen.findByText('Roundup')).closest('tr')!;
     expect(row).toHaveTextContent(String(total));
@@ -522,7 +522,7 @@ describe('CustomerDetail stale whole-record save', () => {
 
     renderDetail();
     await screen.findByDisplayValue('Original Farm');
-    fireEvent.click(screen.getByRole('button', { name: 'financials' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Financials', expanded: false }));
     expect(await screen.findByText('Not available')).toBeInTheDocument();
     expect(screen.queryByText('Credit Utilization')).not.toBeInTheDocument();
     expect(screen.getByText('Outstanding').parentElement?.textContent).not.toContain('$');
@@ -540,7 +540,7 @@ describe('CustomerDetail stale whole-record save', () => {
 
     renderDetail();
     await screen.findByDisplayValue('Original Farm');
-    fireEvent.click(screen.getByRole('button', { name: 'financials' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Financials', expanded: false }));
     expect(await screen.findByText('Financials could not be loaded. Reload the page to try again.')).toBeInTheDocument();
     expect(screen.queryByText('Outstanding')).not.toBeInTheDocument();
   });
@@ -570,7 +570,7 @@ describe('CustomerDetail stale whole-record save', () => {
 
     renderDetailWithCustomerSwitch();
     await screen.findByDisplayValue('Original Farm');
-    fireEvent.click(screen.getByRole('button', { name: 'financials' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Financials', expanded: false }));
     expect(await screen.findByText('$1,234.00')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Jump to customer 2' }));
@@ -927,6 +927,29 @@ describe('CustomerDetail stale whole-record save', () => {
     }
   });
 
+  it('a sales rep sees the price tier and credit limit read-only; an admin can change them (Mason 2026-11-01)', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') return customerQuery(() => original);
+      return query({ data: [], error: null });
+    });
+    mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep One' };
+    try {
+      const { unmount } = renderDetail();
+      await screen.findByDisplayValue('Original Farm');
+      expect(screen.getByLabelText('Pricing Tier')).toBeDisabled();
+      expect(screen.getByLabelText('Credit Limit ($)')).toBeDisabled();
+      expect(screen.getByText(/only an admin can change a customer.s price tier and credit limit/i)).toBeInTheDocument();
+      unmount();
+    } finally {
+      mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' };
+    }
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    expect(screen.getByLabelText('Pricing Tier')).toBeEnabled();
+    expect(screen.getByLabelText('Credit Limit ($)')).toBeEnabled();
+    expect(screen.queryByText(/only an admin can change a customer.s price tier and credit limit/i)).not.toBeInTheDocument();
+  });
+
   it('restores the create-form defaults on that jump, not an empty form', async () => {
     // The clear above went too far in its first revision: it reset to `{}`, which
     // drops the defaults `useState` seeds a fresh /customers/new with. The form
@@ -1123,7 +1146,7 @@ describe('CustomerDetail tab loads bind to a customer, not only to call order', 
 
     renderDetailWithCustomerSwitch();
     await screen.findByDisplayValue('Original Farm');
-    fireEvent.click(screen.getByRole('button', { name: 'timeline' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline', expanded: false }));
     expect(await screen.findByText('Original Farm timeline entry')).toBeInTheDocument();
 
     await logAnInteraction();
@@ -1150,7 +1173,7 @@ describe('CustomerDetail tab loads bind to a customer, not only to call order', 
 
     renderDetail();
     await screen.findByDisplayValue('Original Farm');
-    fireEvent.click(screen.getByRole('button', { name: 'timeline' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline', expanded: false }));
 
     // That first read is still open; log a call, whose refresh answers immediately.
     await logAnInteraction();
@@ -1159,6 +1182,28 @@ describe('CustomerDetail tab loads bind to a customer, not only to call order', 
     slowFirstRead.open();
     await waitFor(() => expect(screen.getByText('customer-1 timeline including the call')).toBeInTheDocument());
     expect(screen.queryByText('customer-1 timeline before the call')).not.toBeInTheDocument();
+  });
+
+  it('lets two open sections load side by side without one cancelling the other', async () => {
+    // One page, several sections: opening Quotes while the timeline read is still
+    // out must not count as a newer load of the timeline and strand it on a spinner.
+    const slowTimeline = openGate();
+    installTables(async (customerId) => {
+      await slowTimeline.reached;
+      return { data: timelineRow(`${customerId} timeline entry`), error: null };
+    });
+
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline', expanded: false }));
+    await screen.findByText('Loading timeline...');
+    fireEvent.click(screen.getByRole('button', { name: 'Quotes', expanded: false }));
+    expect(screen.getByRole('button', { name: 'Timeline', expanded: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Quotes', expanded: true })).toBeInTheDocument();
+
+    slowTimeline.open();
+    expect(await screen.findByText('customer-1 timeline entry')).toBeInTheDocument();
+    expect(screen.queryByText('Loading timeline...')).not.toBeInTheDocument();
   });
 
   it('does not let the refused refresh strand the open customer behind a spinner', async () => {
@@ -1181,7 +1226,7 @@ describe('CustomerDetail tab loads bind to a customer, not only to call order', 
 
     renderDetailWithCustomerSwitch();
     await screen.findByDisplayValue('Original Farm');
-    fireEvent.click(screen.getByRole('button', { name: 'timeline' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline', expanded: false }));
     expect(await screen.findByText('Original Farm timeline entry')).toBeInTheDocument();
 
     await logAnInteraction();
@@ -1241,7 +1286,7 @@ describe("CustomerDetail Financials tab uses Chicago's date for the aging", () =
 
     renderDetail();
     await screen.findByDisplayValue('Original Farm');
-    fireEvent.click(screen.getByRole('button', { name: 'financials' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Financials', expanded: false }));
     expect(await screen.findByText('$1,234.00')).toBeInTheDocument();
     expect(agingDates).toEqual(['2026-10-20']);
   });

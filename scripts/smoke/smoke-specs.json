@@ -7,10 +7,90 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "get_orders_page": {
+      "chain": "smoke-goal4-orders-page.sql",
+      "area": ["regression"],
+      "description": "REQUIRES 20261116120000. Goal 4 Orders list page, read only: as the oldest active admin under the authenticated role, get_orders_page for the current season returns total_count and total_price_cents equal to the table (each order rounded to whole cents), every page of 7 together lists each season order once in (order_date DESC, id) order, and a search for an order number finds it; an active driver, when one exists, sees no order.",
+      "covers": ["get_orders_page"]
+    },
+    "records_replay_binding_batch4d": {
+      "chain": "smoke-records-replay-binding-batch4d.sql",
+      "container_only": true,
+      "container_prover": "prove-records-replay-binding-batch4d-real-schema.mjs",
+      "description": "CONTAINER ONLY. After batch 4c, proves the 25 records operations require a key, preserve pre-replay checks, and bind any written receipt to its actor and full request. Uses invented records and rolls back.",
+      "covers": ["admin_update_profile", "batch_approve_blend_tickets", "batch_reject_blend_tickets", "bulk_create_label_drafts", "commit_label_draft", "create_label_draft", "create_blend_ticket", "save_blend_ticket", "save_blend_ticket_fields", "dismiss_watchdog_flag", "delete_vendor", "reactivate_vendor", "save_vendor", "link_fields_to_parent", "unlink_field_from_parent", "review_customer_fact", "supersede_customer_fact", "save_blend_recipe", "save_field", "save_field_crop_history", "save_field_geometry", "save_field_polygons", "set_application_record_lots", "set_field_boundary", "set_field_override_acres"],
+      "area": ["idempotency", "security", "regression"]
+    },
+    "get_dispatch_board_jobs": {
+      "chain": "smoke-goal4-list-totals.sql",
+      "area": ["regression"],
+      "description": "REQUIRES 20261114080000. Goal 4 list totals, read only: as the oldest active admin, each of the five call lists returns success, at most 200 rows and a total_count that is at least the rows shown (equal when fewer than 200); for the applicator with the most jobs, every dispatch board row carries one _total_count, the board shows min(total, 500) rows in (job_date, id) DESC order and no row carries total_cost_cents; an active driver, when one exists, is refused every call list.",
+      "covers": [
+        "get_dispatch_board_jobs",
+        "get_call_list_prepay_prospects",
+        "get_call_list_no_recent_contact",
+        "get_call_list_stale_quotes",
+        "get_call_list_lapsed_products",
+        "get_call_list_unassigned_accounts"
+      ]
+    },
+    "get_receiving_log": {
+      "chain": "smoke-goal4-paged-list-reads.sql",
+      "area": ["regression", "inventory"],
+      "description": "REQUIRES 20261113110000. Goal 4 paged reads, read only: as the oldest active admin, the receiving log, the watchdog list (dismissed included) and the fields map each return no repeated id in one read, and pages of 50 return exactly the one-shot read in the same order; an active driver, when one exists, is still refused the receiving log and the watchdog list.",
+      "covers": [
+        "get_receiving_log",
+        "get_watchdog_flags",
+        "get_fields_with_geojson"
+      ]
+    },
+    "create_product_with_parent": {
+      "chain": "smoke-product_parents.sql",
+      "container_prover": "prove-product-parents-real-schema.mjs",
+      "description": "REQUIRES 20261108120000. Product parents (PAR-1): anon cannot execute the twelve public parent functions; on invented parents an admin creates a parent with its first size (a same-key retry answers the same), adds a bulk size whose spaced EPA number is stored normalized, edits the nickname and is refused a no-change edit; a direct browser edit of a grouped size category is refused PRODUCT_PARENT_VALUE; unlocked the parent rates reach every size at the previewed prices, locked a correction with a reason does too and logs a corrected rate event per size; a size moves to another parent at its previewed prices with reason and evidence; the identity correction saves; both reads find the parents with no cost or price; every copied size change is a parent_copy history entry; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED.",
+      "covers": [
+        "create_product_with_parent",
+        "add_product_size",
+        "update_product_parent",
+        "preview_parent_rates",
+        "set_parent_rates",
+        "correct_parent_rates",
+        "preview_move_product_size",
+        "move_product_size",
+        "preview_product_parent_identity_correction",
+        "correct_product_parent_identity",
+        "get_product_parents",
+        "search_product_parents",
+        "normalize_product_category",
+        "write_product_change_history",
+        "guard_product_parent_values",
+        "guard_product_parent_timings"
+      ],
+      "area": [
+        "pricing",
+        "security"
+      ]
+    },
+    "fill_tote_from_bulk": {
+      "chain": "smoke-tote_fill_from_bulk.sql",
+      "container_prover": "prove-tote-fill-real-schema.mjs",
+      "description": "REQUIRES 20261117130000. Tote fill from bulk (BLK-1a): anon cannot execute the three public functions; on an invented fertilizer parent an admin previews one 265-gal tote from 1,000 gal (nothing written), fills it (two signed ledger rows, one tote_fills row, no cost or price change), a same-key retry replays, the undo restores both counts and replays, a second undo is refused TOTE_FILL_ALREADY_REVERSED; an active non-admin profile is refused ADMIN_REQUIRED.",
+      "covers": [
+        "fill_tote_from_bulk",
+        "preview_tote_fill",
+        "reverse_tote_fill",
+        "_tote_fill_preview",
+        "_tote_fill_liquid_oz"
+      ],
+      "area": [
+        "inventory",
+        "security"
+      ]
+    },
     "apply_product_setup": {
       "chain": "smoke-product_setup_workbook.sql",
       "container_prover": "prove-product-setup-workbook-real-schema.mjs",
-      "description": "REQUIRES 20261107080000. The product setup workbook (WP-PM-11a-2): the bodies of get_product_setup_workbook, preview_product_rates, apply_product_setup and the fingerprint helper are pinned and anon cannot execute them; on an invented product an admin downloads it, previews a rate change, saves a setup change and a same-key replay answers the same, and the old downloaded row is then refused PRODUCT_SETUP_STALE; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED by all three functions and a signed-out visitor is refused EXECUTE.",
+      "description": "REQUIRES 20261107080000 and 20261107130000. The product setup workbook (WP-PM-11a-2): the bodies of get_product_setup_workbook, preview_product_rates, apply_product_setup (20261107130000), its renamed update body _apply_product_setup_update and the fingerprint helper are pinned, no signed-in user can call the update body directly and anon cannot execute them; on an invented product an admin downloads it, previews a rate change, saves a setup change and a same-key replay answers the same, and the old downloaded row is then refused PRODUCT_SETUP_STALE; an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED by all three functions and a signed-out visitor is refused EXECUTE.",
       "covers": [
         "apply_product_setup",
         "get_product_setup_workbook",
@@ -20,6 +100,14 @@
         "security",
         "pricing"
       ]
+    },
+    "replay_binding_batch4c": {
+      "chain": "smoke-replay-binding-batch4c.sql",
+      "container_only": true,
+      "container_prover": "prove-replay-binding-batch4c-real-schema.mjs",
+      "description": "CONTAINER ONLY - run via scripts/smoke/prove-replay-binding-batch4c-real-schema.mjs, never through run-smoke.mjs against the live database: duplicate_quote, create_delivery_with_items and create_followup_delivery draw customer-visible quote and delivery numbers from non-transactional sequences that a rollback does not return (the prover reports which document-number sequences the chain moved), and the chain plants [SMOKE] customers, products, orders, purchase orders, deliveries, cycle counts and blend tickets, which the LIVE-DATA GUARD refuses. Proves the twelve batch 4c functions replay a stored receipt only for the same person and the exact same request (KNOWN_ISSUES KI-10 batch 4c).",
+      "covers": ["submit_purchase_order", "cancel_purchase_order", "delete_purchase_order", "duplicate_quote", "edit_delivery", "reassign_delivery", "batch_reschedule_deliveries", "confirm_delivery", "create_delivery_with_items", "create_followup_delivery", "cancel_cycle_count", "reverse_blend_ticket_approval"],
+      "area": ["billing", "inventory", "idempotency", "security"]
     },
     "order_replay_binding_batch4b": {
       "chain": "smoke-order-replay-binding-batch4b.sql",
@@ -554,7 +642,7 @@
       "covers": [
         "delivery_signature_storage_access"
       ],
-      "description": "Delivery-signature Storage access is private and scoped to the delivery path and authorized actor; the shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
+      "description": "REQUIRES 20261116100000. Delivery-signature Storage access is private: an old fixed-path signature is readable only when its delivery records it, by an admin, a sales rep or the delivery's active assigned driver; nobody signed in can write, replace or delete one. The shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
       "area": [
         "security",
         "inventory"
@@ -949,6 +1037,19 @@
         "billing"
       ]
     },
+    "tiers_credit_limits_admin_only": {
+      "chain": "smoke-tiers-credit-limits-admin-only.sql",
+      "description": "Migration 20261111100000 (Mason 2026-11-01, permissions): a sales rep's direct update of a customer's price tier is refused TIER_ADMIN_ONLY; a rep's save_customer that changes the credit limit is refused CREDIT_LIMIT_ADMIN_ONLY, while re-sending the unchanged tier and limit is accepted; a rep's new customer on the Settings Default Tier with no limit is accepted and one with a limit is refused; an admin changes both; a direct API update of a booking's tier is refused QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE even for an admin, while a direct update of header notes still works; a rep's direct insert of a tier-3 or already-planned booking is refused. Fails on the old bodies at A, B, D, F and G. Terminal rollback.",
+      "covers": [
+        "guard_customer_rep_edit_20261013",
+        "guard_quote_direct_tier_planned_20261107",
+        "save_customer"
+      ],
+      "area": [
+        "security",
+        "regression"
+      ]
+    },
     "invoice_resave_keeps_cost": {
       "chain": "smoke-invoice-resave-keeps-cost.sql",
       "description": "Migration 20261106140000 (#13): a $36.65 draft invoice delivered from a booking at a $6.00 cost; after the product's cost rises to $8.00 (above the $7.33 price) through the governed pricing path, re-saving the draft with only a note changed is accepted and keeps the $6.00 invoiced cost and $36.65 total (it was refused below cost); re-saving it with the price lowered to $5.00, with the saved line sent twice, with the line lowered to 3 gal and later raised to 4 gal, or with the line repriced to $9.00 and lowered back to $7.33 is still refused by the below-cost check; after a second cost rise to $10.00, a note-only re-save keeps the $9.00 line and its cost, and repricing it to $9.50 is refused. Terminal rollback.",
@@ -1320,6 +1421,19 @@
       ],
       "area": [
         "billing"
+      ]
+    },
+    "generate_rup_sales_records": {
+      "chain": "smoke-rup-records-require-posted-invoice.sql",
+      "container_prover": "prove-rup-records-require-posted-invoice-real-schema.mjs",
+      "description": "KI-05 (REQUIRES 20261110140000): the live body carries the RUP_INVOICE_NOT_POSTED check and the grants are unchanged; an active admin calling it directly on a [SMOKE] draft invoice with an RUP line is refused RUP_INVOICE_NOT_POSTED and nothing is written (no register row, no idempotency receipt), and the same admin's direct insert into rup_sales_records for the draft is refused by the new table trigger; post_invoice as the signed-in admin still posts the same invoice and writes exactly one compliant register row; a direct call on the posted invoice is let through and returns 0 (dedup).",
+      "covers": [
+        "generate_rup_sales_records",
+        "post_invoice"
+      ],
+      "area": [
+        "billing",
+        "security"
       ]
     },
     "dispatch_job_locations": {
@@ -1865,6 +1979,32 @@
       "area": [
         "security"
       ]
+    },
+    "delivery_invoice_charge_lines": {
+      "chain": "smoke-delivery-invoice-charge-lines.sql",
+      "description": "Migration 20261108160000 (billing plan M1): on a completed delivery's invoice, a $45.00 freight charge saved through save_invoice is accepted and the invoice posts at the product total + $45.00 to the cent; a line with no product and no charge type is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; a product the delivery didn't carry is still refused DELIVERY_INVOICE_EXCEEDS_DELIVERED; one more stored quantity tick on the delivered product is still refused. Fails on the old body at A and D. Terminal rollback.",
+      "covers": [
+        "_delivery_invoice_overbilling",
+        "enforce_delivery_invoice_within_delivered",
+        "save_invoice",
+        "post_invoice"
+      ],
+      "area": [
+        "billing",
+        "regression"
+      ]
+    },
+    "retire_uncertain_request": {
+      "chain": "smoke-uncertain-request-clear-check.sql",
+      "description": "REQUIRES 20261111120000. KI-27 server check, and retire, before a staff member clears their own stuck request. Self-seeding (needs one active admin profile; everything is rolled back): the function and receipt-guard bodies are pinned, only authenticated can execute the function and no client role reaches either new table; a key recorded under its own operation is safe (expired too) and one under another operation is not; an unrecorded key needs two checks 15+ minutes apart by server time in a token signed for that exact request (no, forged, borrowed and future tokens start a new wait; 5 minutes refused, 16 minutes safe, then retired); a batch with a row saved under adjust_inventory is recorded and a row under another operation or not ending in a UUID is not; after a safe answer the database refuses a later save of the request, of any batch row under it (any ending) and of an expired key, while an unrelated key still saves and a retired request with a live receipt still replays (allocate_payment's claim row included); an active non-admin staff member (when one exists) is answered for their own key and refused another user's; a service profile (when one exists), another user's key, a row key, a wrong idempotency key and a signed-out session are refused. The in-progress answer needs two sessions and is proven on the local test database.",
+      "covers": ["retire_uncertain_request"],
+      "area": ["idempotency", "regression"]
+    },
+    "sale_line_vendor": {
+      "chain": "smoke-sale-line-vendor.sql",
+      "description": "Migration 20261118110000 (billing plan M3): a new order line is filled from the product's preferred vendor; a line created with a vendor keeps it; a line's vendor changed on the sale reaches its invoice and doesn't touch the product; an older line with no vendor invoices with the preferred vendor; a re-save that sends no vendor keeps it and one that sends a vendor changes it; a product with no preferred vendor stays blank; only the vendor column is open to UPDATE; a product swap on a line takes the new product's preferred vendor unless the same write names one. Terminal rollback.",
+      "covers": ["_fill_order_line_vendor", "_fill_invoice_line_vendor", "save_invoice", "complete_delivery"],
+      "area": ["billing", "regression"]
     }
   }
 }

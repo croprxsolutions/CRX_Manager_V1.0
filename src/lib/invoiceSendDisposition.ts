@@ -24,16 +24,17 @@ export function assertInvoiceSendDisposition(
   }
 }
 
-/** Re-read the server-owned gate immediately before every invoice email send. */
-export async function assertInvoiceSendable(invoiceId: string): Promise<void> {
+/** Re-read the server-owned gate immediately before every invoice email send; returns the live version (updated_at). */
+export async function assertInvoiceSendable(invoiceId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from('invoices')
-    .select('send_disposition,status,deleted_at')
+    .select('send_disposition,status,deleted_at,updated_at')
     .eq('id', invoiceId)
     .maybeSingle();
   if (error) throw error;
-  const row = data as { send_disposition?: unknown; status?: unknown; deleted_at?: unknown } | null;
+  const row = data as { send_disposition?: unknown; status?: unknown; deleted_at?: unknown; updated_at?: string | null } | null;
   assertInvoiceSendDisposition(row?.send_disposition, row?.status, row?.deleted_at);
+  return row?.updated_at ?? null;
 }
 
 /** Proof-of-application notices are operational records, not invoice emails. */

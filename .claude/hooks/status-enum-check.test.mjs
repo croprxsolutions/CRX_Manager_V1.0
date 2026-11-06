@@ -56,10 +56,11 @@ function runHook(toolName, filePath, toolInput) {
   });
 }
 function isDeny(r) { return r.stdout.includes('"permissionDecision":"deny"'); }
-// Allow-side assertions must be AFFIRMATIVE: a crashed hook produces empty
-// stdout, and `!isDeny` would read that as an allow (CodeRabbit PR #489).
+// Allow-side assertions must be AFFIRMATIVE: a crashed hook also produces empty
+// stdout, so a pass needs a clean exit 0 AND no decision printed (a passing
+// guard stays silent rather than printing "allow", which would pre-approve).
 function isAllow(r) {
-  return !r.error && r.status === 0 && r.stdout.includes('"permissionDecision":"allow"');
+  return !r.error && r.status === 0 && !r.stdout.includes('"permissionDecision"');
 }
 
 const CRLF = (s) => s.replace(/\n/g, "\r\n");

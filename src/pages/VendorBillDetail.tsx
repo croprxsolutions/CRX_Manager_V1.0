@@ -43,6 +43,7 @@ import { centsToDollarInput, formatCents as fmt } from '../lib/money';
 import { getIdempotencyMismatchResult } from '../lib/idempotency';
 import { Sentry } from '../lib/sentry';
 import type { VendorBill, VendorPayment } from '../types';
+import ClearExpiredIntentButton from '../components/ClearExpiredIntentButton';
 
 const statusVariant: Record<string, BadgeVariant> = {
   unpaid: 'warning',
@@ -999,6 +1000,7 @@ export default function VendorBillDetail() {
                 : paymentCleanupFailed
                 ? 'This payment was recorded once. Browser cleanup failed; retry this same payment unchanged. If it stays locked after reloading, report it before recording another payment on this device.'
                 : 'This saved payment request needs reconciliation before another can be recorded. Retry this exact payment unchanged.'}
+              <ClearExpiredIntentButton intent={paymentIntent} operation="record_vendor_payment" />
             </div>
           )}
 

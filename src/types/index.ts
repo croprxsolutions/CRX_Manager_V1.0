@@ -475,7 +475,9 @@ export interface ProductVendor {
 export interface ProductChangeHistoryEntry {
   id: number;
   product_id: string;
-  change_type: 'created' | 'updated';
+  /** parent_copy: a field a parent write copied onto this size (PAR-1); parent_event_id names the write. */
+  change_type: 'created' | 'updated' | 'parent_copy';
+  parent_event_id?: number | null;
   field_name: string | null;
   old_value: string | null;
   new_value: string | null;
@@ -1089,6 +1091,8 @@ export interface OrderItem {
   /** Tier (1-3) in effect when the line was written; NULL = unknown (older lines). Stamped by a
    * trigger (20261027060000); never written by the app. Optional until the screens select it. */
   price_tier_at_sale?: 1 | 2 | 3 | null;
+  /** Vendor for this sale line (20261118110000); a trigger fills it from the product's preferred vendor. */
+  vendor?: string | null;
   actual_rate: number | null;
   rate_unit: string | null;
   acres: number | null;
@@ -4151,6 +4155,8 @@ export interface EmailLog {
   status: 'pending' | 'sent' | 'failed' | 'bounced';
   error_message: string | null;
   idempotency_key: string | null;
+  /** Which email this row sends; at most one pending row per value (20261110110000). */
+  send_lock_key: string | null;
   created_by: string | null;
   created_at: string;
 }

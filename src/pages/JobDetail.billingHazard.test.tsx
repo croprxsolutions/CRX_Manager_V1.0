@@ -106,7 +106,7 @@ vi.mock('../lib/criticalAction', () => ({
 }));
 vi.mock('../lib/dateUtils', async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
-  return { ...actual, localToday: () => '2026-08-19' };
+  return { ...actual, todayInBusinessTz: () => '2026-08-19' };
 });
 
 import { Sentry } from '../lib/sentry';
@@ -477,7 +477,8 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     // Several inputs legitimately display '' — pick the SELECT whose options carry the
     // stock units and whose current value is the blank one.
     const unitSelect = screen.getAllByRole('combobox').find((s) => {
-      const sel = s as HTMLSelectElement;
+      if (!(s instanceof HTMLSelectElement)) return false; // the page also holds search pickers
+      const sel = s;
       return sel.value === '' && Array.from(sel.options).some((o) => o.value === 'Lb');
     }) as HTMLSelectElement;
     expect(unitSelect).toBeTruthy();
@@ -568,18 +569,13 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
         ...HAZARD_CHEM, quantity: 0, unit: 'Lb', rate_per_acre: 0, rate_unit: 'Lb/ac',
         cost_per_unit_cents: 0, price_per_unit_cents: 0,
       }, 1);
-      const locations = await waitFor(() => {
-        const button = screen.getAllByRole('button').find((entry) => /^locations/i.test(entry.textContent?.trim() || ''));
-        if (!button) throw new Error('Locations tab not found');
-        return button;
-      });
-      fireEvent.click(locations);
+      // One page (Style D): the Fields section is always on screen, no tab to open.
       const acresInput = await waitFor(() => {
         const label = screen.getAllByText('Acres').find((entry) => entry.parentElement?.querySelector('input'));
         const input = label?.parentElement?.querySelector('input');
         if (!input) throw new Error('Field acreage input not found');
         return input;
-      });
+      }, { timeout: 15000 });
       fireEvent.change(acresInput, { target: { value: acreage } });
       expect(acresInput.value).toBe(acreage);
       const buttons = await screen.findAllByRole('button', { name: /save/i }, { timeout: 15000 });
@@ -765,9 +761,9 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     expect(args.p_fields[0].acres_to_treat).toBe(0);
   }, 30000);
 
-  /** Mount on the Locations tab with one reloaded 1.5 pt/ac / 150 pt line over 100 acres,
-   *  carrying whatever `driver` the database returned, then double the acreage and move to
-   *  the Chemicals tab. Returns the spinbutton values as they stand after the change. */
+  /** Mount with one reloaded 1.5 pt/ac / 150 pt line over 100 acres, carrying whatever
+   *  `driver` the database returned, then double the acreage. Fields and Chemicals share one
+   *  page. Returns the spinbutton values as they stand after the change. */
   async function reloadLineAndDoubleAcres(driver: 'rate' | 'qty' | null) {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'jobs') {
@@ -788,7 +784,7 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
       </MemoryRouter>,
     );
 
-    // Double the acreage on the Locations tab: 100 → 200.
+    // Double the acreage in the Fields section: 100 → 200.
     const acresInput = await waitFor(() => {
       const found = screen.getAllByRole('spinbutton')
         .find((el) => (el as HTMLInputElement).value === '100');
@@ -797,9 +793,7 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     }, { timeout: 15000 });
     fireEvent.change(acresInput, { target: { value: '200' } });
 
-    // Move to the Chemicals tab, where the rate and quantity inputs live.
-    const chemTab = screen.getAllByRole('button').find((b) => /chemical/i.test(b.textContent || ''));
-    fireEvent.click(chemTab as HTMLElement);
+    // The Chemicals section's rate and quantity inputs are on the same page.
     await waitFor(() => {
       expect(screen.getAllByRole('spinbutton').length).toBeGreaterThan(2);
     }, { timeout: 15000 });
@@ -840,12 +834,6 @@ describe('JobDetail — billing-hazard guard is wired, not just implemented', ()
     // Database driver='rate' → acreage change → the payload save_job receives carries
     // driver 'rate' and the re-derived quantity, so the next reload knows the side again.
     mountWith({ ...HAZARD_CHEM, quantity: 150, unit: 'pt', rate_per_acre: 1.5, rate_unit: 'pt/ac', driver: 'rate' });
-    const locTab = await waitFor(() => {
-      const b = screen.getAllByRole('button').find((x) => /^locations/i.test((x.textContent || '').trim()));
-      if (!b) throw new Error('Locations tab not found');
-      return b;
-    }, { timeout: 15000 });
-    fireEvent.click(locTab as HTMLElement);
     const acresInput = await waitFor(() => {
       const found = screen.getAllByRole('spinbutton')
         .find((el) => (el as HTMLInputElement).value === '100');

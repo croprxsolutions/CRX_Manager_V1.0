@@ -2943,6 +2943,94 @@ export type Database = {
           },
         ]
       }
+      delivery_receipt_queue: {
+        Row: {
+          attempt_to: string | null
+          attempts: number
+          claim_token: string | null
+          claimed_at: string | null
+          created_at: string
+          customer_id: string
+          delivery_id: string
+          id: string
+          last_error: string | null
+          next_attempt_at: string
+          receipt: Json
+          requested_by: string | null
+          resend_message_id: string | null
+          send_authorized_at: string | null
+          send_confirmed_token: string | null
+          sent_at: string | null
+          sent_to: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_to?: string | null
+          attempts?: number
+          claim_token?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          customer_id: string
+          delivery_id: string
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          receipt: Json
+          requested_by?: string | null
+          resend_message_id?: string | null
+          send_authorized_at?: string | null
+          send_confirmed_token?: string | null
+          sent_at?: string | null
+          sent_to?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_to?: string | null
+          attempts?: number
+          claim_token?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          customer_id?: string
+          delivery_id?: string
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          receipt?: Json
+          requested_by?: string | null
+          resend_message_id?: string | null
+          send_authorized_at?: string | null
+          send_confirmed_token?: string | null
+          sent_at?: string | null
+          sent_to?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_receipt_queue_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_receipt_queue_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: true
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_receipt_queue_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       delivery_remainders: {
         Row: {
           created_at: string
@@ -6703,6 +6791,7 @@ export type Database = {
           total_price: number
           total_units_needed: number
           unit_size: string | null
+          vendor: string | null
         }
         Insert: {
           acres?: number | null
@@ -6729,6 +6818,7 @@ export type Database = {
           total_price?: number
           total_units_needed?: number
           unit_size?: string | null
+          vendor?: string | null
         }
         Update: {
           acres?: number | null
@@ -6755,6 +6845,7 @@ export type Database = {
           total_price?: number
           total_units_needed?: number
           unit_size?: string | null
+          vendor?: string | null
         }
         Relationships: [
           {
@@ -7696,6 +7787,7 @@ export type Database = {
           id: number
           new_value: string | null
           old_value: string | null
+          parent_event_id: number | null
           product_id: string
         }
         Insert: {
@@ -7707,6 +7799,7 @@ export type Database = {
           id?: never
           new_value?: string | null
           old_value?: string | null
+          parent_event_id?: number | null
           product_id: string
         }
         Update: {
@@ -7718,6 +7811,7 @@ export type Database = {
           id?: never
           new_value?: string | null
           old_value?: string | null
+          parent_event_id?: number | null
           product_id?: string
         }
         Relationships: [
@@ -12177,6 +12271,10 @@ export type Database = {
         Returns: Json
       }
       _format_pricing_dollars: { Args: { p_cents: number }; Returns: string }
+      _enqueue_delivery_receipt: {
+        Args: { p_actor: string; p_delivery_id: string }
+        Returns: undefined
+      }
       _format_pricing_margin_percent: {
         Args: { p_ratio: number }
         Returns: string
@@ -12798,6 +12896,7 @@ export type Database = {
         }
         Returns: Json
       }
+      _wake_delivery_receipt_worker: { Args: never; Returns: undefined }
       adjust_inventory: {
         Args: {
           p_delta: number
@@ -13145,6 +13244,10 @@ export type Database = {
       check_remainder_reminders: { Args: never; Returns: Json }
       check_unpriced_orders: { Args: never; Returns: Json }
       cleanup_rate_limits: { Args: never; Returns: undefined }
+      claim_delivery_receipts: {
+        Args: { p_idempotency_key?: string; p_limit?: number }
+        Returns: Json
+      }
       close_accounting_period: {
         Args: {
           p_idempotency_key?: string
@@ -13220,6 +13323,7 @@ export type Database = {
         Args: {
           p_completed_at?: string
           p_delivery_id: string
+          p_email_receipt?: boolean
           p_evidence?: string
           p_evidence_ref?: string
           p_idempotency_key?: string
@@ -13278,6 +13382,14 @@ export type Database = {
           p_performed_by?: string
         }
         Returns: Json
+      }
+      confirm_delivery_receipt_send: {
+        Args: {
+          p_claim_token: string
+          p_id: string
+          p_idempotency_key?: string
+        }
+        Returns: string
       }
       confirm_job_notification_sent: {
         Args: {
@@ -13717,6 +13829,18 @@ export type Database = {
       find_overlapping_fields: {
         Args: { p_boundary_geojson: string; p_customer_id?: string }
         Returns: Json
+      }
+      finish_delivery_receipt: {
+        Args: {
+          p_claim_token: string
+          p_detail?: string
+          p_id: string
+          p_idempotency_key?: string
+          p_outcome: string
+          p_resend_message_id?: string
+          p_sent_to?: string
+        }
+        Returns: string
       }
       generate_batch_statements: {
         Args: {
@@ -14320,6 +14444,22 @@ export type Database = {
       }
       get_open_booking_rollover: {
         Args: { p_customer_id?: string; p_season?: number }
+        Returns: Json
+      }
+      get_orders_page: {
+        Args: {
+          p_from: string
+          p_limit?: number
+          p_needs_split_billing?: boolean
+          p_offset?: number
+          p_planned?: boolean
+          p_pricing_status?: string
+          p_search?: string
+          p_sort_dir?: string
+          p_sort_key?: string
+          p_status?: string
+          p_to: string
+        }
         Returns: Json
       }
       get_product_cost_basis_workspace: {
@@ -15082,6 +15222,10 @@ export type Database = {
         }
         Returns: Json
       }
+      preview_product_import: {
+        Args: { p_rows: Json }
+        Returns: Json
+      }
       preview_product_rates: {
         Args: { p_rows: Json }
         Returns: Json
@@ -15314,6 +15458,14 @@ export type Database = {
           p_idempotency_key?: string
           p_inventory_id: string
           p_performed_by?: string
+        }
+        Returns: Json
+      }
+      retire_uncertain_request: {
+        Args: {
+          p_first_check_token?: string
+          p_idempotency_key?: string
+          p_request_key: string
         }
         Returns: Json
       }

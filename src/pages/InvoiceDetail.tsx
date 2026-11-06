@@ -44,6 +44,7 @@ import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSA
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
+import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
@@ -644,20 +645,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     const normalizedTerms = effectivePaymentTerms.toLowerCase();
     const isReceiptAlias = ['due on receipt', 'due upon receipt', 'receipt', 'immediately'].includes(normalizedTerms);
     const isPreset = ['Net 30', 'Net 15', 'Net 60', 'Due on receipt'].includes(effectivePaymentTerms);
-    const termDays = isReceiptAlias
-      ? 0
-      : (() => {
-          const match = /(\d+)/.exec(effectivePaymentTerms);
-          const parsed = match ? Number(match[1]) : NaN;
-          return Number.isFinite(parsed) && parsed >= 1 && parsed <= 365 ? parsed : 30;
-        })();
-    let stampedDate = '';
-    if (loadedInvoice.invoice_date) {
-      const stamped = new Date(`${loadedInvoice.invoice_date}T00:00:00Z`);
-      stamped.setUTCDate(stamped.getUTCDate() + termDays);
-      stampedDate = stamped.toISOString().slice(0, 10);
-    }
-    const isPostingStamp = loadedDueDate !== '' && loadedDueDate === stampedDate;
+    // KI-14: a field-application invoice records whether its date was typed (due_date_is_custom);
+    // other invoice types still compare the date with the stamp their terms give.
+    const stampedDate = loadedInvoice.invoice_date ? dueDateFromTerms(loadedInvoice.invoice_date, effectivePaymentTerms) : '';
+    const isPostingStamp = loadedDueDate !== '' && (
+      loadedInvoice.invoice_type === 'field_application'
+        ? !loadedInvoice.due_date_is_custom
+        : loadedDueDate === stampedDate);
     const isEditableStatus = ['draft', 'unposted'].includes(loadedInvoice.status || '');
     if (loadedDueDate && !isPostingStamp && isEditableStatus) {
       setPaymentTerms('Custom date…');
@@ -1119,6 +1113,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     if (addingProductRef.current) return;
     if (paymentTerms === 'Custom date…' && !customDueDate) {
       toast('error', 'Choose a custom due date before saving.');
+      return;
+    }
+    // KI-14: the database marks a field invoice's date as typed only when the date changes, so a "custom" date equal
+    // to the date its terms already gave would be recalculated from the new terms on save (Sol, PR #1556).
+    if (paymentTerms === 'Custom date…' && invoice.invoice_type === 'field_application'
+      && !invoice.due_date_is_custom && customDueDate === (invoice.due_date || '')) {
+      toast('error', "That is already this invoice's due date from its terms. Keep the terms, or choose a different custom date.");
       return;
     }
     // Per-line split billing (Codex P1 #6, 2026-07-18): a split child's line detail lives in

@@ -2848,6 +2848,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261108120000',
   '20261110150000',
   '20261115160000',
+  '20261120100000',
 ]);
 
 /**
@@ -3039,6 +3040,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // required-key public wrapper. Prune once the registry high-water passes 20261102200000.
   '_manual_inventory_add_replay_impl_20261015',
   '_complete_job_replay_impl_20261015',
+  // 20261120100000 (KI-14) re-creates this renamed body with a trailing p_terms_by_invoice; it keeps
+  // p_idempotency_key behind its required-key public wrapper. Prune once the registry high-water passes 20261120100000.
+  '_update_field_app_invoice_billing_replay_impl_20261015',
   // 20261108120000 (PAR-1, applied live 2026-11-05): admin-only parent writers; each replays through
   // _product_parent_replay (check_idempotency + actor/fingerprint match) and saves its receipt.
   // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.

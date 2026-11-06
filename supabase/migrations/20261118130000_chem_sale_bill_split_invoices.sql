@@ -1,5 +1,5 @@
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261117140000_chem_sale_bill_split_invoices.md.
+-- docs/reference/migrations.d/20261118130000_chem_sale_bill_split_invoices.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M2, Mason 4 Nov: "splits work line by line"): the Bill Split card now bills. When
@@ -15,6 +15,7 @@
 --     the line's cost by about a cent where a share splits a unit; billed cents are exact.
 --   - The card and the line shares freeze at the first completed delivery (voiding it reopens them), and
 --     refuse a change while a one-customer draft is on the sale, which would never bill the new payer.
+--     A line with its own shares can't move to another sale.
 --   - guard_invoice_terminal_order admits a payer on the sale's card or line shares, only inside the
 --     creation claim or as the invoice its provenance row names, as for field splits. Delivery lineage
 --     accepts that invoice. A sale with other payers refuses a one-customer chemical-sale or misc-charge
@@ -42,7 +43,7 @@
 --   _create_invoice_for_unbilled_delivery_impl_20260718 20260827041200,
 --   _save_invoice_intent_impl_20260802 20260720175946, prevent_order_shares_edit_after_post 20260504100000,
 --   _validate_order_shares_total 20260616121521, delete_invoices 20260719060256), restore order_shares_select
---   from 20260511050000, drop the new helpers, trg_oifa_bill_split_freeze, order_item_shares,
+--   from 20260511050000, drop the new helpers, trg_oifa_bill_split_freeze, trg_order_items_bill_split_move, order_item_shares,
 --   order_shares.updated_at and order_shares_order_customer_key. Split invoices already drafted stay governed by their
 --   provenance rows; void them first if the sale should bill as one invoice.
 --
@@ -270,7 +271,8 @@ BEGIN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_IMMUTABLE: a line share cannot move to another line'
       USING ERRCODE = 'check_violation';
   END IF;
-  PERFORM public._refuse_bill_split_change((SELECT order_id FROM order_items WHERE id = v_item_id));
+  -- FOR SHARE holds the line on its sale until commit (trg_order_items_bill_split_move).
+  PERFORM public._refuse_bill_split_change((SELECT order_id FROM order_items WHERE id = v_item_id FOR SHARE));
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
   END IF;
@@ -291,6 +293,27 @@ $function$;
 CREATE TRIGGER trg_guard_order_item_shares
   BEFORE INSERT OR UPDATE OR DELETE ON public.order_item_shares
   FOR EACH ROW EXECUTE FUNCTION public.guard_order_item_shares();
+
+-- A line with its own shares can't move to another sale: the override would bill the other sale's payers.
+CREATE FUNCTION public.guard_order_item_bill_split_move()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF NEW.order_id IS DISTINCT FROM OLD.order_id
+     AND EXISTS (SELECT 1 FROM order_item_shares WHERE order_item_id = OLD.id) THEN
+    RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split; remove its shares before moving it to another order'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE TRIGGER trg_order_items_bill_split_move
+  BEFORE UPDATE OF order_id ON public.order_items
+  FOR EACH ROW EXECUTE FUNCTION public.guard_order_item_bill_split_move();
 
 -- True when a sale bills someone other than its customer. Field/acre splits win over a card.
 CREATE FUNCTION public._order_has_bill_split(p_order_id uuid)
@@ -523,6 +546,7 @@ REVOKE ALL ON FUNCTION public.guard_bill_split_field_switch() FROM PUBLIC, anon,
 REVOKE ALL ON FUNCTION public._bill_split_product_lines(uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._refuse_bill_split_change(uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.guard_order_item_shares() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.guard_order_item_bill_split_move() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._order_has_bill_split(uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._order_bill_split_has_payer(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._bill_split_line_shares(uuid, bigint, bigint) FROM PUBLIC, anon, authenticated, service_role;

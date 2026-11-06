@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a Bill Split sale bills one invoice per payer, to the cent
 -- ----------------------------------------------------------------------------
--- Migration 20261117140000_chem_sale_bill_split_invoices (billing plan M2).
+-- Migration 20261118130000_chem_sale_bill_split_invoices (billing plan M2).
 --   A  Card 60/40 on line 1, line 2's own shares 100% to the main customer: a delivery drafts two
 --      invoices in one group, base-1 and base-2, CS- numbers, each line adds up exactly
 --   B  A three-way split: the leftover cents go to the main customer
@@ -31,6 +31,7 @@
 --   W  Two deliveries under one frozen card add up to the sale
 --   X  Replaying complete_delivery and Create Invoice with their keys drafts nothing new
 --   Y  A rush sale waiting for prices drafts nothing at completion, can still be priced, then Create Invoice drafts it
+--   Z  A line with its own shares can't move to another sale (ORDER_ITEM_SHARES_LINE_MOVE)
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -638,6 +639,18 @@ BEGIN
     END IF;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (Y) pricing or drafting after it was refused: ' || SQLERRM || ';';
+  END;
+
+  -- Z: a line with its own shares can't move to another sale.
+  PERFORM pg_temp.smk_new_sale('z' || v_suffix);
+  SELECT o, l1 INTO v_o, v_l1 FROM smk_sale;
+  INSERT INTO order_item_shares (order_item_id, customer_id, split_percentage) VALUES (v_l1, v_payer2, 30);
+  PERFORM pg_temp.smk_new_sale('z2' || v_suffix);
+  BEGIN
+    UPDATE order_items SET order_id = (SELECT o FROM smk_sale) WHERE id = v_l1;
+    v_fails := v_fails || ' (Z) a line with its own shares moved to another sale;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'ORDER_ITEM_SHARES_LINE_MOVE:%' THEN v_fails := v_fails || ' (Z) wrong refusal: ' || SQLERRM || ';'; END IF;
   END;
 
   -- V: row security, last, because it changes role. The card and line shares of a soft-deleted order are hidden.

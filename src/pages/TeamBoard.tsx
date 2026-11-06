@@ -220,11 +220,13 @@ export default function TeamBoard() {
     // Whole Chicago business days, not UTC days (KI-18). A typed year past 9999 is no
     // business day, and 9999-12-31 has no next day: such a bound means "no limit".
     const isPlainDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+    // Before 1883 Chicago had no standard offset, so the exact start throws; 06:00Z is close enough for a filter.
+    const dayStart = (d: string) => { try { return businessDayStartIso(d); } catch { return `${d}T06:00:00Z`; } };
     if (activityDateFrom && isPlainDay(activityDateFrom)) {
-      query = query.gte('created_at', businessDayStartIso(activityDateFrom));
+      query = query.gte('created_at', dayStart(activityDateFrom));
     }
     if (activityDateTo && isPlainDay(activityDateTo) && activityDateTo < '9999-12-31') {
-      query = query.lt('created_at', businessDayStartIso(addDaysToDate(activityDateTo, 1)));
+      query = query.lt('created_at', dayStart(addDaysToDate(activityDateTo, 1)));
     }
     if (activityUser) {
       query = query.eq('user_id', activityUser);

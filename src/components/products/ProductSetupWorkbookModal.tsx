@@ -63,7 +63,7 @@ function ParentRatesTabPreview({ rows, previews, saved, busy, blocked, onConfirm
       ) : null))}
       {previews && (
         <div className="max-h-64 overflow-auto">
-          <table className="w-full text-left">
+          <table className="w-full text-left" aria-label="Parent rate changes and affected sizes">
             <thead><tr className="text-secondary"><th className="font-medium">Parent and size</th><th className="font-medium">Rate now → new</th>
               {TIERS.map((t) => <th key={t} className="font-medium">Tier {t} per acre</th>)}</tr></thead>
             <tbody>

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for PAR-2 (20261117160000): grouping existing products into parents. Builds the checked-in
+ * Real-schema proof for PAR-2 (20261123120000): grouping existing products into parents. Builds the checked-in
  * schema baseline in a network-disabled PostgreSQL container, replays every migration before the candidate
  * (PAR-1 and its stock-unit follow-up included), seeds invented rows that copy the real shapes, installs the
  * candidate and checks the build sheet's §5.4 cases as named cases (each prints "[case] ..."). Ends by running
@@ -22,7 +22,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261117160000_product_parent_proposals.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261123120000_product_parent_proposals.sql');
 const ORIGINAL_BRANDS = path.join(MIGRATIONS, '20261022086500_product_brands.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

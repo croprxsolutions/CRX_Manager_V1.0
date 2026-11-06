@@ -22,6 +22,9 @@
 --      product's own unit (container unit, else stock unit), so "2 lb ai/gal" on a 2 gal jug and "2 gal
 --      concentrate per 10 gal" stay strengths (Mason, 2026-11-06: match the unit word; when unsure, hold). Sizes
 --      whose names carry the same numbers and units are not held, with or without a recorded container size.
+--      Accepted limit (Mason, 2026-11-06): a strength written exactly as the container size ("2 lb ai" on a
+--      2 lb bag) cannot be told from the size by its name; every group still needs an admin's approval, and
+--      different strengths almost always carry different EPA numbers, which are never grouped together.
 --    * epa_has_parent (flag): an active parent already has the group's EPA number. Held when that parent's form
 --      and base name are the group's too (a second parent for the same product); otherwise it stays a flag, as
 --      the build sheet's same-EPA-different-name rule says (Gen Liberty / Gen Liberty: Higher Quality).

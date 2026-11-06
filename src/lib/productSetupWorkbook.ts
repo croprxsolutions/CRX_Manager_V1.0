@@ -28,6 +28,8 @@ const SETUP_WORKBOOK_FORMAT_VERSION = 'crx-product-setup-v2';
 const OLD_SETUP_WORKBOOK_FORMAT_VERSIONS = new Set(['crx-product-setup-v1']);
 /** The most rows one tab's save (and set_product_rates) takes at once. */
 export const MAX_SETUP_WORKBOOK_SAVE_ROWS = 2000;
+/** set_parent_rates refuses more than 500 rows in one call. */
+export const MAX_PARENT_RATE_SAVE_ROWS = 500;
 
 const SETUP_TEXT_FIELDS = [
   'product_name', 'sku', 'category', 'manufacturer', 'container_type', 'epa_registration',

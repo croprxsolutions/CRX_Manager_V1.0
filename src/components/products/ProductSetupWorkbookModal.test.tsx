@@ -54,8 +54,8 @@ const preview: ParentRatePreview = {
     before_prices: { tier1_price_per_acre: 4.2, tier2_price_per_acre: 3.8, tier3_price_per_acre: 3.3 } }],
 };
 
-async function upload(membershipHash: string) {
-  H.parse.mockResolvedValue({ setupRows: [{ product_id: SIZE }], rateRows: [], parentRateRows: [editedParent], membershipHash });
+async function upload(membershipHash: string, parentRateRows: ParentRateUploadRow[] = [editedParent]) {
+  H.parse.mockResolvedValue({ setupRows: [{ product_id: SIZE }], rateRows: [], parentRateRows, membershipHash });
   render(<ProductSetupWorkbookModal open profileId="u1" onClose={vi.fn()} onSaved={vi.fn()} />);
   const file = new File(['x'], 'setup.xlsx');
   Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
@@ -105,5 +105,11 @@ describe('ProductSetupWorkbookModal parent rates', () => {
     await upload('0'.repeat(64));
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'Parents could not be loaded.'));
     expect(screen.queryByText(/tab:/)).not.toBeInTheDocument();
+  });
+  it('refuses more than 500 edited parents before previewing any', async () => {
+    const rows = Array.from({ length: 501 }, (_, i) => ({ ...editedParent, parent_id: `parent-${i}` }));
+    await upload(await setupMembershipHash([SIZE], [parent]), rows);
+    await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'Save at most 500 changed parents on the Parent Rates tab at a time.'));
+    expect(H.previewParentRates).not.toHaveBeenCalled();
   });
 });

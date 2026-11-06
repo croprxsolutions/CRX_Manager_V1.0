@@ -786,6 +786,13 @@ export default function ProductDetail() {
       return;
     }
 
+    // A new parent needs its form; a new size takes its parent's form.
+    if (isNew && !addSizeTo && !product.product_form) {
+      toast('error', 'Choose a product form (liquid, dry, seed or each) before saving.');
+      revealPhoneSection('information');
+      return;
+    }
+
     // Container size must be positive if set
     if (product.container_size != null && product.container_size <= 0
       && (!persistedProduct || product.container_size !== persistedProduct.container_size)) {

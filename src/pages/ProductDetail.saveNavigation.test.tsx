@@ -99,6 +99,7 @@ describe('ProductDetail — leaving a new product', () => {
   it('a successful create opens the new product for pricing with no Unsaved Changes prompt', async () => {
     const router = renderNewProduct();
     fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
     await screen.findByText('New product page');
@@ -112,6 +113,7 @@ describe('ProductDetail — leaving a new product', () => {
     mockCreate.mockResolvedValue({ parent_id: 'parent-1', parent_version: 1, event_id: 1 });
     const router = renderNewProduct();
     fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
     await screen.findByText('Products list page');
@@ -156,12 +158,21 @@ describe('ProductDetail — leaving a new product', () => {
     renderNewProduct();
     const name = await screen.findByLabelText(/Product Name/);
     fireEvent.change(name, { target: { value: 'New Chem' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
     expect(name).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
     await waitFor(() => expect(name).toBeDisabled());
     finish({ parent_id: 'parent-1', parent_version: 1, product_id: 'product-1', event_id: 1 });
     await screen.findByText('New product page');
+  });
+
+  it('refuses a new product with no form before requesting a save', async () => {
+    renderNewProduct();
+    fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Choose a product form (liquid, dry, seed or each) before saving.');
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 
   it('leaving with an unsaved name still prompts', async () => {

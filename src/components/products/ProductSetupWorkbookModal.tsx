@@ -17,6 +17,7 @@ import {
   generateSetupWorkbook,
   groupedParentNames,
   loadSetupWorkbookExport,
+  MAX_PARENT_RATE_SAVE_ROWS,
   MAX_SETUP_WORKBOOK_SAVE_ROWS,
   parseSetupWorkbook,
   previewProductRates,
@@ -255,9 +256,11 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
       const setupPreview = buildSetupPreview(parsed.setupRows, current, options, categories.filter((c) => c.is_active).map((c) => c.name), groupedParentNames(parents));
       const rateRows = editedRateRows(parsed.rateRows);
       const parentRows = editedParentRateRows(parsed.parentRateRows);
-      if (setupPreview.changes.length > MAX_SETUP_WORKBOOK_SAVE_ROWS || rateRows.length > MAX_SETUP_WORKBOOK_SAVE_ROWS
-          || parentRows.length > MAX_SETUP_WORKBOOK_SAVE_ROWS) {
+      if (setupPreview.changes.length > MAX_SETUP_WORKBOOK_SAVE_ROWS || rateRows.length > MAX_SETUP_WORKBOOK_SAVE_ROWS) {
         throw new Error(`Save at most ${MAX_SETUP_WORKBOOK_SAVE_ROWS} changed rows per tab at a time.`);
+      }
+      if (parentRows.length > MAX_PARENT_RATE_SAVE_ROWS) {
+        throw new Error(`Save at most ${MAX_PARENT_RATE_SAVE_ROWS} changed parents on the Parent Rates tab at a time.`);
       }
       setSetup(setupPreview);
       // Keep the parent rows first, so a failed Rates preview still leaves them ready to preview again.

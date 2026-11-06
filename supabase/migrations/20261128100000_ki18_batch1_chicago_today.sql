@@ -17,7 +17,8 @@
 --   * AR reminders: get_ar_reminder_candidates counts Chicago calendar days past due
 --     (Chicago date - due date) instead of whole 24-hour periods since UTC midnight
 --   * applicator licenses and RUP: _enforce_applicator_license, _dispatch_job_locations_replay_impl_20261015,
---     generate_rup_sales_records (license expiry and the RUP record date)
+--     generate_rup_sales_records (license expiry, the RUP record date, and its season, which now reads the
+--     invoice's creation time in Chicago so a Sep 30 evening invoice is not put in the next season)
 --   * holds and stock: _sync_job_holds, get_dispatch_stock_status, get_job_inventory_shortfalls,
 --     _get_inventory_position_cost_impl_20261019 (also its season start), _create_inventory_hold_intent_impl_20260905
 --   * other business dates: _transition_rebate_claim_replay_impl_20261015, _create_rush_order_below_cost_impl_20260810,
@@ -29,8 +30,9 @@
 --   * column defaults: payments.payment_date, commission_payments.payment_date,
 --     ar_reminder_tracking.sent_date, deliveries.scheduled_date
 -- Signatures, return types, SECURITY DEFINER and search_path are unchanged (each statement is the live
--- pg_get_functiondef text, and both checks pin them); CREATE OR REPLACE keeps owners and grants. No row is read or written. Re-runnable: the preflight accepts the
--- pre-image or this file's body.
+-- pg_get_functiondef text); CREATE OR REPLACE keeps owners and grants. The preflight and postflight pin
+-- each function's body md5, search_path, SECURITY DEFINER, owner and exact live EXECUTE grants.
+-- No row is read or written. Re-runnable: the preflight accepts the pre-image or this file's body.
 -- Not changed here: comment-only mentions; the advisory-lock key in _create_blend_ticket_replay_impl_20261015
 -- (a lock name, not a business date); internal impls whose date default is never used (their wrapper
 -- always passes the date); boards and reports (batch 2); statement and AR aging (batch 3).
@@ -41,41 +43,41 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true),
-    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true),
-    ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', 'c5666f64d37ed39b5e3ed7f86f0bad51', true),
-    ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true),
-    ('_apply_prepay_to_invoice_replay_impl_20261015(uuid,uuid,bigint,uuid,text)', 'c9377dab8f2534a03af2c27a6e1d510c', '53ac418df8065bd8001136a55e29ebea', true),
-    ('_apply_write_off_replay_impl_20261015(uuid,bigint,text,uuid,text)', '00e8d020f9faf6276de8ddaf4f1411fc', '6c89936b2baa95094dbdcf654ad6f89e', true),
-    ('_post_commission_payment_intent_impl_20260809(uuid,uuid,text)', '240fd81fd597136c195a62e7f60f3fbc', '865aed5ebe639bd2965c97224f484cf6', true),
-    ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true),
-    ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true),
-    ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true),
-    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true),
-    ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true),
-    ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true),
-    ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false),
-    ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true),
-    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '204d833fff403df36925d628a8920295', true),
-    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true),
-    ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true),
-    ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true),
-    ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true),
-    ('_create_inventory_hold_intent_impl_20260905(uuid,uuid,numeric,text,date,text,uuid,boolean,text,text)', '30ae56a0e1ee3b472abe5c95508b43fc', 'd7e98a25d9b194e8ede05047c0cb0b6a', true),
-    ('_transition_rebate_claim_replay_impl_20261015(uuid,text,bigint,text,text)', 'de22ed84218873c02023720f5f4d06e1', 'ab5e9d5210ff4aeabff662b56ff5c85d', true),
-    ('_create_rush_order_below_cost_impl_20260810(uuid,jsonb,text,text,uuid,text)', '00eb8676ef9f214baf0cfa9fc25b1924', '17fa918ed609b079ce8a3c08337368ca', true),
-    ('_create_followup_delivery_replay_impl_20261015(uuid,date,uuid,text)', 'da4e748e6139cc43247fdcfbfccf5251', '286023631494a108ad1ecadec3011bff', true),
-    ('_create_job_from_quote_section_replay_impl_20261015(uuid,uuid,uuid,text)', 'e1e701e0a096c0d022b5ac370aa4bb60', 'b567ac08aef7db8c747af5424439d7de', true),
-    ('_batch_reschedule_deliveries_replay_impl_20261015(uuid[],date,uuid,text)', 'd87ef756d7e5c30e2fe9cf722e68b646', '9e36f19b08770f23b95c106fcdd1ead1', true),
-    ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true),
-    ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true),
-    ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true),
-    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true),
-    ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true),
-    ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true),
-    ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true),
-    ('create_quick_delivery(uuid,jsonb,uuid,date,text,uuid,text,boolean)', '69c1d569fb2e9eb913502d59e41a76fe', '69c1d569fb2e9eb913502d59e41a76fe', true)
-  ) AS t(sig, pre_md5, post_md5, secdef)
+    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', 'c5666f64d37ed39b5e3ed7f86f0bad51', true, '{postgres=X/postgres}'),
+    ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_apply_prepay_to_invoice_replay_impl_20261015(uuid,uuid,bigint,uuid,text)', 'c9377dab8f2534a03af2c27a6e1d510c', '53ac418df8065bd8001136a55e29ebea', true, '{postgres=X/postgres}'),
+    ('_apply_write_off_replay_impl_20261015(uuid,bigint,text,uuid,text)', '00e8d020f9faf6276de8ddaf4f1411fc', '6c89936b2baa95094dbdcf654ad6f89e', true, '{postgres=X/postgres}'),
+    ('_post_commission_payment_intent_impl_20260809(uuid,uuid,text)', '240fd81fd597136c195a62e7f60f3fbc', '865aed5ebe639bd2965c97224f484cf6', true, '{postgres=X/postgres}'),
+    ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true, '{postgres=X/postgres}'),
+    ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true, '{postgres=X/postgres}'),
+    ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true, '{postgres=X/postgres}'),
+    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true, '{postgres=X/postgres}'),
+    ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}'),
+    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '33bd21749b60bfa6c3dd9e7d71336d7c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true, '{postgres=X/postgres}'),
+    ('_create_inventory_hold_intent_impl_20260905(uuid,uuid,numeric,text,date,text,uuid,boolean,text,text)', '30ae56a0e1ee3b472abe5c95508b43fc', 'd7e98a25d9b194e8ede05047c0cb0b6a', true, '{postgres=X/postgres}'),
+    ('_transition_rebate_claim_replay_impl_20261015(uuid,text,bigint,text,text)', 'de22ed84218873c02023720f5f4d06e1', 'ab5e9d5210ff4aeabff662b56ff5c85d', true, '{postgres=X/postgres}'),
+    ('_create_rush_order_below_cost_impl_20260810(uuid,jsonb,text,text,uuid,text)', '00eb8676ef9f214baf0cfa9fc25b1924', '17fa918ed609b079ce8a3c08337368ca', true, '{postgres=X/postgres}'),
+    ('_create_followup_delivery_replay_impl_20261015(uuid,date,uuid,text)', 'da4e748e6139cc43247fdcfbfccf5251', '286023631494a108ad1ecadec3011bff', true, '{postgres=X/postgres}'),
+    ('_create_job_from_quote_section_replay_impl_20261015(uuid,uuid,uuid,text)', 'e1e701e0a096c0d022b5ac370aa4bb60', 'b567ac08aef7db8c747af5424439d7de', true, '{postgres=X/postgres}'),
+    ('_batch_reschedule_deliveries_replay_impl_20261015(uuid[],date,uuid,text)', 'd87ef756d7e5c30e2fe9cf722e68b646', '9e36f19b08770f23b95c106fcdd1ead1', true, '{postgres=X/postgres}'),
+    ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true, '{postgres=X/postgres}'),
+    ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('create_quick_delivery(uuid,jsonb,uuid,date,text,uuid,text,boolean)', '69c1d569fb2e9eb913502d59e41a76fe', '69c1d569fb2e9eb913502d59e41a76fe', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}')
+  ) AS t(sig, pre_md5, post_md5, secdef, acl)
   LOOP
     SELECT * INTO v_fn FROM pg_proc WHERE oid = to_regprocedure('public.' || v_row.sig);
     IF v_fn.oid IS NULL THEN
@@ -84,8 +86,9 @@ BEGIN
     IF md5(replace(v_fn.prosrc, chr(13), '')) NOT IN (v_row.pre_md5, v_row.post_md5)
        OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
        OR v_fn.prosecdef IS DISTINCT FROM v_row.secdef
+       OR coalesce((SELECT array_agg(g::text ORDER BY g::text COLLATE "C") FROM unnest(v_fn.proacl) g)::text, 'NULL') IS DISTINCT FROM v_row.acl
        OR pg_get_userbyid(v_fn.proowner) <> 'postgres' THEN
-      RAISE EXCEPTION 'PREFLIGHT_FAIL: % body, settings, SECURITY DEFINER or owner drifted; re-review the current definition', v_row.sig;
+      RAISE EXCEPTION 'PREFLIGHT_FAIL: % body, settings, SECURITY DEFINER, owner or grants drifted; re-review the current definition', v_row.sig;
     END IF;
   END LOOP;
 END;
@@ -2491,9 +2494,9 @@ BEGIN
   END IF;
 
   v_season := CASE
-    WHEN EXTRACT(MONTH FROM v_invoice.created_at) >= 10
-    THEN EXTRACT(YEAR FROM v_invoice.created_at)::integer + 1
-    ELSE EXTRACT(YEAR FROM v_invoice.created_at)::integer
+    WHEN EXTRACT(MONTH FROM (v_invoice.created_at AT TIME ZONE 'America/Chicago')) >= 10
+    THEN EXTRACT(YEAR FROM (v_invoice.created_at AT TIME ZONE 'America/Chicago'))::integer + 1
+    ELSE EXTRACT(YEAR FROM (v_invoice.created_at AT TIME ZONE 'America/Chicago'))::integer
   END;
 
   FOR v_item IN
@@ -5632,41 +5635,41 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true),
-    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true),
-    ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', 'c5666f64d37ed39b5e3ed7f86f0bad51', true),
-    ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true),
-    ('_apply_prepay_to_invoice_replay_impl_20261015(uuid,uuid,bigint,uuid,text)', 'c9377dab8f2534a03af2c27a6e1d510c', '53ac418df8065bd8001136a55e29ebea', true),
-    ('_apply_write_off_replay_impl_20261015(uuid,bigint,text,uuid,text)', '00e8d020f9faf6276de8ddaf4f1411fc', '6c89936b2baa95094dbdcf654ad6f89e', true),
-    ('_post_commission_payment_intent_impl_20260809(uuid,uuid,text)', '240fd81fd597136c195a62e7f60f3fbc', '865aed5ebe639bd2965c97224f484cf6', true),
-    ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true),
-    ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true),
-    ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true),
-    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true),
-    ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true),
-    ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true),
-    ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false),
-    ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true),
-    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '204d833fff403df36925d628a8920295', true),
-    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true),
-    ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true),
-    ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true),
-    ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true),
-    ('_create_inventory_hold_intent_impl_20260905(uuid,uuid,numeric,text,date,text,uuid,boolean,text,text)', '30ae56a0e1ee3b472abe5c95508b43fc', 'd7e98a25d9b194e8ede05047c0cb0b6a', true),
-    ('_transition_rebate_claim_replay_impl_20261015(uuid,text,bigint,text,text)', 'de22ed84218873c02023720f5f4d06e1', 'ab5e9d5210ff4aeabff662b56ff5c85d', true),
-    ('_create_rush_order_below_cost_impl_20260810(uuid,jsonb,text,text,uuid,text)', '00eb8676ef9f214baf0cfa9fc25b1924', '17fa918ed609b079ce8a3c08337368ca', true),
-    ('_create_followup_delivery_replay_impl_20261015(uuid,date,uuid,text)', 'da4e748e6139cc43247fdcfbfccf5251', '286023631494a108ad1ecadec3011bff', true),
-    ('_create_job_from_quote_section_replay_impl_20261015(uuid,uuid,uuid,text)', 'e1e701e0a096c0d022b5ac370aa4bb60', 'b567ac08aef7db8c747af5424439d7de', true),
-    ('_batch_reschedule_deliveries_replay_impl_20261015(uuid[],date,uuid,text)', 'd87ef756d7e5c30e2fe9cf722e68b646', '9e36f19b08770f23b95c106fcdd1ead1', true),
-    ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true),
-    ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true),
-    ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true),
-    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true),
-    ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true),
-    ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true),
-    ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true),
-    ('create_quick_delivery(uuid,jsonb,uuid,date,text,uuid,text,boolean)', '69c1d569fb2e9eb913502d59e41a76fe', '69c1d569fb2e9eb913502d59e41a76fe', true)
-  ) AS t(sig, pre_md5, post_md5, secdef)
+    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', 'c5666f64d37ed39b5e3ed7f86f0bad51', true, '{postgres=X/postgres}'),
+    ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_apply_prepay_to_invoice_replay_impl_20261015(uuid,uuid,bigint,uuid,text)', 'c9377dab8f2534a03af2c27a6e1d510c', '53ac418df8065bd8001136a55e29ebea', true, '{postgres=X/postgres}'),
+    ('_apply_write_off_replay_impl_20261015(uuid,bigint,text,uuid,text)', '00e8d020f9faf6276de8ddaf4f1411fc', '6c89936b2baa95094dbdcf654ad6f89e', true, '{postgres=X/postgres}'),
+    ('_post_commission_payment_intent_impl_20260809(uuid,uuid,text)', '240fd81fd597136c195a62e7f60f3fbc', '865aed5ebe639bd2965c97224f484cf6', true, '{postgres=X/postgres}'),
+    ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true, '{postgres=X/postgres}'),
+    ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true, '{postgres=X/postgres}'),
+    ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true, '{postgres=X/postgres}'),
+    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true, '{postgres=X/postgres}'),
+    ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}'),
+    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '33bd21749b60bfa6c3dd9e7d71336d7c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true, '{postgres=X/postgres}'),
+    ('_create_inventory_hold_intent_impl_20260905(uuid,uuid,numeric,text,date,text,uuid,boolean,text,text)', '30ae56a0e1ee3b472abe5c95508b43fc', 'd7e98a25d9b194e8ede05047c0cb0b6a', true, '{postgres=X/postgres}'),
+    ('_transition_rebate_claim_replay_impl_20261015(uuid,text,bigint,text,text)', 'de22ed84218873c02023720f5f4d06e1', 'ab5e9d5210ff4aeabff662b56ff5c85d', true, '{postgres=X/postgres}'),
+    ('_create_rush_order_below_cost_impl_20260810(uuid,jsonb,text,text,uuid,text)', '00eb8676ef9f214baf0cfa9fc25b1924', '17fa918ed609b079ce8a3c08337368ca', true, '{postgres=X/postgres}'),
+    ('_create_followup_delivery_replay_impl_20261015(uuid,date,uuid,text)', 'da4e748e6139cc43247fdcfbfccf5251', '286023631494a108ad1ecadec3011bff', true, '{postgres=X/postgres}'),
+    ('_create_job_from_quote_section_replay_impl_20261015(uuid,uuid,uuid,text)', 'e1e701e0a096c0d022b5ac370aa4bb60', 'b567ac08aef7db8c747af5424439d7de', true, '{postgres=X/postgres}'),
+    ('_batch_reschedule_deliveries_replay_impl_20261015(uuid[],date,uuid,text)', 'd87ef756d7e5c30e2fe9cf722e68b646', '9e36f19b08770f23b95c106fcdd1ead1', true, '{postgres=X/postgres}'),
+    ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true, '{postgres=X/postgres}'),
+    ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('create_quick_delivery(uuid,jsonb,uuid,date,text,uuid,text,boolean)', '69c1d569fb2e9eb913502d59e41a76fe', '69c1d569fb2e9eb913502d59e41a76fe', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}')
+  ) AS t(sig, pre_md5, post_md5, secdef, acl)
   LOOP
     SELECT * INTO v_fn FROM pg_proc WHERE oid = to_regprocedure('public.' || v_row.sig);
     IF v_fn.oid IS NULL
@@ -5675,6 +5678,7 @@ BEGIN
        OR pg_get_function_arguments(v_fn.oid) ~* '\mcurrent_date\M'
        OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
        OR v_fn.prosecdef IS DISTINCT FROM v_row.secdef
+       OR coalesce((SELECT array_agg(g::text ORDER BY g::text COLLATE "C") FROM unnest(v_fn.proacl) g)::text, 'NULL') IS DISTINCT FROM v_row.acl
        OR pg_get_userbyid(v_fn.proowner) <> 'postgres' THEN
       RAISE EXCEPTION 'POSTFLIGHT_FAIL: % still uses the UTC date or did not take the new body', v_row.sig;
     END IF;

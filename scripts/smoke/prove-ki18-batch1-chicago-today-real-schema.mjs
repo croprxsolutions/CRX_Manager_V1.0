@@ -255,16 +255,22 @@ const ADMIN = '16000000-0000-4000-8000-000000000018';
 const SYSTEM_ACTOR = '22c1fc50-4d2a-4baa-8ff8-341c0c7edd4f';  // mark_overdue_invoices' audit actor
 const CHI = "(now() AT TIME ZONE 'America/Chicago')::date";
 
-// The candidate's only edit: CURRENT_DATE (outside -- comments) becomes the Chicago date, and
-// get_ar_reminder_candidates counts calendar days. Applied to the pre-image, it must give the post-image.
+// The candidate's only edit: CURRENT_DATE (outside -- comments) becomes the Chicago date,
+// get_ar_reminder_candidates counts calendar days, and generate_rup_sales_records reads the invoice's
+// creation time in Chicago for its season. Applied to the pre-image, it must give the post-image.
+// Postgres re-prints an argument default in normalized form, so the header line expects that form.
+const CHI_ARG = "((now() AT TIME ZONE 'America/Chicago'::text))::date";
 const REMIND_OLD = 'EXTRACT(DAY FROM NOW() - COALESCE(i.due_date, i.invoice_date))::int';
 const REMIND_NEW = `(${CHI} - COALESCE(i.due_date, i.invoice_date))`;
+const RUP_OLD = 'FROM v_invoice.created_at)';
+const RUP_NEW = "FROM (v_invoice.created_at AT TIME ZONE 'America/Chicago'))";
 function swap(sig, def) {
   return def.split('\n').map((line) => {
     const c = line.indexOf('--');
     const code = c >= 0 ? line.slice(0, c) : line;
     let next = sig.startsWith('get_ar_reminder_candidates') ? code.split(REMIND_OLD).join(REMIND_NEW) : code;
-    next = next.replace(/\bcurrent_date\b/gi, CHI);
+    if (sig.startsWith('generate_rup_sales_records')) next = next.split(RUP_OLD).join(RUP_NEW);
+    next = next.replace(/\bcurrent_date\b/gi, line.startsWith('CREATE OR REPLACE FUNCTION') ? CHI_ARG : CHI);
     return next + (c >= 0 ? line.slice(c) : '');
   }).join('\n');
 }

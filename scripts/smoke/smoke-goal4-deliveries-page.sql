@@ -1,6 +1,6 @@
 -- Rolled-back smoke chain (Goal 4): the Deliveries list pages, searches and totals in the database.
 --
--- Covers get_deliveries_page after 20261116130000_deliveries_list_page.sql.
+-- Covers get_deliveries_page after 20261119130000_deliveries_list_page.sql.
 --
 -- Read only: signs in as the oldest active admin (then the active driver with the most deliveries, when
 -- one exists) and calls the function as the authenticated role, so row level security applies as it

@@ -473,10 +473,11 @@ receipt; the driver is warned and the office can resend by hand. A queue table p
 and not built (needs a new Edge Function deploy). No `delivery_receipt_queue` exists in `supabase/`.
 
 ### KI-26 — Delivery completion-evidence leftovers
-**LOW · OPEN · UI/database/process · airplane-mode test owed (Mason)**
+**LOW · OPEN · UI/database/process**
 Following `20261022075000` (PR #1024): old app versions are refused until reloaded; offline completions queued
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
-abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test.
+abandoned signature files stay stored; file contents are not inspected. Real-phone airplane-mode test PASSED
+(Mason 2026-11-06, after the narrowing below): an offline signed completion synced and showed its signature.
 The four older signature policies (fixed path `signatures/<id>.png`) are narrowed by
 `20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`): insert, update and delete dropped,
 and reading needs the file to be the delivery's recorded signature.

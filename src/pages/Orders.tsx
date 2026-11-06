@@ -16,7 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
-import { fetchOrdersPage, fetchAllMatchingOrders, type OrderListRow, type OrdersQuery } from '../lib/ordersPage';
+import { buildOrdersQuery, fetchOrdersPage, fetchAllMatchingOrders, type OrderListRow, type OrdersQuery } from '../lib/ordersPage';
 import type { SortDir } from '../lib/tableSearchSort';
 import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
 import { Sentry } from '../lib/sentry';
@@ -81,30 +81,20 @@ export default function Orders() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const query = useMemo<OrdersQuery>(() => {
-    const { start, end } = getSeasonDates();
-    return {
-      p_from: start,
-      p_to: end,
-      p_search: debouncedSearch || null,
-      p_status: statusFilter || null,
-      p_planned: planFilter === 'planned' ? true : planFilter === 'committed' ? false : null,
-      p_pricing_status: pricingFilter || null,
-      p_needs_split_billing: splitFilter ? true : null,
-      p_sort_key: sort.key,
-      p_sort_dir: sort.dir,
-    };
-  }, [debouncedSearch, statusFilter, planFilter, pricingFilter, splitFilter, sort]);
+  const query = useMemo<OrdersQuery>(() => buildOrdersQuery(getSeasonDates(), {
+    search: debouncedSearch, status: statusFilter, plan: planFilter, pricing: pricingFilter, split: splitFilter,
+    sortKey: sort.key, sortDir: sort.dir,
+  }), [debouncedSearch, statusFilter, planFilter, pricingFilter, splitFilter, sort]);
   const queryKey = JSON.stringify(query);
 
   // The page number belongs to one query: a new search, filter or sort starts again at page one.
   const [pageState, setPageState] = useState({ key: queryKey, page: 0 });
-  const page = pageState.key === queryKey ? pageState.page : 0;
+  const page = forQuery(pageState, queryKey)?.page ?? 0;
   const goToPage = (next: number) => setPageState({ key: queryKey, page: next });
 
   // "Select all" across every page: the rows read for this exact query, or null.
   const [allMatchingState, setAllMatchingState] = useState<{ key: string; rows: OrderWithFulfillment[] } | null>(null);
-  const allMatching = allMatchingState?.key === queryKey ? allMatchingState.rows : null;
+  const allMatching = forQuery(allMatchingState, queryKey)?.rows ?? null;
 
   // A read can finish after a newer one started (a new page, a refresh after a
   // bulk action); only the latest request may set the list, toasts or loading.
@@ -181,9 +171,8 @@ export default function Orders() {
   );
 
   // A new search or filter hides the old totals until its own read lands: they never describe another query.
-  const totals = totalsState?.key === queryKey ? totalsState : null;
-  const moreThanThisPage = totals !== null && totals.count > orders.length;
-  const everythingSelected = allMatching !== null || (allSelected && !moreThanThisPage);
+  const totals = forQuery(totalsState, queryKey);
+  const { moreThanThisPage, everythingSelected } = selectionScope(totals, orders.length, allMatching !== null, allSelected);
 
   const handleSelectAll = async () => {
     if (everythingSelected) {
@@ -725,34 +714,14 @@ export default function Orders() {
                     disabled={selectingAll}
                     className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors disabled:opacity-50"
                   >
-                    {selectingAll
-                      ? 'Selecting…'
-                      : everythingSelected
-                        ? 'Deselect All'
-                        : moreThanThisPage && totals
-                          ? `Select All ${totals.count.toLocaleString()}`
-                          : 'Select All'}
+                    {selectAllLabel(selectingAll, everythingSelected, moreThanThisPage ? totals : null)}
                   </button>
                 )}
               </>
             }
           />
-          {totals && !loadFailed && totals.count > 0 && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3" aria-label="Orders pages">
-              <span className="text-sm text-secondary">
-                Showing {(page * ORDERS_PAGE_SIZE + 1).toLocaleString()}–{Math.min(page * ORDERS_PAGE_SIZE + orders.length, totals.count).toLocaleString()} of {totals.count.toLocaleString()} orders · {formatCents(totals.cents)} total
-              </span>
-              {totals.count > ORDERS_PAGE_SIZE && (
-                <div className="flex items-center gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => goToPage(page - 1)} disabled={page === 0 || pageLoading}>
-                    Previous
-                  </Button>
-                  <Button variant="secondary" size="sm" onClick={() => goToPage(page + 1)} disabled={(page + 1) * ORDERS_PAGE_SIZE >= totals.count || pageLoading}>
-                    Next
-                  </Button>
-                </div>
-              )}
-            </div>
+          {totals && !loadFailed && (
+            <OrdersPager totals={totals} page={page} rowsShown={orders.length} busy={pageLoading} goToPage={goToPage} />
           )}
         </div>
       </Card>
@@ -784,4 +753,50 @@ export default function Orders() {
       />
     </div>
   );
+}
+
+/** "Showing A–B of N orders · $X total" with Previous/Next; N and $X cover every matching order. */
+function OrdersPager({ totals, page, rowsShown, busy, goToPage }: {
+  totals: { count: number; cents: number };
+  page: number;
+  rowsShown: number;
+  busy: boolean;
+  goToPage: (page: number) => void;
+}) {
+  if (totals.count === 0) return null;
+  const first = page * ORDERS_PAGE_SIZE;
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3" aria-label="Orders pages">
+      <span className="text-sm text-secondary">
+        Showing {(first + 1).toLocaleString()}–{Math.min(first + rowsShown, totals.count).toLocaleString()} of {totals.count.toLocaleString()} orders · {formatCents(totals.cents)} total
+      </span>
+      {totals.count > ORDERS_PAGE_SIZE && (
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => goToPage(page - 1)} disabled={page === 0 || busy}>
+            Previous
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => goToPage(page + 1)} disabled={first + ORDERS_PAGE_SIZE >= totals.count || busy}>
+            Next
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** State saved for one query (page, totals, "select all"), or null once the query has changed. */
+function forQuery<T extends { key: string }>(state: T | null, key: string): T | null {
+  return state !== null && state.key === key ? state : null;
+}
+
+function selectAllLabel(selecting: boolean, everythingSelected: boolean, moreThanThisPage: { count: number } | null): string {
+  if (selecting) return 'Selecting…';
+  if (everythingSelected) return 'Deselect All';
+  return moreThanThisPage ? `Select All ${moreThanThisPage.count.toLocaleString()}` : 'Select All';
+}
+
+/** Whether more orders match than this page shows, and whether every matching order is already selected. */
+function selectionScope(totals: { count: number } | null, rowsShown: number, allMatchingSelected: boolean, pageAllSelected: boolean) {
+  const moreThanThisPage = totals !== null && totals.count > rowsShown;
+  return { moreThanThisPage, everythingSelected: allMatchingSelected || (pageAllSelected && !moreThanThisPage) };
 }

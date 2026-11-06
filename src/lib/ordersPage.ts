@@ -27,6 +27,24 @@ export interface OrdersQuery {
   p_sort_dir: SortDir;
 }
 
+/** The screen's filter boxes ('' = no filter) as the database arguments (null = no filter). */
+export function buildOrdersQuery(
+  season: { start: string; end: string },
+  f: { search: string; status: string; plan: string; pricing: string; split: string; sortKey: string | null; sortDir: SortDir },
+): OrdersQuery {
+  return {
+    p_from: season.start,
+    p_to: season.end,
+    p_search: f.search || null,
+    p_status: f.status || null,
+    p_planned: f.plan === 'planned' ? true : f.plan === 'committed' ? false : null,
+    p_pricing_status: f.pricing || null,
+    p_needs_split_billing: f.split ? true : null,
+    p_sort_key: f.sortKey,
+    p_sort_dir: f.sortDir,
+  };
+}
+
 export interface OrdersPage {
   rows: OrderListRow[];
   /** Every matching order, not just this page. */

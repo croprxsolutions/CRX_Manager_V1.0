@@ -166,6 +166,8 @@ export function replay({ stopBefore } = {}) {
     if (LEDGER_ONLY.has(base)) continue;
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     if (base === FORMS_SEED_EACH) restoreLiveBodies();
+    // The tote-fill preflight needs live's count units; the schema baseline carries no unit rows (live factors, 2026-11-05).
+    if (base === '20261117130000_tote_fill_from_bulk.sql') psql("INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Ea', 1, 'both'), ('Unit', 1, 'both') ON CONFLICT DO NOTHING;");
     const name = `m-${i}.sql`; stageText(name, lf(file));
     const r = docker([...psqlArgs(), '-1', '-f', `/tmp/${name}`], { allowFailure: true });
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.stdout}\n${r.stderr}`);

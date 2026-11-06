@@ -144,7 +144,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"],
   [/^BILL_SPLIT_QUANTITY_TOO_SMALL\b/,
    "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"],
-  [/^BILL_SPLIT_PRICING_PENDING\b/,
+  [/^PRICING_INCOMPLETE: price the order before its Bill Split\b/,
    "Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery"],
   [/^SPLIT_INVOICE_PROVENANCE_IMMUTABLE\b/,
    "Nothing was changed. This split invoice is locked to its group. Void the group and create a replacement"],

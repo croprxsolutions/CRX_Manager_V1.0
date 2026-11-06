@@ -1,5 +1,5 @@
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261115170000_chem_sale_bill_split_invoices.md.
+-- docs/reference/migrations.d/20261117140000_chem_sale_bill_split_invoices.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M2, Mason 4 Nov: "splits work line by line"): the Bill Split card now bills. When
@@ -24,7 +24,8 @@
 --     still can't). Its product lines (product, description, quantity, price, cents and cost) follow the
 --     split: changing them means voiding the group, so the cost the save recomputes stays the same.
 --   - The payers' drafts stand or fall together: delete_invoices refuses one member of a Bill Split group.
---   - A rush sale still waiting for prices drafts nothing at completion; Create Invoice drafts it once priced.
+--   - A price-later (rush) sale drafts nothing until it is priced (PRICING_INCOMPLETE, as for field
+--     splits): the delivery completes, the office is told, and Create Invoice drafts per payer after.
 --   - A failed split doesn't stop the delivery completing: it leaves an activity record and a flag in the
 --     result, and Create Invoice on the delivery runs it again.
 --   - Reps read the card (order_shares_select): any rep can already write it and reps work any customer.
@@ -393,11 +394,10 @@ BEGIN
   SELECT * INTO STRICT v_delivery FROM deliveries WHERE id = p_delivery_id;
   SELECT * INTO STRICT v_order FROM orders WHERE id = v_delivery.order_id;
 
-  -- price_order sweeps a rush sale's drafts directly, which a governed draft refuses, so it would roll the
-  -- pricing back. Draft once it is priced: Create Invoice on the delivery runs this again.
-  IF v_order.pricing_status = 'needs_pricing' THEN
-    RAISE EXCEPTION 'BILL_SPLIT_PRICING_PENDING: price this sale first, then use Create Invoice on delivery %', v_delivery.delivery_number
-      USING ERRCODE = 'check_violation';
+  -- As for field splits: price_order sweeps a draft's lines and can't touch a governed split, so a
+  -- price-later (rush) sale is priced first; Create Invoice on the delivery drafts the payers then.
+  IF EXISTS (SELECT 1 FROM order_items WHERE order_id = v_order.id AND pricing_pending) THEN
+    RAISE EXCEPTION 'PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted';
   END IF;
 
   INSERT INTO split_invoice_creation_claims (transaction_id, order_id) VALUES (pg_current_xact_id(), v_order.id);

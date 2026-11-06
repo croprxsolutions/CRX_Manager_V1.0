@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a Bill Split sale bills one invoice per payer, to the cent
 -- ----------------------------------------------------------------------------
--- Migration 20261115170000_chem_sale_bill_split_invoices (billing plan M2).
+-- Migration 20261117140000_chem_sale_bill_split_invoices (billing plan M2).
 --   A  Card 60/40 on line 1, line 2's own shares 100% to the main customer: a delivery drafts two
 --      invoices in one group, base-1 and base-2, CS- numbers, each line adds up exactly
 --   B  A three-way split: the leftover cents go to the main customer
@@ -22,6 +22,7 @@
 --      change to a product line's cost or description is refused (BILL_SPLIT_LINES_LOCKED)
 --   O  A share too small for one unit of quantity gets no cents either
 --   P  A line share and a card row record when they changed
+--   Q  A price-later (rush) sale drafts nothing at delivery; once priced, Create Invoice drafts per payer
 --   R  One payer's draft can't be deleted or voided alone; the whole group can, and Create Invoice redrafts
 --   S  A delivery too small to share leaves no invoice, a lasting record and a flag for the screen
 --   T  A field split can't take over a frozen Bill Split, by a new allocation or by moving one
@@ -593,6 +594,23 @@ BEGIN
     v_fails := v_fails || ' (X) a Create Invoice replay drafted again or answered differently;';
   END IF;
 
+  -- Q: a line still waiting for its price. price_order couldn't sweep a governed split, so none is drafted.
+  PERFORM pg_temp.smk_new_sale('q' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+  UPDATE order_items SET pricing_pending = true WHERE id = v_l1;
+  PERFORM pg_temp.smk_done(v_d, 'q' || v_suffix);
+  IF (SELECT status FROM deliveries WHERE id = v_d) IS DISTINCT FROM 'completed'
+     OR EXISTS (SELECT 1 FROM invoices WHERE delivery_id = v_d)
+     OR NOT EXISTS (SELECT 1 FROM notifications WHERE related_entity_id = v_o AND message LIKE '%PRICING_INCOMPLETE%') THEN
+    v_fails := v_fails || ' (Q) an unpriced sale drafted payer invoices, or the delivery or the notice is missing;';
+  END IF;
+  UPDATE order_items SET pricing_pending = false WHERE id = v_l1;
+  PERFORM create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-q-' || v_suffix);
+  IF (SELECT count(*) FROM invoices WHERE delivery_id = v_d AND status = 'draft') <> 2 THEN
+    v_fails := v_fails || ' (Q) Create Invoice after pricing did not draft per payer;';
+  END IF;
+
   -- Y: a rush sale's prices arrive after the delivery. Pricing must still work, and then the split drafts.
   PERFORM pg_temp.smk_new_sale('y' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
@@ -607,7 +625,7 @@ BEGIN
     PERFORM create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-y2-' || v_suffix);
     v_fails := v_fails || ' (Y) Create Invoice drafted an unpriced sale;';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT LIKE 'BILL_SPLIT_PRICING_PENDING:%' THEN v_fails := v_fails || ' (Y) wrong refusal: ' || SQLERRM || ';'; END IF;
+    IF SQLERRM NOT LIKE 'PRICING_INCOMPLETE:%' THEN v_fails := v_fails || ' (Y) wrong refusal: ' || SQLERRM || ';'; END IF;
   END;
   BEGIN
     PERFORM price_order(v_o, (SELECT jsonb_agg(jsonb_build_object('order_item_id', oi.id, 'price', oi.price_per_unit)) FROM order_items oi WHERE oi.order_id = v_o),

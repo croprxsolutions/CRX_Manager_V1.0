@@ -264,7 +264,7 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_SMALL: delivery D-1')).toBe(
       "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"
     );
-    expect(sanitizeError('BILL_SPLIT_PRICING_PENDING: price this sale first')).toBe(
+    expect(sanitizeError('PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted')).toBe(
       'Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery'
     );
     expect(sanitizeError('SPLIT_INVOICE_PROVENANCE_IMMUTABLE: x')).toBe(

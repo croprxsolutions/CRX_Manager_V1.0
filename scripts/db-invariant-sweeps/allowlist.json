@@ -1093,9 +1093,9 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "financial_dashboard_summary()#d90523f12239",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
-      "dated": "2026-11-02"
+      "violation_key": "financial_dashboard_summary()#3390d8094cb2",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-06 after 20261121090000 (applied live, ledger 20261106152929): the body now ages by the Chicago date with the get_ar_aging ranges; is_admin() is still checked first and it returns the same admin-only figures, so still SAFE.",
+      "dated": "2026-11-06"
     },
     {
       "predicate": "cost-exposure-review",

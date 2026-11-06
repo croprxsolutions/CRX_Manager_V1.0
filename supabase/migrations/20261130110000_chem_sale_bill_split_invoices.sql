@@ -51,6 +51,14 @@
 -- MASON'S DECISIONS (2026-11-06, #crx-work): the restricted-use register keeps the main customer as buyer on a
 --   payer's share (the farmer takes delivery and applies; the landlord only pays). Sales reports stay under
 --   the main customer until M15.
+--   Per-line rounding is accepted (Mason, 2026-11-06, "Yes, accept it"): each line splits on its own, so up
+--   to one cent per line goes to the main customer instead of another payer; billed totals stay exact.
+--   Per-payer cost is Option 1 above (cost can top the line's cost by about a cent): accepted, not a defect.
+--
+-- SCREENS (the next PR; this one lands the database first, as planned): the completion screens show
+--   bill_split_failed and every drafted invoice, Create Invoice is offered for a split backfill while
+--   needs_split_billing is set, and the card shows each payer's live amount. Until then a failed split is
+--   reported by the admin notification and the activity record, and the server-side paths are complete.
 --
 -- NOT CHANGED: a sale with no other payers bills exactly as before. Field/acre splits keep their own
 --   engine and win over a card until it freezes. Posting, payments and the overbilling caps. Who may unpost

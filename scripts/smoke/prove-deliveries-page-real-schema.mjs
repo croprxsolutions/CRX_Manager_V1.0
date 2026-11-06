@@ -455,6 +455,7 @@ try {
     ANALYZE public.deliveries; ANALYZE public.delivery_items; ANALYZE public.customers;
     ${ms('warm', 'n := (SELECT count(*) FROM public.deliveries);')}
     ${ms('base', 'n := (SELECT count(*) FROM public.deliveries);')}
+    ${ms('rep_cold', page({ limit: 50 }))}
     ${ms('rep_first', page({ limit: 50 }))}
     ${ms('rep_by_id', page({ limit: 500, after_id: NIL }))}
     ${ms('rep_export', page({ limit: 500, offset: 30000 }))}
@@ -471,6 +472,9 @@ try {
     assert.ok(times[k] < 8000, `${k} took ${times[k]} ms at 60,000 deliveries (authenticated statement_timeout is 8 s)`);
     assert.ok(times[k] < 3 * Math.max(times.base, 100), `${k} took ${times[k]} ms, over 3x a rep's plain read (${times.base} ms): the per-page cost regressed`);
   }
+  // The very first call also plans get_deliveries_page and the keyset function it wraps (one-time, ~0.6 s here);
+  // it is held only to the timeout, and rep_first measures the per-page cost.
+  assert.ok(times.rep_cold < 8000, `rep_cold took ${times.rep_cold} ms at 60,000 deliveries`);
   // Sorting by item count still counts every match (known limit, in the migration record and KNOWN_ISSUES); it must
   // at least stay under the timeout here.
   assert.ok(times.rep_items_sort < 8000, `rep_items_sort took ${times.rep_items_sort} ms at 60,000 deliveries`);

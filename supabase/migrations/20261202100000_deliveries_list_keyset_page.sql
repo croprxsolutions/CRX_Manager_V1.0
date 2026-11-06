@@ -350,6 +350,11 @@ BEGIN
   IF v_fn IS NULL THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: get_deliveries_keyset_page was not created';
   END IF;
+  -- One function of each name, so the wrapper's call and PostgREST never meet an ambiguous overload.
+  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'get_deliveries_keyset_page') <> 1
+     OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'get_deliveries_page') <> 1 THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: a second get_deliveries_page or get_deliveries_keyset_page overload exists';
+  END IF;
   IF (SELECT prosecdef FROM pg_proc WHERE oid = v_fn) OR (SELECT prosecdef FROM pg_proc WHERE oid = v_old) THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: both deliveries page functions must be SECURITY INVOKER';
   END IF;

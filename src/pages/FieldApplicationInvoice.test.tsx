@@ -468,6 +468,31 @@ describe('FieldApplicationInvoice — #33 discount on a NEW invoice reaches the 
     });
   });
 
+  it.each([
+    ['Net 15', '2026-10-15'],
+    [null, '2026-10-30'], // blank customer terms count as Net 30, like the database trigger
+  ])('KI-14: "Customer’s terms" shows the date from the customer’s own terms (%s) before the first save; the save still sends blank terms', async (customerTerms, expectedDue) => {
+    pinClockToSeasonEve();
+    mockFrom.mockImplementation(makeFromMock({
+      invoices: { data: [{ id: 'new-inv-1', customer_id: 'cust-A' }] },
+      customers: { data: [{ id: 'cust-A', payment_terms: customerTerms }] },
+    }));
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /Select Locations/i }));
+    fireEvent.click(await screen.findByTestId('mock-select-one-field'));
+    expect(((await screen.findByLabelText('Payment Terms')) as HTMLSelectElement).value).toBe('');
+    await waitFor(() => expect(screen.getByText('Due Date').nextElementSibling).toHaveTextContent(expectedDue));
+    expect(screen.queryByText(/From the customer.s terms/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => {
+      const billingCall = mockRpc.mock.calls.find((c) => c[0] === 'update_field_app_invoice_billing');
+      expect(billingCall).toBeDefined();
+      expect((billingCall![1] as Record<string, unknown>).p_terms_by_invoice)
+        .toEqual({ 'new-inv-1': { payment_terms: null, due_date: null } });
+    });
+  });
+
   it('KI-14: a saved un-split invoice keys its terms picker to its own billed customer, even when its field names another grower (Taha, PR #1556)', async () => {
     mockUseParams.mockReturnValue({ id: 'inv-saved' });
     mockFrom.mockImplementation(

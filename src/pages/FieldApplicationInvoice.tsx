@@ -1004,6 +1004,23 @@ export default function FieldApplicationInvoice() {
     }
     return [...byId.values()];
   }, [shares, siblings, termsByCustomer, id, pdfSnapshot?.customer_id, pdfSnapshot?.customer_name]);
+  // Each owner's own customers.payment_terms, so "Customer's terms" can show a date before the first save.
+  // Display only: the save still sends a blank choice and the database fills it in (blank -> Net 30).
+  const [customerDefaultTerms, setCustomerDefaultTerms] = useState<Record<string, string | null>>({});
+  const termsOwnerIdsKey = termsOwners.map((o) => o.customer_id).sort().join(',');
+  useEffect(() => {
+    if (!termsOwnerIdsKey) return;
+    let cancelled = false;
+    void supabase.from('customers').select('id, payment_terms').in('id', termsOwnerIdsKey.split(','))
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) { Sentry.captureException(error, { tags: { query: 'field_invoice_customer_terms' } }); return; }
+        const next: Record<string, string | null> = {};
+        for (const row of (data ?? []) as Array<{ id: string; payment_terms: string | null }>) next[row.id] = row.payment_terms;
+        setCustomerDefaultTerms((prev) => ({ ...prev, ...next }));
+      });
+    return () => { cancelled = true; };
+  }, [termsOwnerIdsKey]);
   const setOwnerTerms = useCallback((custId: string, patch: Partial<OwnerTerms>) => {
     setTermsByCustomer((prev) => ({ ...prev, [custId]: { ...(prev[custId] ?? OWNER_TERMS_DEFAULT), ...patch } }));
     setDirty(true);
@@ -3316,7 +3333,9 @@ export default function FieldApplicationInvoice() {
                     <p className="px-3 py-2 text-sm text-gray-700">
                       {ot.choice
                         ? dueDateFromTerms(transactionDate || todayInBusinessTz(), ot.choice)
-                        : 'From the customer’s terms'}
+                        : owner.customer_id in customerDefaultTerms
+                          ? dueDateFromTerms(transactionDate || todayInBusinessTz(), customerDefaultTerms[owner.customer_id])
+                          : 'From the customer’s terms'}
                     </p>
                   </div>
                 ) : null}

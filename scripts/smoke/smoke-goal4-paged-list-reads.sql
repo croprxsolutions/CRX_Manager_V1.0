@@ -99,14 +99,14 @@ BEGIN
     BEGIN
       PERFORM public.get_receiving_log(1, 0);
     EXCEPTION WHEN OTHERS THEN
-      IF SQLERRM = $m$Not authorized$m$ THEN v_refused := true; ELSE RAISE; END IF;
+      IF SQLERRM = 'Not authorized' THEN v_refused := true; ELSE RAISE; END IF;
     END;
     IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a driver read the receiving log'; END IF;
     v_refused := false;
     BEGIN
       SELECT count(*) INTO v_n FROM public.get_watchdog_flags();
     EXCEPTION WHEN OTHERS THEN
-      IF SQLERRM LIKE $m$WATCHDOG_ACCESS_DENIED%$m$ THEN v_refused := true; ELSE RAISE; END IF;
+      IF SQLERRM LIKE 'WATCHDOG_ACCESS_DENIED%' THEN v_refused := true; ELSE RAISE; END IF;
     END;
     IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a driver read the watchdog list (% rows)', v_n; END IF;
   END IF;

@@ -37,7 +37,13 @@ BEGIN
   -- 1. Call lists.
   FOREACH v_list IN ARRAY ARRAY['get_call_list_prepay_prospects', 'get_call_list_no_recent_contact',
       'get_call_list_stale_quotes', 'get_call_list_lapsed_products', 'get_call_list_unassigned_accounts'] LOOP
-    EXECUTE format('SELECT public.%I()', v_list) INTO v_r;
+    CASE v_list
+      WHEN 'get_call_list_prepay_prospects' THEN v_r := public.get_call_list_prepay_prospects();
+      WHEN 'get_call_list_no_recent_contact' THEN v_r := public.get_call_list_no_recent_contact();
+      WHEN 'get_call_list_stale_quotes' THEN v_r := public.get_call_list_stale_quotes();
+      WHEN 'get_call_list_lapsed_products' THEN v_r := public.get_call_list_lapsed_products();
+      ELSE v_r := public.get_call_list_unassigned_accounts();
+    END CASE;
     v_shown := jsonb_array_length(v_r->'rows');
     v_total := (v_r->>'total_count')::bigint;
     IF (v_r->>'success') IS DISTINCT FROM 'true' OR v_total IS NULL THEN
@@ -54,7 +60,7 @@ BEGIN
   SELECT j.applicator_id INTO v_applicator
     FROM public.jobs j
    WHERE j.deleted_at IS NULL AND j.applicator_id IS NOT NULL
-     AND NOT EXISTS (SELECT 1 FROM public.job_location_dispatches d WHERE d.job_id = j.id AND d.dispatch_status = $m$dispatched$m$)
+     AND NOT EXISTS (SELECT 1 FROM public.job_location_dispatches d WHERE d.job_id = j.id AND d.dispatch_status = 'dispatched')
    GROUP BY j.applicator_id
    ORDER BY count(*) DESC, j.applicator_id
    LIMIT 1;
@@ -64,7 +70,7 @@ BEGIN
     v_rows := COALESCE(v_rows, '[]'::jsonb);
     v_shown := jsonb_array_length(v_rows);
     IF v_shown = 0 THEN
-      RAISE EXCEPTION $m$SMOKE_FAIL: the board returned no job for an applicator with board jobs$m$;
+      RAISE EXCEPTION 'SMOKE_FAIL: the board returned no job for an applicator with board jobs';
     END IF;
     IF v_shown > 0 THEN
       IF (SELECT count(DISTINCT e->>'_total_count') FROM jsonb_array_elements(v_rows) e) <> 1 THEN
@@ -94,7 +100,13 @@ BEGIN
         'get_call_list_stale_quotes', 'get_call_list_lapsed_products', 'get_call_list_unassigned_accounts'] LOOP
       v_refused := false;
       BEGIN
-        EXECUTE format('SELECT public.%I()', v_list) INTO v_r;
+        CASE v_list
+          WHEN 'get_call_list_prepay_prospects' THEN v_r := public.get_call_list_prepay_prospects();
+          WHEN 'get_call_list_no_recent_contact' THEN v_r := public.get_call_list_no_recent_contact();
+          WHEN 'get_call_list_stale_quotes' THEN v_r := public.get_call_list_stale_quotes();
+          WHEN 'get_call_list_lapsed_products' THEN v_r := public.get_call_list_lapsed_products();
+          ELSE v_r := public.get_call_list_unassigned_accounts();
+        END CASE;
       EXCEPTION WHEN OTHERS THEN
         IF SQLERRM LIKE '%CALL_LIST_ACCESS_DENIED%' THEN v_refused := true; ELSE RAISE; END IF;
       END;

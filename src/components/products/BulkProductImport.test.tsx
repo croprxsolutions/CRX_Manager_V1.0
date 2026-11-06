@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { IDBFactory } from 'fake-indexeddb';
 
 const { mockToast, rpc } = vi.hoisted(() => ({ mockToast: vi.fn(), rpc: vi.fn() }));
 
@@ -18,7 +19,7 @@ vi.mock('../../lib/productSetup', () => ({
   ]),
 }));
 vi.mock('../../lib/documentOCR', () => ({ isCSVFile: vi.fn(() => true) }));
-vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1' } }) }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1' }, role: 'admin' }) }));
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import BulkProductImport from './BulkProductImport';
@@ -26,6 +27,7 @@ import {
   PRODUCT_IMPORT_COLUMNS,
   PRODUCT_IMPORT_TEMPLATE,
   buildProductImportRow,
+  csvRecordProblem,
   importRefusalReason,
   isRetiredPricingColumn,
   mapProductImportHeaders,
@@ -73,6 +75,20 @@ describe('CSV reader', () => {
   it('numbers each record by the file line it starts on, past multi-line notes and blank lines', () => {
     const text = 'product_name,notes\r\nA,"one\r\ntwo\nthree"\r\n\r\nB,x\nC,"a\rb"\nD,y';
     expect(parseCsvRecords(text).map((r) => r.line)).toEqual([1, 2, 6, 7, 9]);
+  });
+  it('refuses a row with more values than columns, or text after a closing quote, but allows trailing blanks', () => {
+    const [, extra, stray, blanks, spaced] = parseCsvRecords('product_name,notes\nChem,Handle,with care\n"abc"x,n\nOk,n,, \n "2,4-D" ,n\n');
+    expect(csvRecordProblem(extra, 2)).toMatch(/1 more value\(s\) than the header/);
+    expect(csvRecordProblem(stray, 2)).toMatch(/Text follows a closing quote/);
+    expect(csvRecordProblem(blanks, 2)).toBeUndefined();
+    expect(csvRecordProblem(spaced, 2)).toBeUndefined();
+    const [, twoQuoted] = parseCsvRecords('product_name,notes\n"" "Chem",n\n');
+    expect(csvRecordProblem(twoQuoted, 2)).toMatch(/Text follows a closing quote/);
+    const [, blankThenQuoted] = parseCsvRecords('product_name,notes\nChem," " "x"\n');
+    expect(csvRecordProblem(blankThenQuoted, 2)).toMatch(/Text follows a closing quote/);
+    expect(spaced.cells[0].trim()).toBe('2,4-D');
+    const [, blankInside] = parseCsvRecords('product_name,notes\nA,B,,C\n');
+    expect(csvRecordProblem(blankInside, 2)).toMatch(/2 more value\(s\) than the header/);
   });
 });
 
@@ -169,7 +185,31 @@ describe('row building', () => {
 
 describe('BulkProductImport screen', () => {
   const props = { open: true, onClose: vi.fn(), onSuccess: vi.fn() };
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The unconfirmed-import record lives in browser storage; each test starts with none.
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    globalThis.indexedDB = new IDBFactory();
+  });
+
+  it('refuses a new import too large for browser storage before anything is saved or locked', async () => {
+    rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
+    render(<BulkProductImport {...props} />);
+    await upload(`product_name,notes\nBig,${'x'.repeat(1_000_001)}\n`);
+    fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/too large to import safely/)));
+    expect(rpc).not.toHaveBeenCalledWith('apply_product_setup', expect.anything());
+    expect(screen.queryByText(/was not confirmed/)).not.toBeInTheDocument();
+  });
+
+  it('skips a row with more values than columns before anything is sent', async () => {
+    rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
+    render(<BulkProductImport {...props} />);
+    await upload('product_name,notes\nChem,Handle,with care\nOk,fine\n');
+    expect(await screen.findByText(/1 more value\(s\) than the header has columns/)).toBeInTheDocument();
+    expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [{ insert: { product_name: 'Ok', notes: 'fine' } }] });
+  });
 
   it('offers the template and blocks a pricing column before anything is sent', async () => {
     render(<BulkProductImport {...props} />);
@@ -217,7 +257,7 @@ describe('BulkProductImport screen', () => {
     ] });
     fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/^The import was not confirmed \(network\)/)));
-    fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Finish Earlier Import (1)' }));
     await waitFor(() => expect(rpc).toHaveBeenCalledTimes(3));
     const saves = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup');
     expect(saves[0][1]).toMatchObject({ p_performed_by: 'u1', p_rows: [
@@ -225,6 +265,27 @@ describe('BulkProductImport screen', () => {
     ] });
     expect(saves[1][1].p_idempotency_key).toBe(saves[0][1].p_idempotency_key);
     expect(props.onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('offers the clear button once an unconfirmed import is past its retry window (Sol HIGH)', async () => {
+    rpc.mockImplementation(async (name: string) => (name === 'preview_product_import'
+      ? { data: { rates_locked: false, rows: [okRow()] }, error: null }
+      : { data: null, error: { message: 'network' } }));
+    const first = render(<BulkProductImport {...props} />);
+    await upload('product_name\nLost Reply\n');
+    fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
+    await screen.findByRole('button', { name: 'Finish Earlier Import (1)' });
+    expect(screen.queryByRole('button', { name: /clear this/ })).not.toBeInTheDocument();
+    first.unmount();
+    const realNow = Date.now();
+    const later = vi.spyOn(Date, 'now').mockReturnValue(realNow + 25 * 60 * 60 * 1000);
+    try {
+      render(<BulkProductImport {...props} />);
+      expect(await screen.findByRole('button', { name: /I checked the records — clear this/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Finish Earlier Import (1)' })).toBeDisabled();
+    } finally {
+      later.mockRestore();
+    }
   });
 
   it('checks a large file in batches of 100 (KI-103) but still saves it in one all-or-nothing call', async () => {
@@ -244,7 +305,8 @@ describe('BulkProductImport screen', () => {
     expect(screen.getByText('Row 150 refused')).toBeInTheDocument();
     expect(screen.getByText(/Rates are locked\. Rows that set a rate are skipped/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Import 249 Product/ }));
-    expect(await screen.findByText('Import Complete')).toBeInTheDocument();
+    // 249 rows are written to browser storage before the save; CI with coverage needs more than the default 1 s.
+    expect(await screen.findByText('Import Complete', undefined, { timeout: 5000 })).toBeInTheDocument();
     const saves = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup');
     expect(saves).toHaveLength(1);
     expect(saves[0][1].p_rows).toHaveLength(249);
@@ -310,28 +372,31 @@ describe('BulkProductImport screen', () => {
     expect(screen.getByText(/b\.csv/)).toBeInTheDocument();
   });
 
-  it('after an unconfirmed save, keeps the same preview and retry key, even through closing, until Import is confirmed', async () => {
+  it('after an unconfirmed save, a reload offers only the same import, re-sent unchanged under the same key', async () => {
     let saves = 0;
     rpc.mockImplementation(async (name: string) => {
       if (name === 'preview_product_import') return { data: { rates_locked: false, rows: [okRow()] }, error: null };
       saves += 1;
       return saves === 1 ? { data: null, error: { message: 'network' } } : { data: { inserted_count: 1, rows: [] }, error: null };
     });
-    const { rerender } = render(<BulkProductImport {...props} />);
+    const first = render(<BulkProductImport {...props} />);
     await upload('product_name\nOne\n');
     fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
-    expect(await screen.findByText(/The last import was not confirmed/)).toBeInTheDocument();
+    expect(await screen.findByText(/An earlier import of 1 product\(s\) was not confirmed/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Choose Different File' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(props.onClose).toHaveBeenCalled();
-    rerender(<BulkProductImport {...props} open={false} />);
-    rerender(<BulkProductImport {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
+    // The page reloads: nothing in memory survives.
+    first.unmount();
+    render(<BulkProductImport {...props} />);
+    expect(await screen.findByText(/An earlier import of 1 product\(s\) was not confirmed/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Select File')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Check File/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Earlier Import (1)' }));
     expect(await screen.findByText('Import Complete')).toBeInTheDocument();
-    const keys = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup').map(([, a]) => a.p_idempotency_key);
-    expect(keys).toHaveLength(2);
-    expect(keys[1]).toBe(keys[0]);
-    expect(screen.queryByText(/The last import was not confirmed/)).not.toBeInTheDocument();
+    const saved = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup').map(([, a]) => a);
+    expect(saved).toHaveLength(2);
+    expect(saved[1].p_idempotency_key).toBe(saved[0].p_idempotency_key);
+    expect(saved[1].p_rows).toEqual([{ insert: { product_name: 'One' } }]);
+    expect(screen.queryByText(/was not confirmed/)).not.toBeInTheDocument();
   });
 
   it('a refused save frees the screen; closing mid-save keeps the import, so the late success is still confirmed', async () => {
@@ -344,13 +409,15 @@ describe('BulkProductImport screen', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
     expect(screen.getByRole('button', { name: 'Choose Different File' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
-    answer({ data: null, error: { message: 'Nothing was saved. Bad row.' } });
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith('apply_product_setup', expect.anything()));
+    answer({ data: null, error: { code: 'P0001', message: 'Nothing was saved. Bad row.' } });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Choose Different File' })).toBeEnabled());
-    expect(screen.queryByText(/The last import was not confirmed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/was not confirmed/)).not.toBeInTheDocument();
     // Save again, and the page closes the window before the reply lands.
     fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
     rerender(<BulkProductImport {...props} open={false} />);
     rerender(<BulkProductImport {...props} />);
+    await waitFor(() => expect(rpc.mock.calls.filter(([n]) => n === 'apply_product_setup')).toHaveLength(2));
     answer({ data: { inserted_count: 1, rows: [] }, error: null });
     expect(await screen.findByText('Import Complete')).toBeInTheDocument();
     expect(props.onSuccess).toHaveBeenCalledTimes(1);

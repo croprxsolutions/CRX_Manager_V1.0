@@ -7,6 +7,20 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "get_orders_page": {
+      "chain": "smoke-goal4-orders-page.sql",
+      "area": ["regression"],
+      "description": "REQUIRES 20261116120000. Goal 4 Orders list page, read only: as the oldest active admin under the authenticated role, get_orders_page for the current season returns total_count and total_price_cents equal to the table (each order rounded to whole cents), every page of 7 together lists each season order once in (order_date DESC, id) order, and a search for an order number finds it; an active driver, when one exists, sees no order.",
+      "covers": ["get_orders_page"]
+    },
+    "records_replay_binding_batch4d": {
+      "chain": "smoke-records-replay-binding-batch4d.sql",
+      "container_only": true,
+      "container_prover": "prove-records-replay-binding-batch4d-real-schema.mjs",
+      "description": "CONTAINER ONLY. After batch 4c, proves the 25 records operations require a key, preserve pre-replay checks, and bind any written receipt to its actor and full request. Uses invented records and rolls back.",
+      "covers": ["admin_update_profile", "batch_approve_blend_tickets", "batch_reject_blend_tickets", "bulk_create_label_drafts", "commit_label_draft", "create_label_draft", "create_blend_ticket", "save_blend_ticket", "save_blend_ticket_fields", "dismiss_watchdog_flag", "delete_vendor", "reactivate_vendor", "save_vendor", "link_fields_to_parent", "unlink_field_from_parent", "review_customer_fact", "supersede_customer_fact", "save_blend_recipe", "save_field", "save_field_crop_history", "save_field_geometry", "save_field_polygons", "set_application_record_lots", "set_field_boundary", "set_field_override_acres"],
+      "area": ["idempotency", "security", "regression"]
+    },
     "get_dispatch_board_jobs": {
       "chain": "smoke-goal4-list-totals.sql",
       "area": ["regression"],
@@ -54,6 +68,22 @@
       ],
       "area": [
         "pricing",
+        "security"
+      ]
+    },
+    "fill_tote_from_bulk": {
+      "chain": "smoke-tote_fill_from_bulk.sql",
+      "container_prover": "prove-tote-fill-real-schema.mjs",
+      "description": "REQUIRES 20261117130000. Tote fill from bulk (BLK-1a): anon cannot execute the three public functions; on an invented fertilizer parent an admin previews one 265-gal tote from 1,000 gal (nothing written), fills it (two signed ledger rows, one tote_fills row, no cost or price change), a same-key retry replays, the undo restores both counts and replays, a second undo is refused TOTE_FILL_ALREADY_REVERSED; an active non-admin profile is refused ADMIN_REQUIRED.",
+      "covers": [
+        "fill_tote_from_bulk",
+        "preview_tote_fill",
+        "reverse_tote_fill",
+        "_tote_fill_preview",
+        "_tote_fill_liquid_oz"
+      ],
+      "area": [
+        "inventory",
         "security"
       ]
     },
@@ -612,7 +642,7 @@
       "covers": [
         "delivery_signature_storage_access"
       ],
-      "description": "Delivery-signature Storage access is private and scoped to the delivery path and authorized actor; the shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
+      "description": "REQUIRES 20261116100000. Delivery-signature Storage access is private: an old fixed-path signature is readable only when its delivery records it, by an admin, a sales rep or the delivery's active assigned driver; nobody signed in can write, replace or delete one. The shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
       "area": [
         "security",
         "inventory"

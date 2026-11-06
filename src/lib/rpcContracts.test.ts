@@ -2847,6 +2847,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261107060000',
   '20261108120000',
   '20261110150000',
+  '20261115160000',
 ]);
 
 /**
@@ -3048,6 +3049,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'move_product_size',
   'set_parent_rates',
   'update_product_parent',
+  // 20261117130000 (BLK-1a): admin-only tote fill and its undo; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'fill_tote_from_bulk',
+  'reverse_tote_fill',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3078,6 +3083,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  // KI-06 (local candidate 20261115160000): trigger functions, never called as RPCs.
+  _snapshot_financial_hard_delete:
+    'AFTER DELETE row trigger on invoices, allocation_sets and payments: appends one audit snapshot per row a delete really erased, so a replayed delete matches no row and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _refuse_financial_truncate:
+    'BEFORE TRUNCATE statement trigger on invoices, allocation_sets and payments: only raises (the word TRUNCATE is in its message), writes nothing; every API-role EXECUTE is revoked',
   // KI-25 receipt queue (20261113140000).
   _enqueue_delivery_receipt:
     'internal helper called only by complete_delivery after its required-key replay binding; one row per delivery (ON CONFLICT (delivery_id), reopening only a cancelled never-sent row); every API-role EXECUTE (incl. service_role) is revoked',

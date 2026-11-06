@@ -8,6 +8,7 @@ import SplitHeading from '../components/ui/SplitHeading';
 import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
 import { Sentry } from '../lib/sentry';
+import { computeSeason } from '../utils/season';
 
 // Money safety: invoiced_amount_cents is bigint cents, display / 100
 const fmtDollars = (cents: number) =>
@@ -33,18 +34,13 @@ interface ProgramRow {
 const statusBadge: Record<string, BadgeVariant> = { not_started: 'default', in_progress: 'warning', completed: 'success' };
 const statusLabel: Record<string, string> = { not_started: 'Not Started', in_progress: 'In Progress', completed: 'Completed' };
 
-function currentSeason(): number {
-  const now = new Date();
-  return now.getMonth() >= 9 ? now.getFullYear() + 1 : now.getFullYear();
-}
-
 export default function ProgramTracker() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [programs, setPrograms] = useState<ProgramRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [season, setSeason] = useState(currentSeason());
+  const [season, setSeason] = useState(computeSeason());
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [customerFilter, setCustomerFilter] = useState<string>('');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -104,7 +100,7 @@ export default function ProgramTracker() {
         <div>
           <label className="block text-xs text-secondary mb-1">Season</label>
           <select value={season} onChange={(e) => setSeason(Number(e.target.value))} className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green">
-            {[currentSeason() - 1, currentSeason(), currentSeason() + 1].map((s) => <option key={s} value={s}>{s}</option>)}
+            {[computeSeason() - 1, computeSeason(), computeSeason() + 1].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <div>

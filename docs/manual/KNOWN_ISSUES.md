@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-05 for the live ledger only (see the void-delivery-order-status-guards-applied-live note); other evidence retains its stated dates.
+**Last verified:** 2026-11-06 for the live ledger only (permission tightening applied, ledger `20261106062807`); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -36,8 +36,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
-| Accepted by Mason (KI-60 to KI-71, KI-79, KI-80, KI-104) | 15 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
+| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104) | 16 |
 | Closed as FIXED, with proof (bottom of file and archive) | 14 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
@@ -46,8 +46,7 @@ Highest-priority open items, in order: KI-01 (an applicator keeps field access a
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
 migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
-key alone), KI-18 (UTC/browser-clock season can
-suppress the pre-harvest safety warning).
+key alone).
 
 ---
 
@@ -134,15 +133,19 @@ connected connector, or one whose id changes on reconnect, is unlisted until som
 gaps are accepted in KI-78.
 
 ### KI-06 — Financial audit log can point at hard-deleted records
-**HIGH (per older record) · UNVERIFIED · database/money · Mason (migration decision)**
-Some audit-trail rows refer to invoices or payments that were later hard-deleted and carry no snapshot of what
-the record was. Newer invoice deletes are soft; hard-delete paths for payments and the admin override remain.
-No snapshot/guard migration was found, but the live row count could not be checked.
+**FIXED 2026-11-06 12:02 AM Central (PR #1546, migration `20261115160000_financial_delete_snapshots`) · database/money**
+The app never hard-deletes these rows: invoice deletes are soft (`deleted_at`), payment deletes are voids
+(`allocation_sets.is_active = false`), and signed-in users hold no DELETE on `invoices`, `allocation_sets` or
+`payments`. Any remaining back-office (postgres/service-role) hard delete now writes a `financial_audit_log` row
+with the whole erased row plus every row that cascades away with it, naming the system actor; TRUNCATE on the
+three tables is refused. Residual (accepted, recorded): 206 older audit rows (162 invoice, 43 payment, March
+2026 test-era data plus one August E2E demo invoice) still point at rows erased before the fix; Mason decided
+nothing is back-filled or deleted without his approval. A database owner who disables triggers can still bypass.
 
 ### KI-07 — Other small security gaps
 **MED/LOW · mixed · unassigned**
-- `profiles` still grants `TRUNCATE`/`TRIGGER` to signed-in users (no revoking migration found; confirmed live
-  read-only 2026-10-25 with `has_table_privilege('authenticated', ...)`) — OPEN, LOW-MED.
+- `profiles` grants `TRUNCATE`/`TRIGGER` to signed-in users (confirmed live read-only 2026-10-25 and
+  2026-11-05) — revoked by `20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`), LOW-MED.
 - Customer-document post-apply check (browser storage policies removed, Documents tab still works) was never
   recorded; and a removed document cannot be reopened even by an admin — UNVERIFIED, LOW.
 - Three older "reps work any customer" leftovers: signed-in rep click-through of `customer-document-files`
@@ -154,8 +157,8 @@ No snapshot/guard migration was found, but the live row count could not be check
   `get_fields_with_geojson`, `get_job_fields_with_geojson`, `get_job_proof_data`, `save_field_geometry`,
   `save_field_polygons`, `set_field_boundary`, `set_field_override_acres` (read-only `execute_sql`, 2026-10-26 UTC; same 12 re-read
   2026-10-25 10:52 PM Central).
-  They need `extensions` for PostGIS. Either document a PostGIS exception to the rule or schema-qualify the
-  PostGIS calls and drop `extensions` from the path. Promised to CodeRabbit on PR #1065 (thread 4373018174) — LOW.
+  They need `extensions` for PostGIS. DOCUMENTED 2026-11-05 (Mason): `docs/workflows/RLS_SECURITY_GUIDE.md`
+  records the PostGIS exception; live has sixteen (these twelve plus four internal helpers). No function changed — CLOSED.
 
 ---
 
@@ -233,8 +236,17 @@ Accepted without a wrapper (reason): `void_invoice` (already binds its request);
 path is bound; the single save is an edit of one record); `increment_customer_prepay`, `restore_cancelled_delivery`
 and the `_section9_*` inner bodies (no app caller; only the database owner and service role can run them);
 `apply_remaining_prepayments` and `batch_apply_all_prepayments` (always refused, disabled);
-`admin_save_application_service` (admin-only edit of one setting row). Remaining: notification RPCs and the
-LOW functions (batch 4d).
+`admin_save_application_service` (admin-only edit of one setting row). Batch 4d (`20261114200000`, PR #1528, applied live 2026-11-06, ledger `20261106035950`) binds 25 records
+functions and requires a key on each: `admin_update_profile`, `batch_approve_blend_tickets`,
+`batch_reject_blend_tickets`, `bulk_create_label_drafts`, `commit_label_draft`, `create_label_draft`,
+`create_blend_ticket`, `save_blend_ticket`, `save_blend_ticket_fields`, `dismiss_watchdog_flag`, `delete_vendor`,
+`reactivate_vendor`, `save_vendor`, `link_fields_to_parent`, `unlink_field_from_parent`, `review_customer_fact`,
+`supersede_customer_fact`, `save_blend_recipe`, `save_field`, `save_field_crop_history`, `save_field_geometry`,
+`save_field_polygons`, `set_application_record_lots`, `set_field_boundary`, `set_field_override_acres`.
+It also limits `save_blend_recipe` to an active admin or sales rep, as both app recipe screens already were.
+`link_fields_to_parent`, `unlink_field_from_parent` and `save_field_polygons` also refuse a "performed by" naming someone
+other than the signed-in user (the app always sends the signed-in user).
+Remaining: notification RPCs and the other operations functions (batch 4e).
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
 **HIGH on money paths · FIXED IN CODE 2026-11-02 (branch `claude/crx-idempotency-keys-4a3741`; live once merged) · money**
@@ -271,7 +283,10 @@ a reload and Finish it left one order and 100 gal drawn. Other screens still kee
 **Remaining risk:** for the unbound functions, a create retried with different details after a lost reply opens
 the record already created without the later edits, and an edited retry of an existing record applies the new edit
 after the old one. Neither makes a second record or moves money twice; a clear refusal needs server-side binding
-(KI-10 batches 4c/4d; batch 4c binds `edit_delivery` and `reassign_delivery`), not a screen change. Quotes' Convert to Order
+(KI-10 batches 4c/4d; batch 4c binds `edit_delivery` and `reassign_delivery`), not a screen change. Once batch 4d is applied, `save_field` is bound: a changed retry
+with the same key is refused, and nothing changes, instead of opening the field already created; after a
+refresh the new field is in the list. Field Setup shows that refusal as the raw code
+`IDEMPOTENCY_INTENT_MISMATCH` rather than the plain message in `errorSanitizer.ts` (cosmetic; follow-up). Quotes' Convert to Order
 starts a new key each time its dialog opens, which is accepted: the server answers a repeat with
 `already_converted` and opens the existing order. `KNOWN_UNFIXED_SITES` in
 `src/__tests__/idempotency-reset-order.test.ts` lists only three documented scanner false positives (CustomerDetail,
@@ -352,14 +367,8 @@ can make old splits refuse to save (LOW-MED).
   in dollars, not integer cents. Found by CodeRabbit on PR #1078 (2026-10-23) and deferred: moving it to cents
   changes rounding on every quote line, so it needs its own money PR. LOW.
 
-### KI-17 — Blend-ticket linkage picks one order line per product
-**MED · PARTIAL · money · automatic matching unassigned**
-`link_blend_ticket_to_order` still takes `ORDER BY sort_order, id LIMIT 1`. The invoice side now refuses to guess
-when tier prices differ and asks staff to pick (PRs #982, #995, #1020). Automatic matching or splitting across
-tiers is not built; the linkage field is not used for money today.
-
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock
-**MED (safety path) / LOW · OPEN · money/UI · unassigned (fix the JobDetail one first)**
+**MED / LOW · OPEN · money/UI · unassigned (the pre-harvest warning part is fixed, see the archive)**
 - Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
   `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
   (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
@@ -367,11 +376,13 @@ tiers is not built; the linkage field is not used for money today.
   (`20261020210000:1050,1227`). Fixed by `20261103120000` (applied live 2026-11-03, ledger `20261103003731`), which makes `current_season()` read the
   Chicago date; the same migration moves the `invoices.invoice_date` default to the Chicago date, so the two
   defaults agree. LOW.
-- Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
-  interval warning in `src/pages/JobDetail.tsx:1449`: a wrong season at the 1 October boundary can silently
-  suppress the warning. MED (safety).
+- Client season reads: FIXED 2026-11-05 (branch `claude/ki18-season-central-1f821d`). `computeSeason()` now uses
+  the America/Chicago date, matching `current_season()`; details and proof are in the archive. Left open: other
+  screens still default some dates and "this month"/"last 30 days" filters from the browser clock (only the season
+  part was changed).
 - Two AR-aging views bucket a 30-day-old invoice differently; invoice dates have no future-date limit; three
   filters cut the day at UTC midnight. UNVERIFIED (PR #991 fixed the AR strip; the rest not re-checked). MED.
+  Checked 2026-11-05: none of these live in the season helpers, so they were left out of the season fix.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**
@@ -462,11 +473,14 @@ receipt; the driver is warned and the office can resend by hand. A queue table p
 and not built (needs a new Edge Function deploy). No `delivery_receipt_queue` exists in `supabase/`.
 
 ### KI-26 — Delivery completion-evidence leftovers
-**LOW · OPEN · UI/database/process · Mason for the access-policy item**
+**LOW · OPEN · UI/database/process**
 Following `20261022075000` (PR #1024): old app versions are refused until reloaded; offline completions queued
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
-abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test, and
-Mason's approval to narrow four older signature policies.
+abandoned signature files stay stored; file contents are not inspected. Real-phone airplane-mode test PASSED
+(Mason 2026-11-06, after the narrowing below): an offline signed completion synced and showed its signature.
+The four older signature policies (fixed path `signatures/<id>.png`) are narrowed by
+`20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`): insert, update and delete dropped,
+and reading needs the file to be the delivery's recorded signature.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
 **MED · OPEN · database · unassigned**
@@ -495,7 +509,8 @@ Most lists now page through every row (PRs #959, #1017, #1048). The order, job a
 the database, and cycle-count locations read every row (PR #1048). The Customers and Jobs lists now read every row,
 the Jobs Applicators/Customers filters match their job-id lists on the rows read (no URL-size risk), and the order and job
 pickers match a customer name in the database instead of only the first 50 matching names (2026-11-05). Crop
-Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Dispatch
+Programs was not capped: its programs are one settings record and its product picker searches (PR #944).
+The Orders list pages in the database with the true count and total of every match (`get_orders_page`, PR #1550). Dispatch
 Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1538; rest waits on KI-28, issue
 #1497); Call Lists say how many customers match beyond their 200 (same PRs). Still capped: the blend-ticket scanner
 Edge Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
@@ -564,7 +579,7 @@ together match the real total applied, rounded once, and holds at least each dra
 `scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs`.
 
 ### KI-101 — Voiding a delivery on a cancelled order reopens the order
-**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471); the grant item below is still open · database/lifecycle · found 2026-11-04 (KI-93 design review)**
+**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471); the grant item below is in `20261116100000` · database/lifecycle · found 2026-11-04 (KI-93 design review)**
 `_void_delivery_replay_impl_20261015` recomputed the order's status and wrote it under the admin override without
 checking for `cancelled`, so voiding a delivery of a cancelled, part-delivered order reopened it and put back the
 reservation the cancel had released. Reproduced 2026-11-04 on the throwaway copy. Such orders come from cancels before
@@ -574,9 +589,11 @@ not put back (a full cancel released it and nobody will deliver a cancelled orde
 deliver, and the stock-ledger note says so. An order cancelled through the direct status change released nothing;
 its reservation is left as it was. Live 2026-11-04: 4 cancelled orders, none with a completed delivery or
 delivered quantity. Proof: `scripts/smoke/prove-void-delivery-order-status-guards-real-schema.mjs`.
-- **Still open (needs Mason's yes: a permissions change).** Signed-in admins hold a direct UPDATE grant on
-  `orders.status`, so they can move an order between allowed statuses (for example confirmed to fulfilled, or
-  partially fulfilled to cancelled) with no delivery and no stock movement. Revoking it is its own PR.
+- **Grant item (Mason 2026-11-05).** Signed-in admins held a direct UPDATE grant on `orders.status`, so they
+  could move an order between allowed statuses with no delivery and no stock movement.
+  `20261116100000_permission_tightening.sql` revokes it, and the matching INSERT grant so an order cannot be created
+  already fulfilled (APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`); the order screen's unreachable direct
+  status write is removed.
 
 ### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice
 **MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471) · database/inventory · found 2026-11-04 (KI-93 design review, Sol r2 #8)**
@@ -776,6 +793,7 @@ Delete with a grep of every reference first; keep one copy of each helper.
 
 | ID | What | Why accepted |
 |---|---|---|
+| KI-17 | Blend-ticket linkage picks one order line per product: `link_blend_ticket_to_order` still takes `ORDER BY sort_order, id LIMIT 1`; automatic matching or splitting across tiers is not built | ACCEPTED limit (Mason 2026-11-05): the linkage is not used for money; the invoice side asks staff to pick (PRs #982, #995, #1020) |
 | KI-60 | A permitted staff member can mint a temporary link to a private photo | Mason, option A, 2026-10-14 |
 | KI-61 | A `LOCK TABLE` in a migration does not stop an already-running call of the OLD function body | Mason 2026-09-03; both instances applied with zero activity; future migrations of that shape need a quiet rollout and a concurrency proof |
 | KI-62 | Live migration ledger has older entries with no file on `main` | Pre-existing drift, not new |
@@ -897,7 +915,8 @@ per order, and a payload change is refused with a conflict dialog that reloads t
 **MED/LOW · OPEN · UI/database**
 Still row-capped: the Invoice Detail customer selector, Bulk PO Import products, bulk-import name matching,
 Label Data Quality choices, Product Detail choice lists (MED). Paging caveats: two identical reads can still miss
-concurrent changes, load/count cost grows on large tables, more than 20 identical-name search results are hard to
+concurrent changes, load/count cost grows on large tables (the Orders list now reads one page at a time, but each page
+still recomputes the season's line, invoice and delivery totals), more than 20 identical-name search results are hard to
 reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer
 one fails (LOW). `SelectLocationsModal` map/list split stays 50/50 on tablets (LOW). CRM gaps: applicator-license
 visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate-customer detection, bulk
@@ -940,7 +959,7 @@ service-role tools (LOW).
 
 ## Unverified items (could not confirm either way; treat as open until checked)
 
-KI-06 (audit log), KI-07 (customer-document post-apply check), KI-16 (split-acre
+KI-07 (customer-document post-apply check), KI-16 (split-acre
 rounding), KI-18 (AR-aging parts), KI-20 (per-delivery split, commission design choices), KI-29/KI-30
 (live-data counts), KI-35 (ledger reconciliation), KI-41 (offline recovery), KI-52 (prover, live-testdata false
 positives). Live-database facts need a read-only query by someone with access.

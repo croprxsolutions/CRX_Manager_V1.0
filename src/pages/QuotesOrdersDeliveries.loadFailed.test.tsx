@@ -156,41 +156,30 @@ describe('Quotes list', () => {
 });
 
 describe('Orders list', () => {
-  const order = () => ({ id: 'o1', order_number: 'ORD-77', status: 'confirmed', customer_id: 'c1', order_date: getSeasonDates().start, deleted_at: null, total_price: 100, is_planned: false, pricing_status: 'priced', customer: { farm_name: 'Big Farm', parent_customer_id: null } });
+  // One page from get_orders_page: lines, invoices, deliveries and farm groups are read in that one
+  // statement, so any of them failing fails the whole reply (never a partial row or a 0%).
+  const order = () => ({ id: 'o1', order_number: 'ORD-77', status: 'confirmed', customer_id: 'c1', order_date: getSeasonDates().start, deleted_at: null, total_price: 100, is_planned: false, pricing_status: 'priced', customer: { farm_name: 'Big Farm', parent_customer_id: null }, customer_name: 'Big Farm', farm_group_name: null, fulfillment_pct: 0, invoiced_pct: 0, active_delivery_count: 0, earliest_delivery_date: null, product_names: '' });
 
   it.each(['error', 'nodata'] as const)('a %s orders read says it could not be loaded, not "No orders yet"', async (mode) => {
-    H.failing.set('orders', mode);
+    H.failing.set('get_orders_page', mode);
     at('/orders', <Orders />);
     expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('No orders yet')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
 
-    H.failing.delete('orders');
-    H.tables.orders = [order()];
+    H.failing.delete('get_orders_page');
+    H.functions.get_orders_page = { rows: [order()], total_count: 1, total_price_cents: 10000 };
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
     expect(await screen.findByText('ORD-77')).toBeInTheDocument();
+    expect(screen.getByText('Showing 1–1 of 1 orders · $100.00 total')).toBeInTheDocument();
   });
 
-  it.each(['order_items', 'deliveries'])('a failed %s read fails the list instead of showing zero fulfilled or no deliveries', async (table) => {
-    H.tables.orders = [order()];
-    H.failing.set(table, 'error');
+  it('a reply without its totals fails the list instead of showing a $0 total', async () => {
+    H.functions.get_orders_page = { rows: [order()] };
     at('/orders', <Orders />);
     expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('ORD-77')).not.toBeInTheDocument();
-  });
-  it('an invoice read with no list says invoiced is unavailable, not 0%', async () => {
-    H.tables.orders = [order()];
-    H.failing.set('invoices', 'nodata');
-    at('/orders', <Orders />);
-    expect(await screen.findByText('ORD-77')).toBeInTheDocument();
-    expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('Invoiced percentages are unavailable'));
-  });
-
-  it('a failed farm-group name read fails the list instead of dropping the farm-group labels', async () => {
-    H.tables.orders = [{ ...order(), customer: { farm_name: 'Big Farm', parent_customer_id: 'parent-1' } }];
-    H.failing.set('customers', 'nodata');
-    at('/orders', <Orders />);
-    expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
-    expect(screen.queryByText('ORD-77')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\$0\.00/)).not.toBeInTheDocument();
   });
 });
 

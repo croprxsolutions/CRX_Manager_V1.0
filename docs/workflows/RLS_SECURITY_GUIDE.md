@@ -66,6 +66,19 @@ END;
 $$;
 ```
 Copy that shape: a pinned `search_path` and the `is_active = true` check are both required.
+
+**PostGIS exception (KI-07, recorded 2026-11-05).** The rule is `SET search_path = public, pg_temp`, or an
+exactly empty path with fully-qualified names. Field-map `SECURITY DEFINER` functions instead use
+`public, extensions, pg_temp`, because their PostGIS calls (`ST_*`, `geography`, `geometry`) live in the
+`extensions` schema. Live 2026-11-05 (read-only), sixteen: the twelve named in KI-07,
+`fields_acre_authority_guard`, `find_overlapping_fields`, `get_field_dashboard`, `get_field_geojson`,
+`get_fields_geojson_by_ids`, `get_fields_with_geojson`, `get_job_fields_with_geojson`, `get_job_proof_data`,
+`save_field_geometry`, `save_field_polygons`, `set_field_boundary`, `set_field_override_acres`, plus the four
+internal helpers behind the last four, `_save_field_geometry_replay_impl_20261015`,
+`_save_field_polygons_replay_impl_20261015`, `_set_field_boundary_replay_impl_20261015` and
+`_set_field_override_acres_replay_impl_20261015`. This is accepted: `extensions` is owned by `postgres`,
+neither `authenticated` nor `anon` may create objects in it, and `pg_temp` still comes last. Only a function
+that calls PostGIS may use this path; otherwise use the normal rule.
 `20260728233459_revoke_anon_execute_rls_role_helpers.sql` also revoked `EXECUTE` on `is_admin()`,
 `is_driver()` and `is_applicator()` from `anon`, so a new helper should grant `EXECUTE` deliberately
 (see `is_active_profile()` in `20260727174657_broad_reads_require_active_profile.sql`).

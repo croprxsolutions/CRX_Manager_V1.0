@@ -727,10 +727,9 @@ export default function FieldApplicationInvoice() {
     let cancelled = false;
     const fieldIds = locationFieldKey ? locationFieldKey.split(',') : [];
     if (fieldIds.length === 0) { setEarliestHarvestDate(null); return; }
-    // Parse the YYYY-MM-DD as a LOCAL date (NOT UTC) so a season-boundary date like
-    // Oct 1 doesn't shift into the prior season's evening before computeSeason reads the
-    // month. (Codex r2 P2.)
-    const appSeason = computeSeason(guardrailAppDate ? new Date(guardrailAppDate + 'T00:00:00') : new Date());
+    // Pass the YYYY-MM-DD text, not a Date, so Oct 1 never shifts into the prior season;
+    // with no date, computeSeason uses today in America/Chicago (KI-18).
+    const appSeason = computeSeason(guardrailAppDate || undefined);
     (async () => {
       const { data, error } = await supabase
         .from('field_crop_history')

@@ -145,13 +145,13 @@ function getPresetDates(preset: string): { start: string; end: string } {
   };
   switch (preset) {
     case 'this_season':
-      return getSeasonDates(now);
+      return getSeasonDates();
     case 'last_season': {
-      const s = computeSeason(now) - 1;
+      const s = computeSeason() - 1;
       return { start: seasonStartDate(s), end: seasonEndDate(s) };
     }
     case 'ytd': {
-      const s = computeSeason(now);
+      const s = computeSeason();
       return { start: seasonStartDate(s), end: formatLocalDate(now) };
     }
     case 'last30':

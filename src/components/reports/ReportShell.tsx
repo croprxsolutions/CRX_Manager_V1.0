@@ -17,16 +17,16 @@ function getPresetDates(preset: string): { start: string; end: string } {
 
   switch (preset) {
     case 'this_season': {
-      const s = computeSeason(now);
+      const s = computeSeason();
       return { start: seasonStartDate(s), end: seasonEndDate(s) };
     }
     case 'last_season': {
-      const s = computeSeason(now) - 1;
+      const s = computeSeason() - 1;
       return { start: seasonStartDate(s), end: seasonEndDate(s) };
     }
     case 'ytd': {
       // Season runs Oct 1 to Sep 30 — YTD starts from current season's Oct 1
-      const s = computeSeason(now);
+      const s = computeSeason();
       return { start: seasonStartDate(s), end: formatLocalDate(now) };
     }
     case 'last30': {

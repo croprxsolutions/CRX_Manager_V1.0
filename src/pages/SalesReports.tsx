@@ -26,13 +26,13 @@ interface FilterOption { id: string; name: string }
 function getPresetDates(preset: string): { start: string; end: string } {
   const now = new Date();
   switch (preset) {
-    case 'this_season': return getSeasonDates(now);
+    case 'this_season': return getSeasonDates();
     case 'last_season': {
-      const s = computeSeason(now) - 1;
+      const s = computeSeason() - 1;
       return { start: seasonStartDate(s), end: seasonEndDate(s) };
     }
     case 'ytd': {
-      const s = computeSeason(now);
+      const s = computeSeason();
       return { start: seasonStartDate(s), end: formatLocalDate(now) };
     }
     case 'last30': {
@@ -117,7 +117,7 @@ export default function SalesReports() {
 
   // ── Season options (current + 4 prior) ──
   const seasonOptions = useMemo(() => {
-    const cur = computeSeason(new Date());
+    const cur = computeSeason();
     return Array.from({ length: 5 }, (_, i) => cur - i);
   }, []);
 

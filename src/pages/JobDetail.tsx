@@ -695,14 +695,16 @@ export default function JobDetail() {
           await sendEmail(payload);
           // Flip THIS row failed -> sent now that the email actually went out, and
           // store the EXACT per-recipient text that was emailed so the audit row
-          // matches what the (co-billed) customer received. No idempotency key
-          // needed: the RPC is naturally idempotent (re-confirming a 'sent' row is a
-          // no-op) and scoped to a single stable notification_id.
+          // matches what the (co-billed) customer received. The RPC is naturally
+          // idempotent per notification_id; a fresh key per call is sent only because the
+          // server is moving to require one (KI-10), and a fresh key never replays.
           const confirmRes = await supabase.rpc('confirm_job_notification_sent', {
             p_notification_id: r.notification_id,
             p_subject: rendered.subject,
             p_message: rendered.body,
             p_performed_by: profile?.id ?? undefined,
+            // eslint-disable-next-line local-rules/idempotency-key-from-hook -- fresh per call is intended: repeat-safe call that sent no key before (KI-10)
+            p_idempotency_key: crypto.randomUUID(),
           });
           if (confirmRes.error) throw confirmRes.error;
           assertRpcResult(confirmRes.data, 'confirm_job_notification_sent');
@@ -869,12 +871,14 @@ export default function JobDetail() {
           await sendEmail(payload);
           // Flip THIS row failed -> sent now that the email actually went out, and
           // store the EXACT per-recipient text emailed. confirm_job_notification_sent
-          // is REUSED from #40 (notification_type-agnostic).
+          // is REUSED from #40 (notification_type-agnostic). Fresh key per call: see above.
           const confirmRes = await supabase.rpc('confirm_job_notification_sent', {
             p_notification_id: r.notification_id,
             p_subject: rendered.subject,
             p_message: rendered.body,
             p_performed_by: profile?.id ?? undefined,
+            // eslint-disable-next-line local-rules/idempotency-key-from-hook -- fresh per call is intended: repeat-safe call that sent no key before (KI-10)
+            p_idempotency_key: crypto.randomUUID(),
           });
           if (confirmRes.error) throw confirmRes.error;
           assertRpcResult(confirmRes.data, 'confirm_job_notification_sent');

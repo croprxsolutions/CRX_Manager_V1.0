@@ -325,6 +325,8 @@ export default function Dashboard() {
         supabase.rpc('log_failed_notification', {
           p_notification_type: 'remainder_reminders',
           p_error_message: err instanceof Error ? err.message : String(err),
+          // eslint-disable-next-line local-rules/idempotency-key-from-hook -- fresh per call is intended: repeat-safe call that sent no key before (KI-10)
+          p_idempotency_key: crypto.randomUUID(),
         }).then(({ error: logErr }) => { if (logErr) Sentry.captureException(logErr, { tags: { source: 'mutation', action: 'log_failed_notification' } }); });
       }
     }
@@ -338,6 +340,8 @@ export default function Dashboard() {
       supabase.rpc('log_failed_notification', {
         p_notification_type: 'release_expired_holds',
         p_error_message: err instanceof Error ? err.message : String(err),
+        // eslint-disable-next-line local-rules/idempotency-key-from-hook -- fresh per call is intended: repeat-safe call that sent no key before (KI-10)
+        p_idempotency_key: crypto.randomUUID(),
       }).then(({ error: logErr }) => { if (logErr) Sentry.captureException(logErr, { tags: { source: 'mutation', action: 'log_failed_notification' } }); });
     }
   }, [role, toast]);

@@ -2064,6 +2064,9 @@ export default function FieldApplicationInvoice() {
           p_temperature_text: temperature || undefined,
           p_applicator_name: applicator || undefined,
           p_performed_by: profile.id,
+          // Fresh per call: the server is moving to require a key (KI-10); it never replays.
+          // eslint-disable-next-line local-rules/idempotency-key-from-hook -- fresh per call is intended: repeat-safe call that sent no key before (KI-10)
+          p_idempotency_key: crypto.randomUUID(),
           // p_update_weather: TRUE — this (current-bundle) UI intends to write the structured
           // weather columns. The RPC only writes them on TRUE, so a stale old-bundle tab (which
           // omits this and the weather params) can't silently erase captured weather.
@@ -2855,6 +2858,9 @@ export default function FieldApplicationInvoice() {
             p_subject: proofSubject(recipientDraft),
             p_message: recipientText,
             p_performed_by: profile.id,
+            // Fresh per call: the server is moving to require a key (KI-10); it never replays.
+            // eslint-disable-next-line local-rules/idempotency-key-from-hook -- fresh per call is intended: repeat-safe call that sent no key before (KI-10)
+            p_idempotency_key: crypto.randomUUID(),
           });
           if (confirmRes.error) throw confirmRes.error;
           assertRpcResult(confirmRes.data, 'confirm_job_notification_sent');

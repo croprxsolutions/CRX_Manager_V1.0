@@ -5,8 +5,9 @@
   MAINTAIN rights on any app table or view, and tables created by later migrations no longer get them. No screen,
   Edge Function or scheduled job uses them. Every other grant is unchanged; the migration checks that itself and
   rolls back if anything else moved.
-- Known limit: tables created through the Supabase dashboard (owned by `supabase_admin`) still get Supabase's default
-  rights; every app table is created by migrations, and the migration refuses to run if any app table has another owner.
+- Known limit: tables owned by `supabase_admin` (Supabase platform and extension objects) still get Supabase's default
+  rights; every app table is owned by `postgres`, and the migration refuses to run if any app table has another owner.
+  The new live sweep `browser-table-maintenance` reports any table or view where the rights come back.
 - Proof: `scripts/smoke/prove-revoke-truncate-trigger-maintain-real-schema.mjs` (local Docker copy of the real schema)
   shows the rights present before and gone after, order and delivery functions still working as a signed-in user,
   and the reviewed rollback restoring every grant. The signature-storage smoke gained malformed file-name cases.

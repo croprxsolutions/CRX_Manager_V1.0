@@ -56,7 +56,7 @@ const ROLLBACK_QUERY = `SELECT coalesce(string_agg(stmt, E'\\n' ORDER BY stmt), 
 const snapshot = () => scalar(`SELECT md5(coalesce((SELECT string_agg(e, ',' ORDER BY e) FROM (
     SELECT c.relname || '|' || a.grantee::regrole || '|' || a.grantor::regrole || '|' || a.privilege_type || '|' || a.is_grantable AS e
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace CROSS JOIN LATERAL aclexplode(c.relacl) a
-     WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND a.grantee <> 0) s), '')
+     WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f')) s), '')
   || '#' || coalesce((SELECT string_agg(e, ',' ORDER BY e) FROM (
     SELECT d.defaclnamespace || '|' || a.grantee || '|' || a.privilege_type || '|' || a.is_grantable AS e
       FROM pg_default_acl d CROSS JOIN LATERAL aclexplode(d.defaclacl) a

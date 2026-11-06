@@ -19,14 +19,24 @@ const inPublic = (name: string) => {
   return parts.length === 1 || parts[0].toLowerCase() === 'public';
 };
 
-/** Every statement that grants TRUNCATE, TRIGGER, MAINTAIN or ALL on a public table (or all/future ones) to a browser role. */
+const BROWSER = /\b(anon|authenticated|PUBLIC)\b/i;
+
+/**
+ * Every statement that grants TRUNCATE, TRIGGER, MAINTAIN or ALL on a public table (or all/future ones) to a
+ * browser role, plus the two indirect routes: a role membership (e.g. pg_maintain) or ownership handed to one.
+ * shortcut: text only, so a privilege list built in dynamic SQL is missed; the migration's postflight and the
+ * live sweep `browser-table-maintenance` catch those.
+ */
 function maintenanceGrants(source: string): string[] {
   return strip(source).split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter((statement) => {
+    if (/\bOWNER\s+TO\s+"?(anon|authenticated)"?(\s|$)/i.test(statement)) return true;
+    const membership = /^GRANT\s+(?!.*\sON\s)(.+?)\s+TO\s+(.+)$/i.exec(statement);
+    if (membership) return BROWSER.test(membership[2]);
     const grant = /\bGRANT\s+(.+?)\s+ON\s+(.+?)\s+TO\s+(.+)$/i.exec(statement);
     if (!grant) return false;
     const [, privileges, target, grantees] = grant;
     if (!/\b(TRUNCATE|TRIGGER|MAINTAIN|ALL)\b/i.test(privileges)) return false;
-    if (!/\b(anon|authenticated|PUBLIC)\b/i.test(grantees)) return false;
+    if (!BROWSER.test(grantees)) return false;
     if (NOT_TABLES.test(target)) return false;
     const defaults = /^ALTER\s+DEFAULT\s+PRIVILEGES\b/i.test(statement);
     const schemas = /\bIN\s+SCHEMA\s+(.+?)\s+(GRANT|REVOKE)\b/i.exec(statement)?.[1];
@@ -63,6 +73,10 @@ describe('browser roles: no TRUNCATE, TRIGGER or MAINTAIN on public tables (2026
       'ALTER DEFAULT PRIVILEGES GRANT TRIGGER ON TABLES TO authenticated;',
       'GRANT TRIGGER ON public.orders TO service_role, authenticated WITH GRANT OPTION;',
       'GRANT\n  TRUNCATE\n  ON public.orders\n  TO authenticated;',
+      'GRANT pg_maintain TO authenticated;',
+      'GRANT service_role TO anon;',
+      'ALTER TABLE public.orders OWNER TO authenticated;',
+      'ALTER VIEW public.v OWNER TO "anon";',
     ]) expect(maintenanceGrants(sql), sql).toHaveLength(1);
   });
 
@@ -82,6 +96,9 @@ describe('browser roles: no TRUNCATE, TRIGGER or MAINTAIN on public tables (2026
       'ALTER DEFAULT PRIVILEGES IN SCHEMA private GRANT ALL ON TABLES TO authenticated;',
       'REVOKE TRUNCATE ON public.orders FROM authenticated;',
       '-- GRANT TRUNCATE ON public.orders TO authenticated;',
+      'GRANT authenticated TO authenticator;',
+      'ALTER TABLE public.orders OWNER TO postgres;',
+      'GRANT EXECUTE ON FUNCTION public.f() TO authenticated;',
     ]) expect(maintenanceGrants(sql), sql).toEqual([]);
   });
 

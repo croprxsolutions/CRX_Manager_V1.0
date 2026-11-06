@@ -15,7 +15,7 @@
 --
 -- NOT CHANGED: SELECT / INSERT / UPDATE / DELETE / REFERENCES grants; service_role, postgres and every
 -- other role; column grants; policies, functions, triggers; no rows. The default privileges of role
--- supabase_admin (tables made from the Supabase dashboard) cannot be changed by postgres (not a member)
+-- supabase_admin (Supabase platform and extension objects) cannot be changed by postgres (not a member)
 -- and stay; every app table is postgres-owned, which the preflight checks.
 --
 -- ROLLBACK (its own reviewed migration): the exact GRANT list read live before the apply, in

@@ -294,15 +294,41 @@ describe('Deliveries list pages in the database', () => {
     await waitFor(() => expect(screen.queryByText(/Checking stock for shortages/)).not.toBeInTheDocument());
   });
 
-  it('checks stock again on a page flip, so a delivery added elsewhere gets its shortage warning', async () => {
+  it('checks stock on opening, not on every page flip, since the check covers every open delivery', async () => {
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
     await screen.findByText('Scheduled Today');
-    await waitFor(() => expect(H.tableReads).toContain('inventory'));
-    const before = H.tableReads.filter((t) => t === 'inventory').length;
+    await waitFor(() => expect(H.tableReads).toContain('delivery_items'));
+    const before = H.tableReads.filter((t) => t === 'delivery_items').length;
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
-    await waitFor(() => expect(H.tableReads.filter((t) => t === 'inventory').length).toBeGreaterThan(before));
+    expect(H.tableReads.filter((t) => t === 'delivery_items')).toHaveLength(before);
+  });
+
+  it('offers no batch action on the old rows while a typed search has not been applied yet', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    fireEvent.click(screen.getAllByRole('checkbox', { name: 'Select DEL-0000' })[0]);
+    expect(screen.getByRole('button', { name: /Cancel 1 Selected/ })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Search deliveries'), { target: { value: 'DEL-1499' } });
+    expect(screen.queryByRole('button', { name: /Cancel 1 Selected/ })).not.toBeInTheDocument();
+  });
+
+  it('exports from the calendar what the calendar shows, not the list filters it hides', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    fireEvent.change(screen.getByLabelText('Filter by priority'), { target: { value: 'high' } });
+    await waitFor(() => expect(H.pageCalls[H.pageCalls.length - 1]?.p_priority).toBe('high'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar view' }));
+    await waitFor(() => expect(H.pageCalls[H.pageCalls.length - 1]?.p_priority ?? null).toBeNull());
+    const calls = H.pageCalls.length;
+    fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
+    await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
+    const exportCalls = H.pageCalls.slice(calls);
+    expect(exportCalls.length).toBeGreaterThan(0);
+    expect(exportCalls.every((c) => (c.p_priority ?? null) === null)).toBe(true);
   });
 
   it('exports nothing and says so when the export read fails', async () => {

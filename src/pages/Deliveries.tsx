@@ -833,13 +833,15 @@ export default function Deliveries() {
     });
   };
 
-  // Each page flip or filter change also re-checks stock, so a delivery added elsewhere gets its warning.
-  useEffect(() => { void loadDeliveries(); void loadShortages(); }, [loadDeliveries, loadShortages]);
+  useEffect(() => { void loadDeliveries(); }, [loadDeliveries]);
+  // The stock check covers every open delivery, not the shown page, so it runs on opening and after each
+  // change made here, not on every page flip (that would reread every open delivery's items each time).
   useEffect(() => {
+    void loadShortages();
     fetchDrivers();
     fetchCustomers();
     fetchRemainderCount();
-  }, [fetchDrivers, fetchCustomers, fetchRemainderCount]);
+  }, [loadShortages, fetchDrivers, fetchCustomers, fetchRemainderCount]);
 
   // Fetch unassigned deliveries for driver dashboard
   useEffect(() => {
@@ -901,10 +903,10 @@ export default function Deliveries() {
   }, [searched]);
 
   /* ─── Batch actions ─── */
-  // While a new page, search or filter loads, the rows on screen belong to the old query: nothing acts on them.
-  const selectedDeliveries = pageLoading ? [] : searched.filter((d) => selected.has(d.id));
-  // Exports read the query on screen; a search still being typed has not reached it yet.
+  // While a new page, search or filter loads (or a search is still being typed), the rows on screen belong
+  // to the old query: nothing acts on them, and exports wait for the query on screen.
   const listSettling = pageLoading || listSearch.trim() !== searchTerm;
+  const selectedDeliveries = listSettling ? [] : searched.filter((d) => selected.has(d.id));
   const selectableShown = searched.filter((d) => SELECTABLE_STATUSES.includes(d.status));
   const allShownSelected = selectableShown.length > 0 && selectableShown.every((d) => selected.has(d.id));
   const activeFilterCount = [statusFilter, driverFilter, priorityFilter, customerFilter, scheduleDate || datePreset].filter(Boolean).length;
@@ -979,13 +981,15 @@ export default function Deliveries() {
     setShowCancelModal(false);
   };
 
+  // What the screen shows: the calendar hides the filters and search, so there its own query applies.
+  const shownQuery = viewMode === 'calendar' ? loadQuery : listQuery;
   // The selected rows, or every row matching the search and filters on every page, in the shown order.
   const readExportRows = async (): Promise<DeliveryRow[]> => (selectedDeliveries.length > 0
     ? selectedDeliveries
-    : (await readDeliveriesPage(viewMode === 'list' ? listQuery : filterQuery, null)).rows);
+    : (await readDeliveriesPage(shownQuery, null)).rows);
   // The load sheet only prints open deliveries, so with no status chosen it reads only those.
   const readLoadSheetRows = async (): Promise<DeliveryRow[]> => {
-    const query = viewMode === 'list' ? listQuery : filterQuery;
+    const query = shownQuery;
     return (await readDeliveriesPage({ ...query, p_statuses: query.p_statuses ?? ['scheduled', 'in_progress'] }, null)).rows;
   };
 

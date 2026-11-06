@@ -41,8 +41,8 @@
 -- Lock order: the parent row (FOR SHARE, as PAR-1's writers lock parents first), the two member rows,
 -- the two products rows (FOR SHARE, so a deactivation, unit or cost edit cannot commit mid-fill), then
 -- the two Main Warehouse inventory rows in product-ID order (each created at zero first if missing,
--- ON CONFLICT on inventory's (product_id, location) key). unit_conversions is read unlocked (admin-edited,
--- rarely changed). A cycle count locking both rows by inventory id may deadlock with a fill; Postgres
+-- ON CONFLICT on inventory's (product_id, location) key). unit_conversions is locked in SHARE mode
+-- (after the products rows) so no factor changes mid-fill. A cycle count locking both rows by inventory id may deadlock with a fill; Postgres
 -- aborts one, nothing is saved, and the same key retries cleanly.
 -- Bulk amounts are rounded to 4 decimal places, so a preview survives a round trip through the browser.
 -- No existing row is changed; no grant, revoke or policy on an existing table. The only change to an
@@ -188,7 +188,7 @@ DECLARE
   v_bulk public.products%ROWTYPE;
   v_size_oz numeric;
   v_bulk_oz numeric;
-  v_each_gal numeric;
+  v_gallons numeric;
   v_bulk_qty numeric;
   v_bulk_before numeric;
   v_tote_before numeric;
@@ -242,8 +242,12 @@ BEGIN
       v_bulk.product_name, COALESCE(v_bulk.inventory_unit, 'no unit');
   END IF;
 
-  v_each_gal := trim_scale(round(v_tote.container_size * v_size_oz / 128, 4));
+  v_gallons := trim_scale(round(p_totes * v_tote.container_size * v_size_oz / 128, 4));
   v_bulk_qty := trim_scale(round(p_totes * v_tote.container_size * v_size_oz / v_bulk_oz, 4));
+  IF v_gallons <= 0 OR v_bulk_qty <= 0 THEN
+    RAISE EXCEPTION 'TOTE_FILL_TOTE_SIZE: "%"''s container size (% %) is too small to fill',
+      v_tote.product_name, v_tote.container_size, v_tote.container_unit;
+  END IF;
   v_bulk_before := COALESCE((SELECT quantity_available FROM public.inventory
                               WHERE product_id = v_bulk.id AND location = 'Main Warehouse'), 0);
   v_tote_before := COALESCE((SELECT quantity_available FROM public.inventory
@@ -266,7 +270,7 @@ BEGIN
     'tote_product_id', v_tote.id, 'bulk_product_id', v_bulk.id, 'parent_id', v_parent.id,
     'totes', p_totes, 'tote_unit', v_tote.inventory_unit,
     'tote_size', trim_scale(v_tote.container_size), 'tote_size_unit', v_tote.container_unit,
-    'gallons', trim_scale(p_totes * v_each_gal),
+    'gallons', v_gallons,
     'bulk_unit', v_bulk.inventory_unit, 'bulk_quantity', v_bulk_qty,
     'bulk_before', trim_scale(v_bulk_before), 'bulk_after', trim_scale(v_bulk_before - v_bulk_qty),
     'tote_before', trim_scale(v_tote_before), 'tote_after', trim_scale(v_tote_before + p_totes),
@@ -338,6 +342,8 @@ BEGIN
   IF v_bulk IS NOT NULL THEN
     PERFORM 1 FROM public.product_parent_members WHERE product_id = v_bulk FOR SHARE;
     PERFORM 1 FROM public.products WHERE id IN (p_tote_product_id, v_bulk) ORDER BY id FOR SHARE;
+    -- Conversion factors may not change between the preview check below and the stock write.
+    LOCK TABLE public.unit_conversions IN SHARE MODE;
     INSERT INTO public.inventory (product_id, location, quantity_available)
       SELECT x, 'Main Warehouse', 0 FROM unnest(ARRAY[p_tote_product_id, v_bulk]) x ORDER BY x
       ON CONFLICT (product_id, location) DO NOTHING;

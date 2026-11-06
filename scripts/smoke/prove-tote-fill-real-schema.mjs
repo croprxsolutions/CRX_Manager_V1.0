@@ -441,6 +441,19 @@ async function main() {
   const e3 = fill(TOTEQ, 3, p, 'k-e3');
   assert.deepEqual([e3.shortfall, e3.bulk_unit, stock(BULKQ), stock(TOTEQ)], [240, 'Qt', -240, 4]);
   console.log('[prover] Bulk stocked in quarts loses 1,060 qt per 265-gal tote; its ledger row and shortfall are in quarts');
+  // A unit factor cannot change while a fill is in flight.
+  p = preview(TOTEQ);
+  const held = bg(ADMIN, `${fillSql(TOTEQ, 1, p, 'k-e4')} SELECT pg_sleep(1.5);`);
+  await pause(700);
+  assert.match(owner("SET lock_timeout = '300ms'; UPDATE public.unit_conversions SET factor_oz = 16 WHERE unit = 'Qt';").output, /lock timeout/);
+  const heldDone = await held;
+  assert.equal(heldDone.status, 0, heldDone.output);
+  assert.equal(scalar("SELECT factor_oz FROM public.unit_conversions WHERE unit = 'Qt';"), '32');
+  // A tote too small to measure is refused by the preview, not by a table check at confirm.
+  asOwner(`UPDATE public.products SET container_size = 0.00001 WHERE id = '${TOTEQ}';`);
+  refused(ADMIN, previewSql(TOTEQ, 1), /TOTE_FILL_TOTE_SIZE: .*too small/);
+  asOwner(`UPDATE public.products SET container_size = 265 WHERE id = '${TOTEQ}';`);
+  console.log('[prover] a unit edit waits for an in-flight fill; a tote too small to measure is refused by the preview');
 
   // Cost flags; a cost-only change between preview and fill.
   asOwner(`UPDATE public.products SET current_cost = 1000.00 WHERE id = '${TOTE}';`);

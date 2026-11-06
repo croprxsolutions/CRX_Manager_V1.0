@@ -456,9 +456,22 @@ async function main() {
   const raced = as(ADMIN, `${madeAfter}\n${approve(P1, [entry(kappa)], 'k-kappa-approve')}`);
   assert.notEqual(raced.status, 0);
   assert.match(raced.output, /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Kappa" already has EPA number 400-1 and this name/);
+  // The name submitted at approval counts too (Sol): a parent "Foo" with Rho's EPA number refuses Rho approved as "Foo (EPA ...)".
+  const rhoG = groupOf(G, R1);
+  const fooFirst = `SELECT public.create_product_with_parent(${J({ name: '[PROVER] Foo', product_form: 'liquid', generic_epa_registration: rhoG.generic_epa_registration, category: 'Herbicide' })},
+    ${J({ product_name: '[PROVER] Foo 1 gal', sku: 'FO-1', inventory_unit: 'Gal' })}, 'k-foo');`;
+  const renamed = as(ADMIN, `${fooFirst}\n${approve(P1, [entry(rhoG, { name: `[PROVER] Foo (EPA ${rhoG.generic_epa_registration})` })], 'k-rho-foo')}`);
+  assert.notEqual(renamed.status, 0);
+  assert.match(renamed.output, /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Foo" already has EPA number 600-2 and this name/);
+  // One call cannot make two parents for one product (Sol): no EPA number, one form, one name after approval's suffixes.
+  const [u1g, u2g] = [groupOf(G, I1), groupOf(G, I2)];
+  assert.equal(u1g.status, 'proposed'); assert.equal(u2g.status, 'proposed');
+  refused(ADMIN, approve(P1, [entry(u1g, { name: '[PROVER] Dup', owner_confirmed: true }),
+    entry(u2g, { name: '[PROVER] Dup (liquid)', owner_confirmed: true })], 'k-dup-batch'),
+  /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Dup[^"]*" already has EPA number none and this name/);
   const kappaDone = call(ADMIN, approve(P1, [entry(kappa)], 'k-kappa-ok'));
   assert.equal(scalar(`SELECT count(*) FROM public.product_parent_members WHERE parent_id = '${kappaDone.groups[0].parent_id}';`), '2');
-  console.log('[case] approval: a group whose EPA number and name match a parent made after the build is refused PRODUCT_PARENT_EPA_HAS_PARENT; without that parent it is approved');
+  console.log('[case] approval: a group whose EPA number and name match a parent made after the build is refused PRODUCT_PARENT_EPA_HAS_PARENT; without that parent it is approved; the name submitted at approval is checked too, and one call cannot make two parents for one product, with or without an EPA number');
 
   // [case] rejection carried (Taha finding 4)
   const xeno = groupOf(G, X1);
@@ -514,12 +527,21 @@ async function main() {
     { product_name: '[PROVER] Kappa Max 1 gal', sku: 'KA-M', inventory_unit: 'Gal' }, 'k-kappa-max');
   psql(`INSERT INTO public.products (id, product_name, sku, category, epa_registration, product_form, inventory_unit, is_active, container_size, container_unit)
     VALUES ('${id('3b')}', '[PROVER] Kappa 5 gal', 'KA-5', 'Herbicide', '400-1', 'liquid', 'Gal', true, 5, 'Gal');`);
+  // Without an EPA number (Sol): two hand-made "Nu" parents are listed, and an unparented Nu size is held.
+  create({ name: '[PROVER] Nu', product_form: 'liquid', category: 'Adjuvant' }, { product_name: '[PROVER] Nu 1 gal', sku: 'NV-1', inventory_unit: 'Gal' }, 'k-nu');
+  create({ name: '[PROVER] Nu (liquid)', product_form: 'liquid', category: 'Adjuvant' }, { product_name: '[PROVER] Nu X 1 gal', sku: 'NV-X', inventory_unit: 'Gal' }, 'k-nu-2');
+  psql(`INSERT INTO public.products (id, product_name, sku, category, epa_registration, product_form, inventory_unit, is_active, container_size, container_unit)
+    VALUES ('${id('44')}', '[PROVER] Nu 5 gal', 'NV-5', 'Adjuvant', null, 'liquid', 'Gal', true, 5, 'Gal');`);
   const PD = build('k-build-dup');
   assert.deepEqual(PD.duplicate_parents, [{ generic_epa_registration: '400-1', product_form: 'liquid',
-    names: ['[PROVER] Kappa', '[PROVER] Kappa (EPA 400-1)', '[PROVER] Kappa Bulk'] }]);
+    names: ['[PROVER] Kappa', '[PROVER] Kappa (EPA 400-1)', '[PROVER] Kappa Bulk'] },
+  { generic_epa_registration: null, product_form: 'liquid', names: ['[PROVER] Nu', '[PROVER] Nu (liquid)'] }]);
   const k5 = groupOf(groups(PD.proposal_id), id('3b'));
   assert.equal(k5.status, 'held'); assert.ok(k5.flags.includes('epa_has_parent'));
-  console.log('[case] duplicate parents warned: hand-made parents with one EPA number, form and base name are allowed, the next build lists them in duplicate_parents and holds a matching group; another name with the same EPA number is not listed');
+  const nu5 = groupOf(groups(PD.proposal_id), id('44'));
+  assert.equal(nu5.status, 'held'); assert.ok(nu5.flags.includes('epa_has_parent'));
+  assert.match(nu5.reason, /already has EPA number none, this form and this name/);
+  console.log('[case] duplicate parents warned: hand-made parents with one EPA number, form and base name are allowed, the next build lists them in duplicate_parents and holds a matching group, with or without an EPA number; another name with the same EPA number is not listed');
 
   // [case] moving a size between parents with different brand lists (Taha finding 2)
   const mu = create({ name: '[PROVER] Mu', product_form: 'liquid', category: 'Herbicide' },

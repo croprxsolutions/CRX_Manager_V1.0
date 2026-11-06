@@ -31,11 +31,14 @@
 --    * rejected_before (flag): an earlier proposal rejected a group with exactly these sizes. When none of them
 --      changed (same group fingerprint) the rejection is carried, with its reason, who and when; otherwise the
 --      group is proposed again with the earlier rejection in its reason.
---    The result adds rejected_count and duplicate_parents: active parents that already share an EPA number, form
---    and base name, so a duplicate made by hand or by two admins at once is shown to be fixed.
--- 3. Approval (approve_product_parent_groups, re-issued): after the member locks, a group whose EPA number, form
---    and base name match an active parent's is refused PRODUCT_PARENT_EPA_HAS_PARENT (a parent made after the
---    build). Duplicates are warned, not blocked on the table (Mason, 2026-11-06): a rare one is visible in the
+--    The result adds rejected_count and duplicate_parents: active parents that already share an EPA number (or
+--    both have none), form and base name, so a duplicate made by hand or by two admins at once is shown to be
+--    fixed. A group with no EPA number is held the same way when an active parent with no EPA number has its
+--    form and base name.
+-- 3. Approval (approve_product_parent_groups, re-issued): after the member locks, each group in turn is refused
+--    PRODUCT_PARENT_EPA_HAS_PARENT when an active parent has its EPA number (or both have none), form and base
+--    name, by the group's name or the name submitted for it; checked per group, so a parent made earlier in the
+--    same batch counts (a parent made after the build, or two matching groups in one call). Duplicates are warned, not blocked on the table (Mason, 2026-11-06): a rare one is visible in the
 --    next build and reversible (move its sizes, deactivate it).
 -- 4. Moving a size (PAR-1; _product_size_move_refusal and move_product_size, re-issued):
 --    * refused PRODUCT_PARENT_BRANDS_DIFFER when the two parents' active brand lists differ (name, EPA number,
@@ -243,7 +246,10 @@ BEGIN
                    AND public._product_parent_identity_name(pp.name) = public._product_parent_identity_name(v_g.base))
       INTO v_epa_parent, v_epa_same_name
       FROM public.product_parents pp
-     WHERE v_g.epa IS NOT NULL AND pp.is_active AND pp.generic_epa_registration = v_g.epa;
+     WHERE pp.is_active AND pp.generic_epa_registration IS NOT DISTINCT FROM v_g.epa
+       -- No EPA number: only a parent with this form and name is the same product.
+       AND (v_g.epa IS NOT NULL OR (pp.product_form IS NOT DISTINCT FROM v_g.form
+            AND public._product_parent_identity_name(pp.name) = public._product_parent_identity_name(v_g.base)));
     IF v_g.shared_epa THEN v_flags := v_flags || '["same_epa_different_name"]'::jsonb; END IF;
     IF v_epa_parent IS NOT NULL THEN v_flags := v_flags || '["epa_has_parent"]'::jsonb; END IF;
     IF v_basis = 'owner_confirmed' THEN v_flags := v_flags || '["owner_confirmation_needed"]'::jsonb; END IF;
@@ -267,7 +273,7 @@ BEGIN
       v_flags := v_flags || '["size_numbers_differ"]'::jsonb;
     ELSIF v_epa_same_name THEN
       v_status := 'held';
-      v_reason := format('parent "%s" already has EPA number %s, this form and this name; a second parent is never made for one product', v_epa_parent, v_g.epa);
+      v_reason := format('parent "%s" already has EPA number %s, this form and this name; a second parent is never made for one product', v_epa_parent, COALESCE(v_g.epa, 'none'));
     END IF;
 
     -- An earlier rejection of exactly these sizes: carried while none of them changed, otherwise noted.
@@ -326,7 +332,7 @@ BEGIN
         FROM (SELECT pp.generic_epa_registration AS epa, pp.product_form AS form,
                      jsonb_agg(pp.name ORDER BY pp.name) AS names
                 FROM public.product_parents pp
-               WHERE pp.is_active AND pp.generic_epa_registration IS NOT NULL
+               WHERE pp.is_active
                GROUP BY pp.generic_epa_registration, pp.product_form, public._product_parent_identity_name(pp.name)
               HAVING count(*) > 1) d), '[]'::jsonb));
   PERFORM public.save_idempotency(p_idempotency_key, 'build_product_parent_proposal',
@@ -387,23 +393,23 @@ BEGIN
                      AND g.id IN (SELECT (e->>'group_id')::uuid FROM jsonb_array_elements(p_groups) e))
    ORDER BY p.id FOR UPDATE;
   SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR SHARE;
-  -- A parent with this EPA number, form and base name made since the build: never a second parent for one product.
-  -- (The group's stored members are re-checked against the locked rows before anything is written.)
-  SELECT pp.name, g.generic_epa_registration AS epa INTO v_clash
-    FROM public.product_parent_proposal_groups g
-    JOIN public.product_parents pp ON pp.is_active AND pp.generic_epa_registration = g.generic_epa_registration
-   WHERE g.proposal_id = p_proposal_id
-     AND g.id IN (SELECT (e->>'group_id')::uuid FROM jsonb_array_elements(p_groups) e)
-     AND pp.product_form IS NOT DISTINCT FROM g.product_form
-     AND public._product_parent_identity_name(pp.name)
-         = public._product_parent_identity_name(g.members->0->>'product_name')
-   ORDER BY pp.name LIMIT 1;
-  IF FOUND THEN
-    RAISE EXCEPTION 'PRODUCT_PARENT_EPA_HAS_PARENT: parent "%" already has EPA number % and this name; build a new proposal',
-      v_clash.name, v_clash.epa;
-  END IF;
-
   FOR v_entry IN SELECT e FROM jsonb_array_elements(p_groups) e ORDER BY e->>'group_id' LOOP
+    -- A parent with this EPA number (or none), form and base name, by the group's name or the submitted one, made
+    -- since the build or earlier in this call: never a second parent for one product. (The group's stored members
+    -- are re-checked against the locked rows before anything is written.)
+    SELECT pp.name, g.generic_epa_registration AS epa INTO v_clash
+      FROM public.product_parent_proposal_groups g
+      JOIN public.product_parents pp ON pp.is_active AND pp.generic_epa_registration IS NOT DISTINCT FROM g.generic_epa_registration
+     WHERE g.proposal_id = p_proposal_id AND g.id = (v_entry->>'group_id')::uuid
+       AND pp.product_form IS NOT DISTINCT FROM g.product_form
+       AND public._product_parent_identity_name(pp.name)
+           IN (public._product_parent_identity_name(g.members->0->>'product_name'),
+               public._product_parent_identity_name(v_entry->>'name'))
+     ORDER BY pp.name LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_HAS_PARENT: parent "%" already has EPA number % and this name; build a new proposal',
+        v_clash.name, COALESCE(v_clash.epa, 'none');
+    END IF;
     v_done := v_done || public._approve_product_parent_group(v_proposal, v_entry, COALESCE(v_locked, true));
   END LOOP;
   PERFORM public._close_product_parent_proposal_if_done(p_proposal_id);

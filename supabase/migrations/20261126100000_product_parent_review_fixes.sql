@@ -14,39 +14,42 @@
 --    * Grams are no longer removed: "Talstar 2 G" and "0.2 G" (also live's "Aztec 4.67 G", "Counter 20 G") are
 --      strengths. A gram-sized package name only groups less, never wrongly.
 --    Measured on live 2026-11-06 (604 products): 15 base names change, every one by keeping a strength or ratio.
--- 2. Build (build_product_parent_proposal, re-issued), three new holds and a flag:
---    * size_numbers_differ (held): two sizes of one group with the same recorded container size and unit carry
---      different numbers in their names, so a removed number was not their size (0 of live's 118 multi-size groups).
---    * epa_has_parent (flag): an active parent already has the group's EPA number. Held when that parent's base
---      name is the group's too (a second parent for the same product); a different name stays a flag, as the
---      build sheet's same-EPA-different-name rule says (Gen Liberty / Gen Liberty: Higher Quality).
+-- 2. Build (build_product_parent_proposal, re-issued), three new holds, a flag and a list:
+--    * size_numbers_differ (held): the sizes' names, less each one's recorded container size, carry different
+--      numbers (compared by value), so the base name lost a strength or analysis however it was written
+--      ("2 lb./gal", "2 lb ai/gal"). A name with a size but no recorded container size holds its group too:
+--      names group less rather than risk one parent for two strengths.
+--    * epa_has_parent (flag): an active parent already has the group's EPA number. Held when that parent's form
+--      and base name are the group's too (a second parent for the same product); otherwise it stays a flag, as
+--      the build sheet's same-EPA-different-name rule says (Gen Liberty / Gen Liberty: Higher Quality).
 --    * rejected_before (flag): an earlier proposal rejected a group with exactly these sizes. When none of them
 --      changed (same group fingerprint) the rejection is carried, with its reason, who and when; otherwise the
 --      group is proposed again with the earlier rejection in its reason.
---    The result adds rejected_count.
--- 3. Approval (approve_product_parent_groups, re-issued): after the member locks, a group whose EPA number and base
---    name match an active parent's is refused PRODUCT_PARENT_EPA_HAS_PARENT (a parent made after the build).
+--    The result adds rejected_count and duplicate_parents: active parents that already share an EPA number, form
+--    and base name, so a duplicate made by hand or by two admins at once is shown to be fixed.
+-- 3. Approval (approve_product_parent_groups, re-issued): after the member locks, a group whose EPA number, form
+--    and base name match an active parent's is refused PRODUCT_PARENT_EPA_HAS_PARENT (a parent made after the
+--    build). Duplicates are warned, not blocked on the table (Mason, 2026-11-06): a rare one is visible in the
+--    next build and reversible (move its sizes, deactivate it).
 -- 4. Moving a size (PAR-1; _product_size_move_refusal and move_product_size, re-issued):
 --    * refused PRODUCT_PARENT_BRANDS_DIFFER when the two parents' active brand lists differ (name, EPA number,
 --      manufacturer, sourced, RUP, signal word), so a move never changes a size's brands silently. The preview
 --      calls the same refusal, so it shows it too.
 --    * a parent left with no sizes is made inactive as before, and now its active brands are retired, each with
 --      a 'retired' brand event. The receipt adds from_parent_brands_retired.
--- 5. One parent per product (new trigger guard_product_parent_epa_duplicate on product_parents): any write that
---    leaves two active parents with one EPA number and one base name is refused PRODUCT_PARENT_EPA_HAS_PARENT,
---    under a lock per EPA number, so two admins working at once cannot both make one. It and move_product_size
---    refuse a REPEATABLE READ or SERIALIZABLE transaction (PRODUCT_PARENT_READ_COMMITTED_REQUIRED), whose old
---    snapshot would hide a row committed while it waited; the app's calls are READ COMMITTED. Every second-parent check
---    (build, approval, trigger) compares _product_parent_identity_name (new helper): the base name without the
---    " (EPA ...)", " (form)" and " #n" suffixes approval adds to keep names unique.
+--    * a REPEATABLE READ or SERIALIZABLE transaction is refused (PRODUCT_PARENT_READ_COMMITTED_REQUIRED): its
+--      old snapshot would hide a row committed while it waited. The app's calls are READ COMMITTED.
+-- Two new private helpers: _product_parent_identity_name (the base name without the " (EPA ...)", " (form)" and
+-- " #n" suffixes approval adds to keep names unique; every second-parent check compares it) and
+-- _product_name_strength_numbers (the numbers check above).
 -- Same signatures, owners and grants for every re-issued function (CREATE OR REPLACE keeps them; the postflight
--- checks). No table, row, grant or policy changes beyond the new trigger. The switch stays off.
+-- checks). No table, row, grant or policy changes. The switch stays off.
 --
--- Rollback: DROP TRIGGER guard_product_parent_epa_duplicate ON public.product_parents and DROP FUNCTION
--- public.guard_product_parent_epa_duplicate(); re-issue _product_parent_base_name, build_product_parent_proposal and approve_product_parent_groups from
--- 20261123120000_product_parent_proposals.sql, and _product_size_move_refusal and move_product_size from
--- 20261110150000_product_parent_stock_units.sql, then DROP FUNCTION public._product_parent_identity_name(text). Brands retired by an emptying move stay retired (retired is final;
--- their events record it).
+-- Rollback: re-issue _product_parent_base_name, build_product_parent_proposal and approve_product_parent_groups
+-- from 20261123120000_product_parent_proposals.sql, and _product_size_move_refusal and move_product_size from
+-- 20261110150000_product_parent_stock_units.sql, then DROP FUNCTION public._product_parent_identity_name(text) and
+-- public._product_name_strength_numbers(text, numeric). Brands retired by an emptying move stay retired (retired
+-- is final; their events record it).
 
 SET LOCAL lock_timeout = '10s';
 
@@ -107,6 +110,21 @@ LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
 $function$;
 ALTER FUNCTION public._product_parent_identity_name(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_parent_identity_name(text) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+
+-- Every number in a size's name, by value and sorted, less one that equals its recorded container size. Sizes of
+-- one product differ only in that number, so two members whose lists differ carry a strength or analysis the
+-- base name lost ("2 lb./gal 2.5 gal" vs "4 lb./gal 30 gal"), however it is written.
+CREATE FUNCTION public._product_name_strength_numbers(p_name text, p_size numeric) RETURNS numeric[]
+LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
+  WITH n AS (
+    SELECT x.m[1]::numeric AS v, x.i
+      FROM regexp_matches(COALESCE(p_name, ''), '([0-9]+(?:\.[0-9]+)?|\.[0-9]+)', 'g') WITH ORDINALITY AS x(m, i)
+  )
+  SELECT COALESCE(array_agg(v ORDER BY v), '{}')
+    FROM n WHERE i IS DISTINCT FROM (SELECT min(i) FROM n WHERE v = p_size);
+$function$;
+ALTER FUNCTION public._product_name_strength_numbers(text, numeric) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._product_name_strength_numbers(text, numeric) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. Build a proposal
@@ -190,17 +208,13 @@ BEGIN
     v_decided_by := NULL;
     v_decided_at := NULL;
     v_basis := CASE WHEN v_g.epa IS NULL THEN 'owner_confirmed' ELSE 'epa_number' END;
-    -- Two sizes with the same container whose names carry different numbers: a removed number was not their size.
-    v_numbers_differ := EXISTS (
-      SELECT 1 FROM public.products a JOIN public.products b ON a.id < b.id
-       WHERE a.id = ANY(v_g.ids) AND b.id = ANY(v_g.ids)
-         AND a.container_size IS NOT NULL AND a.container_size = b.container_size
-         AND lower(btrim(COALESCE(a.container_unit, ''))) = lower(btrim(COALESCE(b.container_unit, '')))
-         AND ARRAY(SELECT x[1] FROM regexp_matches(a.product_name, '([0-9]+(\.[0-9]+)?|\.[0-9]+)', 'g') x)
-             IS DISTINCT FROM ARRAY(SELECT x[1] FROM regexp_matches(b.product_name, '([0-9]+(\.[0-9]+)?|\.[0-9]+)', 'g') x));
+    -- Sizes whose names carry different numbers besides their own container size: a strength or analysis.
+    v_numbers_differ := (SELECT count(DISTINCT public._product_name_strength_numbers(p.product_name, p.container_size))
+                           FROM public.products p WHERE p.id = ANY(v_g.ids)) > 1;
     -- An active parent already carries this EPA number (made by PAR-1, or approved from an earlier proposal).
     SELECT string_agg(pp.name, ', ' ORDER BY pp.name),
-           bool_or(public._product_parent_identity_name(pp.name) = public._product_parent_identity_name(v_g.base))
+           bool_or(pp.product_form IS NOT DISTINCT FROM v_g.form
+                   AND public._product_parent_identity_name(pp.name) = public._product_parent_identity_name(v_g.base))
       INTO v_epa_parent, v_epa_same_name
       FROM public.product_parents pp
      WHERE v_g.epa IS NOT NULL AND pp.is_active AND pp.generic_epa_registration = v_g.epa;
@@ -223,11 +237,11 @@ BEGIN
       v_status := 'held'; v_reason := 'names differ only by a strength or volume token such as "4L"; review by hand';
       v_flags := v_flags || '["ambiguous_strength_token"]'::jsonb;
     ELSIF v_numbers_differ THEN
-      v_status := 'held'; v_reason := 'two sizes with the same container have different numbers in their names (a strength or analysis); review by hand';
+      v_status := 'held'; v_reason := 'sizes in this group carry different numbers in their names besides their container size (a strength or analysis); review by hand';
       v_flags := v_flags || '["size_numbers_differ"]'::jsonb;
     ELSIF v_epa_same_name THEN
       v_status := 'held';
-      v_reason := format('parent "%s" already has EPA number %s and this name; a second parent is never made for one product', v_epa_parent, v_g.epa);
+      v_reason := format('parent "%s" already has EPA number %s, this form and this name; a second parent is never made for one product', v_epa_parent, v_g.epa);
     END IF;
 
     -- An earlier rejection of exactly these sizes: carried while none of them changed, otherwise noted.
@@ -275,7 +289,17 @@ BEGIN
   PERFORM public._close_product_parent_proposal_if_done(v_proposal.id);
 
   v_result := jsonb_build_object('proposal_id', v_proposal.id, 'proposal_version', v_proposal.proposal_version,
-    'group_count', v_count, 'held_count', v_held, 'rejected_count', v_rejected);
+    'group_count', v_count, 'held_count', v_held, 'rejected_count', v_rejected,
+    -- Active parents that already duplicate one another (made by hand, or by two admins at once): shown to fix.
+    'duplicate_parents', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('generic_epa_registration', d.epa, 'product_form', d.form, 'names', d.names)
+                       ORDER BY d.epa, d.form)
+        FROM (SELECT pp.generic_epa_registration AS epa, pp.product_form AS form,
+                     jsonb_agg(pp.name ORDER BY pp.name) AS names
+                FROM public.product_parents pp
+               WHERE pp.is_active AND pp.generic_epa_registration IS NOT NULL
+               GROUP BY pp.generic_epa_registration, pp.product_form, public._product_parent_identity_name(pp.name)
+              HAVING count(*) > 1) d), '[]'::jsonb));
   PERFORM public.save_idempotency(p_idempotency_key, 'build_product_parent_proposal',
     jsonb_build_object('actor_id', auth.uid(), 'request_fingerprint', v_fp, 'response', v_result));
   RETURN v_result;
@@ -334,13 +358,14 @@ BEGIN
                      AND g.id IN (SELECT (e->>'group_id')::uuid FROM jsonb_array_elements(p_groups) e))
    ORDER BY p.id FOR UPDATE;
   SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR SHARE;
-  -- A parent with this EPA number and base name made since the build: never a second parent for one product.
+  -- A parent with this EPA number, form and base name made since the build: never a second parent for one product.
   -- (The group's stored members are re-checked against the locked rows before anything is written.)
   SELECT pp.name, g.generic_epa_registration AS epa INTO v_clash
     FROM public.product_parent_proposal_groups g
     JOIN public.product_parents pp ON pp.is_active AND pp.generic_epa_registration = g.generic_epa_registration
    WHERE g.proposal_id = p_proposal_id
      AND g.id IN (SELECT (e->>'group_id')::uuid FROM jsonb_array_elements(p_groups) e)
+     AND pp.product_form IS NOT DISTINCT FROM g.product_form
      AND public._product_parent_identity_name(pp.name)
          = public._product_parent_identity_name(g.members->0->>'product_name')
    ORDER BY pp.name LIMIT 1;
@@ -525,47 +550,6 @@ END;
 $function$;
 
 -- ---------------------------------------------------------------------------------------------
--- 5. One parent per product, whoever writes it
--- ---------------------------------------------------------------------------------------------
--- The approval check above reads before it writes, so two admins (an approval and a hand-made parent, or two
--- approvals) could each see no parent and both make one. This trigger closes that on the table itself: every
--- write that makes a parent active, or changes an active parent's name or EPA number, first takes a lock held per
--- EPA number until commit, then refuses when another active parent has that EPA number and the same base name.
--- The second writer waits for the first to commit and then sees its row (each statement reads afresh).
-CREATE FUNCTION public.guard_product_parent_epa_duplicate() RETURNS trigger
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-DECLARE
-  v_other text;
-BEGIN
-  IF NEW.is_active AND NEW.generic_epa_registration IS NOT NULL THEN
-    -- The check below must read rows committed after this transaction began (the lock's point); a snapshot
-    -- kept for the whole transaction (REPEATABLE READ or SERIALIZABLE) would not, so those are refused.
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-      RAISE EXCEPTION 'PRODUCT_PARENT_READ_COMMITTED_REQUIRED: parents are written only in READ COMMITTED transactions'
-        USING ERRCODE = '55000';
-    END IF;
-    -- The raw value is already canonical: the column CHECK allows only [A-Z0-9-], and _normalize_epa_registration
-    -- only removes spaces and upper-cases, so two stored spellings of one EPA number cannot exist.
-    PERFORM pg_advisory_xact_lock(hashtext('crx.product_parent_epa:' || NEW.generic_epa_registration));
-    SELECT pp.name INTO v_other FROM public.product_parents pp
-     WHERE pp.is_active AND pp.id <> NEW.id AND pp.generic_epa_registration = NEW.generic_epa_registration
-       AND public._product_parent_identity_name(pp.name) = public._product_parent_identity_name(NEW.name)
-     ORDER BY pp.name LIMIT 1;
-    IF FOUND THEN
-      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_HAS_PARENT: parent "%" already has EPA number % and this name; build a new proposal',
-        v_other, NEW.generic_epa_registration USING ERRCODE = '23505';
-    END IF;
-  END IF;
-  RETURN NEW;
-END;
-$function$;
-ALTER FUNCTION public.guard_product_parent_epa_duplicate() OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.guard_product_parent_epa_duplicate() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
-CREATE TRIGGER guard_product_parent_epa_duplicate
-  BEFORE INSERT OR UPDATE OF name, generic_epa_registration, is_active ON public.product_parents
-  FOR EACH ROW EXECUTE FUNCTION public.guard_product_parent_epa_duplicate();
-
--- ---------------------------------------------------------------------------------------------
 -- Postflight
 -- ---------------------------------------------------------------------------------------------
 
@@ -587,12 +571,8 @@ BEGIN
       RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_FUNCTION: %', v_sig;
     END IF;
   END LOOP;
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.product_parents'::regclass
-                   AND tgname = 'guard_product_parent_epa_duplicate' AND tgenabled = 'O') THEN
-    RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_TRIGGER: the one-parent-per-product trigger is missing';
-  END IF;
   FOREACH v_sig IN ARRAY ARRAY['public._product_parent_base_name(text)', 'public._product_size_move_refusal(uuid,uuid)',
-                               'public.guard_product_parent_epa_duplicate()', 'public._product_parent_identity_name(text)'] LOOP
+                               'public._product_parent_identity_name(text)', 'public._product_name_strength_numbers(text,numeric)'] LOOP
     IF (SELECT array_agg(DISTINCT grantee::regrole::text ORDER BY grantee::regrole::text)
           FROM pg_proc p, aclexplode(p.proacl) WHERE p.oid = v_sig::regprocedure AND privilege_type = 'EXECUTE')
        IS DISTINCT FROM ARRAY['postgres']
@@ -610,6 +590,11 @@ BEGIN
   END LOOP;
   IF public._product_parent_identity_name('Base (EPA 600-1) (liquid) #2') <> public._product_parent_identity_name('Base 2.5 gal') THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_IDENTITY_NAME: approval''s name suffixes are not ignored';
+  END IF;
+  -- Numbers other than the size's own container size are compared by value, so 1 and 1.0 match.
+  IF public._product_name_strength_numbers('Imidacloprid 2 lb/gal 2.5 gal', 2.5) <> ARRAY[2]::numeric[]
+     OR public._product_name_strength_numbers('Rho 1.0 gal', 1) <> '{}'::numeric[] THEN
+    RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_STRENGTH: name numbers are not compared by value';
   END IF;
   IF public._product_parent_base_name('Rho 2 x 2.5 gal') <> 'Rho' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_BASE_NAME: sizes no longer removed';

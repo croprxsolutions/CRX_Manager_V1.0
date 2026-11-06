@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -237,6 +237,10 @@ const [U1, U2, I1, I2, T1, T2, S1, S2] = ['11', '12', '13', '14', '15', '16', '1
 const [N1, N2, R1, R2, Z1, Z2, K1, K2, X1, X2] = ['21', '22', '23', '24', '25', '26', '27', '28', '29', '2a'].map(id);
 // Each pair Taha named, as it would be keyed by the old rule: they must never share a base name or a group.
 const TAHA = [[U1, U2], [I1, I2], [T1, T2], [S1, S2]];
+// Strengths the base name still loses (written "lb./gal", "lb ai/gal", "oz ai/gal", or with the size's own number):
+// each pair shares a base name, and the numbers check must hold it.
+const [A1, A2, L1, L2, O1, O2, W1, W2, R3, ZD] = ['31', '32', '33', '34', '35', '36', '37', '38', '39', '3a'].map(id);
+const STRENGTH_PAIRS = [[A1, A2], [L1, L2], [O1, O2], [W1, W2]];
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -268,8 +272,20 @@ function seed() {
     p(K2, '[PROVER] Kappa 30 gal', 'KA-30', 'Herbicide', '400-1', 'liquid', 'Gal', 30, 'Gal'),
     p(X1, '[PROVER] Xeno 1 gal', 'XE-1', 'Herbicide', '900-1', 'liquid', 'Gal', 1, 'Gal'),
     p(X2, '[PROVER] Xeno 2.5 gal', 'XE-25', 'Herbicide', '900-1', 'liquid', 'Gal', 2.5, 'Gal'),
+    p(A1, '[PROVER] Imida 2 lb./gal 2.5 gal', 'IA-2', 'Herbicide', null, 'liquid', 'Gal', 2.5, 'Gal'),
+    p(A2, '[PROVER] Imida 4 lb./gal 30 gal', 'IA-4', 'Herbicide', null, 'liquid', 'Gal', 30, 'Gal'),
+    p(L1, '[PROVER] Lam 2 lb ai/gal 2.5 gal', 'LA-2', 'Herbicide', null, 'liquid', 'Gal', 2.5, 'Gal'),
+    p(L2, '[PROVER] Lam 4 lb ai/gal 2.5 gal', 'LA-4', 'Herbicide', null, 'liquid', 'Gal', 2.5, 'Gal'),
+    p(O1, '[PROVER] Oza 22 oz ai/gal 1 gal', 'OZ-22', 'Herbicide', null, 'liquid', 'Gal', 1, 'Gal'),
+    p(O2, '[PROVER] Oza 11 oz ai/gal 2.5 gal', 'OZ-11', 'Herbicide', null, 'liquid', 'Gal', 2.5, 'Gal'),
+    p(W1, '[PROVER] Wex 2 lb./gal 2 gal', 'WE-2', 'Herbicide', null, 'liquid', 'Gal', 2, 'Gal'),
+    p(W2, '[PROVER] Wex 4 lb./gal 4 gal', 'WE-4', 'Herbicide', null, 'liquid', 'Gal', 4, 'Gal'),
+    // 1.0 and 1 are one number: Rho 1.0 gal joins Rho.
+    p(R3, '[PROVER] Rho 1.0 gal', 'RH-1', 'Herbicide', '600-2', 'liquid', 'Gal', 1, 'Gal'),
+    // Zeta's EPA number and name, but dry: another product, never held as a second Zeta.
+    p(ZD, '[PROVER] Zeta 25 lb', 'ZE-D', 'Herbicide', '300-1', 'dry', 'Lb', 25, 'Lb'),
   ].join(',\n    ')};`);
-  console.log('[prover] seeded an admin, a sales rep and 18 invented products');
+  console.log('[prover] seeded an admin, a sales rep and 28 invented products');
 }
 
 const PINS = {
@@ -293,13 +309,12 @@ function rollbackSql() {
   const par2 = '20261123120000_product_parent_proposals.sql';
   const units = '20261110150000_product_parent_stock_units.sql';
   return [
-    'DROP TRIGGER guard_product_parent_epa_duplicate ON public.product_parents; DROP FUNCTION public.guard_product_parent_epa_duplicate();',
     take(par2, 'CREATE FUNCTION public._product_parent_base_name('),
     take(par2, 'CREATE FUNCTION public.build_product_parent_proposal('),
     take(par2, 'CREATE FUNCTION public.approve_product_parent_groups('),
     take(units, 'CREATE OR REPLACE FUNCTION public._product_size_move_refusal('),
     take(units, 'CREATE OR REPLACE FUNCTION public.move_product_size('),
-    'DROP FUNCTION public._product_parent_identity_name(text);',
+    'DROP FUNCTION public._product_parent_identity_name(text); DROP FUNCTION public._product_name_strength_numbers(text, numeric);',
   ].join('\n\n');
 }
 
@@ -362,6 +377,11 @@ async function main() {
     // A concentration written with spaces around the slash is still a strength (Luna round 4).
     ['Imidacloprid 2 lb / gal 2.5 gal', 'Imidacloprid 2 lb / gal'], ['Mix 4 lb /gal', 'Mix 4 lb /gal'],
   ];
+  // The numbers check: every number in the name, by value, less one equal to the recorded container size.
+  for (const [name, size, want] of [['Imida 2 lb./gal 2.5 gal', 2.5, '{2}'], ['Wex 2 lb./gal 2 gal', 2, '{2}'], ['Rho 1.0 gal', 1, '{}'],
+    ['Rho 2 x 2.5 gal', 2.5, '{2}'], ['UAN 28/0/0 Tote', 275, '{0,0,28}'], ['Rho 1 gal', null, '{1}'], ['Mix .5 gal', 0.5, '{}']]) {
+    assert.equal(scalar(`SELECT public._product_name_strength_numbers(${lit(name)}, ${size ?? 'NULL'})::text;`), want, `numbers of ${name}`);
+  }
   for (const [input, want] of BASES) assert.equal(scalar(`SELECT '>' || public._product_parent_base_name(${lit(input)}) || '<';`), `>${want}<`, `base name of ${input}`);
   for (const [a, b] of [['UAN 28/0/0 Tote', 'UAN 32/0/0 Tote'], ['Imidacloprid 2 lb/gal', 'Imidacloprid 4 lb/gal'], ['Talstar 2 G', 'Talstar 0.2 G'], ['Starter 6/24/6', 'Starter 3/24/6']]) {
     assert.equal(scalar(`SELECT lower(public._product_parent_base_name(${lit(a)})) = lower(public._product_parent_base_name(${lit(b)}));`), 'f', `${a} / ${b} share a base name`);
@@ -377,21 +397,30 @@ async function main() {
   const numo = groupOf(G, N1);
   assert.deepEqual(ids(numo), [N1, N2].sort());
   assert.equal(numo.status, 'held'); assert.ok(numo.flags.includes('size_numbers_differ')); assert.equal(numo.identity_basis, null);
-  assert.match(numo.reason, /same container have different numbers/);
+  assert.match(numo.reason, /carry different numbers in their names besides their container size/);
+  for (const [a, b] of STRENGTH_PAIRS) {
+    const g = groupOf(G, a);
+    assert.deepEqual(ids(g), [a, b].sort(), 'the pair should share a base name, or the case proves nothing');
+    assert.equal(g.status, 'held'); assert.ok(g.flags.includes('size_numbers_differ'));
+  }
   const rho = groupOf(G, R1);
-  assert.deepEqual(ids(rho), [R1, R2].sort()); assert.equal(rho.status, 'proposed');
+  assert.deepEqual(ids(rho), [R1, R2, R3].sort()); assert.equal(rho.status, 'proposed');
   assert.ok(!rho.flags.includes('size_numbers_differ'));
   const z1 = groupOf(G, Z1);
   assert.deepEqual(ids(z1), [Z1]);
   assert.equal(z1.status, 'held'); assert.ok(z1.flags.includes('epa_has_parent'));
-  assert.equal(z1.reason, 'parent "[PROVER] Zeta" already has EPA number 300-1 and this name; a second parent is never made for one product');
+  assert.equal(z1.reason, 'parent "[PROVER] Zeta" already has EPA number 300-1, this form and this name; a second parent is never made for one product');
+  const zd = groupOf(G, ZD);
+  assert.deepEqual(ids(zd), [ZD]); assert.equal(zd.status, 'proposed', 'a dry product is not a second parent for the liquid one');
+  assert.ok(zd.flags.includes('epa_has_parent'));
+  assert.deepEqual(P1.duplicate_parents, []);
   const z2 = groupOf(G, Z2);
   assert.equal(z2.status, 'proposed', 'a different name with the same EPA number is a flag, never a hold');
   assert.ok(z2.flags.includes('epa_has_parent')); assert.ok(z2.flags.includes('same_epa_different_name'));
   assert.ok(!G.some((g) => g.members.some((m) => m.product_id === zeta.product_id)), 'a grouped size was proposed');
   assert.equal(P1.held_count, G.filter((g) => g.status === 'held').length);
   assert.equal(P1.rejected_count, 0);
-  console.log("[case] build: Taha's pairs land in separate groups; a group whose same-size names carry different numbers is held size_numbers_differ; Zeta (EPA 300-1, parent exists) is held, Zeta Pro (same EPA, other name) is proposed with epa_has_parent");
+  console.log("[case] build: Taha's pairs land in separate groups; a group whose names carry different numbers besides their container size is held size_numbers_differ (Numo, and strengths written lb./gal, lb ai/gal, oz ai/gal or with the size's own number); Rho 1.0 gal joins Rho; Zeta (EPA 300-1, liquid parent exists) is held, Zeta Pro (same EPA, other name) and Zeta dry are proposed with epa_has_parent");
 
   // [case] approval after a parent appeared (Taha finding 3)
   const kappa = groupOf(G, K1);
@@ -405,51 +434,6 @@ async function main() {
   const kappaDone = call(ADMIN, approve(P1, [entry(kappa)], 'k-kappa-ok'));
   assert.equal(scalar(`SELECT count(*) FROM public.product_parent_members WHERE parent_id = '${kappaDone.groups[0].parent_id}';`), '2');
   console.log('[case] approval: a group whose EPA number and name match a parent made after the build is refused PRODUCT_PARENT_EPA_HAS_PARENT; without that parent it is approved');
-
-  // [case] one parent per product, whoever writes it (Luna round 1: the approval check alone could race)
-  assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'guard_product_parent_epa_duplicate' AND tgenabled = 'O';`), '1');
-  // A hand-made parent with Kappa's EPA number and base name is refused on the real create path.
-  refused(ADMIN, `SELECT public.create_product_with_parent(${J({ name: '[PROVER] Kappa Bulk', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' })},
-    ${J({ product_name: '[PROVER] Kappa Bulk 30 gal', sku: 'KA-B', inventory_unit: 'Gal' })}, 'k-kappa-bulk');`,
-  /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Kappa" already has EPA number 400-1 and this name/);
-  // The suffix approval adds to keep a name unique does not hide a duplicate.
-  refused(ADMIN, `SELECT public.create_product_with_parent(${J({ name: '[PROVER] Kappa (EPA 400-1)', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' })},
-    ${J({ product_name: '[PROVER] Kappa X 1 gal', sku: 'KA-X', inventory_unit: 'Gal' })}, 'k-kappa-suffix');`,
-  /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Kappa" already has EPA number 400-1/);
-  for (const [a, b] of [['Base (EPA 600-1)', 'Base 2.5 gal'], ['Base (liquid) #3', 'base'], ['Base (EPA 600-1) (liquid) #2', 'Base Tote']]) {
-    assert.equal(scalar(`SELECT public._product_parent_identity_name(${lit(a)}) = public._product_parent_identity_name(${lit(b)});`), 't', `${a} / ${b}`);
-  }
-  assert.equal(scalar(`SELECT public._product_parent_identity_name('Mix #2') = public._product_parent_identity_name('Mix');`), 'f', 'a "#2" in a real name was stripped');
-  // Same EPA number under another name is still allowed (the build sheet's same-EPA-different-name rule).
-  create({ name: '[PROVER] Kappa Max', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' },
-    { product_name: '[PROVER] Kappa Max 1 gal', sku: 'KA-M', inventory_unit: 'Gal' }, 'k-kappa-max');
-  // Two writers at once: A inserts "Omega" and holds its transaction open; B, started while A is open, inserts
-  // "Omega 1 gal" with the same EPA number. B must wait for A's commit and then be refused, leaving one parent.
-  const parentRow = (name) => `INSERT INTO public.product_parents (name, product_form, generic_epa_registration, created_by, updated_by)
-    VALUES (${lit(name)}, 'liquid', '500-1', '${ADMIN}', '${ADMIN}');`;
-  const writerA = new Promise((resolve) => {
-    const child = spawn('docker', psqlArgs(), { cwd: ROOT });
-    let out = '';
-    child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { out += d; });
-    child.on('close', (code) => resolve({ code, out }));
-    child.stdin.end(`BEGIN;\n${parentRow('[PROVER] Omega')}\nSELECT pg_sleep(4);\nCOMMIT;\n`);
-  });
-  await new Promise((r) => setTimeout(r, 1500));
-  assert.equal(scalar(`SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();`), '1', 'writer A is not holding its transaction open');
-  const startedB = Date.now();
-  const b = psql(`BEGIN;\n${parentRow('[PROVER] Omega 1 gal')}\nCOMMIT;\n`, { allowFailure: true });
-  const waitedB = Date.now() - startedB;
-  const a = await writerA;
-  assert.equal(a.code, 0, a.out);
-  assert.notEqual(b.status, 0, 'the second writer made a duplicate parent');
-  assert.match(`${b.stdout}\n${b.stderr}`, /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Omega" already has EPA number 500-1/);
-  assert.ok(waitedB >= 1000, `the second writer did not wait for the first (${waitedB} ms)`);
-  assert.equal(scalar(`SELECT count(*) FROM public.product_parents WHERE is_active AND generic_epa_registration = '500-1';`), '1');
-  // A whole-transaction snapshot would not see a parent committed while it waited for the lock: refused.
-  const rr = psql(`BEGIN ISOLATION LEVEL REPEATABLE READ;\n${parentRow('[PROVER] Psi').replace("'500-1'", "'800-1'")}\nCOMMIT;\n`, { allowFailure: true });
-  assert.notEqual(rr.status, 0);
-  assert.match(`${rr.stdout}\n${rr.stderr}`, /PRODUCT_PARENT_READ_COMMITTED_REQUIRED/);
-  console.log(`[case] one parent per product: a hand-made duplicate (also one carrying approval's "(EPA ...)" suffix) is refused PRODUCT_PARENT_EPA_HAS_PARENT, another name with the same EPA number is allowed, of two writers at once the second waits (${waitedB} ms) and is refused, and a REPEATABLE READ writer is refused`);
 
   // [case] rejection carried (Taha finding 4)
   const xeno = groupOf(G, X1);
@@ -481,6 +465,29 @@ async function main() {
   x = groupOf(groups(build('k-build-5').proposal_id), X1);
   assert.equal(x.status, 'proposed'); assert.ok(!x.flags.includes('rejected_before'));
   console.log('[case] rejection carried: a rebuild keeps a rejection (reason, who, when) while its sizes are unchanged; a changed size proposes it again with the earlier rejection named; a different set of sizes starts fresh');
+
+  // [case] duplicate parents are warned, not blocked (Mason, 2026-11-06)
+  // A hand-made parent with Kappa's EPA number, form and base name (also one carrying approval's "(EPA ...)"
+  // suffix) is allowed by the database; the next build lists them and holds a matching group.
+  create({ name: '[PROVER] Kappa Bulk', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' },
+    { product_name: '[PROVER] Kappa Bulk 30 gal', sku: 'KA-B', inventory_unit: 'Gal' }, 'k-kappa-bulk');
+  create({ name: '[PROVER] Kappa (EPA 400-1)', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' },
+    { product_name: '[PROVER] Kappa X 1 gal', sku: 'KA-X', inventory_unit: 'Gal' }, 'k-kappa-suffix');
+  for (const [a, b] of [['Base (EPA 600-1)', 'Base 2.5 gal'], ['Base (liquid) #3', 'base'], ['Base (EPA 600-1) (liquid) #2', 'Base Tote']]) {
+    assert.equal(scalar(`SELECT public._product_parent_identity_name(${lit(a)}) = public._product_parent_identity_name(${lit(b)});`), 't', `${a} / ${b}`);
+  }
+  assert.equal(scalar(`SELECT public._product_parent_identity_name('Mix #2') = public._product_parent_identity_name('Mix');`), 'f', 'a "#2" in a real name was stripped');
+  // Same EPA number under another name is not a duplicate (the build sheet's same-EPA-different-name rule).
+  create({ name: '[PROVER] Kappa Max', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' },
+    { product_name: '[PROVER] Kappa Max 1 gal', sku: 'KA-M', inventory_unit: 'Gal' }, 'k-kappa-max');
+  psql(`INSERT INTO public.products (id, product_name, sku, category, epa_registration, product_form, inventory_unit, is_active, container_size, container_unit)
+    VALUES ('${id('3b')}', '[PROVER] Kappa 5 gal', 'KA-5', 'Herbicide', '400-1', 'liquid', 'Gal', true, 5, 'Gal');`);
+  const PD = build('k-build-dup');
+  assert.deepEqual(PD.duplicate_parents, [{ generic_epa_registration: '400-1', product_form: 'liquid',
+    names: ['[PROVER] Kappa', '[PROVER] Kappa (EPA 400-1)', '[PROVER] Kappa Bulk'] }]);
+  const k5 = groupOf(groups(PD.proposal_id), id('3b'));
+  assert.equal(k5.status, 'held'); assert.ok(k5.flags.includes('epa_has_parent'));
+  console.log('[case] duplicate parents warned: hand-made parents with one EPA number, form and base name are allowed, the next build lists them in duplicate_parents and holds a matching group; another name with the same EPA number is not listed');
 
   // [case] moving a size between parents with different brand lists (Taha finding 2)
   const mu = create({ name: '[PROVER] Mu', product_form: 'liquid', category: 'Herbicide' },
@@ -540,15 +547,14 @@ async function main() {
   stageText('rollback.sql', rollbackSql());
   const rolled = apply('rollback.sql');
   assert.equal(rolled.status, 0, rolled.output);
-  assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'guard_product_parent_epa_duplicate';`), '0', 'the rollback left the trigger');
-  assert.equal(scalar(`SELECT to_regprocedure('public.guard_product_parent_epa_duplicate()') IS NULL;`), 't');
+  assert.equal(scalar(`SELECT to_regprocedure('public._product_name_strength_numbers(text,numeric)') IS NULL;`), 't');
   assert.equal(scalar(`SELECT to_regprocedure('public._product_parent_identity_name(text)') IS NULL;`), 't');
   for (const [sig, want] of Object.entries(PINS)) assert.equal(bodyMd5(sig), want, `${sig}: the rollback did not restore the live body`);
   for (const s of Object.keys(PINS)) assert.equal(aclOf(s), aclBefore[s], `${s}: the rollback changed grants, settings, owner or security`);
   // The candidate's preflight accepts the rolled-back database again.
   const reinstalled = apply('cand.sql');
   assert.equal(reinstalled.status, 0, reinstalled.output);
-  console.log('[case] rollback: dropping the new trigger and re-issuing the five old bodies restores exactly the bodies the preflight pins (and their grants); the candidate installs again on top');
+  console.log('[case] rollback: re-issuing the five old bodies and dropping the two new helpers restores exactly the bodies the preflight pins (and their grants); the candidate installs again on top');
 
   console.log('PRODUCT_PARENT_REVIEW_FIXES_PROOF_PASS');
 }

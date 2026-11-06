@@ -266,7 +266,7 @@ function refused(uid, sql, pattern) {
 const J = (v) => `'${JSON.stringify(v).replaceAll("'", "''")}'::jsonb`;
 // A customer-supplied line at zero: passes every money and unit refusal, so only the EPA behaviour is tested.
 const chem = (pid, sort, extra = {}) => ({ product_id: pid, quantity: 0, unit: 'Gal', rate_per_acre: null, rate_unit: null,
-  cost_per_unit_cents: 0, price_per_unit_cents: 0, customer_supplied: true, sort_order: sort, ...extra });
+  cost_per_unit_cents: 0, price_per_unit_cents: 0, customer_supplied: true, sort_order: sort, id: null, ...extra });
 const saveSql = (job, chems, key = null) => `SELECT public.save_job(${job ? `'${job}'` : 'NULL'},
   jsonb_build_object('customer_id', '${CUST}', 'job_date', current_date::text),
   ${J([{ field_id: FIELD, acres_to_treat: 10, sort_order: 0 }])}, ${J(chems)}, auth.uid(), ${key ? `'${key}'` : 'NULL'})->>'job_id';`;
@@ -368,6 +368,10 @@ async function main() {
   // A line id that is not a line of this sprayed job (another job's, or one a second tab saw before a
   // save replaced it) is refused: the screen must reload. The job keeps its numbers.
   const before = lines(sprayed);
+  // An older cached screen sends no "id" key at all: refused on a sprayed job until the app reloads.
+  const { id: _noId, ...oldScreenLine } = chem(PA, 0);
+  refused(ADMIN, saveSql(sprayed, [oldScreenLine]), /screen is out of date/);
+  assert.equal(lines(sprayed), before, 'a refused old-screen save changes nothing');
   ids = lineIds(JOTHER);
   refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: ids[0] })]), /saved somewhere else since you opened it/);
   const staleTab = lineIds(sprayed);

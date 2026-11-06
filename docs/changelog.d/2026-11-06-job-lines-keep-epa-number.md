@@ -10,7 +10,8 @@
   its id (same job, same product). The database reads the stored number itself. The job screen now
   sends each saved line's id (`src/lib/jobChemicalPayload.ts`). If another tab or device saved a
   sprayed job after this screen opened it, the save is refused with "Reload the job" instead of
-  quietly changing the number.
+  quietly changing the number. An older cached copy of the app (which sends no line ids) is refused
+  on a sprayed job with "Reload the app".
 - No printout reads the new number yet, so every printout still shows the product's number. A
   follow-up PR moves the sent proof, applicator sheet, chemical application report and WPS notice to
   it together.

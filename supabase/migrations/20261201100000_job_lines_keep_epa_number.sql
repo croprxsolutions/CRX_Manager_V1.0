@@ -29,8 +29,9 @@
 --      the key, so the screen can ship with or before this file). On a sprayed or finished job, a
 --      sent line id that is no longer a line of that job (a second tab or device saved meanwhile) is
 --      refused with "Reload the job", so a stale screen never silently swaps in the product's number;
---      a replay of a stored save (same idempotency key) goes through. A screen that sends no ids
---      (an older cached build) is never refused.
+--      a replay of a stored save (same idempotency key) goes through. The screen sends an "id" key on
+--      every line (null for a new one); a save of a sprayed or finished job with a line lacking that
+--      key (an older cached build, which could not keep the numbers) is refused with "Reload the app".
 --   5. No printout reads the new column yet: every printout keeps reading the product's number, so
 --      they all agree. A follow-up change moves the sent proof, applicator sheet, chemical
 --      application report and WPS notice onto the line's number together.
@@ -209,13 +210,21 @@ BEGIN
   -- stale (another tab or device saved since it loaded). Refuse, so it reloads instead of the save
   -- silently giving that line the product's current number. A replay of a stored save goes through
   -- (p_replay: save_job reads its receipt after taking this same job lock).
-  IF NOT p_replay AND NOT public._job_line_epa_follows_product(p_job_id) AND EXISTS (
-       SELECT 1 FROM jsonb_array_elements(p_chemicals) e
-        WHERE jsonb_typeof(e.value) = 'object' AND (e.value->>'id') ~ v_uuid
-          AND NOT EXISTS (SELECT 1 FROM public.job_chemicals jc
-                           WHERE jc.id = (e.value->>'id')::uuid AND jc.job_id = p_job_id)) THEN
-    RAISE EXCEPTION 'This job was saved somewhere else since you opened it. Reload the job, then make your changes again.'
-      USING ERRCODE = '40001';
+  IF NOT p_replay AND NOT public._job_line_epa_follows_product(p_job_id) THEN
+    -- The job screen sends an "id" key on every line (null for a new line); an older cached build
+    -- sends none, so it could not keep a sprayed job's numbers. Refuse it until the app reloads.
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_chemicals) e
+                WHERE jsonb_typeof(e.value) = 'object' AND NOT (e.value ? 'id')) THEN
+      RAISE EXCEPTION 'This screen is out of date. Reload the app, then save this job again.'
+        USING ERRCODE = '40001';
+    END IF;
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_chemicals) e
+                WHERE jsonb_typeof(e.value) = 'object' AND (e.value->>'id') ~ v_uuid
+                  AND NOT EXISTS (SELECT 1 FROM public.job_chemicals jc
+                                   WHERE jc.id = (e.value->>'id')::uuid AND jc.job_id = p_job_id)) THEN
+      RAISE EXCEPTION 'This job was saved somewhere else since you opened it. Reload the job, then make your changes again.'
+        USING ERRCODE = '40001';
+    END IF;
   END IF;
   RETURN COALESCE((
     WITH sent AS (

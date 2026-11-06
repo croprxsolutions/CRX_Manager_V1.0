@@ -4,6 +4,13 @@
 -- read the wrong "yesterday", and day counts were off by one. Each function below is its live definition
 -- (2026-11-06, md5 checked) with only CURRENT_DATE replaced by (now() AT TIME ZONE 'America/Chicago')::date,
 -- the expression the invoice_date and order_date defaults already use. The database timezone stays UTC.
+-- Where a timestamp is compared with that date, it is read on the Chicago calendar too:
+-- get_call_list_stale_quotes (quote age from updated_at) and get_customer_summary (season deliveries by
+-- completed_at, so a delivery finished on the evening of September 30 stays in its season).
+-- Access (Mason, 2026-11-06): get_expiring_planned_holds and get_inventory_forecast feed admin and
+-- sales-rep screens only, but any signed-in user could call them and read customer holds or the
+-- business-wide stock forecast. Both now refuse anyone but an active admin or sales rep (the same check
+-- _get_customer_statement_scoped_impl uses). EXECUTE grants are unchanged.
 --   * dashboards: operational_dashboard_summary (also its accounting-period name and days left, which read
 --     NOW() and now read the Chicago wall clock, so the month does not roll early on the last evening),
 --     get_customer_summary, get_receiving_summary
@@ -27,13 +34,13 @@ DECLARE
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
     ('operational_dashboard_summary()', '77655108c73c1a98d826a21d55d7739d', 'f369ca15668c5eb26052bd98b2e09a8b', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_customer_summary(uuid)', 'bf700aa02e7df78c79f02a0dc425e583', 'f95a6aecc657a8d8d813648ce5344d62', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_customer_summary(uuid)', 'bf700aa02e7df78c79f02a0dc425e583', '5ab6a0dd177c7f5ff025afcceb8ff336', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_receiving_summary()', 'da09c3911448a80451a3c2592d1f1f5a', 'e93f1be5e711e9ef9da680056900aa09', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_call_list_stale_quotes(uuid,integer)', '6ddc2b4b3bbbfcf0304b7879261643de', '0d2a47d7e7e82e65140ea39e17384ac8', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_call_list_stale_quotes(uuid,integer)', '6ddc2b4b3bbbfcf0304b7879261643de', '32e3084dab9b7e8093d20f1f677ab27e', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatch_board_jobs(uuid,text,date,date)', 'a0cb35e0fae1e2fd0c7cddbd2b33ac13', '7795522b437d296121437ca237d9e588', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatched_list(uuid,uuid)', '1b544f558c4b4c2f503dd157ccf7b1e1', '00a961e63d243e4d8d162a1e267b3624', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_expiring_planned_holds(integer,text)', '80cd30fbb5c0569c4630d577a8b0ed76', 'e0ffb323bd4efef1ec8adeb394db30f1', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_inventory_forecast(integer)', 'f93b242a58945e5fb7128bbaea81c87f', '12c7c33e171f422537881502af2c81b7', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_expiring_planned_holds(integer,text)', '80cd30fbb5c0569c4630d577a8b0ed76', 'd18dd0de10282408feecc192773c7de7', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_inventory_forecast(integer)', 'f93b242a58945e5fb7128bbaea81c87f', 'd09a7eb840476fdbe05a189e1093c804', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_team_board_deliveries()', '2dd884639ed907554532d420a2ad6676', 'bb25c0f24732b70c62d48121f03cf6de', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_team_workload()', '4afd88dcb7f7df47b694c805dd2e0933', '2915daf61d2444f8a2d065590ac20fdb', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_yesterday_delivery_recap()', '5994e38938f09c94a3b7fa1bb2f11e43', '5ba5ded6da9a5441375dd55c749380ad', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
@@ -450,8 +457,8 @@ BEGIN
   FROM deliveries
   WHERE customer_id = p_customer_id
     AND status = 'completed'
-    AND completed_at >= v_season_start
-    AND completed_at <= v_season_end;
+    AND (completed_at AT TIME ZONE 'America/Chicago')::date >= v_season_start
+    AND (completed_at AT TIME ZONE 'America/Chicago')::date <= v_season_end;
 
   SELECT assigned_tier
   INTO v_credit_tier
@@ -584,7 +591,7 @@ BEGIN
         q.quote_number,
         ROUND(q.total_price * 100)::bigint AS quote_total_cents,
         q.updated_at AS quote_updated_at,
-        ((now() AT TIME ZONE 'America/Chicago')::date - q.updated_at::date) AS quote_age_days
+        ((now() AT TIME ZONE 'America/Chicago')::date - (q.updated_at AT TIME ZONE 'America/Chicago')::date) AS quote_age_days
       FROM public.quotes q
       JOIN public.customers c ON c.id = q.customer_id
       LEFT JOIN LATERAL (
@@ -874,6 +881,15 @@ CREATE OR REPLACE FUNCTION public.get_expiring_planned_holds(p_days_ahead intege
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
+  IF auth.uid() IS NULL OR NOT EXISTS (
+    SELECT 1 FROM profiles
+     WHERE id = auth.uid()
+       AND is_active = true
+       AND role IN ('admin', 'sales_rep')
+  ) THEN
+    RAISE EXCEPTION 'Access denied: admin or sales_rep role required' USING ERRCODE = '42501';
+  END IF;
+
   RETURN (
     SELECT COALESCE(jsonb_agg(row_to_json(r)), '[]'::jsonb)
     FROM (
@@ -909,6 +925,15 @@ CREATE OR REPLACE FUNCTION public.get_inventory_forecast(p_months_ahead integer 
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
+  IF auth.uid() IS NULL OR NOT EXISTS (
+    SELECT 1 FROM profiles
+     WHERE id = auth.uid()
+       AND is_active = true
+       AND role IN ('admin', 'sales_rep')
+  ) THEN
+    RAISE EXCEPTION 'Access denied: admin or sales_rep role required' USING ERRCODE = '42501';
+  END IF;
+
   RETURN (
     SELECT COALESCE(jsonb_agg(row_to_json(r)), '[]'::jsonb)
     FROM (
@@ -1375,13 +1400,13 @@ DECLARE
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
     ('operational_dashboard_summary()', '77655108c73c1a98d826a21d55d7739d', 'f369ca15668c5eb26052bd98b2e09a8b', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_customer_summary(uuid)', 'bf700aa02e7df78c79f02a0dc425e583', 'f95a6aecc657a8d8d813648ce5344d62', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_customer_summary(uuid)', 'bf700aa02e7df78c79f02a0dc425e583', '5ab6a0dd177c7f5ff025afcceb8ff336', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_receiving_summary()', 'da09c3911448a80451a3c2592d1f1f5a', 'e93f1be5e711e9ef9da680056900aa09', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_call_list_stale_quotes(uuid,integer)', '6ddc2b4b3bbbfcf0304b7879261643de', '0d2a47d7e7e82e65140ea39e17384ac8', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_call_list_stale_quotes(uuid,integer)', '6ddc2b4b3bbbfcf0304b7879261643de', '32e3084dab9b7e8093d20f1f677ab27e', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatch_board_jobs(uuid,text,date,date)', 'a0cb35e0fae1e2fd0c7cddbd2b33ac13', '7795522b437d296121437ca237d9e588', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatched_list(uuid,uuid)', '1b544f558c4b4c2f503dd157ccf7b1e1', '00a961e63d243e4d8d162a1e267b3624', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_expiring_planned_holds(integer,text)', '80cd30fbb5c0569c4630d577a8b0ed76', 'e0ffb323bd4efef1ec8adeb394db30f1', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_inventory_forecast(integer)', 'f93b242a58945e5fb7128bbaea81c87f', '12c7c33e171f422537881502af2c81b7', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_expiring_planned_holds(integer,text)', '80cd30fbb5c0569c4630d577a8b0ed76', 'd18dd0de10282408feecc192773c7de7', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_inventory_forecast(integer)', 'f93b242a58945e5fb7128bbaea81c87f', 'd09a7eb840476fdbe05a189e1093c804', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_team_board_deliveries()', '2dd884639ed907554532d420a2ad6676', 'bb25c0f24732b70c62d48121f03cf6de', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_team_workload()', '4afd88dcb7f7df47b694c805dd2e0933', '2915daf61d2444f8a2d065590ac20fdb', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_yesterday_delivery_recap()', '5994e38938f09c94a3b7fa1bb2f11e43', '5ba5ded6da9a5441375dd55c749380ad', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
@@ -1399,6 +1424,14 @@ BEGIN
        OR coalesce((SELECT array_agg(g::text ORDER BY g::text COLLATE "C") FROM unnest(v_fn.proacl) g)::text, 'NULL') IS DISTINCT FROM v_row.acl
        OR pg_get_userbyid(v_fn.proowner) <> 'postgres' THEN
       RAISE EXCEPTION 'POSTFLIGHT_FAIL: % still uses the UTC date or did not take the new body', v_row.sig;
+    END IF;
+  END LOOP;
+  -- Argument defaults are outside the body md5: both statement date defaults must be the Chicago date.
+  FOR v_row IN SELECT unnest(ARRAY['get_customer_statement(uuid,date,date)', '_get_customer_statement_scoped_impl(uuid,date,date)']) AS sig
+  LOOP
+    IF (SELECT count(*) FROM regexp_matches(pg_get_function_arguments(to_regprocedure('public.' || v_row.sig)),
+          'now\(\) AT TIME ZONE ''America/Chicago''::text', 'g')) <> 2 THEN
+      RAISE EXCEPTION 'POSTFLIGHT_FAIL: % date defaults are not the Chicago date', v_row.sig;
     END IF;
   END LOOP;
 END;

@@ -231,20 +231,42 @@ function buildContainer() {
 }
 
 const ADMIN = '16000000-0000-4000-8000-000000000018';
+const DRIVER = '16000000-0000-4000-8000-000000000019';
 const CHI = "(now() AT TIME ZONE 'America/Chicago')::date";
 
-// The candidate's only edit: CURRENT_DATE (outside -- comments) becomes the Chicago date, and the
-// dashboard's NOW() the Chicago wall clock. Applied to the
-// pre-image, it must give the post-image. Postgres re-prints an argument default in normalized form, so the
-// header line expects that form.
+// The candidate's edits: CURRENT_DATE (outside -- comments) becomes the Chicago date, the dashboard's NOW()
+// the Chicago wall clock, two timestamps compared with that date are read on the Chicago calendar, and two
+// office-only feeds gain the admin/sales-rep check (Mason, 2026-11-06). Applied to the pre-image, it must give
+// the post-image. Postgres re-prints an argument default in normalized form, so the header line expects that form.
 const CHI_ARG = "((now() AT TIME ZONE 'America/Chicago'::text))::date";
+const EXTRA = {
+  get_call_list_stale_quotes: [['q.updated_at::date', "(q.updated_at AT TIME ZONE 'America/Chicago')::date"]],
+  get_customer_summary: [
+    ['AND completed_at >= v_season_start', "AND (completed_at AT TIME ZONE 'America/Chicago')::date >= v_season_start"],
+    ['AND completed_at <= v_season_end', "AND (completed_at AT TIME ZONE 'America/Chicago')::date <= v_season_end"],
+  ],
+};
+const GATED = ['get_expiring_planned_holds', 'get_inventory_forecast'];
+const GATE = `  IF auth.uid() IS NULL OR NOT EXISTS (
+    SELECT 1 FROM profiles
+     WHERE id = auth.uid()
+       AND is_active = true
+       AND role IN ('admin', 'sales_rep')
+  ) THEN
+    RAISE EXCEPTION 'Access denied: admin or sales_rep role required' USING ERRCODE = '42501';
+  END IF;
+
+`;
 function swap(sig, def) {
-  return def.split('\n').map((line) => {
+  const name = sig.slice(0, sig.indexOf('('));
+  const src = GATED.includes(name) ? def.replace('AS $function$\nBEGIN\n', `AS $function$\nBEGIN\n${GATE}`) : def;
+  return src.split('\n').map((line) => {
     const c = line.indexOf('--');
-    const code = c >= 0 ? line.slice(0, c) : line;
+    let next = c >= 0 ? line.slice(0, c) : line;
     // The dashboard's accounting-period name and days left read the Chicago wall clock instead of UTC NOW().
-    const wall = sig.startsWith('operational_dashboard_summary') ? code.split('NOW()').join("(now() AT TIME ZONE 'America/Chicago')") : code;
-    const next = wall.replace(/\bcurrent_date\b/gi, line.startsWith('CREATE OR REPLACE FUNCTION') ? CHI_ARG : CHI);
+    if (name === 'operational_dashboard_summary') next = next.split('NOW()').join("(now() AT TIME ZONE 'America/Chicago')");
+    for (const [from, to] of EXTRA[name] || []) next = next.split(from).join(to);
+    next = next.replace(/\bcurrent_date\b/gi, line.startsWith('CREATE OR REPLACE FUNCTION') ? CHI_ARG : CHI);
     return next + (c >= 0 ? line.slice(c) : '');
   }).join('\n');
 }
@@ -284,17 +306,25 @@ END $seed$;`);
 const addDays = (date, n) => scalar(`SELECT ('${date}'::date + ${n})::text;`);
 
 function seed(zone) {
-  psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ('${ADMIN}', 'ki18-b2-admin@example.invalid', '{"full_name":"[PROVER]"}'::jsonb) ON CONFLICT DO NOTHING;
-    SET session_replication_role = replica;
-    INSERT INTO public.profiles (id, email, full_name, role, is_active) VALUES ('${ADMIN}', 'ki18-b2-admin@example.invalid', '[PROVER]', 'admin', true)
-    ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, is_active = EXCLUDED.is_active;`);
+  for (const [id, email, role] of [[ADMIN, 'ki18-b2-admin@example.invalid', 'admin'], [DRIVER, 'ki18-b2-driver@example.invalid', 'driver']]) {
+    psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ('${id}', '${email}', '{"full_name":"[PROVER] ${role}"}'::jsonb) ON CONFLICT DO NOTHING;
+      SET session_replication_role = replica;
+      INSERT INTO public.profiles (id, email, full_name, role, is_active) VALUES ('${id}', '${email}', '[PROVER] ${role}', '${role}', true)
+      ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, is_active = EXCLUDED.is_active;`);
+  }
   const customer = seedRow('customers', { email: 'ki18-b2-customer@example.invalid' });
   const T = today();
   const delivery = (date, status) => seedRow('deliveries', {
     customer_id: customer, assigned_driver: ADMIN, scheduled_date: date, status,
     delivery_number: `PD-${randomUUID().slice(0, 8)}`,
   });
-  return { customer, today: delivery(T, 'scheduled'), yesterday: delivery(addDays(T, -1), 'completed'), zone };
+  const seasonStart = scalar(`SELECT make_date(extract(year FROM ${CHI})::int - CASE WHEN extract(month FROM ${CHI}) >= 10 THEN 0 ELSE 1 END, 10, 1)::text;`);
+  const lateCustomer = seedRow('customers', { email: 'ki18-b2-late@example.invalid' });
+  seedRow('deliveries', {
+    customer_id: lateCustomer, assigned_driver: ADMIN, scheduled_date: addDays(seasonStart, -1), status: 'completed',
+    completed_at: `${seasonStart} 00:30:00+00`, delivery_number: `PD-${randomUUID().slice(0, 8)}`,
+  });
+  return { customer, lateCustomer, today: delivery(T, 'scheduled'), yesterday: delivery(addDays(T, -1), 'completed'), zone };
 }
 const today = () => scalar(`SELECT ${CHI};`);
 
@@ -305,6 +335,20 @@ function decisions(ids) {
   const today = Number(inZone(`SELECT (x->>'today_deliveries')::int FROM jsonb_array_elements(public.get_team_workload()) x WHERE x->>'id' = '${ADMIN}';`));
   const yesterday = Number(inZone("SELECT (public.get_yesterday_delivery_recap()->'summary'->>'total_completed')::int;"));
   return { today, yesterday };
+}
+// Who may read the two office-only feeds: 'allowed', 'denied' (the role check), or the unexpected error.
+function access(user) {
+  return ['get_expiring_planned_holds(7)', 'get_inventory_forecast(6)'].map((call) => {
+    const r = docker([...psqlArgs(), '-A', '-t'], { input: `SET request.jwt.claim.sub = '${user}'; SELECT public.${call} IS NOT NULL;`, allowFailure: true });
+    if (r.status === 0) return 'allowed';
+    return /Access denied: admin or sales_rep role required/.test(r.stderr) ? 'denied' : `error: ${r.stderr.trim()}`;
+  }).join(',');
+}
+// Season deliveries for a customer whose only completed delivery finished at 7:30 pm CDT on the last
+// evening of the previous season (00:30 UTC on the season's first day): the UTC session counted it.
+function seasonDeliveries(customer) {
+  return Number(scalar(`SET TimeZone = 'UTC'; SET request.jwt.claim.sub = '${ADMIN}';
+    SELECT (public.get_customer_summary('${customer}'::uuid)->>'delivery_count')::int;`));
 }
 // The owner dashboard's season day count and accounting-period name in the same off-by-one session.
 function dashboard(zone) {
@@ -336,9 +380,11 @@ const BOUNDARIES = [
   ['2026-11-02 00:00:00+00', 'Nov 1 6:00 pm CST (first evening after fall back)', '2026-11-02', '2026-11-01'],
 ];
 
+let startDay = null;  // the Chicago date the run started on
 function main() {
   buildContainer();  // always a fresh sealed container: no reuse of any existing database
   const T = today();
+  startDay = T;
   const zone = scalar(`SELECT CASE WHEN (now() AT TIME ZONE 'Pacific/Kiritimati')::date <> ${CHI} THEN 'Pacific/Kiritimati' ELSE 'Etc/GMT+12' END;`);
   const D = scalar(`SET TimeZone = '${zone}'; SELECT current_date::text;`);
   assert.notEqual(D, T, 'the test zone must put CURRENT_DATE on another day than Chicago');
@@ -352,6 +398,9 @@ function main() {
   const before = decisions(ids);
   const dashBefore = dashboard(zone);
   assert.deepEqual(before, { today: 0, yesterday: 0 }, `BEFORE the boards already follow Chicago: ${JSON.stringify(before)}`);
+  assert.equal(access(DRIVER), 'allowed,allowed', 'BEFORE: a driver could read both office-only feeds');
+  assert.equal(seasonDeliveries(ids.lateCustomer), 1, 'BEFORE: the UTC session counts the Sep 30 evening delivery in the new season');
+  console.log('[prover] BEFORE: a driver reads both office-only feeds; a Sep 30 7:30 pm CDT delivery counts in the new season');
   console.log(`[prover] BEFORE (UTC-style date): ${JSON.stringify(before)}; Chicago answer ${JSON.stringify(want)}`);
 
   stageText('candidate.sql', lf(CANDIDATE));
@@ -362,15 +411,19 @@ function main() {
   // Every function equals its pre-image with only the date swapped; grants, owner and SECURITY DEFINER kept.
   for (const sig of TARGETS) {
     const post = definition(sig);
-    assert.equal(post, swap(sig, preDefs[sig]), `${sig}: the new definition differs from the pre-image by more than the date swap`);
+    assert.equal(post, swap(sig, preDefs[sig]), `${sig}: the new definition differs from the pre-image by more than the planned edits`);
     assert.notEqual(post, preDefs[sig], `${sig}: nothing changed`);
     assert.equal(acl(sig), preAcl[sig], `${sig}: grants, owner or SECURITY DEFINER changed`);
   }
-  console.log(`[prover] all ${TARGETS.length} definitions equal their pre-image with only CURRENT_DATE swapped; grants unchanged`);
+  console.log(`[prover] all ${TARGETS.length} definitions equal their pre-image with only the planned edits; grants unchanged`);
 
   const after = decisions(ids);
   assert.deepEqual(after, want, `AFTER ${JSON.stringify(after)} must follow the Chicago date ${JSON.stringify(want)}`);
   console.log(`[prover] AFTER (same session zone): ${JSON.stringify(after)} = the Chicago answer`);
+  assert.equal(access(DRIVER), 'denied,denied', 'AFTER: a driver is refused both office-only feeds');
+  assert.equal(access(ADMIN), 'allowed,allowed', 'AFTER: an admin still reads both feeds');
+  assert.equal(seasonDeliveries(ids.lateCustomer), 0, 'AFTER: the Sep 30 evening delivery stays in its own season');
+  console.log('[prover] AFTER: driver refused, admin allowed on both office-only feeds; the Sep 30 evening delivery stays in the old season');
 
   // The dashboard runs with the new clock expressions; its season day count moves by the one day the session
   // zone was off, and with no open accounting period its period name is the Chicago month.
@@ -419,4 +472,11 @@ function dump(dir) {
 
 const dumpAt = process.argv.indexOf('--dump');
 try { if (dumpAt >= 0) dump(process.argv[dumpAt + 1]); else main(); }
+// Fixtures use the start date; a run that crosses Chicago midnight cannot judge the dates, so say so.
+catch (e) {
+  let endDay = startDay;
+  try { if (startDay) endDay = today(); } catch { /* container gone: report the original error */ }
+  if (endDay !== startDay) throw new Error(`the run crossed Chicago midnight (${startDay} -> ${endDay}); rerun the proof`, { cause: e });
+  throw e;
+}
 finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

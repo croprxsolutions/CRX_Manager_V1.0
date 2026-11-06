@@ -6,5 +6,8 @@
   counted the wrong day. 13 functions now take "today" from the Chicago date; the owner dashboard's
   accounting-period name and days left read the Chicago clock too. Customer statements default to a
   date range ending on the Chicago date.
-- Nothing else in those functions changes. Statement and AR aging ranges follow in batch 3.
+- A quote's age and a customer's season delivery count read their timestamps on the Chicago calendar.
+- The planned-holds and stock-forecast feeds now refuse anyone but an admin or sales rep, matching the
+  screens that use them (Mason, 2026-11-06).
+- Statement and AR aging ranges follow in batch 3.
 - Proof: `scripts/smoke/prove-ki18-batch2-chicago-boards-real-schema.mjs`.

@@ -16,6 +16,7 @@ import {
   classifyLunaRun,
   exitCodeFor,
   main,
+  buildLunaPrompt,
   nextStepHint,
   scopeHint,
   parseArgs,
@@ -44,6 +45,12 @@ assert.equal(args[args.indexOf("-m") + 1], LUNA_MODEL);
 assert.ok(args.includes(`model_reasoning_effort="${LUNA_EFFORT}"`));
 for (const flag of ["--ignore-user-config", "--ephemeral"]) assert.ok(args.includes(flag));
 assert.equal(args[args.indexOf("--sandbox") + 1], "read-only");
+
+// Luna wrongly called has_function_privilege('public', ...) a BLOCKER on PR #1590 (2026-11-06); the prompt says it is valid,
+// above the diff markers so it stays an instruction.
+const prompt = buildLunaPrompt({ diff: "+x", canary });
+assert.ok(/has_function_privilege\('public'[^\n]*\n[^\n]*accepted role name/.test(prompt));
+assert.ok(prompt.indexOf("has_function_privilege('public'") < prompt.indexOf("===== CANDIDATE DIFF (canary:"));
 
 // A valid run reaches a verdict, and each verdict has its own exit code.
 assert.equal(classifyLunaRun(good).outcome, "clean");

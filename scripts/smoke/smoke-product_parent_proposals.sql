@@ -3,6 +3,8 @@
 -- receipts it writes are rolled back. Proves, as a real signed-in browser session (role authenticated with
 -- each live profile's claims) and as a signed-out visitor (role anon), on three invented two-size products:
 --   * anon cannot execute any of the six public PAR-2 functions;
+--   * while the grouping switch is off (as shipped), approval and parent-brand edits are refused
+--     PRODUCT_PARENT_GROUPING_NOT_OPEN; the chain then turns it on inside its own rolled-back transaction;
 --   * an admin builds a proposal (a same-key retry answers the same) that proposes each invented product
 --     as one group by its EPA number;
 --   * the admin approves one group (a same-key retry answers the same): both sizes join one new parent;
@@ -20,6 +22,7 @@ DECLARE
   v_role text;
   v_sig text;
   v_refused boolean;
+  v_was_open boolean;
   v_cat text;
   v_tag text := translate(substr(md5(clock_timestamp()::text), 1, 10), '0123456789', 'ghijklmnop');
   v_ids uuid[] := ARRAY[gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
@@ -67,6 +70,38 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
+
+  -- The grouping switch ships off until the PAR-2 screens are live. Off: both writers refuse. Then on, here only.
+  EXECUTE 'RESET ROLE';
+  v_was_open := public._product_parent_grouping_open();
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  IF NOT v_was_open THEN
+    BEGIN
+      PERFORM public.approve_product_parent_groups(gen_random_uuid(), 1, '[]'::jsonb, 'smoke:par2:closed-a:' || v_tag);
+      v_refused := false;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'PRODUCT_PARENT_GROUPING_NOT_OPEN%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: a closed approval failed for another reason: %', SQLERRM;
+      END IF;
+      v_refused := true;
+    END;
+    IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: an approval ran while grouping is closed'; END IF;
+    BEGIN
+      PERFORM public.upsert_parent_brand(gen_random_uuid(), 'Smoke Closed ' || v_tag, NULL, NULL, true, false, NULL,
+        NULL, NULL, false, NULL, 'smoke:par2:closed-b:' || v_tag);
+      v_refused := false;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'PRODUCT_PARENT_GROUPING_NOT_OPEN%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: a closed parent-brand edit failed for another reason: %', SQLERRM;
+      END IF;
+      v_refused := true;
+    END;
+    IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a parent-brand edit ran while grouping is closed'; END IF;
+    EXECUTE 'RESET ROLE';
+    CREATE OR REPLACE FUNCTION public._product_parent_grouping_open() RETURNS boolean
+    LANGUAGE sql STABLE SET search_path = public, pg_temp AS $open$ SELECT true; $open$;
+    EXECUTE 'SET LOCAL ROLE authenticated';
+  END IF;
 
   v_p := public.build_product_parent_proposal('smoke-pp2-build-' || v_tag);
   v_again := public.build_product_parent_proposal('smoke-pp2-build-' || v_tag);

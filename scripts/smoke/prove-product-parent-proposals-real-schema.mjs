@@ -381,9 +381,11 @@ async function main() {
     ['Rho Bulk', 'Rho'], ['Rho Tote', 'Rho'], ['Rho 12 ct case', 'Rho'], ['#2 Mix 2.5gal', '#2 Mix'],
     ['Corn Mix Safened 2.5 gal', 'Corn Mix Safened'], ['Gen Liberty: Higher Quality 2.5 gal', 'Gen Liberty: Higher Quality'],
     ['2.5 gal', ''], ['Mix 1 Pt', 'Mix'], ['Mix 32 fl oz', 'Mix'], ['Mix 1.5 Qts.', 'Mix'], ['Galaxy 2.5 gal', 'Galaxy'],
+    ['Atra 4G 2.5 gal', 'Atra 4G'], ['Atra 4g', 'Atra 4g'], ['Seed Mix 500 g', 'Seed Mix'],
   ];
   for (const [input, want] of BASES) assert.equal(scalar(`SELECT '>' || public._product_parent_base_name(${lit(input)}) || '<';`), `>${want}<`, `base name of ${input}`);
   assert.equal(scalar("SELECT public._product_parent_loose_key('[PROVER] Atra 4L') = public._product_parent_loose_key('[PROVER] Atra');"), 't');
+  assert.equal(scalar("SELECT public._product_parent_loose_key('[PROVER] Atra 4G') = public._product_parent_loose_key('[PROVER] Atra');"), 't');
   console.log(`[case] base-name rule: ${BASES.length} names; sizes, packs and containers removed, strength and quality words kept`);
 
   // [case] access
@@ -400,6 +402,23 @@ async function main() {
     refused(ADMIN, `SELECT public.${helper};`, /permission denied/);
   }
   console.log('[case] access: writers are admin-only with a retry key; tables have no write grant; visitors see nothing; helpers are private');
+
+  // [case] switch off (as shipped): approval and parent-brand edits refuse; a PAR-1 grouped size keeps its own
+  // brand list, read and written as before (made and read in one transaction that is then rolled back).
+  assert.equal(scalar('SELECT public._product_parent_grouping_open();'), 'f');
+  refused(ADMIN, approve({ proposal_id: id('ee'), proposal_version: 1 }, [], 'k-closed-a'), /PRODUCT_PARENT_GROUPING_NOT_OPEN/);
+  refused(ADMIN, parentBrand(already.parent_id, 'Closed Brand', {}, 'k-closed-b'), /PRODUCT_PARENT_GROUPING_NOT_OPEN/);
+  const closedSize = as(ADMIN, `${brandUpsert(already.product_id, 'Closed Size Brand', null, null, null, 'k-closed-c')}
+SELECT public.get_product_brands('${already.product_id}');
+DO $x$ BEGIN RAISE EXCEPTION 'PROVER_ROLLBACK'; END $x$;`);
+  assert.match(closedSize.output, /PROVER_ROLLBACK/);
+  assert.match(closedSize.output, /"brands": \[\{[^\n]*Closed Size Brand[^\n]*"source": "product"/);
+  assert.equal(scalar(`SELECT count(*) FROM public.product_brands WHERE product_id = '${already.product_id}';`), '0');
+  const setSwitch = (on) => psql(`CREATE OR REPLACE FUNCTION public._product_parent_grouping_open() RETURNS boolean
+LANGUAGE sql STABLE SET search_path = public, pg_temp AS $f$ SELECT ${on}; $f$;`);
+  setSwitch(true);
+  assert.equal(scalar('SELECT public._product_parent_grouping_open();'), 't');
+  console.log('[case] switch off: approval and parent-brand edits refuse PRODUCT_PARENT_GROUPING_NOT_OPEN; a PAR-1 grouped size keeps its own brand list; the rest of this proof runs with it on');
 
   // [case] build
   const membersBefore = memberCount();
@@ -622,12 +641,16 @@ async function main() {
   call(ADMIN, parentBrand(GL, 'Brandy B', { id: bb, version: 2, retire: true, reason: 'no longer sold' }, 'k-pb6'));
   refused(ADMIN, parentBrand(GL, 'Brandy B', { id: bb, version: 3 }, 'k-pb7'), /BRAND_RETIRED/);
   refused(REP, parentBrand(GL, 'Brandy D', {}, 'k-pb8'), /ADMIN_REQUIRED/);
+  // An inactive parent (made inactive inside the refused call's own transaction, so nothing stays).
+  refused(ADMIN, parentBrand(GL, 'Brandy D', {}, 'k-pb8b'), /PRODUCT_PARENT_INACTIVE/,
+    `UPDATE public.product_parents SET is_active = false WHERE id = '${GL}';`);
+  assert.equal(scalar(`SELECT is_active FROM public.product_parents WHERE id = '${GL}';`), 't');
   assert.deepEqual(call(REP, `SELECT public.get_product_brands('${L1}');`).brands.map((b) => b.brand_name), ['Brandy A', 'Brandy C']);
   assert.equal(scalar(`SELECT string_agg(event_type, ',' ORDER BY id) FROM public.product_parent_brand_events WHERE parent_brand_id IN ('${added.id}', '${bb}');`), 'created,created,updated,retired');
   ownerRefused("UPDATE public.product_parent_brand_events SET reason = 'x';", /PRODUCT_PARENT_BRAND_EVENTS_ARE_APPEND_ONLY/);
   ownerRefused('DELETE FROM public.product_parent_brand_events;', /PRODUCT_PARENT_BRAND_EVENTS_ARE_APPEND_ONLY/);
   ownerRefused('TRUNCATE public.product_parent_brand_events CASCADE;', /PRODUCT_PARENT_BRAND_EVENTS_ARE_APPEND_ONLY/);
-  console.log('[case] parent brand list: add, duplicate, stale edit, other parent, retire (with a reason, final) and sales-rep refusal; events are append-only');
+  console.log('[case] parent brand list: add, duplicate, stale edit, other parent, retire (with a reason, final) and inactive-parent and sales-rep refusals; events are append-only');
 
   // [case] label facts and prices
   assert.equal(labelMd5(), labelBefore, 'an EPA number, label fact, list price, name or active flag changed');
@@ -671,8 +694,11 @@ async function main() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ${others.map(([n, r]) =>
     `('${id(n)}', 'pp2-${r}@example.invalid', '{"full_name":"[PROVER] ${r}","role":"${r}"}'::jsonb)`).join(', ')};`);
   asOwner(others.map(([n, r]) => `UPDATE public.profiles SET role = '${r}', is_active = true WHERE id = '${id(n)}';`).join('\n'));
+  setSwitch(false); // as live will be: the chain proves the refusals, then turns it on inside its own rollback
   const chain = docker([...psqlArgs(), '-f', '-'], { input: lf(path.join(ROOT, 'scripts/smoke/smoke-product_parent_proposals.sql')), allowFailure: true });
   assert.match(`${chain.stdout}\n${chain.stderr}`, /SMOKE_PASS_ROLLBACK/, `${chain.stdout}\n${chain.stderr}`);
+  assert.equal(scalar('SELECT public._product_parent_grouping_open();'), 'f', 'the smoke chain left grouping on');
+  setSwitch(true);
   console.log('[case] live smoke chain: smoke-product_parent_proposals.sql passes on the post-apply schema');
   // Cost-exposure keys after the apply, for the allowlist re-key (ship.md step 5): printed, not asserted.
   const costRows = docker([...psqlArgs(), '-A', '-t', '-f', '-'], { input: lf(path.join(ROOT, 'scripts/db-invariant-sweeps/predicates/cost-exposure-review.sql')) })

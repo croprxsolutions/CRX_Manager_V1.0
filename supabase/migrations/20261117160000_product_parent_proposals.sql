@@ -22,15 +22,19 @@
 -- before the replay lookup):
 --   build_product_parent_proposal, approve_product_parent_groups, hold_product_parent_group,
 --   reject_product_parent_group, upsert_parent_brand, get_product_brands (any active user).
--- Re-issued: upsert_product_brand takes the product-row lock approval takes, then refuses a grouped size with
---   PRODUCT_BRANDS_BELONG_TO_PARENT (nothing written). Ungrouped sizes behave exactly as before.
+-- Re-issued: upsert_product_brand takes the product-row lock approval takes, then, once the switch is on, refuses
+--   a grouped size with PRODUCT_BRANDS_BELONG_TO_PARENT (nothing written). Ungrouped sizes behave exactly as before.
 -- Grouping rules: build sheet §5.1. Grouped only when the base name (size, pack and container words removed),
 -- form and, for seed or each, stock unit match, and no two members carry different EPA numbers. A strength token
--- like "4L" is never removed; names that differ only by one are held. Same EPA number under different base names
+-- like "4L" or "4G" is never removed; names that differ only by one are held. Same EPA number under different base names
 -- is a flag, never a merge. Some members with the EPA number and some blank: held until the blanks are filled.
 -- Approval copies the chosen category, use timings and rates onto every member through PAR-1's
 -- _copy_parent_to_size (under a pass; one 'created' parent event per group). It never writes EPA numbers or label
 -- facts. While rates are locked, a group that would change a member's rate is refused whole.
+-- The grouping switch (_product_parent_grouping_open) ships OFF: until the PAR-2 screens that read
+-- get_product_brands are live, approval and parent-brand edits are refused with PRODUCT_PARENT_GROUPING_NOT_OPEN,
+-- every size's brands stay its own list (read and written exactly as before, grouped by PAR-1 or not), and
+-- building, holding and rejecting proposals change no product. The screens PR's migration turns it on.
 -- No existing row, grant or policy changes. No group is approved by this migration; live data steps are Mason's.
 --
 -- Rollback (a reviewed migration; the proof runs exactly this block, then re-issues upsert_product_brand from
@@ -138,6 +142,7 @@
 -- DROP FUNCTION public._product_parent_loose_key(text);
 -- DROP FUNCTION public._product_parent_base_name(text);
 -- DROP FUNCTION public._parent_brand_event(uuid, uuid, text, text, jsonb, jsonb);
+-- DROP FUNCTION public._product_parent_grouping_open();
 -- ROLLBACK-SQL-END
 
 SET LOCAL lock_timeout = '10s';
@@ -351,12 +356,28 @@ CREATE TRIGGER product_parent_brand_events_no_truncate
   FOR EACH STATEMENT EXECUTE FUNCTION public.refuse_product_parent_brand_event_mutation();
 
 -- ---------------------------------------------------------------------------------------------
+-- Grouping switch (private: no API-role EXECUTE)
+-- ---------------------------------------------------------------------------------------------
+
+-- Off until the PAR-2 screens that read get_product_brands are deployed (build sheet 5.2, section 8 order 5), so
+-- no size's brands move to a list today's product screen cannot show or edit. The screens PR's migration turns it
+-- on by replacing this body with "SELECT true", after settling any brand rows a PAR-1 grouped size gained while
+-- it was off (the check this file's preflight runs).
+CREATE FUNCTION public._product_parent_grouping_open() RETURNS boolean
+LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
+  SELECT false;
+$function$;
+ALTER FUNCTION public._product_parent_grouping_open() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._product_parent_grouping_open() FROM PUBLIC, anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------------------------
 -- Grouping helpers (private: no API-role EXECUTE)
 -- ---------------------------------------------------------------------------------------------
 
 -- The name with size, pack and container words removed (build sheet §5.1). A size is removed only when written
--- as a number, an optional space and a unit word from the list, standing apart from the name. Strength and quality
--- words ("4L", "Higher Quality", "Ester", "safened", percentages, "#") are never removed.
+-- as a number, an optional space and a unit word from the list, standing apart from the name; grams only with the
+-- space ("500 g"), since "4G" is a strength. Strength and quality words ("4L", "4G", "Higher Quality", "Ester",
+-- "safened", percentages, "#") are never removed.
 CREATE FUNCTION public._product_parent_base_name(p_name text) RETURNS text
 LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
   SELECT btrim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(
@@ -364,7 +385,7 @@ LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
     -- pack count before a size: "2 x 2.5 gal", "4/1 gal"
     '(^|[^[:alnum:].])[0-9]+[[:space:]]*[x/][[:space:]]*(?=[0-9.])', '\1', 'gi'),
     -- a size: number, optional space, unit word
-    '(^|[^[:alnum:].])([0-9]+(\.[0-9]+)?|\.[0-9]+)[[:space:]]?(fl[[:space:]]?oz|gallons?|gals?|gl|quarts?|qts?|pints?|pts?|oz|pounds?|lbs?|kg|g|ml|liters?|litres?|tons?)\.?(?![[:alnum:]])',
+    '(^|[^[:alnum:].])([0-9]+(\.[0-9]+)?|\.[0-9]+)([[:space:]]?(fl[[:space:]]?oz|gallons?|gals?|gl|quarts?|qts?|pints?|pts?|oz|pounds?|lbs?|kg|ml|liters?|litres?|tons?)|[[:space:]]g)\.?(?![[:alnum:]])',
     '\1', 'gi'),
     -- pack counts and container words
     '\m([0-9]+[[:space:]]?-?[[:space:]]?(pks?|packs?|ct|counts?)|jugs?|cases?|bulk|totes?|bags?|box|boxes)\M', '', 'gi'),
@@ -375,12 +396,12 @@ $function$;
 ALTER FUNCTION public._product_parent_base_name(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_parent_base_name(text) FROM PUBLIC, anon, authenticated, service_role;
 
--- The base name with bare strength-or-volume tokens ("4L", "2.5 L") dropped: two different base names with the
+-- The base name with bare strength-or-volume tokens ("4L", "2.5 L", "4G") dropped: two different base names with the
 -- same loose key differ only by such a token, so they are held, never grouped or split on a guess.
 CREATE FUNCTION public._product_parent_loose_key(p_base text) RETURNS text
 LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
   SELECT btrim(regexp_replace(regexp_replace(lower(COALESCE(p_base, '')),
-    '\m[0-9]+(\.[0-9]+)?[[:space:]]?l\M', '', 'g'), '[[:space:]]+', ' ', 'g'), ' -,/:;');
+    '\m[0-9]+(\.[0-9]+)?[[:space:]]?[lg]\M', '', 'g'), '[[:space:]]+', ' ', 'g'), ' -,/:;');
 $function$;
 ALTER FUNCTION public._product_parent_loose_key(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_parent_loose_key(text) FROM PUBLIC, anon, authenticated, service_role;
@@ -594,6 +615,8 @@ BEGIN
       v_shape->>'fingerprint', v_status, v_reason, CASE WHEN v_status = 'held' THEN now() END);
     v_count := v_count + 1;
   END LOOP;
+  -- A build with nothing left to decide (no groups, or every one held) is closed, never left open.
+  PERFORM public._close_product_parent_proposal_if_done(v_proposal.id);
 
   v_result := jsonb_build_object('proposal_id', v_proposal.id, 'proposal_version', v_proposal.proposal_version,
     'group_count', v_count, 'held_count', v_held);
@@ -910,6 +933,10 @@ DECLARE
 BEGIN
   v_existing := public._product_parent_replay(p_idempotency_key, 'approve_product_parent_groups', v_fp);
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  IF NOT public._product_parent_grouping_open() THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_GROUPING_NOT_OPEN: grouping opens when the new product screens are live'
+      USING ERRCODE = '55000';
+  END IF;
   IF p_groups IS NULL OR jsonb_typeof(p_groups) <> 'array' OR jsonb_array_length(p_groups) = 0
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(p_groups) e
                  WHERE jsonb_typeof(e) <> 'object' OR jsonb_typeof(e->'group_id') IS DISTINCT FROM 'string'
@@ -1062,10 +1089,15 @@ DECLARE
   v_existing jsonb;
   v_old public.product_parent_brands%ROWTYPE;
   v_saved public.product_parent_brands%ROWTYPE;
+  v_parent_active boolean;
   v_result jsonb;
 BEGIN
   v_existing := public._product_parent_replay(p_idempotency_key, 'upsert_parent_brand', v_fp);
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  IF NOT public._product_parent_grouping_open() THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_GROUPING_NOT_OPEN: parent brand lists open when the new product screens are live'
+      USING ERRCODE = '55000';
+  END IF;
   IF v_brand_name IS NULL OR v_brand_name = '' THEN
     RAISE EXCEPTION 'BRAND_NAME_REQUIRED: enter the brand name' USING ERRCODE = '22023';
   END IF;
@@ -1088,8 +1120,9 @@ BEGIN
   END IF;
   v_reason := public._product_parent_reason(p_reason, 'reason', COALESCE(p_retire, false));
 
-  PERFORM 1 FROM public.product_parents WHERE id = p_parent_id FOR SHARE;
+  SELECT is_active INTO v_parent_active FROM public.product_parents WHERE id = p_parent_id FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_PARENT_NOT_FOUND'; END IF;
+  IF NOT v_parent_active THEN RAISE EXCEPTION 'PRODUCT_PARENT_INACTIVE: reactivate this product before changing its brands'; END IF;
   PERFORM 1 FROM public.products p WHERE p.id IN (SELECT m.product_id FROM public.product_parent_members m
                                                    WHERE m.parent_id = p_parent_id)
    ORDER BY p.id FOR NO KEY UPDATE;
@@ -1144,7 +1177,7 @@ REVOKE ALL ON FUNCTION public.upsert_parent_brand(uuid, text, text, text, boolea
 GRANT EXECUTE ON FUNCTION public.upsert_parent_brand(uuid, text, text, text, boolean, boolean, text, uuid, integer, boolean, text, text)
   TO authenticated;
 
--- A grouped size's brands are its parent's active list; any other size's are its own.
+-- Once the switch is on, a grouped size's brands are its parent's active list; any other size's are its own.
 CREATE FUNCTION public.get_product_brands(p_product_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
@@ -1155,7 +1188,7 @@ BEGIN
   IF NOT public.is_active_profile() THEN RAISE EXCEPTION 'NOT_AUTHORIZED' USING ERRCODE = '42501'; END IF;
   SELECT pp.* INTO v_parent FROM public.product_parent_members m JOIN public.product_parents pp ON pp.id = m.parent_id
    WHERE m.product_id = p_product_id;
-  IF FOUND THEN
+  IF FOUND AND public._product_parent_grouping_open() THEN
     RETURN jsonb_build_object('source', 'parent', 'product_id', p_product_id, 'parent_id', v_parent.id,
       'parent_name', v_parent.name,
       'brands', (SELECT COALESCE(jsonb_agg(to_jsonb(b) ORDER BY lower(b.brand_name), b.id), '[]'::jsonb)
@@ -1171,7 +1204,8 @@ REVOKE ALL ON FUNCTION public.get_product_brands(uuid) FROM PUBLIC, anon, authen
 GRANT EXECUTE ON FUNCTION public.get_product_brands(uuid) TO authenticated;
 
 -- Re-issued from 20261022086500 with one change: after the receipt lookup it takes the product-row lock approval
--- takes, and refuses a grouped size with the reload message (nothing written). Ungrouped sizes are unchanged.
+-- takes, and, once the switch is on, refuses a grouped size with the reload message (nothing written). Ungrouped
+-- sizes, and every size while the switch is off, are unchanged.
 CREATE OR REPLACE FUNCTION public.upsert_product_brand(
   p_product_id uuid,
   p_brand_name text,
@@ -1256,7 +1290,7 @@ BEGIN
     RETURN v_replay -> 'result';
   END IF;
 
-  -- PAR-2: the same product-row lock grouping takes, then a grouped size's brands belong to its parent.
+  -- PAR-2: the same product-row lock grouping takes, then (switch on) a grouped size's brands belong to its parent.
   -- An edit's brand row decides the size, so a mismatched p_product_id cannot dodge the refusal.
   PERFORM 1 FROM public.products
    WHERE id IN (p_product_id, (SELECT b.product_id FROM public.product_brands b WHERE b.id = p_brand_id))
@@ -1265,7 +1299,7 @@ BEGIN
     JOIN public.product_parents pp ON pp.id = m.parent_id
    WHERE m.product_id IN (p_product_id, (SELECT b.product_id FROM public.product_brands b WHERE b.id = p_brand_id))
    ORDER BY m.product_id LIMIT 1;
-  IF v_parent_name IS NOT NULL THEN
+  IF v_parent_name IS NOT NULL AND public._product_parent_grouping_open() THEN
     RAISE EXCEPTION 'PRODUCT_BRANDS_BELONG_TO_PARENT: this product''s brands are kept on parent "%"; reload the app', v_parent_name
       USING ERRCODE = 'check_violation';
   END IF;
@@ -1330,7 +1364,7 @@ ALTER FUNCTION public.upsert_product_brand(uuid, text, text, text, boolean, bool
 REVOKE ALL ON FUNCTION public.upsert_product_brand(uuid, text, text, text, boolean, boolean, text, uuid, integer, text) FROM PUBLIC, anon, service_role, metabase_ro;
 GRANT EXECUTE ON FUNCTION public.upsert_product_brand(uuid, text, text, text, boolean, boolean, text, uuid, integer, text) TO authenticated;
 COMMENT ON FUNCTION public.upsert_product_brand(uuid, text, text, text, boolean, boolean, text, uuid, integer, text) IS
-  'Admin-only add or edit of a product brand (product_brands) for an ungrouped size; a grouped size is refused with PRODUCT_BRANDS_BELONG_TO_PARENT (its brands are on the parent, upsert_parent_brand). Retry key required and bound to caller + request; an edit must pass the row_version it read. Never deletes; retire with p_is_currently_sourced = false.';
+  'Admin-only add or edit of a product brand (product_brands) for an ungrouped size; once grouping is open, a grouped size is refused with PRODUCT_BRANDS_BELONG_TO_PARENT (its brands are on the parent, upsert_parent_brand). Retry key required and bound to caller + request; an edit must pass the row_version it read. Never deletes; retire with p_is_currently_sourced = false.';
 
 -- ---------------------------------------------------------------------------------------------
 -- Postflight
@@ -1381,7 +1415,7 @@ BEGIN
     'public._move_group_brands(uuid,uuid[],jsonb,boolean,text)',
     'public._approve_product_parent_group(public.product_parent_proposals,jsonb,boolean)',
     'public._decide_product_parent_group(uuid,bigint,text,text,text)',
-    'public.refuse_product_parent_brand_event_mutation()'] LOOP
+    'public.refuse_product_parent_brand_event_mutation()', 'public._product_parent_grouping_open()'] LOOP
     IF (SELECT array_agg(DISTINCT grantee::regrole::text ORDER BY grantee::regrole::text)
           FROM pg_proc p, aclexplode(p.proacl) WHERE p.oid = v_sig::regprocedure AND privilege_type = 'EXECUTE')
        IS DISTINCT FROM ARRAY['postgres']
@@ -1392,6 +1426,9 @@ BEGIN
   IF (SELECT count(*) FROM pg_proc WHERE oid IN (SELECT oid FROM pg_proc WHERE proname = 'upsert_product_brand'
         AND pronamespace = 'public'::regnamespace)) <> 1 THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_PROPOSALS_BRAND_WRITER_OVERLOAD';
+  END IF;
+  IF public._product_parent_grouping_open() THEN
+    RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_PROPOSALS_SWITCH_ON: grouping must ship off';
   END IF;
 END;
 $postflight$;

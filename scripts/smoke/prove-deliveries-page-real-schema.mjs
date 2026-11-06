@@ -308,6 +308,18 @@ try {
   assert.deepEqual({ repeated, missing, stray }, { repeated: 0, missing: 0, stray: 0 }, 'a read by id skipped or repeated a delivery across edits');
   console.log(`[deliveries-page] read by id across a cancel and two reactivations: ${before} -> ${after}, none skipped or repeated`);
 
+  // 6c. A delivery whose id is the nil uuid is still read (Sol, 2026-11-06): the nil start cursor includes it, once.
+  const nilRead = probe(USERS.admin, `
+    SET LOCAL session_replication_role = replica;
+    UPDATE public.deliveries SET id = '${NIL}' WHERE id = (SELECT id FROM public.deliveries WHERE delivery_number LIKE 'DP-%' AND status = 'scheduled' ORDER BY id LIMIT 1);
+    SET LOCAL session_replication_role = origin;
+    ${asUser(`r := public.get_deliveries_page(p_today => '${TODAY}', p_week_start => '${WEEK}', p_limit => 5, p_after_id => '${NIL}');`)}
+    u := (r->'rows'->0->>'id')::uuid;
+    ${asUser(`r2 := public.get_deliveries_page(p_today => '${TODAY}', p_week_start => '${WEEK}', p_limit => 5, p_after_id => u);`)}
+    v := concat_ws('|', u, (SELECT count(*) FROM jsonb_array_elements(r2->'rows') e WHERE e->>'id' = '${NIL}'));`);
+  assert.equal(nilRead, `${NIL}|0`, `the nil-id delivery must open the read by id, once (${nilRead})`);
+  console.log('[deliveries-page] a delivery with the nil id is read once from the nil start cursor');
+
   // 7. Bad arguments refused; anon cannot execute.
   for (const bad of ["p_today => NULL, p_week_start => '2026-06-14'", `${args()}, p_limit => 0`, `${args()}, p_limit => 501`, `${args()}, p_limit => NULL`,
     `${args()}, p_offset => -1`, `${args()}, p_after_id => '${NIL}', p_offset => 1`, `${args()}, p_sort_key => 'id'`, `${args()}, p_sort_desc => NULL`, `${args()}, p_search => repeat('a', 201)`]) {

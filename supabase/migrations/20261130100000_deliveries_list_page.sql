@@ -66,7 +66,7 @@ BEGIN
     RAISE EXCEPTION 'DELIVERIES_PAGE_BAD_ARGS: p_offset must be 0 or more';
   END IF;
   -- p_after_id reads the matching rows in delivery id order, the p_limit after that id (the nil uuid
-  -- starts at the beginning; delivery ids are gen_random_uuid() version-4 values, never all zeros). Ids never change, so a full read made this way skips or repeats no
+  -- starts at the beginning and includes a delivery whose id is the nil uuid itself, should one exist). Ids never change, so a full read made this way skips or repeats no
   -- delivery that exists for the whole read, whatever is edited meanwhile; the caller then sorts the
   -- rows by sort_position.
   IF p_after_id IS NOT NULL AND p_offset <> 0 THEN
@@ -178,7 +178,8 @@ BEGIN
            WHERE p_after_id IS NULL AND o1.ord > p_offset AND o1.ord <= p_offset::bigint + p_limit
           UNION ALL
           SELECT k.* FROM (
-            SELECT o2.* FROM ordered o2 WHERE p_after_id IS NOT NULL AND o2.id > p_after_id ORDER BY o2.id LIMIT p_limit
+            SELECT o2.* FROM ordered o2 WHERE p_after_id IS NOT NULL
+              AND (o2.id > p_after_id OR (p_after_id = '00000000-0000-0000-0000-000000000000' AND o2.id = p_after_id)) ORDER BY o2.id LIMIT p_limit
           ) k
         ) o
         JOIN public.deliveries d ON d.id = o.id

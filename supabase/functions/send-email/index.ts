@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { jsPDF } from "npm:jspdf@4.2.1";
 import { autoTable } from "npm:jspdf-autotable@5.0.9";
-import { captureEdgeException } from "../_shared/sentry.ts";
+import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sentry.ts";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import {
@@ -215,6 +215,8 @@ async function checkPurchaseOrderEmail(
   const decision = decidePurchaseOrderEmail(order, poLines, to, snapshot);
   return decision.ok ? { ok: true, order, lines: poLines } : decision;
 }
+
+warnIfSentryMisconfigured("send-email");
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {

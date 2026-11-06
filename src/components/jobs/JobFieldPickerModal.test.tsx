@@ -8,7 +8,14 @@ const { rpcMock, toastMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../lib/db', () => ({
-  supabase: { rpc: rpcMock },
+  // The fields read is paged: rpc(...).order().order().range() resolves to rpcMock's reply.
+  supabase: {
+    rpc: (...args: unknown[]) => {
+      const reply = rpcMock(...args) as Promise<unknown>;
+      const q = { order: () => q, range: () => q, then: reply.then.bind(reply) };
+      return q;
+    },
+  },
   assertRpcResult: (data: unknown) => data,
 }));
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));

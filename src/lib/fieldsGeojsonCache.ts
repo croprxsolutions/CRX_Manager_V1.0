@@ -1,4 +1,5 @@
 import { supabase, assertRpcResult } from './db';
+import { fetchAllRows, pageWithList } from './pagedRead';
 
 /** Full map rows returned by the shared all-fields GeoJSON RPC. */
 export interface FieldsGeojsonRow {
@@ -27,7 +28,12 @@ export async function getCachedFieldsGeojson(now = Date.now()): Promise<FieldsGe
     return fieldsGeojsonCache.data;
   }
 
-  const { data, error } = await supabase.rpc('get_fields_with_geojson');
+  // Every page: the server cuts a function's rows off at 1,000.
+  const { data, error } = await fetchAllRows<FieldsGeojsonRow>((from, to) => pageWithList(supabase
+    .rpc('get_fields_with_geojson', undefined, { count: 'exact' })
+    .order('field_name')
+    .order('id')
+    .range(from, to)));
   if (error) throw error;
   const rows = assertRpcResult<FieldsGeojsonRow[]>(data, 'get_fields_with_geojson');
   fieldsGeojsonCache = { data: rows, fetchedAt: now };

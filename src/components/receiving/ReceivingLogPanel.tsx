@@ -21,6 +21,7 @@ import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { supabase, sanitizeError, assertRpcResult } from '../../lib/db';
+import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { getIdempotencyBindingRejection } from '../../lib/idempotency';
 import { runCriticalAction } from '../../lib/criticalAction';
 import { Sentry } from '../../lib/sentry';
@@ -107,17 +108,18 @@ export default function ReceivingLogPanel() {
 
     // Fetch receiving log via RPC
     try {
-      const params: Record<string, string | number> = {
-        p_limit: 500,
-        p_offset: 0,
-      };
+      const params: Record<string, string> = {};
       if (vendorFilter) params.p_vendor = vendorFilter;
       if (conditionFilter) params.p_condition = conditionFilter;
       if (receivedByFilter) params.p_received_by = receivedByFilter;
       if (dateFrom) params.p_date_from = dateFrom;
       if (dateTo) params.p_date_to = dateTo;
 
-      const { data: logData, error: logError } = await supabase.rpc('get_receiving_log', params);
+      // Every page: the function returns one list per call, so it pages itself with
+      // p_limit/p_offset (its order ends on the row id, so pages never overlap).
+      const { data: logData, error: logError } = await fetchAllRows<ReceivingRecord>((from, to) => pageWithList(supabase
+        .rpc('get_receiving_log', { ...params, p_limit: to - from + 1, p_offset: from })
+        .then(({ data, error }) => ({ data: data as ReceivingRecord[] | null, error }))));
       if (seq !== fetchSeq.current) return;
 
       if (logError) throw logError;

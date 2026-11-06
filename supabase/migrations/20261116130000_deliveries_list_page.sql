@@ -121,12 +121,8 @@ BEGIN
     ),
     ordered AS (
       SELECT f.*, row_number() OVER (ORDER BY
-        -- Default: today first, then upcoming (soonest first), then past (newest first).
-        CASE WHEN p_sort_key IS NULL THEN f.bucket END,
-        CASE WHEN p_sort_key IS NULL AND f.bucket < 3 THEN f.scheduled_date END ASC,
-        CASE WHEN p_sort_key IS NULL AND f.bucket = 3 THEN f.scheduled_date END DESC,
-        CASE WHEN p_sort_key IS NULL THEN f.delivery_number END,
-        -- A chosen column, either direction; empty values last either way, as the screen sorts them.
+        -- A chosen column first, either direction; empty values last either way, as the screen sorts them.
+        -- Rows tied on it keep the default order below, as the screen's stable sort keeps them.
         CASE WHEN NOT p_sort_desc THEN CASE p_sort_key
           WHEN 'delivery_number' THEN f.delivery_number WHEN 'customer_name' THEN f.customer_name
           WHEN 'driver_name' THEN f.driver_name WHEN 'priority' THEN f.priority WHEN 'status' THEN f.status END END ASC NULLS LAST,
@@ -137,6 +133,11 @@ BEGIN
         CASE WHEN p_sort_desc AND p_sort_key = 'scheduled_date' THEN f.scheduled_date END DESC NULLS LAST,
         CASE WHEN NOT p_sort_desc AND p_sort_key = 'item_count' THEN f.item_count END ASC NULLS LAST,
         CASE WHEN p_sort_desc AND p_sort_key = 'item_count' THEN f.item_count END DESC NULLS LAST,
+        -- Default: today first, then upcoming (soonest first), then past (newest first), then number.
+        f.bucket,
+        CASE WHEN f.bucket < 3 THEN f.scheduled_date END ASC,
+        CASE WHEN f.bucket = 3 THEN f.scheduled_date END DESC,
+        f.delivery_number,
         -- The unique tie-breaker: no row repeats or goes missing across pages.
         f.id
       ) AS ord

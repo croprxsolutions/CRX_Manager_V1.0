@@ -144,20 +144,24 @@ try {
   }
   console.log(`[deliveries-page] default order: ${all.total_count} rows, pages of 37 match, screen comparator order`);
 
-  // 2. Every sort key, both directions: pages match and order matches a direct ORDER BY <column>, id.
-  const sortSql = {
-    delivery_number: 'd.delivery_number', customer_name: 'c.farm_name', scheduled_date: 'd.scheduled_date',
-    priority: 'd.priority', status: 'd.status',
-    driver_name: "CASE WHEN d.assigned_driver IS NULL THEN 'Unassigned' ELSE pr.full_name END",
-    item_count: '(SELECT count(*) FROM public.delivery_items i WHERE i.delivery_id = d.id)',
-  };
-  for (const [key, expr] of Object.entries(sortSql)) {
+  // 2. Every sort key, both directions: pages match, and the order equals the screen's own column sort
+  // (src/lib/tableSearchSort.ts, a stable sort) applied to the rows in default order.
+  const screenSort = (rows, key, desc) => [...rows].sort((a, b) => {
+    const av = a[key]; const bv = b[key];
+    if (av == null && bv == null) return 0; // the screen returns 1 here; equal keeps ties in default order
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return desc ? bv - av : av - bv;
+    const cmp = String(av).localeCompare(String(bv));
+    return desc ? -cmp : cmp;
+  });
+  for (const key of ['delivery_number', 'customer_name', 'driver_name', 'scheduled_date', 'priority', 'status', 'item_count']) {
     for (const desc of [false, true]) {
       const got = pagesMatch(USERS.admin, { sort_key: key, sort_desc: desc }, 50);
-      assert.deepEqual(ids(got), directIds(NOT_DONE, `${expr} ${desc ? 'DESC' : 'ASC'} NULLS LAST, d.id`), `sort ${key} ${desc ? 'desc' : 'asc'}: order`);
+      assert.deepEqual(ids(got), ids({ rows: screenSort(all.rows, key, desc) }), `sort ${key} ${desc ? 'desc' : 'asc'}: order differs from the screen's sort`);
     }
   }
-  console.log('[deliveries-page] 7 sort keys x 2 directions: pages of 50 match a direct ORDER BY <column>, id');
+  console.log('[deliveries-page] 7 sort keys x 2 directions: pages of 50 match, order equals the screen sort (ties in default order)');
 
   // 3. Filters and search equal a direct query.
   const cases = [

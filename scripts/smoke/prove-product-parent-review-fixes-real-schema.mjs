@@ -240,7 +240,8 @@ const TAHA = [[U1, U2], [I1, I2], [T1, T2], [S1, S2]];
 // Strengths the base name still loses (written "lb./gal", "lb ai/gal", "oz ai/gal", or with the size's own number):
 // each pair shares a base name, and the numbers check must hold it.
 const [A1, A2, L1, L2, O1, O2, W1, W2, R3, ZD] = ['31', '32', '33', '34', '35', '36', '37', '38', '39', '3a'].map(id);
-const STRENGTH_PAIRS = [[A1, A2], [L1, L2], [O1, O2], [W1, W2]];
+const [M1, M2] = ['3c', '3d'].map(id);
+const STRENGTH_PAIRS = [[A1, A2], [L1, L2], [O1, O2], [W1, W2], [M1, M2]];
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -280,12 +281,14 @@ function seed() {
     p(O2, '[PROVER] Oza 11 oz ai/gal 2.5 gal', 'OZ-11', 'Herbicide', null, 'liquid', 'Gal', 2.5, 'Gal'),
     p(W1, '[PROVER] Wex 2 lb./gal 2 gal', 'WE-2', 'Herbicide', null, 'liquid', 'Gal', 2, 'Gal'),
     p(W2, '[PROVER] Wex 4 lb./gal 4 gal', 'WE-4', 'Herbicide', null, 'liquid', 'Gal', 4, 'Gal'),
+    p(M1, '[PROVER] Mox 2 lb./gal 4 x 2 gal', 'MO-2', 'Herbicide', null, 'liquid', 'Gal', 2, 'Gal'),
+    p(M2, '[PROVER] Mox 4 lb./gal 2 x 4 gal', 'MO-4', 'Herbicide', null, 'liquid', 'Gal', 4, 'Gal'),
     // 1.0 and 1 are one number: Rho 1.0 gal joins Rho.
     p(R3, '[PROVER] Rho 1.0 gal', 'RH-1', 'Herbicide', '600-2', 'liquid', 'Gal', 1, 'Gal'),
     // Zeta's EPA number and name, but dry: another product, never held as a second Zeta.
     p(ZD, '[PROVER] Zeta 25 lb', 'ZE-D', 'Herbicide', '300-1', 'dry', 'Lb', 25, 'Lb'),
   ].join(',\n    ')};`);
-  console.log('[prover] seeded an admin, a sales rep and 28 invented products');
+  console.log('[prover] seeded an admin, a sales rep and 30 invented products');
 }
 
 const PINS = {
@@ -377,9 +380,11 @@ async function main() {
     // A concentration written with spaces around the slash is still a strength (Luna round 4).
     ['Imidacloprid 2 lb / gal 2.5 gal', 'Imidacloprid 2 lb / gal'], ['Mix 4 lb /gal', 'Mix 4 lb /gal'],
   ];
-  // The numbers check: every number in the name, by value, less one equal to the recorded container size.
+  // The numbers check: every number in the name, by value and in order, less the last one equal to the recorded container size.
   for (const [name, size, want] of [['Imida 2 lb./gal 2.5 gal', 2.5, '{2}'], ['Wex 2 lb./gal 2 gal', 2, '{2}'], ['Rho 1.0 gal', 1, '{}'],
-    ['Rho 2 x 2.5 gal', 2.5, '{2}'], ['UAN 28/0/0 Tote', 275, '{0,0,28}'], ['Rho 1 gal', null, '{1}'], ['Mix .5 gal', 0.5, '{}']]) {
+    ['Rho 2 x 2.5 gal', 2.5, '{2}'], ['UAN 28/0/0 Tote', 275, '{28,0,0}'],
+    // Order kept, last match removed: a strength and a pack count cannot trade places (Luna round 5).
+    ['Mix 2 lb./gal 4 x 2 gal', 2, '{2,4}'], ['Mix 4 lb./gal 2 x 4 gal', 4, '{4,2}'], ['Mix 2 gal 2 lb/gal', 2, '{2}'], ['Rho 1 gal', null, '{1}'], ['Mix .5 gal', 0.5, '{}']]) {
     assert.equal(scalar(`SELECT public._product_name_strength_numbers(${lit(name)}, ${size ?? 'NULL'})::text;`), want, `numbers of ${name}`);
   }
   for (const [input, want] of BASES) assert.equal(scalar(`SELECT '>' || public._product_parent_base_name(${lit(input)}) || '<';`), `>${want}<`, `base name of ${input}`);
@@ -420,7 +425,7 @@ async function main() {
   assert.ok(!G.some((g) => g.members.some((m) => m.product_id === zeta.product_id)), 'a grouped size was proposed');
   assert.equal(P1.held_count, G.filter((g) => g.status === 'held').length);
   assert.equal(P1.rejected_count, 0);
-  console.log("[case] build: Taha's pairs land in separate groups; a group whose names carry different numbers besides their container size is held size_numbers_differ (Numo, and strengths written lb./gal, lb ai/gal, oz ai/gal or with the size's own number); Rho 1.0 gal joins Rho; Zeta (EPA 300-1, liquid parent exists) is held, Zeta Pro (same EPA, other name) and Zeta dry are proposed with epa_has_parent");
+  console.log("[case] build: Taha's pairs land in separate groups; a group whose names carry different numbers besides their container size is held size_numbers_differ (Numo, and strengths written lb./gal, lb ai/gal, oz ai/gal, with the size's own number, or traded with a pack count); Rho 1.0 gal joins Rho; Zeta (EPA 300-1, liquid parent exists) is held, Zeta Pro (same EPA, other name) and Zeta dry are proposed with epa_has_parent");
 
   // [case] approval after a parent appeared (Taha finding 3)
   const kappa = groupOf(G, K1);

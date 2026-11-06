@@ -111,17 +111,19 @@ $function$;
 ALTER FUNCTION public._product_parent_identity_name(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_parent_identity_name(text) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
--- Every number in a size's name, by value and sorted, less one that equals its recorded container size. Sizes of
--- one product differ only in that number, so two members whose lists differ carry a strength or analysis the
--- base name lost ("2 lb./gal 2.5 gal" vs "4 lb./gal 30 gal"), however it is written.
+-- Every number in a size's name, by value and in the order written, less the last one that equals its recorded
+-- container size (sizes are written last). Sizes of one product differ only in that number, so two members whose
+-- lists differ carry a strength or analysis the base name lost ("2 lb./gal 2.5 gal" vs "4 lb./gal 30 gal"),
+-- however it is written. Order is kept so a strength and a pack count cannot trade places ("2 lb./gal 4 x 2 gal"
+-- vs "4 lb./gal 2 x 4 gal"). A different pack count also holds the group: names group less, never wrongly.
 CREATE FUNCTION public._product_name_strength_numbers(p_name text, p_size numeric) RETURNS numeric[]
 LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
   WITH n AS (
     SELECT x.m[1]::numeric AS v, x.i
       FROM regexp_matches(COALESCE(p_name, ''), '([0-9]+(?:\.[0-9]+)?|\.[0-9]+)', 'g') WITH ORDINALITY AS x(m, i)
   )
-  SELECT COALESCE(array_agg(v ORDER BY v), '{}')
-    FROM n WHERE i IS DISTINCT FROM (SELECT min(i) FROM n WHERE v = p_size);
+  SELECT COALESCE(array_agg(v ORDER BY i), '{}')
+    FROM n WHERE i IS DISTINCT FROM (SELECT max(i) FROM n WHERE v = p_size);
 $function$;
 ALTER FUNCTION public._product_name_strength_numbers(text, numeric) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_name_strength_numbers(text, numeric) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
@@ -593,7 +595,9 @@ BEGIN
   END IF;
   -- Numbers other than the size's own container size are compared by value, so 1 and 1.0 match.
   IF public._product_name_strength_numbers('Imidacloprid 2 lb/gal 2.5 gal', 2.5) <> ARRAY[2]::numeric[]
-     OR public._product_name_strength_numbers('Rho 1.0 gal', 1) <> '{}'::numeric[] THEN
+     OR public._product_name_strength_numbers('Rho 1.0 gal', 1) <> '{}'::numeric[]
+     OR public._product_name_strength_numbers('Mix 2 lb./gal 4 x 2 gal', 2)
+        = public._product_name_strength_numbers('Mix 4 lb./gal 2 x 4 gal', 4) THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_STRENGTH: name numbers are not compared by value';
   END IF;
   IF public._product_parent_base_name('Rho 2 x 2.5 gal') <> 'Rho' THEN

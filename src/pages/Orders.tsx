@@ -86,8 +86,7 @@ export default function Orders() {
     sortKey: sort.key, sortDir: sort.dir,
   }), [debouncedSearch, statusFilter, planFilter, pricingFilter, splitFilter, sort]);
   const queryKey = JSON.stringify(query);
-  // Rows on screen are stale while a read runs or a typed search waits out its 300 ms debounce.
-  const listBusy = pageLoading || search.trim() !== debouncedSearch;
+  const listBusy = isListBusy(pageLoading, search, debouncedSearch);
 
   // The page number belongs to one query: a new search, filter or sort starts again at page one.
   const [pageState, setPageState] = useState({ key: queryKey, page: 0 });
@@ -722,7 +721,7 @@ export default function Orders() {
                 {canBulkAction && orders.length > 0 && (
                   <button
                     onClick={handleSelectAll}
-                    disabled={selectingAll || listBusy}
+                    disabled={isListBusy(pageLoading, search, debouncedSearch, selectingAll)}
                     className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors disabled:opacity-50"
                   >
                     {selectAllLabel(selectingAll, everythingSelected, moreThanThisPage ? totals : null)}
@@ -793,6 +792,11 @@ function OrdersPager({ totals, page, rowsShown, busy, goToPage }: {
       )}
     </div>
   );
+}
+
+/** Rows on screen are stale while a read runs or a typed search waits out its 300 ms debounce; Select All also waits for its own read. */
+function isListBusy(pageLoading: boolean, search: string, debouncedSearch: string, selectingAll = false): boolean {
+  return pageLoading || selectingAll || search.trim() !== debouncedSearch;
 }
 
 /** State saved for one query (page, totals, "select all"), or null once the query has changed. */

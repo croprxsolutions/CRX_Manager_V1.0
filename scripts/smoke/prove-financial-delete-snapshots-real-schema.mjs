@@ -255,12 +255,27 @@ function seed() {
     INSERT INTO public.profiles (id, email, full_name, role, is_active) VALUES ('${SYSTEM_ACTOR}', 'system@example.invalid', '[PROVER] system', 'admin', false)
     ON CONFLICT (id) DO NOTHING;`);
   const customer = seedRow('customers', {});
+  const draft = seedRow('invoices', { customer_id: customer, status: 'draft', invoice_number: `PROVER-${randomUUID().slice(0, 8)}` });
+  const set = seedRow('allocation_sets', { customer_id: customer, entity_type: 'payment' });
+  // The invoice the payment set's allocation lines point at (kept: invoice_line_allocations -> invoices is NO ACTION).
+  const allocInvoice = seedRow('invoices', { customer_id: customer, status: 'draft', invoice_number: `PROVER-${randomUUID().slice(0, 8)}` });
+  // Child rows that ON DELETE CASCADE removes with their parent; their contents must survive in the audit row.
+  const item1 = seedRow('invoice_items', { invoice_id: draft, quantity: 2, unit_price_cents: 3025, extended_cents: 6050 });
+  const item2 = seedRow('invoice_items', { invoice_id: draft, quantity: 1, unit_price_cents: 3950, extended_cents: 3950 });
+  const children = {
+    item1, item2,
+    lineShare: seedRow('invoice_line_shares', { invoice_item_id: item1, split_mode: 'custom', base_price_source: 'manual', price_mode: 'default', split_micro_pct: 100000000 }),
+    invoiceShare: seedRow('invoice_shares', { invoice_id: draft, split_percentage: 100 }),
+    location: seedRow('field_app_locations', { invoice_id: draft }),
+    alloc1: seedRow('invoice_line_allocations', { allocation_set_id: set, invoice_id: allocInvoice, split_percentage: 60 }),
+    alloc2: seedRow('invoice_line_allocations', { allocation_set_id: set, invoice_id: allocInvoice, split_percentage: 40 }),
+    orderAlloc: seedRow('order_line_allocations', { allocation_set_id: set, split_percentage: 100 }),
+  };
+  children.locationShare = seedRow('field_app_location_shares', { location_id: children.location, split_pct: 100 });
   return {
-    customer,
-    draft: seedRow('invoices', { customer_id: customer, status: 'draft', invoice_number: `PROVER-${randomUUID().slice(0, 8)}` }),
+    customer, children, draft, set,
     draft2: seedRow('invoices', { customer_id: customer, status: 'draft', invoice_number: `PROVER-${randomUUID().slice(0, 8)}` }),
     posted: seedRow('invoices', { customer_id: customer, status: 'posted', posted_at: new Date().toISOString(), invoice_number: `PROVER-${randomUUID().slice(0, 8)}` }),
-    set: seedRow('allocation_sets', { customer_id: customer, entity_type: 'payment' }),
     splitSet: seedRow('allocation_sets', { customer_id: customer, entity_type: 'order' }),
     payment: seedRow('payments', { customer_id: customer, amount: 12.34 }),
   };
@@ -291,8 +306,16 @@ function main() {
   assert.equal(scalar('SELECT count(*) FROM public.financial_audit_log;'), totalBefore, 'applying wrote no audit rows');
   console.log('[prover] candidate applied once; a second apply refuses at the preflight');
 
-  // 1. postgres hard-deletes a draft invoice: one row, old_values is the whole erased row, system actor.
+  // 1. postgres hard-deletes a draft invoice: one row, old_values is the whole erased row, system actor,
+  //    and every row that cascaded away with it is kept in new_values.cascaded_rows.
   const draftRow = JSON.parse(rowJson('invoices', ids.draft));
+  const c = ids.children;
+  const kept = Object.fromEntries(Object.entries({
+    item1: 'invoice_items', item2: 'invoice_items', lineShare: 'invoice_line_shares', invoiceShare: 'invoice_shares',
+    location: 'field_app_locations', locationShare: 'field_app_location_shares',
+    alloc1: 'invoice_line_allocations', alloc2: 'invoice_line_allocations', orderAlloc: 'order_line_allocations',
+  }).map(([k, t]) => [k, JSON.parse(rowJson(t, c[k]))]));
+  const byId = (list, id) => list.find((x) => x.id === id);
   let r = run(`DELETE FROM public.invoices WHERE id = '${ids.draft}';`);
   assert.equal(r.status, 0, r.output);
   assert.equal(audits(ids.draft), 1);
@@ -302,7 +325,18 @@ function main() {
   assert.equal(a.new.hard_delete, true);
   assert.equal(a.new.admin_override_setting, false);
   assert.equal(a.new.allocation_entity_type, null);
-  console.log('[prover] postgres hard delete of a draft invoice -> one invoice_deleted row holding the full row');
+  const cr = a.new.cascaded_rows;
+  assert.equal(cr.invoice_items.length, 2, 'both invoice lines are kept');
+  const { invoice_line_shares: shares1, ...line1 } = byId(cr.invoice_items, c.item1);
+  assert.deepEqual(line1, kept.item1, 'line 1 is kept whole (product, quantity, price)');
+  assert.deepEqual(shares1, [kept.lineShare], 'its line share is kept');
+  const { invoice_line_shares: shares2, ...line2 } = byId(cr.invoice_items, c.item2);
+  assert.deepEqual([line2, shares2], [kept.item2, []]);
+  assert.deepEqual(cr.invoice_shares, [kept.invoiceShare]);
+  const { field_app_location_shares: locShares, ...loc } = cr.field_app_locations[0];
+  assert.deepEqual([cr.field_app_locations.length, loc, locShares], [1, kept.location, [kept.locationShare]]);
+  assert.equal(scalar(`SELECT count(*) FROM public.invoice_items WHERE invoice_id = '${ids.draft}';`), '0', 'the lines really cascaded away');
+  console.log('[prover] postgres hard delete of a draft invoice -> one invoice_deleted row holding the full row and its 2 lines, shares and field locations');
 
   // 2. A posted invoice: refused without the override (and no audit row), snapshotted with it.
   r = run(`DELETE FROM public.invoices WHERE id = '${ids.posted}';`);
@@ -328,10 +362,15 @@ function main() {
   assert.deepEqual([a.op, a.entity, a.actor], ['payment_deleted', 'allocation_set', ADMIN]);
   assert.deepEqual(a.old, setRow);
   assert.deepEqual([a.new.allocation_entity_type, a.new.db_role], ['payment', 'service_role']);
+  assert.deepEqual(a.new.cascaded_rows.invoice_line_allocations.sort((x, y) => x.id.localeCompare(y.id)),
+    [kept.alloc1, kept.alloc2].sort((x, y) => x.id.localeCompare(y.id)), 'both invoice allocation lines are kept whole');
+  assert.deepEqual(a.new.cascaded_rows.order_line_allocations, [kept.orderAlloc]);
+  assert.equal(scalar(`SELECT count(*) FROM public.invoice_line_allocations WHERE allocation_set_id = '${ids.set}';`), '0');
   a = audit(ids.payment);
   assert.deepEqual([a.op, a.entity, a.actor], ['payment_deleted', 'payment', ADMIN]);
   assert.deepEqual(a.old, payRow);
-  console.log('[prover] service_role hard deletes of a payment set and a legacy payment -> payment_deleted rows, actor = JWT subject');
+  assert.equal(a.new.cascaded_rows, null, 'a legacy payment has no cascaded children');
+  console.log('[prover] service_role hard deletes of a payment set (with its 3 allocation lines kept) and a legacy payment -> payment_deleted rows, actor = JWT subject');
 
   // 3b. A split-billing (non-payment) allocation set is labelled allocation_set_deleted, not payment_deleted.
   const splitRow = JSON.parse(rowJson('allocation_sets', ids.splitSet));
@@ -340,6 +379,7 @@ function main() {
   a = audit(ids.splitSet);
   assert.deepEqual([a.op, a.entity, a.new.allocation_entity_type], ['allocation_set_deleted', 'allocation_set', 'order']);
   assert.deepEqual(a.old, splitRow);
+  assert.deepEqual(a.new.cascaded_rows, { invoice_line_allocations: [], order_line_allocations: [] });
   console.log('[prover] a split-billing allocation set delete -> allocation_set_deleted with its kind recorded');
 
   // 3c. TRUNCATE (which fires no row trigger) is refused on all three tables, for postgres and service_role.

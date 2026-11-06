@@ -118,7 +118,7 @@ Mason's explicit OK.
 | `GOOGLE_VISION_API_KEY` | `process-blend-ticket`, `process-document` | OCR for blend tickets and uploaded documents. |
 | `RESEND_API_KEY` | `send-email` | Without it, each send is recorded as failed in `email_log` and returns an error. |
 | `FROM_EMAIL` | `send-email` | Optional sender address; the function falls back to a built-in `croprxsolutions.app` address. |
-| `SENTRY_DSN` | All eight (through `_shared/sentry.ts`) | Optional. Without it, errors are logged as `SENTRY_MISCONFIG` instead of being reported to Sentry. |
+| `SENTRY_DSN` | All eight (through `_shared/sentry.ts`) | Needed in production. Without it (or if malformed) each function logs a `[SENTRY_MISCONFIG]` error on every cold start and keeps working, but its errors are not reported to Sentry. |
 | `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | All eight (through `_shared/sentry.ts`) | Optional labels on Sentry events (environment defaults to `production`). |
 
 To set one (after approval): `npx supabase secrets set <NAME>=<value> --project-ref rhyzpcqhnizqbxphqdkr`.

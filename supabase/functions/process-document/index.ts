@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
-import { captureEdgeException } from "../_shared/sentry.ts";
+import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sentry.ts";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import { validateDocumentType, type DocumentType } from "./documentTypes.ts";
@@ -602,6 +602,8 @@ function approxDecodedBytes(b64: string): number {
   const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
   return Math.floor((b64.length * 3) / 4) - padding;
 }
+
+warnIfSentryMisconfigured("process-document");
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {

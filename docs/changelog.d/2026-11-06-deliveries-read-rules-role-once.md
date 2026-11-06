@@ -1,6 +1,6 @@
 ## 2026-11-06 — Deliveries read rules check the reader's role once per query
 
-- New migration `20261124100000_deliveries_read_rules_check_role_once.sql` (not applied yet; record in
+- New migration `20261129100000_deliveries_read_rules_check_role_once.sql` (not applied yet; record in
   `docs/reference/migrations.d/`). The rules that decide who can read deliveries and delivery items
   now look up the reader's role once per query instead of once per row. Who can read what does not
   change. At 60,000 deliveries a sales rep's Deliveries list was several times slower than an admin's

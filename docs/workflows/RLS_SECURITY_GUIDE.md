@@ -200,7 +200,7 @@ CREATE POLICY "del_select" ON public.deliveries
   );
 ```
 Wrap the role helpers in `(select ...)` so they run once per query, not once per row
-(migration `20261124100000`; at 60,000 deliveries the per-row form made a sales rep's list
+(migration `20261129100000`; at 60,000 deliveries the per-row form made a sales rep's list
 several times slower).
 Live carries no `is_driver()` conjunct: the ownership test alone decides it, so a driver reaches
 a delivery by being assigned to it rather than by holding the role. That is the same distinction

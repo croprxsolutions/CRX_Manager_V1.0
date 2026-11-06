@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a Bill Split sale bills one invoice per payer, to the cent
 -- ----------------------------------------------------------------------------
--- Migration 20261118130000_chem_sale_bill_split_invoices (billing plan M2).
+-- Migration 20261125110000_chem_sale_bill_split_invoices (billing plan M2).
 --   A  Card 60/40 on line 1, line 2's own shares 100% to the main customer: a delivery drafts two
 --      invoices in one group, base-1 and base-2, CS- numbers, each line adds up exactly
 --   B  A three-way split: the leftover cents go to the main customer
@@ -34,6 +34,7 @@
 --   Z  One payer's posted invoice can't be unposted alone (GROUP_UNPOST_REQUIRED); the group call unposts every payer
 --   AA A line bills in the order line's unit, so every payer can return it
 --   AB One line too small to show, worth no cents, doesn't stop the rest of the delivery billing
+--   AK The same tiny line on a restricted-use product refuses (the register reads invoice lines)
 --   AC A line too small to show but worth cents still refuses, so no billed money is dropped
 --   AD A payer's quantity is in whole hundredths, as a return holds it
 --   AE A payer draft's unit follows the split; re-saving a tote line as read still works
@@ -72,6 +73,7 @@ DECLARE
   v_versions jsonb;
   v_fails text := '';
   v_r jsonb;
+  v_rup boolean;
   v_rep uuid;
 BEGIN
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
@@ -702,6 +704,8 @@ BEGIN
   -- 0.00001 stays under half a cent up to about $500 a unit, whichever product the seed lists first.
   PERFORM pg_temp.smk_new_sale('ab' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  SELECT p.is_rup INTO v_rup FROM products p JOIN order_items oi ON oi.product_id = p.id WHERE oi.id = v_l1;
+  UPDATE products SET is_rup = false WHERE id = (SELECT product_id FROM order_items WHERE id = v_l1);
   PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
   v_r := complete_delivery(v_d, 'No proof — recorded by office', v_admin,
     (SELECT jsonb_object_agg(di.id::text, CASE WHEN di.order_item_id = v_l1 THEN 0.00001 ELSE 5 END) FROM delivery_items di WHERE di.delivery_id = v_d),
@@ -714,6 +718,22 @@ BEGIN
                  WHERE i.delivery_id = v_d AND ii.order_item_id = v_l1) THEN
     v_fails := v_fails || ' (AB) one tiny line stopped or changed the delivery''s billing: ' || v_r::text || ';';
   END IF;
+
+  -- AK: the same tiny line on a restricted-use product refuses, since the register reads invoice lines
+  -- (Mason, 2026-11-06). The delivery still completes and the office is told.
+  PERFORM pg_temp.smk_new_sale('ak' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  UPDATE products SET is_rup = true WHERE id = (SELECT product_id FROM order_items WHERE id = v_l1);
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+  v_r := complete_delivery(v_d, 'No proof — recorded by office', v_admin,
+    (SELECT jsonb_object_agg(di.id::text, CASE WHEN di.order_item_id = v_l1 THEN 0.00001 ELSE 5 END) FROM delivery_items di WHERE di.delivery_id = v_d),
+    NULL, NULL, 'smk-spl-ak-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
+  IF COALESCE((v_r->>'bill_split_failed')::boolean, false) IS NOT TRUE
+     OR (SELECT status FROM deliveries WHERE id = v_d) IS DISTINCT FROM 'completed'
+     OR EXISTS (SELECT 1 FROM invoices WHERE delivery_id = v_d) THEN
+    v_fails := v_fails || ' (AK) a tiny restricted-use line was left off the invoices: ' || v_r::text || ';';
+  END IF;
+  UPDATE products SET is_rup = v_rup WHERE id = (SELECT product_id FROM order_items WHERE id = v_l1);
 
   -- AC: a line too small for an invoice line but worth cents still refuses, so no billed money is dropped.
   PERFORM pg_temp.smk_new_sale('ac' || v_suffix);

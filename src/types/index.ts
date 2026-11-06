@@ -1091,6 +1091,8 @@ export interface OrderItem {
   /** Tier (1-3) in effect when the line was written; NULL = unknown (older lines). Stamped by a
    * trigger (20261027060000); never written by the app. Optional until the screens select it. */
   price_tier_at_sale?: 1 | 2 | 3 | null;
+  /** Vendor for this sale line (20261118110000); a trigger fills it from the product's preferred vendor. */
+  vendor?: string | null;
   actual_rate: number | null;
   rate_unit: string | null;
   acres: number | null;
@@ -2059,6 +2061,8 @@ export interface Invoice {
   // Metadata
   invoice_date: string;
   due_date: string | null;
+  // KI-14: true when due_date was typed by hand; false when it follows payment_terms.
+  due_date_is_custom: boolean;
   purchase_order_ref: string | null;
   header_notes: string | null;
   footer_notes: string | null;

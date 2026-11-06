@@ -158,6 +158,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. The bill split can't total more than 100%"],
   [/^ORDER_SHARES_ORDER_IMMUTABLE\b/,
    "Nothing was changed. A bill split row can't move to another order"],
+  [/^ORDER_ITEM_SHARES_LINE_MOVE\b/,
+   "Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order"],
   [/^ORDER_ITEM_SHARES_LINE_IMMUTABLE\b/,
    "Nothing was changed. A line share can't move to another line"],
   [/^BILL_SPLIT_NOTHING_TO_BILL\b/,

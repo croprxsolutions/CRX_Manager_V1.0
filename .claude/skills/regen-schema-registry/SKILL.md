@@ -118,7 +118,7 @@ Next step:
 
 ## Step 7: Run the Tests That Read the Registry
 
-A refresh after a live apply can break two checks that compare the repo with the registry. Run both before committing:
+A refresh after a live apply can break these four checks (the first three compare the repo with the registry; the type check catches a new column missing from the generated types). Run all four before committing:
 
 ```bash
 npx vitest run src/lib/rpcContracts.test.ts
@@ -128,8 +128,18 @@ npx vitest run src/lib/rpcContracts.test.ts
 npm run test:supplier-pricing-phase3c-packet
 ```
 
+```bash
+npx vitest run src/lib/costFields.test.ts
+```
+
+```bash
+npm run typecheck
+```
+
 - `rpcContracts.test.ts` failing on a newly applied migration: flip its `docs/reference/migrations.d/` record's first paragraph to APPLIED LIVE (naming the `.sql`), and add its timestamp to `MIGRATIONS_AWAITING_TYPE_REGENERATION` until types are regenerated.
 - `test:supplier-pricing-phase3c-packet` failing on a CHECK value list: update the matching allowlist in `scripts/supplier-pricing-phase3-private-artifacts.mjs` (e.g. `PRODUCT_FORM_ALLOWLIST`).
+- `costFields.test.ts` failing because a table gained a column: add it to that table's SAFE or COST column list in `src/lib/costFields.ts` (anything a non-admin may not see is COST).
+- `npm run typecheck` (the app project; a bare `npx tsc --noEmit` checks zero files) failing with `SelectQueryError` (column does not exist): add the new column to `src/types/supabase.ts` (Row, Insert, Update) and the matching interface in `src/types/index.ts`.
 - Also prune any `MUTATOR_INVENTORY_EXEMPT` entry the refresh made unnecessary.
 
 Commit the registry with these fixes; the registry being out of sync with the live DB makes every hook and subagent less reliable.

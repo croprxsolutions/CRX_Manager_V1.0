@@ -99,10 +99,12 @@ try {
   const unassigned = probe(USERS.admin, `${asUser('r := public.get_call_list_unassigned_accounts();')} v := r->>'total_count';`);
   assert.ok(Number(unassigned) >= CUSTOMERS, `the unassigned list must count every seeded customer, got ${unassigned}`);
 
-  // 2. Dispatch board: same 500 jobs, (job_date, id) DESC order, _total_count on every row.
+  // 2. Dispatch board: the newest 500 of the old body's full result (the old body broke date ties in no
+  // fixed order, so its own 500 can differ at the cut), (job_date, id) DESC order, _total_count on every row.
   const board = probe(USERS.admin, asUser(`
     SELECT jsonb_agg(x ORDER BY o) INTO r FROM ${BOARD('get_dispatch_board_jobs')} WITH ORDINALITY t(x, o);
-    SELECT jsonb_agg(x) INTO r2 FROM ${BOARD('zz_old_get_dispatch_board_jobs')} t(x);
+    SELECT jsonb_agg(x) INTO r2 FROM (SELECT x FROM ${BOARD('zz_all_get_dispatch_board_jobs')} t(x)
+      ORDER BY (x->>'job_date')::date DESC NULLS LAST, (x->>'id')::uuid DESC LIMIT 500) top;
     SELECT count(*) INTO n FROM ${BOARD('zz_all_get_dispatch_board_jobs')};`) + `
     v := concat_ws('|',
       jsonb_array_length(r), n,
@@ -117,9 +119,9 @@ try {
   assert.equal(shown, '500', `board: expected 500 rows shown, got ${shown}`);
   assert.equal(distinctTotals, '1', 'board: every row must carry the same _total_count');
   assert.equal(total, String(JOBS), `board: _total_count ${total}, expected ${JOBS}`);
-  assert.equal(sameJobs, 't', 'board: rows differ from the old body (apart from _total_count)');
+  assert.equal(sameJobs, 't', 'board: rows differ from the newest 500 of the old body full result (apart from _total_count)');
   assert.equal(ordered, 't', 'board: rows are not in (job_date, id) DESC order');
-  console.log(`[list-totals] get_dispatch_board_jobs: shows ${shown}, _total_count ${total}, same jobs as before, id tie-break order`);
+  console.log(`[list-totals] get_dispatch_board_jobs: shows ${shown}, _total_count ${total}, the newest 500 jobs, id tie-break order`);
 
   // 3. Role gates unchanged.
   for (const name of LISTS) {
@@ -129,6 +131,12 @@ try {
   const driverRows = probe(USERS.driver, `${asUser(`SELECT count(*) INTO n FROM ${BOARD('get_dispatch_board_jobs')};`)} v := n;`);
   assert.equal(driverRows, '0', 'board: a driver must see no job that is not theirs');
   console.log('[list-totals] driver refused by all five call lists; sees 0 board jobs');
+
+  // 3b. The live smoke chain passes here first (it must end in SMOKE_PASS_ROLLBACK).
+  const chain = readFileSync(path.join(ROOT, 'scripts', 'smoke', 'smoke-goal4-list-totals.sql'), 'utf8');
+  const smoked = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-1'], { input: chain, allowFailure: true });
+  assert.match(smoked.stderr, /SMOKE_PASS_ROLLBACK/, `smoke-goal4-list-totals.sql did not pass:\n${smoked.stderr}`);
+  console.log('[list-totals] smoke-goal4-list-totals.sql: PASS (rolled back)');
 
   // 4. A second apply is refused by the preflight and changes nothing.
   docker(['exec', '-i', NAME, 'sh', '-c', 'cat > /tmp/lt-candidate.sql'], { input: candidate });

@@ -17,6 +17,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { computeTotalDiluentGallons, formatGallons } from "./fieldAppDiluent.ts";
+import { dueDateFromTerms } from "../paymentTerms.ts";
 import { COMPANY_LEGAL_NAME, companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo, fitCompanyNameFont } from "./companyInfo.ts";
 import {
   ALT_ROW_BG,
@@ -464,7 +465,8 @@ export async function buildInvoicePdfDataFromRow(
   return {
     invoice_number: inv.invoice_number,
     invoice_date: inv.invoice_date,
-    due_date: pickDue || undefined,
+    // KI-14: before a due date is stored, print the one its terms give (what posting will stamp), not "On receipt".
+    due_date: pickDue || (inv.invoice_date ? dueDateFromTerms(inv.invoice_date, pickTerms || custRow?.payment_terms) : undefined),
     invoice_type: inv.invoice_type || 'field_application',
     status: inv.status || 'draft',
     customer_name: inv.customer_name,

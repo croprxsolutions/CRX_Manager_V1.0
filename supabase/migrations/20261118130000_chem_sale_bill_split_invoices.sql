@@ -10,8 +10,8 @@
 --     down and the main customer (the sale's customer) gets the rest, so each line bills exactly. If
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
 --     the rest with the main customer. Another payer's quantity rounds down to whole hundredths, as a return
---     holds it, so a payer can return a share in full. A share under 0.01 keeps four decimals and its cents, so
---     no money moves to the main customer. A share too small for any quantity gets no cents.
+--     holds it, so a payer can return a share in full. Each payer's cents are exactly its percentage rounded
+--     down, so a share under 0.01 bills its cents on 0.00 quantity (Mason, 2026-11-06: money exact).
 --   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
 --     invoice and in the month-end report (Mason, 2026-11-05, Option 1). Summed across payers it can top
 --     the line's cost by about a cent where a share splits a unit, and more where the unit cost itself has
@@ -387,10 +387,10 @@ $function$;
 
 -- One line's shares of p_cents and p_units (ten-thousandths): the line's own shares, else the card; any
 -- share left over belongs to the main customer. The taker (the main customer, else the largest share)
--- gets the rest after everyone else rounds down, so each line adds up exactly. A share too small for any
--- quantity gets no cents either, so no line bills money for nothing. Other payers' quantity is whole
--- hundredths (100 of p_units) where it can be, because return_items.quantity holds two decimals. The taker
--- comes first.
+-- gets the rest after everyone else rounds down, so each line adds up exactly. Each payer's cents are
+-- exactly their percentage, rounded down. Other payers' quantity is whole hundredths (100 of p_units),
+-- because return_items.quantity holds two decimals, so a share under 0.01 bills its cents on 0.00 (Mason,
+-- 2026-11-06: money exact; such a sliver is credited, not returned). The taker comes first.
 CREATE FUNCTION public._bill_split_line_shares(p_order_item_id uuid, p_cents bigint, p_units bigint)
 RETURNS TABLE (customer_id uuid, cents bigint, units bigint)
 LANGUAGE sql
@@ -417,9 +417,8 @@ AS $function$
     SELECT s.customer_id, sum(s.pct) AS pct FROM shares s GROUP BY s.customer_id HAVING sum(s.pct) > 0
   ), ranked AS (
     SELECT p.customer_id,
-           CASE WHEN floor(p_units * p.pct / 100) = 0 THEN 0 ELSE floor(p_cents * p.pct / 100)::bigint END AS floor_cents,
-           CASE WHEN floor(p_units * p.pct / 10000) > 0 THEN floor(p_units * p.pct / 10000)::bigint * 100
-                ELSE floor(p_units * p.pct / 100)::bigint END AS floor_units,
+           floor(p_cents * p.pct / 100)::bigint AS floor_cents,
+           floor(p_units * p.pct / 10000)::bigint * 100 AS floor_units,
            row_number() OVER (ORDER BY p.customer_id = line.main DESC, p.pct DESC, p.customer_id) AS rn
       FROM payers p, line
   )

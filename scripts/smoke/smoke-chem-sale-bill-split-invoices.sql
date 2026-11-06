@@ -20,7 +20,7 @@
 --      (BILL_SPLIT_LINES_LOCKED) and a charge still saves
 --   N  Cost: each payer's cost is the sum of its own lines (Option 1), a charge re-save keeps it, and a
 --      change to a product line's cost or description is refused (BILL_SPLIT_LINES_LOCKED)
---   O  A share too small for one unit of quantity gets no cents either
+--   O  A share too small for a hundredth of quantity still gets its exact cents
 --   P  A line share and a card row record when they changed
 --   Q  A price-later (rush) sale drafts nothing at delivery; once priced, Create Invoice drafts per payer
 --   R  One payer's draft can't be deleted or voided alone; the whole group can, and Create Invoice redrafts
@@ -41,7 +41,7 @@
 --   AG A payer's invoice takes its season from its date, as a plain delivery invoice does
 --   AH An inactive customer can't become a payer, on the card or on a line
 --   AI A line with its own shares can't move to another sale (ORDER_ITEM_SHARES_LINE_MOVE)
---   AJ A share under 0.01 of quantity keeps its four decimals and its cents
+--   AJ A share under 0.01 of quantity bills its exact cents on 0.00 quantity; every payer quantity is returnable
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -448,14 +448,14 @@ BEGIN
     IF SQLERRM NOT LIKE 'BILL_SPLIT_LINES_LOCKED:%' THEN v_fails := v_fails || ' (N) wrong refusal on a description change: ' || SQLERRM || ';'; END IF;
   END;
 
-  -- O and P: a 0.001% share of one $1,000 unit rounds to no quantity, so it gets no cents.
+  -- O and P: a 0.001% share of one $1,000 unit rounds to no quantity but keeps its exact cent (Mason, 2026-11-06).
   PERFORM pg_temp.smk_new_sale('o' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   INSERT INTO order_item_shares (order_item_id, customer_id, split_percentage, updated_at) VALUES (v_l1, v_payer2, 0.001, '2000-01-01');
-  IF EXISTS (SELECT 1 FROM _bill_split_line_shares(v_l1, 100000, 10000) x WHERE x.customer_id = v_payer2 AND (x.units <> 0 OR x.cents <> 0))
+  IF EXISTS (SELECT 1 FROM _bill_split_line_shares(v_l1, 100000, 10000) x WHERE x.customer_id = v_payer2 AND (x.units <> 0 OR x.cents <> 1))
      OR (SELECT sum(x.cents) FROM _bill_split_line_shares(v_l1, 100000, 10000) x) <> 100000
      OR (SELECT sum(x.units) FROM _bill_split_line_shares(v_l1, 100000, 10000) x) <> 10000 THEN
-    v_fails := v_fails || ' (O) a share with no quantity got cents, or the line stopped adding up;';
+    v_fails := v_fails || ' (O) a share with no quantity lost its exact cents, or the line stopped adding up;';
   END IF;
   UPDATE order_item_shares SET split_percentage = 1 WHERE order_item_id = v_l1;
   IF (SELECT updated_at FROM order_item_shares WHERE order_item_id = v_l1) < '2020-01-01' THEN
@@ -738,7 +738,8 @@ BEGIN
     v_fails := v_fails || ' (AD) a payer''s quantity is not in whole hundredths, or the line no longer adds up;';
   END IF;
 
-  -- AJ: a share under 0.01 of quantity keeps its four decimals and its cents, so no money moves to the main customer.
+  -- AJ: a share under 0.01 of quantity bills its exact cents on 0.00 quantity (Mason, 2026-11-06: money exact),
+  -- so no money moves to the main customer and no payer is billed a quantity a return can't hold.
   PERFORM pg_temp.smk_new_sale('aj' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_payer2, 99);
@@ -746,8 +747,12 @@ BEGIN
     (SELECT jsonb_object_agg(di.id::text, 0.01) FROM delivery_items di WHERE di.delivery_id = v_d),
     NULL, NULL, 'smk-spl-aj-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
   IF NOT EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
-                  WHERE i.delivery_id = v_d AND i.customer_id = v_payer2 AND ii.order_item_id = v_l1 AND ii.quantity = 0.0099 AND ii.extended_cents > 0) THEN
-    v_fails := v_fails || ' (AJ) a payer''s small share went to the main customer;';
+                  WHERE i.delivery_id = v_d AND i.customer_id = v_payer2 AND ii.order_item_id = v_l1 AND ii.quantity = 0
+                    AND ii.extended_cents = floor((SELECT sum(x.extended_cents) FROM invoice_items x JOIN invoices xi ON xi.id = x.invoice_id WHERE xi.delivery_id = v_d AND x.order_item_id = v_l1) * 99 / 100.0)
+                    AND ii.extended_cents > 0)
+     OR EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                 WHERE i.delivery_id = v_d AND ii.quantity <> round(ii.quantity, 2)) THEN
+    v_fails := v_fails || ' (AJ) a payer''s small share lost its cents or has a quantity a return can''t hold;';
   END IF;
 
   -- AE: a payer draft's unit and tote follow the split too, and re-saving a tote line as read still works.

@@ -5,7 +5,8 @@
 --   A  Card 60/40 on line 1, line 2's own shares 100% to the main customer: a delivery drafts two
 --      invoices in one group, base-1 and base-2, CS- numbers, each line adds up exactly
 --   B  A three-way split: the leftover cents go to the main customer
---   C  The card and the line shares refuse changes after the first delivery (BILL_SPLIT_FROZEN)
+--   C  The card and the line shares refuse changes after the first delivery (BILL_SPLIT_FROZEN), and so does
+--      deleting a line that has its own shares
 --   C2 A frozen share can't leave its sale by moving to an open one; a card can't total over 100%
 --   D  A direct write to a payer's line is refused, and save_invoice can't bill past the delivery
 --   E  Re-saving a payer's draft keeps its cents; a freight charge goes on one payer's draft
@@ -74,6 +75,7 @@ DECLARE
   v_fails text := '';
   v_r jsonb;
   v_rup boolean;
+  v_err text;
   v_rep uuid;
 BEGIN
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
@@ -162,6 +164,12 @@ BEGIN
     IF FOUND THEN v_fails := v_fails || ' (C) a line share changed after delivery;'; END IF;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'BILL_SPLIT_FROZEN:%' THEN v_fails := v_fails || ' (C) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+  BEGIN
+    DELETE FROM order_items WHERE id = v_l2;
+    IF FOUND THEN v_fails := v_fails || ' (C) a line with its own shares was deleted after delivery;'; END IF;
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_FROZEN:%' THEN v_fails := v_fails || ' (C) wrong refusal on a line delete: ' || SQLERRM || ';'; END IF;
   END;
 
   PERFORM pg_temp.smk_new_sale('c' || v_suffix);
@@ -487,7 +495,7 @@ BEGIN
     PERFORM void_invoice(v_inv, 'Rolled-back smoke; bill split', 'smk-spl-r2-' || v_suffix);
     v_fails := v_fails || ' (R) one payer''s draft was voided alone;';
   EXCEPTION WHEN OTHERS THEN
-    NULL;
+    IF SQLERRM NOT LIKE 'SPLIT_INVOICE_GROUP_VOID_REQUIRED:%' THEN v_fails := v_fails || ' (R) wrong refusal on a void: ' || SQLERRM || ';'; END IF;
   END;
   BEGIN
     PERFORM delete_invoices((SELECT array_agg(id) FROM invoices WHERE delivery_id = v_d), v_admin, 'smk-spl-r3-' || v_suffix);
@@ -553,10 +561,17 @@ BEGIN
   PERFORM pg_temp.smk_new_sale('u' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+  v_err := NULL;
   BEGIN
     PERFORM complete_delivery(v_d, 'No proof — recorded by office', v_admin,
       (SELECT jsonb_object_agg(di.id::text, 0) FROM delivery_items di WHERE di.delivery_id = v_d),
       NULL, NULL, 'smk-spl-u-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+  END;
+  IF v_err IS NOT NULL THEN
+    v_fails := v_fails || ' (U) a completion with no quantity was refused: ' || v_err || ';';
+  ELSE
     IF EXISTS (SELECT 1 FROM activity_feed WHERE event_type = 'split_invoices_auto_created' AND related_entity_id = v_o) THEN
       v_fails := v_fails || ' (U) a record says invoices were drafted when none were;';
     END IF;
@@ -568,9 +583,7 @@ BEGIN
         IF SQLERRM NOT LIKE 'BILL_SPLIT_NOTHING_TO_BILL:%' THEN v_fails := v_fails || ' (U) wrong refusal: ' || SQLERRM || ';'; END IF;
       END;
     END IF;
-  EXCEPTION WHEN OTHERS THEN
-    NULL; -- A completion with no quantity is refused outright: nothing can reach Create Invoice.
-  END;
+  END IF;
 
   -- W: two deliveries under one frozen card.
   PERFORM pg_temp.smk_new_sale('w' || v_suffix);

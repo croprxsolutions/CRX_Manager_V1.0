@@ -334,6 +334,7 @@ CREATE TRIGGER trg_guard_order_item_shares
   FOR EACH ROW EXECUTE FUNCTION public.guard_order_item_shares();
 
 -- A line with its own shares can't move to another sale: the override would bill the other sale's payers.
+-- Deleting it is checked here, on its sale: the cascade to its shares runs after the line is gone.
 CREATE FUNCTION public.guard_order_item_bill_split_move()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -341,6 +342,12 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT 1 FROM order_item_shares WHERE order_item_id = OLD.id) THEN
+      PERFORM public._refuse_bill_split_change(OLD.order_id);
+    END IF;
+    RETURN OLD;
+  END IF;
   IF NEW.order_id IS DISTINCT FROM OLD.order_id
      AND EXISTS (SELECT 1 FROM order_item_shares WHERE order_item_id = OLD.id) THEN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split; remove its shares before moving it to another order'
@@ -351,7 +358,7 @@ END;
 $function$;
 
 CREATE TRIGGER trg_order_items_bill_split_move
-  BEFORE UPDATE OF order_id ON public.order_items
+  BEFORE UPDATE OF order_id OR DELETE ON public.order_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_order_item_bill_split_move();
 
 -- True when a sale bills someone other than its customer. Field/acre splits win over a card.
@@ -1755,14 +1762,15 @@ BEGIN
   IF p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match the authenticated user';
   END IF;
-  IF EXISTS (SELECT 1 FROM invoices WHERE id = p_invoice_id AND invoice_group_id IS NOT NULL) THEN
-    RAISE EXCEPTION 'GROUP_UNPOST_REQUIRED';
-  END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor, 'invoice_id', p_invoice_id));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'unpost_invoice', v_actor, v_fingerprint);
   IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
+  END IF;
+  -- A retry of an unpost saved before this migration replays; only a new request is refused.
+  IF v_replay IS NULL AND EXISTS (SELECT 1 FROM invoices WHERE id = p_invoice_id AND invoice_group_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'GROUP_UNPOST_REQUIRED';
   END IF;
   v_result := public._unpost_invoice_replay_impl_20261015(p_invoice_id, p_performed_by, p_idempotency_key);
   IF v_replay IS NULL THEN

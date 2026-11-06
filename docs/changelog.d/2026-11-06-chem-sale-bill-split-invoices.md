@@ -24,3 +24,5 @@ A posted split group now unposts together: `unpost_invoice` refuses one member (
 Another payer's quantity is in whole hundredths, so a payer can return a share in full. Create Invoice works on a Bill Split sale after a field allocation is removed from a part delivery. A payer's invoice takes its season from its date. Line shares can't be written on a soft-deleted order. An inactive customer can't be added to a bill split. A draft holding a share under 0.01 of a unit can't be edited: it posts as drafted, or the group is voided.
 
 A restricted-use line too small to show refuses the split instead of being left off, so the restricted-use register never misses it (Mason, 2026-11-06).
+
+An order line with its own payer shares can't be deleted once the sale is frozen, and a retried unpost from before this change gets its saved answer.

@@ -53,7 +53,7 @@
 --   the main customer until M15.
 --   Per-line rounding is accepted (Mason, 2026-11-06, "Yes, accept it"): each line splits on its own, so up
 --   to one cent per line goes to the main customer instead of another payer; billed totals stay exact.
---   Per-payer cost is Option 1 above (cost can top the line's cost by about a cent): accepted, not a defect.
+--   Per-payer cost follows Option 1 above (Mason, 2026-11-05).
 --
 -- SCREENS (the next PR; this one lands the database first, as planned): the completion screens show
 --   bill_split_failed and every drafted invoice, Create Invoice is offered for a split backfill while

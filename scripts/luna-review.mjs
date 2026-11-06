@@ -353,7 +353,7 @@ export function nextStepHint(text) {
 
 // A round on one commit or on uncommitted work never clears the change (Mason, 2026-11-06).
 export function scopeHint(label) {
-  if (String(label).startsWith("branch against")) return null;
+  if (String(label).startsWith("branch against origin/main ")) return null;
   return `Scope: this round read only ${label}. The round that clears the change must be the default `
     + "whole-branch round on the committed head you will push (codex-review Step 3A).";
 }

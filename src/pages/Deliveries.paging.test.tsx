@@ -32,6 +32,8 @@ const H = vi.hoisted(() => ({
   // While set, get_deliveries_page answers only once this settles, so a test can look at the screen mid-read.
   holdPageCalls: null as Promise<void> | null,
   failTable: null as string | null,
+  // While set, reads of delivery_items answer only once this settles (the stock check stays pending).
+  holdStockCheck: null as Promise<void> | null,
   // Every table the screen reads, in order (the stock check reads inventory).
   tableReads: [] as string[],
   pageCalls: [] as Array<Record<string, unknown>>,
@@ -58,7 +60,7 @@ function serverQuery(table: string): Record<string, unknown> {
     return { data: rows.slice(from, to + 1), error: null, count: rows.length };
   };
   b.then = (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
-    Promise.resolve().then(settle).then(onFulfilled, onRejected);
+    (table === 'delivery_items' && H.holdStockCheck ? H.holdStockCheck : Promise.resolve()).then(settle).then(onFulfilled, onRejected);
   return b;
 }
 
@@ -157,6 +159,7 @@ beforeEach(() => {
   H.swapBehindReadAtCall = null;
   H.holdPageCalls = null;
   H.failTable = null;
+  H.holdStockCheck = null;
   H.tableReads = [];
   H.pageCalls = [];
   H.deliveries = Array.from({ length: TOTAL }, (_, i) => ({
@@ -278,6 +281,17 @@ describe('Deliveries list pages in the database', () => {
     await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
     expect(screen.queryByRole('button', { name: /Cancel 1 Selected/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Export CSV/ })).toBeEnabled();
+  });
+
+  it('says the stock check is still running, so no badge is not read as enough stock before it finishes', async () => {
+    let release!: () => void;
+    H.holdStockCheck = new Promise<void>((resolve) => { release = resolve; });
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    expect(screen.getByText(/Checking stock for shortages/)).toHaveAttribute('role', 'status');
+
+    await act(async () => { release(); });
+    await waitFor(() => expect(screen.queryByText(/Checking stock for shortages/)).not.toBeInTheDocument());
   });
 
   it('checks stock again on a page flip, so a delivery added elsewhere gets its shortage warning', async () => {

@@ -361,6 +361,8 @@ export default function Deliveries() {
   const [shortageDeliveryIds, setShortageDeliveryIds] = useState<Set<string>>(new Set());
   // The last stock check failed: no badges then means "not checked", not "enough stock".
   const [shortageCheckFailed, setShortageCheckFailed] = useState(false);
+  // True until a stock check finishes: until then, no badge does not yet mean enough stock.
+  const [shortageChecking, setShortageChecking] = useState(true);
 
   /* Driver-specific: unassigned deliveries they can claim */
   const [unassigned, setUnassigned] = useState<DeliveryRow[]>([]);
@@ -549,6 +551,7 @@ export default function Deliveries() {
   const shortageSeq = useRef(0);
   const loadShortages = useCallback(async () => {
     const seq = ++shortageSeq.current;
+    setShortageChecking(true);
     try {
       const { data: diData, error: diError } = await fetchAllRows((from, to) => pageWithList(supabase
         .from('delivery_items')
@@ -590,6 +593,8 @@ export default function Deliveries() {
       toast('error', 'Stock shortage warnings could not be checked. Reload to try again.');
       setShortageDeliveryIds(new Set());
       setShortageCheckFailed(true);
+    } finally {
+      if (seq === shortageSeq.current) setShortageChecking(false);
     }
   }, [toast]);
 
@@ -1375,6 +1380,9 @@ export default function Deliveries() {
         <div className="space-y-4 p-4 sm:p-6">
           {jumpSections.length > 1 && <SectionJumpBar sections={jumpSections} ariaLabel="Jump to deliveries" />}
 
+          {shortageChecking && !shortageCheckFailed && (
+            <p role="status" className="rounded-xl border border-gray-200 bg-cream px-4 py-3 text-sm text-secondary">Checking stock for shortages. Until this finishes, a missing warning does not mean there is enough stock.</p>
+          )}
           {shortageCheckFailed && (
             <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               Stock shortage warnings could not be checked, so a missing warning does not mean there is enough stock. Reload to try again.
@@ -1831,6 +1839,9 @@ export default function Deliveries() {
         })}
       </div>
 
+      {shortageChecking && !shortageCheckFailed && (
+        <div role="status" className="rounded-lg border border-gray-200 bg-cream px-4 py-3 text-sm text-secondary">Checking stock for shortages. Until this finishes, a missing warning does not mean there is enough stock.</div>
+      )}
       {shortageCheckFailed && (
         <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Stock shortage warnings could not be checked, so a missing warning does not mean there is enough stock. Reload to try again.

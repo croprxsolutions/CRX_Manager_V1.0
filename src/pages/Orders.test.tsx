@@ -39,13 +39,16 @@ vi.mock('../components/ui/PageHeader', () => ({
 }));
 // The table shows each row's tick box (the first column) and the filters, so selection can be driven.
 vi.mock('../components/ui/DataTable', () => ({
-  default: ({ data, columns, filters, loadError }: {
+  default: ({ data, columns, filters, loadError, searchValue, onSearchChange }: {
     data: Array<{ id: string; order_number: string }>;
+    searchValue?: string;
+    onSearchChange?: (v: string) => void;
     columns: Array<{ key: string; render?: (row: unknown) => ReactNode }>;
     filters?: ReactNode;
     loadError?: boolean;
   }) => (
     <div>
+      <input aria-label="Search orders or products…" value={searchValue ?? ''} onChange={(e) => onSearchChange?.(e.target.value)} />
       {filters}
       {loadError ? <span>could not be loaded</span> : <span>{`${data.length} rows shown`}</span>}
       {data.map((row) => (
@@ -62,7 +65,9 @@ vi.mock('../components/ui/BulkDeleteConfirmModal', () => ({
     ? <button onClick={onConfirm}>Confirm order delete</button>
     : null,
 }));
-vi.mock('../components/orders/BulkOrderImport', () => ({ default: () => null }));
+vi.mock('../components/orders/BulkOrderImport', () => ({
+  default: ({ onSuccess }: { onSuccess: () => void }) => <button onClick={onSuccess}>Finish import</button>,
+}));
 vi.mock('../components/customers/CustomerDrawer', () => ({ default: () => null }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 
@@ -206,6 +211,32 @@ describe('Orders list pages through the database', () => {
     await waitFor(() => expect(screen.queryByText(/Showing/)).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it('a refresh that fails drops "Select All": no bulk action is offered over rows nobody can see', async () => {
+    serveOrders(Array.from({ length: 1500 }, (_, i) => order(i, 'cancelled')));
+    renderPage();
+    await screen.findByText('50 rows shown');
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 1,500' }));
+    expect(await screen.findByText('1500 selected')).toBeInTheDocument();
+
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'statement timeout' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
+
+    expect(await screen.findByText('could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+
+  it('typing a search drops the selection at once, before the search runs', async () => {
+    serveOrders(Array.from({ length: 30 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–30 of 30 orders · $300.00 total');
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    await screen.findByText('1 selected');
+
+    fireEvent.change(screen.getByLabelText('Search orders or products…'), { target: { value: 'ORD-2' } });
+    expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
   });
 
   it('Deselect while a "Select All" read is still running wins: the late read selects nothing', async () => {

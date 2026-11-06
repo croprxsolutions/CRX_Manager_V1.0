@@ -99,6 +99,8 @@ export default function Orders() {
   // A read can finish after a newer one started (a new page, a refresh after a
   // bulk action); only the latest request may set the list, toasts or loading.
   const fetchSeq = useRef(0);
+  // Bumped by every deselect, query change and failed read: a "select all" read that finishes later is dropped.
+  const selectAllSeq = useRef(0);
   const fetchOrders = useCallback(async () => {
     const seq = ++fetchSeq.current;
     setPageLoading(true);
@@ -112,6 +114,9 @@ export default function Orders() {
       setOrders([]);
       setTotals(null);
       setLoadFailed(true);
+      // No bulk action may act on "every matching order" while the list cannot be read.
+      selectAllSeq.current += 1;
+      setAllMatchingState(null);
     } else if (data.rows.length === 0 && data.total_count > 0 && page > 0) {
       // Orders were removed since this page was chosen: show the last page that still has rows.
       setPageState({ key: queryKey, page: Math.floor((data.total_count - 1) / ORDERS_PAGE_SIZE) });
@@ -138,11 +143,10 @@ export default function Orders() {
   useEffect(() => {
     clearSelection();
   }, [queryKey, page, clearSelection]);
-  // Bumped by every deselect and query change: a "select all" read that finishes later is dropped.
-  const selectAllSeq = useRef(0);
   useEffect(() => {
     selectAllSeq.current += 1;
     setAllMatchingState(null);
+    setSelectingAll(false);
   }, [queryKey]);
 
   // The rows the bulk actions act on: every matching order after "select all", else the ticked rows.
@@ -168,6 +172,11 @@ export default function Orders() {
     setAllMatchingState(null);
     clearSelection();
   }, [clearSelection]);
+
+  // Typing a search drops the selection at once, not 300 ms later when the query catches up.
+  useEffect(() => {
+    clearBulkSelection();
+  }, [search, clearBulkSelection]);
 
   const checkboxCol = useMemo(
     () => createCheckboxColumn<OrderWithFulfillment>(allMatchingIds ?? selected, toggleRow, (o) => o.id),

@@ -1293,7 +1293,11 @@ export default function ProductDetail() {
           </p>
           {addSizeTo && <p className="mt-1">Category, use timing, EPA number and rates come from the parent.</p>}
           <p className="mt-1">Copied: category, vendor, manufacturer, product form and inventory unit.</p>
-          <p className="mt-1">Not copied, enter them for this product: SKU, container size, EPA number and label details (RUP, signal word, REI, PHI), rates, use timings, notes, brands, cost and prices.</p>
+          <p className="mt-1">
+            {addSizeTo
+              ? 'Not copied, enter them for this size: SKU, container size, label details (RUP, signal word, REI, PHI), notes, brands, cost and prices.'
+              : 'Not copied, enter them for this product: SKU, container size, EPA number and label details (RUP, signal word, REI, PHI), rates, use timings, notes, brands, cost and prices.'}
+          </p>
         </div>
       )}
 

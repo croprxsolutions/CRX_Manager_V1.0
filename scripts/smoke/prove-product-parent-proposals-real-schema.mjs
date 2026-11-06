@@ -698,8 +698,20 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $f$ SELECT ${on}; $f$;`
   const chain = docker([...psqlArgs(), '-f', '-'], { input: lf(path.join(ROOT, 'scripts/smoke/smoke-product_parent_proposals.sql')), allowFailure: true });
   assert.match(`${chain.stdout}\n${chain.stderr}`, /SMOKE_PASS_ROLLBACK/, `${chain.stdout}\n${chain.stderr}`);
   assert.equal(scalar('SELECT public._product_parent_grouping_open();'), 'f', 'the smoke chain left grouping on');
+  // The brand chain still runs when every active size is grouped (it invents an ungrouped one): every
+  // ungrouped size is made inactive in the same transaction, which the chain's final raise rolls back.
+  const activeBefore = scalar('SELECT count(*) FROM public.products WHERE is_active;');
+  const brandChain = docker([...psqlArgs('supabase_admin'), '-f', '-'], { allowFailure: true, input: `BEGIN;
+SET LOCAL session_replication_role = replica;
+UPDATE public.products p SET is_active = false WHERE p.is_active
+   AND NOT EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = p.id);
+SET LOCAL session_replication_role = origin;
+${lf(path.join(ROOT, 'scripts/smoke/smoke-upsert-product-brand.sql'))}
+ROLLBACK;` });
+  assert.match(`${brandChain.stdout}\n${brandChain.stderr}`, /SMOKE_PASS_ROLLBACK/, `${brandChain.stdout}\n${brandChain.stderr}`);
+  assert.equal(scalar('SELECT count(*) FROM public.products WHERE is_active;'), activeBefore);
   setSwitch(true);
-  console.log('[case] live smoke chain: smoke-product_parent_proposals.sql passes on the post-apply schema');
+  console.log('[case] live smoke chain: smoke-product_parent_proposals.sql passes on the post-apply schema, and the brand chain passes with every active size grouped');
   // Cost-exposure keys after the apply, for the allowlist re-key (ship.md step 5): printed, not asserted.
   const costRows = docker([...psqlArgs(), '-A', '-t', '-f', '-'], { input: lf(path.join(ROOT, 'scripts/db-invariant-sweeps/predicates/cost-exposure-review.sql')) })
     .stdout.split(/\r?\n/).filter((l) => /parent|brand/i.test(l));

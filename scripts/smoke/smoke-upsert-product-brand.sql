@@ -38,6 +38,14 @@ BEGIN
     SELECT p.id INTO v_product FROM public.products p WHERE p.is_active
        AND NOT EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = p.id)
      ORDER BY p.created_at LIMIT 1;
+    -- Every active size grouped: an invented ungrouped one, rolled back with the rest.
+    IF v_product IS NULL THEN
+      v_product := gen_random_uuid();
+      INSERT INTO public.products (id, product_name, sku, category, product_form, inventory_unit, is_active)
+      SELECT v_product, '[SMOKE] Brand Size ' || v_suffix, 'SMOKE-BR-' || v_suffix, c.name, 'liquid', 'Gal', true
+        FROM public.product_categories c WHERE c.is_active ORDER BY c.name LIMIT 1;
+      IF NOT FOUND THEN v_product := NULL; END IF;
+    END IF;
   END IF;
   IF v_admin IS NULL OR v_wrong IS NULL OR v_product IS NULL THEN
     RAISE EXCEPTION 'SMOKE_SETUP: need an active admin, an active non-admin and an active product';

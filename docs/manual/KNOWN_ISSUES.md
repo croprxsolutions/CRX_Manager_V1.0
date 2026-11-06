@@ -572,7 +572,8 @@ its reservation is left as it was. Live 2026-11-04: 4 cancelled orders, none wit
 delivered quantity. Proof: `scripts/smoke/prove-void-delivery-order-status-guards-real-schema.mjs`.
 - **Grant item (Mason 2026-11-05).** Signed-in admins held a direct UPDATE grant on `orders.status`, so they
   could move an order between allowed statuses with no delivery and no stock movement.
-  `20261116100000_permission_tightening.sql` revokes it (NOT YET APPLIED); the order screen's unreachable direct
+  `20261116100000_permission_tightening.sql` revokes it, and the matching INSERT grant so an order cannot be created
+  already fulfilled (NOT YET APPLIED); the order screen's unreachable direct
   status write is removed.
 
 ### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice

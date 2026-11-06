@@ -3,7 +3,7 @@
 - New migration `20261116100000_permission_tightening.sql` (not yet applied; record in
   `docs/reference/migrations.d/`). Mason's decisions of 5 Nov, about 10:30 PM Central.
 - KI-101 grant item: signed-in users (admins included) can no longer set an order's status with a direct
-  database update. Delivery completion, cancel, void and pricing still set it through their server functions.
+  database update, nor create an order with a status already set. Delivery completion, cancel, void and pricing still set it through their server functions.
   The order page's direct status write, which no button could reach (the page offers only Cancel, which uses
   `cancel_order`), is removed.
 - KI-07: signed-in and anonymous users lose TRUNCATE and TRIGGER on `profiles`. The PostGIS `search_path`

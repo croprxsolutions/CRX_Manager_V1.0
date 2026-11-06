@@ -75,7 +75,8 @@ BEGIN
   IF EXISTS (SELECT 1
                FROM pg_policies
               WHERE schemaname = 'storage' AND tablename = 'objects' AND permissive = 'PERMISSIVE'
-                AND ((qual IS NULL AND with_check IS NULL)
+                AND ((cmd <> 'INSERT' AND qual IS NULL)
+                     OR (cmd = 'INSERT' AND with_check IS NULL)
                      OR qual !~ '^(\(bucket_id = ''[a-z0-9_-]+''::text\)|\(\(bucket_id = ''[a-z0-9_-]+''::text\) AND .*\))$'
                      OR with_check !~ '^(\(bucket_id = ''[a-z0-9_-]+''::text\)|\(\(bucket_id = ''[a-z0-9_-]+''::text\) AND .*\))$')) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a permissive storage.objects policy is not limited to one bucket';

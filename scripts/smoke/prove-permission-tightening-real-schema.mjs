@@ -64,7 +64,7 @@ function overlayPolicy(name) {
   const end = overlay.indexOf(';\n', start);
   return overlay.slice(start, end + 1);
 }
-const ROLLBACK = `GRANT UPDATE (status) ON public.orders TO authenticated;
+const ROLLBACK = `GRANT UPDATE (status), INSERT (status) ON public.orders TO authenticated;
 GRANT TRUNCATE, TRIGGER ON public.profiles TO authenticated;
 DROP POLICY delivery_signatures_scoped_select ON storage.objects;
 ${POLICIES.map(overlayPolicy).join('\n')}`;
@@ -127,6 +127,9 @@ function permissionProbes() {
   return {
     directStatus: attempt(USERS.admin, asUser(`UPDATE public.orders SET status = 'fulfilled' WHERE id = '${O.direct}'; GET DIAGNOSTICS n = ROW_COUNT;`) + ` v := n::text || ' ' || ${status('direct')};`),
     directNotes: attempt(USERS.admin, asUser(`UPDATE public.orders SET notes = '[PERM] note', is_planned = true WHERE id = '${O.direct}'; GET DIAGNOSTICS n = ROW_COUNT;`) + ' v := n::text;'),
+    // An admin creating an order that is already fulfilled, with no delivery (Sol HIGH, 2026-11-05).
+    directInsertFulfilled: attempt(USERS.admin, asUser(`INSERT INTO public.orders (id, order_number, customer_id, order_date, status, booking_draw, salesman_id)
+      VALUES ('${X('d7')}', 'PERM-INS', '${CUSTOMER}', current_date, 'fulfilled', false, '${USERS.admin}');`) + ` v := (SELECT status FROM public.orders WHERE id = '${X('d7')}');`),
     profilesTruncTrig: scalar(`SELECT has_table_privilege('authenticated', 'public.profiles', 'TRUNCATE')::text || has_table_privilege('authenticated', 'public.profiles', 'TRIGGER')::text
       || has_table_privilege('anon', 'public.profiles', 'TRUNCATE')::text || has_table_privilege('anon', 'public.profiles', 'TRIGGER')::text;`),
     oldInsert: attempt(USERS.admin, asUser(`INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-signatures', '${oldPath(OLD.none)}', '${USERS.admin}', '{"size": 2400, "mimetype": "image/png"}');`) + " v := 'inserted';"),
@@ -181,6 +184,7 @@ try {
   const before = permissionProbes();
   console.log('[perm] BEFORE', JSON.stringify(before));
   assert.equal(before.directStatus, 'ok|1 fulfilled', 'before: an admin could set order status directly');
+  assert.equal(before.directInsertFulfilled, 'ok|fulfilled', 'before: an admin could create an order already fulfilled');
   assert.equal(before.profilesTruncTrig, 'truetruefalsefalse');
   assert.equal(before.oldInsert, 'ok|inserted', 'before: an admin could write an old-path signature on a completed delivery');
   assert.equal(before.oldReplace, 'ok|1');
@@ -193,7 +197,9 @@ try {
   // (The second names the bucket, so the policy-set check refuses it first; either refusal is enough.)
   for (const [broad, why] of [["FOR SELECT TO authenticated USING (true)", /not limited to one bucket/],
     ["FOR SELECT TO authenticated USING (bucket_id = 'delivery-signatures' OR true)", /policy set is not as intended|not limited to one bucket/],
-    ["FOR UPDATE TO authenticated USING ((bucket_id = 'job-attachments') OR true)", /not limited to one bucket/]]) {
+    ["FOR UPDATE TO authenticated USING ((bucket_id = 'job-attachments') OR true)", /not limited to one bucket/],
+    // FOR ALL with only WITH CHECK: no USING clause to inspect (Sol MED, 2026-11-05).
+    ["FOR ALL TO authenticated WITH CHECK (bucket_id = 'job-attachments')", /not limited to one bucket/]]) {
     psql(`CREATE POLICY zz_broad ON storage.objects ${broad};`);
     const refused = applyCandidate();
     psql('DROP POLICY zz_broad ON storage.objects;');
@@ -201,7 +207,7 @@ try {
     assert.match(refused.stderr, why);
   }
   assert.equal(policyMd5(), LIVE_MD5, 'a refused apply changes nothing');
-  console.log('[perm] a bucket-agnostic storage rule makes the apply refuse (all three shapes)');
+  console.log('[perm] a bucket-agnostic storage rule makes the apply refuse (all four shapes)');
 
   const first = applyCandidate();
   assert.equal(first.status, 0, first.stderr);
@@ -214,6 +220,7 @@ try {
   console.log('[perm] AFTER ', JSON.stringify(after));
   assert.match(after.directStatus, /^42501\|permission denied for table orders/, 'after: the direct status update must be refused');
   assert.equal(after.directNotes, 'ok|1', 'after: other order columns still save directly');
+  assert.match(after.directInsertFulfilled, /^42501\|permission denied for table orders/, 'after: creating an order with a status directly must be refused');
   assert.equal(after.profilesTruncTrig, 'falsefalsefalsefalse');
   assert.match(after.oldInsert, /^42501\|new row violates row-level security policy/);
   assert.equal(after.oldReplace, 'ok|0');

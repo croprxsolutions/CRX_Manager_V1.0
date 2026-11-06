@@ -3,7 +3,7 @@
 -- Re-read the live ledger before applying.
 --
 -- WHAT (permissions; Mason's decisions of 2026-11-05, about 10:30 PM Central):
---   1. KI-101 residual. Signed-in users lose their direct UPDATE grant on orders.status, so an
+--   1. KI-101 residual. Signed-in users lose their direct UPDATE and INSERT grants on orders.status, so an
 --      order's status changes only through the SECURITY DEFINER functions (delivery completion,
 --      cancel, void, pricing), which run as postgres and are unaffected. Every other orders column
 --      keeps its UPDATE grant (the screens still set notes, the planned flag, the soft delete...).
@@ -23,7 +23,7 @@
 -- unaffected. The DROP/ALTER POLICY statements briefly lock storage.objects (all buckets) until
 -- commit; lock_timeout caps the wait at 5 s.
 --
--- ROLLBACK (its own reviewed migration): GRANT UPDATE (status) ON public.orders TO authenticated;
+-- ROLLBACK (its own reviewed migration): GRANT UPDATE (status), INSERT (status) ON public.orders TO authenticated;
 --   GRANT TRUNCATE, TRIGGER ON public.profiles TO authenticated; re-create the three dropped
 --   policies and re-set the select policy from supabase/baselines/20260727174805_platform_overlay.sql.
 --
@@ -42,8 +42,10 @@ BEGIN
   END IF;
   -- A column REVOKE only works while no table-wide UPDATE grant covers the column.
   IF has_table_privilege('authenticated', 'public.orders', 'UPDATE')
-     OR has_table_privilege('anon', 'public.orders', 'UPDATE') THEN
-    RAISE EXCEPTION 'PERMISSION_TIGHTENING_PREFLIGHT: a table-wide UPDATE grant on orders exists; a column revoke would not close it';
+     OR has_table_privilege('anon', 'public.orders', 'UPDATE')
+     OR has_table_privilege('authenticated', 'public.orders', 'INSERT')
+     OR has_table_privilege('anon', 'public.orders', 'INSERT') THEN
+    RAISE EXCEPTION 'PERMISSION_TIGHTENING_PREFLIGHT: a table-wide UPDATE or INSERT grant on orders exists; a column revoke would not close it';
   END IF;
   -- The four older signature rules, exactly as read live 2026-11-05 (same md5 recipe as 20261022075000).
   IF (SELECT string_agg(policyname || '=' || md5(cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, '')), ',' ORDER BY policyname)
@@ -60,8 +62,9 @@ BEGIN
 END
 $preflight$;
 
--- 1. KI-101: order status changes only through the server functions.
-REVOKE UPDATE (status) ON public.orders FROM authenticated, anon;
+-- 1. KI-101: order status is set only by the server functions, on change and on creation (no app
+--    screen or Edge Function inserts orders directly; every order insert runs as postgres).
+REVOKE UPDATE (status), INSERT (status) ON public.orders FROM authenticated, anon;
 
 -- 2. KI-07.
 REVOKE TRUNCATE, TRIGGER ON public.profiles FROM authenticated, anon;
@@ -94,6 +97,9 @@ DO $postflight$
 BEGIN
   IF has_column_privilege('authenticated', 'public.orders', 'status', 'UPDATE')
      OR has_column_privilege('anon', 'public.orders', 'status', 'UPDATE')
+     OR has_column_privilege('authenticated', 'public.orders', 'status', 'INSERT')
+     OR has_column_privilege('anon', 'public.orders', 'status', 'INSERT')
+     OR NOT has_column_privilege('authenticated', 'public.orders', 'notes', 'INSERT')
      OR NOT has_column_privilege('authenticated', 'public.orders', 'is_planned', 'UPDATE')
      OR NOT has_column_privilege('authenticated', 'public.orders', 'deleted_at', 'UPDATE')
      OR NOT has_column_privilege('authenticated', 'public.orders', 'status', 'SELECT') THEN
@@ -127,11 +133,13 @@ BEGIN
   END IF;
   -- Permissive rules are OR-ed, so the narrowing above only holds if no permissive rule on
   -- storage.objects reaches another bucket: each one's expressions must open with a single
-  -- bucket_id = '<bucket>' conjunct (true of every live rule, read 2026-11-05).
+  -- bucket_id = '<bucket>' conjunct, and a rule that reads rows (anything but INSERT) must have a
+  -- USING clause (true of every live rule, read 2026-11-05).
   IF EXISTS (SELECT 1
                FROM pg_policies
               WHERE schemaname = 'storage' AND tablename = 'objects' AND permissive = 'PERMISSIVE'
-                AND ((qual IS NULL AND with_check IS NULL)
+                AND ((cmd <> 'INSERT' AND qual IS NULL)
+                     OR (cmd = 'INSERT' AND with_check IS NULL)
                      OR qual !~ '^(\(bucket_id = ''[a-z0-9_-]+''::text\)|\(\(bucket_id = ''[a-z0-9_-]+''::text\) AND .*\))$'
                      OR with_check !~ '^(\(bucket_id = ''[a-z0-9_-]+''::text\)|\(\(bucket_id = ''[a-z0-9_-]+''::text\) AND .*\))$')) THEN
     RAISE EXCEPTION 'PERMISSION_TIGHTENING_POSTFLIGHT: a permissive storage.objects policy is not limited to one bucket';

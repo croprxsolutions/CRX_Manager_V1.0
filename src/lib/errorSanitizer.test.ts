@@ -264,6 +264,15 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_SMALL: delivery D-1')).toBe(
       "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"
     );
+    expect(sanitizeError('BILL_SPLIT_PRICING_PENDING: price this sale first')).toBe(
+      'Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery'
+    );
+    expect(sanitizeError('SPLIT_INVOICE_PROVENANCE_IMMUTABLE: x')).toBe(
+      'Nothing was changed. This split invoice is locked to its group. Void the group and create a replacement'
+    );
+    expect(sanitizeError('ORDER_SHARES_OVER_100: order x')).toBe("Nothing was changed. The bill split can't total more than 100%");
+    expect(sanitizeError('ORDER_SHARES_ORDER_IMMUTABLE: x')).toBe("Nothing was changed. A bill split row can't move to another order");
+    expect(sanitizeError('ORDER_ITEM_SHARES_LINE_IMMUTABLE: x')).toBe("Nothing was changed. A line share can't move to another line");
     expect(sanitizeError('BILL_SPLIT_NOTHING_TO_BILL: delivery D-1')).toBe(
       'Nothing was billed. This delivery has no delivered quantity'
     );

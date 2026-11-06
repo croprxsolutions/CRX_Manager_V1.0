@@ -7,21 +7,24 @@
 --   numbered with one sale number and a suffix (CS-2026-0412-1, -2), in one governed split group.
 --   - New table order_item_shares: a line's own shares, overriding the card for that line.
 --   - Each line shares its delivered cents and quantity: every other payer gets their share rounded
---     down and the main customer (the sale's customer) gets the rest, so each line adds up exactly. If
+--     down and the main customer (the sale's customer) gets the rest, so each line bills exactly. If
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
 --     the rest with the main customer. A share too small for any quantity gets no cents.
---   - A payer's invoice cost is the cost of its own lines, as on every other invoice: what the month-end
---     report, a re-save and a return credit read. Across payers it can differ from the sale line's cost by
---     up to half a cent per payer line; billed amounts add up exactly.
+--   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
+--     invoice and in the month-end report (Mason, 2026-11-05, Option 1). Summed across payers it can top
+--     the line's cost by about a cent where a share splits a unit; billed cents are exact.
 --   - The card and the line shares freeze at the first completed delivery (voiding it reopens them), and
 --     refuse a change while a one-customer draft is on the sale, which would never bill the new payer.
 --   - guard_invoice_terminal_order admits a payer on the sale's card or line shares, only inside the
 --     creation claim or as the invoice its provenance row names, as for field splits. Delivery lineage
---     accepts that invoice. A sale with other payers refuses a one-customer chemical-sale invoice.
+--     accepts that invoice. A sale with other payers refuses a one-customer chemical-sale or misc-charge
+--     invoice.
 --   - Create Invoice on a delivery (backfill) drafts per payer too.
 --   - A Bill Split draft takes charges and header edits through save_invoice until it posts (a field split
---     still can't). Its product lines follow the split: changing them means voiding the group.
+--     still can't). Its product lines (product, description, quantity, price, cents and cost) follow the
+--     split: changing them means voiding the group, so the cost the save recomputes stays the same.
 --   - The payers' drafts stand or fall together: delete_invoices refuses one member of a Bill Split group.
+--   - A rush sale still waiting for prices drafts nothing at completion; Create Invoice drafts it once priced.
 --   - A failed split doesn't stop the delivery completing: it leaves an activity record and a flag in the
 --     result, and Create Invoice on the delivery runs it again.
 --   - Reps read the card (order_shares_select): any rep can already write it and reps work any customer.
@@ -30,16 +33,16 @@
 --     order or line, which would take it out of a frozen sale without the check.
 --
 -- NOT CHANGED: a sale with no other payers bills exactly as before. Field/acre splits keep their own
---   engine and win over a card on the same order. Posting, payments, the overbilling caps, save_invoice
---   and the other invoice guards. No row is written.
+--   engine and win over a card until it freezes. Posting, payments and the overbilling caps. A field-split
+--   group still deletes member by member. No existing row is written.
 --
 -- ROLLBACK (its own reviewed migration): re-emit the seven changed functions from their previous bodies
 --   (_complete_delivery_authorized_impl 20261106230000, guard_invoice_terminal_order 20261021155000,
 --   _create_invoice_for_unbilled_delivery_impl_20260718 20260827041200,
 --   _save_invoice_intent_impl_20260802 20260720175946, prevent_order_shares_edit_after_post 20260504100000,
 --   _validate_order_shares_total 20260616121521, delete_invoices 20260719060256), restore order_shares_select
---   from 20260511050000, drop the new helpers, trg_oifa_bill_split_freeze, order_item_shares and
---   order_shares.updated_at. Split invoices already drafted stay governed by their
+--   from 20260511050000, drop the new helpers, trg_oifa_bill_split_freeze, order_item_shares,
+--   order_shares.updated_at and order_shares_order_customer_key. Split invoices already drafted stay governed by their
 --   provenance rows; void them first if the sale should bill as one invoice.
 --
 -- ORDERING: apply after every older pending migration.
@@ -96,7 +99,7 @@ BEGIN
       JOIN public.orders o ON o.id = s.order_id
       JOIN public.invoices i ON i.order_id = o.id
      WHERE s.customer_id <> o.customer_id
-       AND i.invoice_type = 'chemical_sale' AND i.invoice_group_id IS NULL
+       AND i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.invoice_group_id IS NULL
        AND i.deleted_at IS NULL AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue')
   ) THEN
     RAISE EXCEPTION 'CHEM_SALE_BILL_SPLIT_PREFLIGHT: a sale with other payers has a one-customer invoice; resolve it before applying';
@@ -122,6 +125,7 @@ CREATE INDEX order_item_shares_customer_id_idx ON public.order_item_shares (cust
 ALTER TABLE public.order_item_shares ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.order_item_shares FROM PUBLIC, anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.order_item_shares TO authenticated;
+REVOKE TRUNCATE, REFERENCES, TRIGGER ON public.order_item_shares FROM authenticated;
 GRANT ALL ON public.order_item_shares TO service_role;
 
 CREATE POLICY order_item_shares_select ON public.order_item_shares FOR SELECT TO authenticated
@@ -186,7 +190,7 @@ BEGIN
   SELECT i.invoice_number INTO v_blocking
     FROM invoices i
    WHERE i.order_id = p_order_id
-     AND i.invoice_type = 'chemical_sale'
+     AND i.invoice_type IN ('chemical_sale', 'misc_charge')
      AND i.invoice_group_id IS NULL
      AND i.deleted_at IS NULL
      AND i.status IN ('draft', 'unposted')
@@ -389,6 +393,13 @@ BEGIN
   SELECT * INTO STRICT v_delivery FROM deliveries WHERE id = p_delivery_id;
   SELECT * INTO STRICT v_order FROM orders WHERE id = v_delivery.order_id;
 
+  -- price_order sweeps a rush sale's drafts directly, which a governed draft refuses, so it would roll the
+  -- pricing back. Draft once it is priced: Create Invoice on the delivery runs this again.
+  IF v_order.pricing_status = 'needs_pricing' THEN
+    RAISE EXCEPTION 'BILL_SPLIT_PRICING_PENDING: price this sale first, then use Create Invoice on delivery %', v_delivery.delivery_number
+      USING ERRCODE = 'check_violation';
+  END IF;
+
   INSERT INTO split_invoice_creation_claims (transaction_id, order_id) VALUES (pg_current_xact_id(), v_order.id);
   v_base := next_invoice_number('chemical_sale');
 
@@ -410,7 +421,10 @@ BEGIN
         USING ERRCODE = 'check_violation';
     END IF;
     FOR v_share IN
-      SELECT * FROM _bill_split_line_shares(v_item.order_item_id, v_line_cents, v_line_units)
+      SELECT c.customer_id, c.cents, c.units
+        FROM _bill_split_line_shares(v_item.order_item_id, v_line_cents, v_line_units)
+             WITH ORDINALITY c(customer_id, cents, units, n)
+       ORDER BY c.n
     LOOP
       CONTINUE WHEN v_share.cents = 0 AND v_share.units = 0;
       v_invoice_id := (v_map ->> v_share.customer_id::text)::uuid;
@@ -432,6 +446,8 @@ BEGIN
     END LOOP;
   END LOOP;
 
+  -- Cost is the sum of each payer's own lines, as on every invoice and in the month-end report (Mason,
+  -- 2026-11-05: Option 1). Across payers it can top the line's cost by a cent where a share splits a unit.
   UPDATE invoices i
      SET total_amount_cents = t.cents, total_cost_cents = t.cost
     FROM (SELECT ii.invoice_id, sum(ii.extended_cents)::bigint AS cents,
@@ -465,7 +481,7 @@ BEGIN
 END;
 $function$;
 
--- A draft's product lines as they bill. Charge lines are free to change.
+-- A draft's product lines as they bill and cost. Charge lines (no product, no order line) are free to change.
 CREATE FUNCTION public._bill_split_product_lines(p_invoice_id uuid)
 RETURNS jsonb
 LANGUAGE sql
@@ -473,7 +489,8 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
-  SELECT COALESCE(jsonb_agg(jsonb_build_array(ii.order_item_id, ii.product_id, ii.description, ii.quantity, ii.unit_price_cents, ii.extended_cents)
+  SELECT COALESCE(jsonb_agg(jsonb_build_array(ii.order_item_id, ii.product_id, ii.description, ii.quantity,
+                                    ii.unit_price_cents, ii.extended_cents, ii.cost_cents)
                   ORDER BY ii.order_item_id, ii.quantity, ii.extended_cents, ii.description), '[]'::jsonb)
     FROM invoice_items ii
    WHERE ii.invoice_id = p_invoice_id
@@ -499,7 +516,7 @@ END;
 $function$;
 
 CREATE TRIGGER trg_oifa_bill_split_freeze
-  BEFORE INSERT ON public.order_item_field_allocations
+  BEFORE INSERT OR UPDATE OF order_item_id ON public.order_item_field_allocations
   FOR EACH ROW EXECUTE FUNCTION public.guard_bill_split_field_switch();
 
 REVOKE ALL ON FUNCTION public.guard_bill_split_field_switch() FROM PUBLIC, anon, authenticated, service_role;
@@ -567,7 +584,7 @@ BEGIN
   END IF;
   -- Bill Split (billing plan M2): a sale with payers other than its customer bills through
   -- one draft per payer, never as one invoice to the customer.
-  IF TG_OP = 'INSERT' AND NEW.invoice_type = 'chemical_sale' AND NEW.invoice_group_id IS NULL
+  IF TG_OP = 'INSERT' AND NEW.invoice_type IN ('chemical_sale', 'misc_charge') AND NEW.invoice_group_id IS NULL
      AND public._order_has_bill_split(NEW.order_id) THEN
     RAISE EXCEPTION 'ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice';
   END IF;

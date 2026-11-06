@@ -160,7 +160,7 @@ function flows() {
 
 try {
   if (!reuse) buildContainer();
-  seedUsers();
+  if (scalar(`SELECT count(*) FROM auth.users WHERE id = '${USERS.admin}';`) === '0') seedUsers();
   psql(STORAGE_RLS, { user: 'supabase_admin' });
   seed();
   const isAdminRep = scalar(`SELECT role FROM public.profiles WHERE id = '${USERS.rep}';`);

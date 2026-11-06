@@ -19,7 +19,9 @@
 --      no-delete rules from 20261022075000 are unchanged.
 --
 -- NOT CHANGED: every function, trigger and table; every other grant and policy; no rows.
--- The service role (Edge Functions) bypasses these grants and policies as before.
+-- The service role (Edge Functions) is not in any REVOKE here and bypasses row security, so it is
+-- unaffected. The DROP/ALTER POLICY statements briefly lock storage.objects (all buckets) until
+-- commit; lock_timeout caps the wait at 5 s.
 --
 -- ROLLBACK (its own reviewed migration): GRANT UPDATE (status) ON public.orders TO authenticated;
 --   GRANT TRUNCATE, TRIGGER ON public.profiles TO authenticated; re-create the three dropped
@@ -110,6 +112,18 @@ BEGIN
          AND coalesce(qual, '') || coalesce(with_check, '') LIKE '%delivery-signatures%')
      IS DISTINCT FROM 'delivery_signatures_attempt_insert:INSERT,delivery_signatures_attempt_select:SELECT,delivery_signatures_scoped_select:SELECT' THEN
     RAISE EXCEPTION 'PERMISSION_TIGHTENING_POSTFLIGHT: delivery-signature policy set is not as intended';
+  END IF;
+  -- The narrowed read rule as reviewed, and the 20261022075000 restrictive rules (they name no
+  -- bucket, so the set above cannot see them) still in place, all for authenticated only.
+  IF (SELECT string_agg(policyname || '=' || permissive || '=' || md5(cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, '')), ',' ORDER BY policyname)
+        FROM pg_policies
+       WHERE schemaname = 'storage' AND tablename = 'objects'
+         AND policyname IN ('delivery_signatures_scoped_select', 'delivery_evidence_objects_no_update',
+                            'delivery_evidence_objects_no_delete'))
+     IS DISTINCT FROM 'delivery_evidence_objects_no_delete=RESTRICTIVE=2e0dd64d0b25a9478be6576a2985f9aa,'
+                   || 'delivery_evidence_objects_no_update=RESTRICTIVE=0b0038bcf5071878ee813adb923f1479,'
+                   || 'delivery_signatures_scoped_select=PERMISSIVE=2384b70ad2be19dbe718ca42e744138e' THEN
+    RAISE EXCEPTION 'PERMISSION_TIGHTENING_POSTFLIGHT: the narrowed read rule or the restrictive evidence rules are not as intended';
   END IF;
 END
 $postflight$;

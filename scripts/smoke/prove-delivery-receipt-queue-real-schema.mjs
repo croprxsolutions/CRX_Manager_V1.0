@@ -166,7 +166,7 @@ function installLiveAuthUid() {
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
 }
 function buildContainer() {
-  docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  docker(['run', '-d', '--name', NAME, '--label', 'crx-prover=ki25-receipt-queue', '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
@@ -299,6 +299,11 @@ const confirm = (c, key) =>
 
 function main() {
   if (!REUSE) buildContainer();
+  else {
+    // A reused container must be one this prover built: its label, no network.
+    const seen = docker(['inspect', '-f', '{{index .Config.Labels "crx-prover"}} {{.HostConfig.NetworkMode}}', NAME]).stdout.trim();
+    if (seen !== 'ki25-receipt-queue none') throw new Error(`refusing to reuse ${NAME}: not a container this prover built (${seen})`);
+  }
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamptz,text,text)'::regprocedure;"),
     'c07f8ea8323f512549064a2ee6360dba', 'the replay must reproduce live complete_delivery before the candidate');
   seedUsers();

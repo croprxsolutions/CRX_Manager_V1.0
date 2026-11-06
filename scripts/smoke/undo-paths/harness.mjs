@@ -122,6 +122,16 @@ function restoreLiveBodies() {
       expected, `${signature} is not the pinned live body`);
   }
 }
+// 20261117130000 refuses to build without live's two count units (a schema-only rebuild has none, and
+// 20261104150000 must see all of Lb/Unit/Ea or none), so seed them right before it.
+const TOTE_FILL_FROM_BULK = '20261117130000_tote_fill_from_bulk.sql';
+function seedCountUnits() {
+  psql(`INSERT INTO public.unit_conversions (id, unit, factor_oz, notes, unit_type)
+    SELECT v.id::uuid, v.unit, 1, v.notes, 'both'
+      FROM (VALUES ('5ed18e4b-c4d9-42fc-b85e-22babd3fc098', 'Ea', 'Each / unit'),
+                   ('722e8d86-8e68-47d8-a940-209fad38c70e', 'Unit', 'Each / unit (alias for Ea)')) AS v(id, unit, notes)
+     WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions u WHERE u.unit = v.unit);`);
+}
 function migrations() {
   const r = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs'], { cwd: ROOT, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(r.stderr);
@@ -130,7 +140,8 @@ function migrations() {
 
 // Set only once `docker run` succeeds, so a failed start never removes someone else's same-named container.
 let created = false;
-export function buildContainer() {
+/** `stopBefore`: a migration file name; the replay stops before it (a proof applies it itself). */
+export function buildContainer({ stopBefore } = {}) {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   created = true;
   ready();
@@ -149,21 +160,23 @@ export function buildContainer() {
   psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
   for (const name of ['20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) psql(`\\i /tmp/${name}`, { user: name.includes('overlay') ? 'supabase_admin' : 'postgres' });
   psql(LIVE_UID, { user: 'supabase_admin' });
-  replay();
+  replay({ stopBefore });
 }
 
 const LIVE_UID = `CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`;
 /** Replays every post-baseline migration not yet in the ledger (so a stopped build can resume). */
-export function replay() {
+export function replay({ stopBefore } = {}) {
   const done = new Set(docker([...psqlArgs(), '-A', '-t'], { input: 'SELECT name FROM supabase_migrations.schema_migrations;' }).stdout.split(/\r?\n/).filter(Boolean));
   let replayed = 0;
   for (const [i, file] of migrations().entries()) {
     const base = path.basename(file);
+    if (stopBefore && base >= stopBefore) break;
     if (PARKED.has(base) || done.has(path.basename(file, '.sql'))) continue;
     for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
     if (LEDGER_ONLY.has(base)) continue;
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     if (base === FORMS_SEED_EACH) restoreLiveBodies();
+    if (base === TOTE_FILL_FROM_BULK) seedCountUnits();
     const name = `m-${i}.sql`; stageText(name, lf(file));
     const r = docker([...psqlArgs(), '-1', '-f', `/tmp/${name}`], { allowFailure: true });
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.stdout}\n${r.stderr}`);

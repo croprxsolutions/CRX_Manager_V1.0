@@ -28,3 +28,5 @@ A restricted-use line too small to show refuses the split instead of being left 
 An order line with its own payer shares can't be deleted once the sale is frozen, and a retried unpost from before this change gets its saved answer.
 
 A single invoice with a made-up group number cannot slip past the Bill Split rule.
+
+A plain invoice can not be given a group number later either. Each line splits on its own: another payer rounds down to the cent and the main customer takes the leftover cent (Mason accepted, 2026-11-06).

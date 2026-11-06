@@ -11,7 +11,7 @@
 --   D  A direct write to a payer's line is refused, and save_invoice can't bill past the delivery
 --   E  Re-saving a payer's draft keeps its cents; a freight charge goes on one payer's draft
 --   F  A one-customer chemical-sale or misc-charge invoice on this sale is refused (ORDER_HAS_BILL_SPLIT),
---      also with a made-up group id
+--      also with a made-up group id, and a plain draft can't be given one later
 --   G  The group posts at its reviewed versions, and the second payer can return their share
 --   H  Void the delivery on a fresh sale: both drafts cancel and the card reopens
 --   I  Under 100%: the rest stays with the main customer
@@ -85,8 +85,9 @@ BEGIN
   SELECT id INTO v_payer3 FROM customers WHERE is_active = true AND id NOT IN (v_main, v_payer2) ORDER BY created_at LIMIT 1;
   SELECT * INTO v_p1 FROM products WHERE is_active = true AND current_cost > 0 AND current_cost = round(current_cost, 2) ORDER BY created_at LIMIT 1;
   SELECT * INTO v_p2 FROM products WHERE is_active = true AND current_cost > 0 AND current_cost = round(current_cost, 2) AND id <> v_p1.id ORDER BY created_at LIMIT 1;
-  IF v_admin IS NULL OR v_payer3 IS NULL OR v_p2.id IS NULL THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: needs an active admin, three active customers and two active products with a cost';
+  IF v_admin IS NULL OR v_payer3 IS NULL OR v_p2.id IS NULL
+     OR (SELECT count(*) FROM customers WHERE is_active = true) < 4 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: needs an active admin, four active customers and two active products with a cost';
   END IF;
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -310,6 +311,20 @@ BEGIN
     v_fails := v_fails || ' (F) a one-customer invoice with a made-up group was accepted;';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'ORDER_HAS_BILL_SPLIT:%' THEN v_fails := v_fails || ' (F) wrong refusal on a made-up group: ' || SQLERRM || ';'; END IF;
+  END;
+  -- A plain draft on a sale with no card yet can't be given a group id afterwards.
+  PERFORM pg_temp.smk_new_sale('f4' || v_suffix);
+  BEGIN
+    INSERT INTO invoices (invoice_number, invoice_type, order_id, customer_id, status, invoice_date, total_amount_cents, total_cost_cents, created_by)
+      VALUES ('SMK-SPL-F4' || v_suffix, 'chemical_sale', (SELECT o FROM smk_sale), v_main, 'draft', CURRENT_DATE, 0, 0, v_admin);
+    BEGIN
+      UPDATE invoices SET invoice_group_id = gen_random_uuid() WHERE invoice_number = 'SMK-SPL-F4' || v_suffix;
+      v_fails := v_fails || ' (F) a plain draft was given a made-up group;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'INVOICE_GROUP_ASSIGN_REQUIRES_SPLIT:%' THEN v_fails := v_fails || ' (F) wrong refusal on a group assign: ' || SQLERRM || ';'; END IF;
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (F) a plain draft on a sale with no card was refused: ' || SQLERRM || ';';
   END;
 
   SELECT jsonb_object_agg(id, _invoice_post_version(id)) INTO v_versions FROM invoices WHERE invoice_group_id = v_group;

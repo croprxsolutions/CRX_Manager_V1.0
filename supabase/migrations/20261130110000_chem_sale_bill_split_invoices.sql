@@ -647,6 +647,15 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'INVOICE_SOURCE_LINEAGE_IMMUTABLE: order_id and delivery_id cannot change after invoice creation';
   END IF;
+  -- Bill Split: a sale invoice joins a group only inside the split writer's claim, or a one-customer
+  -- draft given a made-up group id would pass the Bill Split checks. Leaving a group stays open.
+  IF TG_OP = 'UPDATE' AND NEW.invoice_type IN ('chemical_sale', 'misc_charge')
+     AND NEW.invoice_group_id IS NOT NULL AND NEW.invoice_group_id IS DISTINCT FROM OLD.invoice_group_id
+     AND NOT EXISTS (SELECT 1 FROM public.split_invoice_creation_claims claim
+                      WHERE claim.transaction_id = pg_current_xact_id() AND claim.order_id = NEW.order_id) THEN
+    RAISE EXCEPTION 'INVOICE_GROUP_ASSIGN_REQUIRES_SPLIT: a sale invoice joins a group only when the split drafts it'
+      USING ERRCODE = 'check_violation';
+  END IF;
 
   IF NEW.order_id IS NULL THEN
     IF NEW.delivery_id IS NOT NULL THEN

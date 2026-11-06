@@ -41,6 +41,7 @@
 --   AG A payer's invoice takes its season from its date, as a plain delivery invoice does
 --   AH An inactive customer can't become a payer, on the card or on a line
 --   AI A line with its own shares can't move to another sale (ORDER_ITEM_SHARES_LINE_MOVE)
+--   AJ A share under 0.01 of quantity keeps its four decimals and its cents
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -735,6 +736,18 @@ BEGIN
      OR (SELECT sum(total_amount_cents) FROM invoices WHERE delivery_id = v_d)
           IS DISTINCT FROM (SELECT round(sum(total_price) * 100)::bigint FROM order_items WHERE order_id = v_o) THEN
     v_fails := v_fails || ' (AD) a payer''s quantity is not in whole hundredths, or the line no longer adds up;';
+  END IF;
+
+  -- AJ: a share under 0.01 of quantity keeps its four decimals and its cents, so no money moves to the main customer.
+  PERFORM pg_temp.smk_new_sale('aj' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 99);
+  PERFORM complete_delivery(v_d, 'No proof — recorded by office', v_admin,
+    (SELECT jsonb_object_agg(di.id::text, 0.01) FROM delivery_items di WHERE di.delivery_id = v_d),
+    NULL, NULL, 'smk-spl-aj-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
+  IF NOT EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                  WHERE i.delivery_id = v_d AND i.customer_id = v_payer2 AND ii.order_item_id = v_l1 AND ii.quantity = 0.0099 AND ii.extended_cents > 0) THEN
+    v_fails := v_fails || ' (AJ) a payer''s small share went to the main customer;';
   END IF;
 
   -- AE: a payer draft's unit and tote follow the split too, and re-saving a tote line as read still works.

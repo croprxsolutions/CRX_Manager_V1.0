@@ -10,7 +10,8 @@
 --     down and the main customer (the sale's customer) gets the rest, so each line bills exactly. If
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
 --     the rest with the main customer. Another payer's quantity rounds down to whole hundredths, as a return
---     holds it, so a payer can return a share in full. A share too small for 0.01 of quantity gets no cents.
+--     holds it, so a payer can return a share in full. A share under 0.01 keeps four decimals and its cents, so
+--     no money moves to the main customer. A share too small for any quantity gets no cents.
 --   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
 --     invoice and in the month-end report (Mason, 2026-11-05, Option 1). Summed across payers it can top
 --     the line's cost by about a cent where a share splits a unit, and more where the unit cost itself has
@@ -43,6 +44,10 @@
 --   - One row per customer on a card: UNIQUE (order_id, customer_id). Live had 0 rows on 2026-11-06.
 --   - A card totals at most exactly 100%, without the old 0.01 tolerance, and a row can't move to another
 --     order or line, which would take it out of a frozen sale without the check.
+--
+-- MASON'S DECISIONS (2026-11-06, #crx-work): the restricted-use register keeps the main customer as buyer on a
+--   payer's share (the farmer takes delivery and applies; the landlord only pays). Sales reports stay under
+--   the main customer until M15.
 --
 -- NOT CHANGED: a sale with no other payers bills exactly as before. Field/acre splits keep their own
 --   engine and win over a card until it freezes. Posting, payments and the overbilling caps. Who may unpost
@@ -384,7 +389,8 @@ $function$;
 -- share left over belongs to the main customer. The taker (the main customer, else the largest share)
 -- gets the rest after everyone else rounds down, so each line adds up exactly. A share too small for any
 -- quantity gets no cents either, so no line bills money for nothing. Other payers' quantity is whole
--- hundredths (100 of p_units), because return_items.quantity holds two decimals. The taker comes first.
+-- hundredths (100 of p_units) where it can be, because return_items.quantity holds two decimals. The taker
+-- comes first.
 CREATE FUNCTION public._bill_split_line_shares(p_order_item_id uuid, p_cents bigint, p_units bigint)
 RETURNS TABLE (customer_id uuid, cents bigint, units bigint)
 LANGUAGE sql
@@ -411,8 +417,9 @@ AS $function$
     SELECT s.customer_id, sum(s.pct) AS pct FROM shares s GROUP BY s.customer_id HAVING sum(s.pct) > 0
   ), ranked AS (
     SELECT p.customer_id,
-           CASE WHEN floor(p_units * p.pct / 10000) = 0 THEN 0 ELSE floor(p_cents * p.pct / 100)::bigint END AS floor_cents,
-           floor(p_units * p.pct / 10000)::bigint * 100 AS floor_units,
+           CASE WHEN floor(p_units * p.pct / 100) = 0 THEN 0 ELSE floor(p_cents * p.pct / 100)::bigint END AS floor_cents,
+           CASE WHEN floor(p_units * p.pct / 10000) > 0 THEN floor(p_units * p.pct / 10000)::bigint * 100
+                ELSE floor(p_units * p.pct / 100)::bigint END AS floor_units,
            row_number() OVER (ORDER BY p.customer_id = line.main DESC, p.pct DESC, p.customer_id) AS rn
       FROM payers p, line
   )

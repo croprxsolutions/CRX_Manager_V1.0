@@ -11,7 +11,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 
 type Row = Record<string, unknown>;
-type PageArgs = { p_search?: string | null; p_limit: number | null; p_offset: number; p_today: string };
+type PageArgs = { p_search?: string | null; p_driver_id?: string | null; p_limit: number | null; p_offset: number; p_today: string };
 
 const H = vi.hoisted(() => ({
   auth: { role: 'admin', profile: { id: 'user-1', role: 'admin' }, deniedPages: [] as string[] },
@@ -50,7 +50,8 @@ function serverQuery(table: string): Record<string, unknown> {
 
 function deliveriesPage(args: PageArgs) {
   const search = args.p_search?.toLowerCase();
-  const matching = H.deliveries.filter((d) => !search || String(d.delivery_number).toLowerCase().includes(search));
+  const matching = H.deliveries.filter((d) => (!search || String(d.delivery_number).toLowerCase().includes(search))
+    && (!args.p_driver_id || d.assigned_driver === args.p_driver_id));
   const rows = args.p_limit === null ? matching.slice(args.p_offset) : matching.slice(args.p_offset, args.p_offset + args.p_limit);
   const scheduledToday = H.deliveries.filter((d) => d.scheduled_date === args.p_today).length;
   return {
@@ -196,6 +197,29 @@ describe('Deliveries list pages in the database', () => {
     expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load deliveries. Please try again.');
   });
 
+  it('downloads one CSV for a double click', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    const button = screen.getByRole('button', { name: /Export CSV/ });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
+    expect(H.pageCalls.filter((c) => c.p_limit === null)).toHaveLength(1);
+  });
+
+  it('reads the same page again from Try again after a failed read', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    H.failPageFromCall = H.pageCalls.length + 1;
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Next' })); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Deliveries could not be loaded');
+
+    H.failPageFromCall = null;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
+    expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0050');
+  });
+
   it('exports nothing and says so when the export read fails', async () => {
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
     await screen.findByText('Scheduled Today');
@@ -228,10 +252,13 @@ describe('Deliveries list pages in the database', () => {
     H.auth.role = 'driver';
     H.auth.profile = { id: 'driver-1', role: 'driver' };
     H.failTable = 'inventory';
+    // Odd-numbered deliveries belong to driver-1, even ones to another driver.
+    H.deliveries.forEach((d, i) => { d.assigned_driver = i % 2 ? 'driver-1' : 'driver-2'; });
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Stock shortage warnings could not be checked');
     expect(screen.getAllByText('DEL-1499').length).toBeGreaterThan(0);
-    expect(H.pageCalls.every((c) => c.p_limit === null)).toBe(true);
+    expect(screen.queryByText('DEL-1498')).not.toBeInTheDocument();
+    expect(H.pageCalls.every((c) => c.p_limit === null && c.p_driver_id === 'driver-1')).toBe(true);
   });
 });

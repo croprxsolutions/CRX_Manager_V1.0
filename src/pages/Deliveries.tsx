@@ -305,6 +305,8 @@ export default function Deliveries() {
 
   const [rescheduling, setRescheduling] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportingCsvRef = useRef(false);
 
   /* Quick Delivery modal */
   const [quickDeliveryOpen, setQuickDeliveryOpen] = useState(false);
@@ -448,15 +450,24 @@ export default function Deliveries() {
   // shows every delivery of the chosen status; the list reads one page at a time.
   const paged = !isDriver && viewMode === 'list';
   const loadQuery = useMemo<DeliveriesQuery>(() => {
-    if (isDriver) return { p_today: todayStr, p_week_start: weekStartStr };
-    if (viewMode === 'calendar') return { p_today: todayStr, p_week_start: weekStartStr, p_statuses: filterQuery.p_statuses };
+    // Row level security already limits a driver to their deliveries; the filter keeps that if it ever widens.
+    if (isDriver) return { p_today: todayStr, p_week_start: weekStartStr, p_driver_id: profile?.id ?? null };
+    // As before, the calendar shows every delivery except cancelled and voided, unless one of those is chosen.
+    if (viewMode === 'calendar') {
+      return { p_today: todayStr, p_week_start: weekStartStr, p_statuses: statusFilter === 'cancelled' || statusFilter === 'voided' ? [statusFilter] : null };
+    }
     return listQuery;
-  }, [isDriver, viewMode, todayStr, weekStartStr, filterQuery, listQuery]);
+  }, [isDriver, profile?.id, viewMode, todayStr, weekStartStr, statusFilter, listQuery]);
   // The page number belongs to one query: a new search, filter or sort starts again at page one.
   const loadQueryKey = JSON.stringify(loadQuery);
   const [pageState, setPageState] = useState({ key: '', page: 0 });
   const listPage = paged && pageState.key === loadQueryKey ? pageState.page : 0;
   const goToPage = (page: number) => setPageState({ key: loadQueryKey, page });
+  useEffect(() => {
+    setPageState((prev) => (prev.key === loadQueryKey ? prev : { key: loadQueryKey, page: 0 }));
+  }, [loadQueryKey]);
+  // The offset of the rows on screen, so "Showing X–Y" never pairs a new page number with old rows.
+  const [loadedOffset, setLoadedOffset] = useState(0);
 
   // A read can finish after a newer one started (a page flip, or a refresh after completing or
   // cancelling); only the latest read may set the list, its counts or the loading state.
@@ -473,6 +484,7 @@ export default function Deliveries() {
         return;
       }
       setDeliveries(result.rows);
+      setLoadedOffset(paged ? listPage * LIST_PAGE_SIZE : 0);
       setTotalCount(result.total_count);
       setSummary(result.summary);
       setLoadFailed(false);
@@ -924,6 +936,11 @@ export default function Deliveries() {
   const readExportRows = async (): Promise<DeliveryRow[]> => (selectedDeliveries.length > 0
     ? selectedDeliveries
     : (await readDeliveriesPage(viewMode === 'list' ? listQuery : filterQuery, null)).rows);
+  // The load sheet only prints open deliveries, so with no status chosen it reads only those.
+  const readLoadSheetRows = async (): Promise<DeliveryRow[]> => {
+    const query = viewMode === 'list' ? listQuery : filterQuery;
+    return (await readDeliveriesPage({ ...query, p_statuses: query.p_statuses ?? ['scheduled', 'in_progress'] }, null)).rows;
+  };
 
   const handlePrintLoadSheet = async () => {
     await runCriticalAction({
@@ -933,7 +950,7 @@ export default function Deliveries() {
         // Use selected deliveries, or every scheduled/in_progress one matching the search and filters (all pages)
         const rows = selectedDeliveries.length > 0
           ? selectedDeliveries
-          : (await readExportRows()).filter((d) => d.status === 'scheduled' || d.status === 'in_progress');
+          : (await readLoadSheetRows()).filter((d) => d.status === 'scheduled' || d.status === 'in_progress');
 
         if (rows.length === 0) {
           throw new Error('No deliveries to include in load sheet');
@@ -1095,6 +1112,10 @@ export default function Deliveries() {
   };
 
   const handleExportCSV = async () => {
+    // Claimed synchronously, so a double click cannot start two reads and download two files.
+    if (exportingCsvRef.current) return;
+    exportingCsvRef.current = true;
+    setExportingCsv(true);
     let rows: DeliveryRow[];
     try {
       rows = await readExportRows();
@@ -1102,6 +1123,9 @@ export default function Deliveries() {
       Sentry.captureException(err, { tags: { source: 'export', page: 'deliveries' } });
       toast('error', 'The deliveries could not be read for the export. Nothing was exported; try again.');
       return;
+    } finally {
+      exportingCsvRef.current = false;
+      setExportingCsv(false);
     }
     exportToCSV(rows as unknown as Record<string, unknown>[], [
       { key: 'delivery_number', header: 'Delivery #' },
@@ -1285,8 +1309,11 @@ export default function Deliveries() {
           {driverHeader}
           <div className="p-4 sm:p-6">
             <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center text-sm text-red-700">
-              Your deliveries could not be loaded. Reload to try again.
+              Your deliveries could not be loaded.
             </p>
+            <div className="mt-3 flex justify-center">
+              <Button variant="secondary" size="sm" onClick={() => void fetchDeliveries()} loading={pageLoading}>Try again</Button>
+            </div>
           </div>
         </div>
       );
@@ -1552,7 +1579,10 @@ export default function Deliveries() {
       <div className="space-y-4">
         <PageHeader title="Deliveries" />
         <Card>
-          <p role="alert" className="text-center text-red-600 py-8 text-sm">Deliveries could not be loaded. Reload to try again.</p>
+          <p role="alert" className="text-center text-red-600 pt-8 pb-3 text-sm">Deliveries could not be loaded.</p>
+          <div className="flex justify-center pb-6">
+            <Button variant="secondary" size="sm" onClick={() => void fetchDeliveries()} loading={pageLoading}>Try again</Button>
+          </div>
         </Card>
       </div>
     );
@@ -1596,6 +1626,7 @@ export default function Deliveries() {
             size="sm"
             icon={<Download className="w-4 h-4" />}
             onClick={handleExportCSV}
+            loading={exportingCsv}
           >
             Export CSV
           </Button>
@@ -1709,11 +1740,11 @@ export default function Deliveries() {
       {/* Calendar View */}
       {viewMode === 'calendar' && (
         <Card>
-          <DeliveryCalendar
+          {pageLoading ? <SkeletonCard /> : <DeliveryCalendar
             deliveries={deliveries}
             onDeliveryClick={(deliveryId) => navigate(`/deliveries/${deliveryId}`)}
             onDateClick={(date) => navigate(`/deliveries/new?date=${date}`)}
-          />
+          />}
         </Card>
       )}
 
@@ -1862,7 +1893,7 @@ export default function Deliveries() {
                   onClick={toggleAll}
                   className="text-xs text-crx-green hover:underline ml-2"
                 >
-                  {allShownSelected ? 'Deselect All' : 'Select All'}
+                  {allShownSelected ? 'Deselect All' : totalCount > deliveries.length ? 'Select All on This Page' : 'Select All'}
                 </button>
               )}
             </div>
@@ -1947,7 +1978,7 @@ export default function Deliveries() {
           {totalCount > 0 && (
             <nav aria-label="Delivery list pages" className="flex flex-wrap items-center justify-between gap-3">
               <span className="text-sm text-secondary" aria-live="polite">
-                Showing {listPage * LIST_PAGE_SIZE + 1}–{listPage * LIST_PAGE_SIZE + deliveries.length} of {totalCount}
+                Showing {loadedOffset + 1}–{loadedOffset + deliveries.length} of {totalCount}
               </span>
               {totalCount > LIST_PAGE_SIZE && (
                 <div className="flex items-center gap-2">

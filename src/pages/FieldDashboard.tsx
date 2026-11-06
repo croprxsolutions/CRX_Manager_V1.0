@@ -27,6 +27,7 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { computeBounds } from '../hooks/useFitBounds';
@@ -83,7 +84,12 @@ export default function FieldDashboard() {
       setCropHistory((histData || []) as CropHistoryRecord[]);
 
       // Fetch child fields if this is a parent
-      const { data: allFields, error: childErr } = await supabase.rpc('get_fields_with_geojson');
+      // Every page: the server cuts a function's rows off at 1,000, which could hide a child field.
+      const { data: allFields, error: childErr } = await fetchAllRows<{ id: string; field_name: string; total_acres: number | null; boundary_geojson?: string; centroid_geojson?: string; parent_field_id?: string }>((from, to) => pageWithList(supabase
+        .rpc('get_fields_with_geojson', undefined, { count: 'exact' })
+        .order('field_name')
+        .order('id')
+        .range(from, to)));
       if (!childErr) {
         const allRows = assertRpcResult<Array<{ id: string; field_name: string; total_acres: number | null; boundary_geojson?: string; centroid_geojson?: string; parent_field_id?: string }>>(allFields, 'get_fields_with_geojson');
         const childFields = allRows.filter((f) => f.parent_field_id === id);

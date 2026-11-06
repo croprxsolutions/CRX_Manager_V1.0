@@ -8,7 +8,7 @@
 -- Proves:
 --   * each call list (admin, every rep) returns success, rows, and a total_count that is at least the
 --     rows shown, equal to them when fewer than 200 are shown, and never more than 200 rows;
---   * for the applicator with the most dispatchable jobs, every board row carries the same
+--   * for the applicator with the most board jobs (the chain fails if that applicator gets none), every board row carries the same
 --     _total_count, the board shows min(total, 500) rows, rows come in (job_date, id) DESC order, and
 --     no row carries total_cost_cents;
 --   * an active driver, when one exists, is still refused every call list.
@@ -49,10 +49,12 @@ BEGIN
     RAISE NOTICE '%: shows %, total_count %', v_list, v_shown, v_total;
   END LOOP;
 
-  -- 2. Dispatch board, for the applicator with the most whole-job assignments.
+  -- 2. Dispatch board, for the applicator with the most board jobs (whole-job assignments on jobs with no
+  --    per-location dispatch, which the board always lists for that applicator).
   SELECT j.applicator_id INTO v_applicator
     FROM public.jobs j
    WHERE j.deleted_at IS NULL AND j.applicator_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM public.job_location_dispatches d WHERE d.job_id = j.id AND d.dispatch_status = $m$dispatched$m$)
    GROUP BY j.applicator_id
    ORDER BY count(*) DESC, j.applicator_id
    LIMIT 1;
@@ -61,6 +63,9 @@ BEGIN
       FROM public.get_dispatch_board_jobs(v_applicator) WITH ORDINALITY t(x, o);
     v_rows := COALESCE(v_rows, '[]'::jsonb);
     v_shown := jsonb_array_length(v_rows);
+    IF v_shown = 0 THEN
+      RAISE EXCEPTION $m$SMOKE_FAIL: the board returned no job for an applicator with board jobs$m$;
+    END IF;
     IF v_shown > 0 THEN
       IF (SELECT count(DISTINCT e->>'_total_count') FROM jsonb_array_elements(v_rows) e) <> 1 THEN
         RAISE EXCEPTION 'SMOKE_FAIL: board rows disagree on _total_count';

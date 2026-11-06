@@ -10,7 +10,10 @@
 --   * reading it in pages of 50 (the receiving log with its own p_limit/p_offset; the two table
 --     functions with LIMIT/OFFSET over separate calls, as the Data API pages them) returns exactly the
 --     one-shot read, in the same order;
---   * an active driver, when one exists, is still refused the receiving log and the watchdog list.
+--   * an active driver, when one exists, is still refused the receiving log and the watchdog list, with
+--     their own access-denied errors (any other error fails the chain).
+-- Each read is its own statement, so a row written on live between the one-shot read and the pages makes
+-- the chain FAIL (never pass falsely): re-run it once before treating a mismatch as a defect.
 --
 -- Always ends by raising SMOKE_PASS_ROLLBACK: nothing is ever committed.
 
@@ -53,7 +56,7 @@ BEGIN
 
   -- 2. Watchdog flags (table function, dismissed included so the list is as large as it gets).
   SELECT array_agg(f.id::text ORDER BY f.o) INTO v_all
-    FROM (SELECT w.id, row_number() OVER () AS o FROM public.get_watchdog_flags(p_include_dismissed => true) w) f;
+    FROM (SELECT w.id, w.ordinality AS o FROM public.get_watchdog_flags(p_include_dismissed => true) WITH ORDINALITY w ORDER BY w.ordinality) f;
   v_all := COALESCE(v_all, '{}');
   IF cardinality(v_all) <> (SELECT count(DISTINCT u) FROM unnest(v_all) u) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: get_watchdog_flags repeats an id in one read';
@@ -61,7 +64,7 @@ BEGIN
   v_paged := '{}'; v_off := 0;
   LOOP
     SELECT array_agg(f.id::text ORDER BY f.o) INTO v_page
-      FROM (SELECT w.id, row_number() OVER () AS o FROM public.get_watchdog_flags(p_include_dismissed => true) w LIMIT 50 OFFSET v_off) f;
+      FROM (SELECT w.id, w.ordinality AS o FROM public.get_watchdog_flags(p_include_dismissed => true) WITH ORDINALITY w ORDER BY w.ordinality LIMIT 50 OFFSET v_off) f;
     EXIT WHEN v_page IS NULL;
     v_paged := v_paged || v_page; v_off := v_off + 50;
   END LOOP;
@@ -72,7 +75,7 @@ BEGIN
 
   -- 3. Fields with geojson (table function, every customer).
   SELECT array_agg(f.id::text ORDER BY f.o) INTO v_all
-    FROM (SELECT g.id, row_number() OVER () AS o FROM public.get_fields_with_geojson() g) f;
+    FROM (SELECT g.id, g.ordinality AS o FROM public.get_fields_with_geojson() WITH ORDINALITY g ORDER BY g.ordinality) f;
   v_all := COALESCE(v_all, '{}');
   IF cardinality(v_all) <> (SELECT count(DISTINCT u) FROM unnest(v_all) u) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: get_fields_with_geojson repeats an id in one read';
@@ -80,7 +83,7 @@ BEGIN
   v_paged := '{}'; v_off := 0;
   LOOP
     SELECT array_agg(f.id::text ORDER BY f.o) INTO v_page
-      FROM (SELECT g.id, row_number() OVER () AS o FROM public.get_fields_with_geojson() g LIMIT 50 OFFSET v_off) f;
+      FROM (SELECT g.id, g.ordinality AS o FROM public.get_fields_with_geojson() WITH ORDINALITY g ORDER BY g.ordinality LIMIT 50 OFFSET v_off) f;
     EXIT WHEN v_page IS NULL;
     v_paged := v_paged || v_page; v_off := v_off + 50;
   END LOOP;
@@ -95,13 +98,15 @@ BEGIN
     v_refused := false;
     BEGIN
       PERFORM public.get_receiving_log(1, 0);
-    EXCEPTION WHEN OTHERS THEN v_refused := true;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = $m$Not authorized$m$ THEN v_refused := true; ELSE RAISE; END IF;
     END;
     IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a driver read the receiving log'; END IF;
     v_refused := false;
     BEGIN
       SELECT count(*) INTO v_n FROM public.get_watchdog_flags();
-    EXCEPTION WHEN OTHERS THEN v_refused := true;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM LIKE $m$WATCHDOG_ACCESS_DENIED%$m$ THEN v_refused := true; ELSE RAISE; END IF;
     END;
     IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: a driver read the watchdog list (% rows)', v_n; END IF;
   END IF;

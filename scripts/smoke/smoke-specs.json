@@ -15,6 +15,12 @@
       "covers": ["confirm_job_notification_sent", "record_job_pre_notifications", "record_job_post_notifications", "log_failed_notification", "apply_remaining_prepayments", "batch_apply_all_prepayments", "assign_job_applicator", "dispatch_job_locations", "undispatch_job_locations", "start_job", "create_job_from_quote_section", "update_field_app_applied_info", "create_quote_from_template", "rollover_quote_to_season", "save_quote_template"],
       "area": ["idempotency", "security", "regression"]
     },
+    "get_orders_page": {
+      "chain": "smoke-goal4-orders-page.sql",
+      "area": ["regression"],
+      "description": "REQUIRES 20261116120000. Goal 4 Orders list page, read only: as the oldest active admin under the authenticated role, get_orders_page for the current season returns total_count and total_price_cents equal to the table (each order rounded to whole cents), every page of 7 together lists each season order once in (order_date DESC, id) order, and a search for an order number finds it; an active driver, when one exists, sees no order.",
+      "covers": ["get_orders_page"]
+    },
     "records_replay_binding_batch4d": {
       "chain": "smoke-records-replay-binding-batch4d.sql",
       "container_only": true,

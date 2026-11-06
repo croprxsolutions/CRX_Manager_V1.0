@@ -142,10 +142,15 @@ export default function Orders() {
   const { selected, toggleSelect, toggleAll, clearSelection, selectedRows, allSelected } =
     useRowSelection({ data: orders, getId: (o) => o.id });
 
-  // A new search, filter or sort starts with nothing selected.
+  // Ticked rows belong to the page they were ticked on (bulk actions only see this page's
+  // rows), and a new search, filter or sort also drops "select all", so an old snapshot
+  // can never come back when the user returns to an earlier query.
   useEffect(() => {
     clearSelection();
-  }, [queryKey, clearSelection]);
+  }, [queryKey, page, clearSelection]);
+  useEffect(() => {
+    setAllMatchingState(null);
+  }, [queryKey]);
 
   // The rows the bulk actions act on: every matching order after "select all", else the ticked rows.
   const bulkRows = allMatching ?? selectedRows;

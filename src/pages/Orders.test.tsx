@@ -175,6 +175,26 @@ describe('Orders list pages through the database', () => {
     expect(pageCalls).toEqual([[0, 1000], [950, 1000], [1450, 1000], [0, 1000], [950, 1000], [1450, 1000]]);
     expect(screen.getByRole('button', { name: 'Deselect All' })).toBeInTheDocument();
   });
+
+  it('a ticked row does not follow the user to another page, and "Select All" does not come back after a filter round trip', async () => {
+    serveOrders(Array.from({ length: 120 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    expect(await screen.findByText('1 selected')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Showing 51–100 of 120 orders · $1,200.00 total');
+    expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));
+    expect(await screen.findByText('120 selected')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
+    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({ p_needs_split_billing: true })));
+    fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: '' } });
+    await screen.findByText(/of 120 orders · \$1,200\.00 total/);
+    expect(screen.queryByText('120 selected')).not.toBeInTheDocument();
+  });
 });
 
 describe('Orders bulk-delete lifecycle guard', () => {

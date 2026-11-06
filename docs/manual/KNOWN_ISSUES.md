@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-05 for the live ledger only (see the void-delivery-order-status-guards-applied-live note); other evidence retains its stated dates.
+**Last verified:** 2026-11-06 for the live ledger only (see the void-delivery-order-status-guards-applied-live note); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -137,6 +137,7 @@ gaps are accepted in KI-78.
 Some audit-trail rows refer to invoices or payments that were later hard-deleted and carry no snapshot of what
 the record was. Newer invoice deletes are soft; hard-delete paths for payments and the admin override remain.
 No snapshot/guard migration was found, but the live row count could not be checked.
+Update 2026-11-06: `20261115160000_financial_delete_snapshots` (PR #1546) is applied live (ledger `20261106060243`, read-only ledger read 2026-11-06); it keeps a full audit copy on an invoice or payment hard delete. Older rows are unchanged.
 
 ### KI-07 — Other small security gaps
 **MED/LOW · mixed · unassigned**

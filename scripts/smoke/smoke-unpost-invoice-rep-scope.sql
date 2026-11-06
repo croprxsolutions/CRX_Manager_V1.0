@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a rep unposts only invoices under their own name
 -- ----------------------------------------------------------------------------
--- Migration 20261123140000_unpost_invoice_rep_scope (Mason, 2026-11-06: the same rule as posting).
+-- Migration 20261125120000_unpost_invoice_rep_scope (Mason, 2026-11-06: the same rule as posting).
 --   A  A rep unposts an invoice where they are the salesperson
 --   B  A rep is refused on another person's invoice (INVOICE_SCOPE_DENIED); it stays posted, no audit row
 --   C  No salesperson: the creator can, another rep can't

@@ -1,5 +1,5 @@
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261123140000_unpost_invoice_rep_scope.md.
+-- docs/reference/migrations.d/20261125120000_unpost_invoice_rep_scope.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (Mason, 2026-11-06, #crx-work): unposting follows the same rule as posting. Admins can unpost any
@@ -12,9 +12,9 @@
 --   One member of a group still needs the group call (GROUP_UNPOST_REQUIRED). No table, policy, grant or row.
 --
 -- ROLLBACK (its own reviewed migration): re-emit unpost_invoice and unpost_invoice_group from their previous
---   bodies (20261118130000 and 20261102180000).
+--   bodies (20261125110000 and 20261102180000).
 --
--- ORDERING: apply after 20261118130000_chem_sale_bill_split_invoices. The preflight pins that body.
+-- ORDERING: apply after 20261125110000_chem_sale_bill_split_invoices. The preflight pins that body.
 
 SET LOCAL lock_timeout = '5s';
 

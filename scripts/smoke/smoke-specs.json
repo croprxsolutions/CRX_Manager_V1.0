@@ -2040,7 +2040,7 @@
     },
     "unpost_invoice_rep_scope": {
       "chain": "smoke-unpost-invoice-rep-scope.sql",
-      "description": "Migration 20261123140000: a rep unposts only invoices and groups under their own name; an admin unposts any.",
+      "description": "Migration 20261125120000: a rep unposts only invoices and groups under their own name; an admin unposts any.",
       "covers": ["unpost_invoice", "unpost_invoice_group"],
       "area": ["billing", "security", "regression"]
     },

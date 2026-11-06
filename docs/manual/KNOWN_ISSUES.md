@@ -298,20 +298,26 @@ hold sub-cent values, adding the checks is Mason's call (LOW-MED); the old name-
 can make old splits refuse to save (LOW-MED).
 
 ### KI-14 — Transfer-created field invoices are always Net 30
-**MED · PARTIAL · money · screen half unassigned**
-- Database half: candidate `20261112090000` (not yet live) makes the transfer stamp invoice date + the
-  billed customer's terms instead of + 30 days, the date posting would stamp (every posting route ends in
-  `_post_invoice_impl_20260714`, which fills the due date only when blank, so the old +30 always survived),
-  and copies those terms onto the invoice (blank customer terms become `Net 30`). The same migration makes the
-  field-application billing save refuse a split whose owners hold different terms, instead of overwriting them. Saved invoices keep their dates; on 2026-11-05 none disagreed with its customer's terms (all customers Net 30).
-- Still open (MED, not reachable while every customer is Net 30): the field-application screen shows Net 30 when an
-  invoice has no terms of its own, and saving writes that onto the invoice, so a saved-then-posted invoice for a
-  Net 15 customer is due in 30 days. Transfer invoices now carry their customer's terms; other field invoices
-  with blank terms are still affected.
-- Still open (MED, screen): a split whose owners hold different terms cannot be saved from the field-application
-  screen (the save sends one set of terms; the database now refuses it). The screen needs per-owner terms.
-- Still open (MED, not reachable today): `parse_payment_terms_days` reads the first number, so `2/10 Net 30` is due in
-  2 days on every posting route; no live customer has discount terms.
+**MED · PARKED (Mason, 2026-11-05) · money · needs one database-plus-screen fix**
+- Not reachable today: on 2026-11-05 every live customer was Net 30 or blank, so the transfer's fixed +30 days is
+  right for all of them, and no saved invoice disagreed with its customer's terms. Fix this before any customer gets
+  other terms.
+- A database-only fix was tried on branch `claude/ki14-transfer-due-date-terms` (candidate `20261112090000`, never
+  applied; real-schema proof `scripts/smoke/prove-transfer-invoice-due-date-real-schema.mjs`). Sol blocked four
+  versions, each for a gap outside the database:
+  1. A blank due date until posting: an unposted invoice can be emailed, and the server PDF prints a blank due date
+     as "On receipt".
+  2. Stamping the date from the customer's terms without copying them: the PDF falls back to the customer's later
+     terms beside the older date.
+  3. Copying the terms onto the invoice: the field-application split editor saves one set of terms (and a blank due
+     date) over every owner of a split.
+  4. Refusing a mixed-terms split save in the database: the screen saves the invoice date before the billing call,
+     so a refusal leaves stale due dates, and adding an owner (blank terms) is refused.
+- Every version was also flagged because `parse_payment_terms_days` reads the first number, so `2/10 Net 30` is due
+  in 2 days on every posting route.
+- The redo needs, as one planned piece (database PR first, then the screen): per-owner terms in the split editor, a
+  terms parser that reads "Net N", a PDF due-date fallback from terms, and the field-application screen not writing
+  Net 30 onto invoices with no terms of their own.
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**

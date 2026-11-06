@@ -151,6 +151,39 @@ function EditParentModal({ parent, profileId, categoryOptions, timingOptions, on
   );
 }
 
+function parentRows(parent: ProductParent, seedOrEach: boolean, timingOptions: UseTimingOption[]): Array<[string, string]> {
+  return [
+    ['Category', parent.category ?? 'None'],
+    ['Use timing', timingLabels(parent.use_timings, timingOptions)],
+    ['Rate per acre', parent.rate_per_acre == null ? 'None' : `${parent.rate_per_acre} ${seedOrEach ? "(in each size's stock unit)" : parent.rate_unit ?? ''}`.trim()],
+    ['Suggested rate', parent.suggested_rate ?? 'None'],
+    ['Product form', parent.product_form],
+    ['Formulation type', parent.formulation_type ?? 'Not recorded'],
+    ['Safener', parent.safener ?? 'Not recorded'],
+    ['EPA number', parent.generic_epa_registration ?? 'None'],
+  ];
+}
+
+function SizeRow({ size, isThisSize, isAdmin, busy, blocked, onMove }: {
+  size: ProductParent['sizes'][number]; isThisSize: boolean; isAdmin: boolean; busy: boolean; blocked: string | undefined; onMove: () => void;
+}) {
+  return (
+    <li className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+      {isThisSize
+        ? <span className="font-medium text-nav-dark">{size.product_name} (this size)</span>
+        : <Link to={`/products/${size.product_id}`} className="text-crx-green underline hover:text-crx-green-dark">{size.product_name}</Link>}
+      {size.sku && <span className="text-xs text-secondary">{size.sku}</span>}
+      <Badge variant="default">{SIZE_ROLE_LABELS[size.size_role] ?? size.size_role}</Badge>
+      {!size.is_active && <Badge variant="warning">Inactive</Badge>}
+      {isAdmin && (
+        <Button size="sm" variant="secondary" showChevron={false} className="ml-auto" disabled={busy} title={blocked} onClick={onMove}>
+          Move this size
+        </Button>
+      )}
+    </li>
+  );
+}
+
 /**
  * PAR-1 Parent panel on the product page: what the parent shares with every size, its sizes, and the
  * admin actions. Every write goes through the parent's own checked database call.
@@ -176,16 +209,7 @@ export default function ProductParentPanel({
   const saved = () => { setOpen(null); onChanged(); };
   const blocked = busy ? 'Save or discard your other changes first' : undefined;
 
-  const rows: Array<[string, string]> = [
-    ['Category', parent.category ?? 'None'],
-    ['Use timing', timingLabels(parent.use_timings, timingOptions)],
-    ['Rate per acre', parent.rate_per_acre == null ? 'None' : `${parent.rate_per_acre} ${seedOrEach ? "(in each size's stock unit)" : parent.rate_unit ?? ''}`.trim()],
-    ['Suggested rate', parent.suggested_rate ?? 'None'],
-    ['Product form', parent.product_form],
-    ['Formulation type', parent.formulation_type ?? 'Not recorded'],
-    ['Safener', parent.safener ?? 'Not recorded'],
-    ['EPA number', parent.generic_epa_registration ?? 'None'],
-  ];
+  const rows = parentRows(parent, seedOrEach, timingOptions);
 
   return (
     <Card>
@@ -213,20 +237,8 @@ export default function ProductParentPanel({
           <p className="mb-1 text-sm font-medium text-secondary">Sizes</p>
           <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
             {parent.sizes.map((size) => (
-              <li key={size.product_id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-                {size.product_id === productId
-                  ? <span className="font-medium text-nav-dark">{size.product_name} (this size)</span>
-                  : <Link to={`/products/${size.product_id}`} className="text-crx-green underline hover:text-crx-green-dark">{size.product_name}</Link>}
-                {size.sku && <span className="text-xs text-secondary">{size.sku}</span>}
-                <Badge variant="default">{SIZE_ROLE_LABELS[size.size_role] ?? size.size_role}</Badge>
-                {!size.is_active && <Badge variant="warning">Inactive</Badge>}
-                {isAdmin && (
-                  <Button size="sm" variant="secondary" showChevron={false} className="ml-auto" disabled={busy} title={blocked}
-                    onClick={() => setOpen({ move: size.product_id })}>
-                    Move this size
-                  </Button>
-                )}
-              </li>
+              <SizeRow key={size.product_id} size={size} isThisSize={size.product_id === productId} isAdmin={isAdmin} busy={busy}
+                blocked={blocked} onMove={() => setOpen({ move: size.product_id })} />
             ))}
           </ul>
         </div>

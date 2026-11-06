@@ -175,6 +175,24 @@ function RatesTabPreview({ locked, edited, changes, problems, saved, busy, block
  * The setup workbook (WP-PM-11a-2): product details and rates in one spreadsheet, separate from the
  * price sheet. Each tab is previewed and confirmed on its own; nothing saves until its Confirm.
  */
+/** What each tab's preview shows and whether its save is blocked. */
+function tabStates(
+  setup: SetupPreview | null,
+  rates: { rows: RateUploadRow[]; preview: RatePreview | null } | null,
+  parentRates: { rows: ParentRateUploadRow[]; previews: ParentRatePreview[] | null } | null,
+) {
+  const rateChanges = rates?.preview?.rows.filter((r) => r.status === 'change') ?? [];
+  const rateProblems = rates?.preview?.rows.filter((r) => r.status !== 'change' && r.status !== 'unchanged') ?? [];
+  return {
+    rateChanges,
+    rateProblems,
+    setupBlocked: !setup || setup.changes.length === 0 || setup.stale.length > 0 || setup.invalid.length > 0,
+    ratesBlocked: rateChanges.length === 0 || rateProblems.length > 0 || Boolean(rates?.preview?.rates_locked),
+    parentRatesBlocked: !parentRates?.previews || parentRates.previews.some((preview, index) => (
+      preview.rates_locked || preview.parent_version !== parentRates.rows[index].expected.parent_version)),
+  };
+}
+
 export default function ProductSetupWorkbookModal({ open, profileId, onClose, onSaved }: {
   open: boolean;
   profileId: string;
@@ -344,12 +362,7 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
     }
   };
 
-  const rateChanges = rates?.preview?.rows.filter((r) => r.status === 'change') ?? [];
-  const rateProblems = rates?.preview?.rows.filter((r) => r.status !== 'change' && r.status !== 'unchanged') ?? [];
-  const setupBlocked = !setup || setup.changes.length === 0 || setup.stale.length > 0 || setup.invalid.length > 0;
-  const ratesBlocked = rateChanges.length === 0 || rateProblems.length > 0 || Boolean(rates?.preview?.rates_locked);
-  const parentRatesBlocked = !parentRates?.previews || parentRates.previews.some((preview, index) => (
-    preview.rates_locked || preview.parent_version !== parentRates.rows[index].expected.parent_version));
+  const { rateChanges, rateProblems, setupBlocked, ratesBlocked, parentRatesBlocked } = tabStates(setup, rates, parentRates);
 
   return (
     <Modal open={open} onClose={close} closeDisabled={busy} title="Setup workbook" size="large"

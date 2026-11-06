@@ -43,6 +43,77 @@ export function OpenWorkList({ productIds }: { productIds: string[] }) {
   );
 }
 
+const hasAnyCode = (error: unknown, codes: ReadonlyArray<Parameters<typeof hasRpcCode>[1]>) => codes.some((code) => hasRpcCode(error, code));
+const previewWentStale = (error: unknown) => hasAnyCode(error, [
+  RpcErrorCodes.PRODUCT_RATE_PREVIEW_CHANGED, RpcErrorCodes.PRODUCT_RATES_STALE,
+  RpcErrorCodes.PRODUCT_PARENT_RATES_STALE, RpcErrorCodes.PRODUCT_PARENT_STALE,
+]);
+const lockSwitched = (error: unknown) => hasAnyCode(error, [RpcErrorCodes.PRODUCT_RATES_LOCKED, RpcErrorCodes.PRODUCT_RATES_NOT_LOCKED]);
+
+function RateUnitSelect({ seedOrEach, unit, unitOptions, onChange }: {
+  seedOrEach: boolean; unit: string; unitOptions: string[]; onChange: (unit: string) => void;
+}) {
+  if (seedOrEach) return <p className="text-sm text-secondary">Rate unit: each size uses its own stock unit.</p>;
+  return (
+    <div>
+      <label htmlFor="parent-rate-unit" className="mb-1 block text-sm font-medium text-secondary">Rate Unit</label>
+      <select id="parent-rate-unit" value={unit} onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20">
+        <option value="">-- Select --</option>
+        {unit && !unitOptions.includes(unit) && <option value={unit}>{unit} (existing)</option>}
+        {unitOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function RatePreviewTable({ previewed, seedOrEach }: { previewed: ParentRatePreview; seedOrEach: boolean }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-secondary">Per-acre prices if you save:</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="text-secondary">
+              <th className="font-medium">Size</th>
+              {TIERS.map((tier) => <th key={tier} className="font-medium">Tier {tier}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {previewed.sizes.map((size) => (
+              <tr key={size.product_id}>
+                <td className="pr-2">{size.product_name}{seedOrEach && size.inventory_unit ? ` (per ${size.inventory_unit})` : ''}</td>
+                {TIERS.map((tier) => (
+                  <td key={tier} className="pr-2">
+                    {perAcre(size.before_prices[`tier${tier}_price_per_acre`])} → <span className="font-medium text-nav-dark">{perAcre(size.prices[`tier${tier}_price_per_acre`])}</span>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <OpenWorkList productIds={previewed.sizes.map((size) => size.product_id)} />
+    </div>
+  );
+}
+
+/** The typed rates as sent: text, so the decimal arrives exactly; seed and each sizes keep their own unit. */
+function rateInputs(rate: string, unit: string, suggested: string, seedOrEach: boolean) {
+  const trimmed = rate.trim();
+  // 9 whole digits and 6 decimals, the database's limit.
+  const rateValid = trimmed === '' || /^\d{1,9}(\.\d{1,6})?$/.test(trimmed);
+  return { rateValid, rates: { rate_per_acre: trimmed === '' ? null : trimmed, rate_unit: seedOrEach ? null : unit, suggested_rate: suggested } };
+}
+
+// Every new per-acre price reads as an exact dollar amount, so the admin saves what they saw.
+const allShownExactly = (previewed: ParentRatePreview) => previewed.sizes.every((size) =>
+  TIERS.every((tier) => perAcre(size.prices[`tier${tier}_price_per_acre`]) !== 'Invalid amount'));
+
+const introText = (parent: ProductParent, ratesLocked: boolean) => (ratesLocked
+  ? `Rates are locked. This corrects ${parent.name} and all ${parent.sizes.length} size(s), is logged with your reason, and reprices their per-acre prices.`
+  : `Sets the rates of ${parent.name} and all ${parent.sizes.length} size(s), and reprices their per-acre prices.`);
+
 /**
  * The parent's rates for every size. Rates open: preview, then save. Rates locked: the same, with a
  * reason, as a logged correction. The save sends the preview back so the database refuses any size
@@ -58,20 +129,17 @@ export default function ParentRatesModal({ parent, profileId, ratesLocked, unitO
 }) {
   const { toast } = useToast();
   const seedOrEach = parent.product_form === 'seed' || parent.product_form === 'each';
-  const [rate, setRate] = useState(parent.rate_per_acre ?? '');
-  const [unit, setUnit] = useState(parent.rate_unit ?? '');
-  const [suggested, setSuggested] = useState(parent.suggested_rate ?? '');
+  const [rate, setRate] = useState(() => parent.rate_per_acre ?? '');
+  const [unit, setUnit] = useState(() => parent.rate_unit ?? '');
+  const [suggested, setSuggested] = useState(() => parent.suggested_rate ?? '');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<{ input: string; result: ParentRatePreview } | null>(null);
 
-  // 9 whole digits and 6 decimals, the database's limit; sent as text so it arrives exactly.
-  const rateValid = rate.trim() === '' || /^\d{1,9}(\.\d{1,6})?$/.test(rate.trim());
-  const rates = { rate_per_acre: rate.trim() === '' ? null : rate.trim(), rate_unit: seedOrEach ? null : unit, suggested_rate: suggested };
+  const { rateValid, rates } = rateInputs(rate, unit, suggested, seedOrEach);
   const previewInput = JSON.stringify(rates);
   const previewed = preview?.input === previewInput ? preview.result : null;
-  const shownExactly = previewed != null && previewed.sizes.every((size) =>
-    TIERS.every((tier) => perAcre(size.prices[`tier${tier}_price_per_acre`]) !== 'Invalid amount'));
+  const shownExactly = previewed != null && allShownExactly(previewed);
   const needsReason = ratesLocked;
   const canPreview = rateValid && (!needsReason || reason.trim() !== '') && !saving;
   const { getKey, resetKey } = useIdempotencyKey(ratesLocked ? 'correct_parent_rates' : 'set_parent_rates', profileId,
@@ -79,10 +147,9 @@ export default function ParentRatesModal({ parent, profileId, ratesLocked, unitO
 
   const refuse = (error: unknown) => {
     toast('error', sanitizeError(error));
-    if (hasRpcCode(error, RpcErrorCodes.PRODUCT_RATE_PREVIEW_CHANGED) || hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_STALE)
-      || hasRpcCode(error, RpcErrorCodes.PRODUCT_PARENT_RATES_STALE) || hasRpcCode(error, RpcErrorCodes.PRODUCT_PARENT_STALE)) setPreview(null);
+    if (previewWentStale(error)) setPreview(null);
     // The lock switched since this page loaded: reload so the right action shows.
-    if (hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_LOCKED) || hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_NOT_LOCKED)) onSaved();
+    if (lockSwitched(error)) onSaved();
   };
   const showPreview = async () => {
     setSaving(true);
@@ -132,56 +199,13 @@ export default function ParentRatesModal({ parent, profileId, ratesLocked, unitO
       )}
     >
       <fieldset disabled={saving} className="space-y-3">
-        <p className="text-sm text-secondary">
-          {ratesLocked
-            ? `Rates are locked. This corrects ${parent.name} and all ${parent.sizes.length} size(s), is logged with your reason, and reprices their per-acre prices.`
-            : `Sets the rates of ${parent.name} and all ${parent.sizes.length} size(s), and reprices their per-acre prices.`}
-        </p>
+        <p className="text-sm text-secondary">{introText(parent, ratesLocked)}</p>
         <Input label="Suggested Rate" value={suggested} onChange={(event) => setSuggested(event.target.value)} />
         <Input label="Rate Per Acre" inputMode="decimal" value={rate} onChange={(event) => setRate(event.target.value)}
           error={rateValid ? undefined : 'Enter zero or more, up to 9 digits and 6 decimals, or leave blank'} />
-        {seedOrEach ? (
-          <p className="text-sm text-secondary">Rate unit: each size uses its own stock unit.</p>
-        ) : (
-          <div>
-            <label htmlFor="parent-rate-unit" className="mb-1 block text-sm font-medium text-secondary">Rate Unit</label>
-            <select id="parent-rate-unit" value={unit} onChange={(event) => setUnit(event.target.value)}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20">
-              <option value="">-- Select --</option>
-              {unit && !unitOptions.includes(unit) && <option value={unit}>{unit} (existing)</option>}
-              {unitOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </div>
-        )}
+        <RateUnitSelect seedOrEach={seedOrEach} unit={unit} unitOptions={unitOptions} onChange={setUnit} />
         {needsReason && <ReasonField id="parent-rates-reason" label="Reason" value={reason} onChange={setReason} />}
-        {previewed && (
-          <div className="space-y-3">
-            <p className="text-sm text-secondary">Per-acre prices if you save:</p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="text-secondary">
-                    <th className="font-medium">Size</th>
-                    {TIERS.map((tier) => <th key={tier} className="font-medium">Tier {tier}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewed.sizes.map((size) => (
-                    <tr key={size.product_id}>
-                      <td className="pr-2">{size.product_name}{seedOrEach && size.inventory_unit ? ` (per ${size.inventory_unit})` : ''}</td>
-                      {TIERS.map((tier) => (
-                        <td key={tier} className="pr-2">
-                          {perAcre(size.before_prices[`tier${tier}_price_per_acre`])} → <span className="font-medium text-nav-dark">{perAcre(size.prices[`tier${tier}_price_per_acre`])}</span>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <OpenWorkList productIds={previewed.sizes.map((size) => size.product_id)} />
-          </div>
-        )}
+        {previewed && <RatePreviewTable previewed={previewed} seedOrEach={seedOrEach} />}
       </fieldset>
     </Modal>
   );

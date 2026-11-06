@@ -259,15 +259,10 @@ export function newSizeFields(product: Record<string, unknown>, role: ProductSiz
   return size;
 }
 
-/** Seed and each sizes keep their stock unit as rate unit; the parent's is blank. */
-export function sizeRateUnit(productForm: string | null | undefined, inventoryUnit: string | null | undefined, parentUnit: string | null): string | null {
-  return productForm === 'seed' || productForm === 'each' ? inventoryUnit ?? null : parentUnit;
-}
-
 export type ParentSearchIndex = ReadonlyMap<string, { name: string; nickname: string | null }>;
 
 /** Size id → its parent's name and nickname, for text search. */
-export function parentSearchIndex(parents: readonly ProductParent[]): ParentSearchIndex {
+function parentSearchIndex(parents: readonly ProductParent[]): ParentSearchIndex {
   const index = new Map<string, { name: string; nickname: string | null }>();
   for (const parent of parents) {
     for (const size of parent.sizes) index.set(size.product_id, { name: parent.name, nickname: parent.nickname });

@@ -519,6 +519,19 @@ const shown = (field: SetupField, value: SetupValue | undefined, options: readon
   return String(value);
 };
 
+/** Why an edited value cannot be saved from the Setup tab, or null when it can. */
+function setupEditRefusal(
+  field: SetupField, value: SetupValue, fingerprintMatches: boolean, parentName: string | undefined, categories: readonly string[],
+): string | null {
+  // A parent edit since the download also moves the fingerprint; that row is shown as stale instead.
+  if (parentName && PARENT_OWNED_SETUP_FIELDS.includes(field) && fingerprintMatches) {
+    return `${field} is set on parent "${parentName}"; change it on the product page's Parent panel`;
+  }
+  // Only listed names: an old alias would be rewritten by the database and move the use timings.
+  if (field === 'category' && value != null && !categories.includes(value as string)) return `unknown category "${value}"`;
+  return null;
+}
+
 /**
  * The Setup tab's preview: compares each uploaded row with the product as it is now. A row whose
  * values differ and whose download fingerprint no longer matches is stale (someone changed it since);
@@ -556,15 +569,10 @@ export function buildSetupPreview(
         continue;
       }
       if (sameSetupValue(field, product, parsed.value)) continue;
-      const parentName = groupedParents.get(product.product_id);
-      // A parent edit since the download also moves the fingerprint; that row is shown as stale below.
-      if (parentName && PARENT_OWNED_SETUP_FIELDS.includes(field) && row.setup_fingerprint === product.setup_fingerprint) {
-        problems.push(`${field} is set on parent "${parentName}"; change it on the product page's Parent panel`);
-        continue;
-      }
-      // Only listed names: an old alias would be rewritten by the database and move the use timings.
-      if (field === 'category' && parsed.value != null && !categories.includes(parsed.value as string)) {
-        problems.push(`unknown category "${parsed.value}"`);
+      const refusal = setupEditRefusal(field, parsed.value, row.setup_fingerprint === product.setup_fingerprint,
+        groupedParents.get(product.product_id), categories);
+      if (refusal) {
+        problems.push(refusal);
         continue;
       }
       changes[field] = parsed.value;

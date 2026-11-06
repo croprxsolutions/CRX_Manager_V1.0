@@ -53,8 +53,8 @@ let matching = 0;
 let seeded = false;
 
 test.beforeAll(() => {
-  if (localSql(`SELECT count(*) FROM pg_proc WHERE proname = 'get_orders_page'`) === '0') {
-    throw new Error('The local copy has no get_orders_page. Rebuild the local copy: node scripts/local-app/app.mjs rebuild (see scripts/local-app/README.md).');
+  if (localSql(`SELECT count(*) FROM pg_proc WHERE proname = 'get_orders_keyset_page'`) === '0') {
+    throw new Error('The local copy has no get_orders_keyset_page. Rebuild the local copy: node scripts/local-app/app.mjs rebuild (see scripts/local-app/README.md).');
   }
   const email = process.env.LOCAL_TEST_EMAIL!.replaceAll("'", "''");
   const admin = localSql(`SELECT id FROM auth.users WHERE email = '${email}'`);
@@ -117,7 +117,7 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   await expect(page.getByText(`Showing 1–50 of ${total} orders`, { exact: false })).toBeVisible({ timeout: 30000 });
 
   // While a page read runs, Select All is greyed out, never a click that is silently dropped.
-  await page.route('**/rpc/get_orders_page**', async (route) => {
+  await page.route('**/rpc/get_orders_keyset_page**', async (route) => {
     await new Promise((r) => setTimeout(r, 3000));
     await route.continue();
   });
@@ -126,7 +126,7 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   await expect(page.getByText(`Showing 51–100 of ${total} orders`, { exact: false })).toBeVisible({ timeout: 15000 });
   await expect(selectAll).toBeEnabled();
   await expect(selectedCount).toHaveCount(0);
-  await page.unroute('**/rpc/get_orders_page**');
+  await page.unroute('**/rpc/get_orders_keyset_page**');
   await page.getByRole('button', { name: `Select All ${total}` }).click();
   await expect(page.getByText(`${matching} selected`)).toBeVisible({ timeout: 60000 });
   // A page turn clears a full Select All too.
@@ -139,4 +139,24 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   await expect(selectAll).toBeDisabled();
   await expect(page.getByText(/^G4O-\d{5}$/)).toHaveCount(0);
   await expect(page.getByText('G4O-04321')).toBeVisible({ timeout: 30000 });
+
+  // An order removed while page one is on screen does not make Next skip one: page two still starts
+  // right after page one's last row (a row count would have moved its first order onto page one).
+  const orderNumbers = () => page.getByText(/^G4O-\d{5}$/).allInnerTexts();
+  await page.getByLabel('Search orders or products…').fill('');
+  await expect(page.getByText(`Showing 1–50 of ${total} orders`, { exact: false })).toBeVisible({ timeout: 30000 });
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByText(`Showing 51–100 of ${total} orders`, { exact: false })).toBeVisible();
+  const pageTwo = await orderNumbers();
+  await page.getByRole('button', { name: 'Previous' }).click();
+  await expect(page.getByText(`Showing 1–50 of ${total} orders`, { exact: false })).toBeVisible();
+  const removed = (await orderNumbers())[2];
+  expect(removed).toMatch(/^G4O-\d{5}$/);
+  // Soft-deleted as the owner with triggers off (an invented row; CLEAN deletes it with the rest).
+  localSql(`BEGIN; SET LOCAL session_replication_role = replica;
+    UPDATE public.orders SET deleted_at = now() WHERE order_number = '${removed}' AND id IN (SELECT md5('g4o-order-' || g)::uuid FROM generate_series(1, 5250) g);
+    COMMIT;`);
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByText(`Showing 51–100 of ${(matching - 1).toLocaleString('en-US')} orders`, { exact: false })).toBeVisible({ timeout: 15000 });
+  expect(await orderNumbers()).toEqual(pageTwo);
 });

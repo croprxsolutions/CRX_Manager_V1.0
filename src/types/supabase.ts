@@ -14450,6 +14450,23 @@ export type Database = {
         Args: { p_customer_id?: string; p_season?: number }
         Returns: Json
       }
+      get_orders_keyset_page: {
+        Args: {
+          p_after?: Json
+          p_from: string
+          p_limit?: number
+          p_needs_split_billing?: boolean
+          p_offset?: number
+          p_planned?: boolean
+          p_pricing_status?: string
+          p_search?: string
+          p_sort_dir?: string
+          p_sort_key?: string
+          p_status?: string
+          p_to: string
+        }
+        Returns: Json
+      }
       get_orders_page: {
         Args: {
           p_from: string

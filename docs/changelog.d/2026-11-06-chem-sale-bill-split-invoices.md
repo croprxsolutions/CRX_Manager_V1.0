@@ -18,3 +18,5 @@
   before); smoke chain `smoke-chem-sale-bill-split-invoices.sql` passes.
 
 A Bill Split draft's product lines now follow the split: changing them means voiding the group, while charges can still be added. A one-customer draft on a sale has to go before a payer can be added. The payers' drafts delete together, not one at a time. Each payer's invoice cost is the cost of its own lines, as on every invoice. If drafting fails at completion the delivery still completes, an activity record is written and the result says so. A price-later (rush) sale drafts nothing until it is priced; Create Invoice on the delivery drafts per payer after.
+
+A posted split group now unposts together: `unpost_invoice` refuses one member (`GROUP_UNPOST_REQUIRED`), for field-split groups too, and the screens already use the group call. A payer's line bills in the order line's unit, so every payer can return it. One line too small to show and worth no cents no longer stops the rest of a delivery billing. The card can't be truncated by a signed-in user.

@@ -142,6 +142,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. A line's shares can't total more than 100%"],
   [/^BILL_SPLIT_GROUP_DELETE_PARTIAL\b/,
    "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"],
+  [/^GROUP_UNPOST_REQUIRED\b/,
+   "Nothing was unposted. This invoice is part of a split group, so the whole group unposts together. Refresh the page and try again"],
   [/^BILL_SPLIT_QUANTITY_TOO_SMALL\b/,
    "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"],
   [/^PRICING_INCOMPLETE: price the order before its Bill Split\b/,

@@ -255,6 +255,9 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_HAS_DRAFT: draft invoice CS-1 bills this sale to one customer.')).toBe(
       "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"
     );
+    expect(sanitizeError('GROUP_UNPOST_REQUIRED')).toBe(
+      'Nothing was unposted. This invoice is part of a split group, so the whole group unposts together. Refresh the page and try again',
+    );
     expect(sanitizeError('BILL_SPLIT_LINES_LOCKED: follow the split')).toBe(
       "Nothing was saved. A Bill Split invoice's product lines follow the split. Void the group to change them; charges can still be added"
     );

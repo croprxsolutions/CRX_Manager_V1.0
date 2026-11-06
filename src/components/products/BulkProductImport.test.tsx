@@ -305,7 +305,8 @@ describe('BulkProductImport screen', () => {
     expect(screen.getByText('Row 150 refused')).toBeInTheDocument();
     expect(screen.getByText(/Rates are locked\. Rows that set a rate are skipped/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Import 249 Product/ }));
-    expect(await screen.findByText('Import Complete')).toBeInTheDocument();
+    // 249 rows are written to browser storage before the save; CI with coverage needs more than the default 1 s.
+    expect(await screen.findByText('Import Complete', undefined, { timeout: 5000 })).toBeInTheDocument();
     const saves = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup');
     expect(saves).toHaveLength(1);
     expect(saves[0][1].p_rows).toHaveLength(249);

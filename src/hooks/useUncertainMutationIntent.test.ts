@@ -297,6 +297,61 @@ describe('useUncertainMutationIntent', () => {
     setItem.mockRestore();
   });
 
+  it.each([
+    ['mirror', (s: Storage, key: string) => s === window.localStorage && key.startsWith('crx:uncertain-mutation:v4:')],
+    ['acknowledgment', (s: Storage, key: string) => s === window.sessionStorage && key.startsWith('crx:uncertain-mutation-ack:v1:')],
+  ])('a failed %s write leaves no hidden record to block the next, different request (Sol MED)', async (_label, fails) => {
+    const options = { operation: 'apply_product_setup', userId: `hidden-${_label}`, surface: 'bulk-product-import' };
+    const originalSetItem = Storage.prototype.setItem;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (fails(this, key)) throw new DOMException('quota exceeded', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    const first = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    try {
+      await expect(act(async () => first.result.current.beginIntent({ file: 'a.csv' })))
+        .rejects.toThrow('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
+    } finally {
+      writes.mockRestore();
+    }
+    first.unmount();
+    expect(window.localStorage.getItem(`crx:uncertain-mutation:v4:${JSON.stringify([options.operation, options.userId])}`)).toBeNull();
+
+    const next = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    expect(next.result.current.isIntentLocked).toBe(false);
+    await act(async () => {
+      expect(await next.result.current.beginIntent({ file: 'b.csv' })).toEqual({ file: 'b.csv' });
+    });
+  });
+
+  it('a failed mirror write never removes an earlier request that may have committed', async () => {
+    const options = { operation: 'apply_product_setup', userId: 'kept-earlier', surface: 'bulk-product-import' };
+    const first = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    await act(async () => first.result.current.beginIntent({ file: 'a.csv' }));
+    const earlierKey = first.result.current.getIdempotencyKey();
+    first.unmount();
+    const originalSetItem = Storage.prototype.setItem;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.localStorage && key.startsWith('crx:uncertain-mutation:v4:')) throw new DOMException('full', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    const retry = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    try {
+      await expect(act(async () => retry.result.current.beginIntent({ file: 'a.csv' }))).rejects.toThrow();
+    } finally {
+      writes.mockRestore();
+    }
+    retry.unmount();
+    const after = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    await expect(act(async () => after.result.current.beginIntent({ file: 'b.csv' })))
+      .rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    expect(after.result.current.unresolvedIntent).toEqual({ file: 'a.csv' });
+    await act(async () => {
+      expect(await after.result.current.beginIntent({ file: 'a.csv' })).toEqual({ file: 'a.csv' });
+    });
+    expect(after.result.current.getIdempotencyKey()).toBe(earlierKey);
+  });
+
   it('fails closed before mutation when transactional browser storage is unavailable', async () => {
     Object.defineProperty(globalThis, 'indexedDB', {
       configurable: true,

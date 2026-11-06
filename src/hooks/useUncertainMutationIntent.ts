@@ -967,6 +967,8 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
         createdAtMs,
         retryNotAfterMs,
       };
+      // Set once IndexedDB holds the record this call just minted. No request has gone out under it until this returns.
+      let mintedVersion: string | null = null;
       try {
         const coordinated = await coordinateDurableRecord(
           storageKey,
@@ -978,6 +980,9 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
           attemptRecordRef.current?.requestVersion ?? null,
           requiredKey,
         );
+        if (!coordinated.conflict && coordinated.record.requestVersion === proposed.requestVersion) {
+          mintedVersion = proposed.requestVersion;
+        }
         writeDurableRecord(storageKey, coordinated.record);
         if (coordinated.conflict) {
           applyRecord(coordinated.record);
@@ -991,6 +996,13 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
         applyRecord(coordinated.record);
         return coordinated.record.intent;
       } catch (error) {
+        if (mintedVersion !== null) {
+          // A mirror write failed after IndexedDB took this call's new record, and the caller never got a key,
+          // so nothing was sent. Left in place, that hidden record would block the next request with no
+          // visible lock to clear. An earlier request's record (a different version) is never removed here.
+          await deleteCoordinatedRecord(storageKey, options, mintedVersion, currentClaimId).catch(() => undefined);
+          if (readDurableRecord(storageKey, options)?.requestVersion === mintedVersion) removeDurableRecord(storageKey);
+        }
         releaseLiveClaim(currentClaimId);
         throw error;
       }

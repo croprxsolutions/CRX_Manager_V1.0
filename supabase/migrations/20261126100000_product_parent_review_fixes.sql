@@ -34,14 +34,16 @@
 --      a 'retired' brand event. The receipt adds from_parent_brands_retired.
 -- 5. One parent per product (new trigger guard_product_parent_epa_duplicate on product_parents): any write that
 --    leaves two active parents with one EPA number and one base name is refused PRODUCT_PARENT_EPA_HAS_PARENT,
---    under a lock per EPA number, so two admins working at once cannot both make one.
+--    under a lock per EPA number, so two admins working at once cannot both make one. Every second-parent check
+--    (build, approval, trigger) compares _product_parent_identity_name (new helper): the base name without the
+--    " (EPA ...)", " (form)" and " #n" suffixes approval adds to keep names unique.
 -- Same signatures, owners and grants for every re-issued function (CREATE OR REPLACE keeps them; the postflight
 -- checks). No table, row, grant or policy changes beyond the new trigger. The switch stays off.
 --
 -- Rollback: DROP TRIGGER guard_product_parent_epa_duplicate ON public.product_parents and DROP FUNCTION
 -- public.guard_product_parent_epa_duplicate(); re-issue _product_parent_base_name, build_product_parent_proposal and approve_product_parent_groups from
 -- 20261123120000_product_parent_proposals.sql, and _product_size_move_refusal and move_product_size from
--- 20261110150000_product_parent_stock_units.sql. Brands retired by an emptying move stay retired (retired is final;
+-- 20261110150000_product_parent_stock_units.sql, then DROP FUNCTION public._product_parent_identity_name(text). Brands retired by an emptying move stay retired (retired is final;
 -- their events record it).
 
 SET LOCAL lock_timeout = '10s';
@@ -92,6 +94,17 @@ LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
     '[(\[][^[:alnum:]]*[)\]]', ' ', 'g'),
     '[[:space:]]+', ' ', 'g'), ' -,/:;');
 $function$;
+
+-- What makes two parents one product, by name: the base name, lower case, without the suffixes approval itself
+-- adds to keep names unique (" (EPA 600-1)", " (liquid)", " (no form)", then " #2"). Used by every
+-- second-parent check, so a renamed-for-uniqueness parent is still recognized.
+CREATE FUNCTION public._product_parent_identity_name(p_name text) RETURNS text
+LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
+  SELECT lower(btrim(regexp_replace(public._product_parent_base_name(p_name),
+    '([[:space:]]*\((EPA [A-Z0-9-]+|liquid|dry|seed|each|no form)\))+([[:space:]]+#[0-9]+)?$', '', 'i')));
+$function$;
+ALTER FUNCTION public._product_parent_identity_name(text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._product_parent_identity_name(text) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. Build a proposal
@@ -185,7 +198,7 @@ BEGIN
              IS DISTINCT FROM ARRAY(SELECT x[1] FROM regexp_matches(b.product_name, '([0-9]+(\.[0-9]+)?|\.[0-9]+)', 'g') x));
     -- An active parent already carries this EPA number (made by PAR-1, or approved from an earlier proposal).
     SELECT string_agg(pp.name, ', ' ORDER BY pp.name),
-           bool_or(lower(public._product_parent_base_name(pp.name)) = lower(v_g.base))
+           bool_or(public._product_parent_identity_name(pp.name) = public._product_parent_identity_name(v_g.base))
       INTO v_epa_parent, v_epa_same_name
       FROM public.product_parents pp
      WHERE v_g.epa IS NOT NULL AND pp.is_active AND pp.generic_epa_registration = v_g.epa;
@@ -326,8 +339,8 @@ BEGIN
     JOIN public.product_parents pp ON pp.is_active AND pp.generic_epa_registration = g.generic_epa_registration
    WHERE g.proposal_id = p_proposal_id
      AND g.id IN (SELECT (e->>'group_id')::uuid FROM jsonb_array_elements(p_groups) e)
-     AND lower(public._product_parent_base_name(pp.name))
-         = lower(public._product_parent_base_name(g.members->0->>'product_name'))
+     AND public._product_parent_identity_name(pp.name)
+         = public._product_parent_identity_name(g.members->0->>'product_name')
    ORDER BY pp.name LIMIT 1;
   IF FOUND THEN
     RAISE EXCEPTION 'PRODUCT_PARENT_EPA_HAS_PARENT: parent "%" already has EPA number % and this name; build a new proposal',
@@ -520,7 +533,7 @@ BEGIN
     PERFORM pg_advisory_xact_lock(hashtext('crx.product_parent_epa:' || NEW.generic_epa_registration));
     SELECT pp.name INTO v_other FROM public.product_parents pp
      WHERE pp.is_active AND pp.id <> NEW.id AND pp.generic_epa_registration = NEW.generic_epa_registration
-       AND lower(public._product_parent_base_name(pp.name)) = lower(public._product_parent_base_name(NEW.name))
+       AND public._product_parent_identity_name(pp.name) = public._product_parent_identity_name(NEW.name)
      ORDER BY pp.name LIMIT 1;
     IF FOUND THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_EPA_HAS_PARENT: parent "%" already has EPA number % and this name; build a new proposal',
@@ -563,7 +576,7 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_TRIGGER: the one-parent-per-product trigger is missing';
   END IF;
   FOREACH v_sig IN ARRAY ARRAY['public._product_parent_base_name(text)', 'public._product_size_move_refusal(uuid,uuid)',
-                               'public.guard_product_parent_epa_duplicate()'] LOOP
+                               'public.guard_product_parent_epa_duplicate()', 'public._product_parent_identity_name(text)'] LOOP
     IF (SELECT array_agg(DISTINCT grantee::regrole::text ORDER BY grantee::regrole::text)
           FROM pg_proc p, aclexplode(p.proacl) WHERE p.oid = v_sig::regprocedure AND privilege_type = 'EXECUTE')
        IS DISTINCT FROM ARRAY['postgres']
@@ -579,6 +592,9 @@ BEGIN
       RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_BASE_NAME: % / %', v_pair[1], v_pair[2];
     END IF;
   END LOOP;
+  IF public._product_parent_identity_name('Base (EPA 600-1) (liquid) #2') <> public._product_parent_identity_name('Base 2.5 gal') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_IDENTITY_NAME: approval''s name suffixes are not ignored';
+  END IF;
   IF public._product_parent_base_name('Rho 2 x 2.5 gal') <> 'Rho' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_BASE_NAME: sizes no longer removed';
   END IF;

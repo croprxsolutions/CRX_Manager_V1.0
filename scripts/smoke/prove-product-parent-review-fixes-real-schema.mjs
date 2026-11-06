@@ -299,6 +299,7 @@ function rollbackSql() {
     take(par2, 'CREATE FUNCTION public.approve_product_parent_groups('),
     take(units, 'CREATE OR REPLACE FUNCTION public._product_size_move_refusal('),
     take(units, 'CREATE OR REPLACE FUNCTION public.move_product_size('),
+    'DROP FUNCTION public._product_parent_identity_name(text);',
   ].join('\n\n');
 }
 
@@ -409,6 +410,14 @@ async function main() {
   refused(ADMIN, `SELECT public.create_product_with_parent(${J({ name: '[PROVER] Kappa Bulk', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' })},
     ${J({ product_name: '[PROVER] Kappa Bulk 30 gal', sku: 'KA-B', inventory_unit: 'Gal' })}, 'k-kappa-bulk');`,
   /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Kappa" already has EPA number 400-1 and this name/);
+  // The suffix approval adds to keep a name unique does not hide a duplicate.
+  refused(ADMIN, `SELECT public.create_product_with_parent(${J({ name: '[PROVER] Kappa (EPA 400-1)', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' })},
+    ${J({ product_name: '[PROVER] Kappa X 1 gal', sku: 'KA-X', inventory_unit: 'Gal' })}, 'k-kappa-suffix');`,
+  /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Kappa" already has EPA number 400-1/);
+  for (const [a, b] of [['Base (EPA 600-1)', 'Base 2.5 gal'], ['Base (liquid) #3', 'base'], ['Base (EPA 600-1) (liquid) #2', 'Base Tote']]) {
+    assert.equal(scalar(`SELECT public._product_parent_identity_name(${lit(a)}) = public._product_parent_identity_name(${lit(b)});`), 't', `${a} / ${b}`);
+  }
+  assert.equal(scalar(`SELECT public._product_parent_identity_name('Mix #2') = public._product_parent_identity_name('Mix');`), 'f', 'a "#2" in a real name was stripped');
   // Same EPA number under another name is still allowed (the build sheet's same-EPA-different-name rule).
   create({ name: '[PROVER] Kappa Max', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' },
     { product_name: '[PROVER] Kappa Max 1 gal', sku: 'KA-M', inventory_unit: 'Gal' }, 'k-kappa-max');
@@ -434,7 +443,7 @@ async function main() {
   assert.match(`${b.stdout}\n${b.stderr}`, /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Omega" already has EPA number 500-1/);
   assert.ok(waitedB >= 1000, `the second writer did not wait for the first (${waitedB} ms)`);
   assert.equal(scalar(`SELECT count(*) FROM public.product_parents WHERE is_active AND generic_epa_registration = '500-1';`), '1');
-  console.log(`[case] one parent per product: a hand-made duplicate is refused PRODUCT_PARENT_EPA_HAS_PARENT, another name with the same EPA number is allowed, and of two writers at once the second waits (${waitedB} ms) and is refused`);
+  console.log(`[case] one parent per product: a hand-made duplicate (also one carrying approval's "(EPA ...)" suffix) is refused PRODUCT_PARENT_EPA_HAS_PARENT, another name with the same EPA number is allowed, and of two writers at once the second waits (${waitedB} ms) and is refused`);
 
   // [case] rejection carried (Taha finding 4)
   const xeno = groupOf(G, X1);
@@ -519,6 +528,7 @@ async function main() {
   assert.equal(rolled.status, 0, rolled.output);
   assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'guard_product_parent_epa_duplicate';`), '0', 'the rollback left the trigger');
   assert.equal(scalar(`SELECT to_regprocedure('public.guard_product_parent_epa_duplicate()') IS NULL;`), 't');
+  assert.equal(scalar(`SELECT to_regprocedure('public._product_parent_identity_name(text)') IS NULL;`), 't');
   for (const [sig, want] of Object.entries(PINS)) assert.equal(bodyMd5(sig), want, `${sig}: the rollback did not restore the live body`);
   for (const s of Object.keys(PINS)) assert.equal(aclOf(s), aclBefore[s], `${s}: the rollback changed grants, settings, owner or security`);
   // The candidate's preflight accepts the rolled-back database again.

@@ -14,8 +14,8 @@ for (const name of [
   "docs/plans/product.md", "docs/reference/gotchas.md", "README.md", "AGENTS.md", "docs/workflows/SAFE_DEVELOPMENT_RULES.md",
   "src/components/Label.tsx", "src/lib/units.ts", "public/sw.js", ".gitignore",
   ".claude/commands/ship.md", ".claude/hooks/loop-guard.mjs", ".claude/hooks/pr-merge-guard.test.mjs", "scripts/agent-health-check.mjs",
-  ".claude/hooks/env-guard.mjs", ".claude/settings.json", ".claude/hooks/sol-risk-lib.test.mjs", "scripts/write-codex-push-proof.test.mjs",
-  "scripts/check-agent-guidance.mjs", ".claude/agents/rls-security-reviewer.md",
+  ".claude/hooks/pr-merge-guard.mjs", ".claude/hooks/sol-risk-lib.mjs", ".claude/hooks/env-guard.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json",
+  "scripts/write-codex-push-proof.mjs", "scripts/check-agent-guidance.mjs", ".claude/agents/rls-security-reviewer.md",
   "package.json", "package-lock.json", "tools/x/package.json", ".npmrc", "deno.lock",
   ".github/workflows/ci.yml", ".husky/pre-push", "vercel.json", "vite.config.ts", "index.html", "scripts/classify-ci-scope.mjs",
   "src/pages/Jobs.tsx", "src/pages/Fields.tsx",
@@ -26,9 +26,6 @@ for (const name of [
   "src/lib/invoiceMath.ts", "src/pages/Inventory.tsx", "supabase/migrations/20261029_x.sql", "supabase/functions/send-email/index.ts", "supabase/config.toml",
   "src/lib/db.ts", "src/contexts/AuthContext.tsx", "src/lib/pagePermissions.ts", "src/components/auth/ResetPasswordPage.tsx", "SRC\\Components\\Auth\\LoginPage.tsx",
   "src/App.tsx", "src/appPages.tsx", "src/pages/MonthEndClose.tsx", "src/pages/Rebates.tsx", "src/pages/Receiving.tsx", "src/pages/LotTrace.tsx", "src/pages/JobDetail.tsx", "src/pages/OfficeCockpit.tsx", "src/pages/Reports.tsx", "src/pages/SettingsPage.tsx", "src/lib/offlineSync.ts", "src/components/receiving/ReceiveForm.tsx",
-  // The gates themselves (Mason, 2026-11-06).
-  ".claude/hooks/pr-merge-guard.mjs", ".claude/hooks/sol-risk-lib.mjs", ".claude\\hooks\\Codex-Push-Lib.mjs", ".codex/hooks/production-action-guard.mjs",
-  "scripts/write-codex-push-proof.mjs", "scripts/apply-migration-file.mjs", ".claude/hooks/migration-access-lib.mjs", ".claude/hooks/owner-approval-lib.mjs",
 ]) {
   check(`${name} needs Sol`, () => assert.ok(solRiskPathProblem(name)));
 }

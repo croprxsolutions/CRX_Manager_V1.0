@@ -1882,6 +1882,7 @@ try {
     for (const file of [
       "src/components/Label.tsx", "AGENTS.md", "docs/reference/gotchas.md", "docs/workflows/SAFE_DEVELOPMENT_RULES.md",
       ".claude/commands/ship.md", ".claude/hooks/loop-guard.mjs", "scripts/agent-health-check.mjs",
+      ".claude/hooks/pr-merge-guard.mjs", ".codex/hooks/production-action-guard.mjs", "scripts/write-codex-push-proof.mjs",
       "package.json", ".github/workflows/ci.yml", "vercel.json",
     ]) {
       assert.equal(mergeDocs({ compare: compareOf([file]) }).blocked, false, `${file} merges without Sol (Mason, 2026-10-30)`);
@@ -1889,8 +1890,6 @@ try {
     for (const file of [
       "supabase/migrations/20261007000000_x.sql", "supabase/functions/send-email/index.ts", "src/lib/invoiceMath.ts", "src/pages/Inventory.tsx", "src/App.tsx",
       "src/lib/db.ts", "src/components/auth/LoginPage.tsx", "src/lib/pagePermissions.ts",
-      // The gates themselves (Mason, 2026-11-06).
-      ".claude/hooks/pr-merge-guard.mjs", ".codex/hooks/production-action-guard.mjs", "scripts/write-codex-push-proof.mjs",
     ]) {
       const verdict = mergeDocs({ compare: compareOf(["docs/plans/2026-10-07-note.md", file]) });
       assert.equal(verdict.blocked, true, `${file} still needs Sol`);

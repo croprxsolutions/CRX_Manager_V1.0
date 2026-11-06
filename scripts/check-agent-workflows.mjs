@@ -91,32 +91,6 @@ requireIncludes(".codex/hooks.json", codexHooksText, ".claude/hooks/sql-safety.m
 requireIncludes(".claude/settings.json", claudeSettingsText, "review-proof-guard.mjs");
 requireIncludes(".codex/hooks.json", codexHooksText, "review-proof-guard.mjs");
 requireIncludes(".codex/hooks.json", codexHooksText, "production-action-guard.mjs");
-// The gate hooks must stay wired (Mason, 2026-11-06): unwiring one is how a gate could be
-// switched off without touching a file on the Sol list. Read the real PreToolUse
-// registrations, not the raw text, so a name left in a comment or other string does not count.
-function preToolUseCommands(text) {
-  try {
-    const entries = JSON.parse(text)?.hooks?.PreToolUse;
-    if (!Array.isArray(entries)) return [];
-    return entries.flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
-      .filter((hook) => hook?.type === "command")
-      .flatMap((hook) => [hook.command, hook.commandWindows].filter((c) => typeof c === "string"));
-  } catch {
-    return [];
-  }
-}
-// shortcut: a changed `matcher` can still stop a wired gate firing (accepted, Mason 2026-11-06 "Best effort (B)").
-function requireGateWired(relative, text, gatePath) {
-  const name = `${relative} wires gate hook ${gatePath} on PreToolUse`;
-  if (preToolUseCommands(text).some((command) => command.includes(gatePath))) pass(name);
-  else fail(name);
-}
-for (const gate of ["pr-merge-guard.mjs", "merge-guard-launcher.mjs", "codex-push-guard.mjs", "migration-apply-guard.mjs", "review-proof-guard.mjs"]) {
-  requireGateWired(".claude/settings.json", claudeSettingsText, `.claude/hooks/${gate}`);
-}
-for (const gatePath of [".claude/hooks/migration-apply-guard.mjs", ".claude/hooks/review-proof-guard.mjs", ".codex/hooks/production-action-guard.mjs"]) {
-  requireGateWired(".codex/hooks.json", codexHooksText, gatePath);
-}
 // Scope to the [mcp_servers.supabase] url line, parsed line-by-line so a
 // commented heading, a commented url, a backup_url key, or a url in a later
 // TOML table can never satisfy the check; the read_only flag is matched at

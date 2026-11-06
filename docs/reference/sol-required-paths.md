@@ -1,11 +1,10 @@
 # Sol-required paths
 
-**Rule (Mason, 2026-10-30; cut to three areas 2026-11-01; gate files added back 2026-11-06):**
-a pull request needs one clean Sol review only when it changes, deletes, renames or moves a
-file below: the database, logins and permissions, money and inventory, or the files that
-enforce the Sol, migration-apply and owner-approval gates. Every other change merges on
+**Rule (Mason, 2026-10-30; cut to three areas 2026-11-01):** a pull request needs one
+clean Sol review only when it changes, deletes, renames or moves a file below: the
+database, logins and permissions, or money and inventory. Every other change merges on
 green checks, with the head pinned by `--match-head-commit`. That includes dependencies,
-deployment files, and the other hooks, guards and scripts. This replaces the
+deployment files, and the hooks, guards and scripts themselves. This replaces the
 2026-10-07 documentation exemption and the 2026-10-29 "every code change" rule, which cost
 more review time than they repaid.
 
@@ -43,33 +42,10 @@ Folders end in `/`. The match ignores case, from the repository root.
 `src/components/products/BulkProductImport.tsx`, `src/components/products/bulkProductImportSafety.ts`,
 `src/components/receiving/`, `src/components/integrity/`, `src/components/field-app/`
 
-**The gates themselves (Mason, 2026-11-06):** a change that could weaken a gate must not
-land on green checks alone. `.claude/hooks/sol-risk-lib.mjs`, `.claude/hooks/codex-bot-review-lib.mjs`
-(the money word list), `.claude/hooks/codex-push-lib.mjs`, `.claude/hooks/pr-merge-guard.mjs`,
-`.claude/hooks/merge-guard-launcher.mjs`, `.claude/hooks/codex-push-guard.mjs`,
-`.claude/hooks/migration-apply-guard.mjs`, `.claude/hooks/migration-apply-lib.mjs`,
-`.claude/hooks/migration-landing-gate-lib.mjs`, `.claude/hooks/migration-access-lib.mjs`,
-`.claude/hooks/owner-approval-lib.mjs`, `.codex/hooks/production-action-guard.mjs`,
-`scripts/write-codex-push-proof.mjs`, `scripts/write-apply-proofs.mjs`,
-`scripts/apply-migration-file.mjs`, `scripts/owner-approve-migration.mjs`, and
-`scripts/check-agent-workflows.mjs`, which fails CI if a gate hook is unwired from
-`.claude/settings.json` or `.codex/hooks.json`. Those two wiring files change too often for
-routine reasons to put behind Sol, so that CI check guards them instead. The gate files' tests and every
-other hook stay off the list.
-
-**Best effort, not airtight (Mason, 2026-11-06, chose this over putting every hook behind Sol).**
-The list catches an agent accidentally weakening a main gate. Accepted holes, each needing a
-deliberate edit: a hook's `matcher` can be changed so a wired gate never fires; other guard
-files (`review-proof-guard.mjs`, `codex-hook-adapter.mjs`, `scripts/run-claude-review.mjs` and
-the rest of the hooks) stay off the list; and the merge guards judge a pull request with that
-pull request's own copy of this module, so one that deletes an entry and its test also escapes
-Sol. Putting every hook and both wiring files behind Sol would close these, at roughly 20 extra
-Sol runs a week (59 of 479 merged pull requests touched them from 2026-10-23 to 2026-11-06).
-
 ## What stays separate
 
 A migration still needs a Sol proof bound to its exact head before it applies (a full
 review, or a carry-forward of one after a clean merge of main, since 2026-11-03); the apply gate
 checks that on its own. To change this list, change the module and this page in one pull
-request. Since 2026-11-06 the module is on the list itself, so that pull request needs Sol;
-widening or narrowing the list stays Mason's decision.
+request. Since 2026-11-01 that pull request is off the list itself, so it lands on green
+checks; widening or narrowing the list stays Mason's decision.

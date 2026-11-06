@@ -1,0 +1,5 @@
+## 2026-11-05 — The Deliveries list can page, search and total in the database (Goal 4, database half)
+
+- New migration `20261116130000_deliveries_list_page.sql` (not yet applied): a new read-only function `get_deliveries_page` returns one page of the Deliveries list (search, status/driver/priority/customer/date filters and every column sort applied in the database, the delivery id as the last sort key) with the true `total_count`, plus the screen's cards and 7-day strip counted over every visible delivery. `p_limit` NULL returns every matching row in one snapshot for exports and the calendar. SECURITY INVOKER: row level security decides what each person sees, as the screen's own reads do today. New function only; grants to authenticated and service_role.
+- Proof script `scripts/smoke/prove-deliveries-page-real-schema.mjs` (scratch container, 1,203 deliveries) and live smoke chain `scripts/smoke/smoke-goal4-deliveries-page.sql`.
+- The Deliveries screen switches to it in a separate PR after this is live.

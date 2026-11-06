@@ -7,6 +7,15 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "get_deliveries_page": {
+      "chain": "smoke-goal4-deliveries-page.sql",
+      "container_prover": "prove-deliveries-page-real-schema.mjs",
+      "area": ["regression"],
+      "description": "REQUIRES 20261116130000. Goal 4 Deliveries list, read only, as the authenticated role: as the oldest active admin, pages of 50 equal the one-shot read (p_limit NULL) for the default order, customer_name ascending and item_count descending, with no repeated id; total_count and the summary's visible_count equal a direct count of deliveries not cancelled or voided, open_count equals the open rows; searching the last row's delivery number finds it; p_limit 501 is refused; the active driver with the most deliveries sees exactly the deliveries assigned to them; the oldest active sales rep sees every delivery an admin sees; an active user of any other role sees none.",
+      "covers": [
+        "get_deliveries_page"
+      ]
+    },
     "get_dispatch_board_jobs": {
       "chain": "smoke-goal4-list-totals.sql",
       "area": ["regression"],

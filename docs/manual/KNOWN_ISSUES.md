@@ -36,9 +36,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 55 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104) | 16 |
-| Closed as FIXED, with proof (bottom of file and archive) | 14 |
+| Closed as FIXED, with proof (bottom of file and archive) | 15 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
@@ -246,7 +246,18 @@ functions and requires a key on each: `admin_update_profile`, `batch_approve_ble
 It also limits `save_blend_recipe` to an active admin or sales rep, as both app recipe screens already were.
 `link_fields_to_parent`, `unlink_field_from_parent` and `save_field_polygons` also refuse a "performed by" naming someone
 other than the signed-in user (the app always sends the signed-in user).
-Remaining: notification RPCs and the other operations functions (batch 4e).
+Batch 4e (`20261123110000`, applied live 2026-11-06, ledger `20261106154806`, after the app PR #1518 that sends a key
+on the six keyless notification and applied-info calls was serving in production) binds 15 operations
+functions and requires a key on each: `confirm_job_notification_sent`, `record_job_pre_notifications`,
+`record_job_post_notifications`, `log_failed_notification`, `assign_job_applicator`, `dispatch_job_locations`,
+`undispatch_job_locations`, `start_job`, `create_job_from_quote_section`, `update_field_app_applied_info`,
+`create_quote_from_template`, `rollover_quote_to_season`, `save_quote_template`, and the two disabled bulk
+prepayment functions `apply_remaining_prepayments` and `batch_apply_all_prepayments` (still always refused).
+Exceptions: the three calls PR #1518 began keying (`confirm_job_notification_sent`, `log_failed_notification`,
+`update_field_app_applied_info`) still accept a call with no key and run it exactly as before (no receipt). A browser
+tab opened before PR #1518 can then still mark an email it already sent, log a failure, and save applied info after
+its invoice. A key-carrying call is bound like the rest.
+After 4e, only the accepted exceptions listed for batch 4c remain.
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
 **HIGH on money paths · FIXED IN CODE 2026-11-02 (branch `claude/crx-idempotency-keys-4a3741`; live once merged) · money**
@@ -286,7 +297,9 @@ after the old one. Neither makes a second record or moves money twice; a clear r
 (KI-10 batches 4c/4d; batch 4c binds `edit_delivery` and `reassign_delivery`), not a screen change. Once batch 4d is applied, `save_field` is bound: a changed retry
 with the same key is refused, and nothing changes, instead of opening the field already created; after a
 refresh the new field is in the list. Field Setup shows that refusal as the raw code
-`IDEMPOTENCY_INTENT_MISMATCH` rather than the plain message in `errorSanitizer.ts` (cosmetic; follow-up). Quotes' Convert to Order
+`IDEMPOTENCY_INTENT_MISMATCH` rather than the plain message in `errorSanitizer.ts` (cosmetic; follow-up). Once batch 4e is applied, `assign_job_applicator`,
+`create_quote_from_template` and `rollover_quote_to_season` are bound the same way: a changed retry with the same key is
+refused and changes nothing, instead of replaying the record already made; a refresh shows that record. Quotes' Convert to Order
 starts a new key each time its dialog opens, which is accepted: the server answers a repeat with
 `already_converted` and opens the existing order. `KNOWN_UNFIXED_SITES` in
 `src/__tests__/idempotency-reset-order.test.ts` lists only three documented scanner false positives (CustomerDetail,
@@ -326,28 +339,18 @@ hold sub-cent values, adding the checks is Mason's call (LOW-MED); the old name-
 can make old splits refuse to save (LOW-MED).
 
 ### KI-14 — Transfer-created field invoices are always Net 30
-**MED · PARKED (Mason, 2026-11-05) · money · needs one database-plus-screen fix**
-- The transfer (`_transfer_job_to_invoice_intent_impl_20260908`) stamps due date = invoice date + 30 days whatever
-  the customer's terms say. Every posting route ends in `_post_invoice_impl_20260714`, which fills the due date only
-  when blank, so the +30 survives posting.
-- Not reachable today: on 2026-11-05 every live customer was Net 30 or blank, so +30 days is right for all of them,
-  and no saved invoice disagreed with its customer's terms. Fix this before any customer gets other terms.
-- A database-only fix is parked on branch `claude/ki14-transfer-due-date-terms` (candidate `20261112090000`, never
-  applied; real-schema proof `scripts/smoke/prove-transfer-invoice-due-date-real-schema.mjs`). Sol blocked four
-  versions, each for a gap outside the database:
-  1. A blank due date until posting: an unposted invoice can be emailed, and the server PDF prints a blank due date
-     as "On receipt".
-  2. Stamping the date from the customer's terms without copying them: the PDF falls back to the customer's later
-     terms beside the older date.
-  3. Copying the terms onto the invoice: the field-application split editor saves one set of terms (and a blank due
-     date) over every owner of a split.
-  4. Refusing a mixed-terms split save in the database: the screen saves the invoice date before the billing call,
-     so a refusal leaves stale due dates, and adding an owner (blank terms) is refused.
-- Every version was also flagged because `parse_payment_terms_days` reads the first number, so `2/10 Net 30` is due
-  in 2 days on every posting route.
-- The redo needs, as one planned piece (database PR first, then the screen): per-owner terms in the split editor, a
-  terms parser that reads "Net N", a PDF due-date fallback from terms, and the field-application screen not writing
-  Net 30 onto invoices with no terms of their own.
+**MED · FIXED 2026-11-06 8:54 AM Central (PR #1556, migration `20261120100000_field_invoice_due_date_follows_owner_terms`, ledger `20261106145427`) · money**
+- Each field-application invoice is now due on its own owner's terms: the transfer leaves the due date blank and a
+  trigger fills it from that invoice's terms (blank terms take the customer's, then Net 30). A due date typed by hand
+  is marked custom (`invoices.due_date_is_custom`) and kept when terms change.
+- `parse_payment_terms_days` reads "Net N" first, so `2/10 Net 30` is 30 days.
+- The split editor saves per-owner terms through `update_field_app_invoice_billing(p_terms_by_invoice)`. An app tab
+  opened before this change saves the PO, notes and discounts and leaves each invoice's terms and due date as they
+  are (Mason, 2026-11-06: an old tab saves all but terms/due date).
+- The PDF falls back to the terms' due date only for field-application invoices; Print refuses a custom due date
+  left blank.
+- Proof: `scripts/smoke/prove-field-invoice-due-date-follows-terms-real-schema.mjs` (Docker), live smoke chains, and
+  `db-sweeps:live` after the apply (six cost-exposure keys re-read and re-keyed; no cost reaches a reply).
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**
@@ -368,21 +371,18 @@ can make old splits refuse to save (LOW-MED).
   changes rounding on every quote line, so it needs its own money PR. LOW.
 
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock
-**MED / LOW · OPEN · money/UI · unassigned (the pre-harvest warning part is fixed, see the archive)**
-- Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
-  `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
-  (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
-- `invoices.season` defaults to `current_season()`, and the blend-ticket path uses it
-  (`20261020210000:1050,1227`). Fixed by `20261103120000` (applied live 2026-11-03, ledger `20261103003731`), which makes `current_season()` read the
-  Chicago date; the same migration moves the `invoices.invoice_date` default to the Chicago date, so the two
-  defaults agree. LOW.
-- Client season reads: FIXED 2026-11-05 (branch `claude/ki18-season-central-1f821d`). `computeSeason()` now uses
-  the America/Chicago date, matching `current_season()`; details and proof are in the archive. Left open: other
-  screens still default some dates and "this month"/"last 30 days" filters from the browser clock (only the season
-  part was changed).
-- Two AR-aging views bucket a 30-day-old invoice differently; invoice dates have no future-date limit; three
-  filters cut the day at UTC midnight. UNVERIFIED (PR #991 fixed the AR strip; the rest not re-checked). MED.
-  Checked 2026-11-05: none of these live in the season helpers, so they were left out of the season fix.
+**MED · OPEN · money/UI · unassigned (fixed parts: seasons, screens, blend-ticket year, dashboard aging and the invoice date limit; see below)**
+- Fixed 2026-11-06 by `20261121090000` (applied live, ledger `20261106152929`, PR #1560): blend-ticket numbers take
+  the Chicago year; the Financial Dashboard's AR-aging strip uses the AR Aging page's ranges on the Chicago date; the
+  database refuses an invoice date more than 365 days after the Chicago date. Earlier fixes: `20261103120000`
+  (`current_season()` and the `invoice_date` default) and `20261029160300` (quote, order and rebate-claim years).
+- Customer statements (`get_detailed_statement_data`) age by <=30 / 31-60 / 61-90 / 91-120 / >120 days; the AR Aging
+  page uses 0-29 / 30-59 / 60-89 / 90-119 / 120+, so a 30-day-old invoice is "current" on the statement and 30-59 on
+  AR Aging. Which ranges both use is Mason's decision (recommended: the AR Aging ones). MED.
+- The live database clock is UTC, and many functions still take "today" from `CURRENT_DATE` or `now()`, so from
+  6-7 pm Central they act on tomorrow: overdue marking, AR reminders, license expiry, RUP record dates, quote expiry,
+  holds, dispatch windows, default invoice and bill dates, `get_customer_summary`, and `operational_dashboard_summary`
+  (season, today, and days left in the period). A Sol scan on 2026-11-06 listed about 30; not yet checked one by one. MED.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**
@@ -892,7 +892,7 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   for the same product (LOW).
 - `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (applied live 2026-11-03, ledger `20261103003731`) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
-- Transfer Net 30 (KI-14): traced 2026-11-05; posting keeps the +30. Parked; see KI-14.
+- Transfer Net 30 (KI-14): FIXED 2026-11-06 (PR #1556); see KI-14.
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).

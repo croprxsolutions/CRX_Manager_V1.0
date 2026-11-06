@@ -86,6 +86,8 @@ export default function Orders() {
     sortKey: sort.key, sortDir: sort.dir,
   }), [debouncedSearch, statusFilter, planFilter, pricingFilter, splitFilter, sort]);
   const queryKey = JSON.stringify(query);
+  // Rows on screen are stale while a read runs or a typed search waits out its 300 ms debounce.
+  const listBusy = pageLoading || search.trim() !== debouncedSearch;
 
   // The page number belongs to one query: a new search, filter or sort starts again at page one.
   const [pageState, setPageState] = useState({ key: queryKey, page: 0 });
@@ -670,7 +672,7 @@ export default function Orders() {
                 </Button>
               </div>
             }
-            loading={pageLoading}
+            loading={listBusy}
             loadError={loadFailed}
             onRetry={fetchOrders}
             filters={
@@ -720,7 +722,7 @@ export default function Orders() {
                 {canBulkAction && orders.length > 0 && (
                   <button
                     onClick={handleSelectAll}
-                    disabled={selectingAll}
+                    disabled={selectingAll || listBusy}
                     className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors disabled:opacity-50"
                   >
                     {selectAllLabel(selectingAll, everythingSelected, moreThanThisPage ? totals : null)}

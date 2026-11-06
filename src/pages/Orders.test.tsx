@@ -39,19 +39,20 @@ vi.mock('../components/ui/PageHeader', () => ({
 }));
 // The table shows each row's tick box (the first column) and the filters, so selection can be driven.
 vi.mock('../components/ui/DataTable', () => ({
-  default: ({ data, columns, filters, loadError, searchValue, onSearchChange }: {
+  default: ({ data, columns, filters, loading, loadError, searchValue, onSearchChange }: {
     data: Array<{ id: string; order_number: string }>;
     searchValue?: string;
     onSearchChange?: (v: string) => void;
     columns: Array<{ key: string; render?: (row: unknown) => ReactNode }>;
     filters?: ReactNode;
+    loading?: boolean;
     loadError?: boolean;
   }) => (
     <div>
       <input aria-label="Search orders or products…" value={searchValue ?? ''} onChange={(e) => onSearchChange?.(e.target.value)} />
       {filters}
       {loadError ? <span>could not be loaded</span> : <span>{`${data.length} rows shown`}</span>}
-      {data.map((row) => (
+      {loading ? <span>rows loading</span> : data.map((row) => (
         <div key={row.id}>
           {row.order_number}
           {columns[0].key === '_select' && columns[0].render?.(row)}
@@ -216,6 +217,29 @@ describe('Orders list pages through the database', () => {
     await waitFor(() => expect(screen.queryByText(/Showing/)).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it('"Select All" is greyed out while a page read is running, so a click is never silently dropped', async () => {
+    serveOrders(Array.from({ length: 120 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+    expect(screen.getByRole('button', { name: 'Select All 120' })).toBeEnabled();
+
+    mockRpc.mockImplementation(() => new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('rows loading');
+    expect(screen.getByRole('button', { name: 'Select All 120' })).toBeDisabled();
+  });
+
+  it('while a typed search waits to run, the old rows are hidden and "Select All" is greyed out', async () => {
+    serveOrders(Array.from({ length: 120 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+
+    fireEvent.change(screen.getByLabelText('Search orders or products…'), { target: { value: 'ORD-2' } });
+    expect(screen.getByText('rows loading')).toBeInTheDocument();
+    expect(screen.queryByText('ORD-0')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select All 120' })).toBeDisabled();
   });
 
   it('a refresh that fails drops "Select All": no bulk action is offered over rows nobody can see', async () => {

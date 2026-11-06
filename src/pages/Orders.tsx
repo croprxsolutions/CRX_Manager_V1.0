@@ -176,7 +176,7 @@ export default function Orders() {
 
   // A new search or filter hides the old totals until its own read lands: they never describe another query.
   const totals = forQuery(totalsState, queryKey);
-  const { moreThanThisPage, everythingSelected } = selectionScope(totals, orders.length, allMatching !== null, allSelected);
+  const { moreThanThisPage, everythingSelected } = selectionScope(totals, orders.length, allMatching, allSelected);
 
   const handleSelectAll = async () => {
     if (everythingSelected) {
@@ -805,7 +805,9 @@ function selectAllLabel(selecting: boolean, everythingSelected: boolean, moreTha
 }
 
 /** Whether more orders match than this page shows, and whether every matching order is already selected. */
-function selectionScope(totals: { count: number } | null, rowsShown: number, allMatchingSelected: boolean, pageAllSelected: boolean) {
+function selectionScope(totals: { count: number } | null, rowsShown: number, allMatching: unknown[] | null, pageAllSelected: boolean) {
   const moreThanThisPage = totals !== null && totals.count > rowsShown;
+  // After "select all", unticking rows brings the "Select All" button back.
+  const allMatchingSelected = allMatching !== null && totals !== null && allMatching.length >= totals.count;
   return { moreThanThisPage, everythingSelected: allMatchingSelected || (pageAllSelected && !moreThanThisPage) };
 }

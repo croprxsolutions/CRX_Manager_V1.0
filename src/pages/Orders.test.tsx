@@ -179,6 +179,11 @@ describe('Orders list pages through the database', () => {
     const pageCalls = mockRpc.mock.calls.map(([, args]) => [args.p_offset, args.p_limit]).filter(([, limit]) => limit === 1000);
     expect(pageCalls).toEqual([[0, 1000], [950, 1000], [1450, 1000], [0, 1000], [950, 1000], [1450, 1000]]);
     expect(screen.getByRole('button', { name: 'Deselect All' })).toBeInTheDocument();
+
+    // Unticking one row after "select all" brings the Select All button back.
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    expect(await screen.findByText('1499 selected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select All 1,500' })).toBeInTheDocument();
   });
 
   it('a ticked row does not follow the user to another page, and "Select All" does not come back after a filter round trip', async () => {

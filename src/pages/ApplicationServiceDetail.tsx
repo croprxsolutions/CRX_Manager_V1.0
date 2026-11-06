@@ -21,6 +21,7 @@ import {
   parseApplicationServiceCostCents,
 } from '../lib/applicationServiceCosts';
 import type { Vehicle, CustomerApplicationRate } from '../types';
+import { computeSeason } from '../utils/season';
 
 // Every column of application_services EXCEPT cost_per_acre_cents. That column is
 // our internal per-acre cost — margin, once subtracted from the customer rate —
@@ -36,11 +37,6 @@ const SERVICE_COLUMNS = 'id, name, vehicle_id, default_rate_per_acre_cents, is_a
 // (positive-only, rejects scientific notation / multi-dot — no parseFloat).
 function formatCentsToDollars(cents: number): string {
   return (cents / 100).toFixed(2);
-}
-
-function currentSeason(): number {
-  const now = new Date();
-  return now.getMonth() >= 9 ? now.getFullYear() + 1 : now.getFullYear();
 }
 
 export default function ApplicationServiceDetail() {
@@ -74,7 +70,7 @@ export default function ApplicationServiceDetail() {
   const skipUnsavedPromptRef = useRef(false);
   const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
   const saveIdem = useIdempotencyKey('admin_save_application_service', profile?.id || '');
-  const [newOverride, setNewOverride] = useState({ customer_id: '', rate: '', season: currentSeason().toString(), notes: '' });
+  const [newOverride, setNewOverride] = useState({ customer_id: '', rate: '', season: computeSeason().toString(), notes: '' });
   const [deleteOverrideId, setDeleteOverrideId] = useState<string | null>(null);
 
   useEffect(() => { if (!initialLoadDone.current || form === loadedFormRef.current) return; setIsDirty(true); }, [form]);
@@ -255,15 +251,15 @@ export default function ApplicationServiceDetail() {
 
   const handleAddOverride = async () => {
     if (!newOverride.customer_id || !newOverride.rate) { toast('error', 'Customer and rate are required'); return; }
-    const dup = overrides.find((o) => o.customer_id === newOverride.customer_id && o.season === (parseInt(newOverride.season) || currentSeason()));
+    const dup = overrides.find((o) => o.customer_id === newOverride.customer_id && o.season === (parseInt(newOverride.season) || computeSeason()));
     if (dup) { toast('error', 'This customer already has a rate for this season. Remove the existing one first.'); return; }
     const overrideRateCents = parseDollarsToCents(newOverride.rate);
     if (overrideRateCents === null) { toast('error', `Rate: ${MONEY_PRECISION_MESSAGE}`); return; }
     try {
-      const result = await supabase.from('customer_application_rates').insert({ customer_id: newOverride.customer_id, application_service_id: id!, rate_per_acre_cents: overrideRateCents, season: parseInt(newOverride.season) || currentSeason(), notes: newOverride.notes || null, created_by: profile?.id }).select('*, customer:customers(farm_name)').single();
+      const result = await supabase.from('customer_application_rates').insert({ customer_id: newOverride.customer_id, application_service_id: id!, rate_per_acre_cents: overrideRateCents, season: parseInt(newOverride.season) || computeSeason(), notes: newOverride.notes || null, created_by: profile?.id }).select('*, customer:customers(farm_name)').single();
       checkMutationResult(result, 'Add customer rate override');
       setOverrides((prev) => [result.data as CustomerApplicationRate, ...prev]);
-      setNewOverride({ customer_id: '', rate: '', season: currentSeason().toString(), notes: '' });
+      setNewOverride({ customer_id: '', rate: '', season: computeSeason().toString(), notes: '' });
       setNewOverrideCustomerName('');
       if (profile) logActivity({ event: 'app_rate_override_added', description: `Rate override added`, performedBy: profile.id, entityType: 'customer_application_rate', entityId: result.data!.id });
       toast('success', 'Override added');

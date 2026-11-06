@@ -1,0 +1,6 @@
+## 2026-11-06 — The Orders list can page by bookmark, so no order is skipped (Goal 4 follow-up, database half)
+
+- New migration `20261125100000_orders_list_keyset_page.sql`: read-only `get_orders_keyset_page` returns the Orders list page after a bookmark of the last row shown (`p_after` = the previous page's `next_cursor`). Before, paging by position skipped one order whenever an order left the list between pages (deleted, or edited out of the filter); Sol raised it as a MED on PR 1559. `get_orders_page` keeps its arguments and now calls the new function, so screens already loaded keep working. SECURITY INVOKER, so each role still sees exactly what it saw. Nothing calls the bookmark yet.
+- Proof: `scripts/smoke/prove-orders-list-page-real-schema.mjs` now also pages by bookmark for every sort and shows an order deleted between pages made the old paging skip a row and the bookmark paging skip none. New live smoke chain `smoke-goal4-orders-keyset-page.sql`.
+- The Orders screen switches to the bookmark in a separate PR after this is live.
+- Applied live 2026-11-06 17:34:20 UTC (ledger `20261106173420`). Live checks after apply: both smoke chains (`get_orders_keyset_page`, `get_orders_page`) PASS (rolled back); both functions SECURITY INVOKER, STABLE, `search_path` pinned, EXECUTE only for authenticated and service_role.

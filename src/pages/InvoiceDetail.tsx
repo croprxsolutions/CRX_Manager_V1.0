@@ -43,7 +43,8 @@ import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
-import { todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
+import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
+import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
@@ -170,7 +171,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     invoice_type: isMiscChargeLocked ? 'misc_charge' : 'chemical_sale',
     status: 'draft',
     // An invoice date is a company-wide accounting fact, so it follows Crop RX's business
-    // timezone, not the browser's. localToday() would let a user outside Chicago open a new
+    // timezone, not the browser's. The browser's own date would let a user outside Chicago open a new
     // invoice dated 2026-09-30 while Chicago is already on 2026-10-01, filing it in season 2026
     // when the business day says 2027 (the server derives season from invoice_date since
     // migration 20260904180000).
@@ -644,20 +645,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     const normalizedTerms = effectivePaymentTerms.toLowerCase();
     const isReceiptAlias = ['due on receipt', 'due upon receipt', 'receipt', 'immediately'].includes(normalizedTerms);
     const isPreset = ['Net 30', 'Net 15', 'Net 60', 'Due on receipt'].includes(effectivePaymentTerms);
-    const termDays = isReceiptAlias
-      ? 0
-      : (() => {
-          const match = /(\d+)/.exec(effectivePaymentTerms);
-          const parsed = match ? Number(match[1]) : NaN;
-          return Number.isFinite(parsed) && parsed >= 1 && parsed <= 365 ? parsed : 30;
-        })();
-    let stampedDate = '';
-    if (loadedInvoice.invoice_date) {
-      const stamped = new Date(`${loadedInvoice.invoice_date}T00:00:00Z`);
-      stamped.setUTCDate(stamped.getUTCDate() + termDays);
-      stampedDate = stamped.toISOString().slice(0, 10);
-    }
-    const isPostingStamp = loadedDueDate !== '' && loadedDueDate === stampedDate;
+    // KI-14: a field-application invoice records whether its date was typed (due_date_is_custom);
+    // other invoice types still compare the date with the stamp their terms give.
+    const stampedDate = loadedInvoice.invoice_date ? dueDateFromTerms(loadedInvoice.invoice_date, effectivePaymentTerms) : '';
+    const isPostingStamp = loadedDueDate !== '' && (
+      loadedInvoice.invoice_type === 'field_application'
+        ? !loadedInvoice.due_date_is_custom
+        : loadedDueDate === stampedDate);
     const isEditableStatus = ['draft', 'unposted'].includes(loadedInvoice.status || '');
     if (loadedDueDate && !isPostingStamp && isEditableStatus) {
       setPaymentTerms('Custom date…');
@@ -1121,6 +1115,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'Choose a custom due date before saving.');
       return;
     }
+    // KI-14: the database marks a field invoice's date as typed only when the date changes, so a "custom" date equal
+    // to the date its terms already gave would be recalculated from the new terms on save (Sol, PR #1556).
+    if (paymentTerms === 'Custom date…' && invoice.invoice_type === 'field_application'
+      && !invoice.due_date_is_custom && customDueDate === (invoice.due_date || '')) {
+      toast('error', "That is already this invoice's due date from its terms. Keep the terms, or choose a different custom date.");
+      return;
+    }
     // Per-line split billing (Codex P1 #6, 2026-07-18): a split child's line detail lives in
     // invoice_line_shares, keyed to invoice_items by billing_line_id. The generic save_invoice
     // deletes + recreates invoice_items, which would CASCADE those shares away and silently
@@ -1132,6 +1133,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     }
     if (!invoice.customer_id) {
       toast('error', 'Please select a customer');
+      return;
+    }
+    const dateProblem = invoiceDateTooFarProblem(invoice.invoice_date);
+    if (dateProblem) {
+      toast('error', dateProblem);
       return;
     }
     if (takesCharges) {
@@ -2287,6 +2293,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                   type="date"
                   value={invoice.invoice_date?.split('T')[0] || ''}
                   onChange={(e) => setInvoice((prev) => ({ ...prev, invoice_date: e.target.value }))}
+                  max={latestInvoiceDate()}
                   className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 />
               ) : (

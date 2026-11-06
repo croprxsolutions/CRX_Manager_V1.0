@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   Save, Send, Trash2, MapPin, FlaskConical, Users, ClipboardList, ArrowLeft, Eye, AlertTriangle,
@@ -22,7 +22,8 @@ import { logActivity } from '../lib/activityLogger';
 import { Sentry } from '../lib/sentry';
 import { formatCents as fmt } from '../lib/money';
 import { DISCOUNT_EARNED_INPUT_MESSAGE, parseDiscountEarnedCents } from '../lib/parseCents';
-import { todayInBusinessTz } from '../lib/dateUtils';
+import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz } from '../lib/dateUtils';
+import { RECEIPT_TERMS, dueDateFromTerms } from '../lib/paymentTerms';
 import { billableAcres, acreDivergence, appliedMatchesSystem } from '../lib/fieldGeometry';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -172,6 +173,30 @@ type CreatedInvoiceCheck =
  * and rolled it back, so nothing was saved under its key. An error with no code (a network
  * failure, a lost reply) is NOT definitive: the call may have committed.
  */
+// KI-14: each owner of a split keeps its own payment terms. choice is a preset, a legacy text, '' (the
+// customer's terms, filled in by the database on save) or CUSTOM_DUE (a typed due date).
+const CUSTOM_DUE = 'Custom date…';
+const TERMS_PRESETS = ['Net 30', 'Net 15', 'Due on receipt'];
+type OwnerTerms = { choice: string; customText: string; dueDate: string };
+const OWNER_TERMS_DEFAULT: OwnerTerms = { choice: '', customText: '', dueDate: '' };
+
+function ownerTermsFromRow(row: Record<string, unknown>): OwnerTerms {
+  const terms = (row.payment_terms as string | null) || '';
+  const due = (row.due_date as string | null) || '';
+  const editable = ['draft', 'unposted'].includes((row.status as string) || 'draft');
+  // The database records whether the date was typed (due_date_is_custom); never guess from the date.
+  if (editable && row.due_date_is_custom === true && due) return { choice: CUSTOM_DUE, customText: terms, dueDate: due };
+  const choice = RECEIPT_TERMS.includes(terms.trim().toLowerCase()) ? 'Due on receipt' : terms;
+  // A posted invoice keeps its stored date for read-only display; an editable one follows its terms.
+  return { choice, customText: '', dueDate: editable ? '' : due };
+}
+
+function ownerTermsPayload(t: OwnerTerms): { payment_terms: string | null; due_date: string | null } {
+  return t.choice === CUSTOM_DUE
+    ? { payment_terms: t.customText || 'Custom', due_date: t.dueDate || null }
+    : { payment_terms: t.choice || null, due_date: null };
+}
+
 function isDefinitiveRpcError(error: { code?: string | null } | null | undefined): boolean {
   return !!error?.code;
 }
@@ -297,13 +322,13 @@ export default function FieldApplicationInvoice() {
   // (To-Do 10.5), so Save cannot write an empty chemical or location list over the real one.
   const [loadFailed, setLoadFailed] = useState<{ id: string; route: number } | null>(null);
   const [filedDate, setFiledDate] = useState<string | null>(null);
-  // todayInBusinessTz(), NOT new Date().toISOString() and NOT localToday().
+  // todayInBusinessTz(), NOT new Date().toISOString() and NOT the browser's own date.
   // toISOString() converts to UTC, so from ~7 pm Chicago this pre-filled TOMORROW — the same
   // UTC/Chicago bug the server-side invoice_date fallbacks fixed on 2026-09-04. Because this
   // page ALWAYS sends invoice_date, the server fallback never engages here, so the wrong day
   // could only be fixed on the client. On 2026-09-30 after 7 pm it pre-filled 2026-10-01,
   // filing the invoice in season 2027.
-  // localToday() fixes that only for a browser whose own clock is Chicago. An invoice date is a
+  // The browser's own date fixes that only for a browser whose own clock is Chicago. An invoice date is a
   // company-wide accounting fact, so it must follow Crop RX's business timezone regardless of
   // where the user is sitting — otherwise a salesman on Pacific time creates 2026-09-30
   // invoices while Chicago is already on 2026-10-01, landing them in the wrong season.
@@ -318,14 +343,10 @@ export default function FieldApplicationInvoice() {
   // existed on invoices; payment_terms / internal_notes / discount are new (migration
   // 20260625150000). The header fields apply uniformly to the whole split group; the
   // Discount Earned is per-invoice (one invoice row per customer in a split).
-  // poRef/terms/dueDate/footerNotes/internalMemo are uniform across the group.
+  // poRef/footerNotes/internalMemo are uniform across the group; payment terms and due date are per
+  // owner (KI-14), keyed by CUSTOMER_ID like the Discount Earned draft below.
   const [poRef, setPoRef] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState('Net 30');
-  // A non-standard terms string loaded from the DB (e.g. legacy 'Net 45') shows as
-  // 'Custom date…' in the picker; preserve the original text so saving doesn't
-  // overwrite it with the picker's sentinel label.
-  const [customTermsText, setCustomTermsText] = useState('');
-  const [dueDate, setDueDate] = useState('');
+  const [termsByCustomer, setTermsByCustomer] = useState<Record<string, OwnerTerms>>({});
   const [footerNotes, setFooterNotes] = useState('');
   const [internalMemo, setInternalMemo] = useState(''); // internal_notes — NOT printed
   // #33: Discount Earned is owner-driven + DISPLAY-ONLY (it NEVER folds into the
@@ -961,6 +982,50 @@ export default function FieldApplicationInvoice() {
     setDirty(true);
   }, []);
 
+  // KI-14: per-owner payment terms, keyed by customer like the discount draft.
+  const termsFor = useCallback((custId: string | null | undefined): OwnerTerms =>
+    (custId ? termsByCustomer[custId] : undefined) ?? OWNER_TERMS_DEFAULT, [termsByCustomer]);
+  // The owners whose terms the header shows: every billing share and every saved group member (a saved
+  // member's own share list names only its owner); else the loaded invoice's own customer. Empty until
+  // fields are chosen.
+  const termsOwners = useMemo<Array<{ customer_id: string; customer_name: string }>>(() => {
+    if (shares.length === 0 && siblings.length === 0) {
+      return Object.keys(termsByCustomer).map((cid) => ({ customer_id: cid, customer_name: '' }));
+    }
+    const byId = new Map<string, { customer_id: string; customer_name: string }>();
+    for (const o of [...shares, ...siblings]) {
+      if (!byId.get(o.customer_id)?.customer_name) byId.set(o.customer_id, { customer_id: o.customer_id, customer_name: o.customer_name });
+    }
+    // A saved un-split invoice that stays single-owner keeps its own billed customer (the save
+    // never changes it and sends that customer's terms), even when its share names another grower.
+    const billedId = pdfSnapshot?.customer_id;
+    if (id && siblings.length === 0 && byId.size <= 1 && billedId) {
+      return [{ customer_id: billedId, customer_name: byId.get(billedId)?.customer_name || pdfSnapshot?.customer_name || '' }];
+    }
+    return [...byId.values()];
+  }, [shares, siblings, termsByCustomer, id, pdfSnapshot?.customer_id, pdfSnapshot?.customer_name]);
+  // Each owner's own customers.payment_terms, so "Customer's terms" can show a date before the first save.
+  // Display only: the save still sends a blank choice and the database fills it in (blank -> Net 30).
+  const [customerDefaultTerms, setCustomerDefaultTerms] = useState<Record<string, string | null>>({});
+  const termsOwnerIdsKey = termsOwners.map((o) => o.customer_id).sort().join(',');
+  useEffect(() => {
+    if (!termsOwnerIdsKey) return;
+    let cancelled = false;
+    void supabase.from('customers').select('id, payment_terms').in('id', termsOwnerIdsKey.split(','))
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) { Sentry.captureException(error, { tags: { query: 'field_invoice_customer_terms' } }); return; }
+        const next: Record<string, string | null> = {};
+        for (const row of (data ?? []) as Array<{ id: string; payment_terms: string | null }>) next[row.id] = row.payment_terms;
+        setCustomerDefaultTerms((prev) => ({ ...prev, ...next }));
+      });
+    return () => { cancelled = true; };
+  }, [termsOwnerIdsKey]);
+  const setOwnerTerms = useCallback((custId: string, patch: Partial<OwnerTerms>) => {
+    setTermsByCustomer((prev) => ({ ...prev, [custId]: { ...(prev[custId] ?? OWNER_TERMS_DEFAULT), ...patch } }));
+    setDirty(true);
+  }, []);
+
   // #26: base for the ChemMan "<base>-<NNN>" split reference. Prefer the source
   // job number; else the group's PRIMARY (lowest) saved invoice number; else the
   // current invoice number. Display-only — the real invoice_number is untouched.
@@ -1080,68 +1145,11 @@ export default function FieldApplicationInvoice() {
     // fields are uniform across a split group (the save RPC writes them to every
     // member), so reading them off the URL invoice is correct.
     setPoRef((invoice.purchase_order_ref as string | null) || '');
-    const loadedPaymentTerms = (invoice.payment_terms as string | null) || '';
-    const loadedDueDate = (invoice.due_date as string | null) || '';
-    // Picker mode from BOTH fields (CodeRabbit P1s on PR #195):
-    // - an explicit due_date on a draft/unposted invoice means a deliberate override —
-    //   show Custom mode with the date so a save round-trips it instead of erasing it;
-    // - receipt-form aliases the parser understands normalize to the preset;
-    // - any other legacy free-text (e.g. 'Net 45') keeps its own picker entry (rendered
-    //   dynamically) so it never gets reclassified as Custom and never demands a date.
-    const isPreset = ['Net 30', 'Net 15', 'Due on receipt'].includes(loadedPaymentTerms);
-    const isReceiptAlias = ['due on receipt', 'due upon receipt', 'receipt', 'immediately'].includes(
-      loadedPaymentTerms.trim().toLowerCase(),
-    );
-    // An unposted invoice keeps the due_date the posting RPC stamped. If the stored
-    // date is exactly what the preset terms would stamp from invoice_date, it's a
-    // stamp — reload as the preset (clearing the date so a repost re-derives it),
-    // not as a deliberate Custom override (CodeRabbit P2 on PR #195).
-    // Mirror parse_payment_terms_days for ANY stored terms (incl. legacy 'Net 45' /
-    // 'net_30'), not just the three presets, so their posting stamps are recognized too.
-    const termDays = isReceiptAlias
-      ? 0
-      : (() => {
-          const m = /(\d+)/.exec(loadedPaymentTerms);
-          const n = m ? Number(m[1]) : NaN;
-          return Number.isFinite(n) && n >= 1 && n <= 365 ? n : 30;
-        })();
     const loadedInvoiceDate = (invoice.invoice_date as string) || '';
     setFiledDate(loadedInvoiceDate);
-    let stampedDate = '';
-    if (loadedInvoiceDate) {
-      const d = new Date(loadedInvoiceDate + 'T00:00:00Z');
-      d.setUTCDate(d.getUTCDate() + termDays);
-      stampedDate = d.toISOString().slice(0, 10);
-    }
-    const isPostingStamp = loadedDueDate !== '' && loadedDueDate === stampedDate;
-    if (
-      loadedDueDate &&
-      !isPostingStamp &&
-      ['draft', 'unposted'].includes((invoice.status as string) || 'draft')
-    ) {
-      setPaymentTerms('Custom date…');
-      // keep the stored terms text (even a preset like 'Net 30') so the save
-      // round-trips it verbatim; the explicit due_date wins server-side anyway.
-      setCustomTermsText(loadedPaymentTerms);
-    } else if (isPreset) {
-      setPaymentTerms(loadedPaymentTerms);
-      setCustomTermsText('');
-    } else if (isReceiptAlias) {
-      setPaymentTerms('Due on receipt');
-      setCustomTermsText('');
-    } else {
-      // legacy free-text (or blank -> Net 30 default)
-      setPaymentTerms(loadedPaymentTerms || 'Net 30');
-      setCustomTermsText('');
-    }
-    // A recognized posting stamp on a still-editable invoice is NOT kept as local
-    // state: the print path would treat it as explicit and skip re-deriving after a
-    // transaction-date edit. Posted/locked invoices keep it for read-only display.
-    setDueDate(
-      isPostingStamp && ['draft', 'unposted'].includes((invoice.status as string) || 'draft')
-        ? ''
-        : loadedDueDate,
-    );
+    // KI-14: this owner's terms; a split's other owners load with the group below.
+    const loadedCustomerId = (invoice.customer_id as string | null) || null;
+    setTermsByCustomer(loadedCustomerId ? { [loadedCustomerId]: ownerTermsFromRow(invoice) } : {});
     setFooterNotes((invoice.footer_notes as string | null) || '');
     setInternalMemo((invoice.internal_notes as string | null) || '');
     setStatus((invoice.status as InvoiceStatus) || 'draft');
@@ -1247,7 +1255,7 @@ export default function FieldApplicationInvoice() {
     if (groupId) {
       const { data: sibs, error: sibsReadError } = await supabase
         .from(INVOICES_POSTABLE)
-        .select('id, invoice_number, customer_id, total_amount_cents, status, discount_earned_cents, discount_date, invoice_post_version:invoice_postable_version, customer:customers!invoices_customer_id_fkey(farm_name)')
+        .select('id, invoice_number, customer_id, total_amount_cents, status, discount_earned_cents, discount_date, payment_terms, due_date, due_date_is_custom, invoice_post_version:invoice_postable_version, customer:customers!invoices_customer_id_fkey(farm_name)')
         .eq('invoice_group_id', groupId)
         .is('deleted_at', null) // [B1.2] don't surface a soft-deleted split member in the banner
         .order('invoice_number');
@@ -1274,13 +1282,16 @@ export default function FieldApplicationInvoice() {
       // CUSTOMER_ID (the key the Customers-tab editor reads/writes). One invoice
       // row per customer in a split, so customer_id is a stable 1:1 key.
       const discMap: Record<string, { dollars: string; date: string }> = {};
+      const termsMap: Record<string, OwnerTerms> = {};
       (sibs as Array<Record<string, unknown>>).forEach((s) => {
         discMap[s.customer_id as string] = {
           dollars: centsToDollars(s.discount_earned_cents as number | null),
           date: (s.discount_date as string | null) || '',
         };
+        termsMap[s.customer_id as string] = ownerTermsFromRow(s);
       });
       setDiscountByCustomer(discMap);
+      setTermsByCustomer(termsMap);
     } else {
       setSiblings([]);
       // #33: single (un-split) invoice — its own Discount Earned, keyed by the
@@ -1787,7 +1798,8 @@ export default function FieldApplicationInvoice() {
       toast('error', 'Choose a transaction date before saving.');
       return;
     }
-    if ((isNew || ['draft', 'unposted'].includes(status)) && paymentTerms === 'Custom date…' && !dueDate) {
+    if ((isNew || ['draft', 'unposted'].includes(status))
+      && termsOwners.some((o) => termsFor(o.customer_id).choice === CUSTOM_DUE && !termsFor(o.customer_id).dueDate)) {
       toast('error', 'Choose a custom due date before saving.');
       return;
     }
@@ -1873,6 +1885,11 @@ export default function FieldApplicationInvoice() {
     // with an actionable message before allocating an idempotency key or starting save.
     if (!transactionDate) {
       toast('error', 'Choose a transaction date before saving.');
+      return;
+    }
+    const dateProblem = invoiceDateTooFarProblem(transactionDate);
+    if (dateProblem) {
+      toast('error', dateProblem);
       return;
     }
     if (fetchingWeather !== null) {
@@ -2127,8 +2144,11 @@ export default function FieldApplicationInvoice() {
           });
         }
         const discounts: Record<string, { amount_cents: number; date: string | null }> = {};
+        // KI-14: one terms/due date per invoice, from that invoice's owner.
+        const termsByInvoice: Record<string, { payment_terms: string | null; due_date: string | null }> = {};
         for (const invId of ids) {
           const custId = customerByInvoiceId.get(invId);
+          if (custId) termsByInvoice[invId] = ownerTermsPayload(termsFor(custId));
           const entry = custId ? discountByCustomer[custId] : undefined;
           const cents = entry ? parseDiscountEarnedCents(entry.dollars) : 0;
           // Refused before the save started; never sent as a zero if it got here anyway.
@@ -2143,11 +2163,8 @@ export default function FieldApplicationInvoice() {
           // Omit (undefined) when blank → the RPC's NULL default clears the column,
           // matching the Applied-Info "blank intentionally clears" behavior.
           p_purchase_order_ref: poRef || undefined,
-          p_payment_terms:
-            (paymentTerms === 'Custom date…' ? customTermsText || 'Custom' : paymentTerms) ||
-            undefined,
           p_header_notes: notes || undefined,
-          p_due_date: paymentTerms === 'Custom date…' ? dueDate || undefined : undefined,
+          p_terms_by_invoice: termsByInvoice,
           p_footer_notes: footerNotes || undefined,
           p_internal_notes: internalMemo || undefined,
           p_discounts: discounts,
@@ -2534,6 +2551,7 @@ export default function FieldApplicationInvoice() {
   // Re-fetches line items / shares / customer billing by id via buildInvoicePdfDataFromRow.
   const buildEditorPdfData = (format: 'current' | 'legacy' = 'current') => {
     const primaryShare = shares.find((s) => s.is_primary) || shares[0];
+    const printTerms = termsFor(customerForThisInvoice ?? pdfSnapshot!.customer_id);
     return buildInvoicePdfDataFromRow({
       id: id!,
       invoice_number: invoiceNumber,
@@ -2547,39 +2565,19 @@ export default function FieldApplicationInvoice() {
       // (matches the existing header_notes: notes pattern). payment_terms is the
       // invoice-level override and wins over the customer default in the builder.
       purchase_order_ref: poRef || null,
-      payment_terms:
-        (paymentTerms === 'Custom date…' ? customTermsText || 'Custom' : paymentTerms) || null,
+      // KI-14: THIS invoice's owner's terms. '' prints the customer's terms (the builder's fallback).
+      payment_terms: ownerTermsPayload(printTerms).payment_terms,
       header_notes: notes || null,
       footer_notes: footerNotes || null,
-      // Display-only: before posting the DB has no stamped due_date yet, and the PDF
-      // renders null as "On receipt" — which would contradict a printed "Net 30". Derive
-      // the same date the posting RPC will stamp (invoice_date + terms days) so a
-      // pre-posting print matches the eventual invoice. Server stamping stays authoritative.
+      // Display-only: an editable invoice's date follows its terms (the database derives the same date on
+      // save); a typed date or a posted invoice's stored date prints as is. With no terms chosen, the
+      // builder derives the date from the customer's terms. A cleared transaction date falls back to
+      // today for THIS print only; Save refuses it before any write.
       due_date:
-        dueDate ||
-        (() => {
-          // Mirror the server's parse_payment_terms_days for ANY terms string so a
-          // pre-posting print (incl. legacy 'Net 45') matches the eventual stamp:
-          // receipt aliases -> 0; first digit run clamped 1..365; else default 30.
-          if (paymentTerms === 'Custom date…') return null;
-          const t = paymentTerms.trim().toLowerCase();
-          let days: number;
-          if (['due on receipt', 'due upon receipt', 'receipt', 'immediately'].includes(t)) {
-            days = 0;
-          } else {
-            const m = /(\d+)/.exec(paymentTerms);
-            const n = m ? Number(m[1]) : NaN;
-            days = Number.isFinite(n) && n >= 1 && n <= 365 ? n : 30;
-          }
-          // A cleared transaction-date input falls back to today for THIS print calculation only.
-          // Saving is different: handleSave gives the user an actionable refusal before the
-          // override flow, and performSave repeats the guard directly before the RPC as a
-          // defense-in-depth check. Do not read this line as "the server fills it in".
-          const base = transactionDate || todayInBusinessTz();
-          const d = new Date(base + 'T00:00:00Z');
-          d.setUTCDate(d.getUTCDate() + days);
-          return d.toISOString().slice(0, 10);
-        })(),
+        printTerms.dueDate
+        || (printTerms.choice && printTerms.choice !== CUSTOM_DUE
+          ? dueDateFromTerms(transactionDate || todayInBusinessTz(), printTerms.choice)
+          : null),
       // #33: Discount Earned for THIS invoice (the URL invoice), resolved from the
       // customer-keyed draft via the URL invoice's billed customer. Informational line
       // on the PDF — it does NOT change the Total/Balance math (passed through untouched).
@@ -2622,6 +2620,12 @@ export default function FieldApplicationInvoice() {
       return;
     }
     if (discountInputRefused()) return;
+    // KI-14: a custom due date with no date would otherwise print the terms' date.
+    const printTerms = termsFor(customerForThisInvoice ?? pdfSnapshot.customer_id);
+    if (printTerms.choice === CUSTOM_DUE && !printTerms.dueDate) {
+      toast('error', 'Choose a custom due date before printing.');
+      return;
+    }
     setPrinting(true);
     try {
       const pdfData = await buildEditorPdfData(format);
@@ -3222,6 +3226,7 @@ export default function FieldApplicationInvoice() {
             <input
               type="date"
               value={transactionDate}
+              max={latestInvoiceDate()}
               // invalidatePreview(): the transaction date decides the SEASON, and the season
               // selects the customer_application_rates row, so this input changes the PRICE just
               // as much as locations (:1314), chemicals (:1367) and the service selector (:2665)
@@ -3279,45 +3284,70 @@ export default function FieldApplicationInvoice() {
               className="w-full px-3 py-2 border rounded-lg text-sm disabled:bg-gray-50"
             />
           </div>
-          {/* #33: Payment Terms — invoice-level override, printed. */}
-          <div>
-            <label htmlFor="payment-terms" className="block text-xs font-medium text-gray-500 mb-1">Payment Terms</label>
-            <select
-              id="payment-terms"
-              value={paymentTerms}
-              onChange={(e) => {
-                setPaymentTerms(e.target.value);
-                if (e.target.value !== 'Custom date…') setDueDate('');
-                setDirty(true);
-              }}
-              disabled={!canEditPaymentTerms}
-              className="w-full px-3 py-2 border rounded-lg text-sm disabled:bg-gray-50"
-            >
-              <option value="Net 30">Net 30</option>
-              <option value="Net 15">Net 15</option>
-              <option value="Due on receipt">Due on receipt</option>
-              {!['Net 30', 'Net 15', 'Due on receipt', 'Custom date…'].includes(paymentTerms) && (
-                <option value={paymentTerms}>{paymentTerms} (legacy)</option>
-              )}
-              <option value="Custom date…">Custom date…</option>
-            </select>
-          </div>
-          {/* Custom mode: editable date. Otherwise: keep the stamped due date visible
-              (read-only) on posted/locked invoices — never hide a real due date. */}
-          {(paymentTerms === 'Custom date…' || (!canEditPaymentTerms && !!dueDate)) && (
+          {/* #33 / KI-14: Payment Terms — one per owner (a split's owners can differ), printed. */}
+          {termsOwners.length === 0 && (
             <div>
-              <label htmlFor="custom-due-date" className="block text-xs font-medium text-gray-500 mb-1">Due Date</label>
-              <input
-                id="custom-due-date"
-                type="date"
-                value={dueDate}
-                onChange={(e) => { setDueDate(e.target.value); setDirty(true); }}
-                disabled={!canEditPaymentTerms}
-                required
-                className="w-full px-3 py-2 border rounded-lg text-sm disabled:bg-gray-50"
-              />
+              <span className="block text-xs font-medium text-gray-500 mb-1">Payment Terms</span>
+              <p className="px-3 py-2 text-sm text-gray-500">Each customer&apos;s terms, once fields are chosen</p>
             </div>
           )}
+          {termsOwners.map((owner) => {
+            const ot = termsFor(owner.customer_id);
+            const pickerId = `payment-terms-${owner.customer_id}`;
+            const dateId = `due-date-${owner.customer_id}`;
+            const ownerLabel = termsOwners.length > 1 ? ` — ${owner.customer_name}` : '';
+            return (
+              <Fragment key={owner.customer_id}>
+                <div>
+                  <label htmlFor={pickerId} className="block text-xs font-medium text-gray-500 mb-1">Payment Terms{ownerLabel}</label>
+                  <select
+                    id={pickerId}
+                    value={ot.choice}
+                    onChange={(e) => setOwnerTerms(owner.customer_id, {
+                      choice: e.target.value,
+                      dueDate: e.target.value === CUSTOM_DUE ? ot.dueDate : '',
+                    })}
+                    disabled={!canEditPaymentTerms}
+                    className="w-full px-3 py-2 border rounded-lg text-sm disabled:bg-gray-50"
+                  >
+                    <option value="">Customer&apos;s terms</option>
+                    {TERMS_PRESETS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    {ot.choice && ![...TERMS_PRESETS, CUSTOM_DUE].includes(ot.choice) && (
+                      <option value={ot.choice}>{ot.choice} (legacy)</option>
+                    )}
+                    <option value={CUSTOM_DUE}>{CUSTOM_DUE}</option>
+                  </select>
+                </div>
+                {/* Custom: an editable date. Otherwise the date the terms give (read-only), or a posted
+                    invoice's stored date — never hide a real due date. */}
+                {ot.choice === CUSTOM_DUE || (!canEditPaymentTerms && !!ot.dueDate) ? (
+                  <div>
+                    <label htmlFor={dateId} className="block text-xs font-medium text-gray-500 mb-1">Due Date{ownerLabel}</label>
+                    <input
+                      id={dateId}
+                      type="date"
+                      value={ot.dueDate}
+                      onChange={(e) => setOwnerTerms(owner.customer_id, { dueDate: e.target.value })}
+                      disabled={!canEditPaymentTerms}
+                      required
+                      className="w-full px-3 py-2 border rounded-lg text-sm disabled:bg-gray-50"
+                    />
+                  </div>
+                ) : canEditPaymentTerms ? (
+                  <div>
+                    <span className="block text-xs font-medium text-gray-500 mb-1">Due Date{ownerLabel}</span>
+                    <p className="px-3 py-2 text-sm text-gray-700">
+                      {ot.choice
+                        ? dueDateFromTerms(transactionDate || todayInBusinessTz(), ot.choice)
+                        : owner.customer_id in customerDefaultTerms
+                          ? dueDateFromTerms(transactionDate || todayInBusinessTz(), customerDefaultTerms[owner.customer_id])
+                          : 'From the customer’s terms'}
+                    </p>
+                  </div>
+                ) : null}
+              </Fragment>
+            );
+          })}
           {/* header_notes (printed at the top of the invoice). */}
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Header Notes</label>

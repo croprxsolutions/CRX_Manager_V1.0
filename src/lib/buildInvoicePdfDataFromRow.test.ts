@@ -161,9 +161,12 @@ describe('buildInvoicePdfDataFromRow — #33 list-print re-fetch', () => {
   it('KI-14: only a field-application invoice with no stored due date prints its terms date', async () => {
     const billing = { discount_earned_cents: 0, payment_terms: 'Net 15', purchase_order_ref: null, due_date: null, header_notes: null, footer_notes: null };
     installFromMock({ customers: {}, invoice_items: [ONE_LINE], invoice_shares: [], invoices: billing });
-    expect((await buildInvoicePdfDataFromRow(listRow())).due_date).toBe('2026-06-16');
+    expect((await buildInvoicePdfDataFromRow(listRow({ status: 'unposted' }))).due_date).toBe('2026-06-16');
     installFromMock({ customers: {}, invoice_items: [ONE_LINE], invoice_shares: [], invoices: billing });
-    expect((await buildInvoicePdfDataFromRow(listRow({ invoice_type: 'chemical_sale' }))).due_date).toBeUndefined();
+    expect((await buildInvoicePdfDataFromRow(listRow({ status: 'unposted', invoice_type: 'chemical_sale' }))).due_date).toBeUndefined();
+    // A closed field invoice the database never filled (live has a cancelled one) keeps "On receipt" (CodeRabbit, PR #1556).
+    installFromMock({ customers: {}, invoice_items: [ONE_LINE], invoice_shares: [], invoices: billing });
+    expect((await buildInvoicePdfDataFromRow(listRow({ status: 'cancelled' }))).due_date).toBeUndefined();
   });
 
   it('a caller-supplied value WINS over the DB re-fetch (in-editor live-form print)', async () => {

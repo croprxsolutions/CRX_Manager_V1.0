@@ -465,8 +465,9 @@ export async function buildInvoicePdfDataFromRow(
   return {
     invoice_number: inv.invoice_number,
     invoice_date: inv.invoice_date,
-    // KI-14: a field-application invoice with no stored due date prints the one its terms give; other types keep "On receipt".
-    due_date: pickDue || (inv.invoice_date && (inv.invoice_type || 'field_application') === 'field_application' ? dueDateFromTerms(inv.invoice_date, pickTerms || custRow?.payment_terms) : undefined),
+    // KI-14: an editable field-application invoice with no stored due date prints the one its terms give (the
+    // database fills it on save); other types and closed invoices keep "On receipt" (CodeRabbit, PR #1556).
+    due_date: pickDue || (inv.invoice_date && (inv.invoice_type || 'field_application') === 'field_application' && ['draft', 'unposted'].includes(inv.status || 'draft') ? dueDateFromTerms(inv.invoice_date, pickTerms || custRow?.payment_terms) : undefined),
     invoice_type: inv.invoice_type || 'field_application',
     status: inv.status || 'draft',
     customer_name: inv.customer_name,

@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 
 // KI-27: the server check the clear makes before it removes anything.
 const { clearCheck } = vi.hoisted(() => ({
@@ -322,6 +322,31 @@ describe('useUncertainMutationIntent', () => {
     await act(async () => {
       expect(await next.result.current.beginIntent({ file: 'b.csv' })).toEqual({ file: 'b.csv' });
     });
+  });
+
+  it('shows the record as a lock when it cannot be removed after a failed mirror write (Luna LOW)', async () => {
+    const options = { operation: 'apply_product_setup', userId: 'cleanup-fails', surface: 'bulk-product-import' };
+    const originalSetItem = Storage.prototype.setItem;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.localStorage && key.startsWith('crx:uncertain-mutation:v4:')) throw new DOMException('full', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    const realDelete = IDBObjectStore.prototype.delete;
+    const deletes = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore) {
+      this.transaction.abort();
+      return realDelete.call(this, '__none__');
+    });
+    const { result } = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    try {
+      await expect(act(async () => result.current.beginIntent({ file: 'a.csv' })))
+        .rejects.toThrow('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
+    } finally {
+      writes.mockRestore();
+      deletes.mockRestore();
+    }
+    await act(async () => {});
+    expect(result.current.isIntentLocked).toBe(true);
+    expect(result.current.unresolvedIntent).toEqual({ file: 'a.csv' });
   });
 
   it('a failed mirror write never removes an earlier request that may have committed', async () => {

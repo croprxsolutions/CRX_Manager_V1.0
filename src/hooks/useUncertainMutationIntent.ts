@@ -1000,8 +1000,10 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
           // A mirror write failed after IndexedDB took this call's new record, and the caller never got a key,
           // so nothing was sent. Left in place, that hidden record would block the next request with no
           // visible lock to clear. An earlier request's record (a different version) is never removed here.
-          await deleteCoordinatedRecord(storageKey, options, mintedVersion, currentClaimId).catch(() => undefined);
+          const cleanup = await deleteCoordinatedRecord(storageKey, options, mintedVersion, currentClaimId).catch(() => null);
           if (readDurableRecord(storageKey, options)?.requestVersion === mintedVersion) removeDurableRecord(storageKey);
+          // If the record could not be removed, show it as a lock rather than leave it hidden.
+          if (!cleanup?.deleted) applyRecord(cleanup?.current ?? proposed);
         }
         releaseLiveClaim(currentClaimId);
         throw error;

@@ -877,7 +877,12 @@ export default function ProductDetail() {
       }
 
       await saveExistingProductDetails();
-      unsavedNotesRef.current = undefined;
+      if (unsavedNotesRef.current) {
+        unsavedNotesRef.current = undefined;
+        // Drop the carried notes from the history entry too, so a reload or Back never brings them back.
+        skipUnsavedPromptRef.current = true;
+        navigate(`/products/${id}`, { replace: true, state: { justCreated } });
+      }
       await fetchProduct();
       setPriceHistoryReloadToken((current) => current + 1);
       setIsDirty(false);

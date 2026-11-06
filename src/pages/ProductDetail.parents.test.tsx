@@ -231,6 +231,9 @@ describe('ProductDetail — parents (PAR-1)', () => {
     await waitFor(() => expect(H.mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       internal_notes: 'Keep in the cold room', quoting_notes: 'Quote by the gallon',
     })));
+    // The saved notes leave the history entry, so a reload cannot put them back.
+    await waitFor(() => expect(router.state.location.state).toEqual({ justCreated: true }));
+    expect(router.state.location.pathname).toBe('/products/product-2');
   });
 
   it('Add a size is disabled for a product with no parent, and New product stays available', async () => {

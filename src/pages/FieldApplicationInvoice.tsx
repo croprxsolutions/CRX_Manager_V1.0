@@ -22,7 +22,7 @@ import { logActivity } from '../lib/activityLogger';
 import { Sentry } from '../lib/sentry';
 import { formatCents as fmt } from '../lib/money';
 import { DISCOUNT_EARNED_INPUT_MESSAGE, parseDiscountEarnedCents } from '../lib/parseCents';
-import { todayInBusinessTz } from '../lib/dateUtils';
+import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz } from '../lib/dateUtils';
 import { RECEIPT_TERMS, dueDateFromTerms } from '../lib/paymentTerms';
 import { billableAcres, acreDivergence, appliedMatchesSystem } from '../lib/fieldGeometry';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
@@ -322,13 +322,13 @@ export default function FieldApplicationInvoice() {
   // (To-Do 10.5), so Save cannot write an empty chemical or location list over the real one.
   const [loadFailed, setLoadFailed] = useState<{ id: string; route: number } | null>(null);
   const [filedDate, setFiledDate] = useState<string | null>(null);
-  // todayInBusinessTz(), NOT new Date().toISOString() and NOT localToday().
+  // todayInBusinessTz(), NOT new Date().toISOString() and NOT the browser's own date.
   // toISOString() converts to UTC, so from ~7 pm Chicago this pre-filled TOMORROW — the same
   // UTC/Chicago bug the server-side invoice_date fallbacks fixed on 2026-09-04. Because this
   // page ALWAYS sends invoice_date, the server fallback never engages here, so the wrong day
   // could only be fixed on the client. On 2026-09-30 after 7 pm it pre-filled 2026-10-01,
   // filing the invoice in season 2027.
-  // localToday() fixes that only for a browser whose own clock is Chicago. An invoice date is a
+  // The browser's own date fixes that only for a browser whose own clock is Chicago. An invoice date is a
   // company-wide accounting fact, so it must follow Crop RX's business timezone regardless of
   // where the user is sitting — otherwise a salesman on Pacific time creates 2026-09-30
   // invoices while Chicago is already on 2026-10-01, landing them in the wrong season.
@@ -1887,6 +1887,11 @@ export default function FieldApplicationInvoice() {
       toast('error', 'Choose a transaction date before saving.');
       return;
     }
+    const dateProblem = invoiceDateTooFarProblem(transactionDate);
+    if (dateProblem) {
+      toast('error', dateProblem);
+      return;
+    }
     if (fetchingWeather !== null) {
       toast('error', 'Wait for Get Weather to finish before saving.');
       return;
@@ -3221,6 +3226,7 @@ export default function FieldApplicationInvoice() {
             <input
               type="date"
               value={transactionDate}
+              max={latestInvoiceDate()}
               // invalidatePreview(): the transaction date decides the SEASON, and the season
               // selects the customer_application_rates row, so this input changes the PRICE just
               // as much as locations (:1314), chemicals (:1367) and the service selector (:2665)

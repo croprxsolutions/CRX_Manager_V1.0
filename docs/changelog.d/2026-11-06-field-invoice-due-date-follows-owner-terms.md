@@ -1,6 +1,6 @@
 ## 2026-11-06 — Field-application invoices are due on their own owner's terms (KI-14)
 
-- New migration `20261118100000_field_invoice_due_date_follows_owner_terms.sql` (not yet applied):
+- New migration `20261120100000_field_invoice_due_date_follows_owner_terms.sql` (not yet applied):
   - `parse_payment_terms_days` reads "Net N" first, so "2/10 Net 30" is 30 days (was 2). Every other value parses as before.
   - New column `invoices.due_date_is_custom` (default false; readable by the app, also through `invoices_postable`): true when the due date was typed by hand.
   - New trigger `zzz_field_invoice_due_date_follows_terms` on field-application drafts and unposted invoices: blank terms are filled from the customer (blank customer: Net 30), and a due date that was not typed by hand is always the invoice date plus those terms. Posted, paid, voided and cancelled invoices are never touched while in those statuses, and an invoice posted before this change that is later unposted keeps a due date that differs from its terms; a later change to the customer's terms never moves an existing invoice.

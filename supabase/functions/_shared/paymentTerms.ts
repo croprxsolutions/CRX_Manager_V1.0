@@ -1,4 +1,4 @@
-// Mirrors public.parse_payment_terms_days (migration 20261118100000_field_invoice_due_date_follows_owner_terms).
+// Mirrors public.parse_payment_terms_days (migration 20261120100000_field_invoice_due_date_follows_owner_terms).
 // Keep the two in step: src/lib/paymentTerms.test.ts and the real-schema proof check the same case table.
 
 export const RECEIPT_TERMS = ['due on receipt', 'due upon receipt', 'receipt', 'immediately'];

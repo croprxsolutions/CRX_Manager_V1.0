@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261118100000_field_invoice_due_date_follows_owner_terms.sql (KI-14).
+ * Real-schema proof for 20261120100000_field_invoice_due_date_follows_owner_terms.sql (KI-14).
  *
  * Builds the checked-in baseline and every post-baseline migration BEFORE the candidate in a
  * network-disabled PostgreSQL container (scripts/smoke/undo-paths/harness.mjs). Customers are on Net 15,
@@ -31,7 +31,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, psql, scalar, attempt, docker, id, USERS, ROOT, NAME } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20261118100000_field_invoice_due_date_follows_owner_terms.sql';
+const CANDIDATE = '20261120100000_field_invoice_due_date_follows_owner_terms.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const ADMIN = USERS.admin;
 const [C15, C30, CRCPT, CBLANK, C210] = ['c1', 'c2', 'c3', 'c4', 'c5'].map(id);

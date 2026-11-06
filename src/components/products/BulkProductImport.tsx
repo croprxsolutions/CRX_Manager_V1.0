@@ -307,6 +307,7 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
       const headers = header?.cells ?? [];
       // A broken header would map a column the file did not cleanly name, so every row under it is suspect.
       if (header?.malformed) {
+        if (gen !== generation.current) return;
         toast('error', 'The header row has text after a closing quote. Put each column name fully inside its quotes and try again.');
         return;
       }

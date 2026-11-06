@@ -760,9 +760,51 @@ async function discardUnsentRecord<T>({ storageKey, options, proposed, coordinat
 }): Promise<void> {
   // Only a record this call minted: not a conflict, and not an earlier request it restored or reopened.
   if (!coordinated || coordinated.conflict || coordinated.record.requestVersion !== proposed.requestVersion) return;
-  const cleanup = await deleteCoordinatedRecord(storageKey, options, proposed.requestVersion, tabId).catch(() => null);
+  const cleanup = await deleteSoleClaimRecord(storageKey, options, proposed.requestVersion, tabId).catch(() => null);
+  if (!cleanup?.deleted) {
+    // Kept: another tab joined it (and may have sent it), or the delete failed. Keep the mirror so a reload shows it too.
+    showLock(cleanup?.current ?? proposed);
+    return;
+  }
   if (readDurableRecord(storageKey, options)?.requestVersion === proposed.requestVersion) removeDurableRecord(storageKey);
-  if (!cleanup?.deleted) showLock(cleanup?.current ?? proposed);
+}
+
+/**
+ * Deletes a pending record only while this tab is its sole claimant. Unlike deleteCoordinatedRecord, a tab that
+ * joined and has since closed still counts: it may have sent the request before closing.
+ */
+async function deleteSoleClaimRecord<T>(
+  storageKey: string,
+  options: DurableMutationIntentOptions<T>,
+  requestVersion: string,
+  tabId: string,
+): Promise<{ deleted: boolean; current: DurableMutationIntentRecord<T> | null }> {
+  const db = await openDurableIntentDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(DURABLE_INTENT_STORE, 'readwrite');
+      const store = transaction.objectStore(DURABLE_INTENT_STORE);
+      const request = store.get(storageKey);
+      let outcome: { deleted: boolean; current: DurableMutationIntentRecord<T> | null } = { deleted: false, current: null };
+      request.onsuccess = () => {
+        const stored = request.result as { record?: unknown } | undefined;
+        if (!stored) { outcome = { deleted: true, current: null }; return; }
+        const candidate = stored.record as Partial<DurableMutationIntentRecord<T>> | undefined;
+        if (!candidate || !isValidRecord(candidate, options)) return;
+        const sole = candidate.status === 'pending' && candidate.requestVersion === requestVersion
+          && candidate.claimTabIds.length === 1 && candidate.claimTabIds[0] === tabId;
+        if (!sole) { outcome = { deleted: false, current: candidate }; return; }
+        store.delete(storageKey);
+        outcome = { deleted: true, current: null };
+      };
+      request.onerror = () => reject(request.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'));
+      transaction.oncomplete = () => resolve(outcome);
+      transaction.onerror = () => reject(transaction.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'));
+    });
+  } finally {
+    db.close();
+  }
 }
 
 /**

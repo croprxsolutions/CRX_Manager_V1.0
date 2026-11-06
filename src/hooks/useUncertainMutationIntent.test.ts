@@ -349,6 +349,72 @@ describe('useUncertainMutationIntent', () => {
     expect(result.current.unresolvedIntent).toEqual({ file: 'a.csv' });
   });
 
+  it('keeps a record another tab joined, even after that tab closed, when this tab’s acknowledgment write fails (Sol HIGH)', async () => {
+    const options = { operation: 'record_vendor_payment', userId: 'joined-peer', surface: 'vendor-bill-detail', scope: 'bill-1' };
+    const originalSetItem = Storage.prototype.setItem;
+    let ackFailed = false;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.sessionStorage && key.startsWith('crx:uncertain-mutation-ack:v1:')) {
+        ackFailed = true;
+        throw new DOMException('full', 'QuotaExceededError');
+      }
+      return originalSetItem.call(this, key, value);
+    });
+    // Once the acknowledgment has failed, the cleanup reads a record that a peer tab joined and has since closed.
+    const realGet = IDBObjectStore.prototype.get;
+    const gets = vi.spyOn(IDBObjectStore.prototype, 'get').mockImplementation(function (this: IDBObjectStore, key) {
+      const request = realGet.call(this, key);
+      if (ackFailed) {
+        request.addEventListener('success', () => {
+          const stored = request.result as { record?: { claimTabIds: string[] } } | undefined;
+          stored?.record?.claimTabIds.push('closed-peer-tab');
+        });
+      }
+      return request;
+    });
+    const tabA = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    try {
+      await expect(act(async () => tabA.result.current.beginIntent({ amount: 10000 })))
+        .rejects.toThrow('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
+    } finally {
+      writes.mockRestore();
+      gets.mockRestore();
+    }
+    await act(async () => {});
+    expect(tabA.result.current.isIntentLocked).toBe(true);
+    tabA.unmount();
+    // After a reload the request is still shown, and a different payment cannot start under a new key.
+    const reloaded = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    expect(reloaded.result.current.isIntentLocked).toBe(true);
+    await expect(act(async () => reloaded.result.current.beginIntent({ amount: 5000 })))
+      .rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+  });
+
+  it('keeps the local copy when the cleanup itself fails, so a reload still shows the lock (Sol MED)', async () => {
+    const options = { operation: 'apply_product_setup', userId: 'cleanup-fails-reload', surface: 'bulk-product-import' };
+    const originalSetItem = Storage.prototype.setItem;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.sessionStorage && key.startsWith('crx:uncertain-mutation-ack:v1:')) throw new DOMException('full', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    const realDelete = IDBObjectStore.prototype.delete;
+    const deletes = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore) {
+      this.transaction.abort();
+      return realDelete.call(this, '__none__');
+    });
+    const first = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    try {
+      await expect(act(async () => first.result.current.beginIntent({ file: 'a.csv' }))).rejects.toThrow();
+    } finally {
+      writes.mockRestore();
+      deletes.mockRestore();
+    }
+    first.unmount();
+    const reloaded = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    expect(reloaded.result.current.isIntentLocked).toBe(true);
+    expect(reloaded.result.current.unresolvedIntent).toEqual({ file: 'a.csv' });
+  });
+
   it('a failed mirror write never removes an earlier request that may have committed', async () => {
     const options = { operation: 'apply_product_setup', userId: 'kept-earlier', surface: 'bulk-product-import' };
     const first = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));

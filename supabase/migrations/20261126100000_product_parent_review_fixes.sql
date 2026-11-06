@@ -85,10 +85,10 @@ LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
   SELECT btrim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(
     COALESCE(p_name, ''),
     -- pack count right before a size: "2 x 2.5 gal", "4/1 gal"
-    '(^|[^[:alnum:].])[0-9]+[[:space:]]*[x/][[:space:]]*(?=([0-9]+(\.[0-9]+)?|\.[0-9]+)[[:space:]]?(fl[[:space:]]?oz|gallons?|gals?|gl|quarts?|qts?|pints?|pts?|oz|pounds?|lbs?|kg|ml|liters?|litres?|tons?)\.?(?![[:alnum:]/]))',
+    '(^|[^[:alnum:].])[0-9]+[[:space:]]*[x/][[:space:]]*(?=([0-9]+(\.[0-9]+)?|\.[0-9]+)[[:space:]]?(fl[[:space:]]?oz|gallons?|gals?|gl|quarts?|qts?|pints?|pts?|oz|pounds?|lbs?|kg|ml|liters?|litres?|tons?)\.?(?![[:alnum:]]|[[:space:]]*/))',
     '\1', 'gi'),
-    -- a size: number, optional space, unit word, not followed by a letter, digit or "/"
-    '(^|[^[:alnum:].])([0-9]+(\.[0-9]+)?|\.[0-9]+)[[:space:]]?(fl[[:space:]]?oz|gallons?|gals?|gl|quarts?|qts?|pints?|pts?|oz|pounds?|lbs?|kg|ml|liters?|litres?|tons?)\.?(?![[:alnum:]/])',
+    -- a size: number, optional space, unit word, not followed by a letter, a digit or a "/" (spaces allowed before it)
+    '(^|[^[:alnum:].])([0-9]+(\.[0-9]+)?|\.[0-9]+)[[:space:]]?(fl[[:space:]]?oz|gallons?|gals?|gl|quarts?|qts?|pints?|pts?|oz|pounds?|lbs?|kg|ml|liters?|litres?|tons?)\.?(?![[:alnum:]]|[[:space:]]*/)',
     '\1', 'gi'),
     -- pack counts and container words
     '\m([0-9]+[[:space:]]?-?[[:space:]]?(pks?|packs?|ct|counts?)|jugs?|cases?|bulk|totes?|bags?|box|boxes)\M', '', 'gi'),

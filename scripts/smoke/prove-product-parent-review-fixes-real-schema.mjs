@@ -359,6 +359,8 @@ async function main() {
     ['Corn Mix Safened 2.5 gal', 'Corn Mix Safened'], ['Gen Liberty: Higher Quality 2.5 gal', 'Gen Liberty: Higher Quality'],
     ['2.5 gal', ''], ['Mix 1 Pt', 'Mix'], ['Mix 32 fl oz', 'Mix'], ['Mix 1.5 Qts.', 'Mix'], ['Galaxy 2.5 gal', 'Galaxy'],
     ['Atra 4G 2.5 gal', 'Atra 4G'], ['Atra 4g', 'Atra 4g'],
+    // A concentration written with spaces around the slash is still a strength (Luna round 4).
+    ['Imidacloprid 2 lb / gal 2.5 gal', 'Imidacloprid 2 lb / gal'], ['Mix 4 lb /gal', 'Mix 4 lb /gal'],
   ];
   for (const [input, want] of BASES) assert.equal(scalar(`SELECT '>' || public._product_parent_base_name(${lit(input)}) || '<';`), `>${want}<`, `base name of ${input}`);
   for (const [a, b] of [['UAN 28/0/0 Tote', 'UAN 32/0/0 Tote'], ['Imidacloprid 2 lb/gal', 'Imidacloprid 4 lb/gal'], ['Talstar 2 G', 'Talstar 0.2 G'], ['Starter 6/24/6', 'Starter 3/24/6']]) {

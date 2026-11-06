@@ -318,6 +318,30 @@ function headVariables(cmd) {
   }
 }
 
+// The command's parts, split only at a `&&`, `||`, `;` or line break the shell acts
+// on: not inside quotes or `$'…'`, not after a backslash (Luna: `rm -rf 'a;/../..'`
+// is one argument). It only ever splits less than a plain split, so a part never
+// loses text a plain split would keep. An unclosed quote returns null.
+function shellParts(text) {
+  const parts = [];
+  let quote = "", start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote[quote.length - 1]) quote = "";
+      else if (c === "\\" && quote !== "'") i++;
+    } else if (c === "\\") i++;
+    else if (c === "$" && text[i + 1] === "'") { quote = "$'"; i++; }
+    else if (c === '"' || c === "'") quote = c;
+    else if (c === ";" || c === "\r" || c === "\n" || ((c === "&" || c === "|") && text[i + 1] === c)) {
+      parts.push(text.slice(start, i));
+      if (c !== ";" && c !== "\r" && c !== "\n") i++;
+      start = i + 1;
+    }
+  }
+  return quote ? null : [...parts, text.slice(start)];
+}
+
 function redirectTargetsStateDir(value) {
   const norm = String(value || "").replace(/\\/g, "/");
   for (const m of norm.matchAll(/>>?\s*("[^"]*"|'[^']*'|[^\s;&|()<>]+)/g)) {
@@ -648,10 +672,14 @@ if (shellTool) {
   // and the whole command still counts after a cd that climbs or cannot be read,
   // or when the delete reads a heredoc, whose lines are split apart here.
   const cdClimbs = cdTargets.some((t) => !t || /(?:^|[/\\])\.\.(?:[/\\]|$)/.test(t) || /[$%`*?[\]{}!^]/.test(t));
-  const deleteClimbsOut = (v) => cdClimbs ? climbsOut(v) : v.split(/&&|\|\||[;\r\n]/).some((part) =>
-    hitsDestructiveVerb(part) && (climbsOut(part) || (/<</.test(part) && climbsOut(v))));
+  // Parts come from the command as typed (quotes intact), then each is judged in every
+  // normalized view, like the whole command.
+  const parts = shellParts(readHeadVars(command.replace(/[\\`]\r?\n/g, "")));
+  const wholeClimbs = cdViews.some((v) => hitsDestructiveVerb(v) && climbsOut(v));
+  const deleteClimbsOut = cdClimbs || !parts ? wholeClimbs : parts.some((part) =>
+    shellCommandViews(part).some((v) => hitsDestructiveVerb(v) && (climbsOut(v) || (/<</.test(v) && wholeClimbs))));
   if ((cdEntersRepoClaude && destructiveViews.some(hitsDestructiveVerb)) ||
-      (cdEntersWorktree && cdViews.some((v) => hitsDestructiveVerb(v) && deleteClimbsOut(v)))) {
+      (cdEntersWorktree && deleteClimbsOut)) {
     deny("REVIEW PROOF GUARD: a delete or move after cd into the repo's .claude folder is blocked — that folder holds the guard hooks, workflow sources and wrapper-owned review state. Run the command from the repo root with the full path so the guard can see what it touches.");
   }
 

@@ -514,12 +514,14 @@ refused commands from those sessions before and after the change.
    unrelated `rm`.
    **Narrowed again 2026-11-05 (Mason, session retro):** after `cd` into a worktree, the `..`, `.`,
    glob or unreadable target that makes a delete or move "climb out" must be in that delete or
-   move's own command (split at `&&`, `||`, `;` and line breaks; a pipe stays joined, so
-   `echo .. | xargs rm` is still refused). The whole command still counts after a `cd` whose target
+   move's own command (split only at a `&&`, `||`, `;` or line break the shell acts on, never
+   inside quotes, `$'…'` or after a backslash, so `rm -rf 'a;/../..'` stays one argument; a pipe
+   stays joined, so `echo .. | xargs rm` is still refused; an unclosed quote judges the whole
+   command). The whole command still counts after a `cd` whose target
    climbs (`cd ..`) or cannot be read, and when the delete reads a here-document. A variable the
    command sets first and only reads after (`S=<scratchpad>; rm -rf "$S"; cd "$S"`, proven by
    `folderVariableValue`) reads as its literal, as if typed. Replayed against the 19 real refusals
-   from 11/5: 7 now pass. Known over-blocks kept: a variable set mid-command (`cd <wt>; O=…; git mv
+   from 11/5: 6 now pass. Known over-blocks kept: a variable set mid-command (`cd <wt>; O=…; git mv
    …${O}…`; set it first instead), and a delete word with a `$`/`%`/`!` inside quoted script or
    prose text (a `node -e` or Python here-document body, a `printf` note).
 4. **Destructive SQL (`bash-safety-lib.mjs`).** Unchanged. New tests pin that every real SQL route

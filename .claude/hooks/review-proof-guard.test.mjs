@@ -1090,6 +1090,12 @@ for (const command of [
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && D=..; rm -rf \"$D\"",
   "R='$(echo ..)'; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf $R",
   "S=/tmp/x; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$S\" ../wt-b",
+  // A separator the shell reads as text must not split the delete's argument (Luna).
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && mkdir -p 'safe;' && rm -rf 'safe;/../../../../../.claude'",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && mkdir -p \"s;\" && rm -rf \"s;/../../wt-b\"",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && mkdir -p s\\; && rm -rf s\\;/../../wt-b",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && rm -rf $'s\\x3b'/../../wt-b",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && rm -rf 's\n/../../wt-b'",
   "git add a && mv /tmp/x .claude/schema-registry.json",
   "rm -f .claude/caller-graph.json",
   // The home exclusion is anchored to a real home folder (Luna, PR #956 round 1).

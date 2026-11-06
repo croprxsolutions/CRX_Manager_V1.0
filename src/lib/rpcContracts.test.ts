@@ -1403,7 +1403,6 @@ const MUTATING_RPCS_WITH_IDEMPOTENCY: string[] = [
   '_price_order_below_cost_impl_20260810',
   '_restore_quote_version_below_cost_impl_20260810',
   '_save_field_app_split_invoice_impl',
-  '_save_invoice_intent_impl_20260802',
   '_save_invoice_lineage_unaware_impl_20260827',
   '_save_purchase_order_ascii_identity_impl',
   'adjust_inventory',
@@ -1652,9 +1651,6 @@ const IDEMPOTENCY_BODY_EXEMPT: Record<
   string,
   'verified-live' | 'natural' | 'gap' | 'non-mutating' | 'table-unique' | 'receipt-unique' | 'delegated'
 > = {
-  // Delegates its key to _save_invoice_governed_split_guard_impl_20260720, which owns the replay. Its only own
-  // write puts a Bill Split draft's total_cost_cents back to the value it read, so a replay changes nothing.
-  _save_invoice_intent_impl_20260802: 'delegated',
   // KI-93 (owner decision 2026-11-04): migration 20261107050000 makes these three ticket-to-order
   // functions always raise BLEND_TICKET_ORDERS_DISABLED before touching any row, so they mutate
   // nothing and have no replay to cache. The parameter stays for the unchanged signature.
@@ -2849,7 +2845,6 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261105160000',
   '20261106150000',
   '20261107060000',
-  '20261107150000',
   '20261108120000',
   '20261110150000',
 ]);
@@ -3087,6 +3082,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'trigger function re-emitted by the Bill Split candidate (billing plan M2); no application role can EXECUTE it and it takes no key. Prune once the candidate is in the generated snapshot',
   _create_bill_split_delivery_invoices:
     'private writer of Bill Split drafts (billing plan M2); complete_delivery and create_invoice_for_unbilled_delivery own idempotency and every application-role EXECUTE is revoked',
+  // KI-06 (local candidate 20261115160000): trigger functions, never called as RPCs.
+  _snapshot_financial_hard_delete:
+    'AFTER DELETE row trigger on invoices, allocation_sets and payments: appends one audit snapshot per row a delete really erased, so a replayed delete matches no row and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _refuse_financial_truncate:
+    'BEFORE TRUNCATE statement trigger on invoices, allocation_sets and payments: only raises (the word TRUNCATE is in its message), writes nothing; every API-role EXECUTE is revoked',
   // KI-25 receipt queue (20261113140000).
   _enqueue_delivery_receipt:
     'internal helper called only by complete_delivery after its required-key replay binding; one row per delivery (ON CONFLICT (delivery_id), reopening only a cancelled never-sent row); every API-role EXECUTE (incl. service_role) is revoked',
@@ -3106,10 +3106,6 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Local candidate 20261107130000 (WP-PM-10): a dry run, so it keeps nothing to replay.
   preview_product_import:
     'import preview (20261107130000): runs the keyed apply_product_setup insert save per row inside a subtransaction it always rolls back (SQLSTATE CRXPV), so nothing it writes is kept; the real save is keyed',
-  // 20261107150000 (KI-27, applied live 2026-11-05): re-issued trigger; prune together with its
-  // MIGRATIONS_AWAITING_TYPE_REGENERATION entry (a trigger function never reaches the generated types).
-  _guard_idempotency_key_insert:
-    'idempotency infrastructure trigger (20261107150000): BEFORE INSERT on idempotency_keys; its only write purges an expired copy of the key being inserted, and every API-role EXECUTE is revoked',
   // Local candidate 20261107060000 (WP-PM-11a-1): internal helper behind the two rate writers.
   _write_product_rates:
     'internal rate writer (20261107060000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',

@@ -258,6 +258,15 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_LINES_LOCKED: follow the split')).toBe(
       "Nothing was saved. A Bill Split invoice's product lines follow the split. Void the group to change them; charges can still be added"
     );
+    expect(sanitizeError('BILL_SPLIT_GROUP_DELETE_PARTIAL: select every payer')).toBe(
+      "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"
+    );
+    expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_SMALL: delivery D-1')).toBe(
+      "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"
+    );
+    expect(sanitizeError('BILL_SPLIT_NOTHING_TO_BILL: delivery D-1')).toBe(
+      'Nothing was billed. This delivery has no delivered quantity'
+    );
     expect(sanitizeError('ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice'))
       .toContain('billed per payer');
     expect(sanitizeError("ORDER_ITEM_SHARES_OVER_100: a line's shares can't total more than 100%"))

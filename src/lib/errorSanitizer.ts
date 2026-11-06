@@ -130,8 +130,6 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Return credits are briefly paused while an accounting update finishes. Retry in a moment'],
   [/^ORDER_INVOICE_TERMINAL\b/i,
    'This order invoice is already final and cannot be changed'],
-  // create_invoice_from_order refuses an order split across fields (20261022021000): it is billed
-  // per field owner. The page offers that path once it sees the order's field allocations.
   [/^BILL_SPLIT_FROZEN\b/,
    "Nothing was changed. A delivery on this sale is complete, so its bill split is locked. Void the delivery to change the split"],
   [/^BILL_SPLIT_HAS_DRAFT\b/,
@@ -142,6 +140,14 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was billed. This sale has a bill split, so it is billed per payer. Refresh the page, then choose Create Invoice on the delivery"],
   [/^ORDER_ITEM_SHARES_OVER_100\b/,
    "Nothing was changed. A line's shares can't total more than 100%"],
+  [/^BILL_SPLIT_GROUP_DELETE_PARTIAL\b/,
+   "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"],
+  [/^BILL_SPLIT_QUANTITY_TOO_SMALL\b/,
+   "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"],
+  [/^BILL_SPLIT_NOTHING_TO_BILL\b/,
+   "Nothing was billed. This delivery has no delivered quantity"],
+  // create_invoice_from_order refuses an order split across fields (20261022021000): it is billed
+  // per field owner. The page offers that path once it sees the order's field allocations.
   [/^ORDER_HAS_FIELD_SPLIT\b/,
    "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],
   [/^ORDER_INVOICE_EXCEEDS_DELIVERED\b/,

@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-05",
+    "generated_at": "2026-11-06",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261105224006",
+    "migrations_high_water": "20261106035950",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -517,6 +517,13 @@
       "20261110120000_uncertain_request_clear_any_staff",
       "20261110140000_rup_records_require_posted_invoice",
       "20261110150000_product_parent_stock_units",
+      "20261110160000_bind_money_inventory_replay_receipts_batch4c",
+      "20261111100000_tiers_credit_limits_admin_only",
+      "20261111120000_uncertain_request_cleared_message_neutral",
+      "20261113110000_paged_read_tiebreakers",
+      "20261113140000_delivery_receipt_queue",
+      "20261114080000_list_true_totals",
+      "20261114200000_bind_records_replay_receipts_batch4d",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1250,6 +1257,13 @@
       "cancelled",
       "voided"
     ],
+    "delivery_receipt_queue.status": [
+      "pending",
+      "sending",
+      "sent",
+      "needs_check",
+      "cancelled"
+    ],
     "delivery_remainders.status": [
       "pending",
       "scheduled",
@@ -1932,6 +1946,18 @@
       ],
       "constraints": [
         "deliveries_status_check"
+      ]
+    },
+    "delivery_receipt_queue.status": {
+      "values": [
+        "pending",
+        "sending",
+        "sent",
+        "needs_check",
+        "cancelled"
+      ],
+      "constraints": [
+        "delivery_receipt_queue_status_check"
       ]
     },
     "delivery_remainders.status": {
@@ -3459,6 +3485,30 @@
       "table": "delivery_items",
       "constraint": "delivery_items_quantity_prebooked_released_check",
       "def": "CHECK ((quantity_prebooked_released >= (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_receipt_queue",
+      "constraint": "delivery_receipt_queue_attempts_check",
+      "def": "CHECK (((attempts >= 0) AND (attempts <= 5)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_receipt_queue",
+      "constraint": "delivery_receipt_queue_check",
+      "def": "CHECK (((status = 'sending'::text) = ((claim_token IS NOT NULL) AND (claimed_at IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_receipt_queue",
+      "constraint": "delivery_receipt_queue_check1",
+      "def": "CHECK (((status <> 'sent'::text) OR (sent_at IS NOT NULL)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "delivery_receipt_queue",
+      "constraint": "delivery_receipt_queue_receipt_check",
+      "def": "CHECK (((jsonb_typeof(receipt) = 'object'::text) AND (COALESCE(jsonb_typeof((receipt -> 'lines'::text)), ''::text) = 'array'::text)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -5308,6 +5358,21 @@
         "id",
         "uploaded_at",
         "sort_order"
+      ]
+    },
+    "delivery_receipt_queue": {
+      "no_default": [
+        "delivery_id",
+        "customer_id",
+        "receipt"
+      ],
+      "with_default": [
+        "id",
+        "status",
+        "attempts",
+        "next_attempt_at",
+        "created_at",
+        "updated_at"
       ]
     },
     "delivery_remainders": {
@@ -7729,6 +7794,27 @@
       "uploaded_at",
       "file_size",
       "sort_order"
+    ],
+    "delivery_receipt_queue": [
+      "id",
+      "delivery_id",
+      "customer_id",
+      "requested_by",
+      "receipt",
+      "status",
+      "attempts",
+      "next_attempt_at",
+      "claim_token",
+      "claimed_at",
+      "attempt_to",
+      "send_authorized_at",
+      "send_confirmed_token",
+      "last_error",
+      "sent_to",
+      "resend_message_id",
+      "sent_at",
+      "created_at",
+      "updated_at"
     ],
     "delivery_remainders": [
       "id",

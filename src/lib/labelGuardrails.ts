@@ -24,6 +24,8 @@
  * (labelGuardrails.test.ts).
  */
 
+import { todayInBusinessTz } from './dateUtils';
+
 // ── Unit normalization (shared with the SQL-side intent: LOWER(NULLIF(btrim(unit),''))) ──
 
 /**
@@ -199,7 +201,7 @@ export function phiHarvestWarning(
   if (phi == null || harvest == null) {
     return { status: 'unknown', phiDays: phi, earliestHarvest: null, harvestDate: harvest ? toDateOnly(harvest) : null };
   }
-  const appDate = parseDateOnly(applicationDate) ?? parseDateOnly(toDateOnly(new Date()));
+  const appDate = parseDateOnly(applicationDate) ?? parseDateOnly(todayInBusinessTz()); // KI-18: Chicago today, not UTC
   if (appDate == null) {
     return { status: 'unknown', phiDays: phi, earliestHarvest: null, harvestDate: toDateOnly(harvest) };
   }

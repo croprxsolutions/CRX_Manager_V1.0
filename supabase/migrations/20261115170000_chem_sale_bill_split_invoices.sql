@@ -1,15 +1,18 @@
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261114210000_chem_sale_bill_split_invoices.md.
+-- docs/reference/migrations.d/20261115170000_chem_sale_bill_split_invoices.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M2, Mason 4 Nov: "splits work line by line"): the Bill Split card now bills. When
 --   a delivery on a sale with other payers completes, it drafts one chemical-sale invoice per payer,
 --   numbered with one sale number and a suffix (CS-2026-0412-1, -2), in one governed split group.
 --   - New table order_item_shares: a line's own shares, overriding the card for that line.
---   - Each line shares its delivered cents, cost and quantity: every other payer gets their share rounded
+--   - Each line shares its delivered cents and quantity: every other payer gets their share rounded
 --     down and the main customer (the sale's customer) gets the rest, so each line adds up exactly. If
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
---     the rest with the main customer. A share too small for any quantity gets no cents or cost.
+--     the rest with the main customer. A share too small for any quantity gets no cents.
+--   - A payer's invoice cost is the cost of its own lines, as on every other invoice: what the month-end
+--     report, a re-save and a return credit read. Across payers it can differ from the sale line's cost by
+--     up to half a cent per payer line; billed amounts add up exactly.
 --   - The card and the line shares freeze at the first completed delivery (voiding it reopens them), and
 --     refuse a change while a one-customer draft is on the sale, which would never bill the new payer.
 --   - guard_invoice_terminal_order admits a payer on the sale's card or line shares, only inside the
@@ -17,8 +20,10 @@
 --     accepts that invoice. A sale with other payers refuses a one-customer chemical-sale invoice.
 --   - Create Invoice on a delivery (backfill) drafts per payer too.
 --   - A Bill Split draft takes charges and header edits through save_invoice until it posts (a field split
---     still can't). Its product lines follow the split: changing them means voiding the group. A save keeps
---     the draft's cost, because the line-by-line total the save recomputes wouldn't add up across payers.
+--     still can't). Its product lines follow the split: changing them means voiding the group.
+--   - The payers' drafts stand or fall together: delete_invoices refuses one member of a Bill Split group.
+--   - A failed split doesn't stop the delivery completing: it leaves an activity record and a flag in the
+--     result, and Create Invoice on the delivery runs it again.
 --   - Reps read the card (order_shares_select): any rep can already write it and reps work any customer.
 --   - One row per customer on a card: UNIQUE (order_id, customer_id). Live had 0 rows on 2026-11-06.
 --   - A card totals at most exactly 100%, without the old 0.01 tolerance, and a row can't move to another
@@ -28,12 +33,13 @@
 --   engine and win over a card on the same order. Posting, payments, the overbilling caps, save_invoice
 --   and the other invoice guards. No row is written.
 --
--- ROLLBACK (its own reviewed migration): re-emit the six changed functions from their previous bodies
+-- ROLLBACK (its own reviewed migration): re-emit the seven changed functions from their previous bodies
 --   (_complete_delivery_authorized_impl 20261106230000, guard_invoice_terminal_order 20261021155000,
 --   _create_invoice_for_unbilled_delivery_impl_20260718 20260827041200,
 --   _save_invoice_intent_impl_20260802 20260720175946, prevent_order_shares_edit_after_post 20260504100000,
---   _validate_order_shares_total 20260616121521), restore order_shares_select from 20260511050000,
---   drop the new helpers and order_item_shares. Split invoices already drafted stay governed by their
+--   _validate_order_shares_total 20260616121521, delete_invoices 20260719060256), restore order_shares_select
+--   from 20260511050000, drop the new helpers, trg_oifa_bill_split_freeze, order_item_shares and
+--   order_shares.updated_at. Split invoices already drafted stay governed by their
 --   provenance rows; void them first if the sale should bill as one invoice.
 --
 -- ORDERING: apply after every older pending migration.
@@ -60,7 +66,8 @@ BEGIN
     ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)', 'aeb4643d79eccb9e998cd8a5e3a9598e', ARRAY['postgres=X/postgres']::aclitem[]),
     ('public._save_invoice_intent_impl_20260802(jsonb,jsonb,text)', 'f7e0fe8f494fe160039df9aef46067df', ARRAY['postgres=X/postgres']::aclitem[]),
     ('public._validate_order_shares_total()', '5afa7599d7d9b60b90f626a8781a17e3', ARRAY['postgres=X/postgres','service_role=X/postgres']::aclitem[]),
-    ('public.prevent_order_shares_edit_after_post()', 'f21012312edbc966076a3318a3214abb', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
+    ('public.prevent_order_shares_edit_after_post()', 'f21012312edbc966076a3318a3214abb', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
+    ('public.delete_invoices(uuid[],uuid,text)', '24c271164caa2369c57c3bdc5d88c50a', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
   ) AS v(sig, body_md5, acl)
   LOOP
     IF NOT EXISTS (
@@ -90,15 +97,16 @@ BEGIN
       JOIN public.invoices i ON i.order_id = o.id
      WHERE s.customer_id <> o.customer_id
        AND i.invoice_type = 'chemical_sale' AND i.invoice_group_id IS NULL
-       AND i.deleted_at IS NULL AND i.status IN ('draft', 'unposted')
+       AND i.deleted_at IS NULL AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue')
   ) THEN
-    RAISE EXCEPTION 'CHEM_SALE_BILL_SPLIT_PREFLIGHT: a sale with other payers has a one-customer draft; resolve it before applying';
+    RAISE EXCEPTION 'CHEM_SALE_BILL_SPLIT_PREFLIGHT: a sale with other payers has a one-customer invoice; resolve it before applying';
   END IF;
 END
 $preflight$;
 
 ALTER TABLE public.order_shares
-  ADD CONSTRAINT order_shares_order_customer_key UNIQUE (order_id, customer_id);
+  ADD CONSTRAINT order_shares_order_customer_key UNIQUE (order_id, customer_id),
+  ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now();
 
 CREATE TABLE public.order_item_shares (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -117,7 +125,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.order_item_shares TO authenticate
 GRANT ALL ON public.order_item_shares TO service_role;
 
 CREATE POLICY order_item_shares_select ON public.order_item_shares FOR SELECT TO authenticated
-  USING (public.is_admin() OR public.is_sales_rep());
+  USING (EXISTS (SELECT 1 FROM public.order_items oi JOIN public.orders o ON o.id = oi.order_id
+                  WHERE oi.id = order_item_shares.order_item_id AND o.deleted_at IS NULL
+                    AND (public.is_admin() OR public.is_sales_rep())));
 CREATE POLICY order_item_shares_insert ON public.order_item_shares FOR INSERT TO authenticated
   WITH CHECK (public.is_admin() OR public.is_sales_rep());
 CREATE POLICY order_item_shares_update ON public.order_item_shares FOR UPDATE TO authenticated
@@ -206,6 +216,9 @@ BEGIN
   PERFORM public._refuse_bill_split_change(COALESCE(NEW.order_id, OLD.order_id));
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
+  END IF;
+  IF TG_OP = 'UPDATE' THEN
+    NEW.updated_at := now();
   END IF;
   RETURN NEW;
 END;
@@ -372,7 +385,6 @@ DECLARE
   v_ids uuid[] := '{}';
   v_line_cents bigint;
   v_line_units bigint;
-  v_costs jsonb := '{}'::jsonb;
 BEGIN
   SELECT * INTO STRICT v_delivery FROM deliveries WHERE id = p_delivery_id;
   SELECT * INTO STRICT v_order FROM orders WHERE id = v_delivery.order_id;
@@ -392,14 +404,13 @@ BEGIN
   LOOP
     v_line_cents := _allocated_delivery_cents(v_item.order_item_id, v_item.quantity_delivered, NULL);
     v_line_units := round(v_item.quantity_delivered * 10000)::bigint;
+    -- An invoice line holds four decimals of quantity, so this delivery can't be shown or shared.
+    IF v_line_units = 0 THEN
+      RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: delivery % delivered too little of a line to bill it', v_delivery.delivery_number
+        USING ERRCODE = 'check_violation';
+    END IF;
     FOR v_share IN
-      SELECT c.customer_id, c.cents, c.units, k.cents AS cost
-        FROM _bill_split_line_shares(v_item.order_item_id, v_line_cents, v_line_units)
-             WITH ORDINALITY c(customer_id, cents, units, n)
-        JOIN _bill_split_line_shares(v_item.order_item_id,
-               ROUND(v_item.quantity_delivered * COALESCE(v_item.cost_per_unit, 0) * 100)::bigint, v_line_units) k
-          ON k.customer_id = c.customer_id
-       ORDER BY c.n
+      SELECT * FROM _bill_split_line_shares(v_item.order_item_id, v_line_cents, v_line_units)
     LOOP
       CONTINUE WHEN v_share.cents = 0 AND v_share.units = 0;
       v_invoice_id := (v_map ->> v_share.customer_id::text)::uuid;
@@ -418,14 +429,13 @@ BEGIN
       VALUES (v_invoice_id, v_item.order_item_id, v_item.product_id, COALESCE(v_item.oi_product_name, v_item.p_name),
         v_share.units::numeric / 10000, ROUND(v_item.price_per_unit * 100)::bigint, v_share.cents,
         ROUND(COALESCE(v_item.cost_per_unit, 0) * 100)::bigint, v_item.unit_size, v_item.tote_number);
-      v_costs := v_costs || jsonb_build_object(v_invoice_id::text,
-        COALESCE((v_costs ->> v_invoice_id::text)::bigint, 0) + v_share.cost);
     END LOOP;
   END LOOP;
 
   UPDATE invoices i
-     SET total_amount_cents = t.cents, total_cost_cents = (v_costs ->> i.id::text)::bigint
-    FROM (SELECT ii.invoice_id, sum(ii.extended_cents)::bigint AS cents
+     SET total_amount_cents = t.cents, total_cost_cents = t.cost
+    FROM (SELECT ii.invoice_id, sum(ii.extended_cents)::bigint AS cents,
+                 sum(ROUND(ii.cost_cents * ii.quantity))::bigint AS cost
             FROM invoice_items ii
            WHERE ii.invoice_id = ANY (v_ids)
            GROUP BY ii.invoice_id) t
@@ -455,7 +465,7 @@ BEGIN
 END;
 $function$;
 
--- A draft's product lines as they bill. Charge lines (no product, no order line) are free to change.
+-- A draft's product lines as they bill. Charge lines are free to change.
 CREATE FUNCTION public._bill_split_product_lines(p_invoice_id uuid)
 RETURNS jsonb
 LANGUAGE sql
@@ -463,13 +473,36 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
-  SELECT COALESCE(jsonb_agg(jsonb_build_array(ii.order_item_id, ii.product_id, ii.quantity, ii.unit_price_cents, ii.extended_cents)
-                  ORDER BY ii.order_item_id, ii.quantity, ii.extended_cents), '[]'::jsonb)
+  SELECT COALESCE(jsonb_agg(jsonb_build_array(ii.order_item_id, ii.product_id, ii.description, ii.quantity, ii.unit_price_cents, ii.extended_cents)
+                  ORDER BY ii.order_item_id, ii.quantity, ii.extended_cents, ii.description), '[]'::jsonb)
     FROM invoice_items ii
    WHERE ii.invoice_id = p_invoice_id
-     AND ii.order_item_id IS NOT NULL;
+     AND ii.charge_type IS NULL;
 $function$;
 
+-- A field split wins over a card only until the card freezes: past that it would take the rest of a
+-- part-billed sale away from the split that billed its first delivery.
+CREATE FUNCTION public.guard_bill_split_field_switch()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_order_id uuid := (SELECT order_id FROM order_items WHERE id = NEW.order_item_id);
+BEGIN
+  IF public._order_has_bill_split(v_order_id) THEN
+    PERFORM public._refuse_bill_split_change(v_order_id);
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE TRIGGER trg_oifa_bill_split_freeze
+  BEFORE INSERT ON public.order_item_field_allocations
+  FOR EACH ROW EXECUTE FUNCTION public.guard_bill_split_field_switch();
+
+REVOKE ALL ON FUNCTION public.guard_bill_split_field_switch() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._bill_split_product_lines(uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._refuse_bill_split_change(uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.guard_order_item_shares() FROM PUBLIC, anon, authenticated, service_role;
@@ -623,13 +656,15 @@ BEGIN
       SELECT 1 FROM public.deliveries d
        WHERE d.id = NEW.delivery_id
          AND d.order_id = NEW.order_id
-         AND (d.customer_id = NEW.customer_id OR (v_governed_split_customer AND d.customer_id = v_order_customer_id))
+         AND (d.customer_id = NEW.customer_id
+              OR (v_governed_split_customer AND d.customer_id = v_order_customer_id AND public._order_has_bill_split(NEW.order_id)))
          AND d.deleted_at IS NULL
     ), EXISTS (
       SELECT 1 FROM public.deliveries d
        WHERE d.id = NEW.delivery_id
          AND d.order_id = NEW.order_id
-         AND (d.customer_id = NEW.customer_id OR (v_governed_split_customer AND d.customer_id = v_order_customer_id))
+         AND (d.customer_id = NEW.customer_id
+              OR (v_governed_split_customer AND d.customer_id = v_order_customer_id AND public._order_has_bill_split(NEW.order_id)))
          AND d.status = 'completed'
          AND d.deleted_at IS NULL
     ) INTO v_valid_delivery_lineage, v_valid_completed_delivery;
@@ -751,6 +786,8 @@ DECLARE
   v_actor_role text;
   v_auto_invoice_id uuid;
   v_auto_invoice_number text;
+  v_bill_split_ids uuid[];
+  v_bill_split_failed boolean := false;
   v_auto_total_cents bigint := 0;
   v_auto_cost_cents bigint := 0;
   -- CRX-MONEY-LIFECYCLE-001: cents allocated to THIS delivery from the order
@@ -1130,8 +1167,13 @@ BEGIN
         -- must not stop the driver completing the delivery: it rolls back only this block, and the office
         -- is told; Create Invoice on the delivery runs the same split again.
         BEGIN
-          PERFORM public._create_bill_split_delivery_invoices(p_delivery_id, v_effective_completion_date, v_actor);
+          v_bill_split_ids := public._create_bill_split_delivery_invoices(p_delivery_id, v_effective_completion_date, v_actor);
         EXCEPTION WHEN OTHERS THEN
+          v_bill_split_failed := true;
+          INSERT INTO activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id, customer_id)
+          VALUES ('bill_split_invoices_failed',
+            'Delivery ' || v_delivery.delivery_number || ' completed, but its Bill Split invoices could not be drafted: ' || SQLERRM,
+            v_actor, 'order', v_delivery.order_id, v_delivery.customer_id);
           FOR v_admin IN SELECT id FROM profiles WHERE role = 'admin' AND is_active = true
           LOOP
             INSERT INTO notifications (user_id, title, message, notification_type, related_entity_type, related_entity_id)
@@ -1261,6 +1303,9 @@ BEGIN
         jsonb_build_object('invoice_id', v_auto_invoice_id, 'invoice_number', v_auto_invoice_number, 'total_cents', v_auto_total_cents)
       ELSE NULL
     END,
+    'bill_split_failed', v_bill_split_failed,
+    'bill_split_invoices', (SELECT jsonb_agg(jsonb_build_object('invoice_id', i.id, 'invoice_number', i.invoice_number, 'total_cents', i.total_amount_cents) ORDER BY i.invoice_number)
+                              FROM invoices i WHERE i.id = ANY (v_bill_split_ids)),
     'stock_warning', (v_short_count > 0),
     'short_stock_count', v_short_count,
     'warnings', to_jsonb(v_stock_warnings)
@@ -1334,6 +1379,10 @@ BEGIN
   IF public._order_has_bill_split(v_delivery.order_id) THEN
     v_invoice_ids := public._create_bill_split_delivery_invoices(
       p_delivery_id, (now() AT TIME ZONE 'America/Chicago')::date, v_actor);
+    IF cardinality(v_invoice_ids) = 0 THEN
+      RAISE EXCEPTION 'BILL_SPLIT_NOTHING_TO_BILL: delivery % delivered no quantity, so there is nothing to bill', v_delivery.delivery_number
+        USING ERRCODE = 'check_violation';
+    END IF;
     SELECT id, invoice_number INTO v_invoice_id, v_invoice_number FROM invoices WHERE id = v_invoice_ids[1];
     v_result := jsonb_build_object('success', true, 'delivery_id', p_delivery_id,
       'invoice_id', v_invoice_id, 'invoice_number', v_invoice_number, 'invoice_ids', to_jsonb(v_invoice_ids),
@@ -1397,7 +1446,6 @@ DECLARE
   v_invoice_id uuid := NULLIF(p_invoice->>'id', '')::uuid;
   v_bill_split_draft boolean := false;
   v_lines_before jsonb;
-  v_cost_before bigint;
   v_saved_id uuid;
 BEGIN
   IF v_invoice_id IS NOT NULL THEN
@@ -1408,8 +1456,8 @@ BEGIN
 
     -- Billing plan M2: a Bill Split draft takes charges and header edits until it posts. The layer below
     -- already refreshes its provenance under a mutation claim.
-    SELECT i.total_cost_cents, public._bill_split_product_lines(i.id)
-      INTO v_cost_before, v_lines_before
+    SELECT public._bill_split_product_lines(i.id)
+      INTO v_lines_before
       FROM public.invoices i
      WHERE i.id = v_invoice_id
        AND i.status = 'draft'
@@ -1435,18 +1483,136 @@ BEGIN
     p_idempotency_key
   );
 
-  IF v_bill_split_draft THEN
-    IF public._bill_split_product_lines(v_invoice_id) IS DISTINCT FROM v_lines_before THEN
-      RAISE EXCEPTION
-        'BILL_SPLIT_LINES_LOCKED: a Bill Split invoice''s product lines follow the split. Void the group to change them; charges can still be added.'
-        USING ERRCODE = 'check_violation';
-    END IF;
-    -- The save recomputes cost line by line, which wouldn't add up across the payers. Charges cost nothing,
-    -- so with the product lines unchanged the cost is unchanged.
-    UPDATE public.invoices SET total_cost_cents = v_cost_before WHERE id = v_invoice_id;
+  IF v_bill_split_draft AND public._bill_split_product_lines(v_invoice_id) IS DISTINCT FROM v_lines_before THEN
+    RAISE EXCEPTION
+      'BILL_SPLIT_LINES_LOCKED: a Bill Split invoice''s product lines follow the split. Void the group to change them; charges can still be added.'
+      USING ERRCODE = 'check_violation';
   END IF;
 
   RETURN v_saved_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.delete_invoices(p_invoice_ids uuid[], p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_contract CONSTANT text := 'delete_invoices_v1';
+  v_request_ids uuid[] := '{}'::uuid[];
+  v_request jsonb;
+  v_fingerprint text;
+  v_replay jsonb;
+  v_deleted_count integer;
+  v_governed_ids uuid[] := '{}'::uuid[];
+  v_claim_count integer := 0;
+BEGIN
+  PERFORM public.require_admin();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'AUTH_REQUIRED';
+  END IF;
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH';
+  END IF;
+
+  SELECT COALESCE(array_agg(DISTINCT requested.invoice_id ORDER BY requested.invoice_id), '{}'::uuid[])
+    INTO v_request_ids
+    FROM unnest(COALESCE(p_invoice_ids, '{}'::uuid[])) AS requested(invoice_id)
+   WHERE requested.invoice_id IS NOT NULL;
+  IF cardinality(v_request_ids) = 0 THEN
+    RAISE EXCEPTION 'No invoice IDs provided';
+  END IF;
+
+  v_request := jsonb_build_object(
+    'contract_version', v_contract,
+    'actor_id', v_actor,
+    'invoice_ids', to_jsonb(v_request_ids)
+  );
+  v_fingerprint := md5(v_request::text);
+  IF p_idempotency_key IS NOT NULL THEN
+    v_replay := public._claim_bound_lifecycle_idempotency(
+      p_idempotency_key,
+      'delete_invoices',
+      v_contract,
+      v_fingerprint,
+      v_request
+    );
+    IF v_replay IS NOT NULL THEN
+      RETURN (v_replay #>> '{}')::integer;
+    END IF;
+  END IF;
+
+  SELECT COALESCE(array_agg(p.invoice_id ORDER BY p.invoice_id), '{}'::uuid[])
+    INTO v_governed_ids
+    FROM public.split_invoice_provenance p
+   WHERE p.invoice_id = ANY(v_request_ids);
+
+  -- Billing plan M2: a Bill Split group's drafts stand or fall together. One gone would post the rest
+  -- and leave that payer's share unbilled.
+  IF EXISTS (
+    SELECT 1
+      FROM public.invoices member
+      JOIN public.invoices other
+        ON other.invoice_group_id = member.invoice_group_id
+       AND other.deleted_at IS NULL
+       AND other.id <> ALL (v_request_ids)
+     WHERE member.id = ANY (v_governed_ids)
+       AND member.invoice_group_id IS NOT NULL
+       AND public._order_has_bill_split(member.order_id)
+  ) THEN
+    RAISE EXCEPTION 'BILL_SPLIT_GROUP_DELETE_PARTIAL: select every payer''s draft in this Bill Split group to delete them together'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  INSERT INTO public.split_invoice_mutation_claims (
+    transaction_id, invoice_id, operation
+  )
+  SELECT pg_current_xact_id(), governed.invoice_id, 'delete_invoices'
+    FROM unnest(v_governed_ids) AS governed(invoice_id);
+
+  v_deleted_count := public._delete_invoices_split_provenance_impl_20260719(
+    v_request_ids,
+    p_performed_by,
+    NULL::text
+  );
+
+  UPDATE public.invoices i
+     SET status = 'cancelled'
+   WHERE i.id = ANY(v_governed_ids)
+     AND i.deleted_at IS NOT NULL
+     AND i.status IN ('draft', 'unposted');
+
+  DELETE FROM public.split_invoice_mutation_claims claim
+   WHERE claim.transaction_id = pg_current_xact_id()
+     AND claim.operation = 'delete_invoices'
+     AND claim.invoice_id = ANY(v_governed_ids);
+  GET DIAGNOSTICS v_claim_count = ROW_COUNT;
+  IF v_claim_count IS DISTINCT FROM cardinality(v_governed_ids) THEN
+    RAISE EXCEPTION 'SPLIT_INVOICE_DELETE_CLAIM_LOST';
+  END IF;
+
+  IF cardinality(v_governed_ids) > 0
+     AND NOT EXISTS (
+       SELECT 1
+         FROM public.split_invoice_provenance p
+        WHERE p.invoice_id = ANY(v_governed_ids)
+     ) THEN
+    RAISE EXCEPTION 'SPLIT_INVOICE_PROVENANCE_IDENTITY_LOST';
+  END IF;
+
+  PERFORM public._bind_completed_lifecycle_idempotency(
+    p_idempotency_key,
+    'delete_invoices',
+    v_contract,
+    v_fingerprint,
+    v_request,
+    to_jsonb(v_deleted_count)
+  );
+
+  RETURN v_deleted_count;
 END;
 $function$;
 
@@ -1460,7 +1626,8 @@ BEGIN
     ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)', '_create_bill_split_delivery_invoices', ARRAY['postgres=X/postgres']::aclitem[]),
     ('public._save_invoice_intent_impl_20260802(jsonb,jsonb,text)', 'BILL_SPLIT_LINES_LOCKED', ARRAY['postgres=X/postgres']::aclitem[]),
     ('public._validate_order_shares_total()', 'v_total > 100 THEN', ARRAY['postgres=X/postgres','service_role=X/postgres']::aclitem[]),
-    ('public.prevent_order_shares_edit_after_post()', '_refuse_bill_split_change', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
+    ('public.prevent_order_shares_edit_after_post()', '_refuse_bill_split_change', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
+    ('public.delete_invoices(uuid[],uuid,text)', 'BILL_SPLIT_GROUP_DELETE_PARTIAL', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
   ) AS v(sig, marker, acl)
   LOOP
     IF NOT EXISTS (

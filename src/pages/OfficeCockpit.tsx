@@ -72,7 +72,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { Sentry } from '../lib/sentry';
 import { formatCents } from '../lib/money';
 import { localToday, localDatePlusDays, parseLocalDate } from '../lib/dateUtils';
-import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
+import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import type { WatchdogFlag } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -564,12 +564,17 @@ export default function OfficeCockpit() {
 
     // (c) Active watchdog flags (non-dismissed) via §2 RPC — pulled out of
     // Promise.all so the assertRpcCoverage scanner can detect the capture.
-    const watchdogRes = await supabaseUntyped.rpc('get_watchdog_flags', {
-      p_job_id: null,
-      p_invoice_id: null,
-      p_flag_type: null,
-      p_include_dismissed: false,
-    });
+    // Every page: the server cuts a function's rows off at 1,000.
+    const watchdogRes = await fetchAllRows<WatchdogFlag>((from, to) => pageWithList(supabaseUntyped
+      .rpc('get_watchdog_flags', {
+        p_job_id: null,
+        p_invoice_id: null,
+        p_flag_type: null,
+        p_include_dismissed: false,
+      }, { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to)));
 
     // (g) Inventory shortfalls — products short for the next 7 days of scheduled jobs
     // vs today's free stock (available − prebooked − active holds). Read-only RPC pulled
@@ -1092,12 +1097,17 @@ export default function OfficeCockpit() {
         try {
           // refresh_watchdog_flags RETURNS jsonb (sweep counts); we only need it to have run.
           await supabaseUntyped.rpc('refresh_watchdog_flags', {}).throwOnError();
-          const freshRes = await supabaseUntyped.rpc('get_watchdog_flags', {
-            p_job_id: null,
-            p_invoice_id: null,
-            p_flag_type: null,
-            p_include_dismissed: false,
-          });
+          // Every page: a flag past the 1,000-row cut would let its invoice post.
+          const freshRes = await fetchAllRows<WatchdogFlag>((from, to) => pageWithList(supabaseUntyped
+            .rpc('get_watchdog_flags', {
+              p_job_id: null,
+              p_invoice_id: null,
+              p_flag_type: null,
+              p_include_dismissed: false,
+            }, { count: 'exact' })
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(from, to)));
           if (freshRes.error) throw freshRes.error;
           freshFlags = assertRpcResult<WatchdogFlag[]>(freshRes.data, 'get_watchdog_flags');
         } catch (err: unknown) {

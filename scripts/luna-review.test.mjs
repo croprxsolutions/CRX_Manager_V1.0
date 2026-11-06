@@ -17,6 +17,7 @@ import {
   exitCodeFor,
   main,
   nextStepHint,
+  scopeHint,
   parseArgs,
   runLunaReview,
 } from "./luna-review.mjs";
@@ -259,6 +260,9 @@ for (const bad of [
 // Only MED/LOW findings point at Sol; any BLOCKER or HIGH keeps the Luna loop going.
 assert.match(nextStepHint("- **MED — a.ts:1** — footer\n- LOW — b.ts:2 — nit\nLUNA_REVIEW: FINDINGS 2\n"), /whole-branch round once more/);
 assert.equal(nextStepHint("- **HIGH — a.ts:1** — wrong total\nLUNA_REVIEW: FINDINGS 1\n"), null);
+assert.match(scopeHint("commit abc123"), /whole-branch round/);
+assert.match(scopeHint("uncommitted changes"), /whole-branch round/);
+assert.equal(scopeHint("branch against origin/main (abc) at head def"), null);
 assert.equal(nextStepHint("- **High — a.ts:1** — wrong total\nLUNA_REVIEW: FINDINGS 1\n"), null);
 assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLUNA_REVIEW: FINDINGS 2\n"), null);
 

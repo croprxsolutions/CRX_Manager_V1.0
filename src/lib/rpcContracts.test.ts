@@ -3048,7 +3048,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'move_product_size',
   'set_parent_rates',
   'update_product_parent',
-  // 20261114220000 (BLK-1a): admin-only tote fill and its undo; each replays through
+  // 20261117130000 (BLK-1a): admin-only tote fill and its undo; each replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
   'fill_tote_from_bulk',
   'reverse_tote_fill',

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for BLK-1a (20261114220000): fill a fertilizer tote from bulk, quantities only.
+ * Real-schema proof for BLK-1a (20261117130000): fill a fertilizer tote from bulk, quantities only.
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays every
  * migration before the candidate (PAR-1 included), seeds invented rows, and checks the build sheet's
  * §6.3 cases: a 265-gal tote from 1,000 gal; a repeated key; two identical calls at once; a stale
@@ -25,7 +25,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261114220000_tote_fill_from_bulk.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261117130000_tote_fill_from_bulk.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

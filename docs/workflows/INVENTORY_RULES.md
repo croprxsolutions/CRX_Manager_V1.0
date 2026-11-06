@@ -95,7 +95,7 @@ Every inventory change creates an `inventory_transactions` record. Here are all 
 | `prebook_reconciliation` | Data-fix correction of `quantity_prebooked` only (added 2026-06-10) | **No change to quantity_available** (prebooked-only) |
 | `cancelled_delivery_reversal` | Cancelled delivery restores inventory | + (increases stock) |
 | `void_delivery_reversal` | Voided delivery restores inventory | + (increases stock) |
-| `tote_fill_out` | A fertilizer tote is filled from its Bulk (`fill_tote_from_bulk`, `20261114220000`); its undo writes the opposite sign | Signed: - on the Bulk in its own unit (may go below zero; a shortfall is flagged `requires_review`), + on undo |
+| `tote_fill_out` | A fertilizer tote is filled from its Bulk (`fill_tote_from_bulk`, `20261117130000`); its undo writes the opposite sign | Signed: - on the Bulk in its own unit (may go below zero; a shortfall is flagged `requires_review`), + on undo |
 | `tote_fill_in` | The same fill, on the tote | Signed: + whole totes, - on undo |
 
 ### Caveats for anyone recomputing stock from the ledger

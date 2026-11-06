@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20261114220000_tote_fill_from_bulk.sql` (SQL sha256: `2e9c09554166f3cbf0f32457c3581693bbdda69bdd07966250aedbd439fc98a4`). BLK-1a, quantities only, fertilizer totes only (build sheet `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md` §6.1, §6.3). REQUIRES `20261108120000_product_parents` and `20261110150000_product_parent_stock_units` (both live).
+**LOCAL CANDIDATE — NOT APPLIED.** `20261117130000_tote_fill_from_bulk.sql` (SQL sha256: `2e9c09554166f3cbf0f32457c3581693bbdda69bdd07966250aedbd439fc98a4`). BLK-1a, quantities only, fertilizer totes only (build sheet `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md` §6.1, §6.3). REQUIRES `20261108120000_product_parents` and `20261110150000_product_parent_stock_units` (both live).
 
 What it does:
 - Adds `tote_fill_out` and `tote_fill_in` to `inventory_transactions_transaction_type_check` (a superset of the 12 live values; the preflight pins the live definition).

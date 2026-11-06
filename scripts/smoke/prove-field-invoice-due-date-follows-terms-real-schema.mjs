@@ -9,8 +9,8 @@
  *           committed so the candidate's one-pass touch of editable field invoices has rows to fix.
  *   APPLY   the candidate applies; bodies keep owner/settings/ACL; one billing-save overload; the trigger
  *           function is not callable by app roles; the flag is readable through invoices_postable.
- *   BACKFILL the old transfer's +30 stamp on blank terms is derived and gains its owner's terms (Net 15 -> +15);
- *           a date that differs from that stamp is kept as typed.
+ *   BACKFILL no existing due date moves: blank terms gain the owner's terms, a date equal to that stamp is
+ *           derived, any other date (the old +30 on a Net 15 owner, a typed date) is kept and marked typed.
  *   AFTER   each owner (split included) is due on its own terms, with its terms on the invoice; posting
  *           keeps both; every other invoice and line column matches BEFORE.
  *   RULES   customer re-term after transfer moves nothing; unpost + re-term + repost re-derives; an
@@ -161,9 +161,9 @@ try {
   // BACKFILL.
   assert.equal(ok(summary('JPRE30'), 'backfill 30'), 'Net 30=+30');
   assert.equal(ok(summary('JPREBLANK'), 'backfill blank'), 'Net 30=+30');
-  assert.equal(ok(summary('JPRE15'), 'backfill 15'), 'Net 15=+15');
+  assert.equal(ok(summary('JPRE15'), 'backfill 15'), 'Net 15=+30*');
   assert.equal(ok(summary('JPRETYPED'), 'backfill typed'), 'Net 15=+35*');
-  console.log('[prover] BACKFILL: the old +30 stamp follows each owner terms (Net 15 -> +15); a typed date is kept as typed');
+  console.log('[prover] BACKFILL: no existing due date moves; blank terms gain the owner terms; a date off its stamp (old +30 on Net 15, typed) is kept as typed');
 
   // AFTER: each owner on its own terms, set at transfer and kept by posting.
   const EXPECT = { J15: 'Net 15=+15', J30: 'Net 30=+30', JRCPT: 'Due on receipt=+0', JSPLIT: 'Net 15=+15, Net 30=+30', JBLANK: 'Net 30=+30', J210: '2/10 Net 30=+30' };

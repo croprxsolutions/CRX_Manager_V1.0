@@ -1,7 +1,9 @@
 -- Field-application invoices are due on their own owner's payment terms (KI-14).
 -- ROUTINE: one new column (default false) with a SELECT grant, one view column, one trigger, three function
 -- bodies, one signature change on update_field_app_invoice_billing; a one-pass touch of editable
--- field-application invoices so the trigger fills their terms. No row is deleted.
+-- field-application invoices so the trigger fills their terms. No row is deleted, and no existing due date
+-- moves: one may already be on a document the customer holds. A date that is not its terms' stamp is kept
+-- and marked typed (the screen re-derives it in one click); the postflight refuses any changed due date.
 --
 -- Before: the job transfer stamped every field invoice due = today + 30 whatever the customer's terms; posting
 -- fills the due date only when blank, so +30 survived. The field-application editor saved one set of terms
@@ -277,15 +279,18 @@ CREATE TRIGGER zzz_field_invoice_due_date_follows_terms
   EXECUTE FUNCTION public._field_invoice_due_date_follows_terms();
 
 -- 4. Existing editable field invoices: mark a date that is not its terms' stamp as typed, then let the trigger
---    fill blank terms and re-derive the rest. A blank-terms row still carrying the old transfer's +30 stamp is
---    derived (that stamp is the KI-14 defect, not a typed date). Live 2026-11-05: one row, derived.
+--    fill blank terms; every due date stays exactly as it was (checked in the postflight). Live 2026-11-06:
+--    one row, blank terms on a blank-terms customer at +30, so derived and unchanged.
+CREATE TEMP TABLE ki14_due_before ON COMMIT DROP AS
+  SELECT id, due_date FROM public.invoices
+   WHERE invoice_type = 'field_application' AND status IN ('draft', 'unposted');
+
 UPDATE public.invoices i
    SET due_date_is_custom = (
          i.due_date IS NOT NULL
          AND i.due_date <> i.invoice_date + public.parse_payment_terms_days(
                COALESCE(NULLIF(btrim(i.payment_terms), ''),
-                        (SELECT NULLIF(btrim(c.payment_terms), '') FROM customers c WHERE c.id = i.customer_id)))
-         AND NOT (NULLIF(btrim(i.payment_terms), '') IS NULL AND i.due_date = i.invoice_date + 30))
+                        (SELECT NULLIF(btrim(c.payment_terms), '') FROM customers c WHERE c.id = i.customer_id))))
  WHERE i.invoice_type = 'field_application'
    AND i.status IN ('draft', 'unposted');
 
@@ -1076,12 +1081,9 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- KI-14: per-invoice terms are required (an older app version sends none), must name every invoice
+  -- KI-14: per-invoice terms (refused below when absent) must name every invoice
   -- exactly once, and replace the uniform terms/date.
-  IF v_terms IS NULL OR jsonb_typeof(v_terms) = 'null' THEN
-    RAISE EXCEPTION 'FIELD_INVOICE_RELOAD_REQUIRED: this screen needs the latest app version; refresh the page, then save again' USING ERRCODE = '22023';
-  END IF;
-  BEGIN
+  IF v_terms IS NOT NULL AND jsonb_typeof(v_terms) <> 'null' THEN
     IF jsonb_typeof(v_terms) IS DISTINCT FROM 'object' THEN
       RAISE EXCEPTION 'FIELD_INVOICE_TERMS_INVALID: per-invoice terms must be an object' USING ERRCODE = '22023';
     END IF;
@@ -1102,12 +1104,18 @@ BEGIN
       END IF;
       PERFORM (v_entry ->> 'due_date')::date;   -- refuses an impossible date such as 2026-02-30
     END LOOP;
-  END;
+  END IF;
 
   IF p_idempotency_key IS NOT NULL THEN
     SELECT result INTO v_existing FROM idempotency_keys
      WHERE idempotency_key = p_idempotency_key AND operation = 'update_field_app_invoice_billing';
     IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  END IF;
+
+  -- An app tab opened before per-invoice terms sends no map; after the replay check, so a save that committed
+  -- just before this change still returns its result on retry.
+  IF v_terms IS NULL OR jsonb_typeof(v_terms) = 'null' THEN
+    RAISE EXCEPTION 'FIELD_INVOICE_RELOAD_REQUIRED: this screen needs the latest app version; refresh the page, then save again' USING ERRCODE = '22023';
   END IF;
 
   PERFORM 1 FROM invoices WHERE id = ANY(p_invoice_ids) ORDER BY id FOR UPDATE;
@@ -1256,5 +1264,9 @@ BEGIN
                      OR (NOT i.due_date_is_custom
                          AND i.due_date IS DISTINCT FROM i.invoice_date + public.parse_payment_terms_days(i.payment_terms)))) THEN
     RAISE EXCEPTION 'KI14_POSTFLIGHT: an editable field invoice still lacks its own terms or a derived due date';
+  END IF;
+  IF EXISTS (SELECT 1 FROM ki14_due_before b JOIN invoices i ON i.id = b.id
+              WHERE i.due_date IS DISTINCT FROM b.due_date) THEN
+    RAISE EXCEPTION 'KI14_POSTFLIGHT: the one-pass touch moved an existing due date';
   END IF;
 END $postflight$;

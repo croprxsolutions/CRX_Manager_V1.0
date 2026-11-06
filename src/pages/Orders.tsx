@@ -16,7 +16,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
-import { buildOrdersQuery, fetchOrdersPage, fetchAllMatchingOrders, type OrderListRow, type OrdersQuery } from '../lib/ordersPage';
+import { buildOrdersQuery, fetchOrdersPage, fetchAllMatchingOrders, isBookmarkRefused, type OrderListRow, type OrdersQuery } from '../lib/ordersPage';
+import type { Json } from '../types/supabase';
 import type { SortDir } from '../lib/tableSearchSort';
 import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
 import { Sentry } from '../lib/sentry';
@@ -37,6 +38,14 @@ import { getSeasonDates } from '../utils/season';
 type OrderWithFulfillment = OrderListRow;
 
 const ORDERS_PAGE_SIZE = 50;
+/** Page one has no bookmark: it reads from the top of the list. */
+const FIRST_PAGE: (Json | null)[] = [null];
+
+type NextBookmark = { key: string; page: number; cursor: Json | null };
+/** The bookmark after the page on screen, only when it came from that same query and page. */
+function nextBookmarkFor(next: NextBookmark | null, key: string, page: number): Json | null {
+  return next && next.key === key && next.page === page ? next.cursor : null;
+}
 
 export default function Orders() {
   const navigate = useNavigate();
@@ -88,10 +97,20 @@ export default function Orders() {
   const queryKey = JSON.stringify(query);
   const listBusy = isListBusy(pageLoading, search, debouncedSearch);
 
-  // The page number belongs to one query: a new search, filter or sort starts again at page one.
-  const [pageState, setPageState] = useState({ key: queryKey, page: 0 });
-  const page = forQuery(pageState, queryKey)?.page ?? 0;
-  const goToPage = (next: number) => setPageState({ key: queryKey, page: next });
+  // Each page is read from the bookmark (the last row) of the page before it, so orders removed in
+  // between never push one past the screen. afters[i] is page i's bookmark; the last one is on screen.
+  // The pages belong to one query: a new search, filter or sort starts again at page one.
+  const [pageState, setPageState] = useState({ key: queryKey, afters: FIRST_PAGE });
+  const afters = forQuery(pageState, queryKey)?.afters ?? FIRST_PAGE;
+  const page = afters.length - 1;
+  const after = afters[page];
+  // The bookmark after the page on screen, from its own read; null on the last page.
+  const [nextState, setNextState] = useState<NextBookmark | null>(null);
+  const nextCursor = nextBookmarkFor(nextState, queryKey, page);
+  const goNext = () => {
+    if (nextCursor !== null) setPageState({ key: queryKey, afters: [...afters, nextCursor] });
+  };
+  const goPrevious = () => setPageState({ key: queryKey, afters: afters.slice(0, -1) });
 
   // "Select all" across every page: the rows read for this exact query, or null.
   const [allMatchingState, setAllMatchingState] = useState<{ key: string; rows: OrderWithFulfillment[] } | null>(null);
@@ -118,11 +137,16 @@ export default function Orders() {
     const seq = ++fetchSeq.current;
     clearBulkSelection();
     setPageLoading(true);
-    const { data, error } = await fetchOrdersPage(query, ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE);
+    const { data, error } = await fetchOrdersPage(query, ORDERS_PAGE_SIZE, 0, after);
     if (seq !== fetchSeq.current) return;
     // Rows ticked against the old list while this read ran do not carry over to the new one.
     clearBulkSelection();
-    if (error || !data) {
+    setNextState(null);
+    if (error && page > 0 && isBookmarkRefused(error.message)) {
+      // The bookmark no longer fits this list: start again at page one rather than show an error.
+      setPageState({ key: queryKey, afters: FIRST_PAGE });
+      return;
+    } else if (error || !data) {
       // A failed read shows "could not be loaded" and no totals: an older page would
       // look current, and an empty one would read as "No orders yet".
       Sentry.captureException(new Error(error?.message ?? 'orders page read failed'), { tags: { source: 'fetch', action: 'load_orders' } });
@@ -130,18 +154,19 @@ export default function Orders() {
       setOrders([]);
       setTotals(null);
       setLoadFailed(true);
-    } else if (data.rows.length === 0 && data.total_count > 0 && page > 0) {
-      // Orders were removed since this page was chosen: show the last page that still has rows.
-      setPageState({ key: queryKey, page: Math.floor((data.total_count - 1) / ORDERS_PAGE_SIZE) });
+    } else if (data.rows.length === 0 && page > 0) {
+      // Every order after the bookmark was removed: step back to the page before.
+      setPageState({ key: queryKey, afters: afters.slice(0, -1) });
       return;
     } else {
       setOrders(data.rows);
+      setNextState({ key: queryKey, page, cursor: data.next_cursor });
       setTotals({ key: queryKey, count: data.total_count, cents: data.total_price_cents });
       setLoadFailed(false);
     }
     setLoading(false);
     setPageLoading(false);
-  }, [query, queryKey, page, toast, clearBulkSelection]);
+  }, [query, queryKey, afters, page, after, toast, clearBulkSelection]);
 
   useEffect(() => {
     fetchOrders();
@@ -731,7 +756,7 @@ export default function Orders() {
             }
           />
           {totals && !loadFailed && (
-            <OrdersPager totals={totals} page={page} rowsShown={orders.length} busy={listBusy} goToPage={goToPage} />
+            <OrdersPager totals={totals} page={page} rowsShown={orders.length} busy={listBusy} hasNext={nextCursor !== null} onPrevious={goPrevious} onNext={goNext} />
           )}
         </div>
       </Card>
@@ -765,27 +790,29 @@ export default function Orders() {
   );
 }
 
-/** "Showing A–B of N orders · $X total" with Previous/Next; N and $X cover every matching order. */
-function OrdersPager({ totals, page, rowsShown, busy, goToPage }: {
+/** "Showing 1–B of N orders" (later pages: "Page P · B shown of N orders") · $X total, with Previous/Next; N and $X cover every matching order. */
+function OrdersPager({ totals, page, rowsShown, busy, hasNext, onPrevious, onNext }: {
   totals: { count: number; cents: number };
   page: number;
   rowsShown: number;
   busy: boolean;
-  goToPage: (page: number) => void;
+  hasNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
 }) {
   if (totals.count === 0) return null;
-  const first = page * ORDERS_PAGE_SIZE;
   return (
     <div className="mt-3 flex flex-wrap items-center justify-between gap-3" aria-label="Orders pages">
       <span className="text-sm text-secondary">
-        Showing {(first + 1).toLocaleString()}–{Math.min(first + rowsShown, totals.count).toLocaleString()} of {totals.count.toLocaleString()} orders · {formatCents(totals.cents)} total
+        {/* Past page one the exact row numbers are unknown: a page starts after the last row seen, and orders removed before it change the numbering. */}
+        {page === 0 ? `Showing 1–${rowsShown.toLocaleString()}` : `Page ${page + 1} · ${rowsShown.toLocaleString()} shown`} of {totals.count.toLocaleString()} orders · {formatCents(totals.cents)} total
       </span>
-      {totals.count > ORDERS_PAGE_SIZE && (
+      {(totals.count > ORDERS_PAGE_SIZE || page > 0) && (
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => goToPage(page - 1)} disabled={page === 0 || busy}>
+          <Button variant="secondary" size="sm" onClick={onPrevious} disabled={page === 0 || busy}>
             Previous
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => goToPage(page + 1)} disabled={first + ORDERS_PAGE_SIZE >= totals.count || busy}>
+          <Button variant="secondary" size="sm" onClick={onNext} disabled={!hasNext || busy}>
             Next
           </Button>
         </div>

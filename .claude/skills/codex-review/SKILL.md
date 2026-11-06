@@ -190,7 +190,7 @@ records, changelog entries, plans), say so and name both heads. Rules are not pl
 `docs/workflows/` always need the round again. Why: on PR #1494 Luna came back clean on five fix
 commits while Sol found new bugs in how the pieces worked together each time.
 Outside those rule files, a commit that only fixes or refutes MED/LOW findings needs no whole-branch rerun:
-list those fixes in the final report and name both heads (Mason, 2026-11-06, after one 5-line hint
+list those fixes and refutations (with the reason) in the final report and name both heads (Mason, 2026-11-06, after one 5-line hint
 took four extra Luna rounds on #1572). A commit that fixes a BLOCKER or HIGH, or adds anything
 beyond the findings, still needs the round again. A MED/LOW fix in a rule file still reruns: those
 files are the gates, and Luna is their only model review (Mason, 2026-11-06, with Sol's advice).

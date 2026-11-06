@@ -2133,10 +2133,11 @@ export default function CustomerDetail() {
                   {(() => {
                     const buckets = [
                       { label: 'Current', value: aging.current_amount, color: 'bg-green-500' },
-                      { label: '1-30', value: aging.days_30, color: 'bg-blue-500' },
-                      { label: '31-60', value: aging.days_60, color: 'bg-amber-500' },
-                      { label: '61-90', value: aging.days_90, color: 'bg-orange-500' },
-                      { label: '90+', value: aging.over_90, color: 'bg-red-500' },
+                      // get_ar_aging's day ranges, as on the AR Aging page (KI-18)
+                      { label: '30-59', value: aging.days_30, color: 'bg-blue-500' },
+                      { label: '60-89', value: aging.days_60, color: 'bg-amber-500' },
+                      { label: '90-119', value: aging.days_90, color: 'bg-orange-500' },
+                      { label: '120+', value: aging.over_90, color: 'bg-red-500' },
                     ];
                     const total = aging.total_outstanding;
                     return (

@@ -96,16 +96,31 @@ export default function Orders() {
   const [allMatchingState, setAllMatchingState] = useState<{ key: string; rows: OrderWithFulfillment[] } | null>(null);
   const allMatching = forQuery(allMatchingState, queryKey)?.rows ?? null;
 
+  const { selected, toggleSelect, toggleAll, clearSelection, selectedRows, allSelected } =
+    useRowSelection({ data: orders, getId: (o) => o.id });
+
+  // Bumped by every deselect and every list read: a "select all" read that finishes later is dropped.
+  const selectAllSeq = useRef(0);
+  // Mason, 2026-11-06: any list refresh or page turn clears the selection (ticked rows and
+  // "select all"), so a bulk action only ever acts on the list the user is looking at.
+  const clearBulkSelection = useCallback(() => {
+    selectAllSeq.current += 1;
+    setAllMatchingState(null);
+    setSelectingAll(false);
+    clearSelection();
+  }, [clearSelection]);
+
   // A read can finish after a newer one started (a new page, a refresh after a
   // bulk action); only the latest request may set the list, toasts or loading.
   const fetchSeq = useRef(0);
-  // Bumped by every deselect, query change and failed read: a "select all" read that finishes later is dropped.
-  const selectAllSeq = useRef(0);
   const fetchOrders = useCallback(async () => {
     const seq = ++fetchSeq.current;
+    clearBulkSelection();
     setPageLoading(true);
     const { data, error } = await fetchOrdersPage(query, ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE);
     if (seq !== fetchSeq.current) return;
+    // Rows ticked against the old list while this read ran do not carry over to the new one.
+    clearBulkSelection();
     if (error || !data) {
       // A failed read shows "could not be loaded" and no totals: an older page would
       // look current, and an empty one would read as "No orders yet".
@@ -114,9 +129,6 @@ export default function Orders() {
       setOrders([]);
       setTotals(null);
       setLoadFailed(true);
-      // No bulk action may act on "every matching order" while the list cannot be read.
-      selectAllSeq.current += 1;
-      setAllMatchingState(null);
     } else if (data.rows.length === 0 && data.total_count > 0 && page > 0) {
       // Orders were removed since this page was chosen: show the last page that still has rows.
       setPageState({ key: queryKey, page: Math.floor((data.total_count - 1) / ORDERS_PAGE_SIZE) });
@@ -128,26 +140,11 @@ export default function Orders() {
     }
     setLoading(false);
     setPageLoading(false);
-  }, [query, queryKey, page, toast]);
+  }, [query, queryKey, page, toast, clearBulkSelection]);
 
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
-
-  const { selected, toggleSelect, toggleAll, clearSelection, selectedRows, allSelected } =
-    useRowSelection({ data: orders, getId: (o) => o.id });
-
-  // Ticked rows belong to the page they were ticked on (bulk actions only see this page's
-  // rows), and a new search, filter or sort also drops "select all", so an old snapshot
-  // can never come back when the user returns to an earlier query.
-  useEffect(() => {
-    clearSelection();
-  }, [queryKey, page, clearSelection]);
-  useEffect(() => {
-    selectAllSeq.current += 1;
-    setAllMatchingState(null);
-    setSelectingAll(false);
-  }, [queryKey]);
 
   // The rows the bulk actions act on: every matching order after "select all", else the ticked rows.
   const bulkRows = allMatching ?? selectedRows;
@@ -166,12 +163,6 @@ export default function Orders() {
       rows: allMatching.some((o) => o.id === id) ? allMatching.filter((o) => o.id !== id) : row ? [...allMatching, row] : allMatching,
     });
   }, [allMatching, orders, queryKey, toggleSelect]);
-
-  const clearBulkSelection = useCallback(() => {
-    selectAllSeq.current += 1;
-    setAllMatchingState(null);
-    clearSelection();
-  }, [clearSelection]);
 
   // Typing a search drops the selection at once, not 300 ms later when the query catches up.
   useEffect(() => {
@@ -203,8 +194,9 @@ export default function Orders() {
     const seq = ++selectAllSeq.current;
     setSelectingAll(true);
     const { data, error } = await fetchAllMatchingOrders(query);
-    setSelectingAll(false);
+    // A newer read or deselect already cleared the button; this old read changes nothing.
     if (seq !== selectAllSeq.current) return;
+    setSelectingAll(false);
     if (error || !data) {
       toast('error', 'Could not select every matching order. Please try again.');
       return;

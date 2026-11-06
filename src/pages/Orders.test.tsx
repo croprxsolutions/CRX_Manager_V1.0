@@ -228,6 +228,42 @@ describe('Orders list pages through the database', () => {
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 
+  it('a refresh that succeeds also drops "Select All": an order that left the filter is never acted on (Mason, 2026-11-06)', async () => {
+    serveOrders(Array.from({ length: 1500 }, (_, i) => order(i, 'cancelled')));
+    renderPage();
+    await screen.findByText('50 rows shown');
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 1,500' }));
+    expect(await screen.findByText('1500 selected')).toBeInTheDocument();
+
+    // Someone reopened order 0: it is no longer in the list.
+    serveOrders(Array.from({ length: 1499 }, (_, i) => order(i + 1, 'cancelled')));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
+
+    expect(await screen.findByText(/of 1,499 orders/)).toBeInTheDocument();
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+
+  it('a refresh that lands while "Select All" is still reading wins: the late read selects nothing', async () => {
+    const all = Array.from({ length: 120 }, (_, i) => order(i));
+    serveOrders(all);
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    mockRpc.mockImplementation(async (_fn: string, args: { p_limit: number; p_offset: number }) => {
+      if (args.p_limit === 1000) await gate;
+      return { data: { rows: all.slice(args.p_offset, args.p_offset + args.p_limit), total_count: all.length, total_price_cents: all.length * 1000 }, error: null };
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Select All 120' })).toBeEnabled());
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
   it('typing a search drops the selection at once, before the search runs', async () => {
     serveOrders(Array.from({ length: 30 }, (_, i) => order(i)));
     renderPage();

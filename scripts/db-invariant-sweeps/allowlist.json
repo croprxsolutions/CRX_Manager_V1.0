@@ -925,7 +925,7 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "upsert_parent_brand(p_parent_id uuid, p_brand_name text, p_epa_registration text, p_manufacturer text, p_is_currently_sourced boolean, p_is_rup boolean, p_signal_word text, p_brand_id uuid, p_expected_row_version integer, p_retire boolean, p_reason text, p_idempotency_key text)#4fb4871a8204",
+      "violation_key": "upsert_parent_brand(p_parent_id uuid, p_brand_name text, p_epa_registration text, p_manufacturer text, p_is_currently_sourced boolean, p_is_rup boolean, p_signal_word text, p_brand_id uuid, p_expected_row_version integer, p_retire boolean, p_reason text, p_idempotency_key text)#9e3fe63afe47",
       "justification": "New in 20261123120000_product_parent_proposals (PAR-2), read 2026-11-06 before the apply: SAFE. SECURITY DEFINER, owner postgres, search_path public, pg_temp; EXECUTE to authenticated only. Admin gate first (_product_parent_require_admin), then the receipt replay, then the grouping switch (_product_parent_grouping_open, private, false as shipped) and an inactive-parent refusal. Flagged only because it serializes its own product_parent_brands row (to_jsonb) while locking member products FOR NO KEY UPDATE; it reads no products column into the reply. Reply, events and errors carry brand name, EPA number, manufacturer, flags, version and reason only: no cost, price or margin. Post-apply key computed read-only on live from live helper hashes plus the migration body; the post-apply sweep confirms it.",
       "dated": "2026-11-06"
     },
@@ -1495,7 +1495,7 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "upsert_product_brand(p_product_id uuid, p_brand_name text, p_epa_registration text, p_manufacturer text, p_is_currently_sourced boolean, p_is_rup boolean, p_signal_word text, p_brand_id uuid, p_expected_row_version integer, p_idempotency_key text)#27719e57fd43",
+      "violation_key": "upsert_product_brand(p_product_id uuid, p_brand_name text, p_epa_registration text, p_manufacturer text, p_is_currently_sourced boolean, p_is_rup boolean, p_signal_word text, p_brand_id uuid, p_expected_row_version integer, p_idempotency_key text)#3c9026172356",
       "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep / admin; no cost in reply, errors or feed. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-06 for 20261123120000_product_parent_proposals (PAR-2): the only change in the chain is this function, which now also takes a product-row lock and, once the grouping switch (_product_parent_grouping_open, private, returns false as shipped) is on, refuses a grouped size with PRODUCT_BRANDS_BELONG_TO_PARENT before writing; same admin gate, reply is still the brand row, no cost. Post-apply key computed read-only on live from live helper hashes plus the migration body.",
       "dated": "2026-11-02"
     },

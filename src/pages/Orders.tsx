@@ -784,7 +784,7 @@ export default function Orders() {
   );
 }
 
-/** "Showing A–B of N orders · $X total" with Previous/Next; N and $X cover every matching order. */
+/** "Showing 1–B of N orders" (later pages: "Page P · B shown of N orders") · $X total, with Previous/Next; N and $X cover every matching order. */
 function OrdersPager({ totals, page, rowsShown, busy, hasNext, onPrevious, onNext }: {
   totals: { count: number; cents: number };
   page: number;
@@ -795,12 +795,11 @@ function OrdersPager({ totals, page, rowsShown, busy, hasNext, onPrevious, onNex
   onNext: () => void;
 }) {
   if (totals.count === 0) return null;
-  // Orders removed from earlier pages shrink the count: keep the range inside it.
-  const first = Math.max(0, Math.min(page * ORDERS_PAGE_SIZE, totals.count - rowsShown));
   return (
     <div className="mt-3 flex flex-wrap items-center justify-between gap-3" aria-label="Orders pages">
       <span className="text-sm text-secondary">
-        Showing {(first + 1).toLocaleString()}–{Math.min(first + rowsShown, totals.count).toLocaleString()} of {totals.count.toLocaleString()} orders · {formatCents(totals.cents)} total
+        {/* Past page one the exact row numbers are unknown: a page starts after the last row seen, and orders removed before it change the numbering. */}
+        {page === 0 ? `Showing 1–${rowsShown.toLocaleString()}` : `Page ${page + 1} · ${rowsShown.toLocaleString()} shown`} of {totals.count.toLocaleString()} orders · {formatCents(totals.cents)} total
       </span>
       {(totals.count > ORDERS_PAGE_SIZE || page > 0) && (
         <div className="flex items-center gap-2">

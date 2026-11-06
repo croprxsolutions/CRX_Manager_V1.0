@@ -95,7 +95,7 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   await page.getByRole('checkbox').first().check();
   await expect(page.getByText('1 selected')).toBeVisible();
   await page.getByRole('button', { name: 'Next' }).click();
-  await expect(page.getByText(`Showing 51–100 of ${total} orders`, { exact: false })).toBeVisible();
+  await expect(page.getByText(`Page 2 · 50 shown of ${total} orders`, { exact: false })).toBeVisible();
   await expect(selectedCount).toHaveCount(0);
 
   // Select All reads every matching order; unticking one brings the button back.
@@ -123,7 +123,7 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   });
   await page.getByRole('button', { name: 'Next' }).click();
   await expect(selectAll).toBeDisabled();
-  await expect(page.getByText(`Showing 51–100 of ${total} orders`, { exact: false })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText(`Page 2 · 50 shown of ${total} orders`, { exact: false })).toBeVisible({ timeout: 15000 });
   await expect(selectAll).toBeEnabled();
   await expect(selectedCount).toHaveCount(0);
   await page.unroute('**/rpc/get_orders_keyset_page**');
@@ -131,7 +131,7 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   await expect(page.getByText(`${matching} selected`)).toBeVisible({ timeout: 60000 });
   // A page turn clears a full Select All too.
   await page.getByRole('button', { name: 'Next' }).click();
-  await expect(page.getByText(`Showing 101–150 of ${total} orders`, { exact: false })).toBeVisible();
+  await expect(page.getByText(`Page 3 · 50 shown of ${total} orders`, { exact: false })).toBeVisible();
   await expect(selectedCount).toHaveCount(0);
 
   // While a typed search waits to run, the old rows are hidden and Select All is greyed out.
@@ -142,21 +142,32 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
 
   // An order removed while page one is on screen does not make Next skip one: page two still starts
   // right after page one's last row (a row count would have moved its first order onto page one).
-  const orderNumbers = () => page.getByText(/^G4O-\d{5}$/).allInnerTexts();
-  await page.getByLabel('Search orders or products…').fill('');
-  await expect(page.getByText(`Showing 1–50 of ${total} orders`, { exact: false })).toBeVisible({ timeout: 30000 });
+  // The page label shows before the rows land, so wait for all 50 rows before reading them.
+  const orderNumbers = async () => {
+    await expect(page.getByText(/^G4O-\d{5}$/)).toHaveCount(50, { timeout: 15000 });
+    return page.getByText(/^G4O-\d{5}$/).allInnerTexts();
+  };
+  // Only the invented orders, so every row on these pages is one this test may remove.
+  await page.goto('/orders');
+  await page.getByLabel('Search orders or products…').fill('G4O-');
+  await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled({ timeout: 30000 });
+  await expect(page.getByText(`Showing 1–50 of ${G4O_IN_SEASON.toLocaleString('en-US')} orders`, { exact: false })).toBeVisible({ timeout: 30000 });
   await page.getByRole('button', { name: 'Next' }).click();
-  await expect(page.getByText(`Showing 51–100 of ${total} orders`, { exact: false })).toBeVisible();
+  await expect(page.getByText(`Page 2 · 50 shown of ${G4O_IN_SEASON.toLocaleString('en-US')} orders`, { exact: false })).toBeVisible();
   const pageTwo = await orderNumbers();
+  expect(pageTwo).toHaveLength(50);
   await page.getByRole('button', { name: 'Previous' }).click();
-  await expect(page.getByText(`Showing 1–50 of ${total} orders`, { exact: false })).toBeVisible();
+  await expect(page.getByText(`Showing 1–50 of ${G4O_IN_SEASON.toLocaleString('en-US')} orders`, { exact: false })).toBeVisible();
   const removed = (await orderNumbers())[2];
   expect(removed).toMatch(/^G4O-\d{5}$/);
   // Soft-deleted as the owner with triggers off (an invented row; CLEAN deletes it with the rest).
   localSql(`BEGIN; SET LOCAL session_replication_role = replica;
     UPDATE public.orders SET deleted_at = now() WHERE order_number = '${removed}' AND id IN (SELECT md5('g4o-order-' || g)::uuid FROM generate_series(1, 5250) g);
     COMMIT;`);
+  await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled();
   await page.getByRole('button', { name: 'Next' }).click();
-  await expect(page.getByText(`Showing 51–100 of ${(matching - 1).toLocaleString('en-US')} orders`, { exact: false })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText(`Page 2 · 50 shown of ${(G4O_IN_SEASON - 1).toLocaleString('en-US')} orders`, { exact: false })).toBeVisible({ timeout: 15000 });
+  // A row count would have moved page two's first order onto page one; the bookmark keeps page two whole.
   expect(await orderNumbers()).toEqual(pageTwo);
+  await page.screenshot({ path: 'scripts/local-app/.state/test-results/orders-page-two-after-removal.png', fullPage: true });
 });

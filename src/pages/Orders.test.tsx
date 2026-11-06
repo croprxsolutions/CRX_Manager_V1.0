@@ -128,7 +128,7 @@ describe('Orders list pages through the database', () => {
     }
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText('Showing 51–100 of 5,200 orders · $52,000.00 total')).toBeInTheDocument();
+    expect(await screen.findByText('Page 2 · 50 shown of 5,200 orders · $52,000.00 total')).toBeInTheDocument();
     expect(screen.getByText('ORD-50')).toBeInTheDocument();
     // Page two starts after page one's last row (its bookmark), not at a row count.
     expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({
@@ -151,7 +151,7 @@ describe('Orders list pages through the database', () => {
     await screen.findByText(/of 119 orders/);
     // Counting rows would now start at ORD-51; the bookmark starts right after ORD-49.
     expect(screen.getByText('ORD-50')).toBeInTheDocument();
-    expect(screen.getByText('Showing 51–100 of 119 orders · $1,190.00 total')).toBeInTheDocument();
+    expect(screen.getByText('Page 2 · 50 shown of 119 orders · $1,190.00 total')).toBeInTheDocument();
   });
 
   it('the last page has no Next, even when the count would allow one', async () => {
@@ -159,7 +159,7 @@ describe('Orders list pages through the database', () => {
     renderPage();
     await screen.findByText('Showing 1–50 of 60 orders · $600.00 total');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('Showing 51–60 of 60 orders · $600.00 total');
+    await screen.findByText('Page 2 · 10 shown of 60 orders · $600.00 total');
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
@@ -169,7 +169,7 @@ describe('Orders list pages through the database', () => {
     renderPage();
     await screen.findByText('Showing 1–50 of 60 orders · $600.00 total');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('Showing 51–60 of 60 orders · $600.00 total');
+    await screen.findByText('Page 2 · 10 shown of 60 orders · $600.00 total');
 
     all.splice(50, 10);
     fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
@@ -182,7 +182,7 @@ describe('Orders list pages through the database', () => {
     renderPage();
     await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('Showing 51–100 of 120 orders · $1,200.00 total');
+    await screen.findByText('Page 2 · 50 shown of 120 orders · $1,200.00 total');
 
     mockRpc.mockImplementation((_fn: string, args: PageArgs) => Promise.resolve(args.p_after
       ? { data: null, error: { message: 'ORDERS_PAGE_STALE_CURSOR' } }
@@ -197,7 +197,7 @@ describe('Orders list pages through the database', () => {
     renderPage();
     await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('Showing 51–100 of 120 orders · $1,200.00 total');
+    await screen.findByText('Page 2 · 50 shown of 120 orders · $1,200.00 total');
 
     fireEvent.change(screen.getByLabelText('Filter by planned or committed'), { target: { value: 'committed' } });
     fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
@@ -265,7 +265,7 @@ describe('Orders list pages through the database', () => {
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
     expect(await screen.findByText('1 selected')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('Showing 51–100 of 120 orders · $1,200.00 total');
+    await screen.findByText('Page 2 · 50 shown of 120 orders · $1,200.00 total');
     expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));

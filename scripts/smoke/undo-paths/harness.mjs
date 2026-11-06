@@ -122,16 +122,6 @@ function restoreLiveBodies() {
       expected, `${signature} is not the pinned live body`);
   }
 }
-// 20261117130000 refuses to build without live's two count units (a schema-only rebuild has none, and
-// 20261104150000 must see all of Lb/Unit/Ea or none), so seed them right before it.
-const TOTE_FILL_FROM_BULK = '20261117130000_tote_fill_from_bulk.sql';
-function seedCountUnits() {
-  psql(`INSERT INTO public.unit_conversions (id, unit, factor_oz, notes, unit_type)
-    SELECT v.id::uuid, v.unit, 1, v.notes, 'both'
-      FROM (VALUES ('5ed18e4b-c4d9-42fc-b85e-22babd3fc098', 'Ea', 'Each / unit'),
-                   ('722e8d86-8e68-47d8-a940-209fad38c70e', 'Unit', 'Each / unit (alias for Ea)')) AS v(id, unit, notes)
-     WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions u WHERE u.unit = v.unit);`);
-}
 function migrations() {
   const r = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs'], { cwd: ROOT, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(r.stderr);
@@ -140,7 +130,7 @@ function migrations() {
 
 // Set only once `docker run` succeeds, so a failed start never removes someone else's same-named container.
 let created = false;
-/** `stopBefore`: a migration file name; the replay stops before it (a proof applies it itself). */
+/** `stopBefore`: a migration file name; it and every later file are left for the caller to apply. */
 export function buildContainer({ stopBefore } = {}) {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   created = true;
@@ -176,7 +166,8 @@ export function replay({ stopBefore } = {}) {
     if (LEDGER_ONLY.has(base)) continue;
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     if (base === FORMS_SEED_EACH) restoreLiveBodies();
-    if (base === TOTE_FILL_FROM_BULK) seedCountUnits();
+    // The tote-fill preflight needs live's count units; the schema baseline carries no unit rows (live factors, 2026-11-05).
+    if (base === '20261117130000_tote_fill_from_bulk.sql') psql("INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Ea', 1, 'both'), ('Unit', 1, 'both') ON CONFLICT DO NOTHING;");
     const name = `m-${i}.sql`; stageText(name, lf(file));
     const r = docker([...psqlArgs(), '-1', '-f', `/tmp/${name}`], { allowFailure: true });
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.stdout}\n${r.stderr}`);

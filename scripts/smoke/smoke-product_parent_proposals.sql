@@ -1,4 +1,4 @@
--- Smoke chain: product parent proposals and parent brands (REQUIRES 20261117120000, PAR-2).
+-- Smoke chain: product parent proposals and parent brands (REQUIRES 20261117160000, PAR-2).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so the proposal, groups, parents, brands, events and
 -- receipts it writes are rolled back. Proves, as a real signed-in browser session (role authenticated with
 -- each live profile's claims) and as a signed-out visitor (role anon), on three invented two-size products:

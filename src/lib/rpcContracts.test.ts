@@ -2848,7 +2848,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261108120000',
   '20261110150000',
   '20261115160000',
-  '20261117120000',
+  '20261117160000',
 ]);
 
 /**
@@ -3050,7 +3050,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'move_product_size',
   'set_parent_rates',
   'update_product_parent',
-  // 20261117120000 (PAR-2): admin-only proposal and parent-brand writers; each replays through
+  // 20261117160000 (PAR-2): admin-only proposal and parent-brand writers; each replays through
   // _product_parent_replay and saves its receipt. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
   'approve_product_parent_groups',
   'build_product_parent_proposal',
@@ -3126,13 +3126,13 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _product_parent_event: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
   _product_parent_replay:
     'idempotency infrastructure helper (20261108120000): locks the key and replays through check_idempotency with an actor and fingerprint match; every API-role EXECUTE is revoked',
-  // 20261117120000 (PAR-2): private helpers behind the keyed proposal writers. Prune with its
+  // 20261117160000 (PAR-2): private helpers behind the keyed proposal writers. Prune with its
   // MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
-  _approve_product_parent_group: 'internal PAR-2 helper (20261117120000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
-  _close_product_parent_proposal_if_done: 'internal PAR-2 helper (20261117120000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
-  _decide_product_parent_group: 'internal PAR-2 helper (20261117120000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
-  _move_group_brands: 'internal PAR-2 helper (20261117120000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
-  _parent_brand_event: 'internal PAR-2 helper (20261117120000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
+  _approve_product_parent_group: 'internal PAR-2 helper (20261117160000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
+  _close_product_parent_proposal_if_done: 'internal PAR-2 helper (20261117160000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
+  _decide_product_parent_group: 'internal PAR-2 helper (20261117160000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
+  _move_group_brands: 'internal PAR-2 helper (20261117160000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
+  _parent_brand_event: 'internal PAR-2 helper (20261117160000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
   write_product_change_history:
     'trigger-only history writer re-issued by 20261108120000 (PAR-1); it runs inside the calling product write and is never an RPC',
   // Pruned on the 2026-08-11 merge of origin/main, per the standing rule below that a

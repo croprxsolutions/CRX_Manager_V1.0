@@ -333,7 +333,9 @@ function shellParts(text) {
     } else if (c === "\\") i++;
     else if (c === "$" && text[i + 1] === "'") { quote = "$'"; i++; }
     else if (c === '"' || c === "'") quote = c;
-    else if (c === ";" || c === "\r" || c === "\n" || ((c === "&" || c === "|") && text[i + 1] === c)) {
+    // A line break right after `|` or `|&` continues the pipeline, so it is not a split.
+    else if (c === ";" || ((c === "\r" || c === "\n") && !/\|&?\s*$/.test(text.slice(start, i))) ||
+        ((c === "&" || c === "|") && text[i + 1] === c)) {
       parts.push(text.slice(start, i));
       if (c !== ";" && c !== "\r" && c !== "\n") i++;
       start = i + 1;
@@ -672,9 +674,10 @@ if (shellTool) {
   // and the whole command still counts after a cd that climbs or cannot be read,
   // or when the delete reads a heredoc, whose lines are split apart here.
   const cdClimbs = cdTargets.some((t) => !t || /(?:^|[/\\])\.\.(?:[/\\]|$)/.test(t) || /[$%`*?[\]{}!^]/.test(t));
-  // Parts come from the command as typed (quotes intact), then each is judged in every
-  // normalized view, like the whole command.
-  const parts = shellParts(readHeadVars(command.replace(/[\\`]\r?\n/g, "")));
+  // Parts come from the command as typed (quotes intact) and only then get their head
+  // variables filled in, so a `;` inside a value never invents a split; each part is
+  // judged in every normalized view, like the whole command.
+  const parts = shellParts(command.replace(/[\\`]\r?\n/g, ""))?.map(readHeadVars);
   const wholeClimbs = cdViews.some((v) => hitsDestructiveVerb(v) && climbsOut(v));
   const deleteClimbsOut = cdClimbs || !parts ? wholeClimbs : parts.some((part) =>
     shellCommandViews(part).some((v) => hitsDestructiveVerb(v) && (climbsOut(v) || (/<</.test(v) && wholeClimbs))));

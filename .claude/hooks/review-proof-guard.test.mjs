@@ -1087,6 +1087,11 @@ for (const command of [
   "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && xargs rm -rf <<EOF\n../../wt-b\nEOF",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && cat <<EOF | xargs rm -rf\n../../wt-b\nEOF",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && cd src && cd ../.. && rm -rf wt-b",
+  // Codex App on #1536: a pipe continued on the next line, and a `;` inside a head value.
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && printf '../wt-b' |\n xargs rm -rf",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && printf ../wt-b |&\nxargs rm -rf",
+  "S=\"x; ../wt-b\"; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf $S",
+  "S='x\"'; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$S;/../wt-b\"",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && timeout 5 rm -rf ..",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && cd .. && rm -rf wt-b",
   "D=..; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$D\"",

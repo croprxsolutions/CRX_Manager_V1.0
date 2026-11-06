@@ -105,6 +105,11 @@ BEGIN
   END;
   IF (SELECT count(*) FROM public.failed_notifications WHERE id=failed)<>1 THEN RAISE EXCEPTION 'SMOKE_FAIL: failed log row'; END IF;
   IF NOT EXISTS(SELECT 1 FROM public.idempotency_keys WHERE idempotency_key=k AND operation='log_failed_notification' AND request_actor_id=a AND request_fingerprint ~ '^[0-9a-f]{64}$') THEN RAISE EXCEPTION 'SMOKE_FAIL: failed receipt'; END IF;
+  -- An old tab (before PR #1518) logs a failure without a key: the row is still written, with no receipt.
+  SELECT count(*) INTO n FROM public.idempotency_keys WHERE operation='log_failed_notification';
+  failed := public.log_failed_notification('post','job',j2,'[SMOKE] keyless failure','{}'::jsonb,NULL);
+  IF (SELECT count(*) FROM public.failed_notifications WHERE id=failed AND error_message='[SMOKE] keyless failure')<>1 THEN RAISE EXCEPTION 'SMOKE_FAIL: keyless log_failed wrote no row'; END IF;
+  IF n<>(SELECT count(*) FROM public.idempotency_keys WHERE operation='log_failed_notification') THEN RAISE EXCEPTION 'SMOKE_FAIL: keyless log_failed wrote a receipt'; END IF;
 
   k := 'smk-4e-assign-'||s;
   first_answer := public.assign_job_applicator(j,NULL,false,a,k);
@@ -250,7 +255,17 @@ BEGIN
     IF SQLERRM NOT LIKE 'INSUFFICIENT_ROLE%' THEN RAISE EXCEPTION 'SMOKE_FAIL: keyless confirm role gave %',SQLERRM; END IF;
   END;
   PERFORM set_config('request.jwt.claims',json_build_object('sub',a,'role','authenticated')::text,true);
-  FOREACH op IN ARRAY ARRAY['record_job_pre_notifications','record_job_post_notifications','log_failed_notification','apply_remaining_prepayments','batch_apply_all_prepayments','assign_job_applicator','dispatch_job_locations','undispatch_job_locations','start_job','create_job_from_quote_section','update_field_app_applied_info','create_quote_from_template','rollover_quote_to_season','save_quote_template'] LOOP
+  -- An old tab saving applied info without a key reaches the unchanged body (its own actor check), not a key refusal.
+  SELECT count(*) INTO n FROM public.idempotency_keys WHERE operation='update_field_app_applied_info';
+  BEGIN
+    PERFORM public.update_field_app_applied_info(ARRAY[j]::uuid[],NULL,NULL,NULL,NULL,NULL);
+    RAISE EXCEPTION 'SMOKE_FAIL: keyless applied info skipped the actor check';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'p_performed_by does not match%' THEN RAISE EXCEPTION 'SMOKE_FAIL: keyless applied info gave %',SQLERRM; END IF;
+  END;
+  IF n<>(SELECT count(*) FROM public.idempotency_keys WHERE operation='update_field_app_applied_info') THEN RAISE EXCEPTION 'SMOKE_FAIL: keyless applied info wrote a receipt'; END IF;
+  FOREACH op IN ARRAY ARRAY['record_job_pre_notifications','record_job_post_notifications','apply_remaining_prepayments','batch_apply_all_prepayments','assign_job_applicator','dispatch_job_locations','undispatch_job_locations','start_job','create_job_from_quote_section','create_quote_from_template','rollover_quote_to_season','save_quote_template'] LOOP
     SELECT * INTO STRICT p FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname=op;
     call_args := NULL;
     FOR i IN 1..p.pronargs LOOP call_args := concat_ws(', ',call_args,'NULL::'||format_type(p.proargtypes[i-1],NULL)); END LOOP;

@@ -253,9 +253,10 @@ functions and requires a key on each: `confirm_job_notification_sent`, `record_j
 `undispatch_job_locations`, `start_job`, `create_job_from_quote_section`, `update_field_app_applied_info`,
 `create_quote_from_template`, `rollover_quote_to_season`, `save_quote_template`, and the two disabled bulk
 prepayment functions `apply_remaining_prepayments` and `batch_apply_all_prepayments` (still always refused).
-One exception: `confirm_job_notification_sent` still accepts a call with no key and runs it exactly as before (no
-receipt), so a browser tab opened before PR #1518 can still mark an email it already sent as sent instead of leaving
-it open for a resend. A key-carrying call is bound like the rest.
+Exceptions: the three calls PR #1518 began keying (`confirm_job_notification_sent`, `log_failed_notification`,
+`update_field_app_applied_info`) still accept a call with no key and run it exactly as before (no receipt). A browser
+tab opened before PR #1518 can then still mark an email it already sent, log a failure, and save applied info after
+its invoice. A key-carrying call is bound like the rest.
 After 4e, only the accepted exceptions listed for batch 4c remain.
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)

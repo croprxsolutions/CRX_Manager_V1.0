@@ -6,16 +6,18 @@
 -- log_failed_notification, and update_field_app_applied_info is deployed to production.
 -- ROLLBACK: a new reviewed migration restores the prior trigger list, drops the public
 -- wrappers, renames each pinned _<name>_replay_impl_20261015 back, and restores grants.
--- ORDERING: live high-water 20261116120000_orders_list_page (ledger 20261106062918, re-checked
--- 2026-11-06: every pin below, the 78-operation guard and the internal-caller scan match live).
+-- ORDERING: live high-water 20261118110000_sale_line_vendor (ledger 20261106135401; it replaces
+-- only _save_invoice_scoped_impl). Re-checked 2026-11-06: every pin below, the 78-operation guard
+-- and the internal-caller scan match live.
 -- Restamped from 20261111210000 (below applied batch 4d), then from 20261117110000 (below open
--- PR #1524, 20261117140000).
+-- PR #1524, 20261117140000), then from 20261117150000 (below applied sale_line_vendor).
 -- This file requires the exact 78-operation post-4d guard (53 through 4c, then the 25 batch 4d
 -- operations, in that order) and appends its own 15; every other guard state is refused.
 -- KNOWN LIMITS: dynamic SQL callers cannot be found by catalog text scan; a keyless call
--- still fails closed, except confirm_job_notification_sent, which keeps its pre-4e keyless path
--- (unchanged body, no receipt) so a tab older than PR #1518 can still confirm an email it sent.
--- Every other old-bundle call needs the key-adding app PR before batch 4e.
+-- still fails closed, except the three calls PR #1518 began keying: confirm_job_notification_sent,
+-- log_failed_notification and update_field_app_applied_info keep their pre-4e keyless path
+-- (unchanged body, no receipt), so a tab older than PR #1518 can still confirm an email it sent,
+-- log a failure, and save applied info after its invoice. Every other old-bundle call already sent a key.
 -- EXCLUDED: the twelve 4c functions; generate_rup_sales_records (parked rewrite);
 -- service-role-only commit_blend_ticket_ocr_result, increment_customer_prepay,
 -- load_recipe_into_job, restore_cancelled_delivery; save_job_applied_record (own request hash);
@@ -484,7 +486,8 @@ GRANT EXECUTE ON FUNCTION public.record_job_post_notifications(uuid, text, text,
 -- 4. log_failed_notification
 ALTER FUNCTION public.log_failed_notification(text, text, uuid, text, jsonb, text) RENAME TO _log_failed_notification_replay_impl_20261015;
 -- Only signed-in browser screens call this (Dashboard, notificationTriggers); no Edge Function, cron job or
--- database function does (checked live 2026-11-06), so requiring a signed-in caller loses no current path.
+-- database function does (checked live 2026-11-06). A keyless call (an old tab, or a service-role caller)
+-- runs the unchanged body as before 4e; a keyed call needs a signed-in caller, like every bound function.
 REVOKE ALL ON FUNCTION public._log_failed_notification_replay_impl_20261015(text, text, uuid, text, jsonb, text)
   FROM PUBLIC, anon, authenticated, service_role;
 CREATE FUNCTION public.log_failed_notification(p_notification_type text, p_entity_type text DEFAULT NULL::text, p_entity_id uuid DEFAULT NULL::uuid, p_error_message text DEFAULT NULL::text, p_payload jsonb DEFAULT NULL::jsonb, p_idempotency_key text DEFAULT NULL::text)
@@ -499,8 +502,10 @@ DECLARE
   v_replay jsonb;
   v_result uuid;
 BEGIN
+  -- Transition: a tab opened before PR #1518 logs a failure without a key. Refusing it would lose the
+  -- failure record, so a keyless call runs the unchanged body exactly as before 4e; no receipt to bind.
   IF p_idempotency_key IS NULL THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: log_failed_notification requires p_idempotency_key' USING ERRCODE = '22023';
+    RETURN public._log_failed_notification_replay_impl_20261015(p_notification_type, p_entity_type, p_entity_id, p_error_message, p_payload, NULL);
   END IF;
   -- The pinned body runs these statements before its own receipt lookup.
   DECLARE
@@ -935,8 +940,11 @@ DECLARE
   v_replay jsonb;
   v_result jsonb;
 BEGIN
+  -- Transition: a tab opened before PR #1518 saves applied info without a key, after its invoice
+  -- already committed. Refusing it would leave the invoice without its applied info, so a keyless
+  -- call runs the unchanged body exactly as before 4e; it writes no receipt to bind.
   IF p_idempotency_key IS NULL THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: update_field_app_applied_info requires p_idempotency_key' USING ERRCODE = '22023';
+    RETURN public._update_field_app_applied_info_replay_impl_20261015(p_invoice_ids, p_wind_direction, p_temperature_text, p_applicator_name, p_performed_by, NULL, p_start_temp_f, p_start_wind_mph, p_start_wind_direction, p_start_humidity_pct, p_start_weather_time, p_start_weather_source, p_end_temp_f, p_end_wind_mph, p_end_wind_direction, p_end_humidity_pct, p_end_weather_time, p_end_weather_source, p_weather_manual_override, p_update_weather, p_diluent_rate_gpa, p_update_diluent);
   END IF;
   -- The pinned body runs these statements before its own receipt lookup.
   DECLARE

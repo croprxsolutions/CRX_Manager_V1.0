@@ -17,8 +17,9 @@
  *           invoice-date change re-derives; a typed date (even one equal to the stamp) survives both;
  *           save_invoice-style writes infer the flag from the date they write; a posted row is untouched.
  *   BILLING per-invoice terms save each owner's own terms and dates; malformed maps are refused; an old
- *           app tab (no map, or a JSON null map) is refused with FIELD_INVOICE_RELOAD_REQUIRED and changes
- *           nothing; replay returns the first result and refuses a changed map under the same key.
+ *           app tab (no map, or a JSON null map) saves PO, notes and discounts and leaves every invoice's
+ *           terms, due date and typed flag as they were (a mixed split stays mixed, a typed date stays);
+ *           replay returns the first result and refuses a changed map under the same key.
  *   RE-APPLY refused by the preflight, nothing changes.
  *
  * Run: node scripts/smoke/prove-field-invoice-due-date-follows-terms-real-schema.mjs   (needs Docker; never touches live)
@@ -226,14 +227,21 @@ try {
     [`p_terms_by_invoice => (SELECT jsonb_object_agg(id::text, '"Net 15"'::jsonb) FROM public.invoices WHERE job_id = '${J.JSPLIT}')`, /YYYY-MM-DD/],
   ];
   for (const [args, pattern] of bad) refused(`${transfer('JSPLIT')} ${billing('JSPLIT', args)}`, pattern, `bad map ${args.slice(0, 60)}`);
-  // An old app tab (no map) is refused, even on a single invoice, and leaves the row as it was.
-  const oldTabBefore = ok(`${transfer('JSPLIT')} ${summary('JSPLIT')}`, 'old tab before');
-  for (const [args, label] of [["p_payment_terms => 'Net 30'", 'old tab terms'], ["p_payment_terms => NULL", 'old tab blank'],
+  // An old app tab (no map): PO, notes and discounts save; terms, due date and the typed flag stay as they were.
+  const mixed = `${transfer('JSPLIT')} ${billing('JSPLIT', termsMap('JSPLIT', [['Net 15', "(now() AT TIME ZONE 'America/Chicago')::date + 9"], ['Due on receipt', null]]))}`;
+  assert.equal(ok(`${mixed} ${summary('JSPLIT')}`, 'old tab before'), 'Net 15=+9*, Due on receipt=+0');
+  const billed = (k) => `SELECT string_agg(concat_ws('|', purchase_order_ref, header_notes, footer_notes, internal_notes, discount_earned_cents, discount_date), ', ' ORDER BY customer_id)
+    INTO v FROM public.invoices WHERE job_id = '${J[k]}';`;
+  const oldTab = (k, extra) => `p_purchase_order_ref => 'PO-OLD', p_header_notes => 'hn', p_footer_notes => 'fn', p_internal_notes => 'in',
+    p_discounts => (SELECT jsonb_object_agg(id::text, '{"amount_cents":500,"date":"2026-12-01"}'::jsonb) FROM public.invoices WHERE job_id = '${J[k]}'), ${extra}`;
+  for (const [extra, label] of [["p_payment_terms => 'Net 30', p_due_date => DATE '2027-01-01'", 'old tab terms + date'], ['p_payment_terms => NULL', 'old tab blank'],
     ["p_terms_by_invoice => 'null'::jsonb", 'old tab json null']]) {
-    refused(`${transfer('JSPLIT')} ${billing('JSPLIT', args)}`, /FIELD_INVOICE_RELOAD_REQUIRED: this screen needs the latest app version/, label);
+    assert.equal(ok(`${mixed} ${billing('JSPLIT', oldTab('JSPLIT', extra))} ${summary('JSPLIT')}`, label), 'Net 15=+9*, Due on receipt=+0', `${label}: terms or due date moved`);
+    assert.equal(ok(`${mixed} ${billing('JSPLIT', oldTab('JSPLIT', extra))} ${billed('JSPLIT')}`, `${label} saved`),
+      'PO-OLD|hn|fn|in|500|2026-12-01, PO-OLD|hn|fn|in|500|2026-12-01', `${label}: PO/notes/discount did not save`);
   }
-  refused(`${transfer('J30')} ${billing('J30', "p_payment_terms => 'Net 30'")}`, /FIELD_INVOICE_RELOAD_REQUIRED/, 'old tab single');
-  assert.equal(ok(`${transfer('JSPLIT')} BEGIN ${billing('JSPLIT', "p_payment_terms => 'Net 15'")} EXCEPTION WHEN OTHERS THEN RESET ROLE; END; ${summary('JSPLIT')}`, 'old tab unchanged'), oldTabBefore);
+  assert.equal(ok(`${transfer('J30')} ${billing('J30', oldTab('J30', "p_payment_terms => 'Due on receipt'"))} ${summary('J30')}`, 'old tab single'), 'Net 30=+30');
+  assert.equal(ok(`${transfer('J30')} ${billing('J30', oldTab('J30', "p_payment_terms => 'Due on receipt'"))} ${billed('J30')}`, 'old tab single saved'), 'PO-OLD|hn|fn|in|500|2026-12-01');
   // Replay: same key, same map -> first result; same key, changed map -> refused.
   assert.equal(ok(`${transfer('J15')} SELECT array_agg(id) INTO STRICT f0 FROM public.invoices WHERE job_id = '${J.J15}';
     SET LOCAL ROLE authenticated;
@@ -245,7 +253,7 @@ try {
     EXCEPTION WHEN OTHERS THEN t := SQLERRM; END;
     RESET ROLE;
     v := (r = r2)::text || '|' || (t ~ 'IDEMPOTENCY');`, 'replay'), 'true|true', 'REPLAY');
-  console.log('[prover] BILLING: per-owner terms and typed dates save per invoice; 7 malformed maps refused; old tabs (no map) refused and change nothing; replay holds');
+  console.log('[prover] BILLING: per-owner terms and typed dates save per invoice; 7 malformed maps refused; old tabs (no map) save PO/notes/discounts and every invoice keeps its terms, due date and typed flag; replay holds');
 
   // RE-APPLY.
   const again = applyCandidate();

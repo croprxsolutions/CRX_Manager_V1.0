@@ -26,8 +26,9 @@
 -- The transfer inserts due_date NULL (the trigger derives each owner's date); the rest of its body is
 -- byte-identical to live.
 -- update_field_app_invoice_billing gains p_terms_by_invoice: one {payment_terms, due_date} per invoice, so a
--- split's owners keep their own terms. A save without it (an app tab opened before this change) is refused
--- with FIELD_INVOICE_RELOAD_REQUIRED, so the person refreshes to the new screen (Mason, 2026-11-06).
+-- split's owners keep their own terms. A save without it (an app tab opened before this change) saves the PO,
+-- notes and discounts and leaves each invoice's terms, due date and typed-date flag as they are; its terms or
+-- due date are ignored (Mason, 2026-11-06: an old tab saves all but terms/due date).
 -- invoices_postable (security invoker) gains due_date_is_custom so the screens can read it.
 --
 -- Rollback: drop trigger zzz_field_invoice_due_date_follows_terms and function
@@ -40,7 +41,7 @@
 -- INVOICE_COLUMNS in src/lib/costFields.ts and redeploy first); the column can stay (unused) or be dropped.
 -- caller-analysis: _transfer_job_to_invoice_intent_impl_20260908 :: REVOKE/GRANT keep its ACL exactly as live (postgres only); its one caller is the postgres-owned SECURITY DEFINER wrapper transfer_job_to_invoice, which the owner EXECUTE grant still covers
 -- caller-analysis: _update_field_app_invoice_billing_replay_impl_20261015 :: dropped and re-created with one more trailing argument; ACL re-stated owner-only (postgres); its one caller is the re-created wrapper update_field_app_invoice_billing below
--- caller-analysis: update_field_app_invoice_billing :: dropped and re-created with trailing p_terms_by_invoice jsonb DEFAULT NULL; ACL re-stated exactly as live (authenticated, service_role); callers use named arguments, so an old app call without the new argument still resolves to the one remaining signature and is refused with FIELD_INVOICE_RELOAD_REQUIRED
+-- caller-analysis: update_field_app_invoice_billing :: dropped and re-created with trailing p_terms_by_invoice jsonb DEFAULT NULL; ACL re-stated exactly as live (authenticated, service_role); callers use named arguments, so an old app call without the new argument still resolves to the one remaining signature and saves everything but terms/due date
 -- caller-analysis: parse_payment_terms_days :: CREATE OR REPLACE keeps its live ACL; callers _post_invoice_impl_20260714, _post_deleted_delivery_recovery_invoice_20260719 and the new trigger
 -- caller-analysis: _field_invoice_due_date_follows_terms :: new trigger function, EXECUTE revoked from PUBLIC, anon, authenticated, service_role; only the trigger calls it
 
@@ -1083,8 +1084,8 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- KI-14: per-invoice terms (refused below when absent) must name every invoice
-  -- exactly once, and replace the uniform terms/date.
+  -- KI-14: per-invoice terms, when sent, must name every invoice exactly once,
+  -- and replace the uniform terms/date.
   IF v_terms IS NOT NULL AND jsonb_typeof(v_terms) <> 'null' THEN
     IF jsonb_typeof(v_terms) IS DISTINCT FROM 'object' THEN
       RAISE EXCEPTION 'FIELD_INVOICE_TERMS_INVALID: per-invoice terms must be an object' USING ERRCODE = '22023';
@@ -1114,11 +1115,9 @@ BEGIN
     IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
   END IF;
 
-  -- An app tab opened before per-invoice terms sends no map; after the replay check, so a save that committed
-  -- just before this change still returns its result on retry.
-  IF v_terms IS NULL OR jsonb_typeof(v_terms) = 'null' THEN
-    RAISE EXCEPTION 'FIELD_INVOICE_RELOAD_REQUIRED: this screen needs the latest app version; refresh the page, then save again' USING ERRCODE = '22023';
-  END IF;
+  -- An app tab opened before per-invoice terms sends no map: its uniform terms/due date are ignored and each
+  -- invoice keeps its own (Mason, 2026-11-06); the PO, notes and discounts still save.
+  IF jsonb_typeof(v_terms) = 'null' THEN v_terms := NULL; END IF;
 
   PERFORM 1 FROM invoices WHERE id = ANY(p_invoice_ids) ORDER BY id FOR UPDATE;
 
@@ -1126,10 +1125,13 @@ BEGIN
   -- Only editable field-application invoices.
   UPDATE invoices i SET
     purchase_order_ref    = p_purchase_order_ref,
-    payment_terms         = NULLIF(btrim(v_terms -> i.id::text ->> 'payment_terms'), ''),
+    payment_terms         = CASE WHEN v_terms IS NULL THEN i.payment_terms
+                                 ELSE NULLIF(btrim(v_terms -> i.id::text ->> 'payment_terms'), '') END,
     header_notes          = p_header_notes,
-    due_date              = (v_terms -> i.id::text ->> 'due_date')::date,
-    due_date_is_custom    = (v_terms -> i.id::text ->> 'due_date') IS NOT NULL,
+    due_date              = CASE WHEN v_terms IS NULL THEN i.due_date
+                                 ELSE (v_terms -> i.id::text ->> 'due_date')::date END,
+    due_date_is_custom    = CASE WHEN v_terms IS NULL THEN i.due_date_is_custom
+                                 ELSE (v_terms -> i.id::text ->> 'due_date') IS NOT NULL END,
     footer_notes          = p_footer_notes,
     internal_notes        = p_internal_notes,
     discount_earned_cents = COALESCE((v_disc -> i.id::text ->> 'amount_cents')::bigint, 0),

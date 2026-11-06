@@ -103,6 +103,15 @@ BEGIN
       RAISE EXCEPTION 'PREFLIGHT_FAIL: % body, arguments, settings, SECURITY DEFINER, owner or grants drifted; re-review the current definition', v_row.sig;
     END IF;
   END LOOP;
+  -- The four column defaults this file replaces must still be the UTC date (or already this file's).
+  IF EXISTS (
+    SELECT 1 FROM (VALUES ('payments', 'payment_date'), ('commission_payments', 'payment_date'), ('ar_reminder_tracking', 'sent_date'), ('deliveries', 'scheduled_date')) AS t(tbl, col)
+     WHERE coalesce(pg_get_expr((SELECT adbin FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+                         WHERE d.adrelid = ('public.' || t.tbl)::regclass AND a.attname = t.col), ('public.' || t.tbl)::regclass), '')
+           NOT IN ('CURRENT_DATE', '((now() AT TIME ZONE ''America/Chicago''::text))::date')
+  ) THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: a column date default drifted from CURRENT_DATE; re-review before replacing it';
+  END IF;
   IF EXISTS (SELECT 1 FROM rup_sales_records r JOIN invoices i ON i.id = r.invoice_id
               WHERE r.sale_date IS DISTINCT FROM i.invoice_date) THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: RUP sales records exist whose sale date is not their invoice date; plan their correction before applying';

@@ -95,7 +95,9 @@
 --         VALUES (v_block.id, to_jsonb(v_block), (SELECT s.parent_brand_id FROM public.product_parent_brand_sources s WHERE s.legacy_brand_id = v_block.id),
 --                 r.id, 'same name as a renamed active brand; renamed aside at rollback')
 --         RETURNING id INTO v_archive_id;
---         UPDATE public.product_brands SET brand_name = v_block.brand_name || ' (archived ' || v_archive_id || ')',
+--         -- Bounded to the 200-character limit; the archive row keeps the full original name.
+--         UPDATE public.product_brands SET brand_name = left(v_block.brand_name, 200 - char_length(' (archived ' || v_archive_id || ')'))
+--                                                   || ' (archived ' || v_archive_id || ')',
 --           row_version = row_version + 1
 --         WHERE id = v_block.id;
 --       END IF;

@@ -679,7 +679,10 @@ async function main() {
   // The active "Brandy A" takes the retired variant's name after the move: each size keeps its own mapped row,
   // so the frozen "Brandy B" row there has to be archived and renamed aside, not collided with.
   const ba = scalar(`SELECT id || ':' || row_version FROM public.product_parent_brands WHERE parent_id = '${GL}' AND brand_name = 'Brandy A' AND status = 'active';`).split(':');
-  call(ADMIN, parentBrand(GL, 'Brandy B', { id: ba[0], version: Number(ba[1]), epa: '264-829' }, 'k-pb9'));
+  // A 200-character name (the limit): the renamed-aside row must still fit, so its name is cut before the suffix.
+  const LONG = `Brandy B${'x'.repeat(192)}`;
+  asOwner(`UPDATE public.product_brands SET brand_name = '${LONG}' WHERE id IN ('${BB1}', '${BB2}');`);
+  call(ADMIN, parentBrand(GL, LONG, { id: ba[0], version: Number(ba[1]), epa: '264-829' }, 'k-pb9'));
   stageText('rollback.sql', `${rollbackSql()}\n${originalBrandWriter()}\n`);
   const rolled = apply('rollback.sql');
   assert.equal(rolled.status, 0, rolled.output);
@@ -689,9 +692,10 @@ async function main() {
   const legacy = (pid) => scalar(`SELECT string_agg(concat_ws('|', brand_name, epa_registration, manufacturer), ',' ORDER BY brand_name) FROM public.product_brands WHERE product_id = '${pid}';`);
   const archiveId = (bid) => scalar(`SELECT id FROM public.product_brand_rollback_archive WHERE legacy_brand_id = '${bid}';`);
   for (const [pid, bid] of [[L1, BB1], [L2, BB2]]) {
-    assert.equal(legacy(pid), `Brandy B|264-829|Maker One,Brandy B (archived ${archiveId(bid)})|Maker Two,Brandy C|264-829|Maker One`);
+    const suffix = ` (archived ${archiveId(bid)})`;
+    assert.deepEqual(legacy(pid).split(',').sort(), [`${LONG}|264-829|Maker One`, `${LONG.slice(0, 200 - suffix.length)}${suffix}|Maker Two`, 'Brandy C|264-829|Maker One'].sort());
   }
-  assert.equal(scalar(`SELECT string_agg(legacy_row->>'brand_name', ',') FROM public.product_brand_rollback_archive WHERE legacy_brand_id IN ('${BB1}', '${BB2}');`), 'Brandy B,Brandy B');
+  assert.equal(scalar(`SELECT string_agg(legacy_row->>'brand_name', ',') FROM public.product_brand_rollback_archive WHERE legacy_brand_id IN ('${BB1}', '${BB2}');`), `${LONG},${LONG}`);
   assert.equal(scalar("SELECT count(*) FROM public.product_brands WHERE brand_name LIKE '~rollback %';"), '0');
   assert.equal(legacy(S2), 'Spready|700-7|Maker Four');
   assert.equal(scalar(`SELECT count(*) || ':' || min(legacy_row->>'epa_registration') FROM public.product_brand_rollback_archive WHERE legacy_brand_id = '${BS2}';`), '1:700-8');

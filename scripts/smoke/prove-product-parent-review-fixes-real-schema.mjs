@@ -240,8 +240,8 @@ const TAHA = [[U1, U2], [I1, I2], [T1, T2], [S1, S2]];
 // Strengths the base name still loses (written "lb./gal", "lb ai/gal", "oz ai/gal", or with the size's own number):
 // each pair shares a base name, and the numbers check must hold it.
 const [A1, A2, L1, L2, O1, O2, W1, W2, R3, ZD] = ['31', '32', '33', '34', '35', '36', '37', '38', '39', '3a'].map(id);
-const [M1, M2] = ['3c', '3d'].map(id);
-const STRENGTH_PAIRS = [[A1, A2], [L1, L2], [O1, O2], [W1, W2], [M1, M2]];
+const [M1, M2, B1, B2] = ['3c', '3d', '3e', '3f'].map(id);
+const STRENGTH_PAIRS = [[A1, A2], [L1, L2], [O1, O2], [W1, W2], [M1, M2], [B1, B2]];
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -283,12 +283,15 @@ function seed() {
     p(W2, '[PROVER] Wex 4 lb./gal 4 gal', 'WE-4', 'Herbicide', null, 'liquid', 'Gal', 4, 'Gal'),
     p(M1, '[PROVER] Mox 2 lb./gal 4 x 2 gal', 'MO-2', 'Herbicide', null, 'liquid', 'Gal', 2, 'Gal'),
     p(M2, '[PROVER] Mox 4 lb./gal 2 x 4 gal', 'MO-4', 'Herbicide', null, 'liquid', 'Gal', 4, 'Gal'),
+    // One number, another unit (Luna round 6).
+    p(B1, '[PROVER] Lom 2 lb ai/gal 2.5 gal', 'LO-LB', 'Herbicide', null, 'liquid', 'Gal', 2.5, 'Gal'),
+    p(B2, '[PROVER] Lom 2 oz ai/gal 2.5 gal', 'LO-OZ', 'Herbicide', null, 'liquid', 'Gal', 2.5, 'Gal'),
     // 1.0 and 1 are one number: Rho 1.0 gal joins Rho.
     p(R3, '[PROVER] Rho 1.0 gal', 'RH-1', 'Herbicide', '600-2', 'liquid', 'Gal', 1, 'Gal'),
     // Zeta's EPA number and name, but dry: another product, never held as a second Zeta.
     p(ZD, '[PROVER] Zeta 25 lb', 'ZE-D', 'Herbicide', '300-1', 'dry', 'Lb', 25, 'Lb'),
   ].join(',\n    ')};`);
-  console.log('[prover] seeded an admin, a sales rep and 30 invented products');
+  console.log('[prover] seeded an admin, a sales rep and 32 invented products');
 }
 
 const PINS = {
@@ -317,7 +320,7 @@ function rollbackSql() {
     take(par2, 'CREATE FUNCTION public.approve_product_parent_groups('),
     take(units, 'CREATE OR REPLACE FUNCTION public._product_size_move_refusal('),
     take(units, 'CREATE OR REPLACE FUNCTION public.move_product_size('),
-    'DROP FUNCTION public._product_parent_identity_name(text); DROP FUNCTION public._product_name_strength_numbers(text, numeric);',
+    'DROP FUNCTION public._product_parent_identity_name(text); DROP FUNCTION public._product_name_strength_tokens(text, numeric);',
   ].join('\n\n');
 }
 
@@ -380,12 +383,14 @@ async function main() {
     // A concentration written with spaces around the slash is still a strength (Luna round 4).
     ['Imidacloprid 2 lb / gal 2.5 gal', 'Imidacloprid 2 lb / gal'], ['Mix 4 lb /gal', 'Mix 4 lb /gal'],
   ];
-  // The numbers check: every number in the name, by value and in order, less the last one equal to the recorded container size.
-  for (const [name, size, want] of [['Imida 2 lb./gal 2.5 gal', 2.5, '{2}'], ['Wex 2 lb./gal 2 gal', 2, '{2}'], ['Rho 1.0 gal', 1, '{}'],
-    ['Rho 2 x 2.5 gal', 2.5, '{2}'], ['UAN 28/0/0 Tote', 275, '{28,0,0}'],
+  // The numbers check: every number in the name, by value with the word after it and in order, less the last one equal to the recorded container size.
+  for (const [name, size, want] of [['Imida 2 lb./gal 2.5 gal', 2.5, '{"2 lb"}'], ['Wex 2 lb./gal 2 gal', 2, '{"2 lb"}'], ['Rho 1.0 gal', 1, '{}'],
+    ['Rho 2 x 2.5 gal', 2.5, '{"2 x"}'], ['UAN 28/0/0 Tote', 275, '{28,0,"0 tote"}'], ['Lam 2 oz ai/gal 2.5 gal', 2.5, '{"2 oz"}'],
     // Order kept, last match removed: a strength and a pack count cannot trade places (Luna round 5).
-    ['Mix 2 lb./gal 4 x 2 gal', 2, '{2,4}'], ['Mix 4 lb./gal 2 x 4 gal', 4, '{4,2}'], ['Mix 2 gal 2 lb/gal', 2, '{2}'], ['Rho 1 gal', null, '{1}'], ['Mix .5 gal', 0.5, '{}']]) {
-    assert.equal(scalar(`SELECT public._product_name_strength_numbers(${lit(name)}, ${size ?? 'NULL'})::text;`), want, `numbers of ${name}`);
+    ['Mix 2 lb./gal 4 x 2 gal', 2, '{"2 lb","4 x"}'], ['Mix 4 lb./gal 2 x 4 gal', 4, '{"4 lb","2 x"}'],
+    // shortcut: the last match is taken as the size, so a size written before its strength is held, never merged.
+    ['Mix 2 gal 2 lb/gal', 2, '{"2 gal"}'], ['Rho 1 gal', null, '{"1 gal"}'], ['Mix .5 gal', 0.5, '{}']]) {
+    assert.equal(scalar(`SELECT public._product_name_strength_tokens(${lit(name)}, ${size ?? 'NULL'})::text;`), want, `numbers of ${name}`);
   }
   for (const [input, want] of BASES) assert.equal(scalar(`SELECT '>' || public._product_parent_base_name(${lit(input)}) || '<';`), `>${want}<`, `base name of ${input}`);
   for (const [a, b] of [['UAN 28/0/0 Tote', 'UAN 32/0/0 Tote'], ['Imidacloprid 2 lb/gal', 'Imidacloprid 4 lb/gal'], ['Talstar 2 G', 'Talstar 0.2 G'], ['Starter 6/24/6', 'Starter 3/24/6']]) {
@@ -425,7 +430,7 @@ async function main() {
   assert.ok(!G.some((g) => g.members.some((m) => m.product_id === zeta.product_id)), 'a grouped size was proposed');
   assert.equal(P1.held_count, G.filter((g) => g.status === 'held').length);
   assert.equal(P1.rejected_count, 0);
-  console.log("[case] build: Taha's pairs land in separate groups; a group whose names carry different numbers besides their container size is held size_numbers_differ (Numo, and strengths written lb./gal, lb ai/gal, oz ai/gal, with the size's own number, or traded with a pack count); Rho 1.0 gal joins Rho; Zeta (EPA 300-1, liquid parent exists) is held, Zeta Pro (same EPA, other name) and Zeta dry are proposed with epa_has_parent");
+  console.log("[case] build: Taha's pairs land in separate groups; a group whose names carry different numbers besides their container size is held size_numbers_differ (Numo, and strengths written lb./gal, lb ai/gal, oz ai/gal, with the size's own number, or traded with a pack count, or one number in another unit); Rho 1.0 gal joins Rho; Zeta (EPA 300-1, liquid parent exists) is held, Zeta Pro (same EPA, other name) and Zeta dry are proposed with epa_has_parent");
 
   // [case] approval after a parent appeared (Taha finding 3)
   const kappa = groupOf(G, K1);
@@ -552,7 +557,7 @@ async function main() {
   stageText('rollback.sql', rollbackSql());
   const rolled = apply('rollback.sql');
   assert.equal(rolled.status, 0, rolled.output);
-  assert.equal(scalar(`SELECT to_regprocedure('public._product_name_strength_numbers(text,numeric)') IS NULL;`), 't');
+  assert.equal(scalar(`SELECT to_regprocedure('public._product_name_strength_tokens(text,numeric)') IS NULL;`), 't');
   assert.equal(scalar(`SELECT to_regprocedure('public._product_parent_identity_name(text)') IS NULL;`), 't');
   for (const [sig, want] of Object.entries(PINS)) assert.equal(bodyMd5(sig), want, `${sig}: the rollback did not restore the live body`);
   for (const s of Object.keys(PINS)) assert.equal(aclOf(s), aclBefore[s], `${s}: the rollback changed grants, settings, owner or security`);

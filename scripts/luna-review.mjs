@@ -352,8 +352,12 @@ export function nextStepHint(text) {
 }
 
 // A round on one commit or on uncommitted work never clears the change (Mason, 2026-11-06).
-export function scopeHint(label) {
-  if (String(label).startsWith("branch against origin/main ")) return null;
+export function scopeHint(label, dirty = false) {
+  if (String(label).startsWith("branch against origin/main ")) {
+    if (!dirty) return null;
+    return "Scope: the checkout has edits that are not committed, and this round did not read them. Commit "
+      + "them and run the whole-branch round again before you push (codex-review Step 3A).";
+  }
   return `Scope: this round read only ${label}. The round that clears the change must be the default `
     + "whole-branch round on the committed head you will push (codex-review Step 3A).";
 }
@@ -365,7 +369,7 @@ function reportDidNotRun(reason, advice) {
   return EXIT_DID_NOT_RUN;
 }
 
-function report(run, { label, diffLines, files, model, effort }) {
+function report(run, { label, diffLines, files, model, effort, dirty }) {
   const exitCode = exitCodeFor(run);
   if (run.outcome === "void") {
     console.error(run.stderr.split(/\r?\n/).slice(-20).join("\n"));
@@ -378,7 +382,7 @@ function report(run, { label, diffLines, files, model, effort }) {
   console.log("Advisory only: this is not a Sol proof and satisfies no gate.");
   const hint = run.outcome === "clean" ? null : nextStepHint(run.text);
   if (hint) console.log(hint);
-  const scope = scopeHint(label);
+  const scope = scopeHint(label, dirty);
   if (scope) console.log(scope);
   return exitCode;
 }
@@ -430,7 +434,8 @@ export function main(argv = process.argv.slice(2), codexDeps = {}) {
     // Only a round that reached a verdict counts; a broken run is retried for free.
     if (rounds && run.outcome !== "void") rounds.record();
     if (run.kind === "output-limit") run.advice = oversizedAdvice(git, frozen);
-    return report(run, { label: frozen.label, diffLines, files, model, effort });
+    const dirty = gitOutput(git, ["status", "--porcelain"]).trim() !== "";
+    return report(run, { label: frozen.label, diffLines, files, model, effort, dirty });
   } catch (error) {
     return reportDidNotRun(error.message);
   }

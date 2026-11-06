@@ -263,6 +263,7 @@ assert.equal(nextStepHint("- **HIGH — a.ts:1** — wrong total\nLUNA_REVIEW: F
 assert.match(scopeHint("commit abc123"), /whole-branch round/);
 assert.match(scopeHint("uncommitted changes"), /whole-branch round/);
 assert.equal(scopeHint("branch against origin/main (abc) at head def"), null);
+assert.match(scopeHint("branch against origin/main (abc) at head def", true), /not committed/);
 assert.match(scopeHint("branch against origin/release (abc) at head def"), /whole-branch round/);
 assert.equal(nextStepHint("- **High — a.ts:1** — wrong total\nLUNA_REVIEW: FINDINGS 1\n"), null);
 assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLUNA_REVIEW: FINDINGS 2\n"), null);

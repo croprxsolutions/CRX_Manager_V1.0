@@ -197,8 +197,8 @@ on any other change run `node scripts/luna-review.mjs --sol --reason "<which of 
 **A serious screen bug needs proof it is fixed (Mason, 2026-11-06).** A confirmed BLOCKER or HIGH
 in a screen that saves, uploads or imports counts as fixed only with a test that reproduces it (two
 overlapping requests, a double click, a retry after an unconfirmed save, closing or reopening during
-a late reply) or with the fixed behavior observed in the running app. Write the test first, watch
-it fail, then fix. When the builder and a reviewer disagree on such a finding, a test or Sol
+a late reply) or with the fixed behavior observed in the running app. Either one is enough; when
+you choose the test, write it first and watch it fail, then fix. When the builder and a reviewer disagree on such a finding, a test or Sol
 settles it, not Mason.
 
 **No second advisory model by default (Mason, 2026-11-06).** Terra (`gpt-6.1-terra`) is not added

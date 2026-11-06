@@ -42,6 +42,8 @@ interface DataTableProps<T> {
    * tap targets; search, filters, empty and failed states stay shared with the table.
    */
   mobileRow?: (row: T) => ReactNode;
+  /** The rows arrive already searched and sorted (a database page): show them as given. */
+  serverSide?: boolean;
 }
 
 const PHONE_QUERY = '(max-width: 767px)';
@@ -117,6 +119,7 @@ export default function DataTable<T extends Record<string, any>>({
   sortState,
   onSortChange,
   mobileRow,
+  serverSide,
 }: DataTableProps<T>) {
   const { phoneRow, sortableColumns } = usePhoneLayout(mobileRow, columns);
   // Internal fallback state — used only when the caller doesn't control it.
@@ -133,8 +136,8 @@ export default function DataTable<T extends Record<string, any>>({
   const sortDir = controlledSort ? sortState.dir : sortDirInner;
 
   const filtered = useMemo(
-    () => applyTableSearchSort(data, searchKeys, search, sortKey, sortDir),
-    [data, searchKeys, search, sortKey, sortDir]
+    () => (serverSide ? data : applyTableSearchSort(data, searchKeys, search, sortKey, sortDir)),
+    [serverSide, data, searchKeys, search, sortKey, sortDir]
   );
 
   const setSort = (next: { key: string | null; dir: SortDir }) => {

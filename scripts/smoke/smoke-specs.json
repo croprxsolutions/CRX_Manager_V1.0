@@ -7,6 +7,12 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "get_orders_page": {
+      "chain": "smoke-goal4-orders-page.sql",
+      "area": ["regression"],
+      "description": "REQUIRES 20261116120000. Goal 4 Orders list page, read only: as the oldest active admin under the authenticated role, get_orders_page for the current season returns total_count and total_price_cents equal to the table (each order rounded to whole cents), every page of 7 together lists each season order once in (order_date DESC, id) order, and a search for an order number finds it; an active driver, when one exists, sees no order.",
+      "covers": ["get_orders_page"]
+    },
     "records_replay_binding_batch4d": {
       "chain": "smoke-records-replay-binding-batch4d.sql",
       "container_only": true,
@@ -62,6 +68,22 @@
       ],
       "area": [
         "pricing",
+        "security"
+      ]
+    },
+    "fill_tote_from_bulk": {
+      "chain": "smoke-tote_fill_from_bulk.sql",
+      "container_prover": "prove-tote-fill-real-schema.mjs",
+      "description": "REQUIRES 20261117130000. Tote fill from bulk (BLK-1a): anon cannot execute the three public functions; on an invented fertilizer parent an admin previews one 265-gal tote from 1,000 gal (nothing written), fills it (two signed ledger rows, one tote_fills row, no cost or price change), a same-key retry replays, the undo restores both counts and replays, a second undo is refused TOTE_FILL_ALREADY_REVERSED; an active non-admin profile is refused ADMIN_REQUIRED.",
+      "covers": [
+        "fill_tote_from_bulk",
+        "preview_tote_fill",
+        "reverse_tote_fill",
+        "_tote_fill_preview",
+        "_tote_fill_liquid_oz"
+      ],
+      "area": [
+        "inventory",
         "security"
       ]
     },
@@ -620,7 +642,7 @@
       "covers": [
         "delivery_signature_storage_access"
       ],
-      "description": "Delivery-signature Storage access is private and scoped to the delivery path and authorized actor; the shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
+      "description": "REQUIRES 20261116100000. Delivery-signature Storage access is private: an old fixed-path signature is readable only when its delivery records it, by an admin, a sales rep or the delivery's active assigned driver; nobody signed in can write, replace or delete one. The shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
       "area": [
         "security",
         "inventory"
@@ -1977,6 +1999,12 @@
       "description": "REQUIRES 20261111120000. KI-27 server check, and retire, before a staff member clears their own stuck request. Self-seeding (needs one active admin profile; everything is rolled back): the function and receipt-guard bodies are pinned, only authenticated can execute the function and no client role reaches either new table; a key recorded under its own operation is safe (expired too) and one under another operation is not; an unrecorded key needs two checks 15+ minutes apart by server time in a token signed for that exact request (no, forged, borrowed and future tokens start a new wait; 5 minutes refused, 16 minutes safe, then retired); a batch with a row saved under adjust_inventory is recorded and a row under another operation or not ending in a UUID is not; after a safe answer the database refuses a later save of the request, of any batch row under it (any ending) and of an expired key, while an unrelated key still saves and a retired request with a live receipt still replays (allocate_payment's claim row included); an active non-admin staff member (when one exists) is answered for their own key and refused another user's; a service profile (when one exists), another user's key, a row key, a wrong idempotency key and a signed-out session are refused. The in-progress answer needs two sessions and is proven on the local test database.",
       "covers": ["retire_uncertain_request"],
       "area": ["idempotency", "regression"]
+    },
+    "sale_line_vendor": {
+      "chain": "smoke-sale-line-vendor.sql",
+      "description": "Migration 20261118110000 (billing plan M3): a new order line is filled from the product's preferred vendor; a line created with a vendor keeps it; a line's vendor changed on the sale reaches its invoice and doesn't touch the product; an older line with no vendor invoices with the preferred vendor; a re-save that sends no vendor keeps it and one that sends a vendor changes it; a product with no preferred vendor stays blank; only the vendor column is open to UPDATE; a product swap on a line takes the new product's preferred vendor unless the same write names one. Terminal rollback.",
+      "covers": ["_fill_order_line_vendor", "_fill_invoice_line_vendor", "save_invoice", "complete_delivery"],
+      "area": ["billing", "regression"]
     }
   }
 }

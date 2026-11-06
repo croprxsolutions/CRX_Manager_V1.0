@@ -2847,6 +2847,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261107060000',
   '20261108120000',
   '20261110150000',
+  '20261115160000',
 ]);
 
 /**
@@ -3051,6 +3052,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'move_product_size',
   'set_parent_rates',
   'update_product_parent',
+  // 20261117130000 (BLK-1a): admin-only tote fill and its undo; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'fill_tote_from_bulk',
+  'reverse_tote_fill',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their

@@ -322,21 +322,26 @@ try {
     ANALYZE public.orders; ANALYZE public.order_items; ANALYZE public.invoices; ANALYZE public.deliveries; ANALYZE public.customers;
     ${ms('warm', plain)}
     ${ms('base', plain)}
-    ${ms('rep_first', call({ limit: 50 }))}
-    ${ms('rep_deep_page', call({ limit: 50, offset: 30000 }))}
-    ${ms('rep_export', call({ limit: 1000, offset: 30000 }))}
-    ${ms('rep_sort', call({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }))}
-    ${ms('rep_search', call({ limit: 50, search: 'product 3' }))}
+    ${ms('rep_first', call({ limit: 50 }))} t := t || ',rep_first_seen=' || (r->>'total_count') || ',rep_first_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_deep_page', call({ limit: 50, offset: 30000 }))} t := t || ',rep_deep_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_export', call({ limit: 1000, offset: 30000 }))} t := t || ',rep_export_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_sort', call({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }))} t := t || ',rep_sort_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_search', call({ limit: 50, search: 'product 3' }))} t := t || ',rep_search_seen=' || (r->>'total_count');
     ${signIn(USERS.admin)}
     ${ms('admin_first', call({ limit: 50 }))}
-    v := t || ',seen=' || (r->>'total_count');`);
+    v := t || ',admin_seen=' || (r->>'total_count');`);
   assert.ok(timed.startsWith('ok|'), `speed probe failed: ${timed}`);
   const times = Object.fromEntries(timed.slice(3).split(',').map((kv) => kv.split('=')).map(([k, n]) => [k, Number(n)]));
   console.log(`[orders-page] 60,000 more orders, ms: ${JSON.stringify(times)}`);
-  assert.ok(times.seen > 60000, `the timed admin read saw only ${times.seen} orders: the 60,000 were not in its range`);
-  for (const k of ['rep_first', 'rep_deep_page', 'rep_export', 'rep_sort', 'rep_search', 'admin_first']) {
+  // The rep's timed reads must have done the full work, not returned an empty list fast.
+  assert.ok(times.admin_seen > 60000 && times.rep_first_seen > 60000, `the timed reads saw too few orders: ${timed}`);
+  assert.ok(times.rep_first_rows === 50 && times.rep_deep_rows === 50 && times.rep_export_rows === 1000 && times.rep_sort_rows === 50 && times.rep_search_seen > 1000,
+    `a rep's timed read returned a short page: ${timed}`);
+  for (const k of ['base', 'rep_first', 'rep_deep_page', 'rep_export', 'rep_sort', 'rep_search', 'admin_first']) {
+    assert.ok(Number.isFinite(times[k]), `no timing for ${k}: ${timed}`);
     assert.ok(times[k] < 8000, `${k} took ${times[k]} ms at 60,000 orders (authenticated statement_timeout is 8 s)`);
-    assert.ok(times[k] < 3 * Math.max(times.base, 100), `${k} took ${times[k]} ms, over 3x a rep's plain read (${times.base} ms): the per-page cost regressed`);
+    // Floor of 1 s: on a fast PC a tiny baseline must not fail a healthy page.
+    if (k !== 'base') assert.ok(times[k] < 3 * Math.max(times.base, 1000), `${k} took ${times[k]} ms, over 3x a rep's plain read (${times.base} ms): the per-page cost regressed`);
   }
   console.log('\nORDERS_LIST_PAGE_PROOF_PASS');
 } finally {

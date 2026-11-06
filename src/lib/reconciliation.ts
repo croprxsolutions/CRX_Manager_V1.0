@@ -163,7 +163,9 @@ export interface InventoryTransactionRow {
     | 'void_delivery_reversal'
     | 'prebooked'
     | 'released'
-    | 'prebook_reconciliation';
+    | 'prebook_reconciliation'
+    | 'tote_fill_out'
+    | 'tote_fill_in';
   quantity: number; // signed: positive = add, negative = subtract (for adjustments)
 }
 
@@ -199,8 +201,12 @@ export function checkInventoryLedger(
         break;
 
       // ── Signed: positive = add, negative = subtract ──
+      // tote_fill_out is the Bulk row (negative on a fill, positive on its undo);
+      // tote_fill_in is the tote row (positive on a fill, negative on its undo).
       case 'adjusted':
       case 'transferred':
+      case 'tote_fill_out':
+      case 'tote_fill_in':
         delta = tx.quantity;
         break;
 

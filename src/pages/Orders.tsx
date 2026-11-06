@@ -41,6 +41,12 @@ const ORDERS_PAGE_SIZE = 50;
 /** Page one has no bookmark: it reads from the top of the list. */
 const FIRST_PAGE: (Json | null)[] = [null];
 
+type NextBookmark = { key: string; page: number; cursor: Json | null };
+/** The bookmark after the page on screen, only when it came from that same query and page. */
+function nextBookmarkFor(next: NextBookmark | null, key: string, page: number): Json | null {
+  return next && next.key === key && next.page === page ? next.cursor : null;
+}
+
 export default function Orders() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -99,8 +105,8 @@ export default function Orders() {
   const page = afters.length - 1;
   const after = afters[page];
   // The bookmark after the page on screen, from its own read; null on the last page.
-  const [nextState, setNextState] = useState<{ key: string; page: number; cursor: Json | null } | null>(null);
-  const nextCursor = nextState && nextState.key === queryKey && nextState.page === page ? nextState.cursor : null;
+  const [nextState, setNextState] = useState<NextBookmark | null>(null);
+  const nextCursor = nextBookmarkFor(nextState, queryKey, page);
   const goNext = () => {
     if (nextCursor !== null) setPageState({ key: queryKey, afters: [...afters, nextCursor] });
   };

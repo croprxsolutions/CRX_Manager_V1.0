@@ -146,6 +146,10 @@ nothing is back-filled or deleted without his approval. A database owner who dis
 **MED/LOW · mixed · unassigned**
 - `profiles` grants `TRUNCATE`/`TRIGGER` to signed-in users (confirmed live read-only 2026-10-25 and
   2026-11-05) — revoked by `20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`), LOW-MED.
+- The same table-maintenance rights (TRUNCATE, TRIGGER, MAINTAIN) on every public table and view, `profiles` MAINTAIN included (462 grants,
+  live read-only 2026-11-06) — `20261123130000_revoke_truncate_trigger_maintain.sql` APPLIED LIVE 2026-11-06 11:09 AM Central, ledger `20261106170917`; repo
+  guard `browserTableMaintenanceGrants.test.ts`. Known limit: `supabase_admin`'s default privileges (platform and
+  extension objects) cannot be changed by `postgres`; live sweep `browser-table-maintenance` watches for them; every app table is `postgres`-owned and the migration checks that. LOW-MED.
 - Customer-document post-apply check (browser storage policies removed, Documents tab still works) was never
   recorded; and a removed document cannot be reopened even by an admin — UNVERIFIED, LOW.
 - Three older "reps work any customer" leftovers: signed-in rep click-through of `customer-document-files`

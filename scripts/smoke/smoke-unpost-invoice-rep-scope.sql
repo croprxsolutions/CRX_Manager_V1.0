@@ -9,6 +9,7 @@
 --   E  A group with one member under someone else's name is refused whole; the group stays posted
 --   F  A group all under the rep's name unposts; an admin unposts any group
 --   G  One member of a group still goes through the group call (GROUP_UNPOST_REQUIRED)
+--   H  A retry with the same key gets its saved result after the invoice is reassigned
 --
 -- HOW TO RUN: execute this whole file as ONE statement. It ALWAYS ends with RAISE EXCEPTION
 -- 'SMOKE_PASS_ROLLBACK ...', so every fixture is rolled back. Any other error text is a failure.
@@ -157,6 +158,20 @@ BEGIN
   IF EXISTS (SELECT 1 FROM invoices WHERE invoice_group_id = v_group AND status <> 'unposted') THEN
     v_fails := v_fails || ' (F) their own group did not unpost;';
   END IF;
+
+  -- H: a rep's retry with the same key gets its saved result, even if the invoice has since been reassigned.
+  PERFORM pg_temp.smk_as(v_admin);
+  v_inv := pg_temp.smk_posted('h' || v_sfx, v_cust, v_rep, v_admin);
+  PERFORM pg_temp.smk_as(v_rep);
+  PERFORM unpost_invoice(v_inv, v_rep, '[SMOKE] ups-h-' || v_sfx);
+  PERFORM set_config('app.admin_override', 'true', true);
+  UPDATE invoices SET salesman_id = v_rep2 WHERE id = v_inv;
+  PERFORM set_config('app.admin_override', 'false', true);
+  BEGIN
+    PERFORM unpost_invoice(v_inv, v_rep, '[SMOKE] ups-h-' || v_sfx);
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (H) a retry was refused after the invoice moved: ' || SQLERRM || ';';
+  END;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL unpost rep scope:%', v_fails;

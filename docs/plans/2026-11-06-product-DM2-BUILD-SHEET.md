@@ -1,0 +1,208 @@
+# DM-2 build sheet: weight per gallon and dry net weight
+
+**Status: PLAN, 2026-11-06. NOT STARTED.** This is DM-2's own build-sheet section, required by `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md` section 7 ("before any of these packages is built, it gets its own full build-sheet section and its own Sol review against PAR-1 and PAR-2 as built"). It replaces that sheet's outline (section 7.1) and settles DM-2's row in its section 7.8. Words (parent, size, copied value, pass, retry key, harness) mean what they mean there. The Stage 2 sheet's section 3 rules all apply; this sheet names only where DM-2 adds to them. The review record is section 9.
+
+**Goal.** Store how much a liquid weighs per gallon (one value per formulation) and how much one package of a dry product weighs, each reviewed before use, and show the crew the weight where they mix: the job's loader worksheet and the blend ticket. Fix the blend checker so a dry blend with liquid parts is a checked total (C-39). No saved record changes.
+
+---
+
+## 1. Facts this sheet is built on
+
+Read-only checks of `main` (`b6342d091`) and the live database (ledger `20261106182955`) on 2026-11-06. Re-check each at build time.
+
+**PAR-1 and PAR-2 as built.**
+- PAR-1 is `20261108120000_product_parents.sql` plus `20261110150000_product_parent_stock_units.sql`. Tables: `product_parents` (`id`, `name`, `nickname`, `product_form` in `liquid`/`dry`/`seed`/`each`, identity fields, the copied values, `parent_version`, `is_active`, who/when), `product_parent_members` (`product_id` primary key, `parent_id`, `size_role`, `fill_source_product_id`), `product_parent_events` (append-only), `product_parent_copy_passes` (private). Reads: a `SELECT` policy on `is_active_profile()`; `SELECT` granted to `authenticated` only.
+- Shared private helpers DM-2 reuses as they are: `_product_parent_replay(key, scope, fingerprint)` (refuses a missing key, takes an advisory lock, binds actor and request fingerprint), `_product_parent_require_admin()`, `_product_parent_reason(text, label, required)`. A size joins or leaves a parent only through `create_product_with_parent`, `add_product_size`, `move_product_size` (PAR-1) and `approve_product_parent_groups` (PAR-2).
+- PAR-2 is `20261123120000_product_parent_proposals.sql`. Its grouping switch `_product_parent_grouping_open()` ships returning `false`, so no existing product can be grouped until the PAR-2 screens' migration turns it on.
+- **Live today: 0 parents, 0 members, 0 proposals, 0 parent brands.** So every DM-2 weight is unusable on real products until parents exist (Stage 2 sheet section 8, order 7: "5 for real data").
+
+**Products (active, live).** Liquid 505: stocked in `Gal` 486, `Oz` 11, `Qt` 8. Dry 83: stocked in `Lb` 64, `Dry oz` 17, `MG` 2. Each 8 (`Ea`, `Unit`). **No active dry product is stocked in a package unit today**: every dry size is stocked in a weight unit, so its weight per stock unit comes from the unit itself. A new dry product can still be stocked in `Ea` or `Unit` (`unitOptionsForForm`, `src/lib/units.ts:39-48`, offers `unit_type = 'both'` units to dry), which is the only case that needs a stored net weight.
+
+**`unit_conversions` (live).** Weight units (`unit_type = 'dry'`, `factor_oz` in weight ounces): `Lb` and `LB` 16, `Dry oz` 1, `g` 0.03527396, `MG` 0.00003527396. Volume units (`liquid`, fluid ounces): `Gal` 128, `Qt` and `qt` 32, `Pt` 16, `fl oz`, `oz`, `Oz` 1. Count units (`both`): `Ea`, `Unit` 1. There is no `kg` or `ton` row; the Stage 2 outline's "lb, oz, kg" list is corrected below.
+
+**`products` unit columns.** `product_form`, `inventory_unit` (stock unit), `container_size`, `container_unit`, `container_type`, `unit_size`. `guard_product_setup_fields` (live body) refuses changing a saved non-blank `product_form`, `inventory_unit` or `container_unit`, and allows filling a blank one. `container_size`, `container_type` and `unit_size` stay editable. 23 triggers on `products` (names checked live; order matters only for `BEFORE` triggers, and DM-2 adds one `AFTER` trigger).
+
+**Blend tickets (live).** 0 `blend_tickets` rows and 0 `blend_ticket_products` rows. Blend tickets are recorded with an application record and billed by direct invoice only (KI-93, DECISION_LOG 2026-11-04). `blend_ticket_products` columns: `id`, `blend_ticket_id`, `product_id`, `product_name`, `quantity`, `unit`, `lot_number`, `sequence_order`, `confidence_score`, `manually_corrected`, `created_at`, `rate_per_acre`, `rate_per_acre_unit`, `unit_cost_cents`, `unit_price_cents`. Grants are **column-level**: `authenticated` has `SELECT`, `INSERT`, `UPDATE` and `REFERENCES` on 14 columns (`anon` `SELECT`). So the app can write lines directly, not only through RPCs, and a new column there would need Mason's grant approval. `blend_tickets` carries the header totals `total_acres`, `total_volume`, `total_volume_unit`.
+
+**Loader worksheets (live).** `job_loader_worksheets` (1 row) stores `capacity_gal`, `carrier_rate_gpa`, `load_balance_mode`, `per_load_acres`, `loads_done`, `comment`, `is_selected`. **It stores no product amounts**: each view recomputes the products per load from the job's current lines (`computeLoaderWorksheet`, `src/lib/loaderWorksheet.ts:145-310`).
+
+**Today's blend checker.** `validateBlendMath` (`src/lib/blendMathValidator.ts:249`) never adds gallons to pounds: a dry-blend total (weight header unit) with any row that will not convert to weight is reported "Total weight not checked" (`:405-411`); a spray-tank total (volume header) quietly leaves dry rows out of a one-sided "can't be over the tank" bound (`:418-435`). Callers: `BlendTicketDetail.tsx:473`, `ManualTicketCreate.tsx:379`.
+
+## 2. Corrections to the Stage 2 outline (section 7.1 and 7.8), from current code
+
+1. **Nothing to group yet.** The outline assumed parents would exist; live has 0, and PAR-2's grouping switch is off. DM-2's mechanism can ship now; real weights wait for PAR-2's data step. Until a liquid size has a parent it shows "put this product in a parent to record its weight", as the outline said.
+2. **No dry product needs a stored net weight today.** All 83 active dry products are stocked in a weight unit. The stored net-weight table is still built (a new dry product may be stocked in `Ea` or `Unit`), but its live use starts at zero, and DATA-4's dry list is empty unless such a product is added.
+3. **Weight units are `Lb`/`LB`, `Dry oz`, `g` and `MG`**, read from `unit_conversions` (`unit_type = 'dry'`), not "lb, oz, kg". `oz` and `Oz` are fluid ounces in this database (`unit_type = 'liquid'`); the derivation never treats them as weight.
+4. **A count unit is `Ea` or `Unit`** (`unit_type = 'both'`). The outline's "bag, box" are container types, not stock units; no stock unit is called bag or box.
+5. **The snapshot cannot ride on "the ticket's save RPC".** Three RPCs write ticket lines (`create_blend_ticket`, `save_blend_ticket`, `commit_blend_ticket_ocr_result`, the last called by the `process-blend-ticket` Edge Function), and `authenticated` still holds column `INSERT`/`UPDATE` grants with RLS write policies, so a direct API write is possible even though no screen makes one (section 3.4). So the snapshot is taken by a trigger at the line boundary, which catches every writer, as section 7.8's direction says.
+6. **Key the snapshot by ticket and product, not by line.** `commit_blend_ticket_ocr_result` deletes the lines nobody corrected and re-inserts them; `save_blend_ticket` deletes lines missing from the save and inserts new ones. A snapshot keyed by line ID would be lost on those paths and re-taken at today's weight, changing a saved record. Keyed by (`blend_ticket_id`, `product_id`) and written "first time only", a re-saved, OCR-replaced or re-ordered line keeps the weight its ticket first used.
+7. **Saved loader worksheets hold no weights to snapshot** (7.8's round-8 item). `job_loader_worksheets` stores only the plan settings, and every product amount on it is already recomputed live from the job's lines. The weight there is a live view, labelled "current approved weights" (section 4; Mason question 1).
+8. **There is no blend-ticket printout.** The outline said the ticket "prints" its weight. No per-ticket PDF exists; the only blend PDF is the ticket list export (`BlendTickets.tsx:200-222`), which has no quantities. The ticket screen shows the saved weight; no printout is added.
+9. **The checker cannot check a spray tank with dry parts.** A gallon total with dry rows would need the dry product's volume, which no one records. Only a weight total (a dry blend, or any ticket whose header unit is a weight) becomes a checked total, by converting liquid and package rows to pounds. A spray tank keeps today's one-sided bound, and dry rows stay the one quiet exclusion, as today.
+10. **Seed and each products never have a weight.** The outline did not say. They are refused by name ("weight isn't tracked for seed or each products"), and the checker's existing seed/each notice stays.
+11. **The loader worksheet does not know which product a line is.** Its input (`LoaderProductInput`, `loaderWorksheet.ts:31-38`) carries only name, total and unit. The screen PR adds `product_id` and `product_form` to it at its two sources (`loaderWorksheetFetch.ts:65`, `:173-179`; `JobDetail.tsx:2392-2403`) and through `masterMixSummaryFetch.ts`; the outline's file list missed these.
+12. **The outline's file list misses the PDF and fetch files.** `masterMixSummaryData.ts` only builds data; the batch PDF is `masterMixSummaryPdf.ts`, and its inputs come from `masterMixSummaryFetch.ts` and `chemicalApplicationReportFetch.ts`. Section 4 lists the real set.
+
+## 3. Database PR: migration `<stamp>_product_weights`
+
+### 3.1 New tables
+
+All follow the Stage 2 rule 2 lock-down: RLS on, `SELECT` policy `USING ((SELECT public.is_active_profile()))` to `authenticated`, `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`, then `GRANT SELECT … TO authenticated` (the PAR-1 pattern, `20261108120000:184-199`). No write grant to any role. Owner `postgres`.
+
+- **`product_parent_density_values`**: `id uuid` primary key; `parent_id uuid NOT NULL` FK `product_parents(id) ON DELETE RESTRICT`; `lb_per_gal numeric(10,4) NOT NULL CHECK (lb_per_gal > 0 AND lb_per_gal <= 25)`; `entered_value numeric NOT NULL`, `entered_unit text NOT NULL CHECK (entered_unit IN ('lb_per_gal', 'specific_gravity'))`; `source text NOT NULL CHECK (source IN ('measured', 'sds', 'label', 'supplier'))`; `source_note text` (trimmed, ≤ 1000); `review_state text NOT NULL CHECK (review_state IN ('draft', 'approved', 'superseded'))`; `reason`, `evidence` (only on corrections); `created_by`, `created_at`, `reviewed_by`, `reviewed_at`, `superseded_at`. Partial unique indexes: **one `approved` row per parent** and **one `draft` row per parent**.
+- **`product_size_net_weight_values`**: the same shape per size: `product_id uuid NOT NULL` FK `products(id) ON DELETE RESTRICT`; `net_lb numeric(12,4) NOT NULL CHECK (net_lb > 0 AND net_lb <= 4000)` (the net pounds of **one stock unit**: one `Ea`, one `Unit`); no `entered_unit` (entered in pounds); the same source, review, who/when columns and the same two partial unique indexes.
+- **`product_parent_density_state(parent_id uuid PRIMARY KEY` FK, `density_version bigint NOT NULL)`** and **`product_size_net_weight_state(product_id uuid PRIMARY KEY` FK, `net_weight_version bigint NOT NULL)`**. A missing row means version 0. Every write takes the row (`INSERT … ON CONFLICT DO NOTHING`, then `SELECT … FOR UPDATE`), checks the caller's expected version, and adds one. So two writers on one subject serialize on this row, and a stale screen is refused by name.
+- **`product_weight_events`**: append-only (update, delete and truncate refused by trigger, as `product_parent_events`, `20261108120000:201-215`). `id bigint` identity; `subject_kind` in (`parent_density`, `size_net_weight`); `parent_id`, `product_id` (exactly one set, by kind); `event_type` in (`draft_saved`, `draft_replaced`, `approved`, `corrected`, `returned_to_draft`); `value_id`; `before_value jsonb`, `after_value jsonb`; `reason`, `evidence`; `changed_by` and `changed_by_name` from the database session (`auth.uid()` and the profile name, as `_product_parent_event` does); `changed_at`.
+- **`blend_ticket_product_weights`** (the saved-record snapshot): primary key (`blend_ticket_id`, `product_id`); `blend_ticket_id` FK `blend_tickets(id) ON DELETE CASCADE`; `product_id` FK `products(id) ON DELETE RESTRICT`; `weight_kind` in (`density`, `net_weight`, `unit_weight`, `none`); `value_id uuid` (the density or net-weight row used, null for `unit_weight` and `none`); `lb_per_unit numeric(12,6)` and `per_unit text` (`Gal` for density; the stock unit for the other two); `source`; `none_reason` (`no_parent`, `no_approved_weight`, `seed_or_each`, `unit_not_convertible`); `captured_at`. Written only by the trigger in section 3.4.
+
+### 3.2 Reading the one approved weight
+
+- **`_product_weight(p_product_id uuid) RETURNS jsonb`** (private, `STABLE`, `SECURITY DEFINER`, no grant). The one place every reader and the snapshot trigger resolve a size's weight:
+  - `liquid`: the size's parent (`product_parent_members`), then that parent's `approved` density row. Returns `{kind: 'density', lb_per_unit: lb_per_gal, per_unit: 'Gal', value_id, source, reviewed_at}`. No parent: `none` / `no_parent`. Parent but no approved row: `none` / `no_approved_weight`. A draft beside it is ignored.
+  - `dry` with a stock unit whose `unit_conversions.unit_type = 'dry'`: `{kind: 'unit_weight', lb_per_unit: factor_oz / 16, per_unit: inventory_unit}`. Nothing stored; the stock unit is locked once set, so this is the product's reviewed setup data.
+  - `dry` with a count stock unit (`unit_type = 'both'`): the size's `approved` net-weight row, `{kind: 'net_weight', lb_per_unit: net_lb, per_unit: inventory_unit, …}`, else `none` / `no_approved_weight`.
+  - `dry` with any other or missing stock unit: `none` / `unit_not_convertible`. `seed` or `each`: `none` / `seed_or_each`.
+- **`get_product_weights(p_product_ids uuid[])`** (public, `EXECUTE` to `authenticated`, refuses a caller who is not `is_active_profile()`, read-only, no key; at most 500 IDs): for each ID, `_product_weight` plus, for the screens that show review state, the current draft (value, source, who/when) and the subject's version. No cost or price.
+- **`get_blend_ticket_weights(p_blend_ticket_id uuid)`** (public, same rules): the snapshot rows for one ticket. The ticket screen reads saved weights only from here.
+
+Every caller converts its own quantities to the weight's `per_unit` through `unit_conversions` (section 4.1), so the database stores one basis per subject and never a pre-multiplied total.
+
+### 3.3 Writers
+
+All `SECURITY DEFINER`, `SET search_path = public, pg_temp`, owner `postgres`, `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role`, `GRANT EXECUTE … TO authenticated`. Each one: `_product_parent_require_admin()` first, then `_product_parent_replay(p_idempotency_key, '<rpc name>', md5(request))` (so authorization runs before the replay lookup, a NULL key is refused, a repeat returns the first result, and the same key with a different request is refused), then the work, then `save_idempotency` last. This is PAR-1's pattern unchanged (`20261108120000:492-521`).
+
+- **`set_parent_density(p_parent_id, p_expected_density_version, p_value numeric, p_unit text, p_source text, p_source_note text, p_idempotency_key)`**: saves a **draft**. Refuses: a parent that is missing, inactive or not `liquid` (`PRODUCT_WEIGHT_NOT_LIQUID`); a stale version (`PRODUCT_WEIGHT_STALE`, naming the parent); a value out of range or non-finite; an unknown unit or source. Converts specific gravity once: `lb_per_gal = round(p_value × 8.345404, 4)` (`WATER_LB_PER_GAL`, pinned in the migration); a `lb_per_gal` entry is rounded to 4 decimals, half-up. **Trust order** (measured > SDS > label > supplier): a source lower than the approved row's source is refused (`PRODUCT_WEIGHT_LOWER_TRUST: the approved value is from the <source>; use Correct weight with a reason and evidence`). An existing draft is marked `superseded` and a `draft_replaced` event written; then the new draft is inserted and a `draft_saved` event written.
+- **`set_size_net_weight(p_product_id, p_expected_version, p_net_lb, p_source, p_source_note, p_idempotency_key)`**: the same for one dry size whose stock unit is a count unit. Refuses a size that is not dry (`PRODUCT_WEIGHT_NOT_DRY`) and a dry size stocked in a weight unit (`PRODUCT_WEIGHT_FROM_UNIT: "<name>" is stocked in <unit>, so its weight comes from the unit`), or with no stock unit.
+- **`correct_parent_density(…, p_reason, p_evidence, p_idempotency_key)`** and **`correct_size_net_weight(…, p_reason, p_evidence, p_idempotency_key)`**: the same arguments plus a required reason and evidence (`_product_parent_reason`). The only way to save a draft from a lower-trust source than the approved one. They still save a **draft**; the correction is used only after approval. Event `corrected`, with reason and evidence.
+- **`approve_weights(p_items jsonb, p_idempotency_key)`**: each item is `{kind, subject_id, draft_id, expected_version}`; at most 200 items; all or nothing. Locks every subject's version row in a fixed order (kind, then ID), checks each version and that `draft_id` is still that subject's draft, then for each: the old `approved` row becomes `superseded`, the draft becomes `approved` with `reviewed_by`/`reviewed_at`, the version moves, one `approved` event. A draft that has since been replaced, or a version that moved, refuses the whole call by name.
+- **Private helpers for DM-1b's Weights tab** (no grant, no key of their own; Stage 2 rule 3): `_save_parent_density_draft(p_parent_id, p_expected_version, p_value, p_unit, p_source, p_source_note, p_reason, p_evidence)` and `_save_size_net_weight_draft(…)`. The public setters and correctors call them, so the workbook later saves drafts through exactly the same checks.
+
+### 3.4 Saved blend tickets keep their weight
+
+**Every writer of `blend_ticket_products`, as live today** (re-checked at build time against `pg_proc`):
+
+| Writer | Latest body | What it does to lines | App callers |
+|---|---|---|---|
+| `create_blend_ticket` (wrapper) → `_create_blend_ticket_replay_impl_20261015` | wrapper `20261114200000:627-690`; body `20260714230100:559`, insert `:732-753` | inserts every line | `ManualTicketCreate.tsx:490`, `BulkTicketUpload.tsx:406` |
+| `save_blend_ticket` (wrapper) → `_save_blend_ticket_replay_impl_20261015` | wrapper `20261114200000:693-740`; body `20260714230100:1160` | deletes lines missing from the save (`:1335-1341`), updates the rest in place, including `product_id` (`:1343-1358`), inserts new ones (`:1360-1383`) | `BlendTicketDetail.tsx:563` |
+| `commit_blend_ticket_ocr_result` | `20260714230100:850` | deletes lines nobody corrected (`:1075-1077`), re-inserts from the OCR result (`:1081-1094`) | Edge Function `process-blend-ticket/index.ts:1171`, `:1188` |
+| `set_blend_ticket_product_quote_price` | `20261020210000:1338` | updates `unit_price_cents` only | `BlendTicketDetail.tsx:922` |
+| a direct API insert or update | column grants `20261022101000:719-746`, RLS `20260511050000:140-162` | any line | none in `src/` |
+
+Rather than change each writer, the migration adds:
+
+- **`trigger_capture_blend_ticket_product_weight`**: `AFTER INSERT OR UPDATE OF product_id ON public.blend_ticket_products FOR EACH ROW`, function `capture_blend_ticket_product_weight()` (`SECURITY DEFINER`, pinned `search_path`, owner `postgres`, no grant). When `NEW.product_id` is set, it writes `_product_weight(NEW.product_id)` into `blend_ticket_product_weights` for (`NEW.blend_ticket_id`, `NEW.product_id`) with `INSERT … ON CONFLICT DO NOTHING`, **except** that a row recorded as `none` is filled in place when a weight now exists (`ON CONFLICT … DO UPDATE … WHERE weight_kind = 'none'`). So:
+  - a ticket keeps the weight it first used for each product, through re-saves, OCR replacement, re-ordering and quantity edits;
+  - a later approval or correction never changes a saved ticket's weight;
+  - a ticket saved before its product had a weight shows "no weight when saved" until a user edits that ticket's lines again;
+  - deleting a line leaves its snapshot (harmless; it is shown only for products the ticket still lists), and deleting the ticket removes them.
+- A trigger is not a grant or policy change, so `blend_ticket_products` needs no `I approve`. A direct app write cannot skip it, and cannot write the snapshot table (no grant).
+- **Live has 0 tickets**, so no back-fill is needed. The migration's preflight refuses to apply if `blend_ticket_products` has any rows, so a ticket saved between this plan and the apply is never shown a weight it did not use; if that happens, the package re-plans a back-fill labelled "captured at DM-2 apply, original not recorded".
+
+### 3.5 A changed pack returns its net weight to draft
+
+`trigger_return_net_weight_to_draft`: `AFTER UPDATE OF container_size, container_type, container_unit, inventory_unit, unit_size ON public.products FOR EACH ROW`, function `return_net_weight_to_draft()` (`SECURITY DEFINER`, pinned, no grant). When any of those values actually changed (`IS DISTINCT FROM`) and the size has an `approved` net-weight row, that row becomes `draft` again (replacing any open draft, which becomes `superseded`), the size's version moves and a `returned_to_draft` event records the changed values. `container_unit` and `inventory_unit` can only be filled when blank (`guard_product_setup_fields`), and a size with a stored net weight already has a stock unit, so in practice the cases are a container size, type or `unit_size` edit. The guard is an `AFTER` trigger, so it adds nothing to the `BEFORE` order PAR-1 checks.
+
+### 3.6 Grants and gates
+
+New tables only, with `SELECT` policies; the snapshot table, both version tables and the events table have no write grant; public functions `EXECUTE` to `authenticated`; private helpers and trigger functions no grant. Two new triggers on existing tables (`blend_ticket_products`, `products`). **No grant, revoke or policy change on an existing table, so no `I approve`.** No live row is written by the migration. Sol list: yes (`supabase/`).
+
+### 3.7 Rollback (in the migration header)
+
+`DROP TRIGGER trigger_capture_blend_ticket_product_weight ON public.blend_ticket_products; DROP TRIGGER trigger_return_net_weight_to_draft ON public.products;` then drop the new functions. Keep the tables for a re-apply (they hold reviewed data and snapshots). Nothing on `products` or `blend_ticket_products` changes, so every existing reader is unaffected.
+
+### 3.8 Files
+
+`supabase/migrations/<stamp>_product_weights.sql`; `docs/changelog.d/<date>-product-weights.md`; `docs/reference/migrations.d/<stamp>_product_weights.md`; `scripts/smoke/prove-product-weights-real-schema.mjs`; `docs/reference/rpc-functions.md`; `src/types/index.ts` and `src/types/supabase.ts`; `.claude/schema-registry.json` after apply; the live function snapshot (`src/lib/rpcFixtureLiveDiff.test.ts`, re-read from live, never merged by hand); post-apply `npm run db-sweeps:live`.
+
+## 4. Screen PR
+
+**Starts after** the database PR is applied live **and** the PAR-1 screens PR (#1553, with its notes fix #1581) has merged, because the density editor sits on PAR-1's Parent panel (`src/components/products/ProductParentPanel.tsx`, added by #1553). It goes one at a time with the DM-1 and REG-1 screen PRs (all three change `ProductDetail.tsx`).
+
+### 4.1 One shared helper: `src/lib/productWeights.ts` (new)
+
+- `fetchProductWeights(productIds)` calls `get_product_weights` (through `src/lib/db.ts`, `assertRpcResult`); `fetchBlendTicketWeights(ticketId)` calls `get_blend_ticket_weights`.
+- `lineWeightLb(quantity, unit, form, weight)` returns `{ lb }` or `{ refused: <plain message naming the product> }`. It never guesses:
+  - **liquid** with a `density` weight: gallons = `fieldAppPricedQuantity(quantity, unit, 'Gal', 'liquid')` (the existing server-parity converter, `chemCalculator.ts:486-503`, unrounded), then `lb = gallons × lb_per_gal`.
+  - **dry** with a `unit_weight` weight, or a dry line whose own unit is a weight: `lb = fieldAppPricedQuantity(quantity, unit, 'lb', 'dry')`.
+  - **dry** with a `net_weight` weight and the line in the stock unit (`Ea`, `Unit`, same-unit identity): `lb = quantity × net_lb`.
+  - Anything else is refused by name: no parent ("put <name> in a parent to record its weight"), no approved weight ("<name> has no approved weight yet"), seed or each, or a unit that will not convert (for example a dry line in `MG` or `g`, which the existing converter does not know, or a dry line in fluid ounces).
+- Weights are computed unrounded and shown to 2 decimals (lb); a total is the sum of unrounded line weights, rounded once for display. No money is involved.
+- Unit tests, hand-checked: 2.5 gal at 8.3454 lb/gal = 20.8635 lb; 32 fl oz (`Oz`) of the same = 2.08635 lb; specific gravity 1.15 saved as 9.5972 lb/gal; 50 `Lb` = 50 lb; 24 `Dry oz` = 1.5 lb; 3 `Ea` of a 5-lb pack = 15 lb; and each refusal.
+
+### 4.2 Product page (`ProductDetail.tsx`, `ProductParentPanel.tsx`)
+
+- **Liquid parent (Parent panel):** "Weight per gallon: 9.5972 lb/gal, from the SDS, approved by <name> on <date>", plus the open draft if any ("Draft: 9.61 lb/gal from the label, waiting for review"). Admins see **Enter weight** (value, lb/gal or specific gravity, source, note; shows the converted lb/gal before saving), **Correct weight** (adds reason and evidence; shown when the new source is lower trust than the approved one, and when the database refuses with `PRODUCT_WEIGHT_LOWER_TRUST`), and **Approve draft**. Each call sends the version it loaded; a stale refusal reloads the panel.
+- **A liquid size without a parent:** the same row reads "Put this product in a parent to record its weight" with no editor.
+- **Dry size stocked in a weight unit:** "Weight comes from its stock unit (Lb)". No editor.
+- **Dry size stocked in `Ea` or `Unit`:** the same editor as the parent's, for net pounds per one stock unit, on the size (not the parent). After a container change returns it to draft, it shows "Pack changed: approve the weight again".
+- **Seed and each:** no weight row.
+- Weight history: the `product_weight_events` rows for the parent or size, in the existing change-history style.
+
+### 4.3 Loader worksheet and batch summary (live views)
+
+- `src/lib/loaderWorksheet.ts`: `LoaderProductInput` gains `product_id` and `product_form` (optional, so old callers and tests still compile). `computeLoaderWorksheet` is unchanged; a new pure `loaderLoadWeights(worksheet, weights)` returns, for each load, each product's weight in lb (or its refusal) and the load's total product weight. `loaderProductTotals` (test-only, keyed by product name, `:316-329`) is left alone; the new function keys by line position, as the PDF already does (`loaderWorksheetPdf.ts:314-315`).
+- Sources pass the new fields: `src/lib/loaderWorksheetFetch.ts` (`:65`, `:173-179`) and `JobDetail.tsx` (`:2392-2403`, `:1295-1300`, and the panel at `:4863`).
+- `LoaderWorksheetsPanel.tsx` (selected worksheet, `:597-619`) and `loaderWorksheetPdf.ts` (per-load table, `:290-317`): under each product amount, its weight ("12.5 gal · 104.3 lb"), and a "Product weight" row per load. A refused weight shows the reason in place of the number; the rest of the sheet still prints. A caption on screen and on the PDF: **"Weights use the current approved weights."**
+- `masterMixSummaryData.ts` (`:257-304`) and its PDF `masterMixSummaryPdf.ts`: each combined product line shows its total weight, and each load group its per-load product weight, through the same helper; `masterMixSummaryFetch.ts` and `chemicalApplicationReportFetch.ts` (`:128-129`, which already selects `product_form`) carry `product_id` through.
+- The tank math (spray volume, loads, split) does not change. "Water to add" is **not** added (it needs every product's volume, including dry); see section 8.
+
+### 4.4 Blend ticket (`BlendTicketDetail.tsx`, `ManualTicketCreate.tsx`) and the checker
+
+- **Saved ticket** (`BlendTicketDetail.tsx`): reads `get_blend_ticket_weights` once with the ticket (`:202-229`). Each line shows its weight from the snapshot ("2.5 gal · 20.86 lb, weight saved with this ticket"), or "no weight when saved". The header shows the total product weight. Saving (`:528-570`) is unchanged; the trigger records any new product's weight.
+- **New ticket** (`ManualTicketCreate.tsx`): before save, lines use `get_product_weights` for the chosen products, captioned "current approved weights; saved with the ticket". `BulkTicketUpload.tsx` and the OCR path need no screen change (the trigger covers them).
+- **Checker** (`blendMathValidator.ts`): `ProductData` gains an optional `weight` (the helper's result for that line). Only the **weight-total branch** changes (`:405-417`): a row that does not convert to the header's weight unit is converted through its weight, `fieldAppPricedQuantity(lb, 'lb', headerUnit, 'dry')`, and joins the sum. If every contributing row converts, the total is a **checked** total (a real `mismatch` when it differs by more than the existing tolerance). If any row still cannot, the warning names it: "Total weight not checked: <name> has no approved weight". The spray-tank branch, the per-line rate checks and the seed/each notice are unchanged. Tests: three liquids and one dry product against a pound total, by hand; a missing weight; a 2 × 2.5-lb `Ea` pack; a spray tank unchanged.
+- `recipeHelpers.ts`: **no change.** It maps recipe items to job rows (`:85`, `:126`) and has no totals; weights appear on the job's loader worksheet, which reads the saved job lines. (The outline listed it; nothing there reads or needs a weight.)
+
+### 4.5 Files
+
+`src/lib/productWeights.ts` and its test; `src/pages/ProductDetail.tsx`; `src/components/products/ProductParentPanel.tsx`; `src/lib/loaderWorksheet.ts`; `src/lib/loaderWorksheetFetch.ts`; `src/lib/loaderWorksheetPdf.ts`; `src/components/jobs/LoaderWorksheetsPanel.tsx`; `src/pages/JobDetail.tsx`; `src/lib/masterMixSummaryData.ts`, `masterMixSummaryFetch.ts`, `masterMixSummaryPdf.ts`; `src/lib/chemicalApplicationReportFetch.ts` (only if the ID is not already carried); `src/pages/BlendTicketDetail.tsx`; `src/components/blendtickets/ManualTicketCreate.tsx`; `src/lib/blendMathValidator.ts` and its test; component tests for each screen. Sol list: yes (`ProductDetail.tsx`; the final diff decides).
+
+## 5. What changes for blend math and saved records
+
+| Record | Saved or live | What DM-2 does |
+|---|---|---|
+| Blend ticket lines | saved | Weight captured per (ticket, product) the first time the product is saved on that ticket; never changed by a later approval or correction. Live has 0 tickets. |
+| Blend ticket header totals (`total_volume`, unit) | saved, typed by the user or OCR | Unchanged. DM-2 adds no stored total. |
+| Checker warnings | never saved | A pound total becomes checked when every row has a weight. |
+| Loader worksheets (`job_loader_worksheets`) | saved settings only | Unchanged; product amounts and weights are computed live, captioned. |
+| Loader and batch PDFs | printed, not stored | Show weights with the caption. |
+| Jobs, job lines, quotes, orders, invoices, inventory | saved | Untouched. No price, quantity, unit, stock or cost changes anywhere. |
+| Products | saved | Untouched by DM-2's writers. The container-change trigger only reads `products`. |
+
+## 6. Done when (harness, then the private test copy)
+
+In the schema-matched harness (`scripts/smoke/prove-product-weights-real-schema.mjs`), with seeded parents and sizes that copy real shapes (no live rows in the repo):
+- **Hand-checked weights:** three liquid parents and one dry product in one blend against a pound total; each line weight and the total match a hand calculation stated in the proof. Specific gravity 1.15 saves as 9.5972 lb/gal; a 4-decimal value round-trips exactly; a fifth decimal rounds half-up.
+- **Dry cases:** a 50-lb bag stocked in `Lb` reads 1 lb per `Lb` with no stored row; a 2 × 2.5-lb pack stocked in `Ea` stores and reads 5 lb per `Ea`; `set_size_net_weight` on a `Lb`-stocked size is refused (`PRODUCT_WEIGHT_FROM_UNIT`); on a liquid or seed size, refused.
+- **Review gate:** a draft beside no approved row reads `none` / `no_approved_weight`, and the loader-worksheet helper refuses it by name; after `approve_weights` it reads the value. A second draft replaces the first (one draft at a time). A stale `approve_weights` item (replaced draft or moved version) refuses the whole batch.
+- **Trust order:** with an SDS value approved, a supplier value through `set_parent_density` is refused; through `correct_parent_density` without reason or evidence, refused; with both, saved as a draft, and the SDS value stays in use until approval. A measured value saves as an ordinary draft.
+- **Pack change:** editing the `Ea` pack's `container_size` returns its approved row to draft and logs `returned_to_draft`; the size then reads `none` until approved again. An edit that leaves those columns unchanged does nothing.
+- **Saved tickets keep their weight:** a ticket saved through `create_blend_ticket` records each product's weight; after a correction is approved, re-saving the ticket through `save_blend_ticket` (including a line deleted and re-added, and a line changed to another product), an OCR commit that replaces the uncorrected lines, and a direct API line insert all leave the first product's recorded weight unchanged, and the new product gets today's. A ticket saved while a product had no weight shows `none` and is filled on its next line save. Deleting the ticket removes its snapshot rows.
+- **Moves:** a size moved to another parent with a different approved density reads the new parent's value; a ticket saved before the move keeps the old one.
+- **Security and retries, every writer:** a non-admin call writes nothing; an inactive user cannot read `get_product_weights`; a direct write to every new table is refused; a NULL key is refused; one key twice writes once; the same key with a different request is refused; the snapshot table cannot be written directly.
+- **Preflight:** the migration refuses to apply when `blend_ticket_products` has a row.
+- **Rollback:** after the rollback block, every existing table and reader returns exactly what it did before.
+- **Observed in the private test copy** (after #1553): enter a density by specific gravity, approve it; the loader worksheet and its PDF show per-load weights with the caption; a manual blend ticket with three liquids and one dry product against a pound total shows the checked total; a missing weight refused by name; a ticket keeping its weight after a correction.
+
+## 7. Risks
+
+- **A wrong or unreviewed weight reaching the loader worksheet.** Readers use only the approved row (one per subject, by index); a draft is never read; the proof shows a draft refused.
+- **A saved ticket's weight changing.** The trigger writes first-time-only per (ticket, product), covers every writer including direct API writes, and the proof replays each route. A future writer that bypasses `blend_ticket_products` entirely (none exists) would need its own check.
+- **The trigger blocking a ticket save.** It only reads products and writes one row; it never raises for a missing weight (it records `none`). The proof saves a ticket whose products have no parent.
+- **Old browsers.** No existing screen or RPC changes behaviour; an old page simply shows no weights.
+- **Unit spellings.** Only the units the existing converters and `unit_conversions` know are used; `MG` and `g` dry lines are refused by name rather than guessed.
+- **Sibling packages.** DM-1's cost per lb of active reads DM-2's approved density and net weight through `_product_weight`; DM-1b's Weights tab saves through the two private draft helpers (section 3.3). Neither may read the value tables directly. Parallel migration PRs take distinct stamps and re-check the ledger at apply.
+
+**Sol list:** both PRs. **Mason-gated:** none at apply (new objects, no live rows written). Reviewing drafted weights (DATA-4) before an admin approves them is Mason's, once parents exist.
+
+## 8. Questions for Mason
+
+1. **Loader worksheet weights follow today's approved weight.** If a weight is corrected after a job's loads are marked done, the worksheet for that job shows the new weight. Recommendation: accept this, with the caption "Weights use the current approved weights". The job's amounts on that sheet already follow the job's current lines, corrections are rare and reviewed, and freezing them would need a new saved record per job.
+2. **Who may approve a weight.** Recommendation: any admin, after your review, the same as other catalog data; no second approver. Each approval records who and when.
+
+Not done, by choice (say if you want them): "water to add" per load (needs every product's volume, including dry), and a "use today's weight" button on an old ticket.
+
+## 9. Review record
+
+Filled in as reviews run.

@@ -68,6 +68,8 @@ interface DeliveryRow extends Delivery {
   customer_name: string;
   driver_name: string;
   item_count: number;
+  // Its place in the chosen order (get_deliveries_page), used to re-sort a read made by id.
+  sort_position?: number;
   farm_group_name: string | null;
 }
 
@@ -151,22 +153,22 @@ const FULL_READ_PAGE_SIZE = 500;
 // limit null reads every matching row (exports, the load sheet, the calendar, the driver view), in pages of 500.
 async function readDeliveriesPage(query: DeliveriesQuery, limit: number | null, offset = 0): Promise<DeliveriesPage> {
   if (limit !== null) return readOnePage(query, limit, offset);
-  const first = await readOnePage(query, FULL_READ_PAGE_SIZE, 0);
+  // Walk the list by delivery id, which never changes, so a delivery edited between pages is never skipped
+  // or repeated; then put the rows back in the chosen order.
+  const first = await readOnePage(query, FULL_READ_PAGE_SIZE, 0, FIRST_ID);
   const rows = [...first.rows];
-  while (rows.length < first.total_count) {
-    const next = await readOnePage(query, FULL_READ_PAGE_SIZE, rows.length);
-    if (next.rows.length === 0 || next.total_count !== first.total_count) break;
-    rows.push(...next.rows);
+  for (let page = first; page.rows.length === FULL_READ_PAGE_SIZE;) {
+    page = await readOnePage(query, FULL_READ_PAGE_SIZE, 0, page.rows[page.rows.length - 1].id);
+    rows.push(...page.rows);
   }
-  // Deliveries changing between pages can shift a row: refuse rather than return a short or repeated list.
-  if (rows.length !== first.total_count || new Set(rows.map((row) => row.id)).size !== rows.length) {
-    throw new Error('Deliveries changed while they were being read. Please try again.');
-  }
+  rows.sort((a, b) => (a.sort_position ?? 0) - (b.sort_position ?? 0));
   return { ...first, rows };
 }
-async function readOnePage(query: DeliveriesQuery, limit: number, offset: number): Promise<DeliveriesPage> {
+// Below every delivery id: the first page of a read by id.
+const FIRST_ID = '00000000-0000-0000-0000-000000000000';
+async function readOnePage(query: DeliveriesQuery, limit: number, offset: number, afterId?: string): Promise<DeliveriesPage> {
   // Generated Args cannot say null; the function reads a null filter as "no filter".
-  const args = { ...query, p_limit: limit, p_offset: offset } as unknown as Database['public']['Functions']['get_deliveries_page']['Args'];
+  const args = { ...query, p_limit: limit, p_offset: offset, ...(afterId ? { p_after_id: afterId } : {}) } as unknown as Database['public']['Functions']['get_deliveries_page']['Args'];
   const { data, error } = await supabase.rpc('get_deliveries_page', args);
   if (error) throw error;
   const page = assertRpcResult<DeliveriesPage>(data, 'get_deliveries_page');

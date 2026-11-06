@@ -12,7 +12,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 
 type Row = Record<string, unknown>;
-type PageArgs = { p_search?: string | null; p_driver_id?: string | null; p_limit: number; p_offset: number; p_today: string };
+type PageArgs = { p_search?: string | null; p_driver_id?: string | null; p_limit: number; p_offset: number; p_after_id?: string; p_today: string };
+const FIRST_ID = '00000000-0000-0000-0000-000000000000';
 
 const H = vi.hoisted(() => ({
   auth: { role: 'admin', profile: { id: 'user-1', role: 'admin' }, deniedPages: [] as string[] },
@@ -20,8 +21,9 @@ const H = vi.hoisted(() => ({
   deliveries: [] as Row[],
   // get_deliveries_page calls from this one on fail, like a dropped connection.
   failPageFromCall: null as number | null,
-  // A delivery is added just before this get_deliveries_page call, as if someone saved one mid-read.
-  addDeliveryAtCall: null as number | null,
+  // Just before this get_deliveries_page call, a delivery read on page 1 is cancelled and a new one is
+  // saved at the end, so the total stays the same and every later row moves up one place.
+  editDeliveriesAtCall: null as number | null,
   failTable: null as string | null,
   pageCalls: [] as Array<Record<string, unknown>>,
   toast: vi.fn(),
@@ -57,7 +59,13 @@ function deliveriesPage(args: PageArgs) {
     && (!args.p_driver_id || d.assigned_driver === args.p_driver_id));
   // The real function refuses any page larger than 500, and a null limit.
   if (typeof args.p_limit !== 'number' || args.p_limit < 1 || args.p_limit > 500) throw new Error('DELIVERIES_PAGE_BAD_ARGS');
-  const rows = matching.slice(args.p_offset, args.p_offset + args.p_limit);
+  // Like the real function: a read by id returns the rows after that id in id order, each with its place
+  // in the chosen order.
+  if (args.p_after_id && args.p_offset !== 0) throw new Error('DELIVERIES_PAGE_BAD_ARGS');
+  const placed: Row[] = matching.map((d, i) => ({ ...d, sort_position: i + 1 }));
+  const rows = args.p_after_id
+    ? placed.filter((d) => String(d.id) > args.p_after_id!).sort((a, b) => String(a.id).localeCompare(String(b.id))).slice(0, args.p_limit)
+    : placed.slice(args.p_offset, args.p_offset + args.p_limit);
   const scheduledToday = H.deliveries.filter((d) => d.scheduled_date === args.p_today).length;
   return {
     success: true,
@@ -83,7 +91,10 @@ vi.mock('../lib/db', () => ({
       if (H.failPageFromCall !== null && H.pageCalls.length >= H.failPageFromCall) {
         return Promise.resolve({ data: null, error: { message: 'connection reset' } });
       }
-      if (H.addDeliveryAtCall === H.pageCalls.length) H.deliveries.unshift({ ...H.deliveries[0], id: 'del-new', delivery_number: 'DEL-NEW' });
+      if (H.editDeliveriesAtCall === H.pageCalls.length) {
+        H.deliveries.splice(1, 1);
+        H.deliveries.push({ ...H.deliveries[0], id: 'del-new', delivery_number: 'DEL-NEW' });
+      }
       return Promise.resolve({ data: deliveriesPage(args), error: null });
     }),
   },
@@ -126,7 +137,7 @@ beforeEach(() => {
   H.auth.role = 'admin';
   H.auth.profile = { id: 'user-1', role: 'admin' };
   H.failPageFromCall = null;
-  H.addDeliveryAtCall = null;
+  H.editDeliveriesAtCall = null;
   H.failTable = null;
   H.pageCalls = [];
   H.deliveries = Array.from({ length: TOTAL }, (_, i) => ({
@@ -174,9 +185,10 @@ describe('Deliveries list pages in the database', () => {
     await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
     const exported = H.exportToCSV.mock.calls[0][0] as Array<{ delivery_number: string }>;
     expect(exported).toHaveLength(TOTAL);
-    expect(new Set(exported.map((d) => d.delivery_number)).size).toBe(TOTAL);
-    // 1,500 rows: three reads of 500.
-    expect(H.pageCalls.slice(-3).map((c) => [c.p_limit, c.p_offset])).toEqual([[500, 0], [500, 500], [500, 1000]]);
+    // In the shown order, every row once.
+    expect(exported.map((d) => d.delivery_number)).toEqual(H.deliveries.map((d) => d.delivery_number));
+    // 1,500 rows: reads of 500, each after the last id read, until one comes back short.
+    expect(H.pageCalls.slice(-4).map((c) => [c.p_limit, c.p_offset, c.p_after_id])).toEqual([[500, 0, FIRST_ID], [500, 0, 'del-0499'], [500, 0, 'del-0999'], [500, 0, 'del-1499']]);
   });
 
   it('searches in the database, finds a row past the first page, and starts again at page one', async () => {
@@ -212,7 +224,7 @@ describe('Deliveries list pages in the database', () => {
     fireEvent.click(button);
     fireEvent.click(button);
     await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
-    expect(H.pageCalls.filter((c) => c.p_limit === 500 && c.p_offset === 0)).toHaveLength(1);
+    expect(H.pageCalls.filter((c) => c.p_after_id === FIRST_ID)).toHaveLength(1);
   });
 
   it('reads the same page again from Try again after a failed read', async () => {
@@ -238,14 +250,19 @@ describe('Deliveries list pages in the database', () => {
     expect(H.exportToCSV).not.toHaveBeenCalled();
   });
 
-  it('exports nothing when deliveries change between the pages of an export', async () => {
+  it('exports every delivery once when deliveries change between the pages of an export', async () => {
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
     await screen.findByText('Scheduled Today');
-    H.addDeliveryAtCall = H.pageCalls.length + 2;
+    H.editDeliveriesAtCall = H.pageCalls.length + 2;
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
 
-    await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'The deliveries could not be read for the export. Nothing was exported; try again.'));
-    expect(H.exportToCSV).not.toHaveBeenCalled();
+    await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
+    const exported = (H.exportToCSV.mock.calls[0][0] as Array<{ delivery_number: string }>).map((d) => d.delivery_number);
+    // Reading by place would skip DEL-0500 here (it moved up onto page 1); reading by id cannot.
+    expect(exported).toContain('DEL-0500');
+    expect(exported).toContain('DEL-NEW');
+    expect(exported).toHaveLength(TOTAL + 1);
+    expect(new Set(exported).size).toBe(TOTAL + 1);
   });
 
   it('keeps a warning on screen when the stock check fails, so no badge is not read as enough stock', async () => {
@@ -278,6 +295,6 @@ describe('Deliveries list pages in the database', () => {
     expect(screen.getAllByText('DEL-1499').length).toBeGreaterThan(0);
     expect(screen.queryByText('DEL-1498')).not.toBeInTheDocument();
     expect(H.pageCalls.every((c) => c.p_limit === 500 && c.p_driver_id === 'driver-1')).toBe(true);
-    expect(H.pageCalls.map((c) => c.p_offset)).toEqual([0, 500]);
+    expect(H.pageCalls.map((c) => c.p_after_id)).toEqual([FIRST_ID, 'del-0999']);
   });
 });

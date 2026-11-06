@@ -14057,6 +14057,7 @@ export type Database = {
       get_dashboard_action_items: { Args: { p_limit?: number }; Returns: Json }
       get_deliveries_page: {
         Args: {
+          p_after_id?: string
           p_customer_id?: string
           p_date_from?: string
           p_date_to?: string

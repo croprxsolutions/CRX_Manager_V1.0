@@ -352,6 +352,8 @@ async function main() {
   psql(`UPDATE public.invoice_items SET product_id = '${OTHER}' WHERE ${blankLine};
     UPDATE public.invoice_items SET product_id = '${S2}' WHERE ${blankLine};`);
   assert.equal(draftLineEpa(), OLD);
+  psql(`UPDATE public.invoice_items SET epa_registration = '' WHERE ${blankLine};`);
+  assert.equal(draftLineEpa(), OLD);
   console.log("[prover] an invoice line written without an EPA number gets its product's; a given number is kept; a line moved to another product takes that product's number unless one is sent");
 
   // New product and Add a size save their notes in the same step.
@@ -451,6 +453,16 @@ async function main() {
   for (const j of [JDONE, JSPRAY, JINV]) { resave(j); assert.equal(lineEpa(j, S1), OLD, `re-saved ${j}`); }
   psql(`UPDATE public.job_chemicals SET product_id = product_id WHERE job_id = '${JDONE}';`);
   assert.equal(lineEpa(JDONE, S1), OLD);
+  // Two lines for one product carrying different numbers each keep their own through a re-save.
+  psql(`INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES ('${JDONE}', '${S1}', 1, 'gal', 1500, 5);`);
+  assert.equal(lineEpa(JDONE, S1), `${OLD},${NEW}`);
+  psql(`BEGIN;
+    DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}';
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES
+      ('${JDONE}', '${S1}', 5, 'gal', 1500, 1), ('${JDONE}', '${OTHER}', 5, 'gal', 1500, 2), ('${JDONE}', '${S1}', 1, 'gal', 1500, 5);
+    COMMIT;`);
+  assert.equal(lineEpa(JDONE, S1), `${OLD},${NEW}`);
+  psql(`DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}' AND sort_order = 5;`);
   // An unsprayed job re-saved follows the product; a line newly added to a finished job takes today's number.
   psql(`UPDATE public.job_chemicals SET product_id = '${OTHER}' WHERE job_id = '${JOPEN}' AND product_id = '${S1}';`);
   resave(JOPEN);

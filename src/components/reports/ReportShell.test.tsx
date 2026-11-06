@@ -103,27 +103,24 @@ describe('ReportShell', () => {
     expect(end).toMatch(/^\d{4}-09-30$/);
   });
 
-  it('calls onDateChange with YTD dates when YTD preset is clicked', () => {
-    const onDateChange = vi.fn();
-    render(
-      <ReportShell onDateChange={onDateChange}>
-        <div>Content</div>
-      </ReportShell>
-    );
+  it('calls onDateChange with YTD dates by the Chicago date when YTD preset is clicked', () => {
+    // Sep 30, 8:30 PM CDT = Oct 1 in UTC: both ends must stay in the season ending Sep 30 (KI-18).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T01:30:00Z'));
+    try {
+      const onDateChange = vi.fn();
+      render(
+        <ReportShell onDateChange={onDateChange}>
+          <div>Content</div>
+        </ReportShell>
+      );
 
-    fireEvent.click(screen.getByText('YTD'));
-    expect(onDateChange).toHaveBeenCalledTimes(1);
-
-    const [start, end] = onDateChange.mock.calls[0];
-    // Season runs Oct 1 to Sep 30: YTD starts from current season's Oct 1
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const seasonStart = month >= 9 ? `${year}-10-01` : `${year - 1}-10-01`;
-    expect(start).toBe(seasonStart);
-    // End should be today (local date, not UTC)
-    const expectedEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    expect(end).toBe(expectedEnd);
+      fireEvent.click(screen.getByText('YTD'));
+      expect(onDateChange).toHaveBeenCalledTimes(1);
+      expect(onDateChange.mock.calls[0]).toEqual(['2025-10-01', '2026-09-30']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows CSV export button when onExportCSV is provided', () => {

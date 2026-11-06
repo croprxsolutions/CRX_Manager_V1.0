@@ -93,6 +93,10 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   await page.unroute('**/rpc/get_orders_page**');
   await page.getByRole('button', { name: `Select All ${total}` }).click();
   await expect(page.getByText(`${matching} selected`)).toBeVisible({ timeout: 60000 });
+  // A page turn clears a full Select All too.
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByText(`Showing 101–150 of ${total} orders`, { exact: false })).toBeVisible();
+  await expect(selectedCount).toHaveCount(0);
 
   // While a typed search waits to run, the old rows are hidden and Select All is greyed out.
   await page.getByLabel('Search orders or products…').fill('zebra');

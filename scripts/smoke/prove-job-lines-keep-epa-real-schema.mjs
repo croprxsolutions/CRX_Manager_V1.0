@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,6 +55,19 @@ function docker(args, options = {}) {
 }
 function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U', user, '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1']; }
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
+// A second session held open in the background, for the lock-order cases.
+function session(sql) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('docker', psqlArgs(), { cwd: ROOT });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve(out) : reject(new Error(`background session failed:\n${out}`))));
+    child.stdin.end(sql);
+  });
+}
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
 function stageText(name, text) {
@@ -335,15 +348,12 @@ async function main() {
   assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
   save(ADMIN, sprayed, keyed, 'jk-replay-1');
   assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
-  // get_job_proof_data (the sent proof) prints the line's own number.
-  assert.equal(ok(ADMIN, `SELECT string_agg(e->>'epa_registration', ',' ORDER BY (e->>'sort_order')::int)
-    FROM jsonb_array_elements(public.get_job_proof_data('${sprayed}')->'products') e;`), `${OLD},${B_EPA}`);
-  console.log('[prover] re-saving a sprayed or finished job keeps each returned line\'s number (admin, rep, reordered, replayed); the proof prints it');
+  console.log("[prover] re-saving a sprayed or finished job keeps each returned line's number (admin, rep, reordered, replayed)");
 
   // Anything that is not the same line of the same job takes the product's current number.
   ids = lineIds(sprayed);
   save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1, { id: ids[1] })]);
-  assert.equal(lines(sprayed), `0:${NEW},1:${B_EPA}`, 'no id sent: the product\'s number (until the screens send ids)');
+  assert.equal(lines(sprayed), `0:${NEW},1:${B_EPA}`, 'no id sent: the product\'s number');
   ids = lineIds(JOTHER);
   save(ADMIN, sprayed, [chem(PA, 0, { id: ids[0] })]);
   assert.equal(lines(sprayed), `0:${NEW}`, 'a line id of another job keeps nothing');
@@ -377,6 +387,27 @@ async function main() {
   ok(ADMIN, `UPDATE public.job_chemicals SET job_id = '${JOLD}', sort_order = 7 WHERE id = '${ids[0]}';`);
   assert.equal(scalar(`SELECT epa_registration FROM public.job_chemicals WHERE id = '${ids[0]}';`), OLD);
   console.log("[prover] new lines, other jobs' ids, changed products, duplicates and unsprayed jobs take the product's number; a blank stays blank on a finished job; ambiguous positions and moved lines take the product's number");
+
+  // Lock order: a spray in flight when an EPA edit starts finishes first, and the edit then leaves
+  // that job alone (the edit waits on the job lock the spray's foreign key holds).
+  const raceJob = save(ADMIN, null, [chem(PA, 0)]);
+  assert.equal(lines(raceJob), `0:${OLD}`);
+  const spraying = session(`BEGIN;
+    INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceJob}', current_date, 10);
+    SELECT pg_sleep(4); COMMIT;`);
+  await sleep(1500);
+  setProductEpa(PA, NEW);
+  await spraying;
+  assert.equal(lines(raceJob), `0:${OLD}`, 'a spray recorded while the edit waited keeps its number');
+  // An EPA edit in flight when a save starts: the save waits, and every line takes the new number.
+  const lineJob = save(ADMIN, null, [chem(PB, 0)]);
+  const editing = session(`BEGIN; UPDATE public.products SET epa_registration = '100-1072' WHERE id = '${PB}';
+    SELECT pg_sleep(4); COMMIT;`);
+  await sleep(1500);
+  save(ADMIN, lineJob, [chem(PB, 0), chem(PB, 1)]);
+  await editing;
+  assert.equal(lines(lineJob), '0:100-1072,1:100-1072', 'lines written while an edit was in flight take the new number');
+  console.log('[prover] an EPA edit and a spray or save on the same job run one after the other (no stale number either way)');
 
   console.log('JOB_LINES_KEEP_EPA_PROOF_PASS');
 }

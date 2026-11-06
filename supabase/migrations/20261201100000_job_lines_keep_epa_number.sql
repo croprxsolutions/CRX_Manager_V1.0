@@ -25,9 +25,11 @@
 --      save. The database reads the stored number itself; nothing a caller sends sets it. A new line,
 --      a line whose product changed, a line moved to another job, two written lines sharing a
 --      position, and any line of a job not sprayed yet take the product's number.
---      Until the screens PR sends line ids, a re-save takes the product's number (today's behaviour).
---   5. get_job_proof_data (the sent "your field was sprayed" proof) prints the line's own number.
---      The screens PR moves the applicator sheet, chemical application report and WPS notice to it.
+--      The job screen sends each saved line's id from this same change (an older save_job ignores
+--      the key, so the screen can ship with or before this file).
+--   5. No printout reads the new column yet: every printout keeps reading the product's number, so
+--      they all agree. A follow-up change moves the sent proof, applicator sheet, chemical
+--      application report and WPS notice onto the line's number together.
 --
 -- NOT CHANGED: _save_job_cost_step2_impl and every check save_job makes (units, totals, idempotency,
 --   roles); invoices and restricted-use records; prices, costs and inventory.
@@ -35,20 +37,21 @@
 -- SIDE EFFECTS, named: (a) restoring kept numbers in step 4, and a product EPA edit reaching open jobs
 --   in step 3, are UPDATEs of job_chemicals, so the statement trigger trg_sync_job_holds_upd rebuilds
 --   those jobs' holds from their unchanged lines, as any job save does. Step 4 updates only when a
---   kept number differs from the product's (after a product EPA edit). (b) A line write holds its
---   product FOR SHARE until commit, so any write to that product (an EPA edit, a cost update from a
---   receipt) waits for an in-flight job save; two at the same instant can deadlock, and PostgreSQL
---   rolls one back whole (retry).
+--   kept number differs from the product's (after a product EPA edit). (b) Lock order is always
+--   the job, then its lines: a product EPA edit locks the open jobs using that product (FOR UPDATE,
+--   in id order) before updating their lines; a line write first takes its job FOR KEY SHARE; a
+--   spray record's foreign key takes the same KEY SHARE. So an EPA edit and a spray, save or line
+--   write on the same job run one after the other: whichever commits first is seen by the other.
 --   (c) save_job now locks the job row first (FOR UPDATE, the lock the save already takes later), so
 --   the lines it reads are the ones it replaces; only an active admin or sales rep gets that far.
 --   (d) A product EPA edit made with no signed-in user (a SQL fix, a service job) rebuilds open jobs'
 --   holds with the job's creator as actor; if an open job using that product has no creator, the edit
 --   is refused whole (nothing changes) and must be made by a signed-in admin.
--- RARE RACE, accepted: a spray recorded at the same instant as a product EPA edit can leave that job's
---   lines with the edited number (the product's correct number).
+-- RARE WAIT: an EPA edit waits for in-flight saves of the open jobs using that product, and the
+--   reverse; lock_timeout or a deadlock with some other multi-job writer rolls one back whole (retry).
 --
--- ROLLBACK (its own reviewed migration): re-emit save_job and get_job_proof_data from their previous
---   bodies (20261019230000 and 20260630160000), drop the two triggers, the five functions and the column.
+-- ROLLBACK (its own reviewed migration): re-emit save_job from its previous body (20261019230000),
+--   drop the two triggers, the five functions and the column.
 --
 -- ORDERING: apply after every older pending migration. The parked 20261127100000 must drop its own
 --   copy of steps 1-3 and restamp after this file.
@@ -75,12 +78,11 @@ BEGIN
   IF (SELECT count(*) FROM pg_proc p
        WHERE (p.oid, md5(replace(p.prosrc, chr(13), ''))) IN (
          ('public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure, '88ca038686daffbbb2c7a46a05d37e5d'),
-         ('public.get_job_proof_data(uuid,uuid)'::regprocedure, 'e4ec151e7306b61962fd16251f47af76'),
          -- Step 4 relies on these: every line deleted and re-written at COALESCE(sort_order, 0).
          ('public._save_job_cost_step2_impl(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure, '8acf34542105a90212ddb0a5e7c5d272'),
          ('public._cost_step2_job_chemicals(uuid,jsonb)'::regprocedure, '5b5dfff699afa368f5f4a7cb72020f38'))
-         AND p.proowner = 'postgres'::regrole) <> 4 THEN
-    RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_PREFLIGHT: save_job or get_job_proof_data or the save it wraps drifted from the body this file was written from';
+         AND p.proowner = 'postgres'::regrole) <> 3 THEN
+    RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_PREFLIGHT: save_job or the save it wraps drifted from the body this file was written from';
   END IF;
   -- The column takes only the grants below; that holds only while the app roles have no table-wide
   -- SELECT, INSERT or UPDATE on job_chemicals.
@@ -119,9 +121,9 @@ $function$;
 ALTER FUNCTION public._job_line_epa_follows_product(uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._job_line_epa_follows_product(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
--- A written line takes its product's number. FOR SHARE: a line written while a product EPA edit is
--- in flight waits for it and takes the new number; an edit that starts after the line waits for the
--- line's save, so its open-job update (step 3) sees the line.
+-- A written line takes its product's number. It first takes its job FOR KEY SHARE: a line written
+-- while a product EPA edit holds that job waits for the edit and then reads the new number; an edit
+-- that starts after the line waits for the line's transaction, so its update (step 3) sees the line.
 CREATE FUNCTION public._job_chemical_epa() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 BEGIN
@@ -130,8 +132,10 @@ BEGIN
     NEW.epa_registration := OLD.epa_registration;
     RETURN NEW;
   END IF;
+  PERFORM 1 FROM public.jobs WHERE id = NEW.job_id FOR KEY SHARE;
+  -- A new statement: it sees an EPA edit that committed while the line waited above.
   NEW.epa_registration := (SELECT NULLIF(btrim(p.epa_registration), '') FROM public.products p
-                            WHERE p.id = NEW.product_id FOR SHARE);
+                            WHERE p.id = NEW.product_id);
   RETURN NEW;
 END;
 $function$;
@@ -158,6 +162,12 @@ ALTER TABLE public.job_chemicals ENABLE TRIGGER trg_sync_job_holds_upd;
 CREATE FUNCTION public._product_epa_to_unsprayed_job_lines() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 BEGIN
+  -- Lock every open job using this product first, in id order: a spray, save or line write in flight
+  -- on one of them finishes before the update below, which then sees it (a new statement).
+  PERFORM 1 FROM public.jobs j
+   WHERE j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
+     AND EXISTS (SELECT 1 FROM public.job_chemicals jc WHERE jc.job_id = j.id AND jc.product_id = NEW.id)
+   ORDER BY j.id FOR UPDATE;
   UPDATE public.job_chemicals jc SET epa_registration = NULLIF(btrim(NEW.epa_registration), '')
    WHERE jc.product_id = NEW.id
      AND jc.epa_registration IS DISTINCT FROM NULLIF(btrim(NEW.epa_registration), '')
@@ -285,179 +295,6 @@ BEGIN
 END;
 $function$;
 
--- ---------------------------------------------------------------------------------------------
--- 5. The sent proof prints the line's own number (body of 20260630160000, one line changed:
---    'epa_registration' reads jc.epa_registration instead of p.epa_registration)
--- ---------------------------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.get_job_proof_data(p_job_id uuid, p_customer_id uuid DEFAULT NULL::uuid)
- RETURNS jsonb
- LANGUAGE plpgsql
- STABLE SECURITY DEFINER
- SET search_path TO 'public', 'extensions', 'pg_temp'
-AS $function$
-DECLARE
-  v_actor               uuid;
-  v_role                text;
-  v_primary_customer_id uuid;
-  v_job                 record;
-  v_season              int;
-  v_fields              jsonb := '[]'::jsonb;
-  v_products            jsonb := '[]'::jsonb;
-  v_weather             jsonb := NULL;
-  v_result              jsonb;
-BEGIN
-  -- Role gate (office sending tool — admin/sales_rep). First executable statement.
-  v_actor := auth.uid();
-  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
-  SELECT role INTO v_role FROM profiles WHERE id = v_actor AND is_active = true;
-  IF v_role IS NULL OR v_role NOT IN ('admin', 'sales_rep') THEN
-    RAISE EXCEPTION 'INSUFFICIENT_ROLE: admin or sales_rep required';
-  END IF;
-
-  -- Job header + applicator display name. Validates the job exists.
-  SELECT j.id, j.job_number, j.status, j.job_date, j.season, j.customer_id, j.applicator_id,
-         pr.full_name AS applicator_name
-  INTO v_job
-  FROM jobs j
-  LEFT JOIN profiles pr ON pr.id = j.applicator_id
-  WHERE j.id = p_job_id AND j.deleted_at IS NULL;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'JOB_NOT_FOUND: job % does not exist', p_job_id;
-  END IF;
-  v_season := v_job.season;
-  v_primary_customer_id := v_job.customer_id;
-
-  -- ── Resolve each job field to its OWNING customer (same precedence as the recipient
-  -- resolver / get_job_billed_customers): explicit job_field_shares, else
-  -- field_billing_defaults, else the job's primary customer. One row per (field) with the
-  -- resolved customer_id, so we can filter to p_customer_id when scoping a recipient's proof.
-  -- ── Per-field APPLIED acres come from job_applied_record_fields (the real sprayed acres,
-  -- the §2/§5 source) joined via job_applied_records; fall back to the field's effective
-  -- acres (override > measured > total) only when no applied record treated that field.
-  SELECT COALESCE(jsonb_agg(fr ORDER BY (fr->>'sort_order')::int NULLS LAST, fr->>'field_name'), '[]'::jsonb)
-  INTO v_fields
-  FROM (
-    SELECT jsonb_build_object(
-      'field_id',         f.id,
-      'field_name',       f.field_name,
-      'county',           f.county,
-      'state',            f.state,
-      'acres',            CASE
-                            WHEN applied.applied_acres IS NOT NULL
-                              THEN GREATEST(applied.applied_acres, 0)
-                            ELSE GREATEST(COALESCE(f.override_acres, f.measured_acres, f.total_acres, 0), 0)
-                          END,
-      'acres_source',     CASE
-                            WHEN applied.applied_acres IS NOT NULL THEN 'applied'
-                            WHEN f.override_acres IS NOT NULL THEN 'override'
-                            WHEN f.measured_acres IS NOT NULL THEN 'measured'
-                            WHEN f.total_acres   IS NOT NULL THEN 'total'
-                            ELSE NULL END,
-      'centroid_geojson', ST_AsGeoJSON(f.centroid)::text,
-      'boundary_geojson', ST_AsGeoJSON(COALESCE(f.boundary_geom, f.boundary::geometry))::text,
-      'harvest_date',     (
-                            SELECT to_char(fch.harvest_date, 'YYYY-MM-DD')
-                            FROM field_crop_history fch
-                            WHERE fch.field_id = f.id
-                              AND (v_season IS NULL OR fch.season = v_season)
-                              AND fch.harvest_date IS NOT NULL
-                            ORDER BY fch.season DESC NULLS LAST, fch.harvest_date DESC
-                            LIMIT 1
-                          ),
-      'sort_order',       jf.sort_order
-    ) AS fr
-    FROM job_fields jf
-    JOIN fields f ON f.id = jf.field_id
-    -- the real sprayed acres for this field on this job (NULL when none recorded)
-    LEFT JOIN LATERAL (
-      SELECT SUM(rf.applied_acres) AS applied_acres
-      FROM job_applied_records r
-      JOIN job_applied_record_fields rf
-        ON rf.application_record_id = r.id AND rf.field_id = f.id
-      WHERE r.job_id = p_job_id AND rf.applied_acres IS NOT NULL
-      HAVING SUM(rf.applied_acres) > 0
-    ) applied ON true
-    WHERE jf.job_id = p_job_id
-      -- Scope to a recipient (P1 leak fix), but a field SHARED across MULTIPLE customers must
-      -- appear for EACH of its billed customers (not collapse to one owner). Include field f for
-      -- p_customer_id when: whole-job preview (NULL); OR p_customer_id holds an explicit share of f;
-      -- OR f has NO explicit shares and p_customer_id is f's billing-default; OR f has neither and
-      -- p_customer_id is the job's primary customer. A customer with NO claim to f never sees it.
-      AND (
-        p_customer_id IS NULL
-        OR EXISTS (
-             SELECT 1 FROM job_field_shares jfs
-             WHERE jfs.job_id = p_job_id AND jfs.field_id = f.id AND jfs.customer_id = p_customer_id
-           )
-        OR (
-          NOT EXISTS (SELECT 1 FROM job_field_shares jfs2 WHERE jfs2.job_id = p_job_id AND jfs2.field_id = f.id)
-          AND (
-            EXISTS (SELECT 1 FROM field_billing_defaults fbd WHERE fbd.field_id = f.id AND fbd.customer_id = p_customer_id)
-            OR (
-              NOT EXISTS (SELECT 1 FROM field_billing_defaults fbd2 WHERE fbd2.field_id = f.id)
-              AND p_customer_id = v_primary_customer_id
-            )
-          )
-        )
-      )
-  ) s;
-
-  -- ── Products applied (job-wide — the same tank mix went on every field). REI/PHI prefer
-  -- the job line's captured value, else the product master. Unchanged by the scoping fix.
-  SELECT COALESCE(jsonb_agg(pr ORDER BY (pr->>'sort_order')::int NULLS LAST, pr->>'product_name'), '[]'::jsonb)
-  INTO v_products
-  FROM (
-    SELECT jsonb_build_object(
-      'product_name',     p.product_name,
-      'rate_per_acre',    jc.rate_per_acre,
-      'rate_unit',        jc.rate_unit,
-      'rei_hours',        COALESCE(jc.rei_hours, p.rei_hours),
-      'phi_days',         COALESCE(jc.phi_days, p.phi_days),
-      'signal_word',      p.signal_word,
-      'epa_registration', jc.epa_registration,
-      'sort_order',       jc.sort_order
-    ) AS pr
-    FROM job_chemicals jc
-    JOIN products p ON p.id = jc.product_id
-    WHERE jc.job_id = p_job_id
-  ) s;
-
-  -- ── Weather at application (job-wide). Graceful NULL when not captured. Unchanged.
-  SELECT jsonb_build_object(
-           'temperature',    ja.temperature,
-           'wind_speed',     ja.wind_speed,
-           'wind_direction', ja.wind_direction,
-           'humidity',       ja.humidity,
-           'actual_start',   ja.actual_start_time,
-           'actual_end',     ja.actual_end_time
-         )
-  INTO v_weather
-  FROM job_applied_info ja
-  WHERE ja.job_id = p_job_id
-    AND (ja.temperature IS NOT NULL
-         OR ja.wind_speed IS NOT NULL
-         OR ja.wind_direction IS NOT NULL
-         OR ja.humidity IS NOT NULL)
-  ORDER BY ja.updated_at DESC NULLS LAST, ja.created_at DESC
-  LIMIT 1;
-
-  v_result := jsonb_build_object(
-    'job_id',           v_job.id,
-    'job_number',       v_job.job_number,
-    'status',           v_job.status,
-    'application_date', to_char(v_job.job_date, 'YYYY-MM-DD'),
-    'applicator_name',  v_job.applicator_name,
-    'scoped_customer_id', p_customer_id,   -- echoes the scope (NULL = whole job)
-    'fields',           v_fields,
-    'products',         v_products,
-    'weather',          v_weather
-  );
-
-  RETURN v_result;
-END;
-$function$
-;
-
 DO $postflight$
 BEGIN
   IF (SELECT count(*) FROM public.job_chemicals jc JOIN public.products p ON p.id = jc.product_id
@@ -469,10 +306,9 @@ BEGIN
     RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_POSTFLIGHT: an app role can write job_chemicals.epa_registration';
   END IF;
   IF NOT has_function_privilege('authenticated', 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.get_job_proof_data(uuid,uuid)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.get_job_proof_data(uuid,uuid)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_POSTFLIGHT: save_job or get_job_proof_data grants changed';
+     THEN
+    RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_POSTFLIGHT: save_job grants changed';
   END IF;
   IF EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r(role),
                     unnest(ARRAY['public._job_line_epa_follows_product(uuid)', 'public._job_chemical_epa()',

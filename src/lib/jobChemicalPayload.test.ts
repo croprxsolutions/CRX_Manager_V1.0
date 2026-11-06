@@ -30,6 +30,7 @@ function row(overrides: Partial<JobChemicalPayloadSource> = {}): JobChemicalPayl
 describe('buildJobChemicalsPayload', () => {
   it('maps a fully populated row', () => {
     expect(buildJobChemicalsPayload([row()])[0]).toEqual({
+      id: null,
       product_id: 'prod-1',
       quantity: 10,
       unit: 'gal',
@@ -73,6 +74,10 @@ describe('buildJobChemicalsPayload', () => {
       ['b', 1],
       ['c', 2],
     ]);
+  });
+
+  it("sends a saved line back by its id, so save_job keeps a sprayed job's EPA number", () => {
+    expect(buildJobChemicalsPayload([row({ id: 'line-1' }), row()]).map((r) => r.id)).toEqual(['line-1', null]);
   });
 
   it('returns an empty array for no rows', () => {

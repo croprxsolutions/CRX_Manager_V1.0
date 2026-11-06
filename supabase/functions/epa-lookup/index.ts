@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 import { requireActiveProfile } from "../_shared/auth.ts";
-import { captureEdgeException } from "../_shared/sentry.ts";
+import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sentry.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import {
   classifyRegistrationNumber,
@@ -242,6 +242,8 @@ async function fetchEpaLookup(
     );
   }
 }
+
+warnIfSentryMisconfigured("epa-lookup");
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {

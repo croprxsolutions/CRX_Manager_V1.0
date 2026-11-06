@@ -30,12 +30,25 @@ const bodyMatch = migration.slice(start).match(/AS \$\$([\s\S]*?)\$\$;/);
 assert.ok(bodyMatch, 'save_field dollar-quoted body is missing from the migration');
 const body = bodyMatch[1];
 
+// KI-10 batch 4d renamed that body unchanged behind a reviewed wrapper; the predicate pins both.
+const BATCH4D = path.join(ROOT, 'supabase', 'migrations', '20261114200000_bind_records_replay_receipts_batch4d.sql');
+const batch4d = readFileSync(BATCH4D, 'utf8').replace(/\r\n/g, '\n');
+const wrapperStart = batch4d.indexOf('CREATE FUNCTION public.save_field(p_field_id');
+assert.notEqual(wrapperStart, -1, 'batch 4d save_field wrapper is missing from its migration');
+const wrapperMatch = batch4d.slice(wrapperStart).match(/AS \$function\$([\s\S]*?)\$function\$;/);
+assert.ok(wrapperMatch, 'batch 4d save_field wrapper body is missing');
+
 const fingerprints = predicate.match(/\b[0-9a-f]{64}\b/g) ?? [];
-assert.equal(fingerprints.length, 1, 'predicate must embed exactly one reviewed SHA-256 fingerprint');
+assert.equal(fingerprints.length, 2, 'predicate must embed the reviewed body and the batch 4d wrapper fingerprints');
 assert.equal(
   sha256(body),
   fingerprints[0],
   'checked-in save_field body drifted from the standing live-sweep fingerprint',
+);
+assert.equal(
+  sha256(wrapperMatch[1]),
+  fingerprints[1],
+  'checked-in batch 4d save_field wrapper drifted from the standing live-sweep fingerprint',
 );
 
 const alteredBody = body.replace('RETURN v_field_id;', 'RETURN v_field_id ;');

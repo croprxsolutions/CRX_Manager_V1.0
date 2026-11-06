@@ -72,8 +72,9 @@ needs Mason's explicit approval in the current conversation** (`AGENTS.md`). Age
 
 **Supabase Edge Function secrets:** see the "Edge Function secrets" table in `DEPLOYMENT.md`,
 which is the single list. `SUPABASE_SERVICE_ROLE_KEY` is present automatically; never expose
-it to the frontend. When `SENTRY_DSN` is unset, `captureEdgeException` logs a
-`SENTRY_MISCONFIG` warning instead of reporting.
+it to the frontend. When `SENTRY_DSN` is unset or malformed, every function logs a
+`[SENTRY_MISCONFIG]` error on each cold start (`warnIfSentryMisconfigured`, KI-38) and keeps
+serving; `captureEdgeException` then logs the same tag instead of reporting.
 
 ---
 

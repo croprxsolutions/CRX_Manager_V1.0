@@ -106,7 +106,7 @@ vi.mock('../lib/criticalAction', () => ({
 }));
 vi.mock('../lib/dateUtils', async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
-  return { ...actual, localToday: () => '2026-08-19' };
+  return { ...actual, todayInBusinessTz: () => '2026-08-19' };
 });
 
 import { Sentry } from '../lib/sentry';

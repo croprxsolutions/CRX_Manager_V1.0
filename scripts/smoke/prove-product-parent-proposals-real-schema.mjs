@@ -633,6 +633,34 @@ async function main() {
   }
   console.log('[case] label facts and prices: no EPA number, label fact, list price, name or active flag changed; only the re-rated size has new per-acre prices');
 
+  // [case] build race: an EPA edit in flight blocks the build, which then groups and snapshots the new value
+  const epaEdit = new Promise((resolve) => {
+    const child = spawn('docker', [...psqlArgs(), '-A', '-t', '-c', `BEGIN; UPDATE public.products SET epa_registration = '900-7' WHERE id = '${X1}'; SELECT pg_sleep(4); COMMIT;`], { cwd: ROOT });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { out += d; });
+    child.on('close', (status) => resolve({ status, output: out }));
+  });
+  for (let i = 0; i < 40 && scalar(inFlight) !== '1'; i += 1) wait(250);
+  assert.equal(scalar(inFlight), '1', 'the background EPA edit did not start');
+  const tb = Date.now();
+  const PR = build('k-build-race');
+  const builtAfter = Date.now() - tb;
+  const epaDone = await epaEdit;
+  assert.equal(epaDone.status, 0, epaDone.output);
+  assert.ok(builtAfter > 1500, `the build did not wait for the EPA edit (${builtAfter} ms)`);
+  const GR = groups(PR.proposal_id);
+  const xr = groupOf(GR, X1);
+  assert.equal(xr.generic_epa_registration, '900-7', 'the grouping used the EPA number from before the edit');
+  for (const g of GR.filter((x) => x.status === 'proposed')) {
+    for (const m of g.members) assert.equal(scalar(`SELECT public._normalize_epa_registration(${lit(m.epa_registration)});`) || null, g.generic_epa_registration, `group "${g.suggested_name}" stored a member EPA number its grouping did not use`);
+  }
+  // Approval re-checks the grouping rule itself, not only the fingerprint: a group whose EPA number no longer
+  // matches its sizes is refused even when the stored snapshot is unchanged.
+  refused(ADMIN, approve(PR, [entry(xr)], 'k-x-epa'), /PRODUCT_PARENT_GROUP_CHANGED/,
+    `UPDATE public.product_parent_proposal_groups SET generic_epa_registration = '900-9' WHERE id = '${xr.id}';`);
+  psql(`UPDATE public.products SET epa_registration = '900-1' WHERE id = '${X1}';`);
+  console.log(`[case] build race: the build waited ${builtAfter} ms for an in-flight EPA edit and grouped the new number; approval refuses a group whose EPA number no longer matches its sizes`);
+
   // [case] live smoke chain: the post-apply chain runs here first, with one active profile per probed role.
   const others = [['a3', 'driver'], ['a4', 'applicator'], ['a5', 'entity_recipient']];
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ${others.map(([n, r]) =>

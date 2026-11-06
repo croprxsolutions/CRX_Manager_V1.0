@@ -511,6 +511,10 @@ BEGIN
   -- One build at a time; a new build supersedes the open proposal.
   PERFORM pg_advisory_xact_lock(hashtext('crx.product_parent_proposal.build'));
   PERFORM 1 FROM public.product_parent_proposals WHERE status = 'open' FOR UPDATE;
+  -- Hold the candidate sizes still, so each group's decision and its stored snapshot read the same values.
+  PERFORM 1 FROM public.products p
+   WHERE NOT EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = p.id)
+   ORDER BY p.id FOR SHARE;
   UPDATE public.product_parent_proposals SET status = 'superseded' WHERE status = 'open';
   INSERT INTO public.product_parent_proposals (proposal_version, built_by)
   VALUES (COALESCE((SELECT max(proposal_version) FROM public.product_parent_proposals), 0) + 1, v_actor)
@@ -722,7 +726,14 @@ BEGIN
   v_shape := public._product_parent_group_shape(v_ids);
   IF (p_entry->>'group_fingerprint') IS DISTINCT FROM v_group.group_fingerprint
      OR (v_shape->>'fingerprint') IS DISTINCT FROM v_group.group_fingerprint
-     OR EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = ANY(v_ids)) THEN
+     OR EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = ANY(v_ids))
+     -- The grouping rule itself, re-checked on the locked rows: one base name, form, stock unit and EPA number.
+     OR (SELECT count(DISTINCT jsonb_build_array(lower(public._product_parent_base_name(m->>'product_name')), m->>'product_form',
+                  CASE WHEN m->>'product_form' IN ('seed', 'each') THEN lower(btrim(COALESCE(m->>'inventory_unit', ''))) ELSE '' END))
+           FROM jsonb_array_elements(v_shape->'members') m) <> 1
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_shape->'members') m
+                 WHERE m->>'product_form' IS DISTINCT FROM v_group.product_form
+                    OR public._normalize_epa_registration(m->>'epa_registration') IS DISTINCT FROM v_group.generic_epa_registration) THEN
     RAISE EXCEPTION 'PRODUCT_PARENT_GROUP_CHANGED: a size in "%" changed since the proposal was built; build a new proposal',
       v_group.suggested_name;
   END IF;

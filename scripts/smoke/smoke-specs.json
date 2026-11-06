@@ -79,6 +79,30 @@
         "security"
       ]
     },
+    "build_product_parent_proposal": {
+      "chain": "smoke-product_parent_proposals.sql",
+      "container_prover": "prove-product-parent-proposals-real-schema.mjs",
+      "description": "REQUIRES 20261123120000. Product parent proposals (PAR-2): anon cannot execute the six public PAR-2 functions; on three invented two-size products an admin builds a proposal (a same-key retry answers the same) that proposes each as one EPA-number group, approves the first (a same-key retry answers the same) so both sizes join one new parent, refuses a hold without a reason, holds the second and rejects the third with reasons; the old per-size brand writer refuses a grouped size PRODUCT_BRANDS_BELONG_TO_PARENT; a parent brand is added, read through a size by get_product_brands, and retired with a reason (created and retired events logged); an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED.",
+      "covers": [
+        "build_product_parent_proposal",
+        "approve_product_parent_groups",
+        "hold_product_parent_group",
+        "reject_product_parent_group",
+        "upsert_parent_brand",
+        "get_product_brands",
+        "upsert_product_brand",
+        "product_parent_proposals",
+        "product_parent_proposal_groups",
+        "product_parent_brands",
+        "product_parent_brand_events",
+        "product_parent_brand_sources"
+      ],
+      "area": [
+        "pricing",
+        "security",
+        "idempotency"
+      ]
+    },
     "fill_tote_from_bulk": {
       "chain": "smoke-tote_fill_from_bulk.sql",
       "container_prover": "prove-tote-fill-real-schema.mjs",

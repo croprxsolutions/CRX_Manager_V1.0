@@ -16,6 +16,10 @@ DECLARE
   v_rows integer;
   v_denied boolean := false;
   v_sales_rep_source text;
+  v_canonical text;
+  v_bad_name text;
+  v_bad_id uuid;
+  v_reader uuid;
 BEGIN
   SELECT p.prosrc
   INTO v_sales_rep_source
@@ -162,6 +166,51 @@ BEGIN
   EXECUTE 'RESET ROLE';
   IF NOT v_denied THEN
     RAISE EXCEPTION 'SMOKE_FAIL: assigned driver can write an old-path delivery signature';
+  END IF;
+
+  -- Malformed names: only the exact signatures/<delivery id>.png file is readable through the old-path
+  -- rule, and only the exact per-attempt shape through the per-attempt rule. Each file is seeded here
+  -- (rolled back) and, worst case, recorded as the delivery's signature; the driver, a stranger and an
+  -- admin all read nothing. The completion-evidence marker lets this rolled-back test set signature_url.
+  v_canonical := 'signatures/' || v_delivery_id::text || '.png';
+  FOREACH v_bad_name IN ARRAY ARRAY[
+      v_canonical || '/../x',
+      'signatures//' || v_delivery_id::text || '.png',
+      '/' || v_canonical,
+      'signatures/' || upper(v_delivery_id::text) || '.png',
+      v_canonical || '.png',
+      'signatures/' || v_delivery_id::text || '.PNG',
+      v_canonical || chr(10),
+      'signatures/not-a-uuid.png',
+      'signatures/' || v_delivery_id::text || '/' || repeat('A', 32) || '.png',
+      'signatures/' || v_delivery_id::text || '/' || md5('x') || '.png/../x'] LOOP
+    INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+    VALUES ('delivery-signatures', v_bad_name, v_driver_id::text, '{"mimetype":"image/png","size":2400}'::jsonb)
+    RETURNING id INTO v_bad_id;
+    PERFORM set_config('crx.delivery_completion_evidence', v_delivery_id::text, true);
+    UPDATE public.deliveries SET signature_url = v_bad_name WHERE id = v_delivery_id;
+    PERFORM set_config('crx.delivery_completion_evidence', '', true);
+    FOREACH v_reader IN ARRAY ARRAY[v_driver_id, v_stranger_id, v_admin_id] LOOP
+      PERFORM set_config('request.jwt.claim.sub', v_reader::text, true);
+      EXECUTE 'SET LOCAL ROLE authenticated';
+      SELECT count(*) INTO v_rows FROM storage.objects WHERE id = v_bad_id;
+      EXECUTE 'RESET ROLE';
+      IF v_rows <> 0 THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: user % can read malformed signature name %', v_reader, quote_literal(v_bad_name);
+      END IF;
+    END LOOP;
+  END LOOP;
+  PERFORM set_config('crx.delivery_completion_evidence', v_delivery_id::text, true);
+  UPDATE public.deliveries SET signature_url = v_canonical WHERE id = v_delivery_id;
+  PERFORM set_config('crx.delivery_completion_evidence', '', true);
+
+  -- The canonical recorded file is still readable by its driver.
+  PERFORM set_config('request.jwt.claim.sub', v_driver_id::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  SELECT count(*) INTO v_rows FROM storage.objects WHERE id = v_object_id;
+  EXECUTE 'RESET ROLE';
+  IF v_rows <> 1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: assigned driver lost the canonical signature after the malformed-name checks';
   END IF;
 
   -- The same driver loses read access once deactivated (rolled back with everything else). Only an

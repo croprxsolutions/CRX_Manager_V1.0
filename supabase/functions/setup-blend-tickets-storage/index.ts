@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
-import { captureEdgeException } from "../_shared/sentry.ts";
+import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sentry.ts";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 
@@ -10,6 +10,8 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
+
+warnIfSentryMisconfigured("setup-blend-tickets-storage");
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {

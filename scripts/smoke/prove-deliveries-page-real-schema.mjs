@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261119130000_deliveries_list_page.sql (Goal 4). Builds the checked-in baseline plus
+ * Real-schema proof for 20261130100000_deliveries_list_page.sql (Goal 4). Builds the checked-in baseline plus
  * every post-baseline migration on this checkout (the candidate included) in a network-disabled PostgreSQL
  * container (scripts/smoke/undo-paths/harness.mjs), seeds 1,203 deliveries (every status, dates with many
  * ties, three drivers, a farm group, items on a quarter of them), then checks, calling as `authenticated`:
@@ -27,7 +27,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, scalar, attempt, asUser, refuse, claims, signIn, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20261119130000_deliveries_list_page.sql';
+const CANDIDATE = '20261130100000_deliveries_list_page.sql';
 const reuse = process.env.DELIVERIES_PAGE_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const N = 1203;

@@ -284,6 +284,26 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **2026-11-06 10:22 AM Central (KI-14, PR #1556):** the `send-email` Edge Function was deployed live as v28 (was
+  v27) on Mason's in-chat approval ("Yes, deploy it"), with `supabase functions deploy send-email --use-api --yes`
+  from main `d5e7884d2`'s `supabase/functions`; all 14 downloaded files matched main byte for byte.
+  - What changed: an emailed field-application invoice PDF with no stored due date prints the date its owner's terms
+    give (blank terms print as Net 30, the database default); other invoice types and closed invoices keep
+    "On receipt". The only other difference from v27 is the new `_shared/paymentTerms.ts` helper.
+  - ACTIVE, with JWT checking on. Smoke: a signed-out POST got 401 and the OPTIONS preflight 200.
+  - Caller path NOT exercised yet: no email had gone through v28 when this was written. The rollback is redeploying
+    v27 (main before `d5e7884d2`).
+- **2026-11-06, 06:03–14:29 UTC (12:03 AM–8:29 AM Central; KI-38 Sentry startup check, PR #1545):** all eight
+  Edge Functions were redeployed through the Supabase connector, each on Mason's own in-chat approval:
+  `epa-lookup` v6, `setup-blend-tickets-storage` v20, `customer-document-files` v3, `process-document` v22,
+  `process-blend-ticket` v27, `reset-user-password` v17, `create-user` v26, `send-email` v27.
+  - What changed: each function logs an ERROR-level `[SENTRY_MISCONFIG]` line at every cold start if `SENTRY_DSN`
+    is missing or malformed, and never stops serving. Nothing else changed.
+  - Checks for each: the live files matched main `f885e5d7a` byte for byte, the startup check appears once, a
+    signed-out POST got 401, the OPTIONS preflight got 200, and the new version booted with no `[SENTRY_MISCONFIG]`
+    line (so the live key is present and well-formed). JWT checking stays on.
+  - Not exercised: no signed-in call went through any function after its redeploy. The only change is a startup
+    log line, and every function booted cleanly.
 - **2026-11-06 ~01:00 UTC (about 7 PM Central, 2026-11-05; #1302 send-email follow-ups, PR #1515):**
   the `send-email` Edge Function was deployed live as v26 (was v25) on Mason's in-chat approval ("Yes, deploy"),
   with `supabase functions deploy send-email --use-api`; the function files matched main `0e41b3f` byte for byte.

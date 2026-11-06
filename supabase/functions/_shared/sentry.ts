@@ -3,8 +3,10 @@
 //
 // Small helper that posts events to Sentry's HTTP store endpoint without
 // pulling in a Node-only SDK. Safe to import from any Deno-hosted Edge
-// Function. If SENTRY_DSN is not set, every call is a no-op so dev/test
-// environments never accidentally hit production Sentry.
+// Function. If SENTRY_DSN is not set, captureEdgeException sends nothing so
+// dev/test environments never accidentally hit production Sentry. Every function also
+// calls warnIfSentryMisconfigured() at module top so a missing key is logged
+// as an error on each cold start (KI-38).
 //
 // Usage:
 //   import { captureEdgeException } from "../_shared/sentry.ts";
@@ -41,36 +43,36 @@ function parseSentryDsn(dsn: string): ParsedDsn | null {
 }
 
 /**
+ * KI-38: call once at module top of every Edge Function. On every cold start
+ * with a missing or malformed SENTRY_DSN it writes an ERROR-level
+ * [SENTRY_MISCONFIG] line, even if no request ever fails. It deliberately
+ * never throws: a missing alert key must not stop an email send or a user
+ * creation, so the function keeps serving and only the alerting is degraded.
+ */
+export function warnIfSentryMisconfigured(functionName: string): void {
+  try {
+    const dsn = Deno.env.get("SENTRY_DSN");
+    const problem = !dsn
+      ? "SENTRY_DSN is not set"
+      : !parseSentryDsn(dsn)
+      ? "SENTRY_DSN is malformed (expected https://<publicKey>@<host>/<projectId>)"
+      : null;
+    if (problem) {
+      // eslint-disable-next-line no-console -- KI-38: must be ERROR level in Supabase logs
+      console.error(
+        `[SENTRY_MISCONFIG] function=${functionName}: ${problem}. Errors from this function will NOT reach Sentry until the secret is fixed.`,
+      );
+    }
+  } catch {
+    // Never let the alerting check stop the function from serving.
+  }
+}
+
+/**
  * Send an exception to Sentry. Resolves to true if sent, false on failure
  * or when no DSN is configured. Never throws — Sentry is observability,
  * not a user-facing dependency.
  */
-/**
- * Validate that SENTRY_DSN is set and well-formed at boot.
- * Throws if it's missing or malformed — for Edge Functions where missing
- * alerting is unacceptable (e.g. financial/auth-critical functions).
- *
- * Audit #28: this is the fail-loud counterpart to captureEdgeException's
- * graceful degradation. Use whichever fits the function's risk profile.
- *
- * Throwing at boot mirrors the PR-16 ALLOWED_ORIGIN pattern: if a critical
- * env var is missing, fail at module load (every request 500s loudly) rather
- * than silently swallowing the misconfiguration in production.
- */
-export function validateSentryDsnOrThrow(): void {
-  const dsn = Deno.env.get("SENTRY_DSN");
-  if (!dsn) {
-    throw new Error(
-      "SENTRY_DSN not set — refusing to boot Edge Function. Set the secret via `supabase functions secrets set SENTRY_DSN=...` or call captureEdgeException() instead if alerting is optional for this function.",
-    );
-  }
-  if (!parseSentryDsn(dsn)) {
-    throw new Error(
-      `SENTRY_DSN is malformed (got '${dsn.slice(0, 12)}...'). Expected format: https://<publicKey>@<host>/<projectId>.`,
-    );
-  }
-}
-
 export async function captureEdgeException(
   err: unknown,
   context: CaptureContext,
@@ -82,7 +84,7 @@ export async function captureEdgeException(
     // won't have DSN set in dev, so this is expected to be a no-op there.
     // In prod with the secret correctly set this branch never fires.
     console.warn(
-      `[SENTRY_MISCONFIG] SENTRY_DSN not configured — captured exception NOT sent (function=${context.function}). To enforce alerting, call validateSentryDsnOrThrow() at module top.`,
+      `[SENTRY_MISCONFIG] SENTRY_DSN not configured — captured exception NOT sent (function=${context.function}). warnIfSentryMisconfigured() also flags this at cold start.`,
     );
     return false;
   }

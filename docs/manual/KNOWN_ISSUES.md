@@ -612,9 +612,13 @@ NOT APPLIED) selects functions by searching their body for the word "posted", wh
 comment. Nothing is wrong today because it is unapplied.
 
 ### KI-38 — Edge Function error alerting fails quiet
-**LOW · OPEN · tooling/process · Mason (deploy approval)**
-`supabase/functions/_shared/sentry.ts:60` defines `validateSentryDsnOrThrow()` but nothing calls it; a missing key
-logs `[SENTRY_MISCONFIG]` and drops the alert. Failing loudly needs the key confirmed and eight function deploys.
+**LOW · FIX IN REVIEW (code PR; then eight deploys, each on Mason's approval) · tooling/process · Mason (deploy approval)**
+A missing key only logged `[SENTRY_MISCONFIG]` when an error happened, then dropped the alert. Live `SENTRY_DSN` was
+confirmed set on 2026-11-05 (name only). Fix: every function calls `warnIfSentryMisconfigured()` at startup, which
+logs an ERROR-level `[SENTRY_MISCONFIG]` line on every cold start when the key is missing or malformed and never
+throws, so an email send or user creation still works (throwing at boot would 500 every request). The unused
+throwing `validateSentryDsnOrThrow()` was removed; `src/lib/edgeSentryBootCheck.test.ts` fails if a function skips
+the check. Closes once all eight functions are redeployed and checked.
 
 ### KI-40 — CRM Phase 5 (AI receptionist) preconditions
 **LOW · OPEN (future work) · database · unassigned**

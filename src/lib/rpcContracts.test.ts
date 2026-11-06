@@ -3079,6 +3079,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  // KI-25 receipt queue (20261113140000).
+  _enqueue_delivery_receipt:
+    'internal helper called only by complete_delivery after its required-key replay binding; one row per delivery (ON CONFLICT (delivery_id), reopening only a cancelled never-sent row); every API-role EXECUTE (incl. service_role) is revoked',
   _close_undelivered_order_remainder_20260718:
     'preserved internal cancel-remainder impl (Phase 1a closeout); the required-key public cancel_order wrapper owns idempotency and every application-role EXECUTE is revoked',
   _post_deleted_delivery_recovery_invoice_20260719:

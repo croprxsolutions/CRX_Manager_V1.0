@@ -63,7 +63,7 @@
 
 ### 3.1 Tables (PR 1)
 
-All with RLS on, a `SELECT` policy for active users, and no write grants.
+All with RLS on, a `SELECT` policy for active users, and no write grants. **Every function in this sheet** (RPCs, helpers, trigger functions, re-issues) is `SECURITY DEFINER` with `SET search_path = public, pg_temp`, follows `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role`, and grants `EXECUTE` to `authenticated` only for the public RPCs; helpers and trigger functions get no grant.
 
 - **`epa_registrations`**
   - `epa_registration text` primary key, strict CHECK as on `product_parent_brands`.
@@ -96,7 +96,7 @@ Rules that follow:
 ### 3.3 Guards (PR 3)
 
 - **`trigger_zz_guard_product_registration`** on `products` (`BEFORE INSERT OR UPDATE`, `SECURITY DEFINER`, `search_path = public, pg_temp`, owned by `postgres`). Name sorts after `trigger_zz_guard_product_parent_values` (so a grouped size gets the parent message first) and before `trigger_zzz_guard_product_rate_lock`. On UPDATE: when the row has an EPA number with a registration, a change to `signal_word`, `is_rup`, `rei_hours`, `phi_days`, `max_label_rate` or `max_label_rate_unit` without a pass is refused: `EPA_REGISTRATION_FACT: <column> belongs to EPA registration <number>; edit it on the registration (reload the app if you do not see a Registration panel)`. An update that resends unchanged values passes. A change to `epa_registration` itself without a pass is refused with `EPA_REGISTRATION_ASSIGN: use Change EPA number`.
-- **The INSERT branch** of the same trigger: when the new row has an EPA number, it locks or creates the registration (`INSERT … ON CONFLICT DO NOTHING`, then `SELECT … FOR SHARE`), then overwrites the row's label facts from it. A number new to the system creates a registration from the row's own facts with `rup_status` = `yes` when `is_rup` is true, else `unknown` (§7.8 item 2). `is_rup` on the size is set to `rup_status = 'yes'`. A registration created here writes a `created` event naming the source table and row and the session's user.
+- **The INSERT branch** of the same trigger: when the new row has an EPA number, it locks or creates the registration (`INSERT … ON CONFLICT DO NOTHING`, then `SELECT … FOR SHARE`), then overwrites the row's label facts from it. **An insert never changes an existing registration**: a size or brand inserted with a number that already has one simply receives its facts, whatever the insert sent. A number new to the system creates a registration from the row's own facts (that number is on no other row yet, so nothing else changes). When the inserting session is not an admin, the new registration is marked `source = 'unverified_insert'` and the Registration panel shows "Not verified" until an admin saves it through `set_epa_registration`; the created registration's facts are set with `rup_status` = `yes` when `is_rup` is true, else `unknown` (§7.8 item 2). `is_rup` on the size is set to `rup_status = 'yes'`. A registration created here writes a `created` event naming the source table and row and the session's user.
 - **Brand guards** on `product_brands` and `product_parent_brands`: same rule for `signal_word` and `is_rup`; brand `is_rup` mirrors `rup_status` as `true` / `false` / `null`.
 - **Created only after drift is zero.** The PR 3 migration locks the three tables, re-runs the drift check and aborts the whole migration if any row drifts (section 7).
 
@@ -125,9 +125,9 @@ Rules that follow:
 **Objects:**
 - The four tables in 3.1, with RLS, `SELECT` policies, the event table's append-only triggers, and the adjuvant validator.
 - `preview_epa_registration_seed()` (admin, read-only): per distinct normalized number on active and inactive sizes and on brand rows, the proposed registration facts, every disagreement (column, values, row counts, product IDs), and a `fingerprint` of the whole result. RUP proposal: any row `true` → `yes`, else the seed's RUP default.
-- `seed_epa_registrations(p_picks jsonb, p_rup_default text, p_expected_fingerprint text, p_idempotency_key text)` (admin, key required, `_product_parent_replay` pattern): `p_rup_default` in (`unknown`, `no`) is Mason's answer to Q1 and sets `rup_status` for numbers with no `true` row (no default value; a missing one is refused); refuses a stale fingerprint; refuses unless every disagreement has a pick; inserts all registrations, writes one `seeded` event each, and copies each pick onto disagreeing sizes and brands under passes. All-or-nothing. Refuses if any registration already exists (one-time).
+- `seed_epa_registrations(p_picks jsonb, p_rup_default text, p_expected_fingerprint text, p_idempotency_key text)` (admin, key required, `_product_parent_replay` pattern): `p_rup_default` in (`unknown`, `no`) is Mason's answer to Q1 and sets `rup_status` for numbers with no `true` row (no default value; a missing one is refused); refuses a stale fingerprint; refuses unless every disagreement has a pick; inserts all registrations, writes one `seeded` event each, and copies each pick onto disagreeing sizes and brands under passes. All-or-nothing. Refuses if any registration already exists (one-time). **Until the seed has run** (a `seeded` event exists), `set_epa_registration`, `assign_epa_registration` and `settle_epa_registration_drift` refuse with `EPA_REGISTRATION_NOT_SEEDED`, so nothing can create a registration that would block the seed; the insert trigger and the PR 2a/PR 3 re-issues ship only after the seed.
 - `set_epa_registration(p_epa_registration, p_expected_version, p_changes jsonb, p_reason, p_idempotency_key)` (admin, key): locks the registration, then the sizes (ID order) and brands carrying it; refuses a stale version; updates it; writes one event; copies the changed facts to every size and brand under passes. Creates the registration when `p_expected_version` is null and none exists (create rule in 3.2), writing a `created` event. When `rup_status` changes away from `unknown` (PR 2a onward) it also resolves that number's open `rup_unreviewed_sales` rows in the same transaction (section 5).
-- `preview_epa_assignment(p_target_table, p_target_id, p_new_number)` and `assign_epa_registration(p_target_table, p_target_id, p_new_number, p_expected_target_fingerprint, p_reason, p_idempotency_key)` (admin, key): Change EPA number on one ungrouped size or one brand. Locks old and new registration (number order), then the target; refuses a grouped size (`EPA_REGISTRATION_GROUPED_USE_PARENT`, which points to 7.7's correction); writes the number and the new registration's facts under a pass; creates the new registration from the target's facts if none (create rule in 3.2, `created` event). Writes one `assigned` event on each of the old and new registrations, carrying the target, old and new number, reason and actor.
+- `preview_epa_assignment(p_target_table, p_target_id, p_new_number)` and `assign_epa_registration(p_target_table, p_target_id, p_new_number, p_expected_target_fingerprint, p_reason, p_idempotency_key)` (admin, key): Change EPA number on one ungrouped size or one brand. Locks old and new registration (number order), then the target; refuses a grouped size (`EPA_REGISTRATION_GROUPED_USE_PARENT`, which points to 7.7's correction); writes the number and the new registration's facts under a pass; creates the new registration from the target's facts if none (create rule in 3.2, `created` event). Writes one `assigned` event on each of the old and new registrations (only the new one when the target had no number, with the old number recorded as null), carrying the target, old and new number, reason and actor.
 - `get_epa_registrations(p_numbers text[] default null)`: open to active users; no cost or price.
 - `preview_epa_registration_drift()` (admin, read-only) and `settle_epa_registration_drift(p_picks jsonb, p_expected_fingerprint text, p_idempotency_key text)` (admin, key): used before PR 3 (section 7).
 - **Draft targets:** `create_label_draft` and `bulk_create_label_drafts` implementations re-issued from their live bodies with one addition: insert the `label_draft_targets` row (number, product, the product's label-fact fingerprint, the registration version if one exists). Public wrappers unchanged.
@@ -140,6 +140,8 @@ Rules that follow:
 - `is_rup` true → `yes`; false → `unknown`.
 - `set_epa_registration` changes signal word on a number shared by three sizes and one brand: all four updated, one event, each size's history shows the change; a stale version refused.
 - Assignment: ungrouped size moved from number A to B gets B's facts and writes an `assigned` event on A and on B; grouped size refused by name; brand assignment works.
+- Before the seed, `set_epa_registration` and `assign_epa_registration` are refused with `EPA_REGISTRATION_NOT_SEEDED`; assigning a number to a target that had none writes one `assigned` event (old number null).
+- Every new function: `prosecdef` true, `proconfig` holds `search_path=public, pg_temp`, and `EXECUTE` is granted only as listed (read back from `pg_proc` and `information_schema.routine_privileges`).
 - Two sessions creating the same new number (two admin creates, or an admin create racing an assignment to it) end with one registration; the loser gets `EPA_REGISTRATION_STALE` or proceeds on the existing row, never a uniqueness error.
 - Draft create writes a target row; a direct client insert or select on `label_draft_targets` and every new table is refused.
 - Every RPC: non-admin writes nothing; one key twice writes once; one key with a different request refused.
@@ -156,7 +158,7 @@ Rules that follow:
 
 **Migration** `<stamp>_label_draft_commit_registration`:
 - **`_commit_label_draft_replay_impl_20261015`** re-issued from its live body (md5 `dee9e34d…` at writing; diffed again before build):
-  1. Read the draft's `label_draft_targets` row (no lock), then lock the registration it names (if any), then the draft, then the product: section 3.2 order.
+  1. Read the draft's `label_draft_targets` row (no lock), then lock the registration it names (if any), then the draft, then the product: section 3.2 order. Because clients can still update `product_label_drafts`, the commit then refuses with `LABEL_DRAFT_TARGET_MISMATCH` unless the locked draft's `product_id` and normalized EPA number equal the target row's; a draft with no target row (made before PR 1) is refused the same way and must be recreated (none exist live today).
   2. Staleness: refuse when the product's current label-fact fingerprint differs from the target row's and `p_force_overwrite` is false (`LABEL_DRAFT_STALE`).
   3. **Same number, registration exists:** write the facts through `set_epa_registration`'s internal helper (one `draft_committed` event; copies to all sizes and brands).
   4. **Same number, no registration:** hold the draft with `LABEL_DRAFT_NO_REGISTRATION` (status stays `pending`; screen offers "Create registration"). §7.8 item 3.
@@ -169,6 +171,7 @@ Rules that follow:
 
 **Done when (harness):**
 - A draft for a number shared by two sizes commits once and both sizes plus the registration change; one event.
+- A draft whose `product_id` or EPA number was changed directly after creation is refused with `LABEL_DRAFT_TARGET_MISMATCH` and writes nothing.
 - Draft on a number with no registration: held, nothing written; after creating the registration, commit succeeds.
 - Draft with a different number: nothing written, code returned.
 - Product edited after the draft was made: refused unless force.
@@ -211,7 +214,7 @@ Rules that follow:
 
 **Drift settlement (Mason-gated, before the PR 3 apply):**
 - `preview_epa_registration_drift()` (PR 1) lists every size or brand whose copied facts differ from its registration, and every number on a size or brand with no registration.
-- Mason picks per row (keep the registration's value, or take the row's value onto the registration); `settle_epa_registration_drift(p_picks, p_expected_fingerprint, p_idempotency_key)` applies them in one transaction with `drift_settled` events.
+- Mason picks per row: keep the registration's value, take the row's value onto the registration, or, for a number with no registration, create it from that row's facts (the drift preview groups such rows by number and offers one pick per number, refused while its rows disagree until each disagreement also has a pick); `settle_epa_registration_drift(p_picks, p_expected_fingerprint, p_idempotency_key)` applies them in one transaction with `drift_settled` events.
 - A `db-sweeps` predicate reports drift daily.
 
 **Migration** `<stamp>_epa_registration_guards`:
@@ -228,7 +231,8 @@ Rules that follow:
 **Files:** migration, changelog, migrations.d record, `scripts/smoke/prove-epa-registration-guards-real-schema.mjs`, db-sweeps predicate, types.
 
 **Done when (harness):**
-- With drift present, the migration aborts and leaves no trigger; after settlement it applies.
+- With drift present, the migration aborts and leaves no trigger; after settlement (including a create-from-row pick for an unregistered number) it applies.
+- A non-admin inserting a size with an existing number gets the registration's facts and the registration is unchanged; with a new number, the registration is created as `unverified_insert`.
 - A direct `UPDATE` of `signal_word` on a registered size refused by name; an update resending the same value passes; a numberless size still edits freely.
 - On a grouped size, a label-fact edit gets the parent message first only for parent-owned columns; label facts get the registration message.
 - Insert of a size with an existing number takes the registration's facts regardless of what was sent; with a new number creates a registration (`is_rup` true → `yes`, else `unknown`); two concurrent inserts of the same new number create one registration.

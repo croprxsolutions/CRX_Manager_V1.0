@@ -205,6 +205,8 @@ for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   const failed = codeHealthGate("diff --git a/src/pages/Orders.tsx b/src/pages/Orders.tsx\n", "root", spawnFail);
   assert.deepEqual([failed.state, ran], ["failed", 1]);
   assert.match(failed.output, /complexity Orders/);
+  assert.equal(codeHealthGate("diff --git a/x b/src/new.ts\n", "root", () => ({ ...fail, stdout: "diagnostic" })).state, "failed",
+    "code health: a stdout line with no newline must not hide the FAIL line");
   assert.equal(codeHealthGate("diff --git a/x b/src/new.ts\n", "root", () => ({ status: 0, stdout: "PASS", stderr: "" })).state, "passed");
   const noKnip = codeHealthGate("diff --git a/src/a.ts b/src/a.ts\n", "root", () => ({
     status: 1, stdout: "", stderr: "file:///x.mjs:73\nError: Knip output was not a readable report: Unexpected end of JSON input\n",

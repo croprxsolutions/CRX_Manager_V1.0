@@ -154,6 +154,12 @@ missing or duplicate verdict, or an opaque change. A binary file, or a text file
 `.gitattributes` (this repo marks security-sensitive baseline SQL that way), carries no content, so
 the run stops and names it; those files need Sol or a person.
 
+**Code health first (Mason, 2026-11-06).** When the diff touches `src/`, the script first runs the
+code-health ratchet that pre-push runs (`scripts/check-code-health.mjs`, about 30 seconds). If it
+fails, the run stops with exit 2 and prints the violations, and no model is called: fix them, commit,
+and run Luna again. If the check cannot run at all (no `node_modules` or knip in the worktree), Luna
+goes ahead and the result says `Code health: NOT CHECKED`; pre-push and CI still run the real check.
+
 **Oversized diffs.** When Luna runs out of output (`max_output_tokens`, twice on a 960-line diff in
 PR #1248) the script says so and prints one `--commit` command per commit, oldest first. Run those
 and report that they do not cover how the commits interact and skip merge commits. Sol still reads

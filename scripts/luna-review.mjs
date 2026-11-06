@@ -343,7 +343,7 @@ export function codeHealthGate(diff, root, spawn = spawnSync) {
   const result = spawn(process.execPath, ["scripts/check-code-health.mjs"], {
     cwd: root, encoding: "utf8", timeout: CODE_HEALTH_TIMEOUT_MS, maxBuffer: MAX_CAPTURE_BYTES, windowsHide: true, shell: false,
   });
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
   if (!result.error && result.status === 0) return { state: "passed" };
   if (!result.error && /^FAIL - /m.test(output)) return { state: "failed", output };
   const firstError = output.split(/\r?\n/).find((line) => /error/i.test(line));

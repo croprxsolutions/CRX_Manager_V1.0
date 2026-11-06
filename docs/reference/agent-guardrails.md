@@ -28,6 +28,11 @@
 > on a guard change` and exits 1 without calling Codex (count: `crx-luna-guard-rounds.json` in the git common dir,
 > not a proof). Drop the carve-out or hand the decision to Mason.
 >
+> **Luna runs code health first (Mason, 2026-11-06).** When the reviewed diff touches `src/`, `scripts/luna-review.mjs`
+> runs `scripts/check-code-health.mjs` before calling Codex. A `FAIL` stops the round with exit 2 (`DID NOT RUN`) and no
+> model call; a check that cannot run (no `node_modules`/knip) warns, Luna continues, and the result says
+> `Code health: NOT CHECKED`. Pre-push and CI remain the enforcing checks.
+>
 > **A head behind main may merge (Mason, 2026-10-26) — amends every block below.** Mason turned off GitHub's
 > "branch must be up to date" rule (classic branch protection `strict: false`; the `protect-main` ruleset was
 > already `false`), and both merge gates follow: they no longer refuse a head that does not contain GitHub's

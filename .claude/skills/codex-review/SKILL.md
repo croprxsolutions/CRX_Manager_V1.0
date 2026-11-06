@@ -180,6 +180,32 @@ NOT block Step 3B; requiring a literal `CLEAN` would make the Sol gate unreachab
 carrying one accepted nit, which pressures an operator into either looping forever or skipping the
 gate. List each deferral explicitly when you report SHIP-WITH-FOLLOWUPS, then proceed to Step 3B.
 
+**The last round reads the whole branch (Mason, 2026-11-06).** Rounds on a single fix may use
+`--commit <sha>`, but the round that clears the change for the PR (and for Sol) must be the default
+branch scope against `origin/main`, run on the committed head that will be pushed. Its `Reviewed:`
+line names that head; quote it when you report the result. If a later commit changes anything
+but plain notes, run the whole-branch round again; if it changes only plain notes (status
+records, changelog entries, plans), say so and name both heads. Rules are not plain notes:
+`AGENTS.md`, `CLAUDE.md`, anything under `.claude/` or `.agents/`, `docs/reference/` and
+`docs/workflows/` always need the round again. Why: on PR #1494 Luna came back clean on five fix
+commits while Sol found new bugs in how the pieces worked together each time.
+When the whole-branch Luna round cannot run, a whole-branch Sol review counts instead: the
+branch is too large and the script falls back to per-commit commands (those do not count), or
+the guard-change round cap has stopped Luna. On a Sol-list change that is the Step 3B review;
+on any other change run `node scripts/luna-review.mjs --sol --reason "<which of the two>"`.
+
+**A serious screen bug needs proof it is fixed (Mason, 2026-11-06).** A confirmed BLOCKER or HIGH
+in a screen that saves, uploads or imports counts as fixed only with a test that reproduces it (two
+overlapping requests, a double click, a retry after an unconfirmed save, closing or reopening during
+a late reply) or with the fixed behavior observed in the running app. Either one is enough; when
+you choose the test, write it first and watch it fail, then fix. When the builder and a reviewer disagree on such a finding, a test or Sol
+settles it, not Mason.
+
+**No second advisory model by default (Mason, 2026-11-06).** Terra (`gpt-6.1-terra`) is not added
+as a reviewer: it comes from the same vendor as Luna and Sol and tends to share their blind spots.
+If the whole-branch Luna round still misses what Sol later finds, try Grok through the `cursor`
+skill on a few past cases before adding anything.
+
 **Escape hatch.** For genuinely complex work where Luna is plainly out of its depth, add
 `--sol --reason "<why>"` and tell Mason the one-line reason. This is still the advisory path — it
 mints no proof.

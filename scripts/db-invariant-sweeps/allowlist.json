@@ -1452,8 +1452,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_dispatch_board_jobs(p_applicator_id uuid, p_status text, p_start_date date, p_end_date date)#e0d182eb25be",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102200000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes.",
+      "violation_key": "get_dispatch_board_jobs(p_applicator_id uuid, p_status text, p_start_date date, p_end_date date)#562318cffa28",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md): SAFE once migration 20261102200000_cost_definer_leaks_closed is applied. The key is the POST-APPLY chain, computed before the apply from the live chain plus the four fixed bodies as replayed by scripts/smoke/prove-cost-definer-leaks-closed-real-schema.mjs; before the apply the pre-fix chain is flagged, which is correct. Re-read the chain when it changes. Re-keyed 2026-11-05 for 20261113120000 (Goal 4 list totals): the new body only adds a window count of the matched jobs as _total_count, the job id as the last ORDER BY key and an explicit outer ORDER BY; job cost is still stripped, and columns, filters, role gates, grants and security mode are unchanged. Post-apply value computed on the replayed scratch database by scripts/smoke/prove-list-true-totals-real-schema.mjs; it shows until that migration is applied.",
       "dated": "2026-11-02"
     },
     {

@@ -1,0 +1,5 @@
+## 2026-11-05 — Call Lists and the Dispatch Board report how many records really match (Goal 4)
+
+- New migration `20261113120000_list_true_totals.sql` (not yet applied): the five `get_call_list_*` functions add `total_count` (every matching row, counted before their 200-row cut) beside `rows`, and `get_dispatch_board_jobs` adds `_total_count` to each job row (every matching job, counted before its 500-row cut). The board's 500 newest jobs now sort with the job id as a tie-breaker, and the outer select keeps that order. Rows, filters, limits, columns, role checks, grants and security mode are unchanged; today's screens ignore the new keys.
+- Proof script `scripts/smoke/prove-list-true-totals-real-schema.mjs` (scratch container, 250 unassigned customers and 520 jobs: rows equal the old bodies', totals equal the row count with the limit lifted, a driver is still refused).
+- The screens that show "200 of N" and "500 of N" ship in a separate PR after this is live.

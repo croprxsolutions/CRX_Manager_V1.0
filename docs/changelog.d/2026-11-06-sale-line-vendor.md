@@ -1,6 +1,6 @@
 ## 2026-11-06 — Each sale line has a vendor (billing plan M3, database)
 
-- New migration `20261118110000_sale_line_vendor.sql` (not applied; record in
+- New migration `20261118110000_sale_line_vendor.sql` (applied live 2026-11-06, ledger 20261106135401; record in
   `docs/reference/migrations.d/`). An order line now has a vendor, filled from the product's
   preferred vendor when the line is created, whichever path creates it. Its invoice line carries it.
   A line from before this change falls back to the product's preferred vendor. Swapping a line's

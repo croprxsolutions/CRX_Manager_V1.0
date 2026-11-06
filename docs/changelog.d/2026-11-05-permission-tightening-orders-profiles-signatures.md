@@ -16,3 +16,6 @@
 - KI-17 moved to the accepted list (Mason 2026-11-05): the linkage is not used for money; the invoice side asks
   staff to pick.
 - Proof: `scripts/smoke/prove-permission-tightening-real-schema.mjs` on a throwaway copy of the real schema.
+- Live ledger re-read 2026-11-06 about 12:15 AM Central (stamps in `CURRENT_STATE.md` and `KNOWN_ISSUES.md`):
+  newest live `20261115160000_financial_delete_snapshots` (ledger `20261106060243`; its records land in PR #1552);
+  `20261116100000` not yet applied.

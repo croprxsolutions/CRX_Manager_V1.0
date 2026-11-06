@@ -82,32 +82,28 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: a permissive storage.objects policy is not limited to one bucket';
   END IF;
 
-  -- A completed delivery whose recorded signature is its old fixed-path file, with an active driver.
-  SELECT d.id, d.assigned_driver, o.id
-  INTO v_delivery_id, v_driver_id, v_object_id
+  -- A completed delivery whose recorded signature is its old fixed-path file. Live history has no such
+  -- delivery assigned to an active driver, so one is borrowed below (rolled back with everything else).
+  SELECT d.id, o.id
+  INTO v_delivery_id, v_object_id
   FROM public.deliveries d
   JOIN storage.objects o
     ON o.bucket_id = 'delivery-signatures'
    AND o.name = 'signatures/' || d.id::text || '.png'
    AND d.signature_url = o.name
-  JOIN public.profiles dp
-    ON dp.id = d.assigned_driver AND dp.role = 'driver' AND dp.is_active
   WHERE d.status = 'completed'
   ORDER BY d.id
   LIMIT 1;
 
-  SELECT d.id
-  INTO v_insert_delivery_id
-  FROM public.deliveries d
-  WHERE d.status = 'completed'
-    AND d.assigned_driver = v_driver_id
-    AND NOT EXISTS (
-      SELECT 1 FROM storage.objects o
-      WHERE o.bucket_id = 'delivery-signatures'
-        AND o.name = 'signatures/' || d.id::text || '.png'
-    )
-  ORDER BY d.id
+  SELECT p.id
+  INTO v_driver_id
+  FROM public.profiles p
+  WHERE p.role = 'driver' AND p.is_active
+  ORDER BY p.id
   LIMIT 1;
+
+  -- Any old fixed-path name must be refused; a fresh id never collides with a real file.
+  v_insert_delivery_id := gen_random_uuid();
 
   SELECT p.id
   INTO v_stranger_id
@@ -126,10 +122,13 @@ BEGIN
   ORDER BY p.id
   LIMIT 1;
 
-  IF v_object_id IS NULL OR v_insert_delivery_id IS NULL OR
+  IF v_object_id IS NULL OR v_driver_id IS NULL OR
      v_stranger_id IS NULL OR v_admin_id IS NULL THEN
     RAISE EXCEPTION 'SMOKE_SETUP: assigned-driver signature fixture is unavailable';
   END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', v_admin_id::text, true);
+  UPDATE public.deliveries SET assigned_driver = v_driver_id WHERE id = v_delivery_id;
 
   -- The assigned driver reads the recorded file but cannot replace it or write a new old-path file.
   PERFORM set_config('request.jwt.claim.sub', v_driver_id::text, true);

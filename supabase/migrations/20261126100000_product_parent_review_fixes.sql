@@ -487,6 +487,7 @@ BEGIN
     UPDATE public.product_parents SET is_active = false WHERE id = v_from;
     FOR v_brand IN SELECT * FROM public.product_parent_brands WHERE parent_id = v_from AND status = 'active'
                     ORDER BY id FOR UPDATE LOOP
+      -- updated_at is set by the table's trigger set_product_parent_brands_updated_at.
       UPDATE public.product_parent_brands SET status = 'retired', row_version = row_version + 1, updated_by = v_actor
        WHERE id = v_brand.id RETURNING * INTO v_retired;
       PERFORM public._parent_brand_event(v_brand.id, v_from, 'retired',
@@ -543,6 +544,8 @@ BEGIN
       RAISE EXCEPTION 'PRODUCT_PARENT_READ_COMMITTED_REQUIRED: parents are written only in READ COMMITTED transactions'
         USING ERRCODE = '55000';
     END IF;
+    -- The raw value is already canonical: the column CHECK allows only [A-Z0-9-], and _normalize_epa_registration
+    -- only removes spaces and upper-cases, so two stored spellings of one EPA number cannot exist.
     PERFORM pg_advisory_xact_lock(hashtext('crx.product_parent_epa:' || NEW.generic_epa_registration));
     SELECT pp.name INTO v_other FROM public.product_parents pp
      WHERE pp.is_active AND pp.id <> NEW.id AND pp.generic_epa_registration = NEW.generic_epa_registration

@@ -5,10 +5,14 @@
  * replays every migration before the candidate, then:
  *  - runs in a session zone whose date differs from Chicago's (the UTC-evening case) and shows BEFORE that
  *    the Team Board workload and the morning delivery recap count the wrong day;
- *  - applies the candidate and checks every replaced definition equals its pre-image with only CURRENT_DATE
- *    swapped for the Chicago date (grants unchanged), and that the same counts now follow Chicago;
- *  - checks the statement date-range defaults, then 16 fixed instants (6 pm CST / 7 pm CDT edges, midnight,
- *    month, season and year ends, both DST changes) including compute_season;
+ *  - applies the candidate and checks every replaced definition equals its pre-image with only the planned
+ *    edits (grants unchanged), and that the same counts now follow Chicago;
+ *  - runs the customer summary and receiving summary in a UTC session against a delivery and a receipt made
+ *    at 7:30 pm CDT on the last evening of a season (counted in the new season before, the old one after),
+ *    and checks two office-only feeds refuse a driver;
+ *  - checks the statement date-range defaults, then that the Chicago date expression itself is right at 16
+ *    fixed instants (6 pm CST / 7 pm CDT edges, midnight, month, season and year ends, both DST changes),
+ *    including compute_season (an expression check: the functions are exercised in the steps above);
  *  - applies the candidate a second time (re-runnable).
  * `--dump <dir>` instead writes each target's pre-candidate definition (used to generate the candidate).
  *
@@ -240,6 +244,14 @@ const CHI = "(now() AT TIME ZONE 'America/Chicago')::date";
 // the post-image. Postgres re-prints an argument default in normalized form, so the header line expects that form.
 const CHI_ARG = "((now() AT TIME ZONE 'America/Chicago'::text))::date";
 const EXTRA = {
+  operational_dashboard_summary: [
+    ['created_at::date', "(created_at AT TIME ZONE 'America/Chicago')::date"],
+    ["DATE_TRUNC('month', completed_at)", "DATE_TRUNC('month', (completed_at AT TIME ZONE 'America/Chicago'))"],
+    ['AND completed_at >= _season_start', "AND (completed_at AT TIME ZONE 'America/Chicago')::date >= _season_start"],
+    ["TO_CHAR(completed_at, 'YYYY-MM')", "TO_CHAR(completed_at AT TIME ZONE 'America/Chicago', 'YYYY-MM')"],
+    ["TO_CHAR(received_at, 'YYYY-MM')", "TO_CHAR(received_at AT TIME ZONE 'America/Chicago', 'YYYY-MM')"],
+  ],
+  get_receiving_summary: [['rr.received_at::date', "(rr.received_at AT TIME ZONE 'America/Chicago')::date"]],
   get_call_list_stale_quotes: [['q.updated_at::date', "(q.updated_at AT TIME ZONE 'America/Chicago')::date"]],
   get_customer_summary: [
     ['AND completed_at >= v_season_start', "AND (completed_at AT TIME ZONE 'America/Chicago')::date >= v_season_start"],
@@ -324,6 +336,7 @@ function seed(zone) {
     customer_id: lateCustomer, assigned_driver: ADMIN, scheduled_date: addDays(seasonStart, -1), status: 'completed',
     completed_at: `${seasonStart} 00:30:00+00`, delivery_number: `PD-${randomUUID().slice(0, 8)}`,
   });
+  seedRow('receiving_records', { received_at: `${seasonStart} 00:30:00+00`, quantity_received: 5, condition: 'good' });
   return { customer, lateCustomer, today: delivery(T, 'scheduled'), yesterday: delivery(addDays(T, -1), 'completed'), zone };
 }
 const today = () => scalar(`SELECT ${CHI};`);
@@ -349,6 +362,11 @@ function access(user) {
 function seasonDeliveries(customer) {
   return Number(scalar(`SET TimeZone = 'UTC'; SET request.jwt.claim.sub = '${ADMIN}';
     SELECT (public.get_customer_summary('${customer}'::uuid)->>'delivery_count')::int;`));
+}
+// Season-to-date items received; the only receipt is that same last-evening one (5 units).
+function receivedYtd() {
+  return Number(scalar(`SET TimeZone = 'UTC'; SET request.jwt.claim.sub = '${ADMIN}';
+    SELECT (public.get_receiving_summary()->>'items_received_ytd')::numeric;`));
 }
 // The owner dashboard's season day count and accounting-period name in the same off-by-one session.
 function dashboard(zone) {
@@ -400,7 +418,8 @@ function main() {
   assert.deepEqual(before, { today: 0, yesterday: 0 }, `BEFORE the boards already follow Chicago: ${JSON.stringify(before)}`);
   assert.equal(access(DRIVER), 'allowed,allowed', 'BEFORE: a driver could read both office-only feeds');
   assert.equal(seasonDeliveries(ids.lateCustomer), 1, 'BEFORE: the UTC session counts the Sep 30 evening delivery in the new season');
-  console.log('[prover] BEFORE: a driver reads both office-only feeds; a Sep 30 7:30 pm CDT delivery counts in the new season');
+  assert.equal(receivedYtd(), 5, 'BEFORE: the UTC session counts the Sep 30 evening receipt in the new season');
+  console.log('[prover] BEFORE: a driver reads both office-only feeds; a Sep 30 7:30 pm CDT delivery and receipt count in the new season');
   console.log(`[prover] BEFORE (UTC-style date): ${JSON.stringify(before)}; Chicago answer ${JSON.stringify(want)}`);
 
   stageText('candidate.sql', lf(CANDIDATE));
@@ -423,7 +442,8 @@ function main() {
   assert.equal(access(DRIVER), 'denied,denied', 'AFTER: a driver is refused both office-only feeds');
   assert.equal(access(ADMIN), 'allowed,allowed', 'AFTER: an admin still reads both feeds');
   assert.equal(seasonDeliveries(ids.lateCustomer), 0, 'AFTER: the Sep 30 evening delivery stays in its own season');
-  console.log('[prover] AFTER: driver refused, admin allowed on both office-only feeds; the Sep 30 evening delivery stays in the old season');
+  assert.equal(receivedYtd(), 0, 'AFTER: the Sep 30 evening receipt stays in its own season');
+  console.log('[prover] AFTER: driver refused, admin allowed on both office-only feeds; the Sep 30 evening delivery and receipt stay in the old season');
 
   // The dashboard runs with the new clock expressions; its season day count moves by the one day the session
   // zone was off, and with no open accounting period its period name is the Chicago month.

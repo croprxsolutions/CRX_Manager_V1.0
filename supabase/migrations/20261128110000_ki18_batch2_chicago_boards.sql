@@ -5,8 +5,11 @@
 -- (2026-11-06, md5 checked) with only CURRENT_DATE replaced by (now() AT TIME ZONE 'America/Chicago')::date,
 -- the expression the invoice_date and order_date defaults already use. The database timezone stays UTC.
 -- Where a timestamp is compared with that date, it is read on the Chicago calendar too:
--- get_call_list_stale_quotes (quote age from updated_at) and get_customer_summary (season deliveries by
--- completed_at, so a delivery finished on the evening of September 30 stays in its season).
+-- get_call_list_stale_quotes (quote age from updated_at), get_customer_summary (season deliveries by
+-- completed_at), get_receiving_summary (week and season receipts by received_at), and
+-- operational_dashboard_summary (this month's and the season's orders and deliveries, and the 12-month
+-- order, delivery and receiving charts), so an event on the evening of the last day of a month or season
+-- stays in that month or season.
 -- Access (Mason, 2026-11-06): get_expiring_planned_holds and get_inventory_forecast feed admin and
 -- sales-rep screens only, but any signed-in user could call them and read customer holds or the
 -- business-wide stock forecast. Both now refuse anyone but an active admin or sales rep (the same check
@@ -24,7 +27,7 @@
 -- postflight pin each function's body md5, search_path, SECURITY DEFINER, owner and exact live EXECUTE grants.
 -- No row is read or written. Re-runnable: the preflight accepts the pre-image or this file's body.
 -- Not changed here: rolling windows that subtract an interval from now() (they do not depend on the
--- calendar day); month buckets of past event timestamps (KNOWN_ISSUES KI-18 follow-up); statement and
+-- calendar day); statement and
 -- AR aging buckets (batch 3).
 -- Rollback: a forward migration re-emitting the pre-images (their md5s are in the preflight).
 DO $preflight$
@@ -33,9 +36,9 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('operational_dashboard_summary()', '77655108c73c1a98d826a21d55d7739d', 'f369ca15668c5eb26052bd98b2e09a8b', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('operational_dashboard_summary()', '77655108c73c1a98d826a21d55d7739d', '5eb8dec7f9f3b630fa9b81f7d83e0f26', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_customer_summary(uuid)', 'bf700aa02e7df78c79f02a0dc425e583', '5ab6a0dd177c7f5ff025afcceb8ff336', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_receiving_summary()', 'da09c3911448a80451a3c2592d1f1f5a', 'e93f1be5e711e9ef9da680056900aa09', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_receiving_summary()', 'da09c3911448a80451a3c2592d1f1f5a', '30901f8c234b5a56f1dd8ff0fd9bbb05', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_call_list_stale_quotes(uuid,integer)', '6ddc2b4b3bbbfcf0304b7879261643de', '32e3084dab9b7e8093d20f1f677ab27e', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatch_board_jobs(uuid,text,date,date)', 'a0cb35e0fae1e2fd0c7cddbd2b33ac13', '7795522b437d296121437ca237d9e588', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatched_list(uuid,uuid)', '1b544f558c4b4c2f503dd157ccf7b1e1', '00a961e63d243e4d8d162a1e267b3624', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
@@ -181,21 +184,21 @@ BEGIN
     SELECT
       COUNT(*) AS season_total,
       COUNT(*) FILTER (
-        WHERE DATE_TRUNC('month', COALESCE(order_date, created_at::date)) = DATE_TRUNC('month', (now() AT TIME ZONE 'America/Chicago')::date)
+        WHERE DATE_TRUNC('month', COALESCE(order_date, (created_at AT TIME ZONE 'America/Chicago')::date)) = DATE_TRUNC('month', (now() AT TIME ZONE 'America/Chicago')::date)
       ) AS this_month
     FROM orders
-    WHERE COALESCE(order_date, created_at::date) >= _season_start
+    WHERE COALESCE(order_date, (created_at AT TIME ZONE 'America/Chicago')::date) >= _season_start
       AND deleted_at IS NULL
   ),
   deliveries_completed AS (
     SELECT
       COUNT(*) AS season_total,
       COUNT(*) FILTER (
-        WHERE DATE_TRUNC('month', completed_at) = DATE_TRUNC('month', (now() AT TIME ZONE 'America/Chicago')::date)
+        WHERE DATE_TRUNC('month', (completed_at AT TIME ZONE 'America/Chicago')) = DATE_TRUNC('month', (now() AT TIME ZONE 'America/Chicago')::date)
       ) AS this_month
     FROM deliveries
     WHERE status = 'completed'
-      AND completed_at >= _season_start
+      AND (completed_at AT TIME ZONE 'America/Chicago')::date >= _season_start
   ),
   low_stock AS (
     SELECT COUNT(*) AS cnt
@@ -265,15 +268,15 @@ BEGIN
         ) d
       ) m
       LEFT JOIN (
-        SELECT TO_CHAR(COALESCE(order_date, created_at::date), 'YYYY-MM') AS month, COUNT(*) AS cnt
+        SELECT TO_CHAR(COALESCE(order_date, (created_at AT TIME ZONE 'America/Chicago')::date), 'YYYY-MM') AS month, COUNT(*) AS cnt
         FROM orders WHERE deleted_at IS NULL GROUP BY 1
       ) oc ON oc.month = m.month
       LEFT JOIN (
-        SELECT TO_CHAR(completed_at, 'YYYY-MM') AS month, COUNT(*) AS cnt
+        SELECT TO_CHAR(completed_at AT TIME ZONE 'America/Chicago', 'YYYY-MM') AS month, COUNT(*) AS cnt
         FROM deliveries WHERE status = 'completed' AND completed_at IS NOT NULL GROUP BY 1
       ) dc ON dc.month = m.month
       LEFT JOIN (
-        SELECT TO_CHAR(received_at, 'YYYY-MM') AS month, COUNT(*) AS cnt
+        SELECT TO_CHAR(received_at AT TIME ZONE 'America/Chicago', 'YYYY-MM') AS month, COUNT(*) AS cnt
         FROM receiving_records GROUP BY 1
       ) pr ON pr.month = m.month
       ORDER BY m.month
@@ -515,15 +518,15 @@ BEGIN
     ),
     'received_this_week', (
       SELECT count(DISTINCT rr.id) FROM receiving_records rr
-      WHERE rr.received_at::date >= v_week_start
+      WHERE (rr.received_at AT TIME ZONE 'America/Chicago')::date >= v_week_start
     ),
     'items_received_ytd', (
       SELECT COALESCE(sum(rr.quantity_received), 0) FROM receiving_records rr
-      WHERE rr.received_at::date >= v_year_start
+      WHERE (rr.received_at AT TIME ZONE 'America/Chicago')::date >= v_year_start
     ),
     'damaged_this_week', (
       SELECT count(*) FROM receiving_records rr
-      WHERE rr.received_at::date >= v_week_start
+      WHERE (rr.received_at AT TIME ZONE 'America/Chicago')::date >= v_week_start
         AND rr.condition <> 'good'
     )
   ) INTO v_result;
@@ -1399,9 +1402,9 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('operational_dashboard_summary()', '77655108c73c1a98d826a21d55d7739d', 'f369ca15668c5eb26052bd98b2e09a8b', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('operational_dashboard_summary()', '77655108c73c1a98d826a21d55d7739d', '5eb8dec7f9f3b630fa9b81f7d83e0f26', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_customer_summary(uuid)', 'bf700aa02e7df78c79f02a0dc425e583', '5ab6a0dd177c7f5ff025afcceb8ff336', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_receiving_summary()', 'da09c3911448a80451a3c2592d1f1f5a', 'e93f1be5e711e9ef9da680056900aa09', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('get_receiving_summary()', 'da09c3911448a80451a3c2592d1f1f5a', '30901f8c234b5a56f1dd8ff0fd9bbb05', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_call_list_stale_quotes(uuid,integer)', '6ddc2b4b3bbbfcf0304b7879261643de', '32e3084dab9b7e8093d20f1f677ab27e', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatch_board_jobs(uuid,text,date,date)', 'a0cb35e0fae1e2fd0c7cddbd2b33ac13', '7795522b437d296121437ca237d9e588', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatched_list(uuid,uuid)', '1b544f558c4b4c2f503dd157ccf7b1e1', '00a961e63d243e4d8d162a1e267b3624', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),

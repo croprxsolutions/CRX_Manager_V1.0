@@ -60,8 +60,10 @@ export function latestInvoiceDate(): string {
 
 /** The save-time message when an invoice date is past latestInvoiceDate() (a date box's max does not stop a typed value), else null. */
 export function invoiceDateTooFarProblem(date: string | null | undefined): string | null {
-  const day = (date ?? '').slice(0, 10);
-  return day > latestInvoiceDate()
+  const day = (date ?? '').split('T')[0];
+  if (!day) return null;
+  // A five-digit year (10000-01-01) is not YYYY-MM-DD and would compare as earlier; refuse it too.
+  return !/^\d{4}-\d{2}-\d{2}$/.test(day) || day > latestInvoiceDate()
     ? `The invoice date ${day} is more than ${INVOICE_DATE_MAX_DAYS_AHEAD} days from today. Check the year.`
     : null;
 }

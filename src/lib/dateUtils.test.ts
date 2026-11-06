@@ -138,5 +138,6 @@ describe('invoiceDateTooFarProblem (KI-18)', () => {
     expect(invoiceDateTooFarProblem('2026-09-30')).toBeNull();
     expect(invoiceDateTooFarProblem('')).toBeNull();
     expect(invoiceDateTooFarProblem(null)).toBeNull();
+    expect(invoiceDateTooFarProblem('10000-01-01')).toMatch(/Check the year/);
   });
 });

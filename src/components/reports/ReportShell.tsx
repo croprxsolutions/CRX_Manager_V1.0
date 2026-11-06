@@ -9,7 +9,7 @@ import { Download, FileText } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { computeSeason, seasonStartDate, seasonEndDate } from '../../utils/season';
-import { localDatePlusDays, todayInBusinessTz } from '../../lib/dateUtils';
+import { addDaysToDate, todayInBusinessTz } from '../../lib/dateUtils';
 
 // Crop season = October 1 to September 30
 function getPresetDates(preset: string): { start: string; end: string } {
@@ -27,10 +27,15 @@ function getPresetDates(preset: string): { start: string; end: string } {
       const s = computeSeason();
       return { start: seasonStartDate(s), end: todayInBusinessTz() };
     }
-    case 'last30':
-      return { start: localDatePlusDays(-30), end: todayInBusinessTz() };
-    case 'last90':
-      return { start: localDatePlusDays(-90), end: todayInBusinessTz() };
+    // One read of today, so a click at midnight cannot mix two dates.
+    case 'last30': {
+      const today = todayInBusinessTz();
+      return { start: addDaysToDate(today, -30), end: today };
+    }
+    case 'last90': {
+      const today = todayInBusinessTz();
+      return { start: addDaysToDate(today, -90), end: today };
+    }
     default:
       return { start: '', end: '' };
   }

@@ -217,11 +217,13 @@ export default function TeamBoard() {
       .order('created_at', { ascending: false })
       .limit(100);
 
-    // Whole Chicago business days, not UTC days (KI-18).
-    if (activityDateFrom) {
+    // Whole Chicago business days, not UTC days (KI-18). A typed year past 9999 is no
+    // business day, and 9999-12-31 has no next day: such a bound means "no limit".
+    const isPlainDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+    if (activityDateFrom && isPlainDay(activityDateFrom)) {
       query = query.gte('created_at', businessDayStartIso(activityDateFrom));
     }
-    if (activityDateTo) {
+    if (activityDateTo && isPlainDay(activityDateTo) && activityDateTo < '9999-12-31') {
       query = query.lt('created_at', businessDayStartIso(addDaysToDate(activityDateTo, 1)));
     }
     if (activityUser) {

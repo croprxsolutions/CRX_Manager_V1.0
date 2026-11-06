@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-06 — A paged list clears its selection on every refresh and page turn
+
+**Decision:** on the paged Orders list, any list read (a page turn, a new search, filter or sort, a refresh after an import or bulk action, a failed read) clears both the ticked rows and "Select All" (Mason, 2026-11-06: "Yes, clear it").
+**Why:** "Select All" across pages holds a snapshot of every matching order. Sol found a new HIGH from that snapshot three rounds running on PR #1559: after a refresh, a bulk Delete or Export could include an order that had since left the filter. Clearing on every read deletes the snapshot's staleness instead of patching each refresh path; the cost is one extra click after a refresh.
+**What this forbids/implies:** a bulk action on a paged list acts only on rows read for the list the user is looking at now. Other paged lists (Deliveries, and later Quotes and Invoices) follow the same rule.
+
 ## 2026-11-05 — A new HIGH from the same mechanism three rounds running also stops the work
 
 **Decision:** the `AGENTS.md` stop rule gains a trigger: a NEW BLOCKER/HIGH that traces to the same mechanism (one lock, timer, guard, or piece of design) for the third review round in a row. The agent stops patching, names the mechanism, asks Mason the business trade-off that would let it delete that mechanism (for example duplicate vs loss, block vs warn), then re-plans through Astra plan review, Luna, then Sol (Mason, 2026-11-05: "Yes, start it").

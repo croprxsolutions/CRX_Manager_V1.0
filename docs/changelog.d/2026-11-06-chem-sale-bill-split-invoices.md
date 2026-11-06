@@ -1,6 +1,6 @@
 ## 2026-11-06 — The Bill Split card bills: one invoice per payer on a chemical sale (billing plan M2)
 
-- New migration `20261114210000_chem_sale_bill_split_invoices.sql` (not applied; record in
+- New migration `20261117140000_chem_sale_bill_split_invoices.sql` (not applied; record in
   `docs/reference/migrations.d/`). Until now the Bill Split card saved percentages nothing read.
   When a delivery on a sale with other payers completes, it now drafts one invoice per payer:
   one sale number with a suffix (CS-2026-0412-1, -2), in one split group that posts together.
@@ -18,3 +18,4 @@
   before); smoke chain `smoke-chem-sale-bill-split-invoices.sql` passes.
 
 A Bill Split draft's product lines now follow the split: changing them means voiding the group, while charges can still be added. A one-customer draft on a sale has to go before a payer can be added. Each payer's cost is the sum of its own lines, like every other invoice and the month-end report (Mason, 2026-11-05); across payers it can be about a cent above the line's cost where a share splits a unit. A payer's product line can't be re-described or re-costed either.
+- A price-later (rush) sale drafts its payer invoices only once it is priced: the delivery completes, the office is told, and Create Invoice on the delivery drafts per payer after pricing.

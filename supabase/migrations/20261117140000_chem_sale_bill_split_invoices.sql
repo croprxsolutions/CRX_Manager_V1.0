@@ -1,5 +1,5 @@
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261114210000_chem_sale_bill_split_invoices.md.
+-- docs/reference/migrations.d/20261117140000_chem_sale_bill_split_invoices.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M2, Mason 4 Nov: "splits work line by line"): the Bill Split card now bills. When
@@ -19,6 +19,8 @@
 --     creation claim or as the invoice its provenance row names, as for field splits. Delivery lineage
 --     accepts that invoice. A sale with other payers refuses a one-customer chemical-sale invoice.
 --   - Create Invoice on a delivery (backfill) drafts per payer too.
+--   - A price-later (rush) sale drafts nothing until it is priced (PRICING_INCOMPLETE, as for field
+--     splits): the delivery completes, the office is told, and Create Invoice drafts per payer after.
 --   - A Bill Split draft takes charges and header edits through save_invoice until it posts (a field split
 --     still can't). Its product lines (product, description, quantity, price, cents and cost) follow the
 --     split: changing them means voiding the group, so the cost the save recomputes stays the same.
@@ -378,6 +380,11 @@ DECLARE
 BEGIN
   SELECT * INTO STRICT v_delivery FROM deliveries WHERE id = p_delivery_id;
   SELECT * INTO STRICT v_order FROM orders WHERE id = v_delivery.order_id;
+  -- As for field splits: price_order sweeps a draft's lines and can't touch a governed split, so a
+  -- price-later (rush) sale is priced first; Create Invoice on the delivery drafts the payers then.
+  IF EXISTS (SELECT 1 FROM order_items WHERE order_id = v_order.id AND pricing_pending) THEN
+    RAISE EXCEPTION 'PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted';
+  END IF;
 
   INSERT INTO split_invoice_creation_claims (transaction_id, order_id) VALUES (pg_current_xact_id(), v_order.id);
   v_base := next_invoice_number('chemical_sale');

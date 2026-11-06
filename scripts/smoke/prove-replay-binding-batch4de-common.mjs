@@ -359,7 +359,7 @@ function run() {
   refusedAfter('unknown guard list', recreateGuardSql([...prior, 'unknown_prover_operation']), /PREFLIGHT_RECEIPT_GUARD_DRIFT/, prior);
   refusedAfter('pre-4c guard', recreateGuardSql(post4c.slice(0, 41)), /PREFLIGHT_RECEIPT_GUARD_DRIFT/, prior);
   if (OTHER_IN_BASELINE) refusedAfter('post-4c guard without the live other batch', recreateGuardSql(post4c), /PREFLIGHT_RECEIPT_GUARD_DRIFT/, prior);
-  console.log('[prover] AUTOCOMMIT + PREFLIGHT: transaction, body, receipt, internal caller, unknown and pre-4c guard refusals leave no changes');
+  console.log(`[prover] AUTOCOMMIT + PREFLIGHT: transaction, body, receipt, internal caller, unknown, pre-4c${OTHER_IN_BASELINE ? ' and post-4c-only' : ''} guard refusals leave no changes`);
 
   // Clone only when both independent migration files are present.
   if (hasOther) cloneBaseline();

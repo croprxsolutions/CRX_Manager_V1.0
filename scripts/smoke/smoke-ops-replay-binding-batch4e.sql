@@ -259,7 +259,16 @@ BEGIN
       IF SQLERRM<>'PREPAY_BULK_APPLY_DISABLED' THEN RAISE EXCEPTION 'SMOKE_FAIL: disabled prepay gave %',SQLERRM; END IF;
     END;
   END LOOP;
-  IF EXISTS(SELECT 1 FROM public.idempotency_keys WHERE idempotency_key='smk-4e-disabled-'||s) THEN RAISE EXCEPTION 'SMOKE_FAIL: disabled prepay receipt'; END IF;
+  FOREACH k IN ARRAY ARRAY['smk-4e-disabled-one-'||s,'smk-4e-disabled-one-'||s] LOOP
+    BEGIN
+      PERFORM public.apply_remaining_prepayments(cust,a,k);
+      RAISE EXCEPTION 'SMOKE_FAIL: disabled single-customer prepay accepted';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+      IF SQLERRM<>'PREPAY_BULK_APPLY_DISABLED' THEN RAISE EXCEPTION 'SMOKE_FAIL: disabled single-customer prepay gave %',SQLERRM; END IF;
+    END;
+  END LOOP;
+  IF EXISTS(SELECT 1 FROM public.idempotency_keys WHERE idempotency_key IN ('smk-4e-disabled-'||s,'smk-4e-disabled-one-'||s)) THEN RAISE EXCEPTION 'SMOKE_FAIL: disabled prepay receipt'; END IF;
   RAISE NOTICE 'REAL_4E_PATHS_PASS';
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';
 END

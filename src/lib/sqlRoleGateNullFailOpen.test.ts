@@ -168,7 +168,7 @@ const KNOWN_UNGUARDED: Record<string, string> = {
   'get_offline_action_status|v_actor_role': 'active-profile pinned upstream (NOT FOUND raise) before the gate',
   // admin_update_profile|new_role was listed here (safe by design: NULL new_role
   // means "no role change"; the NOT IN is a value whitelist, not an auth gate).
-  // KI-10 batch 4d (20261113300000) renamed that body verbatim into
+  // KI-10 batch 4d (20261114200000) renamed that body verbatim into
   // _admin_update_profile_replay_impl_20261015, which is never re-emitted on
   // disk, so the scanner no longer sees it; the new public wrapper has no such gate.
   // create_inventory_hold|v_role was listed here as "parked, never applied". The

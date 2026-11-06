@@ -15,10 +15,12 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, checkMutationResult } from '../lib/db';
 import { runCriticalAction } from '../lib/criticalAction';
-import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
-import { ORDER_COLUMNS, ORDER_ITEM_COLUMNS } from '../lib/costFields';
+import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
+import { buildOrdersQuery, fetchOrdersPage, fetchAllMatchingOrders, type OrderListRow, type OrdersQuery } from '../lib/ordersPage';
+import type { SortDir } from '../lib/tableSearchSort';
+import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
 import { Sentry } from '../lib/sentry';
-import { formatUSD as fmt } from '../lib/money';
+import { formatUSD as fmt, formatCents } from '../lib/money';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf } from '../lib/reportPdf';
@@ -31,21 +33,10 @@ import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import type { Order } from '../types';
 import { getSeasonDates } from '../utils/season';
-import {
-  activeInvoiceCountsTowardBilling,
-  fetchActiveInvoiceCoveragePages,
-  type ActiveInvoiceCoverageRow,
-} from '../lib/deliveryInvoiceCoverage';
 
-interface OrderWithFulfillment extends Order {
-  fulfillment_pct: number;
-  invoiced_pct: number | null;
-  farm_group_name: string | null;
-  customer_name: string;
-  active_delivery_count: number;
-  earliest_delivery_date: string | null;
-  product_names: string;
-}
+type OrderWithFulfillment = OrderListRow;
+
+const ORDERS_PAGE_SIZE = 50;
 
 export default function Orders() {
   const navigate = useNavigate();
@@ -54,8 +45,14 @@ export default function Orders() {
   // Customer 360 peek exposes AR balance + credit tier — gate it with the canonical
   // customers-page permission (blocks a rep who is denied /customers — Codex P2).
   const canPeekCustomer = hasPageAccess(role, deniedPages, 'customers');
+  // One page of rows, read from the database with the search, filters and sort applied there.
   const [orders, setOrders] = useState<OrderWithFulfillment[]>([]);
+  // Every matching order (count and summed totals), not just this page, for the query they were read for.
+  // null = not known: never shown as 0.
+  const [totalsState, setTotals] = useState<{ key: string; count: number; cents: number } | null>(null);
+  // First read only: later reads keep the search box and filters on screen.
   const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(false);
   // The last list read failed: no rows, so it never reads as "No orders yet".
   const [loadFailed, setLoadFailed] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
@@ -64,197 +61,152 @@ export default function Orders() {
   const [pricingFilter, setPricingFilter] = useState('');
   // U7 SAFE-SCOPE: filter orders complete_delivery queued for manual split billing.
   const [splitFilter, setSplitFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: 'asc' });
   const [showImportModal, setShowImportModal] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [printingSummary, setPrintingSummary] = useState(false);
   const [printingPickList, setPrintingPickList] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   // Customer 360 peek drawer (F2) — view a customer's numbers without leaving the list.
   const [drawerCustomer, setDrawerCustomer] = useState<{ id: string; name: string } | null>(null);
 
   const canBulkAction = role === 'admin' || role === 'sales_rep';
 
-  // A multi-page read can finish after a newer one started (a refresh after a
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const query = useMemo<OrdersQuery>(() => buildOrdersQuery(getSeasonDates(), {
+    search: debouncedSearch, status: statusFilter, plan: planFilter, pricing: pricingFilter, split: splitFilter,
+    sortKey: sort.key, sortDir: sort.dir,
+  }), [debouncedSearch, statusFilter, planFilter, pricingFilter, splitFilter, sort]);
+  const queryKey = JSON.stringify(query);
+  const listBusy = isListBusy(pageLoading, search, debouncedSearch);
+
+  // The page number belongs to one query: a new search, filter or sort starts again at page one.
+  const [pageState, setPageState] = useState({ key: queryKey, page: 0 });
+  const page = forQuery(pageState, queryKey)?.page ?? 0;
+  const goToPage = (next: number) => setPageState({ key: queryKey, page: next });
+
+  // "Select all" across every page: the rows read for this exact query, or null.
+  const [allMatchingState, setAllMatchingState] = useState<{ key: string; rows: OrderWithFulfillment[] } | null>(null);
+  const allMatching = forQuery(allMatchingState, queryKey)?.rows ?? null;
+
+  const { selected, toggleSelect, toggleAll, clearSelection, selectedRows, allSelected } =
+    useRowSelection({ data: orders, getId: (o) => o.id });
+
+  // Bumped by every deselect and every list read: a "select all" read that finishes later is dropped.
+  const selectAllSeq = useRef(0);
+  // Mason, 2026-11-06: any list refresh or page turn clears the selection (ticked rows and
+  // "select all"), so a bulk action only ever acts on the list the user is looking at.
+  const clearBulkSelection = useCallback(() => {
+    selectAllSeq.current += 1;
+    setAllMatchingState(null);
+    setSelectingAll(false);
+    clearSelection();
+  }, [clearSelection]);
+
+  // A read can finish after a newer one started (a new page, a refresh after a
   // bulk action); only the latest request may set the list, toasts or loading.
   const fetchSeq = useRef(0);
   const fetchOrders = useCallback(async () => {
     const seq = ++fetchSeq.current;
-    const { start: seasonStart, end: seasonEnd } = getSeasonDates();
-    // Read every page: a single request is silently cut off at the server's row cap.
-    // A failed read shows "could not be loaded": an older list would look current,
-    // and an empty one would read as "No orders yet".
-    const failLoad = (err: unknown) => {
-      Sentry.captureException(err instanceof Error ? err : new Error(String((err as { message?: string })?.message ?? err)), { tags: { source: 'fetch', action: 'load_orders' } });
+    clearBulkSelection();
+    setPageLoading(true);
+    const { data, error } = await fetchOrdersPage(query, ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE);
+    if (seq !== fetchSeq.current) return;
+    // Rows ticked against the old list while this read ran do not carry over to the new one.
+    clearBulkSelection();
+    if (error || !data) {
+      // A failed read shows "could not be loaded" and no totals: an older page would
+      // look current, and an empty one would read as "No orders yet".
+      Sentry.captureException(new Error(error?.message ?? 'orders page read failed'), { tags: { source: 'fetch', action: 'load_orders' } });
       toast('error', 'Failed to load orders. Please try again.');
       setOrders([]);
+      setTotals(null);
       setLoadFailed(true);
-      setLoading(false);
-    };
-    const { data: ordersData, error: ordersError } = await fetchAllRows((from, to) => pageWithList(supabase
-      .from('orders')
-      .select(`${ORDER_COLUMNS}, customer:customers(farm_name, parent_customer_id)`, { count: 'exact' })
-      .gte('order_date', seasonStart)
-      .lte('order_date', seasonEnd)
-      .is('deleted_at', null)
-      .order('order_date', { ascending: false })
-      .order('id')
-      .range(from, to)));
-    if (seq !== fetchSeq.current) return;
-
-    if (ordersError || !ordersData) {
-      failLoad(ordersError ?? new Error('orders read returned no list'));
+    } else if (data.rows.length === 0 && data.total_count > 0 && page > 0) {
+      // Orders were removed since this page was chosen: show the last page that still has rows.
+      setPageState({ key: queryKey, page: Math.floor((data.total_count - 1) / ORDERS_PAGE_SIZE) });
       return;
+    } else {
+      setOrders(data.rows);
+      setTotals({ key: queryKey, count: data.total_count, cents: data.total_price_cents });
+      setLoadFailed(false);
     }
-
-    const orderIds = ordersData.map((o: Record<string, unknown>) => (o as { id: string }).id);
-
-    // Fetch parent customer names for farm group labels
-    const parentIds = [...new Set(
-      ordersData
-        .map((o: Record<string, unknown>) => (o.customer as { parent_customer_id?: string })?.parent_customer_id)
-        .filter(Boolean) as string[]
-    )];
-
-    // Run all four queries in parallel — they depend on ordersData but not on each other.
-    // Each id list is sent in chunks and every chunk is paged, so a long order list
-    // neither overflows the request URL nor loses rows past the server's row cap.
-    const [itemsResult, invoiceResult, parentsResult, deliveryResult] = await Promise.all([
-      fetchAllRowsForIds(orderIds, (idChunk, from, to) => pageWithList(supabase
-        .from('order_items')
-        // `id` lets the pager drop a line repeated across a page seam.
-        .select('id, order_id, total_units_needed, quantity_delivered, price_per_unit, product_name', { count: 'exact' })
-        .in('order_id', idChunk)
-        .order('id')
-        .range(from, to))),
-      fetchActiveInvoiceCoveragePages(orderIds),
-      fetchAllRowsForIds(parentIds, (idChunk, from, to) => pageWithList(supabase
-        .from('customers')
-        .select('id, farm_name', { count: 'exact' })
-        .in('id', idChunk)
-        .order('id')
-        .range(from, to))),
-      fetchAllRowsForIds(orderIds, (idChunk, from, to) => pageWithList(supabase
-        .from('deliveries')
-        .select('id, order_id, scheduled_date, status', { count: 'exact' })
-        .in('order_id', idChunk)
-        .in('status', ['scheduled', 'in_progress'])
-        .order('id')
-        .range(from, to))),
-    ]);
-    if (seq !== fetchSeq.current) return;
-
-    // Without the lines every order would show 0% fulfilled and no products to
-    // search by; without the deliveries every order would show none scheduled.
-    // Without the parent names, grouped farms would show no farm-group label as if they had none.
-    const { data: itemsData, error: itemsError } = itemsResult;
-    const { data: deliveryData, error: deliveryError } = deliveryResult;
-    const { data: parents, error: parentsError } = parentsResult;
-    if (itemsError || !itemsData || deliveryError || !deliveryData || parentsError || !parents) {
-      failLoad(itemsError ?? deliveryError ?? parentsError ?? new Error('order lines, deliveries or farm groups read returned no list'));
-      return;
-    }
-
-    // H16: Use value-based fulfillment (weighted by price_per_unit) instead of item-count-based
-    const itemsByOrder: Record<string, { neededValue: number; deliveredValue: number }> = {};
-    // Collect product names per order so the list is searchable by product (F1).
-    const productNamesByOrder: Record<string, Set<string>> = {};
-    itemsData.forEach((item) => {
-      if (!itemsByOrder[item.order_id]) {
-        itemsByOrder[item.order_id] = { neededValue: 0, deliveredValue: 0 };
-      }
-      const price = Number(item.price_per_unit) || 0;
-      itemsByOrder[item.order_id].neededValue += (Number(item.total_units_needed) || 0) * price;
-      itemsByOrder[item.order_id].deliveredValue += (Number(item.quantity_delivered) || 0) * price;
-      const pname = item.product_name;
-      if (pname) {
-        (productNamesByOrder[item.order_id] ??= new Set()).add(pname);
-      }
-    });
-
-    // Fetch invoice totals per order for invoiced %
-    // No list is a failed read too: it must say "unavailable", never 0% invoiced (Luna round 2).
-    const { data: invoiceData } = invoiceResult;
-    const invoiceError = invoiceResult.error ?? (invoiceData ? null : { message: 'invoice coverage read returned no list' });
-    if (invoiceError) {
-      Sentry.captureException(invoiceError);
-      toast('error', 'Failed to load invoice coverage. Invoiced percentages are unavailable; refresh to try again.');
-    }
-    const invoicedByOrder: Record<string, number> = {};
-    const visibleOrderIds = new Set(orderIds);
-    (invoiceData || []).forEach((inv: ActiveInvoiceCoverageRow) => {
-      if (inv.order_id && visibleOrderIds.has(inv.order_id) && activeInvoiceCountsTowardBilling(inv)) {
-        invoicedByOrder[inv.order_id] = (invoicedByOrder[inv.order_id] || 0) + (inv.total_amount_cents || 0);
-      }
-    });
-
-    const parentNameMap: Record<string, string> = {};
-    parents.forEach((p: { id: string; farm_name: string }) => { parentNameMap[p.id] = p.farm_name; });
-
-    // Build active delivery info per order (scheduled + in_progress only)
-    const deliveryByOrder: Record<string, { count: number; earliestDate: string | null }> = {};
-    deliveryData.forEach((del: { order_id: string; scheduled_date: string; status: string }) => {
-      if (!deliveryByOrder[del.order_id]) {
-        deliveryByOrder[del.order_id] = { count: 0, earliestDate: null };
-      }
-      deliveryByOrder[del.order_id].count += 1;
-      if (!deliveryByOrder[del.order_id].earliestDate || del.scheduled_date < deliveryByOrder[del.order_id].earliestDate!) {
-        deliveryByOrder[del.order_id].earliestDate = del.scheduled_date;
-      }
-    });
-
-    const enriched = (ordersData as Array<Omit<Order, 'customer'> & {
-      customer: { farm_name: string; parent_customer_id: string | null } | null;
-    }>).map((o) => {
-      const counts = itemsByOrder[o.id] || { neededValue: 0, deliveredValue: 0 };
-      const pct = counts.neededValue > 0 ? Math.round((counts.deliveredValue / counts.neededValue) * 100) : 0;
-      const orderCents = Math.round((o.total_price || 0) * 100);
-      const invCents = invoiceError ? null : (invoicedByOrder[o.id] || 0);
-      const invPct = invCents == null ? null : (orderCents > 0 ? Math.round((invCents / orderCents) * 100) : 0);
-      const cust = o.customer;
-      const farmGroupName = cust?.parent_customer_id ? parentNameMap[cust.parent_customer_id] || null : null;
-      const customerName = cust?.farm_name || '';
-      const delInfo = deliveryByOrder[o.id] || { count: 0, earliestDate: null };
-      return {
-        ...o,
-        fulfillment_pct: pct,
-        invoiced_pct: invPct == null ? null : Math.min(invPct, 100),
-        farm_group_name: farmGroupName,
-        customer_name: customerName,
-        active_delivery_count: delInfo.count,
-        earliest_delivery_date: delInfo.earliestDate,
-        product_names: Array.from(productNamesByOrder[o.id] || []).join(', '),
-      } as OrderWithFulfillment;
-    });
-
-    setOrders(enriched);
-    setLoadFailed(false);
     setLoading(false);
-  }, [toast]);
+    setPageLoading(false);
+  }, [query, queryKey, page, toast, clearBulkSelection]);
 
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
 
-  const filtered = orders.filter((o) => {
-    if (statusFilter && o.status !== statusFilter) return false;
-    if (planFilter === 'planned' && !o.is_planned) return false;
-    if (planFilter === 'committed' && o.is_planned) return false;
-    if (pricingFilter && o.pricing_status !== pricingFilter) return false;
-    if (splitFilter && !o.needs_split_billing) return false;
-    return true;
-  });
+  // The rows the bulk actions act on: every matching order after "select all", else the ticked rows.
+  const bulkRows = allMatching ?? selectedRows;
+  const bulkCount = bulkRows.length;
+  const allMatchingIds = useMemo(() => (allMatching ? new Set(allMatching.map((o) => o.id)) : null), [allMatching]);
 
-  const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
-    useRowSelection({ data: filtered, getId: (o) => o.id });
+  const toggleRow = useCallback((id: string) => {
+    if (!allMatching) {
+      toggleSelect(id);
+      return;
+    }
+    // Unticking (or re-ticking) one row keeps the rest of "every matching order" selected.
+    const row = orders.find((o) => o.id === id);
+    setAllMatchingState({
+      key: queryKey,
+      rows: allMatching.some((o) => o.id === id) ? allMatching.filter((o) => o.id !== id) : row ? [...allMatching, row] : allMatching,
+    });
+  }, [allMatching, orders, queryKey, toggleSelect]);
+
+  // Typing a search drops the selection at once, not 300 ms later when the query catches up.
+  useEffect(() => {
+    clearBulkSelection();
+  }, [search, clearBulkSelection]);
 
   const checkboxCol = useMemo(
-    () => createCheckboxColumn<OrderWithFulfillment>(selected, toggleSelect, (o) => o.id),
-    [selected, toggleSelect]
+    () => createCheckboxColumn<OrderWithFulfillment>(allMatchingIds ?? selected, toggleRow, (o) => o.id),
+    [allMatchingIds, selected, toggleRow]
   );
 
+  // A new search or filter hides the old totals until its own read lands: they never describe another query.
+  const totals = forQuery(totalsState, queryKey);
+  const { moreThanThisPage, everythingSelected } = selectionScope(totals, orders.length, allMatching, allSelected);
+
+  const handleSelectAll = async () => {
+    if (everythingSelected) {
+      clearBulkSelection();
+      return;
+    }
+    // The rows on screen may still be the previous query's until its own read lands.
+    if (!totals) return;
+    if (!moreThanThisPage) {
+      toggleAll();
+      return;
+    }
+    // Every matching order, read page by page; a list that changed mid-read is an error, not a short list.
+    const key = queryKey;
+    const seq = ++selectAllSeq.current;
+    setSelectingAll(true);
+    const { data, error } = await fetchAllMatchingOrders(query);
+    // A newer read or deselect already cleared the button; this old read changes nothing.
+    if (seq !== selectAllSeq.current) return;
+    setSelectingAll(false);
+    if (error || !data) {
+      toast('error', 'Could not select every matching order. Please try again.');
+      return;
+    }
+    setAllMatchingState({ key, rows: data });
+  };
+
   const handleExportCSV = () => {
-    exportToCSV(selectedRows as unknown as Record<string, unknown>[], [
+    exportToCSV(bulkRows as unknown as Record<string, unknown>[], [
       { key: 'order_number', header: 'Order #' },
       { key: 'customer', header: 'Customer', format: (v) => (v as { farm_name: string })?.farm_name || '' },
       { key: 'status', header: 'Status' },
@@ -263,19 +215,19 @@ export default function Orders() {
       { key: 'fulfillment_pct', header: 'Fulfillment %', format: (v) => `${v}%` },
       { key: 'invoiced_pct', header: 'Invoiced %', format: (v) => v == null ? 'Unavailable' : `${v}%` },
     ], 'orders');
-    toast('success', `Exported ${selectedRows.length} order(s) to CSV`);
+    toast('success', `Exported ${bulkRows.length} order(s) to CSV`);
   };
 
   const handleExportPDF = async () => {
     setExporting(true);
     try {
-      const pdfData = selectedRows.map((o) => ({
+      const pdfData = bulkRows.map((o) => ({
         ...o,
         customer_name: (o.customer as unknown as { farm_name: string })?.farm_name || '',
       }));
       await downloadReportPdf({
         title: 'Orders',
-        subtitle: `${selectedRows.length} order(s) selected`,
+        subtitle: `${bulkRows.length} order(s) selected`,
         columns: [
           { header: 'Order #', key: 'order_number' },
           { header: 'Customer', key: 'customer_name' },
@@ -288,7 +240,7 @@ export default function Orders() {
         data: pdfData as unknown as Record<string, unknown>[],
         orientation: 'landscape',
       });
-      toast('success', `Downloaded PDF with ${selectedRows.length} order(s)`);
+      toast('success', `Downloaded PDF with ${bulkRows.length} order(s)`);
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
     }
@@ -298,8 +250,8 @@ export default function Orders() {
   const handleBulkPrintSummaries = async () => {
     setPrintingSummary(true);
     try {
-      const orderIds = selectedRows.map((o) => o.id);
-      const customerIds = [...new Set(selectedRows.map((o) => o.customer_id))];
+      const orderIds = bulkRows.map((o) => o.id);
+      const customerIds = [...new Set(bulkRows.map((o) => o.customer_id))];
 
       // A selection can be the whole list, so read every row in id chunks.
       const [itemsRes, customersRes] = await Promise.all([
@@ -326,7 +278,7 @@ export default function Orders() {
         itemsByOrder[item.order_id].push(item);
       }
 
-      const dataList: OrderSummaryData[] = selectedRows.map((o) => {
+      const dataList: OrderSummaryData[] = bulkRows.map((o) => {
         const cust = customerMap[o.customer_id] || { farm_name: '', contact_name: null, phone: null, billing_address: null };
         const orderItems = itemsByOrder[o.id] || [];
         return {
@@ -363,8 +315,8 @@ export default function Orders() {
   const handleBulkPrintPickLists = async () => {
     setPrintingPickList(true);
     try {
-      const orderIds = selectedRows.map((o) => o.id);
-      const customerIds = [...new Set(selectedRows.map((o) => o.customer_id))];
+      const orderIds = bulkRows.map((o) => o.id);
+      const customerIds = [...new Set(bulkRows.map((o) => o.customer_id))];
 
       // A selection can be the whole list, and inventory is a whole-table read, so
       // read every row (id lists in chunks) rather than stopping at the row cap.
@@ -418,7 +370,7 @@ export default function Orders() {
         itemsByOrder[item.order_id].push(item);
       }
 
-      const dataList: PickListData[] = selectedRows.map((o) => {
+      const dataList: PickListData[] = bulkRows.map((o) => {
         const cust = customerMap[o.customer_id] || { farm_name: '', contact_name: null, phone: null, billing_address: null };
         const orderItems = itemsByOrder[o.id] || [];
         // Flag the shortage against the product's TOTAL remaining on this order.
@@ -478,7 +430,7 @@ export default function Orders() {
   };
 
   const handleBulkDelete = async () => {
-    const activeOrders = selectedRows.filter(
+    const activeOrders = bulkRows.filter(
       (order) => order.status !== 'cancelled' && order.status !== 'voided'
     );
     if (activeOrders.length > 0) {
@@ -492,7 +444,7 @@ export default function Orders() {
 
     await runCriticalAction({
       action: async () => {
-        const ids = selectedRows.map((o) => o.id);
+        const ids = bulkRows.map((o) => o.id);
         const result = await supabase.from('orders').update({ deleted_at: new Date().toISOString() }).in('id', ids).select('id');
         if (result.error?.message.includes('ORDER_MUST_BE_TERMINAL_BEFORE_DELETE')) {
           throw new Error(
@@ -503,10 +455,10 @@ export default function Orders() {
       },
       toast,
       setLoading: setDeleting,
-      successMessage: `Deleted ${selectedRows.length} order(s)`,
+      successMessage: `Deleted ${bulkRows.length} order(s)`,
       sentryTag: 'bulk_delete_orders',
       onSuccess: () => {
-        clearSelection();
+        clearBulkSelection();
         fetchOrders();
         setDeleteModalOpen(false);
       },
@@ -514,7 +466,7 @@ export default function Orders() {
   };
 
   const openBulkDelete = () => {
-    const activeOrders = selectedRows.filter(
+    const activeOrders = bulkRows.filter(
       (order) => order.status !== 'cancelled' && order.status !== 'voided'
     );
     if (activeOrders.length > 0) {
@@ -677,7 +629,7 @@ export default function Orders() {
         actions={
           <>
             {canBulkAction && (
-              <BulkActionBar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />
+              <BulkActionBar selectedCount={bulkCount} actions={bulkActions} onDeselectAll={clearBulkSelection} />
             )}
             <div className="flex items-center gap-2">
               <Button variant="secondary" onClick={() => setShowImportModal(true)}>
@@ -696,11 +648,16 @@ export default function Orders() {
       <Card padding={false}>
         <div className="p-5">
           <DataTable<OrderWithFulfillment>
-            data={filtered}
+            data={orders}
             columns={columns}
             searchable
             searchPlaceholder="Search orders or products…"
-            searchKeys={['order_number', 'farm_group_name', 'customer_name', 'product_names']}
+            // The database searches order number, customer, farm group and products, sorts and pages.
+            serverSide
+            searchValue={search}
+            onSearchChange={setSearch}
+            sortState={sort}
+            onSortChange={setSort}
             onRowClick={(row) => navigate(`/orders/${row.id}`)}
             emptyTitle="No orders yet"
             emptyDescription="Start by creating a quote in Sales → Quotes, then convert it to an order. Or create a direct order below."
@@ -714,9 +671,9 @@ export default function Orders() {
                 </Button>
               </div>
             }
-            loading={loading}
+            loading={listBusy}
             loadError={loadFailed}
-            onRetry={() => { setLoading(true); fetchOrders(); }}
+            onRetry={fetchOrders}
             filters={
               <>
                 <select
@@ -761,17 +718,21 @@ export default function Orders() {
                   <option value="">All Orders</option>
                   <option value="needs_split">Needs Split Billing</option>
                 </select>
-                {canBulkAction && filtered.length > 0 && (
+                {canBulkAction && orders.length > 0 && (
                   <button
-                    onClick={toggleAll}
-                    className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"
+                    onClick={handleSelectAll}
+                    disabled={isListBusy(pageLoading, search, debouncedSearch, selectingAll)}
+                    className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors disabled:opacity-50"
                   >
-                    {allSelected ? 'Deselect All' : 'Select All'}
+                    {selectAllLabel(selectingAll, everythingSelected, moreThanThisPage ? totals : null)}
                   </button>
                 )}
               </>
             }
           />
+          {totals && !loadFailed && (
+            <OrdersPager totals={totals} page={page} rowsShown={orders.length} busy={listBusy} goToPage={goToPage} />
+          )}
         </div>
       </Card>
 
@@ -788,7 +749,7 @@ export default function Orders() {
       <BulkDeleteConfirmModal
         open={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
-        count={selectedCount}
+        count={bulkCount}
         entityName="order"
         onConfirm={handleBulkDelete}
         loading={deleting}
@@ -802,4 +763,57 @@ export default function Orders() {
       />
     </div>
   );
+}
+
+/** "Showing A–B of N orders · $X total" with Previous/Next; N and $X cover every matching order. */
+function OrdersPager({ totals, page, rowsShown, busy, goToPage }: {
+  totals: { count: number; cents: number };
+  page: number;
+  rowsShown: number;
+  busy: boolean;
+  goToPage: (page: number) => void;
+}) {
+  if (totals.count === 0) return null;
+  const first = page * ORDERS_PAGE_SIZE;
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3" aria-label="Orders pages">
+      <span className="text-sm text-secondary">
+        Showing {(first + 1).toLocaleString()}–{Math.min(first + rowsShown, totals.count).toLocaleString()} of {totals.count.toLocaleString()} orders · {formatCents(totals.cents)} total
+      </span>
+      {totals.count > ORDERS_PAGE_SIZE && (
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => goToPage(page - 1)} disabled={page === 0 || busy}>
+            Previous
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => goToPage(page + 1)} disabled={first + ORDERS_PAGE_SIZE >= totals.count || busy}>
+            Next
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Rows on screen are stale while a read runs or a typed search waits out its 300 ms debounce; Select All also waits for its own read. */
+function isListBusy(pageLoading: boolean, search: string, debouncedSearch: string, selectingAll = false): boolean {
+  return pageLoading || selectingAll || search.trim() !== debouncedSearch;
+}
+
+/** State saved for one query (page, totals, "select all"), or null once the query has changed. */
+function forQuery<T extends { key: string }>(state: T | null, key: string): T | null {
+  return state !== null && state.key === key ? state : null;
+}
+
+function selectAllLabel(selecting: boolean, everythingSelected: boolean, moreThanThisPage: { count: number } | null): string {
+  if (selecting) return 'Selecting…';
+  if (everythingSelected) return 'Deselect All';
+  return moreThanThisPage ? `Select All ${moreThanThisPage.count.toLocaleString()}` : 'Select All';
+}
+
+/** Whether more orders match than this page shows, and whether every matching order is already selected. */
+function selectionScope(totals: { count: number } | null, rowsShown: number, allMatching: unknown[] | null, pageAllSelected: boolean) {
+  const moreThanThisPage = totals !== null && totals.count > rowsShown;
+  // After "select all", unticking rows brings the "Select All" button back.
+  const allMatchingSelected = allMatching !== null && totals !== null && allMatching.length >= totals.count;
+  return { moreThanThisPage, everythingSelected: allMatchingSelected || (pageAllSelected && !moreThanThisPage) };
 }

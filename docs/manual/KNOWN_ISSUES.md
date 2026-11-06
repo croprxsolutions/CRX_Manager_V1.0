@@ -473,10 +473,11 @@ receipt; the driver is warned and the office can resend by hand. A queue table p
 and not built (needs a new Edge Function deploy). No `delivery_receipt_queue` exists in `supabase/`.
 
 ### KI-26 — Delivery completion-evidence leftovers
-**LOW · OPEN · UI/database/process · airplane-mode test owed (Mason)**
+**LOW · OPEN · UI/database/process**
 Following `20261022075000` (PR #1024): old app versions are refused until reloaded; offline completions queued
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
-abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test.
+abandoned signature files stay stored; file contents are not inspected. Real-phone airplane-mode test PASSED
+(Mason 2026-11-06, after the narrowing below): an offline signed completion synced and showed its signature.
 The four older signature policies (fixed path `signatures/<id>.png`) are narrowed by
 `20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`): insert, update and delete dropped,
 and reading needs the file to be the delivery's recorded signature.
@@ -508,7 +509,8 @@ Most lists now page through every row (PRs #959, #1017, #1048). The order, job a
 the database, and cycle-count locations read every row (PR #1048). The Customers and Jobs lists now read every row,
 the Jobs Applicators/Customers filters match their job-id lists on the rows read (no URL-size risk), and the order and job
 pickers match a customer name in the database instead of only the first 50 matching names (2026-11-05). Crop
-Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Dispatch
+Programs was not capped: its programs are one settings record and its product picker searches (PR #944).
+The Orders list pages in the database with the true count and total of every match (`get_orders_page`, PR #1550). Dispatch
 Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1538; rest waits on KI-28, issue
 #1497); Call Lists say how many customers match beyond their 200 (same PRs). Still capped: the blend-ticket scanner
 Edge Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
@@ -913,7 +915,8 @@ per order, and a payload change is refused with a conflict dialog that reloads t
 **MED/LOW · OPEN · UI/database**
 Still row-capped: the Invoice Detail customer selector, Bulk PO Import products, bulk-import name matching,
 Label Data Quality choices, Product Detail choice lists (MED). Paging caveats: two identical reads can still miss
-concurrent changes, load/count cost grows on large tables, more than 20 identical-name search results are hard to
+concurrent changes, load/count cost grows on large tables (the Orders list now reads one page at a time, but each page
+still recomputes the season's line, invoice and delivery totals), more than 20 identical-name search results are hard to
 reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer
 one fails (LOW). `SelectLocationsModal` map/list split stays 50/50 on tablets (LOW). CRM gaps: applicator-license
 visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate-customer detection, bulk

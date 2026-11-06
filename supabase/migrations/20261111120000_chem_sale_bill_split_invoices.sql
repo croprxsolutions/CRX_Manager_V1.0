@@ -48,6 +48,8 @@ BEGIN
      OR (SELECT transaction_id FROM pg_temp.chem_sale_bill_split_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'CHEM_SALE_BILL_SPLIT_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
+  -- Held to commit, so no card can change between the checks below and the new guard.
+  LOCK TABLE public.order_shares IN ACCESS EXCLUSIVE MODE;
   -- Each re-emitted function, pinned to its current body, owner, mode, search_path and grants.
   FOR r IN SELECT * FROM (VALUES
     ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)', '6665c5841f047c9ca165c8a20c68f4f9', ARRAY['postgres=X/postgres']::aclitem[]),

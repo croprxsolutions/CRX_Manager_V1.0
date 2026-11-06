@@ -9,6 +9,8 @@
 --   E  Re-saving a draft without sending the vendor keeps it; a save that sends one changes it
 --   F  A product with no preferred vendor, if any, leaves the line blank with no error
 --   G  Only the vendor column is open to UPDATE
+--   H  Swapping a line's product takes the new product's preferred vendor, unless the same write names one;
+--      a write that keeps the product keeps a named vendor
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -21,6 +23,8 @@ DECLARE
   v_customer uuid;
   v_p public.products%ROWTYPE;
   v_blank public.products%ROWTYPE;
+  v_other public.products%ROWTYPE;
+  v_l4 uuid;
   v_suffix text := substr(md5(random()::text), 1, 8);
   v_preferred text;
   v_o uuid;
@@ -130,6 +134,29 @@ BEGIN
      OR has_column_privilege('authenticated', 'public.order_items', 'price_per_unit', 'UPDATE')
      OR has_column_privilege('authenticated', 'public.order_items', 'product_id', 'UPDATE') THEN
     v_fails := v_fails || ' (G) the column grants are not exactly the vendor column;';
+  END IF;
+
+  -- H on a fresh line of the same sale, not delivered. Optional: needs a second product whose preferred vendor differs.
+  SELECT * INTO v_other FROM products WHERE is_active = true AND current_cost > 0 AND current_cost = round(current_cost, 2)
+     AND NULLIF(btrim(vendor), '') IS NOT NULL AND vendor <> v_preferred AND id <> v_p.id ORDER BY created_at LIMIT 1;
+  IF v_other.id IS NOT NULL THEN
+    PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+    INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit, total_units_needed, total_price, quantity_delivered, quantity_remaining, sort_order)
+      VALUES (v_o, v_p.id, '[SMOKE] Swapped', 'gal', v_p.current_cost + 1, v_p.current_cost, 5, (v_p.current_cost + 1) * 5, 0, 5, 4) RETURNING id INTO v_l4;
+    UPDATE order_items SET product_id = v_other.id, cost_per_unit = v_other.current_cost WHERE id = v_l4;
+    IF (SELECT vendor FROM order_items WHERE id = v_l4) IS DISTINCT FROM v_other.vendor THEN
+      v_fails := v_fails || format(' (H) a product swap kept %s, want %s;', (SELECT vendor FROM order_items WHERE id = v_l4), v_other.vendor);
+    END IF;
+    UPDATE order_items SET vendor = '[SMOKE] Kept Supply' WHERE id = v_l4;
+    UPDATE order_items SET product_id = v_other.id WHERE id = v_l4;
+    IF (SELECT vendor FROM order_items WHERE id = v_l4) IS DISTINCT FROM '[SMOKE] Kept Supply' THEN
+      v_fails := v_fails || ' (H) a write that kept the product dropped a named vendor;';
+    END IF;
+    UPDATE order_items SET product_id = v_p.id, cost_per_unit = v_p.current_cost, vendor = '[SMOKE] Swap Supply' WHERE id = v_l4;
+    IF (SELECT vendor FROM order_items WHERE id = v_l4) IS DISTINCT FROM '[SMOKE] Swap Supply' THEN
+      v_fails := v_fails || ' (H) a swap that named a vendor did not keep it;';
+    END IF;
+    PERFORM set_config('app.crx_below_cost_operation', '', true);
   END IF;
 
   IF v_fails <> '' THEN

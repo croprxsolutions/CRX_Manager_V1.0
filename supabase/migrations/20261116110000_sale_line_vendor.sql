@@ -6,7 +6,8 @@
 --   can pick another on each sale without changing anything else"): an order line now has a vendor.
 --   - New column order_items.vendor. A trigger fills it from the product's preferred vendor
 --     (products.vendor, the copy 20261105180000 keeps) when a line is created without one, whichever
---     path creates it.
+--     path creates it. Swapping the line's product takes the new product's preferred vendor, unless the
+--     same write names one.
 --   - A trigger fills invoice_items.vendor from its order line when a line is written without one, so
 --     every invoice path carries it. A line from before this migration has no vendor, so it falls
 --     back to the product's preferred vendor. A vendor set on the invoice line stays.
@@ -75,6 +76,11 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
+  -- A product swap on the line drops the old product's vendor, unless the same write names one.
+  IF TG_OP = 'UPDATE' AND NEW.product_id IS DISTINCT FROM OLD.product_id
+     AND NEW.vendor IS NOT DISTINCT FROM OLD.vendor THEN
+    NEW.vendor := NULL;
+  END IF;
   IF NULLIF(btrim(NEW.vendor), '') IS NULL AND NEW.product_id IS NOT NULL THEN
     NEW.vendor := (SELECT p.vendor FROM products p WHERE p.id = NEW.product_id);
   END IF;
@@ -102,7 +108,7 @@ REVOKE ALL ON FUNCTION public._fill_order_line_vendor() FROM PUBLIC, anon, authe
 REVOKE ALL ON FUNCTION public._fill_invoice_line_vendor() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER trg_fill_order_line_vendor
-  BEFORE INSERT ON public.order_items
+  BEFORE INSERT OR UPDATE OF product_id ON public.order_items
   FOR EACH ROW EXECUTE FUNCTION public._fill_order_line_vendor();
 
 CREATE TRIGGER trg_fill_invoice_line_vendor

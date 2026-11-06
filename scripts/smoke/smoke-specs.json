@@ -1972,7 +1972,7 @@
     },
     "sale_line_vendor": {
       "chain": "smoke-sale-line-vendor.sql",
-      "description": "Migration 20261116110000 (billing plan M3): a new order line is filled from the product's preferred vendor; a line created with a vendor keeps it; a line's vendor changed on the sale reaches its invoice and doesn't touch the product; an older line with no vendor invoices with the preferred vendor; a re-save that sends no vendor keeps it and one that sends a vendor changes it; a product with no preferred vendor stays blank; only the vendor column is open to UPDATE. Terminal rollback.",
+      "description": "Migration 20261116110000 (billing plan M3): a new order line is filled from the product's preferred vendor; a line created with a vendor keeps it; a line's vendor changed on the sale reaches its invoice and doesn't touch the product; an older line with no vendor invoices with the preferred vendor; a re-save that sends no vendor keeps it and one that sends a vendor changes it; a product with no preferred vendor stays blank; only the vendor column is open to UPDATE; a product swap on a line takes the new product's preferred vendor unless the same write names one. Terminal rollback.",
       "covers": ["_fill_order_line_vendor", "_fill_invoice_line_vendor", "save_invoice", "complete_delivery"],
       "area": ["billing", "regression"]
     }

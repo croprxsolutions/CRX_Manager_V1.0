@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261106060243",
+    "migrations_high_water": "20261106145427",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -525,6 +525,11 @@
       "20261114080000_list_true_totals",
       "20261114200000_bind_records_replay_receipts_batch4d",
       "20261115160000_financial_delete_snapshots",
+      "20261116100000_permission_tightening",
+      "20261116120000_orders_list_page",
+      "20261117130000_tote_fill_from_bulk",
+      "20261118110000_sale_line_vendor",
+      "20261120100000_field_invoice_due_date_follows_owner_terms",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1544,6 +1549,7 @@
     "supplier_price_observations",
     "team_note_attachments",
     "team_note_tags",
+    "tote_fills",
     "uncertain_request_clear_check_key",
     "unit_conversions",
     "vendor_alias_stage_receipts",
@@ -2149,7 +2155,9 @@
         "void_delivery_reversal",
         "prebooked",
         "released",
-        "prebook_reconciliation"
+        "prebook_reconciliation",
+        "tote_fill_out",
+        "tote_fill_in"
       ],
       "constraints": [
         "inventory_transactions_transaction_type_check"
@@ -3666,6 +3674,12 @@
     },
     {
       "table": "invoices",
+      "constraint": "invoices_custom_due_date_present",
+      "def": "CHECK (((NOT due_date_is_custom) OR (due_date IS NOT NULL)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "invoices",
       "constraint": "invoices_discount_earned_nonneg",
       "def": "CHECK ((discount_earned_cents >= 0))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
@@ -4769,6 +4783,48 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "tote_fills",
+      "constraint": "tote_fills_bulk_quantity_check",
+      "def": "CHECK ((bulk_quantity > (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_check",
+      "def": "CHECK ((tote_product_id <> bulk_product_id))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_check1",
+      "def": "CHECK (((reverses_fill_id IS NULL) = (reason IS NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_check2",
+      "def": "CHECK (((reverses_fill_id IS NULL) OR (shortfall_quantity = (0)::numeric)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_gallons_check",
+      "def": "CHECK ((gallons > (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_shortfall_quantity_check",
+      "def": "CHECK ((shortfall_quantity >= (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "tote_fills",
+      "constraint": "tote_fills_totes_check",
+      "def": "CHECK ((totes >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "uncertain_request_clear_check_key",
       "constraint": "uncertain_request_clear_check_key_signing_key_check",
       "def": "CHECK ((octet_length(signing_key) = 32))",
@@ -5775,7 +5831,8 @@
         "pricing_pending",
         "discount_earned_cents",
         "credit_applied_cents",
-        "send_disposition"
+        "send_disposition",
+        "due_date_is_custom"
       ]
     },
     "job_applied_info": {
@@ -6998,6 +7055,30 @@
         "is_pinned",
         "created_at",
         "updated_at"
+      ]
+    },
+    "tote_fills": {
+      "no_default": [
+        "tote_product_id",
+        "bulk_product_id",
+        "totes",
+        "gallons",
+        "bulk_unit",
+        "bulk_quantity",
+        "bulk_before",
+        "bulk_after",
+        "tote_before",
+        "tote_after",
+        "bulk_ledger_rows",
+        "tote_ledger_rows",
+        "out_transaction_id",
+        "in_transaction_id",
+        "performed_by"
+      ],
+      "with_default": [
+        "id",
+        "shortfall_quantity",
+        "created_at"
       ]
     },
     "uncertain_request_clear_check_key": {
@@ -8660,7 +8741,8 @@
       "cost_at_time_cents",
       "pricing_pending",
       "suggested_price",
-      "price_tier_at_sale"
+      "price_tier_at_sale",
+      "vendor"
     ],
     "order_line_allocations": [
       "id",
@@ -9651,6 +9733,28 @@
       "linked_entity_type",
       "linked_entity_id",
       "last_escalated_at"
+    ],
+    "tote_fills": [
+      "id",
+      "tote_product_id",
+      "bulk_product_id",
+      "totes",
+      "gallons",
+      "bulk_unit",
+      "bulk_quantity",
+      "bulk_before",
+      "bulk_after",
+      "tote_before",
+      "tote_after",
+      "shortfall_quantity",
+      "bulk_ledger_rows",
+      "tote_ledger_rows",
+      "out_transaction_id",
+      "in_transaction_id",
+      "reverses_fill_id",
+      "reason",
+      "performed_by",
+      "created_at"
     ],
     "uncertain_request_clear_check_key": [
       "singleton",

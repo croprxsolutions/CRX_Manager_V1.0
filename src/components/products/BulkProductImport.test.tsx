@@ -19,7 +19,7 @@ vi.mock('../../lib/productSetup', () => ({
   ]),
 }));
 vi.mock('../../lib/documentOCR', () => ({ isCSVFile: vi.fn(() => true) }));
-vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1' } }) }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1' }, role: 'admin' }) }));
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import BulkProductImport from './BulkProductImport';
@@ -87,6 +87,8 @@ describe('CSV reader', () => {
     const [, blankThenQuoted] = parseCsvRecords('product_name,notes\nChem," " "x"\n');
     expect(csvRecordProblem(blankThenQuoted, 2)).toMatch(/Text follows a closing quote/);
     expect(spaced.cells[0].trim()).toBe('2,4-D');
+    const [, blankInside] = parseCsvRecords('product_name,notes\nA,B,,C\n');
+    expect(csvRecordProblem(blankInside, 2)).toMatch(/2 more value\(s\) than the header/);
   });
 });
 
@@ -263,6 +265,27 @@ describe('BulkProductImport screen', () => {
     ] });
     expect(saves[1][1].p_idempotency_key).toBe(saves[0][1].p_idempotency_key);
     expect(props.onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('offers the clear button once an unconfirmed import is past its retry window (Sol HIGH)', async () => {
+    rpc.mockImplementation(async (name: string) => (name === 'preview_product_import'
+      ? { data: { rates_locked: false, rows: [okRow()] }, error: null }
+      : { data: null, error: { message: 'network' } }));
+    const first = render(<BulkProductImport {...props} />);
+    await upload('product_name\nLost Reply\n');
+    fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
+    await screen.findByRole('button', { name: 'Finish Earlier Import (1)' });
+    expect(screen.queryByRole('button', { name: /clear this/ })).not.toBeInTheDocument();
+    first.unmount();
+    const realNow = Date.now();
+    const later = vi.spyOn(Date, 'now').mockReturnValue(realNow + 25 * 60 * 60 * 1000);
+    try {
+      render(<BulkProductImport {...props} />);
+      expect(await screen.findByRole('button', { name: /I checked the records — clear this/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Finish Earlier Import (1)' })).toBeDisabled();
+    } finally {
+      later.mockRestore();
+    }
   });
 
   it('checks a large file in batches of 100 (KI-103) but still saves it in one all-or-nothing call', async () => {

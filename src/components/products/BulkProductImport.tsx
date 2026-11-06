@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Upload, CheckCircle, AlertCircle, FileText, Sparkles, Download, Lock } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
+import ClearExpiredIntentButton from '../ClearExpiredIntentButton';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -441,7 +442,11 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
         )}
 
         {stage !== 'done' && earlier !== null && (
-          <UnconfirmedNotice count={earlier} foreign={importIntent.isForeignIntentLocked} expired={importIntent.isRetryExpired} />
+          <div>
+            <UnconfirmedNotice count={earlier} foreign={importIntent.isForeignIntentLocked} expired={importIntent.isRetryExpired} />
+            {/* After the retry window this is the only way to unlock imports in this browser (KI-27). */}
+            <ClearExpiredIntentButton intent={importIntent} operation="apply_product_setup" />
+          </div>
         )}
 
         {stage === 'choose' && (

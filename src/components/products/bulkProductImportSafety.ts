@@ -189,7 +189,10 @@ function canonical(value: string, allowed: readonly string[]): string {
 /** Why a data record cannot be trusted as written, or undefined: a stray quote, or more values than columns. */
 export function csvRecordProblem(record: CsvRecord, columnCount: number): string | undefined {
   if (record.malformed) return 'Text follows a closing quote. Put the whole value inside the quotes.';
-  const extra = record.cells.slice(columnCount).filter((c) => c.trim() !== '').length;
+  // Every field up to the last non-blank one is an extra value; only trailing blanks are allowed.
+  const extras = record.cells.slice(columnCount);
+  let extra = extras.length;
+  while (extra > 0 && extras[extra - 1].trim() === '') extra--;
   if (extra > 0) return `This row has ${extra} more value(s) than the header has columns. Check for a comma that needs quotes.`;
   return undefined;
 }

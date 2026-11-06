@@ -1,61 +1,90 @@
 /**
- * Deliveries.paging.test.tsx — Goal 4: the Deliveries list reads every delivery.
+ * Deliveries.paging.test.tsx — Goal 4: the Deliveries list pages, searches and counts in the database.
  *
- * The list used to be one request capped at 500 rows, so deliveries past the cap
- * vanished from the list, its counts and its export. The fake server below behaves
- * like PostgREST: no reply holds more than 1,000 rows, `.range()` returns that slice,
- * and a select with `{ count: 'exact' }` gets the count of every matching row.
+ * The list reads one page of 50 from get_deliveries_page, which also returns the true total and the
+ * cards' counts over every visible delivery. The fake function below behaves like the real one for
+ * what the page relies on: search, limit/offset and the totals. Exports and the load sheet must read
+ * every matching row (p_limit null), and a failed read must never show zeros or a short list.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 type Row = Record<string, unknown>;
+type PageArgs = { p_search?: string | null; p_limit: number | null; p_offset: number; p_today: string };
 
 const H = vi.hoisted(() => ({
   auth: { role: 'admin', profile: { id: 'user-1', role: 'admin' }, deniedPages: [] as string[] },
   tables: {} as Record<string, Row[]>,
-  // A table whose pages from this offset on fail, like a dropped connection mid-read.
-  failPage: null as { table: string; from: number } | null,
-  ranges: [] as Array<{ table: string; from: number; to: number }>,
+  deliveries: [] as Row[],
+  // get_deliveries_page calls from this one on fail, like a dropped connection.
+  failPageFromCall: null as number | null,
+  failTable: null as string | null,
+  pageCalls: [] as Array<Record<string, unknown>>,
   toast: vi.fn(),
   exportToCSV: vi.fn(),
 }));
 
-const SERVER_ROW_CAP = 1000;
-
 function serverQuery(table: string): Record<string, unknown> {
   let rows = H.tables[table] ?? [];
-  let countRequested = false;
-  let head = false;
   let range: [number, number] | null = null;
   const b: Record<string, unknown> = {};
   const self = () => b;
-  for (const m of ['eq', 'neq', 'order', 'limit', 'not', 'is', 'gte', 'lte']) b[m] = self;
-  b.select = (_columns: string, options?: { count?: string; head?: boolean }) => {
-    countRequested = Boolean(options?.count);
-    head = Boolean(options?.head);
+  for (const m of ['eq', 'neq', 'order', 'limit', 'not', 'is', 'gte', 'lte', 'select']) b[m] = self;
+  b.in = (column: string, values: unknown[]) => {
+    // `delivery.status` filters on the embedded delivery, as PostgREST does with !inner.
+    const value = (r: Row) => (column.includes('.') ? (r[column.split('.')[0]] as Row | undefined)?.[column.split('.')[1]] : r[column]);
+    rows = rows.filter((r) => values.includes(value(r)));
     return b;
   };
-  b.in = (column: string, values: unknown[]) => { rows = rows.filter((r) => values.includes(r[column])); return b; };
-  b.range = (from: number, to: number) => { range = [from, to]; H.ranges.push({ table, from, to }); return b; };
+  b.range = (from: number, to: number) => { range = [from, to]; return b; };
   const settle = () => {
-    if (H.failPage?.table === table && range && range[0] >= H.failPage.from) {
-      return { data: null, error: { message: 'connection reset' }, count: null };
-    }
-    if (head) return { data: null, error: null, count: rows.length };
+    if (H.failTable === table) return { data: null, error: { message: 'connection reset' }, count: null };
     const [from, to] = range ?? [0, Infinity];
-    return { data: rows.slice(from, to + 1).slice(0, SERVER_ROW_CAP), error: null, count: countRequested ? rows.length : null };
+    return { data: rows.slice(from, to + 1), error: null, count: rows.length };
   };
   b.then = (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
     Promise.resolve().then(settle).then(onFulfilled, onRejected);
   return b;
 }
 
+function deliveriesPage(args: PageArgs) {
+  const search = args.p_search?.toLowerCase();
+  const matching = H.deliveries.filter((d) => !search || String(d.delivery_number).toLowerCase().includes(search));
+  const rows = args.p_limit === null ? matching.slice(args.p_offset) : matching.slice(args.p_offset, args.p_offset + args.p_limit);
+  const scheduledToday = H.deliveries.filter((d) => d.scheduled_date === args.p_today).length;
+  return {
+    success: true,
+    total_count: matching.length,
+    rows,
+    summary: {
+      visible_count: H.deliveries.length,
+      open_count: H.deliveries.length,
+      scheduled_today: scheduledToday,
+      in_progress: 0,
+      completed_this_week: 0,
+      strip: [{ date: args.p_today, count: scheduledToday, unassigned: scheduledToday }],
+    },
+  };
+}
+
 vi.mock('../lib/db', () => ({
-  supabase: { from: (table: string) => serverQuery(table), rpc: vi.fn(() => Promise.resolve({ data: null, error: null })) },
+  supabase: {
+    from: (table: string) => serverQuery(table),
+    rpc: vi.fn((name: string, args: PageArgs) => {
+      if (name !== 'get_deliveries_page') return Promise.resolve({ data: null, error: null });
+      H.pageCalls.push(args);
+      if (H.failPageFromCall !== null && H.pageCalls.length >= H.failPageFromCall) {
+        return Promise.resolve({ data: null, error: { message: 'connection reset' } });
+      }
+      return Promise.resolve({ data: deliveriesPage(args), error: null });
+    }),
+  },
   sanitizeError: vi.fn((e: unknown) => (e as Error)?.message || 'Error'),
-  assertRpcResult: vi.fn((d) => d),
+  assertRpcResult: vi.fn((d) => {
+    if (d === null || d === undefined) throw new Error('no result');
+    return d;
+  }),
 }));
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => H.auth }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
@@ -70,13 +99,12 @@ vi.mock('../components/deliveries/BatchCancelModal', () => ({ default: () => nul
 vi.mock('../components/deliveries/QuickDeliveryModal', () => ({ default: () => null }));
 vi.mock('../components/deliveries/DeliveryCalendar', () => ({ default: () => null }));
 vi.mock('../components/customers/CustomerDrawer', () => ({ default: () => null }));
-// Drawing 1,500 real table rows takes over 30 seconds here; this test is about what the
-// page loads, so the table only reports the rows it was given (the export checks each one).
+// The table only reports the rows it was given and the first delivery number.
 vi.mock('../components/ui/DataTable', () => ({
-  default: ({ data, filters }: { data: unknown[]; filters?: unknown }) => (
+  default: ({ data }: { data: Array<{ delivery_number: string }> }) => (
     <div>
-      {filters as never}
       <p data-testid="table-rows">{data.length}</p>
+      <p data-testid="table-first">{data[0]?.delivery_number}</p>
     </div>
   ),
 }));
@@ -86,31 +114,28 @@ import { localToday } from '../lib/dateUtils';
 
 const TOTAL = 1500;
 
-function deliveries(): Row[] {
-  return Array.from({ length: TOTAL }, (_, i) => ({
+beforeEach(() => {
+  vi.clearAllMocks();
+  H.auth.role = 'admin';
+  H.auth.profile = { id: 'user-1', role: 'admin' };
+  H.failPageFromCall = null;
+  H.failTable = null;
+  H.pageCalls = [];
+  H.deliveries = Array.from({ length: TOTAL }, (_, i) => ({
     id: `del-${String(i).padStart(4, '0')}`,
     delivery_number: `DEL-${String(i).padStart(4, '0')}`,
     status: 'scheduled',
     scheduled_date: localToday(),
     customer_id: 'cust-1',
     assigned_driver: null,
-    customer: { farm_name: 'Big Farm', parent_customer_id: null },
+    customer_name: 'Big Farm',
+    driver_name: 'Unassigned',
+    item_count: 0,
+    farm_group_name: null,
   }));
-}
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  H.auth.role = 'admin';
-  H.auth.profile = { id: 'user-1', role: 'admin' };
-  H.failPage = null;
-  H.ranges = [];
   H.tables = {
-    deliveries: deliveries(),
-    // The last delivery's lines exist only past the first id chunk and the first page.
     delivery_items: [
-      { id: 'item-a', delivery_id: 'del-0000', product_id: 'product-1', quantity: 1 },
-      { id: 'item-b', delivery_id: 'del-1499', product_id: 'product-1', quantity: 1 },
-      { id: 'item-c', delivery_id: 'del-1499', product_id: 'product-1', quantity: 1 },
+      { id: 'item-a', delivery_id: 'del-1499', product_id: 'product-1', quantity: 1, delivery: { status: 'scheduled' } },
     ],
     customers: [{ id: 'cust-1', farm_name: 'Big Farm' }],
     profile_public_view: [],
@@ -119,74 +144,94 @@ beforeEach(() => {
   };
 });
 
-describe('Deliveries list past the 1,000-row server cap', () => {
-  it('reads every delivery, so the counts and the export include all 1,500', async () => {
+const showing = () => screen.getByText(/^Showing /);
+
+describe('Deliveries list pages in the database', () => {
+  it('shows one page with the true totals, pages through, and exports every matching row', async () => {
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
 
-    // Every delivery is scheduled today: a read stopped at 1,000 (or the old 500) shows less.
-    const card = (await screen.findByText('Scheduled Today', {}, { timeout: 15000 })).closest('div')!.parentElement!;
+    // The card counts every delivery, not only the 50 on the page.
+    const card = (await screen.findByText('Scheduled Today')).closest('div')!.parentElement!;
     expect(card).toHaveTextContent(String(TOTAL));
-    expect(screen.getByTestId('table-rows')).toHaveTextContent(String(TOTAL));
-    // Paged by range, with the 50-row seam overlap, rather than one capped request.
-    expect(H.ranges.filter((r) => r.table === 'deliveries').slice(0, 2).map((r) => [r.from, r.to]))
-      .toEqual([[0, 999], [950, 1949]]);
+    expect(screen.getByTestId('table-rows')).toHaveTextContent('50');
+    expect(showing()).toHaveTextContent(`Showing 1–50 of ${TOTAL}`);
+    expect(H.pageCalls[0]).toMatchObject({ p_limit: 50, p_offset: 0 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
+    expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0050');
+    expect(H.pageCalls[H.pageCalls.length - 1]).toMatchObject({ p_limit: 50, p_offset: 50 });
 
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
     await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
-    const exported = H.exportToCSV.mock.calls[0][0] as Array<{ delivery_number: string; item_count: number }>;
-    // Every delivery exactly once, each with only its own lines counted.
+    const exported = H.exportToCSV.mock.calls[0][0] as Array<{ delivery_number: string }>;
     expect(exported).toHaveLength(TOTAL);
     expect(new Set(exported.map((d) => d.delivery_number)).size).toBe(TOTAL);
-    const byNumber = new Map(exported.map((d) => [d.delivery_number, d.item_count]));
-    expect(byNumber.get('DEL-1499')).toBe(2);
-    expect(byNumber.get('DEL-0000')).toBe(1);
-    expect(byNumber.get('DEL-0001')).toBe(0);
-  }, 30000);
+    expect(H.pageCalls[H.pageCalls.length - 1]).toMatchObject({ p_limit: null, p_offset: 0 });
+  });
 
-  it('shows an error, not the first 1,000 deliveries, when a later page fails', async () => {
-    H.failPage = { table: 'deliveries', from: 1 };
+  it('searches in the database, finds a row past the first page, and starts again at page one', async () => {
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(showing()).toHaveTextContent('Showing 51–100'));
 
-    expect(await screen.findByRole('alert', {}, { timeout: 15000 })).toHaveTextContent('Deliveries could not be loaded');
-    expect(screen.queryByText('DEL-0000')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Search deliveries'), { target: { value: 'DEL-1499' } });
+    await waitFor(() => expect(showing()).toHaveTextContent('Showing 1–1 of 1'), { timeout: 3000 });
+    expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-1499');
+    expect(H.pageCalls[H.pageCalls.length - 1]).toMatchObject({ p_search: 'DEL-1499', p_limit: 50, p_offset: 0 });
+    // The cards still count every delivery, whatever the search.
+    expect((screen.getByText('Scheduled Today').closest('div')!.parentElement!)).toHaveTextContent(String(TOTAL));
+  });
+
+  it('shows an error, not zeros or the old page, when a page read fails', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    H.failPageFromCall = H.pageCalls.length + 1;
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Next' })); });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Deliveries could not be loaded');
     expect(screen.queryByText('Scheduled Today')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Showing /)).not.toBeInTheDocument();
     expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load deliveries. Please try again.');
-  }, 30000);
+  });
+
+  it('exports nothing and says so when the export read fails', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    H.failPageFromCall = H.pageCalls.length + 1;
+    fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
+
+    await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'The deliveries could not be read for the export. Nothing was exported; try again.'));
+    expect(H.exportToCSV).not.toHaveBeenCalled();
+  });
 
   it('keeps a warning on screen when the stock check fails, so no badge is not read as enough stock', async () => {
-    H.failPage = { table: 'inventory', from: 0 };
+    H.failTable = 'inventory';
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
 
-    expect(await screen.findByRole('alert', {}, { timeout: 15000 })).toHaveTextContent('Stock shortage warnings could not be checked');
-    // The list itself still loaded in full.
-    expect(screen.getByTestId('table-rows')).toHaveTextContent(String(TOTAL));
-  }, 30000);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Stock shortage warnings could not be checked');
+    expect(screen.getByTestId('table-rows')).toHaveTextContent('50');
+  });
 
   it("shows a driver an error, not \"no deliveries\", when their list fails to load", async () => {
     H.auth.role = 'driver';
     H.auth.profile = { id: 'driver-1', role: 'driver' };
-    H.failPage = { table: 'deliveries', from: 1 };
+    H.failPageFromCall = 1;
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
 
-    expect(await screen.findByRole('alert', {}, { timeout: 15000 })).toHaveTextContent('Your deliveries could not be loaded');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your deliveries could not be loaded');
     expect(screen.queryByText('No deliveries scheduled for today.')).not.toBeInTheDocument();
-  }, 30000);
+  });
 
-  it('keeps the stock-check warning on the driver dashboard too', async () => {
+  it('gives a driver every delivery of theirs in one read, with the stock-check warning', async () => {
     H.auth.role = 'driver';
     H.auth.profile = { id: 'driver-1', role: 'driver' };
-    H.failPage = { table: 'inventory', from: 0 };
+    H.failTable = 'inventory';
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
 
-    expect(await screen.findByRole('alert', {}, { timeout: 15000 })).toHaveTextContent('Stock shortage warnings could not be checked');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Stock shortage warnings could not be checked');
     expect(screen.getAllByText('DEL-1499').length).toBeGreaterThan(0);
-  }, 30000);
-
-  it('shows an error when the item counts cannot be read, instead of zero items', async () => {
-    H.failPage = { table: 'delivery_items', from: 0 };
-    render(<MemoryRouter><Deliveries /></MemoryRouter>);
-
-    expect(await screen.findByRole('alert', {}, { timeout: 15000 })).toHaveTextContent('Deliveries could not be loaded');
-    expect(screen.queryByText('DEL-0000')).not.toBeInTheDocument();
-  }, 30000);
+    expect(H.pageCalls.every((c) => c.p_limit === null)).toBe(true);
+  });
 });

@@ -3438,6 +3438,9 @@ export interface JobChemical {
   // only when this is set; a null row is left exactly as saved. Column added by migration
   // 20260903150000; optional here so a build against the pre-apply schema still types.
   driver?: 'rate' | 'qty' | null;
+  // The EPA number this line carries, set by the database from the product when the line is
+  // written (20261123100000); a parent EPA correction updates it on open jobs only. Read-only.
+  epa_registration?: string | null;
   // Joined
   product?: Product;
 }

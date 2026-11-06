@@ -146,9 +146,26 @@ interface DeliveriesQuery {
   p_sort_key?: string | null;
   p_sort_desc?: boolean;
 }
-// limit null reads every matching row in one snapshot (exports, the load sheet, the calendar, the driver view).
+// The database returns at most this many rows per call.
+const FULL_READ_PAGE_SIZE = 500;
+// limit null reads every matching row (exports, the load sheet, the calendar, the driver view), in pages of 500.
 async function readDeliveriesPage(query: DeliveriesQuery, limit: number | null, offset = 0): Promise<DeliveriesPage> {
-  // Generated Args cannot say null; the function reads null as "no filter" and p_limit null as "every row".
+  if (limit !== null) return readOnePage(query, limit, offset);
+  const first = await readOnePage(query, FULL_READ_PAGE_SIZE, 0);
+  const rows = [...first.rows];
+  while (rows.length < first.total_count) {
+    const next = await readOnePage(query, FULL_READ_PAGE_SIZE, rows.length);
+    if (next.rows.length === 0 || next.total_count !== first.total_count) break;
+    rows.push(...next.rows);
+  }
+  // Deliveries changing between pages can shift a row: refuse rather than return a short or repeated list.
+  if (rows.length !== first.total_count || new Set(rows.map((row) => row.id)).size !== rows.length) {
+    throw new Error('Deliveries changed while they were being read. Please try again.');
+  }
+  return { ...first, rows };
+}
+async function readOnePage(query: DeliveriesQuery, limit: number, offset: number): Promise<DeliveriesPage> {
+  // Generated Args cannot say null; the function reads a null filter as "no filter".
   const args = { ...query, p_limit: limit, p_offset: offset } as unknown as Database['public']['Functions']['get_deliveries_page']['Args'];
   const { data, error } = await supabase.rpc('get_deliveries_page', args);
   if (error) throw error;

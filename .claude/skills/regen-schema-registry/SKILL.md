@@ -118,7 +118,7 @@ Next step:
 
 ## Step 7: Run the Tests That Read the Registry
 
-A refresh after a live apply can break four checks that compare the repo with the registry. Run all four before committing:
+A refresh after a live apply can break these four checks (the first three compare the repo with the registry; the type check catches a new column missing from the generated types). Run all four before committing:
 
 ```bash
 npx vitest run src/lib/rpcContracts.test.ts

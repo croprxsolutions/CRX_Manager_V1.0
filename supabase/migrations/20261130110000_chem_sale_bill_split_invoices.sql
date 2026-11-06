@@ -671,8 +671,12 @@ BEGIN
     RAISE EXCEPTION 'ORDER_INVOICE_TERMINAL: cannot attach an invoice to missing order %', NEW.order_id;
   END IF;
   -- Bill Split (billing plan M2): a sale with payers other than its customer bills through
-  -- one draft per payer, never as one invoice to the customer.
-  IF TG_OP = 'INSERT' AND NEW.invoice_type IN ('chemical_sale', 'misc_charge') AND NEW.invoice_group_id IS NULL
+  -- one draft per payer, never as one invoice to the customer. A grouped invoice is created only
+  -- inside the split writer's claim for this transaction and order: a made-up group id isn't a split.
+  IF TG_OP = 'INSERT' AND NEW.invoice_type IN ('chemical_sale', 'misc_charge')
+     AND (NEW.invoice_group_id IS NULL OR NOT EXISTS (
+       SELECT 1 FROM public.split_invoice_creation_claims claim
+        WHERE claim.transaction_id = pg_current_xact_id() AND claim.order_id = NEW.order_id))
      AND public._order_has_bill_split(NEW.order_id) THEN
     RAISE EXCEPTION 'ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice';
   END IF;

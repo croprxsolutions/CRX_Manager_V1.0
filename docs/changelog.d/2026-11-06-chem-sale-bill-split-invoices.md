@@ -26,3 +26,5 @@ Another payer's quantity is in whole hundredths, so a payer can return a share i
 A restricted-use line too small to show refuses the split instead of being left off, so the restricted-use register never misses it (Mason, 2026-11-06).
 
 An order line with its own payer shares can't be deleted once the sale is frozen, and a retried unpost from before this change gets its saved answer.
+
+A single invoice with a made-up group number cannot slip past the Bill Split rule.

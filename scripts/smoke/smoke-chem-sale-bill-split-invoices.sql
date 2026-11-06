@@ -10,7 +10,8 @@
 --   C2 A frozen share can't leave its sale by moving to an open one; a card can't total over 100%
 --   D  A direct write to a payer's line is refused, and save_invoice can't bill past the delivery
 --   E  Re-saving a payer's draft keeps its cents; a freight charge goes on one payer's draft
---   F  A one-customer chemical-sale or misc-charge invoice on this sale is refused (ORDER_HAS_BILL_SPLIT)
+--   F  A one-customer chemical-sale or misc-charge invoice on this sale is refused (ORDER_HAS_BILL_SPLIT),
+--      also with a made-up group id
 --   G  The group posts at its reviewed versions, and the second payer can return their share
 --   H  Void the delivery on a fresh sale: both drafts cancel and the card reopens
 --   I  Under 100%: the rest stays with the main customer
@@ -299,6 +300,16 @@ BEGIN
     v_fails := v_fails || ' (F) a one-customer misc-charge invoice was accepted;';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'ORDER_HAS_BILL_SPLIT:%' THEN v_fails := v_fails || ' (F) wrong refusal on misc charge: ' || SQLERRM || ';'; END IF;
+  END;
+  -- On a sale with no delivery yet, so no other guard stands in front of this one.
+  PERFORM pg_temp.smk_new_sale('f3' || v_suffix);
+  PERFORM pg_temp.smk_card((SELECT o FROM smk_sale), v_payer2, 40);
+  BEGIN
+    INSERT INTO invoices (invoice_number, invoice_type, order_id, customer_id, status, invoice_date, total_amount_cents, total_cost_cents, created_by, invoice_group_id)
+      VALUES ('SMK-SPL-F3' || v_suffix, 'chemical_sale', (SELECT o FROM smk_sale), v_main, 'draft', CURRENT_DATE, 0, 0, v_admin, gen_random_uuid());
+    v_fails := v_fails || ' (F) a one-customer invoice with a made-up group was accepted;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'ORDER_HAS_BILL_SPLIT:%' THEN v_fails := v_fails || ' (F) wrong refusal on a made-up group: ' || SQLERRM || ';'; END IF;
   END;
 
   SELECT jsonb_object_agg(id, _invoice_post_version(id)) INTO v_versions FROM invoices WHERE invoice_group_id = v_group;

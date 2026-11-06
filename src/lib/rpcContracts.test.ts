@@ -1718,6 +1718,10 @@ const IDEMPOTENCY_BODY_EXEMPT: Record<
   // The public wrapper authorizes active customer scope before delegating to
   // the directly non-executable implementation that owns canonical replay.
   save_invoice: 'delegated',
+  // 20261201100000: the wrapper keeps returned job lines' EPA numbers around the private
+  // implementation, which owns the canonical replay; on a replay the sent line ids are gone,
+  // so the wrapper's restore matches nothing and writes nothing.
+  save_job: 'delegated',
   // The terminal-provenance wrapper binds the actor and invoice before issuing
   // its exact lifecycle claim and invoking the private implementation.
   void_invoice: 'delegated',
@@ -3100,6 +3104,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER DELETE row trigger on invoices, allocation_sets and payments: appends one audit snapshot per row a delete really erased, so a replayed delete matches no row and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   _refuse_financial_truncate:
     'BEFORE TRUNCATE statement trigger on invoices, allocation_sets and payments: only raises (the word TRUNCATE is in its message), writes nothing; every API-role EXECUTE is revoked',
+  // Job lines keep their EPA number (local candidate 20261201100000).
+  _product_epa_to_unsprayed_job_lines:
+    "AFTER UPDATE OF epa_registration row trigger on products: copies the product's new number onto lines of jobs not sprayed yet, a replay finds them already equal and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked",
+  _job_line_epa_restore:
+    "internal helper called only by save_job after its private implementation: sets a sprayed or finished job's re-written lines back to the EPA number stored on the line the caller named by id, read before the save; a replay names ids that no longer exist and writes nothing; every API-role EXECUTE (incl. service_role) is revoked",
   // KI-25 receipt queue (20261113140000).
   _enqueue_delivery_receipt:
     'internal helper called only by complete_delivery after its required-key replay binding; one row per delivery (ON CONFLICT (delivery_id), reopening only a cancelled never-sent row); every API-role EXECUTE (incl. service_role) is revoked',

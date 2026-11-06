@@ -1,0 +1,389 @@
+#!/usr/bin/env node
+/**
+ * Real-schema proof for 20261201100000_job_lines_keep_epa_number: every spray-job chemical line
+ * carries its own EPA number, a product EPA edit reaches only jobs not sprayed yet, and re-saving
+ * a sprayed or finished job keeps the number on each line the screen sends back by its line id.
+ *
+ * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays every
+ * migration before the candidate, seeds invented rows and checks each case.
+ *
+ * Run: node scripts/smoke/prove-job-lines-keep-epa-real-schema.mjs   (needs local Docker image)
+ * Prints JOB_LINES_KEEP_EPA_PROOF_PASS on success.
+ */
+import assert from 'node:assert/strict';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const NAME = `crx-jobepa-${process.pid}-${Date.now().toString(36)}`;
+const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
+const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
+const BASELINE = path.join(ROOT, 'supabase', 'baselines');
+const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
+const CANDIDATE = path.join(MIGRATIONS, '20261201100000_job_lines_keep_epa_number.sql');
+const FOLLOW_UPS = [];
+const PARKED = new Set([
+  '20260914100700_customer_document_bytes_server_only.sql',
+  '20261015230000_staff_photo_storage_access.sql',
+  '20261016030000_staff_photo_buckets_private.sql',
+]);
+// PR #889's data migrations rewrite live rows this disposable database does not have; they are
+// recorded in the ledger (as live has them) instead of replayed.
+const LEDGER_ONLY = new Set([
+  '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
+  '20261007150200_release_reservations_of_deleted_spring_orders.sql',
+  // DATA-11 rewrites live rows only (every product gets one preferred link); the proof seeds that state.
+  '20261105170000_data11_preferred_vendor_links.sql',
+]);
+// A later or parked file that (re)defines anything the candidate creates or relies on.
+const TOUCHED = /(job_chemicals|save_job|get_job_proof_data|_job_line_epa|_job_chemical_epa|_product_epa_to_unsprayed)/i;
+// The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
+// request.jwt.claims ->> 'sub'. Install live's exact body.
+const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
+  + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
+  + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
+  + '  )::uuid\n';
+const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
+
+function docker(args, options = {}) {
+  const r = spawnSync('docker', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...options });
+  if (r.error || (!options.allowFailure && r.status !== 0)) throw new Error(`${r.error?.message ?? ''}\n${r.stderr || r.stdout}`.trim());
+  return r;
+}
+function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U', user, '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1']; }
+function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
+function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
+function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
+function stageText(name, text) {
+  const staged = path.join(tmpdir(), `${NAME}-${name}`);
+  writeFileSync(staged, text, 'utf8');
+  try { docker(['cp', staged, `${NAME}:/tmp/${name}`]); } finally {
+    try { unlinkSync(staged); } catch (e) { if (e.code !== 'ENOENT') console.error(`could not remove ${staged}: ${e.message}`); }
+  }
+}
+function apply(name) {
+  const r = docker([...psqlArgs(), '-1', '-f', `/tmp/${name}`], { allowFailure: true });
+  return { status: r.status, output: `${r.stdout}\n${r.stderr}` };
+}
+function wait(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function ready() {
+  for (let i = 0; i < 120; i += 1) {
+    if (docker(['exec', NAME, 'pg_isready', '-U', 'postgres'], { allowFailure: true }).status === 0) return;
+    wait(500);
+  }
+  throw new Error('disposable PostgreSQL did not become ready');
+}
+function ledger(stem) {
+  psql(`INSERT INTO supabase_migrations.schema_migrations (version, name, statements)
+    SELECT '${stem.slice(0, 14)}', '${stem}', ARRAY[]::text[]
+     WHERE NOT EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations WHERE name = '${stem}')
+    ON CONFLICT (version) DO NOTHING;`);
+  assert.equal(scalar(`SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${stem}';`), '1', `${stem} is not in the ledger`);
+}
+function restoreLiveCrLfCloseRemainder() {
+  const source = lf(path.join(MIGRATIONS, '20260721014858_20260721010000_govern_invoice_order_money_lifecycle.sql'));
+  const needle = 'CREATE FUNCTION public._close_undelivered_order_remainder_20260718(';
+  assert.equal(source.split(needle).length - 1, 1, 'close-remainder definition is ambiguous');
+  const start = source.indexOf(needle);
+  const tag = /\$([A-Za-z_]*)\$/.exec(source.slice(start));
+  const bodyStart = start + tag.index + tag[0].length;
+  const bodyEnd = source.indexOf(tag[0], bodyStart);
+  const body = source.slice(bodyStart, bodyEnd).replace(/\n/g, '\r\n');
+  assert.equal(body.length, 15910, 'close-remainder live CRLF body length drifted');
+  psql(`CREATE OR REPLACE FUNCTION public._close_undelivered_order_remainder_20260718(p_order_id uuid, p_actor uuid)
+    RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
+    AS $live_crlf_close$${body}$live_crlf_close$;`);
+}
+// 20261104150000 (WP-PM-9, live) pins three live function bodies that the historical LF replay
+// does not reproduce; install them exactly as PM-9's own prover does, right before that file.
+const FORMS_SEED_EACH = '20261104150000_product_forms_seed_each.sql';
+const LIVE_BODY_MD5 = {
+  'public.field_app_priced_quantity(numeric,text,text,text)': 'bc91a52577840973f18f1710e47edf2b',
+  'public.convert_to_gl_lb(numeric,text,text)': 'ce9265521821c09b0cf74de45afb375b',
+  'public.validate_product_units()': '83a51c58c83cd83bea760bd117410a38',
+};
+
+function bodyFrom(file, expression) {
+  const match = expression.exec(readFileSync(path.join(MIGRATIONS, file), 'utf8'));
+  assert.ok(match, `${file} no longer contains its pinned function body`);
+  return match[1];
+}
+function restoreLiveBodies() {
+  // Historical replay uses LF staging; validate_product_units had CRLF in live prosrc.
+  const validate = bodyFrom('20260211000000_unit_tracking_pricing_overhaul.sql',
+    /CREATE OR REPLACE FUNCTION validate_product_units\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/)
+    .replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');  // same bytes on an LF or CRLF checkout
+  const field = bodyFrom('20260630180000_field_app_pricing_unit_fix.sql',
+    /CREATE OR REPLACE FUNCTION public.field_app_priced_quantity\([\s\S]*?AS \$fapq\$([\s\S]*?)\$fapq\$;/);
+  const seededConvert = bodyFrom(FORMS_SEED_EACH,
+    /CREATE OR REPLACE FUNCTION public.convert_to_gl_lb\([\s\S]*?AS \$function\$([\s\S]*?)\$function\$;/).replaceAll('\r\n', '\n');
+  const seedArm = "  IF lower(coalesce(p_product_form, '')) IN ('seed','each') THEN RETURN QUERY SELECT NULL::numeric, NULL::text; RETURN; END IF;\n";
+  assert.equal(seededConvert.split(seedArm).length - 1, 1);
+  const convert = seededConvert.replace(seedArm, '');
+  psql(`CREATE OR REPLACE FUNCTION public.validate_product_units() RETURNS trigger LANGUAGE plpgsql
+    SET search_path = public, pg_temp AS $live_validate$${validate}$live_validate$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.field_app_priced_quantity(
+      p_applied_qty numeric, p_rate_unit text, p_inventory_unit text, p_product_form text)
+    RETURNS numeric LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp
+    AS $live_field$${field}$live_field$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.convert_to_gl_lb(
+      p_total_applied numeric, p_rate_unit text, p_product_form text)
+    RETURNS TABLE(converted_value numeric, converted_unit text) LANGUAGE plpgsql IMMUTABLE
+    SET search_path = public AS $live_convert$${convert}$live_convert$;`);
+  for (const [signature, expected] of Object.entries(LIVE_BODY_MD5)) {
+    assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = '${signature}'::regprocedure;`),
+      expected, `${signature} is not the pinned live body before the candidate`);
+  }
+}
+function plan() {
+  const r = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs'], { cwd: ROOT, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(r.stderr);
+  const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
+  const at = all.indexOf(CANDIDATE);
+  assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
+  // Others' migrations may sort between the candidate and a follow-up (live applied them in between);
+  // they are not replayed, so each must leave alone what this proof covers.
+  let last = at;
+  for (const file of FOLLOW_UPS) {
+    const i = all.indexOf(file);
+    assert.ok(i > last, `${path.basename(file)} must sort after the candidate and earlier follow-ups`);
+    last = i;
+  }
+  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f))) {
+    assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
+  }
+  const before = all.slice(0, at);
+  for (const name of PARKED) {
+    const file = before.find((f) => path.basename(f) === name);
+    assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
+    assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
+  }
+  return before;
+}
+function installLiveAuthUid() {
+  psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
+  assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
+}
+function buildContainer() {
+  docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  ready();
+  wait(1500);
+  for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
+  const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+  if (schema.status !== 0) throw new Error(schema.stderr.toString());
+  psql('\\i /tmp/20260727174805_extensions.sql'); psql(schema.stdout.toString());
+  // storage.objects carries metadata and a (bucket_id, name) key, and postgres may read it, as live
+  // has them: 20261022075000 (replayed before the candidate) checks that shape in its preflight.
+  psql(`CREATE SCHEMA IF NOT EXISTS storage;
+    CREATE TABLE IF NOT EXISTS storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false, file_size_limit bigint, allowed_mime_types text[]);
+    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name));
+    CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
+    CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
+    GRANT USAGE ON SCHEMA storage TO postgres;
+    GRANT ALL ON storage.objects, storage.buckets TO postgres;`, { user: 'supabase_admin' });
+  psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
+  for (const name of ['20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) psql(`\\i /tmp/${name}`, { user: name.includes('overlay') ? 'supabase_admin' : 'postgres' });
+  const files = plan();
+  let replayed = 0;
+  for (const [i, file] of files.entries()) {
+    const base = path.basename(file);
+    if (PARKED.has(base)) continue;
+    for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
+    if (LEDGER_ONLY.has(base)) continue;
+    if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
+    // Batch 2's preflight pins live's auth.uid() body, which live had when batch 2 was applied.
+    if (base === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
+    if (base === FORMS_SEED_EACH) restoreLiveBodies();
+    // BLK-1a's preflight needs live's count units (live has Ea and Unit, factor 1, both).
+    if (base === '20261117130000_tote_fill_from_bulk.sql') {
+      psql(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) SELECT u, 1, 'both' FROM (VALUES ('Ea'), ('Unit')) v(u)
+        WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = v.u);`);
+    }
+    if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') {
+      psql(`UPDATE public.warehouses SET is_active = true WHERE name = 'Main Warehouse';
+        INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
+        WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse');`);
+    }
+    const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
+    if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
+    ledger(path.basename(file, '.sql'));
+    replayed += 1;
+  }
+  installLiveAuthUid();
+  console.log(`[prover] replayed ${replayed} post-baseline migrations before the candidate (skipped: ${[...PARKED].join(', ')}; ledger only: ${[...LEDGER_ONLY].join(', ')})`);
+}
+
+
+const id = (n) => `7a7e4000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const ADMIN = id('a1');
+const REP = id('a2');
+const CUST = id('c1');
+const FIELD = id('d1');
+const PA = id('f1'), PB = id('f2');
+const JOLD = id('10'), JOTHER = id('11');
+const OLD = '524-475', NEW = '524-476', B_EPA = '100-1070';
+
+function txIn(uid, sql) {
+  const claims = uid ? `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);` : '';
+  return `BEGIN;\n${claims}\nSET LOCAL ROLE ${uid ? 'authenticated' : 'anon'};\n${sql}\nCOMMIT;\n`;
+}
+function as(uid, sql) {
+  const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: txIn(uid, sql) });
+  return { status: r.status, output: `${r.stdout}\n${r.stderr}`, rows: r.stdout.trim().split(/\r?\n/).filter(Boolean) };
+}
+function ok(uid, sql) { const r = as(uid, sql); assert.equal(r.status, 0, r.output); return r.rows.at(-1); }
+function refused(uid, sql, pattern) {
+  const r = as(uid, sql);
+  assert.notEqual(r.status, 0, `expected a refusal:\n${sql}`);
+  assert.match(r.output, pattern);
+}
+const J = (v) => `'${JSON.stringify(v).replaceAll("'", "''")}'::jsonb`;
+// A customer-supplied line at zero: passes every money and unit refusal, so only the EPA behaviour is tested.
+const chem = (pid, sort, extra = {}) => ({ product_id: pid, quantity: 0, unit: 'Gal', rate_per_acre: null, rate_unit: null,
+  cost_per_unit_cents: 0, price_per_unit_cents: 0, customer_supplied: true, sort_order: sort, ...extra });
+const save = (uid, job, chems, key = null) => ok(uid, `SELECT public.save_job(${job ? `'${job}'` : 'NULL'},
+  jsonb_build_object('customer_id', '${CUST}', 'job_date', current_date::text),
+  ${J([{ field_id: FIELD, acres_to_treat: 10, sort_order: 0 }])}, ${J(chems)}, auth.uid(), ${key ? `'${key}'` : 'NULL'})->>'job_id';`);
+const lines = (job) => scalar(`SELECT COALESCE(string_agg(sort_order || ':' || COALESCE(epa_registration, '<null>'), ',' ORDER BY sort_order), '<none>')
+  FROM public.job_chemicals WHERE job_id = '${job}';`);
+const lineIds = (job) => scalar(`SELECT string_agg(id::text, ',' ORDER BY sort_order) FROM public.job_chemicals WHERE job_id = '${job}';`).split(',');
+const setProductEpa = (pid, epa) => psql(`UPDATE public.products SET epa_registration = ${epa ? `'${epa}'` : 'NULL'} WHERE id = '${pid}';`);
+const spray = (job) => psql(`INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${job}', current_date, 10);`);
+
+function seed() {
+  psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+    ('${ADMIN}', 'jk-admin@example.invalid', '{"full_name":"[PROVER] Admin","role":"admin"}'::jsonb),
+    ('${REP}', 'jk-rep@example.invalid', '{"full_name":"[PROVER] Rep","role":"sales_rep"}'::jsonb);`);
+  const p = (pid, name, epa) => `('${pid}', '[PROVER] ${name}', '${name}', 'liquid', 'Gal', 'Herbicide', '${epa}', 10.00, 15.00, true)`;
+  psql(`SET session_replication_role = replica;
+    UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
+    UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, category, epa_registration, current_cost, tier1_price, is_active) VALUES
+      ${p(PA, 'Gly', OLD)}, ${p(PB, 'Other', B_EPA)};
+    INSERT INTO public.product_categories (name, sort_order) VALUES ('Herbicide', 60) ON CONFLICT DO NOTHING;
+    INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) SELECT 'Gal', 128, 'liquid' WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = 'Gal');
+    INSERT INTO public.customers (id, farm_name) VALUES ('${CUST}', '[PROVER] Farm');
+    INSERT INTO public.fields (id, customer_id, field_name, total_acres) VALUES ('${FIELD}', '${CUST}', '[PROVER] Field', 100);
+    INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, created_by) VALUES
+      ('${JOLD}', 'JK-OLD', '${CUST}', 'completed', current_date, '${ADMIN}'),
+      ('${JOTHER}', 'JK-OTHER', '${CUST}', 'completed', current_date, '${ADMIN}');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order) VALUES
+      ('${JOLD}', '${PA}', 0, 'Gal', 0, true, 0), ('${JOLD}', '${PB}', 0, 'Gal', 0, true, 1),
+      ('${JOTHER}', '${PA}', 0, 'Gal', 0, true, 0);
+    SET session_replication_role = origin;`, { user: 'supabase_admin' });
+  console.log('[prover] seeded an admin, a rep, a customer and field, two products and two finished jobs with lines');
+}
+
+async function main() {
+  buildContainer();
+  seed();
+  stageText('cand.sql', lf(CANDIDATE));
+
+  // One transaction only, once only.
+  let r = docker([...psqlArgs(), '-f', '/tmp/cand.sql'], { allowFailure: true });
+  assert.notEqual(r.status, 0);
+  assert.match(`${r.stdout}\n${r.stderr}`, /JOB_LINES_KEEP_EPA_NOT_IN_TRANSACTION/);
+  assert.equal(scalar("SELECT count(*) FROM information_schema.columns WHERE table_name = 'job_chemicals' AND column_name = 'epa_registration';"), '0');
+  r = apply('cand.sql');
+  assert.equal(r.status, 0, r.output);
+  r = apply('cand.sql');
+  assert.notEqual(r.status, 0);
+  assert.match(r.output, /already exists/);
+  console.log('[prover] the file applies once, as one transaction');
+
+  // Existing lines carry the number they print today; the app reads the copy but never writes it.
+  assert.equal(lines(JOLD), `0:${OLD},1:${B_EPA}`);
+  assert.equal(ok(ADMIN, `SELECT epa_registration FROM public.job_chemicals WHERE job_id = '${JOLD}' AND sort_order = 0;`), OLD);
+  refused(ADMIN, `UPDATE public.job_chemicals SET epa_registration = '1-1' WHERE job_id = '${JOLD}';`, /permission denied/);
+  refused(ADMIN, `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, epa_registration, sort_order)
+    VALUES ('${JOLD}', '${PB}', 0, 'Gal', 0, true, '1-1', 9);`, /permission denied/);
+  for (const fn of ['_job_line_epa_kept(NULL::uuid, NULL::jsonb)', '_job_line_epa_restore(NULL::uuid, NULL::jsonb)', '_job_line_epa_follows_product(NULL::uuid)']) {
+    refused(ADMIN, `SELECT public.${fn};`, /permission denied/);
+  }
+  console.log("[prover] existing lines got their product's number; signed-in users read it but cannot write it or call the helpers");
+
+  // A new job's lines take the product's number; a job not sprayed yet follows a product edit.
+  const open = save(ADMIN, null, [chem(PA, 0), chem(PB, 1)]);
+  assert.equal(lines(open), `0:${OLD},1:${B_EPA}`);
+  const sprayed = save(ADMIN, null, [chem(PA, 0), chem(PB, 1)]);
+  spray(sprayed);
+  setProductEpa(PA, NEW);
+  assert.equal(lines(open), `0:${NEW},1:${B_EPA}`, 'an unsprayed job follows the product edit');
+  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`, 'a sprayed job keeps its number');
+  assert.equal(lines(JOLD), `0:${OLD},1:${B_EPA}`, 'a finished job keeps its number');
+  console.log('[prover] a product EPA edit reaches only jobs not sprayed yet');
+
+  // THE FIX: re-saving a sprayed job with each line's id sent back keeps the stored number.
+  let ids = lineIds(sprayed);
+  save(ADMIN, sprayed, [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })]);
+  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
+  // The same for a non-admin save (cost worked out on the server) and a finished job.
+  ids = lineIds(JOLD);
+  save(REP, JOLD, [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })]);
+  assert.equal(lines(JOLD), `0:${OLD},1:${B_EPA}`);
+  // Reordered lines keep their own numbers (the id travels with the line, not the position).
+  ids = lineIds(JOLD);
+  save(ADMIN, JOLD, [chem(PB, 0, { id: ids[1] }), chem(PA, 1, { id: ids[0] })]);
+  assert.equal(lines(JOLD), `0:${B_EPA},1:${OLD}`);
+  // A keyed save replayed after it committed (its ids are gone now) answers the same and changes nothing.
+  ids = lineIds(sprayed);
+  const keyed = [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })];
+  save(ADMIN, sprayed, keyed, 'jk-replay-1');
+  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
+  save(ADMIN, sprayed, keyed, 'jk-replay-1');
+  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
+  // get_job_proof_data (the sent proof) prints the line's own number.
+  assert.equal(ok(ADMIN, `SELECT string_agg(e->>'epa_registration', ',' ORDER BY (e->>'sort_order')::int)
+    FROM jsonb_array_elements(public.get_job_proof_data('${sprayed}')->'products') e;`), `${OLD},${B_EPA}`);
+  console.log('[prover] re-saving a sprayed or finished job keeps each returned line\'s number (admin, rep, reordered, replayed); the proof prints it');
+
+  // Anything that is not the same line of the same job takes the product's current number.
+  ids = lineIds(sprayed);
+  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1, { id: ids[1] })]);
+  assert.equal(lines(sprayed), `0:${NEW},1:${B_EPA}`, 'no id sent: the product\'s number (until the screens send ids)');
+  ids = lineIds(JOTHER);
+  save(ADMIN, sprayed, [chem(PA, 0, { id: ids[0] })]);
+  assert.equal(lines(sprayed), `0:${NEW}`, 'a line id of another job keeps nothing');
+  ids = lineIds(JOLD);
+  save(ADMIN, JOLD, [chem(PB, 0, { id: ids[1] }), chem(PB, 1, { id: ids[0] })]);
+  assert.equal(lines(JOLD), `0:${B_EPA},1:${B_EPA}`, 'a line moved to another product takes that product\'s number');
+  ids = lineIds(JOTHER);
+  save(ADMIN, JOTHER, [chem(PA, 0, { id: ids[0] }), chem(PA, 0, { id: ids[0] })]);
+  assert.equal(lines(JOTHER), `0:${NEW},0:${NEW}`, 'an id or sort_order sent twice keeps nothing');
+  // A job not sprayed yet follows its product on a re-save too.
+  ids = lineIds(open);
+  setProductEpa(PB, '100-1071');
+  save(ADMIN, open, [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })]);
+  assert.equal(lines(open), `0:${NEW},1:100-1071`);
+  // A product with no EPA number: the line carries none, and a finished job keeps none after a later edit.
+  setProductEpa(PB, null);
+  const none = save(ADMIN, null, [chem(PB, 0)]);
+  assert.equal(lines(none), '0:<null>');
+  spray(none);
+  setProductEpa(PB, B_EPA);
+  ids = lineIds(none);
+  save(ADMIN, none, [chem(PB, 0, { id: ids[0] })]);
+  assert.equal(lines(none), '0:<null>');
+  // Two written lines at one position (a sort_order spelling the keep does not read) keep nothing.
+  ids = lineIds(none);
+  save(ADMIN, none, [chem(PB, 1, { id: ids[0] }), chem(PB, '+1')]);
+  assert.equal(lines(none), `1:${B_EPA},1:${B_EPA}`, "an ambiguous position takes the product's number");
+  // A line moved to another job by a direct write takes its product's number, not the old job's.
+  ids = lineIds(sprayed);
+  setProductEpa(PA, OLD);
+  ok(ADMIN, `UPDATE public.job_chemicals SET job_id = '${JOLD}', sort_order = 7 WHERE id = '${ids[0]}';`);
+  assert.equal(scalar(`SELECT epa_registration FROM public.job_chemicals WHERE id = '${ids[0]}';`), OLD);
+  console.log("[prover] new lines, other jobs' ids, changed products, duplicates and unsprayed jobs take the product's number; a blank stays blank on a finished job; ambiguous positions and moved lines take the product's number");
+
+  console.log('JOB_LINES_KEEP_EPA_PROOF_PASS');
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+}).finally(() => {
+  if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true });
+});

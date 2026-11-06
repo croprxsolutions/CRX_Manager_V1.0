@@ -250,7 +250,18 @@ functions and requires a key on each: `admin_update_profile`, `batch_approve_ble
 It also limits `save_blend_recipe` to an active admin or sales rep, as both app recipe screens already were.
 `link_fields_to_parent`, `unlink_field_from_parent` and `save_field_polygons` also refuse a "performed by" naming someone
 other than the signed-in user (the app always sends the signed-in user).
-Remaining: notification RPCs and the other operations functions (batch 4e).
+Batch 4e (`20261123110000`, applied live 2026-11-06, ledger `20261106154806`, after the app PR #1518 that sends a key
+on the six keyless notification and applied-info calls was serving in production) binds 15 operations
+functions and requires a key on each: `confirm_job_notification_sent`, `record_job_pre_notifications`,
+`record_job_post_notifications`, `log_failed_notification`, `assign_job_applicator`, `dispatch_job_locations`,
+`undispatch_job_locations`, `start_job`, `create_job_from_quote_section`, `update_field_app_applied_info`,
+`create_quote_from_template`, `rollover_quote_to_season`, `save_quote_template`, and the two disabled bulk
+prepayment functions `apply_remaining_prepayments` and `batch_apply_all_prepayments` (still always refused).
+Exceptions: the three calls PR #1518 began keying (`confirm_job_notification_sent`, `log_failed_notification`,
+`update_field_app_applied_info`) still accept a call with no key and run it exactly as before (no receipt). A browser
+tab opened before PR #1518 can then still mark an email it already sent, log a failure, and save applied info after
+its invoice. A key-carrying call is bound like the rest.
+After 4e, only the accepted exceptions listed for batch 4c remain.
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
 **HIGH on money paths · FIXED IN CODE 2026-11-02 (branch `claude/crx-idempotency-keys-4a3741`; live once merged) · money**
@@ -290,7 +301,9 @@ after the old one. Neither makes a second record or moves money twice; a clear r
 (KI-10 batches 4c/4d; batch 4c binds `edit_delivery` and `reassign_delivery`), not a screen change. Once batch 4d is applied, `save_field` is bound: a changed retry
 with the same key is refused, and nothing changes, instead of opening the field already created; after a
 refresh the new field is in the list. Field Setup shows that refusal as the raw code
-`IDEMPOTENCY_INTENT_MISMATCH` rather than the plain message in `errorSanitizer.ts` (cosmetic; follow-up). Quotes' Convert to Order
+`IDEMPOTENCY_INTENT_MISMATCH` rather than the plain message in `errorSanitizer.ts` (cosmetic; follow-up). Once batch 4e is applied, `assign_job_applicator`,
+`create_quote_from_template` and `rollover_quote_to_season` are bound the same way: a changed retry with the same key is
+refused and changes nothing, instead of replaying the record already made; a refresh shows that record. Quotes' Convert to Order
 starts a new key each time its dialog opens, which is accepted: the server answers a repeat with
 `already_converted` and opens the existing order. `KNOWN_UNFIXED_SITES` in
 `src/__tests__/idempotency-reset-order.test.ts` lists only three documented scanner false positives (CustomerDetail,

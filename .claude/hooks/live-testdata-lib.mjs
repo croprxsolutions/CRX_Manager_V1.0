@@ -22,6 +22,8 @@ const BUSINESS_TABLES = [
   "prepay_applications", "credit_memo_applications", "inventory_transactions",
   "inventory", "inventory_holds",
   "fields", "job_applied_records", "allocation_sets", "write_offs",
+  // Sol 2026-11-06: written only by the tote fill and reversal functions.
+  "tote_fills",
 ];
 const FINANCIAL_TABLES = [
   "invoices", "orders", "payments", "commissions", "commission_payments", "financial_audit_log",
@@ -967,7 +969,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["1a9179b05963dc315c90e54b2fd18445e21d58cae9bdb743111607b9de7e8e86", "plpgsql-check.sql"],
   ["071d89aae1ef714720386c43c9ac6a4c11cc03edb0f00bdcd152ba52079db216", "product-name-vs-return-policy.sql"],
   ["5ea47dde9df5671b8b4acce4e274f242467e3eb71eeb0b3487c8940316a3019d", "profile-role-lock-insert-arm.sql"],
-  ["4d289dab209dcfc69bc14a9a7c1ab576458044e087489fdcec627fc41fba7a26", "quote-price-lock-boundary.sql"],
+  ["201e22f0b21de39e663a7e732475a759b1e56a34316bed517dba68415ffc35cc", "quote-price-lock-boundary.sql"],
   ["cab1d5703f569d05b0c88812028f4ff4c6267256f4cc0163289152458873088d", "quote-versions-rpc-owned.sql"],
   ["7c6edab973d810b5c6e7abc34b4121376609fd82cb82f3905075e01975e29e17", "return-credit-intent-binding.sql"],
   ["e86e0b0d2f61073fce6110913bf9260a9332f92d29c295a61d1a7810345dda49", "returns-lifecycle-rpc-owned.sql"],

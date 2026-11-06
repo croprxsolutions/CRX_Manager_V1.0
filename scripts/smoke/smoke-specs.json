@@ -16,6 +16,13 @@
         "get_deliveries_page"
       ]
     },
+    "get_deliveries_keyset_page": {
+      "chain": "smoke-goal4-deliveries-keyset-page.sql",
+      "container_prover": "prove-deliveries-page-real-schema.mjs",
+      "area": ["regression"],
+      "description": "REQUIRES 20261202100000. Goal 4 Deliveries list bookmark paging, read only: as the oldest active admin under the authenticated role, for the default order, customer_name ascending, priority descending and item_count descending, following next_cursor in pages of 7 lists exactly the offset read (pages of 500 joined) in the same order and the last page has no next_cursor; get_deliveries_page (now its wrapper) returns the same first page; a bookmark from another sort is refused; the busiest active driver's bookmark pages hold only deliveries assigned to them.",
+      "covers": ["get_deliveries_keyset_page", "get_deliveries_page"]
+    },
     "get_orders_keyset_page": {
       "chain": "smoke-goal4-orders-keyset-page.sql",
       "area": ["regression"],

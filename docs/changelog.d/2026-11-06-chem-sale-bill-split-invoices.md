@@ -33,3 +33,4 @@ A plain invoice can not be given a group number later either. Each line splits o
 
 An invoice keeps the type it was created with; a draft can still switch between chemical sale and misc charge (Mason, 2026-11-06).
 The Delivery and Integrity screens offer Create Invoice on a Bill Split sale left to bill after a field split was removed, and the sale keeps its billing flag until every delivery is billed.
+A payer share under 0.01 of a unit that is worth cents now refuses the split, so every billed quantity can be returned (Mason, 2026-11-06, option B). Payer invoices from Create Invoice take the delivery date, and invoices are locked briefly while the change is applied.

@@ -11,7 +11,8 @@
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
 --     the rest with the main customer. Another payer's quantity rounds down to whole hundredths, as a return
 --     holds it, so a payer can return a share in full. Each payer's cents are exactly its percentage rounded
---     down, so a share under 0.01 bills its cents on 0.00 quantity (Mason, 2026-11-06: money exact).
+--     down. A share under 0.01 of a unit that is worth cents refuses the split (BILL_SPLIT_QUANTITY_TOO_SMALL),
+--     so every billed quantity can be returned; the office adjusts the shares (Mason, 2026-11-06, option B).
 --   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
 --     invoice and in the month-end report (Mason, 2026-11-05, Option 1). Summed across payers it can top
 --     the line's cost by about a cent where a share splits a unit, and more where the unit cost itself has
@@ -29,8 +30,8 @@
 --     still can't). Its product lines (product, description, quantity, price, cents and cost) follow the
 --     split: changing them means voiding the group, so the cost the save recomputes stays the same.
 --   - The payers' drafts stand or fall together: delete_invoices refuses one member of a Bill Split group.
---   - A payer's draft holding a line on 0.00 quantity refuses edits (BILL_SPLIT_SLIVER_LOCKED): every layer of the
---     save path needs a quantity. It posts as drafted, and a group void redrafts it.
+--   - A payer's draft holding a line on 0.00 quantity refuses edits (BILL_SPLIT_SLIVER_LOCKED). Option B means the
+--     split never drafts one; the lock stays as a backstop.
 --   - A posted group unposts together: unpost_invoice refuses any group member (GROUP_UNPOST_REQUIRED), as
 --     post_invoice does (GROUP_POST_REQUIRED). This covers field-split groups too: the screens already send
 --     them to unpost_invoice_group, which calls the inner function and isn't changed.
@@ -92,6 +93,8 @@ BEGIN
   END IF;
   -- Held to commit, so no card can change between the checks below and the new guard.
   LOCK TABLE public.order_shares IN ACCESS EXCLUSIVE MODE;
+  -- And no invoice can be created on a sale with a card before the new guard takes effect.
+  LOCK TABLE public.invoices IN SHARE ROW EXCLUSIVE MODE;
   -- Each re-emitted function, pinned to its current body, owner, mode, search_path and grants.
   FOR r IN SELECT * FROM (VALUES
     ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)', '6665c5841f047c9ca165c8a20c68f4f9', ARRAY['postgres=X/postgres']::aclitem[]),
@@ -407,8 +410,8 @@ $function$;
 -- share left over belongs to the main customer. The taker (the main customer, else the largest share)
 -- gets the rest after everyone else rounds down, so each line adds up exactly. Each payer's cents are
 -- exactly their percentage, rounded down. Other payers' quantity is whole hundredths (100 of p_units),
--- because return_items.quantity holds two decimals, so a share under 0.01 bills its cents on 0.00 (Mason,
--- 2026-11-06: money exact; such a sliver is credited, not returned). The taker comes first.
+-- because return_items.quantity holds two decimals, so a share under 0.01 comes back as 0 units with its
+-- cents, and the invoice writer refuses it (Mason, 2026-11-06, option B). The taker comes first.
 CREATE FUNCTION public._bill_split_line_shares(p_order_item_id uuid, p_cents bigint, p_units bigint)
 RETURNS TABLE (customer_id uuid, cents bigint, units bigint)
 LANGUAGE sql
@@ -514,6 +517,13 @@ BEGIN
        ORDER BY c.n
     LOOP
       CONTINUE WHEN v_share.cents = 0 AND v_share.units = 0;
+      -- A share worth cents on no returnable quantity refuses, so every billed quantity can be returned
+      -- (Mason, 2026-11-06, option B); the office adjusts the shares.
+      IF v_share.units = 0 THEN
+        RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: on delivery % a payer''s share of % is under 0.01 of a unit; change the shares so each payer gets at least 0.01',
+          v_delivery.delivery_number, COALESCE(v_item.oi_product_name, v_item.p_name)
+          USING ERRCODE = 'check_violation';
+      END IF;
       v_invoice_id := (v_map ->> v_share.customer_id::text)::uuid;
       IF v_invoice_id IS NULL THEN
         INSERT INTO invoices (invoice_number, invoice_type, order_id, customer_id, delivery_id, status, invoice_date,
@@ -1515,7 +1525,10 @@ BEGIN
   -- Billing plan M2: a Bill Split sale is drafted per payer, as completing the delivery does.
   IF public._order_has_bill_split(v_delivery.order_id) THEN
     v_invoice_ids := public._create_bill_split_delivery_invoices(
-      p_delivery_id, (now() AT TIME ZONE 'America/Chicago')::date, v_actor);
+      p_delivery_id,
+      -- Dated by the delivery, as completing it would have been, not by the day Create Invoice runs.
+      COALESCE((v_delivery.completed_at AT TIME ZONE 'America/Chicago')::date, (now() AT TIME ZONE 'America/Chicago')::date),
+      v_actor);
     IF cardinality(v_invoice_ids) = 0 THEN
       RAISE EXCEPTION 'BILL_SPLIT_NOTHING_TO_BILL: delivery % delivered no quantity, so there is nothing to bill', v_delivery.delivery_number
         USING ERRCODE = 'check_violation';

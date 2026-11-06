@@ -25,9 +25,10 @@
 --   - get_job_proof_data reads the job line's copy; get_customer_year_end_summary reads the invoice
 --     line's copy first. Each is re-emitted from its live body (pinned below) with that one change.
 --   - The parent identity correction can change the generic EPA number: the parent, every size
---     (under the parent copy pass) and the lines of open (scheduled or in-progress) jobs take the
---     new number, in one transaction with one logged event. Finished jobs, invoices and restricted-
---     use records keep the number they were made with. It is refused while any invoice line for
+--     (under the parent copy pass) and the lines of jobs not sprayed yet (scheduled or in progress
+--     with no spray recorded) take the new number, in one transaction with one logged event. Sprayed
+--     and finished jobs, invoices and restricted-use records keep the number they were made with; a
+--     sprayed or finished job re-saved keeps its lines' numbers (save_job re-inserts lines). It is refused while any invoice line for
 --     one of the sizes has no EPA copy of its own (that line would follow the change); the message
 --     names the invoices. And it stays refused while _product_parent_epa_correction_enabled() is
 --     false, which this file creates as false.
@@ -40,12 +41,14 @@
 --   compliance record; record map). Restricted-use sale records still copy the product's number
 --   when posted. The job and invoice writers, prices, costs and inventory.
 --
--- SIDE EFFECT, named: updating job_chemicals runs the existing statement trigger trg_sync_job_holds_upd,
---   which rebuilds the affected jobs' inventory holds from their unchanged lines, as every job save
---   does. The backfill below does this once per job that has lines.
+-- SIDE EFFECT, named: when a product's EPA number changes, updating its unsprayed jobs' lines runs the
+--   existing statement trigger trg_sync_job_holds_upd, which rebuilds those jobs' inventory holds and
+--   booking draws from their unchanged lines, as a save of each of those jobs does. The one-time
+--   backfill pauses that trigger: it changes only the new column.
 --
 -- ROLLBACK (its own reviewed migration): re-emit _insert_parent_size, the parent-correction functions and the two
---   readers from their previous bodies, drop both triggers and their functions, drop the column.
+--   readers from their previous bodies, drop the three triggers and their functions, the switch and
+--   _job_line_epa_follows_product, drop the column.
 --
 -- ORDERING: apply after every older pending migration.
 
@@ -103,12 +106,52 @@ GRANT SELECT (epa_registration) ON public.job_chemicals TO authenticated;
 GRANT REFERENCES (epa_registration) ON public.job_chemicals TO authenticated;
 GRANT SELECT (epa_registration) ON public.job_chemicals TO anon;
 
+-- Whether a job's lines still follow their products' EPA numbers: a live job that is scheduled or in
+-- progress with no spray recorded yet. Any other job's lines keep the number they carry.
+CREATE FUNCTION public._job_line_epa_follows_product(p_job_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+  SELECT EXISTS (SELECT 1 FROM public.jobs j
+                  WHERE j.id = p_job_id AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress'))
+     AND NOT EXISTS (SELECT 1 FROM public.job_applied_records r WHERE r.job_id = p_job_id);
+$function$;
+ALTER FUNCTION public._job_line_epa_follows_product(uuid) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._job_line_epa_follows_product(uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+-- save_job deletes a job's lines and inserts them again. A deleted line leaves its number for the rest
+-- of the transaction (a transaction-local setting keyed by job and product), so a sprayed or finished
+-- job re-saved keeps its lines' numbers. A line whose product is unchanged keeps its number.
 -- FOR SHARE: a line written while a parent EPA correction holds the product waits for it and then
 -- takes the corrected number; a correction that starts after the line waits for the line's save, so
--- its open-job update sees the line. Either way no open job keeps the old number.
+-- its open-job update sees the line. Either way no unsprayed job keeps the old number.
 CREATE FUNCTION public._job_chemical_epa() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_job uuid;
+  v_product uuid;
+  v_key text;
+  v_kept text;
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    v_job := OLD.job_id; v_product := OLD.product_id;
+  ELSE
+    v_job := NEW.job_id; v_product := NEW.product_id;
+  END IF;
+  v_key := 'crx_job_line_epa.k' || md5(COALESCE(v_job::text, '') || ':' || COALESCE(v_product::text, ''));
+  IF TG_OP = 'DELETE' THEN
+    PERFORM set_config(v_key, 'v:' || COALESCE(OLD.epa_registration, ''), true);
+    RETURN OLD;
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id THEN
+    NEW.epa_registration := OLD.epa_registration;
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'INSERT' AND NOT public._job_line_epa_follows_product(NEW.job_id) THEN
+    v_kept := current_setting(v_key, true);
+    IF v_kept LIKE 'v:%' THEN
+      NEW.epa_registration := NULLIF(substr(v_kept, 3), '');
+      RETURN NEW;
+    END IF;
+  END IF;
   NEW.epa_registration := (SELECT NULLIF(btrim(p.epa_registration), '') FROM public.products p
                             WHERE p.id = NEW.product_id FOR SHARE);
   RETURN NEW;
@@ -117,13 +160,38 @@ $function$;
 ALTER FUNCTION public._job_chemical_epa() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._job_chemical_epa() FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE TRIGGER trg_job_chemical_epa BEFORE INSERT OR UPDATE OF product_id ON public.job_chemicals
+CREATE TRIGGER trg_job_chemical_epa BEFORE INSERT OR UPDATE OF product_id OR DELETE ON public.job_chemicals
 FOR EACH ROW EXECUTE FUNCTION public._job_chemical_epa();
 
+-- Existing lines: the number every printout shows today. Only the new column changes, so the
+-- statement trigger that rebuilds inventory holds is paused for this one statement; ADD COLUMN above
+-- already holds this table's ACCESS EXCLUSIVE lock, so no other writer can slip past it.
+ALTER TABLE public.job_chemicals DISABLE TRIGGER trg_sync_job_holds_upd;
 -- Existing lines: the number every printout shows today.
 UPDATE public.job_chemicals jc SET epa_registration = NULLIF(btrim(p.epa_registration), '')
   FROM public.products p
  WHERE p.id = jc.product_id AND NULLIF(btrim(p.epa_registration), '') IS NOT NULL;
+ALTER TABLE public.job_chemicals ENABLE TRIGGER trg_sync_job_holds_upd;
+
+-- A product's EPA number edited anywhere (Product Detail, setup workbook, import, a parent correction)
+-- reaches the lines of jobs not sprayed yet, as printouts did before this file. Sprayed, finished and
+-- deleted jobs keep theirs.
+CREATE FUNCTION public._product_epa_to_unsprayed_job_lines() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+BEGIN
+  UPDATE public.job_chemicals jc SET epa_registration = NULLIF(btrim(NEW.epa_registration), '')
+   WHERE jc.product_id = NEW.id
+     AND jc.epa_registration IS DISTINCT FROM NULLIF(btrim(NEW.epa_registration), '')
+     AND public._job_line_epa_follows_product(jc.job_id);
+  RETURN NULL;
+END;
+$function$;
+ALTER FUNCTION public._product_epa_to_unsprayed_job_lines() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._product_epa_to_unsprayed_job_lines() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER trg_product_epa_to_unsprayed_job_lines AFTER UPDATE OF epa_registration ON public.products
+FOR EACH ROW WHEN (NULLIF(btrim(OLD.epa_registration), '') IS DISTINCT FROM NULLIF(btrim(NEW.epa_registration), ''))
+EXECUTE FUNCTION public._product_epa_to_unsprayed_job_lines();
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. Invoice lines are never written without the product's EPA number
@@ -132,17 +200,26 @@ UPDATE public.job_chemicals jc SET epa_registration = NULLIF(btrim(p.epa_registr
 CREATE FUNCTION public._fill_invoice_line_epa() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 BEGIN
-  IF NEW.product_id IS NOT NULL AND NULLIF(btrim(NEW.epa_registration), '') IS NULL THEN
-    NEW.epa_registration := (SELECT NULLIF(btrim(p.epa_registration), '') FROM public.products p
-                              WHERE p.id = NEW.product_id FOR SHARE);
+  IF NEW.product_id IS NULL THEN RETURN NEW; END IF;
+  IF TG_OP = 'UPDATE' THEN
+    -- Same product, or the writer sent a number of its own with the new product: keep what was sent.
+    IF NEW.product_id IS NOT DISTINCT FROM OLD.product_id
+       OR (NEW.epa_registration IS DISTINCT FROM OLD.epa_registration AND NULLIF(btrim(NEW.epa_registration), '') IS NOT NULL) THEN
+      RETURN NEW;
+    END IF;
+  ELSIF NULLIF(btrim(NEW.epa_registration), '') IS NOT NULL THEN
+    RETURN NEW;
   END IF;
+  -- A new line with no number, or a line moved to another product: the product's number.
+  NEW.epa_registration := (SELECT NULLIF(btrim(p.epa_registration), '') FROM public.products p
+                            WHERE p.id = NEW.product_id FOR SHARE);
   RETURN NEW;
 END;
 $function$;
 ALTER FUNCTION public._fill_invoice_line_epa() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._fill_invoice_line_epa() FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE TRIGGER trg_fill_invoice_line_epa BEFORE INSERT ON public.invoice_items
+CREATE TRIGGER trg_fill_invoice_line_epa BEFORE INSERT OR UPDATE OF product_id ON public.invoice_items
 FOR EACH ROW EXECUTE FUNCTION public._fill_invoice_line_epa();
 
 -- ---------------------------------------------------------------------------------------------
@@ -451,7 +528,7 @@ $function$;
 
 -- The switch. Only a reviewed migration changes it (build sheet, PAR-1 identity correction).
 CREATE FUNCTION public._product_parent_epa_correction_enabled() RETURNS boolean
-LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$ SELECT false $function$;
+LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$ SELECT false $function$;
 ALTER FUNCTION public._product_parent_epa_correction_enabled() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_parent_epa_correction_enabled() FROM PUBLIC, anon, authenticated, service_role;
 
@@ -536,17 +613,16 @@ BEGIN
   WHERE id = p_parent_id RETURNING * INTO v_parent;
   v_event := public._next_product_parent_event_id();
   IF v_parent.generic_epa_registration IS DISTINCT FROM v_before.generic_epa_registration THEN
+    -- Lines of jobs not sprayed yet print the corrected number (written by the products trigger as each
+    -- size takes it). Sprayed or finished jobs keep theirs.
+    SELECT count(*) INTO v_open_lines FROM public.job_chemicals jc
+     WHERE jc.product_id = ANY(v_sizes)
+       AND jc.epa_registration IS DISTINCT FROM v_parent.generic_epa_registration
+       AND public._job_line_epa_follows_product(jc.job_id);
     -- Every size takes the number under the copy pass (the guard refuses it on one size alone).
     FOREACH v_size IN ARRAY v_sizes LOOP
       v_affected := v_affected || public._copy_parent_to_size(p_parent_id, v_size, v_event, false, false, true);
     END LOOP;
-    -- Open jobs have not happened yet, so they print the corrected number. Finished jobs keep theirs.
-    UPDATE public.job_chemicals jc SET epa_registration = v_parent.generic_epa_registration
-      FROM public.jobs j
-     WHERE j.id = jc.job_id AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
-       AND jc.product_id = ANY(v_sizes)
-       AND jc.epa_registration IS DISTINCT FROM v_parent.generic_epa_registration;
-    GET DIAGNOSTICS v_open_lines = ROW_COUNT;
   END IF;
   PERFORM public._product_parent_event(v_event, p_parent_id, 'identity_corrected', v_reason, v_evidence,
     public._product_parent_values(v_before), public._product_parent_values(v_parent), v_affected);
@@ -577,8 +653,9 @@ BEGIN
   IF p_size ?| ARRAY['category', 'use_timing', 'use_timings', 'rate_per_acre', 'rate_unit', 'suggested_rate', 'rates'] THEN
     RAISE EXCEPTION 'PRODUCT_PARENT_SIZE_COPIED_VALUE: category, use timing and rates come from the parent; leave them off the size';
   END IF;
-  IF jsonb_typeof(p_size->'quoting_notes') NOT IN ('string', 'null') OR jsonb_typeof(p_size->'internal_notes') NOT IN ('string', 'null') THEN
-    RAISE EXCEPTION 'PRODUCT_PARENT_INVALID: quoting_notes and internal_notes are text';
+  IF jsonb_typeof(p_size->'quoting_notes') NOT IN ('string', 'null') OR jsonb_typeof(p_size->'internal_notes') NOT IN ('string', 'null')
+     OR length(p_size->>'quoting_notes') > 5000 OR length(p_size->>'internal_notes') > 5000 THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_INVALID: quoting_notes and internal_notes are text of at most 5000 characters';
   END IF;
   IF p_size ? 'product_form' AND (p_size->>'product_form') IS DISTINCT FROM p_parent.product_form THEN
     RAISE EXCEPTION 'PRODUCT_PARENT_FORM_MISMATCH: every size of "%" is %', p_parent.name, p_parent.product_form;
@@ -600,10 +677,11 @@ BEGIN
   v_saved := public.apply_product_setup(jsonb_build_array(jsonb_build_object('insert', v_fields)), auth.uid(),
     'product_parent_size:' || gen_random_uuid()::text);
   v_product := (v_saved->'rows'->0->>'product_id')::uuid;
-  -- The notes go on in the same transaction (the setup insert does not take them), as typed; blank is none.
+  -- The notes go on in the same transaction (the setup insert does not take them), trimmed as the setup
+  -- update stores them; blank is none.
   IF NULLIF(btrim(p_size->>'quoting_notes'), '') IS NOT NULL OR NULLIF(btrim(p_size->>'internal_notes'), '') IS NOT NULL THEN
-    UPDATE public.products SET quoting_notes = CASE WHEN btrim(p_size->>'quoting_notes') <> '' THEN p_size->>'quoting_notes' END,
-      internal_notes = CASE WHEN btrim(p_size->>'internal_notes') <> '' THEN p_size->>'internal_notes' END
+    UPDATE public.products SET quoting_notes = NULLIF(btrim(p_size->>'quoting_notes'), ''),
+      internal_notes = NULLIF(btrim(p_size->>'internal_notes'), '')
     WHERE id = v_product;
   END IF;
   -- A seed or each parent's one rate is per stock unit, so every size must be stocked in the same unit.
@@ -627,6 +705,10 @@ BEGIN
      OR (SELECT proacl FROM pg_proc WHERE oid = 'public.get_customer_year_end_summary(uuid,integer)'::regprocedure)
        IS DISTINCT FROM ARRAY['postgres=X/postgres', 'authenticated=X/postgres', 'service_role=X/postgres']::aclitem[] THEN
     RAISE EXCEPTION 'JOB_LINE_EPA_SNAPSHOT_POSTCONDITION: a re-emitted function''s grants changed';
+  END IF;
+  IF (SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.job_chemicals'::regclass AND tgname = 'trg_sync_job_holds_upd')
+       IS DISTINCT FROM 'O' THEN
+    RAISE EXCEPTION 'JOB_LINE_EPA_SNAPSHOT_POSTCONDITION: trg_sync_job_holds_upd must be enabled';
   END IF;
   IF public._product_parent_epa_correction_enabled() THEN
     RAISE EXCEPTION 'JOB_LINE_EPA_SNAPSHOT_POSTCONDITION: EPA correction must stay off in this file';

@@ -74,13 +74,14 @@ vi.mock('../lib/db', () => {
       neq: () => query,
       order: () => query,
       limit: () => query,
+      range: () => query,
       update: (...args: unknown[]) => {
         mockProductUpdate(...args);
         return query;
       },
       maybeSingle: () => mockProductRead(selectedId),
-      then: (resolve: (value: { data: unknown[]; error: null }) => void) => {
-        Promise.resolve({ data: [], error: null }).then(resolve);
+      then: (resolve: (value: { data: unknown[]; error: null; count: number }) => void) => {
+        Promise.resolve({ data: [], error: null, count: 0 }).then(resolve);
       },
     };
     return query;

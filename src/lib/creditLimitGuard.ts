@@ -1,5 +1,5 @@
 import { assertRpcResult, supabase, supabaseUntyped } from './db';
-import { formatCents } from './money';
+import { formatCents, formatExactCents } from './money';
 import { Sentry } from './sentry';
 import type { CustomerCreditExposure } from '../types';
 
@@ -24,7 +24,7 @@ export const CREDIT_LIMIT_UNVERIFIED_MESSAGE =
  * so a draft or invoice held by another rep made the customer look under the limit (Sol on #1132).
  * Throws when the answer is not a whole-cent amount.
  */
-async function creditExposure(customerId: string): Promise<{ limitCents: number | null; exposureCents: number }> {
+export async function creditExposure(customerId: string): Promise<{ limitCents: number | null; exposureCents: number }> {
   // Not in the generated database types yet (added by #1138).
   const { data, error } = await supabaseUntyped.rpc('customer_credit_exposure', { p_customer_id: customerId });
   if (error) throw error;
@@ -41,6 +41,19 @@ async function creditExposure(customerId: string): Promise<{ limitCents: number 
     throw new Error('customer_credit_exposure returned a credit limit that is not whole cents.');
   }
   return { limitCents, exposureCents };
+}
+
+/** One line for the quote header (To-Do 1.8): open balance against the limit. Money only, never cost or margin. */
+// Exact bigint formatting: these are whole cents already checked by creditExposure.
+const money = (cents: number) => formatExactCents(BigInt(cents));
+
+export function describeCreditStatus({ limitCents, exposureCents }: { limitCents: number | null; exposureCents: number }): { over: boolean; text: string } {
+  if (limitCents === null) return { over: false, text: `No credit limit · ${money(exposureCents)} open` };
+  const overBy = exposureCents - limitCents;
+  if (overBy > 0) {
+    return { over: true, text: `Over credit limit by ${money(overBy)} (${money(exposureCents)} open of ${money(limitCents)})` };
+  }
+  return { over: false, text: `${money(limitCents - exposureCents)} credit available (${money(exposureCents)} open of ${money(limitCents)})` };
 }
 
 /** The customer's name for the warning. The warning still shows if this read fails. */

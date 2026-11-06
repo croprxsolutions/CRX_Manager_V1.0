@@ -192,6 +192,42 @@ for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   assert.deepEqual(damaged.exits, [EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN], counter);
 }
 
+// A merge stopped on a conflict is refused before Codex is called, in every scope.
+{
+  const dir = tempDir("crx-luna-conflict-");
+  const git = (...gitArgs) => execFileSync(fixedGitExecutable(), ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.autocrlf=false", ...gitArgs], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  git("init", "-q", "-b", "main");
+  writeFileSync(path.join(dir, "f.txt"), "base\n");
+  git("add", "f.txt");
+  git("commit", "-q", "-m", "base");
+  const base = git("rev-parse", "HEAD").trim();
+  git("checkout", "-q", "-b", "feature");
+  writeFileSync(path.join(dir, "f.txt"), "feature\n");
+  git("commit", "-q", "-am", "feature");
+  git("checkout", "-q", "main");
+  writeFileSync(path.join(dir, "f.txt"), "main\n");
+  git("commit", "-q", "-am", "main");
+  git("checkout", "-q", "feature");
+  assert.throws(() => git("merge", "main"));
+  const out = [];
+  let spawned = 0;
+  const savedLog = console.log;
+  console.log = (line = "") => out.push(line);
+  process.chdir(dir);
+  try {
+    for (const args of [["--base", base], ["--uncommitted"], ["--commit", "HEAD"]]) {
+      const exit = main(args, { resolveCodex: () => "codex-stub", spawn: () => { spawned += 1; return { status: 1 }; } });
+      assert.equal(exit, EXIT_DID_NOT_RUN, args.join(" "));
+    }
+  } finally {
+    process.chdir(realCwd);
+    console.log = savedLog;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.equal(spawned, 0);
+  assert.match(out.join("\n"), /Unfinished merge: 1 file\(s\) still have conflicts:\n {2}f\.txt/);
+}
+
 // Other broken runs stay broken.
 for (const [finalText, kind] of [
   ["", "no-final"],

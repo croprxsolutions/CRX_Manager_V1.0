@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Tests for FIX 2 (2026-07-13): status-enum-check.mjs, generated-column-check.mjs,
 // and sql-safety.mjs (rules 6-8) must WARN LOUDLY (via a PreToolUse `systemMessage`
-// on an "allow" decision) instead of silently waving everything through when the
+// with no permission decision — a passing guard stays silent) instead of silently waving everything through when the
 // schema registry is missing/unparseable (or, for sql-safety, still v1-shaped).
 //
 // These three hooks resolve .claude/schema-registry.json relative to their OWN
@@ -58,8 +58,8 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "/project/src/lib/x.ts", content: ".from('invoices').eq('status','anything')" },
   });
-  let out = JSON.parse(r.stdout);
-  ok(out.hookSpecificOutput.permissionDecision === "allow", "status-enum-check: still allows (fail-open) with missing registry");
+  let out = JSON.parse(r.stdout || "{}");
+  ok(r.status === 0 && out.hookSpecificOutput === undefined, "status-enum-check: still allows (fail-open) with missing registry");
   ok(typeof out.systemMessage === "string" && out.systemMessage.includes("status-enum-check"), "status-enum-check: missing registry -> loud systemMessage naming the hook");
   ok(out.systemMessage.includes("SKIPPED"), "status-enum-check: warning says the check was SKIPPED");
   ok(out.systemMessage.includes("/regen-schema-registry"), "status-enum-check: warning points at the fix");
@@ -71,8 +71,8 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "/project/src/lib/x.ts", content: ".from('invoices').eq('status','anything')" },
   });
-  out = JSON.parse(r.stdout);
-  ok(out.hookSpecificOutput.permissionDecision === "allow", "status-enum-check: unparseable registry still allows");
+  out = JSON.parse(r.stdout || "{}");
+  ok(r.status === 0 && out.hookSpecificOutput === undefined, "status-enum-check: unparseable registry still allows");
   ok(out.systemMessage && out.systemMessage.includes("SKIPPED"), "status-enum-check: unparseable registry also warns loudly");
 
   // ── status-enum-check.mjs: healthy registry -> no warning at all ─────────
@@ -84,7 +84,7 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "/project/src/lib/x.ts", content: ".from('invoices').eq('status','posted')" },
   });
-  out = JSON.parse(r.stdout);
+  out = JSON.parse(r.stdout || "{}");
   ok(!out.systemMessage, "status-enum-check: healthy registry -> no warning emitted");
 
   // ── generated-column-check.mjs: registry file missing entirely ──────────
@@ -94,8 +94,8 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "supabase/migrations/20990101000000_x.sql", content: "UPDATE invoices SET balance_cents = 0;" },
   });
-  out = JSON.parse(r.stdout);
-  ok(out.hookSpecificOutput.permissionDecision === "allow", "generated-column-check: still allows (fail-open) with missing registry");
+  out = JSON.parse(r.stdout || "{}");
+  ok(r.status === 0 && out.hookSpecificOutput === undefined, "generated-column-check: still allows (fail-open) with missing registry");
   ok(out.systemMessage && out.systemMessage.includes("generated-column-check") && out.systemMessage.includes("SKIPPED"), "generated-column-check: missing registry -> loud systemMessage");
 
   // ── generated-column-check.mjs: unparseable registry ─────────────────────
@@ -105,7 +105,7 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "supabase/migrations/20990101000000_x.sql", content: "UPDATE invoices SET balance_cents = 0;" },
   });
-  out = JSON.parse(r.stdout);
+  out = JSON.parse(r.stdout || "{}");
   ok(out.systemMessage && out.systemMessage.includes("SKIPPED"), "generated-column-check: unparseable registry also warns loudly");
 
   // ── generated-column-check.mjs: healthy registry -> no warning ───────────
@@ -117,7 +117,7 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "supabase/migrations/20990101000000_x.sql", content: "SELECT 1;" },
   });
-  out = JSON.parse(r.stdout);
+  out = JSON.parse(r.stdout || "{}");
   ok(!out.systemMessage, "generated-column-check: healthy registry, no violation -> no warning emitted");
 
   // ── sql-safety.mjs: registry missing entirely -> rules 6-8 skip, warns loudly ──
@@ -129,8 +129,8 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "supabase/migrations/20990101000000_x.sql", content: "SELECT 1;" },
   });
-  out = JSON.parse(r.stdout);
-  ok(out.hookSpecificOutput.permissionDecision === "allow", "sql-safety: missing registry still allows a benign migration write");
+  out = JSON.parse(r.stdout || "{}");
+  ok(r.status === 0 && out.hookSpecificOutput === undefined, "sql-safety: missing registry still allows a benign migration write");
   ok(out.systemMessage && out.systemMessage.includes("sql-safety") && out.systemMessage.includes("rules 6-8"), "sql-safety: missing registry -> loud systemMessage naming rules 6-8");
   ok(out.systemMessage.includes("SKIPPED"), "sql-safety: warning says SKIPPED");
 
@@ -143,7 +143,7 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "supabase/migrations/20990101000000_x.sql", content: "SELECT 1;" },
   });
-  out = JSON.parse(r.stdout);
+  out = JSON.parse(r.stdout || "{}");
   ok(out.systemMessage && out.systemMessage.includes("rules 6-8"), "sql-safety: v1-shaped registry (no v2 keys) also warns loudly");
 
   // ── sql-safety.mjs: exempt-registry marker present -> no warning (deliberate opt-out) ──
@@ -153,7 +153,7 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "supabase/migrations/20990101000000_x.sql", content: "-- sql-safety: exempt-registry (test)\nSELECT 1;" },
   });
-  out = JSON.parse(r.stdout);
+  out = JSON.parse(r.stdout || "{}");
   ok(!out.systemMessage, "sql-safety: exempt-registry marker suppresses the loud warning (deliberate opt-out, not a failure)");
 
   // ── sql-safety.mjs: healthy v2 registry -> no warning ────────────────────
@@ -165,7 +165,7 @@ try {
     tool_name: "Write",
     tool_input: { file_path: "supabase/migrations/20990101000000_x.sql", content: "SELECT 1;" },
   });
-  out = JSON.parse(r.stdout);
+  out = JSON.parse(r.stdout || "{}");
   ok(!out.systemMessage, "sql-safety: healthy v2 registry -> no warning emitted");
 
   console.log(`schema-registry-loud-failopen: ${pass} assertions passed`);

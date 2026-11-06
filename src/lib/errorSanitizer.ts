@@ -37,9 +37,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // The first attempt committed under this key, usually a lost reply followed by an edit.
   [/^IDEMPOTENCY_ARGUMENT_MISMATCH\b/,
    'This attempt was not saved, but an earlier attempt with different details may have saved. Check the record before entering it again'],
-  // KI-27: an admin cleared this stuck request, so the database refuses to save it now.
+  // KI-27: this stuck request was cleared, so the database refuses to save it now.
   [/^IDEMPOTENCY_REQUEST_RETIRED\b/,
-   'Nothing was changed. An admin cleared this request after it got stuck. Check the record, then enter it again as a new request if it is still needed'],
+   'Nothing was changed. This request was cleared after it got stuck. Check the record, then enter it again as a new request if it is still needed'],
   [/^IDEMPOTENCY_(?:RESULT_INVALID|RECEIPT_MISSING)\b/,
    'Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again'],
   // A completion retried under a fresh key after an earlier attempt already completed the record.
@@ -84,6 +84,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Admin-only since 2026-10-14 (migration 20261027080200).
   [/^COMMISSION_SPLIT_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's default commission split"],
+  // Admin-only since 2026-11-01 (migration 20261111100000).
+  [/^TIER_ADMIN_ONLY\b/i,
+   "Only an admin can set or change a customer's price tier"],
+  [/^CREDIT_LIMIT_ADMIN_ONLY\b/i,
+   "Only an admin can set or change a customer's credit limit"],
+  [/^QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE\b/i,
+   "A booking's tier and planned flag change only by saving the quote"],
   [/^SALESMAN_SCOPE_DENIED\b/i,
    "Sales reps work under their own name: choose yourself as the salesman, or ask an admin to handle another salesman's work"],
   [/^INVOICE_SCOPE_DENIED\b/i,

@@ -29,6 +29,7 @@ import Card, { CardHeader } from '../components/ui/Card';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
+import { QuoteCreditStatus } from '../components/quotes/QuoteCustomerChecks';
 import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult } from '../components/customers/CustomerSearchPicker';
 import FieldSearchPicker, { FIELD_SEARCH_SELECT, type FieldSearchResult } from '../components/fields/FieldSearchPicker';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
@@ -58,7 +59,7 @@ import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
-import { billedLine, catalogPricePerAcre, exactRound2, getQuoteTierPrice, isTierPriceMissing, validateCommissionSplits } from '../lib/quoteCalc';
+import { catalogPricePerAcre, getQuoteTierPrice, isTierPriceMissing, recalcItem as recalcQuoteLine, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
 import {
   buildRowVersionPatch,
@@ -1658,17 +1659,6 @@ export default function QuoteBuilder() {
     return true;
   };
 
-  const getConversionFactor = useCallback(
-    (unit: string | null): number => {
-      if (!unit) return 1;
-      const conv = unitConversions.find(
-        (c) => c.unit.toLowerCase() === unit.toLowerCase()
-      );
-      return conv ? conv.factor_oz : 1;
-    },
-    [unitConversions]
-  );
-
   const getTierPrice = useCallback(
     (product: Product, tierNum: number): number => {
       // A stated $0 tier price stays $0 (as save_quote stores it); only a missing one falls back to tier 1
@@ -1703,68 +1693,14 @@ export default function QuoteBuilder() {
     };
   }, [lockedPriceFor]);
 
+  // The tested calculator (quoteCalc, To-Do 1.7), figured at this page's price and cost for the line.
   const recalcItem = useCallback(
     (item: LocalItem, tierNum: number): LocalItem => {
       const product = item.product || products.find((p) => p.id === item.product_id);
       if (!product) return item;
-
-      const tierPrice = getTierPrice(product, tierNum);
-      const { pricePerUnit, cost } = lineBasisFor(item, product, tierPrice);
-      // Fall back to unit_size if inventory_unit is not set on the product
-      const inventoryUnitFactorOz = getConversionFactor(product.inventory_unit || product.unit_size);
-
-      if (item.calc_mode === 'units_direct') {
-        // User entered total_units_needed directly — skip rate×acres computation
-        const enteredUnits = item.total_units_needed || 0;
-        const billed = billedLine(pricePerUnit, cost, [enteredUnits]);
-
-        // Back-calculate oz/acre and $/acre if acres provided; save_quote uses the entered units
-        const acres = item.acres || 0;
-        let ozPerAcre: number | null = item.oz_per_acre;
-        let pricePerAcre: number | null = item.price_per_acre;
-        if (acres > 0 && inventoryUnitFactorOz > 0) {
-          ozPerAcre = exactRound2([enteredUnits, inventoryUnitFactorOz], [acres]);
-          pricePerAcre = exactRound2([pricePerUnit, enteredUnits], [acres]);
-        }
-
-        return {
-          ...item,
-          price_per_unit: pricePerUnit,
-          current_cost: cost,
-          oz_per_acre: ozPerAcre,
-          price_per_acre: pricePerAcre,
-          total_units_needed: billed.units,
-          total_price: billed.totalPrice,
-          profit: billed.profit,
-          net_margin: billed.netMargin,
-        };
-      }
-
-      // Default: rate_acres mode
-      const actualRate = item.actual_rate || 0;
-      const acres = item.acres || 0;
-
-      const rateUnitFactorOz = getConversionFactor(item.rate_unit);
-      // S09: the quantity, total and profit the database stores and bills (see billedLine).
-      const billed = inventoryUnitFactorOz > 0
-        ? billedLine(pricePerUnit, cost, [acres, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
-        : billedLine(pricePerUnit, cost, [0]);
-
-      return {
-        ...item,
-        price_per_unit: pricePerUnit,
-        current_cost: cost,
-        oz_per_acre: exactRound2([actualRate, rateUnitFactorOz]),
-        price_per_acre: inventoryUnitFactorOz > 0
-          ? exactRound2([pricePerUnit, actualRate, rateUnitFactorOz], [inventoryUnitFactorOz])
-          : 0,
-        total_units_needed: billed.units,
-        total_price: billed.totalPrice,
-        profit: billed.profit,
-        net_margin: billed.netMargin,
-      };
+      return recalcQuoteLine(item, product, tierNum, unitConversions, lineBasisFor(item, product, getTierPrice(product, tierNum)));
     },
-    [products, getTierPrice, getConversionFactor, lineBasisFor]
+    [products, getTierPrice, unitConversions, lineBasisFor]
   );
 
   // Clearing a section's field drops the acres that field filled in this session, and keeps acres
@@ -4960,6 +4896,7 @@ export default function QuoteBuilder() {
             {productsLoadFailed && (
               <p role="alert" className="mt-1 text-sm text-red-600">Products failed to load. Refresh the page before adding products or saving this quote.</p>
             )}
+            {!customerView && selectedCustomer && <QuoteCreditStatus customerId={selectedCustomer.id} />}
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary mb-1">

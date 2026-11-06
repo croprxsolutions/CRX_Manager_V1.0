@@ -207,7 +207,8 @@ BEGIN
   PERFORM 1 FROM public.jobs WHERE id = p_job_id FOR UPDATE;
   -- A sprayed or finished job: a sent line id that is no longer a line of this job means the screen is
   -- stale (another tab or device saved since it loaded). Refuse, so it reloads instead of the save
-  -- silently giving that line the product's current number. A replay of a stored save goes through.
+  -- silently giving that line the product's current number. A replay of a stored save goes through
+  -- (p_replay: save_job reads its receipt after taking this same job lock).
   IF NOT p_replay AND NOT public._job_line_epa_follows_product(p_job_id) AND EXISTS (
        SELECT 1 FROM jsonb_array_elements(p_chemicals) e
         WHERE jsonb_typeof(e.value) = 'object' AND (e.value->>'id') ~ v_uuid
@@ -299,6 +300,9 @@ BEGIN
      WHERE p.id::text IN (SELECT lower(e->>'product_id') FROM jsonb_array_elements(
              CASE WHEN jsonb_typeof(p_chemicals) = 'array' THEN p_chemicals ELSE '[]'::jsonb END) e)
      ORDER BY p.id FOR SHARE;
+    -- The job lock before the receipt read: an identical keyed save in flight commits first, so its
+    -- receipt is seen and this call replays it (the impl checks the replay's actor and payload).
+    PERFORM 1 FROM public.jobs WHERE id = p_job_id FOR UPDATE;
     v_kept := public._job_line_epa_kept(p_job_id, p_chemicals,
       p_idempotency_key IS NOT NULL AND EXISTS (SELECT 1 FROM public.idempotency_keys
                                                 WHERE idempotency_key = p_idempotency_key AND operation = 'save_job'));

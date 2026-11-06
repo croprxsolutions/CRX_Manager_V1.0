@@ -450,7 +450,18 @@ async function main() {
   waited(() => setProductEpa(PA, '524-478'), 'the EPA edit');
   await writing.done;
   assert.equal(lines(DJOB), '0:524-478', 'a directly written line still uncommitted when an edit started takes the edited number');
-  console.log('[prover] an EPA edit and a spray, save or new line on the same product run one after the other (no stale number either way)');
+  // Two identical keyed saves of a sprayed job in flight at once: the second waits for the first and then
+  // replays its result (its line ids are gone by then, but the receipt is read after the job lock).
+  const dupJob = save(ADMIN, null, [chem(PB, 0)]);
+  spray(dupJob);
+  const dupIds = lineIds(dupJob);
+  const dupSent = [chem(PB, 0, { id: dupIds[0] })];
+  const first = session(txIn(ADMIN, `${saveSql(dupJob, dupSent, 'jk-dup-1')}\nSELECT 'JK_READY';\nSELECT pg_sleep(4);`));
+  await first.ready;
+  const second = waited(() => save(ADMIN, dupJob, dupSent, 'jk-dup-1'), 'the second identical save');
+  await first.done;
+  assert.equal(second, dupJob, 'an overlapping identical save replays the first one');
+  console.log('[prover] an EPA edit and a spray, save or new line on the same product run one after the other (no stale number either way); an overlapping identical save replays');
 
   console.log('JOB_LINES_KEEP_EPA_PROOF_PASS');
 }

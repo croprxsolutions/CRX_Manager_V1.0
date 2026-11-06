@@ -44,6 +44,7 @@ import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSA
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
+import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
@@ -644,20 +645,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     const normalizedTerms = effectivePaymentTerms.toLowerCase();
     const isReceiptAlias = ['due on receipt', 'due upon receipt', 'receipt', 'immediately'].includes(normalizedTerms);
     const isPreset = ['Net 30', 'Net 15', 'Net 60', 'Due on receipt'].includes(effectivePaymentTerms);
-    const termDays = isReceiptAlias
-      ? 0
-      : (() => {
-          const match = /(\d+)/.exec(effectivePaymentTerms);
-          const parsed = match ? Number(match[1]) : NaN;
-          return Number.isFinite(parsed) && parsed >= 1 && parsed <= 365 ? parsed : 30;
-        })();
-    let stampedDate = '';
-    if (loadedInvoice.invoice_date) {
-      const stamped = new Date(`${loadedInvoice.invoice_date}T00:00:00Z`);
-      stamped.setUTCDate(stamped.getUTCDate() + termDays);
-      stampedDate = stamped.toISOString().slice(0, 10);
-    }
-    const isPostingStamp = loadedDueDate !== '' && loadedDueDate === stampedDate;
+    // KI-14: a field-application invoice records whether its date was typed (due_date_is_custom);
+    // other invoice types still compare the date with the stamp their terms give.
+    const stampedDate = loadedInvoice.invoice_date ? dueDateFromTerms(loadedInvoice.invoice_date, effectivePaymentTerms) : '';
+    const isPostingStamp = loadedDueDate !== '' && (
+      loadedInvoice.invoice_type === 'field_application'
+        ? !loadedInvoice.due_date_is_custom
+        : loadedDueDate === stampedDate);
     const isEditableStatus = ['draft', 'unposted'].includes(loadedInvoice.status || '');
     if (loadedDueDate && !isPostingStamp && isEditableStatus) {
       setPaymentTerms('Custom date…');

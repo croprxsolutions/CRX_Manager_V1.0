@@ -255,20 +255,10 @@ describe('FieldApplicationInvoice — new invoice (no id)', () => {
     expect(screen.getByText('Application Service')).toBeInTheDocument();
   });
 
-  it('uses Net 30 by default and requires a date for Custom date', async () => {
+  it('shows no terms picker until fields name the customers (KI-14: terms are per customer)', async () => {
     await renderPage();
-
-    const terms = screen.getByLabelText('Payment Terms') as HTMLSelectElement;
-    expect(terms.value).toBe('Net 30');
-    expect(screen.getByRole('option', { name: 'Net 15' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Due on receipt' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Custom date…' })).toBeInTheDocument();
-
-    fireEvent.change(terms, { target: { value: 'Custom date…' } });
-    expect(screen.getByLabelText('Due Date')).toBeRequired();
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    expect(mockToast).toHaveBeenCalledWith('error', 'Choose a custom due date before saving.');
-    expect(mockRpc).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText(/Payment Terms/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Each customer.s terms, once fields are chosen/)).toBeInTheDocument();
   });
 
   it('refuses a blank transaction date before calling the save RPC', async () => {
@@ -447,6 +437,34 @@ describe('FieldApplicationInvoice — #33 discount on a NEW invoice reaches the 
       // The new invoice id maps to cust-A; the typed $25.00 must arrive as 2500 cents.
       expect(discounts['new-inv-1']).toBeDefined();
       expect(discounts['new-inv-1'].amount_cents).toBe(2500);
+    });
+  });
+
+  it('KI-14: a new customer defaults to its own terms (never a stamped Net 30); Custom needs a date; the save sends terms per invoice', async () => {
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /Select Locations/i }));
+    fireEvent.click(await screen.findByTestId('mock-select-one-field'));
+    const terms = await screen.findByLabelText('Payment Terms') as HTMLSelectElement;
+    expect(terms.value).toBe('');
+    expect(screen.getByRole('option', { name: /^Customer.s terms$/ })).toBeInTheDocument();
+    expect(screen.getByText(/From the customer.s terms/)).toBeInTheDocument();
+
+    fireEvent.change(terms, { target: { value: 'Custom date…' } });
+    expect(screen.getByLabelText('Due Date')).toBeRequired();
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Choose a custom due date before saving.');
+    expect(mockRpc.mock.calls.some((c) => c[0] === 'save_field_app_invoice')).toBe(false);
+
+    fireEvent.change(terms, { target: { value: 'Net 15' } });
+    expect(screen.queryByLabelText('Due Date')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => {
+      const billingCall = mockRpc.mock.calls.find((c) => c[0] === 'update_field_app_invoice_billing');
+      expect(billingCall).toBeDefined();
+      const args = billingCall![1] as Record<string, unknown>;
+      expect(args.p_terms_by_invoice).toEqual({ 'new-inv-1': { payment_terms: 'Net 15', due_date: null } });
+      expect(args.p_payment_terms).toBeUndefined();
+      expect(args.p_due_date).toBeUndefined();
     });
   });
 
@@ -1086,6 +1104,44 @@ describe('FieldApplicationInvoice — existing GROUP member invoice', () => {
     );
     mockUseParams.mockReturnValue({ id: 'inv-grp-1' });
   }
+
+  it('KI-14: each owner of the split shows its own terms and due date', async () => {
+    mockFrom.mockImplementation(
+      makeFromMock({
+        invoices: {
+          data: [
+            {
+              id: 'inv-grp-1', invoice_number: 'INV-2001', invoice_type: 'field_application', invoice_date: '2026-04-29',
+              header_notes: '', status: 'draft', application_service_id: 'svc-1', invoice_group_id: 'grp-xyz',
+              customer_id: 'cust-1', payment_terms: 'Net 15', due_date: '2026-05-14', due_date_is_custom: false,
+              total_amount_cents: 100000, invoice_post_version: 'v1:header',
+            },
+            {
+              id: 'inv-grp-1', invoice_number: 'INV-2001', customer_id: 'cust-1', customer: { farm_name: 'Farm 1' },
+              total_amount_cents: 50000, status: 'draft', payment_terms: 'Net 15', due_date: '2026-05-14',
+              due_date_is_custom: false, invoice_post_version: 'v1:sibling-1',
+            },
+            {
+              id: 'inv-grp-2', invoice_number: 'INV-2002', customer_id: 'cust-2', customer: { farm_name: 'Farm 2' },
+              total_amount_cents: 50000, status: 'draft', payment_terms: 'Net 30', due_date: '2026-06-10',
+              due_date_is_custom: true, invoice_post_version: 'v1:sibling-2',
+            },
+          ],
+        },
+        field_app_locations: { data: [] },
+        invoice_items: { data: [] },
+        invoice_shares: { data: [] },
+      }),
+    );
+    mockUseParams.mockReturnValue({ id: 'inv-grp-1' });
+    await renderPage();
+    const farm1 = await screen.findByLabelText('Payment Terms — Farm 1') as HTMLSelectElement;
+    expect(farm1.value).toBe('Net 15');
+    expect(screen.getByText('Due Date — Farm 1').nextElementSibling).toHaveTextContent('2026-05-14');
+    const farm2 = screen.getByLabelText('Payment Terms — Farm 2') as HTMLSelectElement;
+    expect(farm2.value).toBe('Custom date…');
+    expect(screen.getByLabelText('Due Date — Farm 2')).toHaveValue('2026-06-10');
+  });
 
   it('renders the sibling banner when the group has 2+ members', async () => {
     setupGroup(['draft', 'draft']);

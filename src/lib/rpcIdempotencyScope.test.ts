@@ -294,6 +294,11 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _save_invoice_split_provenance_impl_20260719: ['save_invoice'],
   _save_invoice_below_cost_impl_20260810: ['save_invoice'],
   _post_invoice_public_impl_20260718: ['post_invoice'],
+  // Direct EXECUTE is revoked (live 2026-11-06: proacl `postgres=X/postgres`). Private layers behind the
+  // public void_invoice and unapply_credit_memo wrappers; they share the wrapper's receipt namespace.
+  // 20261128100000 (KI-18) re-emits the live bodies only to add the Chicago-date closed-month check.
+  _void_invoice_split_provenance_impl_20260719: ['void_invoice'],
+  _unapply_return_credit_guard_impl_20260826: ['unapply_credit_memo'],
   // Direct EXECUTE is revoked. This private implementation remains behind the
   // public create_invoice_from_order wrapper and deliberately shares that
   // wrapper's cache namespace so a retry through either layer finds the same

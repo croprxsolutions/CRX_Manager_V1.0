@@ -18,7 +18,13 @@
 --     (Chicago date - due date) instead of whole 24-hour periods since UTC midnight
 --   * applicator licenses and RUP: _enforce_applicator_license, _dispatch_job_locations_replay_impl_20261015,
 --     generate_rup_sales_records (license expiry; the RUP record's sale date is now the invoice date and its
---     season follows that same date, Mason's decision of 2026-11-06, so a backdated invoice records its own day)
+--     season follows that same date, Mason's decision of 2026-11-06, so a backdated invoice records its own day;
+--     the applicator license must be unexpired on both the invoice date and today)
+--   * reversals of a credit application or write-off (reverse_credit_memo_application,
+--     _unapply_return_credit_guard_impl_20260826, _void_invoice_split_provenance_impl_20260719,
+--     _reverse_write_off_replay_impl_20261015) refuse when the row's UTC or Chicago date is in a closed month:
+--     rows made before this file were checked on the UTC date, rows made after on the Chicago date
+--     (_fix_delivery_plan already checks both)
 --   * holds and stock: _sync_job_holds, get_dispatch_stock_status, get_job_inventory_shortfalls,
 --     _get_inventory_position_cost_impl_20261019 (also its season start), _create_inventory_hold_intent_impl_20260905
 --   * other business dates: _transition_rebate_claim_replay_impl_20261015, _create_rush_order_below_cost_impl_20260810,
@@ -31,8 +37,10 @@
 --     ar_reminder_tracking.sent_date, deliveries.scheduled_date
 -- Signatures, return types, SECURITY DEFINER and search_path are unchanged (each statement is the live
 -- pg_get_functiondef text); CREATE OR REPLACE keeps owners and grants. The preflight and postflight pin
--- each function's body md5, search_path, SECURITY DEFINER, owner and exact live EXECUTE grants.
--- No row is read or written. Re-runnable: the preflight accepts the pre-image or this file's body.
+-- each function's body md5, argument list (with defaults), search_path, SECURITY DEFINER, owner and exact
+-- live EXECUTE grants.
+-- No row is written; the preflight refuses if any RUP sales record's sale date differs from its invoice date
+-- (live had none on 2026-11-06). Re-runnable: the preflight accepts the pre-image or this file's body.
 -- Not changed here: comment-only mentions; the advisory-lock key in _create_blend_ticket_replay_impl_20261015
 -- (a lock name, not a business date); internal impls whose date default is never used (their wrapper
 -- always passes the date); boards and reports (batch 2); statement and AR aging (batch 3).
@@ -43,41 +51,44 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', 'c5666f64d37ed39b5e3ed7f86f0bad51', true, '{postgres=X/postgres}'),
-    ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_apply_prepay_to_invoice_replay_impl_20261015(uuid,uuid,bigint,uuid,text)', 'c9377dab8f2534a03af2c27a6e1d510c', '53ac418df8065bd8001136a55e29ebea', true, '{postgres=X/postgres}'),
-    ('_apply_write_off_replay_impl_20261015(uuid,bigint,text,uuid,text)', '00e8d020f9faf6276de8ddaf4f1411fc', '6c89936b2baa95094dbdcf654ad6f89e', true, '{postgres=X/postgres}'),
-    ('_post_commission_payment_intent_impl_20260809(uuid,uuid,text)', '240fd81fd597136c195a62e7f60f3fbc', '865aed5ebe639bd2965c97224f484cf6', true, '{postgres=X/postgres}'),
-    ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true, '{postgres=X/postgres}'),
-    ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true, '{postgres=X/postgres}'),
-    ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true, '{postgres=X/postgres}'),
-    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true, '{postgres=X/postgres}'),
-    ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}'),
-    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', 'fd0e3a22c7d9284028cad9f9c37e7836', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true, '{postgres=X/postgres}'),
-    ('_create_inventory_hold_intent_impl_20260905(uuid,uuid,numeric,text,date,text,uuid,boolean,text,text)', '30ae56a0e1ee3b472abe5c95508b43fc', 'd7e98a25d9b194e8ede05047c0cb0b6a', true, '{postgres=X/postgres}'),
-    ('_transition_rebate_claim_replay_impl_20261015(uuid,text,bigint,text,text)', 'de22ed84218873c02023720f5f4d06e1', 'ab5e9d5210ff4aeabff662b56ff5c85d', true, '{postgres=X/postgres}'),
-    ('_create_rush_order_below_cost_impl_20260810(uuid,jsonb,text,text,uuid,text)', '00eb8676ef9f214baf0cfa9fc25b1924', '17fa918ed609b079ce8a3c08337368ca', true, '{postgres=X/postgres}'),
-    ('_create_followup_delivery_replay_impl_20261015(uuid,date,uuid,text)', 'da4e748e6139cc43247fdcfbfccf5251', '286023631494a108ad1ecadec3011bff', true, '{postgres=X/postgres}'),
-    ('_create_job_from_quote_section_replay_impl_20261015(uuid,uuid,uuid,text)', 'e1e701e0a096c0d022b5ac370aa4bb60', 'b567ac08aef7db8c747af5424439d7de', true, '{postgres=X/postgres}'),
-    ('_batch_reschedule_deliveries_replay_impl_20261015(uuid[],date,uuid,text)', 'd87ef756d7e5c30e2fe9cf722e68b646', '9e36f19b08770f23b95c106fcdd1ead1', true, '{postgres=X/postgres}'),
-    ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true, '{postgres=X/postgres}'),
-    ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('create_quick_delivery(uuid,jsonb,uuid,date,text,uuid,text,boolean)', '69c1d569fb2e9eb913502d59e41a76fe', '69c1d569fb2e9eb913502d59e41a76fe', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}')
-  ) AS t(sig, pre_md5, post_md5, secdef, acl)
+    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_application_id uuid, p_actor uuid, p_actor_role text, p_reason text', 'p_application_id uuid, p_actor uuid, p_actor_role text, p_reason text'),
+    ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', '39144471446fc8e4a400d51cbe02d85e', true, '{postgres=X/postgres}', 'p_write_off_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_write_off_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_credit_memo_id uuid, p_target_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_credit_memo_id uuid, p_target_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_apply_prepay_to_invoice_replay_impl_20261015(uuid,uuid,bigint,uuid,text)', 'c9377dab8f2534a03af2c27a6e1d510c', '53ac418df8065bd8001136a55e29ebea', true, '{postgres=X/postgres}', 'p_prepay_credit_id uuid, p_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_prepay_credit_id uuid, p_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_apply_write_off_replay_impl_20261015(uuid,bigint,text,uuid,text)', '00e8d020f9faf6276de8ddaf4f1411fc', '6c89936b2baa95094dbdcf654ad6f89e', true, '{postgres=X/postgres}', 'p_invoice_id uuid, p_amount_cents bigint, p_reason text, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_amount_cents bigint, p_reason text, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_post_commission_payment_intent_impl_20260809(uuid,uuid,text)', '240fd81fd597136c195a62e7f60f3fbc', '865aed5ebe639bd2965c97224f484cf6', true, '{postgres=X/postgres}', 'p_payment_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_payment_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true, '{postgres=X/postgres}', 'p_payment_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_payment_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true, '{postgres=X/postgres}', 'p_allocation_set_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_allocation_set_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true, '{postgres=X/postgres}', 'p_commission_ids uuid[], p_payment_method text, p_reference text, p_payment_date date, p_notes text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_commission_ids uuid[], p_payment_method text, p_reference text, p_payment_date date, p_notes text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true, '{postgres=X/postgres}', 'p_quote_id uuid, p_quote_payload jsonb, p_sections jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'p_quote_id uuid, p_quote_payload jsonb, p_sections jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false'),
+    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', 'addc85535a70c08ecb9dce6de54ba16b', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_job_id uuid, p_actor uuid', 'p_job_id uuid, p_actor uuid'),
+    ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_job_ids uuid[]', 'p_job_ids uuid[]'),
+    ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_days_ahead integer DEFAULT 7', 'p_days_ahead integer DEFAULT 7'),
+    ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true, '{postgres=X/postgres}', '', ''),
+    ('_create_inventory_hold_intent_impl_20260905(uuid,uuid,numeric,text,date,text,uuid,boolean,text,text)', '30ae56a0e1ee3b472abe5c95508b43fc', 'd7e98a25d9b194e8ede05047c0cb0b6a', true, '{postgres=X/postgres}', 'p_product_id uuid, p_customer_id uuid, p_quantity numeric, p_hold_type text, p_expires_at date, p_notes text, p_performed_by uuid, p_force boolean DEFAULT false, p_force_reason text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text', 'p_product_id uuid, p_customer_id uuid, p_quantity numeric, p_hold_type text, p_expires_at date, p_notes text, p_performed_by uuid, p_force boolean DEFAULT false, p_force_reason text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text'),
+    ('_transition_rebate_claim_replay_impl_20261015(uuid,text,bigint,text,text)', 'de22ed84218873c02023720f5f4d06e1', 'ab5e9d5210ff4aeabff662b56ff5c85d', true, '{postgres=X/postgres}', 'p_claim_id uuid, p_new_status text, p_paid_amount_cents bigint DEFAULT NULL::bigint, p_manufacturer_ref text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text', 'p_claim_id uuid, p_new_status text, p_paid_amount_cents bigint DEFAULT NULL::bigint, p_manufacturer_ref text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text'),
+    ('_create_rush_order_below_cost_impl_20260810(uuid,jsonb,text,text,uuid,text)', '00eb8676ef9f214baf0cfa9fc25b1924', '17fa918ed609b079ce8a3c08337368ca', true, '{postgres=X/postgres}', 'p_customer_id uuid, p_items jsonb DEFAULT ''[]''::jsonb, p_notes text DEFAULT NULL::text, p_customer_po_number text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_customer_id uuid, p_items jsonb DEFAULT ''[]''::jsonb, p_notes text DEFAULT NULL::text, p_customer_po_number text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_create_followup_delivery_replay_impl_20261015(uuid,date,uuid,text)', 'da4e748e6139cc43247fdcfbfccf5251', '286023631494a108ad1ecadec3011bff', true, '{postgres=X/postgres}', 'p_original_delivery_id uuid, p_scheduled_date date DEFAULT NULL::date, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_original_delivery_id uuid, p_scheduled_date date DEFAULT NULL::date, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_create_job_from_quote_section_replay_impl_20261015(uuid,uuid,uuid,text)', 'e1e701e0a096c0d022b5ac370aa4bb60', 'b567ac08aef7db8c747af5424439d7de', true, '{postgres=X/postgres}', 'p_quote_id uuid, p_section_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'p_quote_id uuid, p_section_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_batch_reschedule_deliveries_replay_impl_20261015(uuid[],date,uuid,text)', 'd87ef756d7e5c30e2fe9cf722e68b646', '9e36f19b08770f23b95c106fcdd1ead1', true, '{postgres=X/postgres}', 'p_delivery_ids uuid[], p_new_date date, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_delivery_ids uuid[], p_new_date date, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true, '{postgres=X/postgres}', 'p_field_id uuid, p_season integer, p_crop_type text, p_variety text DEFAULT NULL::text, p_planting_date date DEFAULT NULL::date, p_harvest_date date DEFAULT NULL::date, p_yield_per_acre numeric DEFAULT NULL::numeric, p_yield_unit text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_field_id uuid, p_season integer, p_crop_type text, p_variety text DEFAULT NULL::text, p_planting_date date DEFAULT NULL::date, p_harvest_date date DEFAULT NULL::date, p_yield_per_acre numeric DEFAULT NULL::numeric, p_yield_unit text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text, p_request_hash text', 'p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text, p_request_hash text'),
+    ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''''::text, p_bill_date date DEFAULT CURRENT_DATE, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text, p_confirm_po_overage boolean DEFAULT false, p_po_overage_reason text DEFAULT NULL::text', 'p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''''::text, p_bill_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text, p_confirm_po_overage boolean DEFAULT false, p_po_overage_reason text DEFAULT NULL::text'),
+    ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_vendor_bill_id uuid, p_amount_cents bigint, p_payment_date date DEFAULT CURRENT_DATE, p_payment_method text DEFAULT NULL::text, p_reference_number text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text', 'p_vendor_bill_id uuid, p_amount_cents bigint, p_payment_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_payment_method text DEFAULT NULL::text, p_reference_number text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text'),
+    ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_blend_ticket_id uuid, p_order_number text, p_order_date date DEFAULT CURRENT_DATE, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT auth.uid(), p_idempotency_key text DEFAULT NULL::text', 'p_blend_ticket_id uuid, p_order_number text, p_order_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT auth.uid(), p_idempotency_key text DEFAULT NULL::text'),
+    ('create_quick_delivery(uuid,jsonb,uuid,date,text,uuid,text,boolean)', '69c1d569fb2e9eb913502d59e41a76fe', '69c1d569fb2e9eb913502d59e41a76fe', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_customer_id uuid, p_items jsonb, p_driver_id uuid DEFAULT NULL::uuid, p_scheduled_date date DEFAULT CURRENT_DATE, p_delivery_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_skip_invoice boolean DEFAULT false', 'p_customer_id uuid, p_items jsonb, p_driver_id uuid DEFAULT NULL::uuid, p_scheduled_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_delivery_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_skip_invoice boolean DEFAULT false'),
+    ('reverse_credit_memo_application(uuid,text,uuid,text)', '38cea043fc7dae4e65bc8593c95bddfb', 'ce8aa78e2dc0f2364f9e02f3a6170833', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_application_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_application_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_unapply_return_credit_guard_impl_20260826(uuid,text,uuid,text)', '8a304e41a63cac0043b3fe7bf75cc10b', '3a7f32364996e50474eed04a25d6e2de', true, '{postgres=X/postgres}', 'p_credit_memo_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_credit_memo_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', 'd5ac51bf7ae432e9c8360bc75247c087', '0a4fb2dda0b46a234ce6e397b332cfa5', true, '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
+  ) AS t(sig, pre_md5, post_md5, secdef, acl, args_pre, args_post)
   LOOP
     SELECT * INTO v_fn FROM pg_proc WHERE oid = to_regprocedure('public.' || v_row.sig);
     IF v_fn.oid IS NULL THEN
@@ -87,10 +98,15 @@ BEGIN
        OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
        OR v_fn.prosecdef IS DISTINCT FROM v_row.secdef
        OR coalesce((SELECT array_agg(g::text ORDER BY g::text COLLATE "C") FROM unnest(v_fn.proacl) g)::text, 'NULL') IS DISTINCT FROM v_row.acl
+       OR pg_get_function_arguments(v_fn.oid) NOT IN (v_row.args_pre, v_row.args_post)
        OR pg_get_userbyid(v_fn.proowner) <> 'postgres' THEN
-      RAISE EXCEPTION 'PREFLIGHT_FAIL: % body, settings, SECURITY DEFINER, owner or grants drifted; re-review the current definition', v_row.sig;
+      RAISE EXCEPTION 'PREFLIGHT_FAIL: % body, arguments, settings, SECURITY DEFINER, owner or grants drifted; re-review the current definition', v_row.sig;
     END IF;
   END LOOP;
+  IF EXISTS (SELECT 1 FROM rup_sales_records r JOIN invoices i ON i.id = r.invoice_id
+              WHERE r.sale_date IS DISTINCT FROM i.invoice_date) THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: RUP sales records exist whose sale date is not their invoice date; plan their correction before applying';
+  END IF;
 END;
 $preflight$;
 
@@ -233,7 +249,7 @@ BEGIN
   -- OVERNIGHT FIX (finding #2): reversing a write-off retroactively changes AR and writes the
   -- append-only ledger; gate on the write-off's booked date so a closed period blocks it
   -- (Hard Red Line: never bypass check_period_open).
-  PERFORM check_period_open(v_wo.created_at::date);
+  PERFORM check_period_open(v_wo.created_at::date); PERFORM check_period_open((v_wo.created_at AT TIME ZONE 'America/Chicago')::date);
 
   SELECT status, due_date INTO v_old_status, v_due_date
     FROM invoices
@@ -2519,7 +2535,7 @@ BEGIN
     IF v_license IS NULL OR v_license.license_number IS NULL THEN
       v_compliance_status := 'non_compliant';
       v_compliance_notes := 'No applicator license on file for this customer';
-    ELSIF v_license.expiry_date IS NOT NULL AND v_license.expiry_date < (now() AT TIME ZONE 'America/Chicago')::date THEN
+    ELSIF v_license.expiry_date IS NOT NULL AND v_license.expiry_date < GREATEST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date) THEN
       v_compliance_status := 'warning';
       v_compliance_notes := 'Applicator license expired on ' || v_license.expiry_date::text;
     ELSE
@@ -5622,6 +5638,436 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.reverse_credit_memo_application(p_application_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_actor      uuid;
+  v_actor_role text;
+  v_app        record;
+  v_existing   jsonb;
+BEGIN
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH';
+  END IF;
+  SELECT role INTO v_actor_role FROM profiles WHERE id = v_actor AND is_active = true;
+  -- Codex BLOCKER: NULL (inactive/absent profile) must be rejected — `NULL NOT IN (...)` is not true.
+  IF v_actor_role IS NULL OR v_actor_role NOT IN ('admin', 'sales_rep') THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE: only active admins and sales reps can reverse credit applications';
+  END IF;
+  IF p_reason IS NULL OR trim(p_reason) = '' THEN
+    RAISE EXCEPTION 'REASON_REQUIRED: a reason is required to reverse a credit application';
+  END IF;
+
+  IF p_idempotency_key IS NOT NULL THEN
+    v_existing := check_idempotency(p_idempotency_key, 'reverse_credit_memo_application');
+    IF v_existing IS NOT NULL THEN
+      -- Codex HIGH: bind idempotency to the application id (mirror the apply RPC) so a key reused
+      -- for a DIFFERENT application can't silently return the first application's success.
+      IF (v_existing->>'application_id')::uuid IS DISTINCT FROM p_application_id THEN
+        RAISE EXCEPTION 'IDEMPOTENCY_ARGUMENT_MISMATCH: key % was already used to reverse a different application', p_idempotency_key;
+      END IF;
+      RETURN v_existing;
+    END IF;
+  END IF;
+
+  SELECT * INTO v_app FROM credit_memo_applications WHERE id = p_application_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'CREDIT_APPLICATION_NOT_FOUND: %', p_application_id; END IF;
+  IF v_app.reversed_at IS NOT NULL THEN
+    RAISE EXCEPTION 'CREDIT_APPLICATION_ALREADY_REVERSED: %', p_application_id;
+  END IF;
+
+  -- Codex HIGH: gate on the APPLICATION's own period (applied_at), NOT the memo's ISSUE date. Apply
+  -- checks CURRENT_DATE, so an application made in an open period must stay reversible in it even if
+  -- the memo was issued in a since-closed period (mirrors void_payment gating on payment_date).
+  PERFORM check_period_open(v_app.applied_at::date); PERFORM check_period_open((v_app.applied_at AT TIME ZONE 'America/Chicago')::date);
+
+  PERFORM _reverse_credit_memo_application(p_application_id, v_actor, v_actor_role, p_reason);
+
+  v_existing := jsonb_build_object(
+    'success', true, 'application_id', p_application_id,
+    'credit_memo_id', v_app.credit_memo_id, 'target_invoice_id', v_app.target_invoice_id,
+    'amount_cents', v_app.amount_cents
+  );
+  IF p_idempotency_key IS NOT NULL THEN
+    PERFORM save_idempotency(p_idempotency_key, 'reverse_credit_memo_application', v_existing);
+  END IF;
+  RETURN v_existing;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public._unapply_return_credit_guard_impl_20260826(p_credit_memo_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_actor uuid; v_invoice record; v_return record; v_existing jsonb; v_result jsonb; v_capp record; v_product_ids uuid[];
+BEGIN
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN RAISE EXCEPTION 'ACTOR_MISMATCH'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_actor AND is_active = true AND role = 'admin') THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE'; END IF;
+  IF p_reason IS NULL OR trim(p_reason) = '' THEN RAISE EXCEPTION 'Reason is required to unapply a credit memo'; END IF;
+  IF p_idempotency_key IS NOT NULL THEN
+    SELECT result INTO v_existing FROM idempotency_keys WHERE idempotency_key = p_idempotency_key AND operation = 'unapply_credit_memo';
+    IF v_existing IS NOT NULL THEN IF (v_existing->>'credit_memo_id')::uuid IS DISTINCT FROM p_credit_memo_id THEN RAISE EXCEPTION 'IDEMPOTENCY_ARGUMENT_MISMATCH: idempotency key was already used for a different credit memo'; END IF; RETURN v_existing; END IF;
+  END IF;
+  SELECT * INTO v_invoice FROM invoices WHERE id = p_credit_memo_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Invoice not found: %', p_credit_memo_id; END IF;
+  IF v_invoice.invoice_type != 'credit_memo' THEN RAISE EXCEPTION 'Invoice % is not a credit memo (type: %)', v_invoice.invoice_number, v_invoice.invoice_type; END IF;
+  IF v_invoice.status != 'posted' THEN RAISE EXCEPTION 'Only posted credit memos can be unapplied (current status: %)', v_invoice.status; END IF;
+  PERFORM check_period_open(v_invoice.invoice_date);
+  -- Acquire Return/Product protocol before reversing applications or voiding the memo.
+  SELECT * INTO v_return FROM returns WHERE credit_invoice_id = p_credit_memo_id FOR UPDATE;
+  IF v_return.id IS NOT NULL THEN
+    SELECT array_agg(DISTINCT ri.product_id ORDER BY ri.product_id) INTO v_product_ids FROM return_items ri WHERE ri.return_id = v_return.id;
+    PERFORM public.lock_phase3_product_policy_products(v_product_ids);
+  END IF;
+  FOR v_capp IN SELECT id, applied_at FROM credit_memo_applications WHERE credit_memo_id = p_credit_memo_id AND reversed_at IS NULL ORDER BY id LOOP
+    PERFORM check_period_open(v_capp.applied_at::date); PERFORM check_period_open((v_capp.applied_at AT TIME ZONE 'America/Chicago')::date);
+    PERFORM _reverse_credit_memo_application(v_capp.id, v_actor, (SELECT role FROM profiles WHERE id = v_actor), 'Auto-reversed: credit memo ' || v_invoice.invoice_number || ' unapplied — ' || p_reason);
+  END LOOP;
+  UPDATE invoices SET status = 'voided', voided_by = v_actor, voided_at = now(), void_reason = p_reason, updated_at = now() WHERE id = p_credit_memo_id;
+  IF v_return.id IS NOT NULL THEN
+    PERFORM set_config('app.admin_override', 'true', true);
+    UPDATE returns SET status = 'received', credit_invoice_id = NULL, total_credit_cents = 0, credited_at = NULL, credited_by = NULL, updated_at = now() WHERE id = v_return.id;
+    PERFORM set_config('app.admin_override', 'false', true);
+  END IF;
+  INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_role, old_values, new_values, total_impact_cents, description)
+  VALUES ('credit_memo_unapplied', 'invoice', p_credit_memo_id, (SELECT role FROM profiles WHERE id = v_actor), jsonb_build_object('status', 'posted', 'total_amount_cents', v_invoice.total_amount_cents), jsonb_build_object('status', 'voided', 'return_reverted', CASE WHEN v_return.id IS NOT NULL THEN v_return.return_number ELSE NULL END), -v_invoice.total_amount_cents, 'Credit memo ' || v_invoice.invoice_number || ' unapplied: ' || p_reason);
+  INSERT INTO activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id, customer_id)
+  VALUES ('credit_memo_unapplied', 'Credit memo ' || v_invoice.invoice_number || ' unapplied: ' || p_reason, v_actor, 'invoice', p_credit_memo_id, v_invoice.customer_id);
+  v_result := jsonb_build_object('success', true, 'credit_memo_id', p_credit_memo_id, 'invoice_number', v_invoice.invoice_number, 'return_id', v_return.id, 'return_reverted', v_return.id IS NOT NULL);
+  IF p_idempotency_key IS NOT NULL THEN INSERT INTO idempotency_keys (idempotency_key, operation, result, expires_at) VALUES (p_idempotency_key, 'unapply_credit_memo', v_result, now() + interval '24 hours') ON CONFLICT (idempotency_key) DO NOTHING; END IF;
+  RETURN v_result;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public._void_invoice_split_provenance_impl_20260719(p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_inv record; v_alloc record; v_total_allocations_reversed bigint := 0;
+  v_total_prepay_restored bigint := 0; v_prepay_app record; v_actor_role text;
+  v_allocation_set_ids uuid[]; v_commissions_cancelled integer := 0; v_existing jsonb;
+  v_job record;  -- U6 #65: job-release locals
+  v_capp record;  -- CREDIT-APPLY: active-application cursor
+BEGIN
+  SELECT role INTO v_actor_role FROM profiles WHERE id = auth.uid() AND is_active = true;
+  IF v_actor_role IS DISTINCT FROM 'admin' THEN RAISE EXCEPTION 'Only admin users can void invoices'; END IF;
+
+  IF p_idempotency_key IS NOT NULL THEN
+    v_existing := check_idempotency(p_idempotency_key, 'void_invoice');
+    IF v_existing IS NOT NULL THEN RETURN; END IF;
+  END IF;
+
+  SELECT * INTO v_inv FROM invoices WHERE id = p_invoice_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Invoice not found: %', p_invoice_id; END IF;
+  IF v_inv.status = 'voided' THEN RAISE EXCEPTION 'Invoice already voided'; END IF;
+  IF v_inv.status = 'cancelled' THEN RAISE EXCEPTION 'Cannot void a cancelled invoice'; END IF;
+
+  -- draft/unposted invoices were never posted: no allocations/prepay/commissions to reverse,
+  -- and the status trigger only allows →voided from posted/overdue. Route to 'cancelled'
+  -- (draft→cancelled / unposted→cancelled are allowed transitions) and return.
+  -- (A draft/unposted invoice can never carry a credit application — apply requires posted on
+  --  both sides — so no credit reversal is needed on this branch.)
+  IF v_inv.status IN ('draft', 'unposted') THEN
+    UPDATE invoices SET status = 'cancelled', void_reason = p_void_reason, updated_at = now()
+    WHERE id = p_invoice_id;
+
+    IF v_inv.invoice_type = 'field_application' AND v_inv.job_id IS NOT NULL THEN
+      SELECT * INTO v_job FROM jobs WHERE id = v_inv.job_id FOR UPDATE;
+      IF FOUND AND v_job.status = 'invoiced' THEN
+        IF EXISTS (SELECT 1 FROM invoices o
+                   WHERE o.job_id = v_inv.job_id AND o.id <> p_invoice_id
+                     AND o.invoice_type = 'field_application'
+                     AND o.status NOT IN ('voided', 'cancelled') AND o.deleted_at IS NULL) THEN
+          IF v_job.invoice_id IS NOT DISTINCT FROM p_invoice_id THEN
+            UPDATE application_records SET invoice_id = (
+              SELECT o.id FROM invoices o
+               WHERE o.job_id = v_inv.job_id AND o.id <> p_invoice_id
+                 AND o.invoice_type = 'field_application'
+                 AND o.status NOT IN ('voided', 'cancelled') AND o.deleted_at IS NULL
+               ORDER BY o.created_at, o.id LIMIT 1)
+              WHERE source_type = 'job' AND source_id = v_inv.job_id AND invoice_id = p_invoice_id;
+            SET LOCAL app.admin_override = 'true';
+            UPDATE jobs SET invoice_id = (
+              SELECT o.id FROM invoices o
+               WHERE o.job_id = v_inv.job_id AND o.id <> p_invoice_id
+                 AND o.invoice_type = 'field_application'
+                 AND o.status NOT IN ('voided', 'cancelled') AND o.deleted_at IS NULL
+               ORDER BY o.created_at, o.id LIMIT 1)
+              WHERE id = v_inv.job_id;
+            RESET app.admin_override;
+          END IF;
+        ELSE
+          UPDATE application_records SET invoice_id = NULL
+            WHERE source_type = 'job' AND source_id = v_inv.job_id AND invoice_id = p_invoice_id;
+          SET LOCAL app.admin_override = 'true';
+          UPDATE jobs SET status = 'completed', invoice_id = NULL WHERE id = v_inv.job_id;
+          RESET app.admin_override;
+        END IF;
+      END IF;
+    END IF;
+
+    IF v_inv.invoice_type = 'field_application' AND v_inv.job_id IS NOT NULL THEN
+      IF EXISTS (
+        SELECT 1 FROM commissions c
+        JOIN commission_payment_items cpi ON cpi.commission_id = c.id
+        JOIN commission_payments cp ON cp.id = cpi.commission_payment_id
+        WHERE c.job_id = v_inv.job_id AND c.invoice_id = p_invoice_id
+          AND c.status = 'pending' AND cp.status <> 'voided'
+      ) THEN
+        RAISE EXCEPTION 'JOB_HAS_BATCHED_COMMISSIONS: this job invoice''s pending commissions are in an active payout batch — void that commission payment first';
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM commissions
+        WHERE job_id = v_inv.job_id AND invoice_id = p_invoice_id AND status = 'paid'
+      ) THEN
+        INSERT INTO notifications (user_id, title, message, notification_type, related_entity_type, related_entity_id)
+        SELECT p.id, 'Job invoice cancelled — commissions already paid',
+          'Invoice ' || v_inv.invoice_number || ' was cancelled but its commissions were already paid out. Manual review needed before the job is re-invoiced.',
+          'commission_review', 'invoice', p_invoice_id
+        FROM profiles p WHERE p.role = 'admin' AND p.is_active = true;
+      END IF;
+      UPDATE commissions SET status = 'cancelled', commission_amount = 0
+        WHERE job_id = v_inv.job_id AND invoice_id = p_invoice_id AND status = 'pending';
+      GET DIAGNOSTICS v_commissions_cancelled = ROW_COUNT;
+    END IF;
+
+    INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_role, old_values, new_values, total_impact_cents, description)
+    VALUES ('invoice_cancelled', 'invoice', p_invoice_id, v_actor_role,
+      jsonb_build_object('status', v_inv.status, 'total_cents', v_inv.total_amount_cents),
+      jsonb_build_object('status', 'cancelled', 'void_reason', p_void_reason, 'commissions_cancelled', v_commissions_cancelled),
+      0,
+      'Cancelled ' || v_inv.invoice_number || ' (was ' || v_inv.status || ') — ' || p_void_reason);
+
+    INSERT INTO activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id, customer_id)
+    VALUES ('invoice_cancelled',
+      'Cancelled invoice ' || v_inv.invoice_number || ' — ' || p_void_reason,
+      auth.uid(), 'invoice', p_invoice_id, v_inv.customer_id);
+
+    IF p_idempotency_key IS NOT NULL THEN
+      PERFORM save_idempotency(p_idempotency_key, 'void_invoice', jsonb_build_object(
+        'success', true, 'invoice_id', p_invoice_id, 'status', 'cancelled',
+        'allocations_reversed_cents', 0, 'prepay_restored_cents', 0, 'commissions_cancelled', v_commissions_cancelled));
+    END IF;
+    RETURN;
+  END IF;
+
+  -- H3 fix: refuse to void a posted/overdue/paid invoice that still has direct
+  -- cash applied. void_invoice reverses prepay + credit-memo applications below,
+  -- but does NOT re-bank direct payments (paid_amount_cents) or payment
+  -- allocations (invoice_line_allocations) — voiding would strand that cash.
+  -- The admin must void/unapply those payments first (void_payment re-banks the
+  -- cash as customer prepay), then void the invoice. Prepay-only and
+  -- credit-memo-only voids carry neither and are unaffected.
+  IF v_inv.paid_amount_cents > 0
+     OR EXISTS (
+       SELECT 1
+       FROM invoice_line_allocations ila
+       JOIN allocation_sets aset ON aset.id = ila.allocation_set_id
+       WHERE ila.invoice_id = p_invoice_id
+         AND aset.entity_type = 'payment'
+         AND aset.is_active = true
+     ) THEN
+    RAISE EXCEPTION 'INVOICE_HAS_APPLIED_PAYMENTS: invoice % has $% in applied payments — void or unapply those payments first (that re-banks the cash as prepay), then void the invoice',
+      v_inv.invoice_number, (v_inv.paid_amount_cents / 100.0)::numeric(12,2);
+  END IF;
+
+  IF v_inv.status IN ('posted', 'paid', 'overdue') THEN PERFORM check_period_open(v_inv.invoice_date); END IF;
+
+  -- CREDIT-APPLY: reverse every active credit-memo application that touches this invoice
+  -- (as the credit memo OR as the target) BEFORE zeroing its levers. This restores the other
+  -- side and drains this invoice's credit_applied_cents to 0; without it a voided target would
+  -- leave credit_applied_cents set and violate invoices_balance_non_negative, and a voided memo
+  -- would strand the credit it handed out (Codex #4).
+  -- Codex BLOCKER: the enclosing void only period-checks status='posted', but a credited target is
+  -- 'paid'/'overdue'. Each application's reversal is a money movement, so gate it on THAT
+  -- application's own period (applied_at) before touching it.
+  -- Codex MED (accepted, not fixed): void locks THIS invoice first, then the helper locks both sides
+  -- in id order — two concurrent voids of a memo and its target can deadlock. Postgres detects it and
+  -- aborts one cleanly (money stays atomic; the operator retries). Rare + non-corrupting, so it is
+  -- left as a safe-abort rather than a global pre-lock of all counterparties.
+  FOR v_capp IN
+    SELECT id, applied_at FROM credit_memo_applications
+     WHERE reversed_at IS NULL
+       AND (credit_memo_id = p_invoice_id OR target_invoice_id = p_invoice_id)
+     ORDER BY id
+  LOOP
+    PERFORM check_period_open(v_capp.applied_at::date); PERFORM check_period_open((v_capp.applied_at AT TIME ZONE 'America/Chicago')::date);
+    PERFORM _reverse_credit_memo_application(v_capp.id, auth.uid(), v_actor_role,
+      'Auto-reversed: invoice ' || v_inv.invoice_number || ' voided — ' || p_void_reason);
+  END LOOP;
+
+  SELECT ARRAY(SELECT DISTINCT ila.allocation_set_id FROM invoice_line_allocations ila
+    WHERE ila.invoice_id = p_invoice_id AND ila.allocation_set_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM allocation_sets hist WHERE hist.id = ila.allocation_set_id
+        AND hist.entity_type = 'payment' AND hist.is_active = false)) INTO v_allocation_set_ids;
+
+  FOR v_alloc IN SELECT ila.id, ila.amount_cents, ila.allocation_set_id FROM invoice_line_allocations ila
+    WHERE ila.invoice_id = p_invoice_id
+      AND NOT EXISTS (SELECT 1 FROM allocation_sets hist WHERE hist.id = ila.allocation_set_id
+        AND hist.entity_type = 'payment' AND hist.is_active = false) LOOP
+    v_total_allocations_reversed := v_total_allocations_reversed + v_alloc.amount_cents;
+    DELETE FROM invoice_line_allocations WHERE id = v_alloc.id;
+  END LOOP;
+
+  IF v_total_allocations_reversed > 0 AND array_length(v_allocation_set_ids, 1) > 0 THEN
+    UPDATE allocation_sets SET total_allocated_cents = (SELECT COALESCE(SUM(amount_cents), 0)
+      FROM invoice_line_allocations WHERE allocation_set_id = allocation_sets.id),
+      updated_at = now() WHERE id = ANY(v_allocation_set_ids);
+  END IF;
+
+  FOR v_prepay_app IN SELECT pa.id, pa.applied_amount_cents, pa.prepay_credit_id FROM prepay_applications pa
+    WHERE pa.invoice_id = p_invoice_id LOOP
+    v_total_prepay_restored := v_total_prepay_restored + v_prepay_app.applied_amount_cents;
+    UPDATE prepay_credits SET balance_cents = balance_cents + v_prepay_app.applied_amount_cents,
+      updated_at = now() WHERE id = v_prepay_app.prepay_credit_id;
+    DELETE FROM prepay_applications WHERE id = v_prepay_app.id;
+  END LOOP;
+
+  IF v_total_prepay_restored > 0 THEN
+    UPDATE customers SET prepay_balance_cents = COALESCE(prepay_balance_cents, 0) + v_total_prepay_restored,
+      updated_at = now() WHERE id = v_inv.customer_id;
+  END IF;
+
+  -- CREDIT-APPLY: credit_applied_cents = 0 added (all applications reversed above → already 0;
+  -- explicit for safety so the voided row's balance is unambiguously 0).
+  UPDATE invoices SET status = 'voided', voided_by = auth.uid(), voided_at = now(),
+    void_reason = p_void_reason, total_amount_cents = 0, paid_amount_cents = 0,
+    prepay_applied_cents = 0, write_off_cents = 0, credit_applied_cents = 0, updated_at = now()
+  WHERE id = p_invoice_id;
+
+  -- Codex HIGH: a generic void of a CREDIT MEMO must also release its linked return (mirroring
+  -- unapply_credit_memo), or the return stays 'credited' pointing at a voided memo and can never be
+  -- re-credited. Regular invoices have no such link, so the guard scopes this to credit memos.
+  IF v_inv.invoice_type = 'credit_memo' THEN
+    PERFORM set_config('app.admin_override', 'true', true);
+    UPDATE returns SET
+      status = 'received', credit_invoice_id = NULL, total_credit_cents = 0,
+      credited_at = NULL, credited_by = NULL, updated_at = now()
+    WHERE credit_invoice_id = p_invoice_id;
+    PERFORM set_config('app.admin_override', 'false', true);
+  END IF;
+
+  IF v_inv.invoice_type = 'field_application' AND v_inv.job_id IS NOT NULL THEN
+    SELECT * INTO v_job FROM jobs WHERE id = v_inv.job_id FOR UPDATE;
+    IF FOUND AND v_job.status = 'invoiced' THEN
+      IF EXISTS (SELECT 1 FROM invoices o
+                 WHERE o.job_id = v_inv.job_id AND o.id <> p_invoice_id
+                   AND o.invoice_type = 'field_application'
+                   AND o.status NOT IN ('voided', 'cancelled') AND o.deleted_at IS NULL) THEN
+        IF v_job.invoice_id IS NOT DISTINCT FROM p_invoice_id THEN
+          UPDATE application_records SET invoice_id = (
+            SELECT o.id FROM invoices o
+             WHERE o.job_id = v_inv.job_id AND o.id <> p_invoice_id
+               AND o.invoice_type = 'field_application'
+               AND o.status NOT IN ('voided', 'cancelled') AND o.deleted_at IS NULL
+             ORDER BY o.created_at, o.id LIMIT 1)
+            WHERE source_type = 'job' AND source_id = v_inv.job_id AND invoice_id = p_invoice_id;
+          SET LOCAL app.admin_override = 'true';
+          UPDATE jobs SET invoice_id = (
+            SELECT o.id FROM invoices o
+             WHERE o.job_id = v_inv.job_id AND o.id <> p_invoice_id
+               AND o.invoice_type = 'field_application'
+               AND o.status NOT IN ('voided', 'cancelled') AND o.deleted_at IS NULL
+             ORDER BY o.created_at, o.id LIMIT 1)
+            WHERE id = v_inv.job_id;
+          RESET app.admin_override;
+        END IF;
+      ELSE
+        UPDATE application_records SET invoice_id = NULL
+          WHERE source_type = 'job' AND source_id = v_inv.job_id AND invoice_id = p_invoice_id;
+        SET LOCAL app.admin_override = 'true';
+        UPDATE jobs SET status = 'completed', invoice_id = NULL WHERE id = v_inv.job_id;
+        RESET app.admin_override;
+      END IF;
+    END IF;
+  END IF;
+
+  IF v_inv.order_id IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM invoices WHERE order_id = v_inv.order_id
+        AND id != p_invoice_id AND status NOT IN ('voided', 'cancelled') AND deleted_at IS NULL) THEN
+      UPDATE commissions SET status = 'cancelled' WHERE order_id = v_inv.order_id AND status = 'pending';
+      GET DIAGNOSTICS v_commissions_cancelled = ROW_COUNT;
+    END IF;
+  END IF;
+
+  IF v_inv.invoice_type = 'field_application' AND v_inv.job_id IS NOT NULL THEN
+    IF EXISTS (
+      SELECT 1 FROM commissions c
+      JOIN commission_payment_items cpi ON cpi.commission_id = c.id
+      JOIN commission_payments cp ON cp.id = cpi.commission_payment_id
+      WHERE c.job_id = v_inv.job_id AND c.invoice_id = p_invoice_id
+        AND c.status = 'pending' AND cp.status <> 'voided'
+    ) THEN
+      RAISE EXCEPTION 'JOB_HAS_BATCHED_COMMISSIONS: this job invoice''s pending commissions are in an active payout batch — void that commission payment first';
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM commissions
+      WHERE job_id = v_inv.job_id AND invoice_id = p_invoice_id AND status = 'paid'
+    ) THEN
+      INSERT INTO notifications (user_id, title, message, notification_type, related_entity_type, related_entity_id)
+      SELECT p.id, 'Job invoice voided — commissions already paid',
+        'Invoice ' || v_inv.invoice_number || ' was voided but its commissions were already paid out. Manual review needed before the job is re-invoiced.',
+        'commission_review', 'invoice', p_invoice_id
+      FROM profiles p WHERE p.role = 'admin' AND p.is_active = true;
+    END IF;
+    UPDATE commissions SET status = 'cancelled', commission_amount = 0
+      WHERE job_id = v_inv.job_id AND invoice_id = p_invoice_id AND status = 'pending';
+    GET DIAGNOSTICS v_commissions_cancelled = ROW_COUNT;
+  END IF;
+
+  INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_role, old_values, new_values, total_impact_cents, description)
+  VALUES ('invoice_voided', 'invoice', p_invoice_id, v_actor_role,
+    jsonb_build_object('status', v_inv.status, 'total_cents', v_inv.total_amount_cents, 'paid_amount_cents', v_inv.paid_amount_cents, 'prepay_applied_cents', v_inv.prepay_applied_cents, 'write_off_cents', v_inv.write_off_cents),
+    jsonb_build_object('status', 'voided', 'void_reason', p_void_reason, 'allocations_reversed_cents', v_total_allocations_reversed, 'prepay_restored_cents', v_total_prepay_restored, 'commissions_cancelled', v_commissions_cancelled),
+    -1 * v_inv.total_amount_cents,
+    'Voided ' || v_inv.invoice_number || ' — ' || p_void_reason ||
+      CASE WHEN v_total_allocations_reversed > 0 THEN '. Reversed $' || (v_total_allocations_reversed / 100.0)::text || ' in allocations.' ELSE '' END ||
+      CASE WHEN v_total_prepay_restored > 0 THEN ' Restored $' || (v_total_prepay_restored / 100.0)::text || ' in prepay credits.' ELSE '' END ||
+      CASE WHEN v_commissions_cancelled > 0 THEN ' Cancelled ' || v_commissions_cancelled || ' pending commission(s).' ELSE '' END);
+
+  INSERT INTO activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id, customer_id)
+  VALUES ('invoice_voided',
+    'Voided invoice ' || v_inv.invoice_number || ' — ' || p_void_reason ||
+      CASE WHEN v_total_allocations_reversed > 0 THEN '. Reversed $' || (v_total_allocations_reversed / 100.0)::text || ' in allocations.' ELSE '' END ||
+      CASE WHEN v_total_prepay_restored > 0 THEN ' Restored $' || (v_total_prepay_restored / 100.0)::text || ' in prepay credits.' ELSE '' END ||
+      CASE WHEN v_commissions_cancelled > 0 THEN ' Cancelled ' || v_commissions_cancelled || ' pending commission(s).' ELSE '' END,
+    auth.uid(), 'invoice', p_invoice_id, v_inv.customer_id);
+
+  IF v_total_allocations_reversed > 0 OR v_total_prepay_restored > 0 OR v_commissions_cancelled > 0 THEN
+    INSERT INTO notifications (user_id, title, message, notification_type, related_entity_type, related_entity_id)
+    SELECT p.id, 'Invoice Voided — Allocations Reversed',
+      'Invoice ' || v_inv.invoice_number || ' voided. $' ||
+        (v_total_allocations_reversed / 100.0)::text || ' in allocations reversed, $' ||
+        (v_total_prepay_restored / 100.0)::text || ' in prepay credits restored.' ||
+        CASE WHEN v_commissions_cancelled > 0 THEN ' ' || v_commissions_cancelled || ' pending commission(s) cancelled.' ELSE '' END,
+      'invoice_void_reversal', 'invoice', p_invoice_id
+    FROM profiles p WHERE p.role = 'admin' AND p.is_active = true;
+  END IF;
+
+  IF p_idempotency_key IS NOT NULL THEN
+    PERFORM save_idempotency(p_idempotency_key, 'void_invoice', jsonb_build_object(
+      'success', true, 'invoice_id', p_invoice_id,
+      'allocations_reversed_cents', v_total_allocations_reversed,
+      'prepay_restored_cents', v_total_prepay_restored,
+      'commissions_cancelled', v_commissions_cancelled));
+  END IF;
+END;
+$function$;
+
 -- Each SET DEFAULT takes a brief exclusive table lock; give up rather than queue behind a long transaction.
 SET LOCAL lock_timeout = '10s';
 ALTER TABLE public.payments ALTER COLUMN payment_date SET DEFAULT ((now() AT TIME ZONE 'America/Chicago'::text))::date;
@@ -5635,47 +6081,50 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', 'c5666f64d37ed39b5e3ed7f86f0bad51', true, '{postgres=X/postgres}'),
-    ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_apply_prepay_to_invoice_replay_impl_20261015(uuid,uuid,bigint,uuid,text)', 'c9377dab8f2534a03af2c27a6e1d510c', '53ac418df8065bd8001136a55e29ebea', true, '{postgres=X/postgres}'),
-    ('_apply_write_off_replay_impl_20261015(uuid,bigint,text,uuid,text)', '00e8d020f9faf6276de8ddaf4f1411fc', '6c89936b2baa95094dbdcf654ad6f89e', true, '{postgres=X/postgres}'),
-    ('_post_commission_payment_intent_impl_20260809(uuid,uuid,text)', '240fd81fd597136c195a62e7f60f3fbc', '865aed5ebe639bd2965c97224f484cf6', true, '{postgres=X/postgres}'),
-    ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true, '{postgres=X/postgres}'),
-    ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true, '{postgres=X/postgres}'),
-    ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true, '{postgres=X/postgres}'),
-    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true, '{postgres=X/postgres}'),
-    ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}'),
-    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', 'fd0e3a22c7d9284028cad9f9c37e7836', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true, '{postgres=X/postgres}'),
-    ('_create_inventory_hold_intent_impl_20260905(uuid,uuid,numeric,text,date,text,uuid,boolean,text,text)', '30ae56a0e1ee3b472abe5c95508b43fc', 'd7e98a25d9b194e8ede05047c0cb0b6a', true, '{postgres=X/postgres}'),
-    ('_transition_rebate_claim_replay_impl_20261015(uuid,text,bigint,text,text)', 'de22ed84218873c02023720f5f4d06e1', 'ab5e9d5210ff4aeabff662b56ff5c85d', true, '{postgres=X/postgres}'),
-    ('_create_rush_order_below_cost_impl_20260810(uuid,jsonb,text,text,uuid,text)', '00eb8676ef9f214baf0cfa9fc25b1924', '17fa918ed609b079ce8a3c08337368ca', true, '{postgres=X/postgres}'),
-    ('_create_followup_delivery_replay_impl_20261015(uuid,date,uuid,text)', 'da4e748e6139cc43247fdcfbfccf5251', '286023631494a108ad1ecadec3011bff', true, '{postgres=X/postgres}'),
-    ('_create_job_from_quote_section_replay_impl_20261015(uuid,uuid,uuid,text)', 'e1e701e0a096c0d022b5ac370aa4bb60', 'b567ac08aef7db8c747af5424439d7de', true, '{postgres=X/postgres}'),
-    ('_batch_reschedule_deliveries_replay_impl_20261015(uuid[],date,uuid,text)', 'd87ef756d7e5c30e2fe9cf722e68b646', '9e36f19b08770f23b95c106fcdd1ead1', true, '{postgres=X/postgres}'),
-    ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true, '{postgres=X/postgres}'),
-    ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
-    ('create_quick_delivery(uuid,jsonb,uuid,date,text,uuid,text,boolean)', '69c1d569fb2e9eb913502d59e41a76fe', '69c1d569fb2e9eb913502d59e41a76fe', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}')
-  ) AS t(sig, pre_md5, post_md5, secdef, acl)
+    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_application_id uuid, p_actor uuid, p_actor_role text, p_reason text', 'p_application_id uuid, p_actor uuid, p_actor_role text, p_reason text'),
+    ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', '39144471446fc8e4a400d51cbe02d85e', true, '{postgres=X/postgres}', 'p_write_off_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_write_off_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_credit_memo_id uuid, p_target_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_credit_memo_id uuid, p_target_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_apply_prepay_to_invoice_replay_impl_20261015(uuid,uuid,bigint,uuid,text)', 'c9377dab8f2534a03af2c27a6e1d510c', '53ac418df8065bd8001136a55e29ebea', true, '{postgres=X/postgres}', 'p_prepay_credit_id uuid, p_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_prepay_credit_id uuid, p_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_apply_write_off_replay_impl_20261015(uuid,bigint,text,uuid,text)', '00e8d020f9faf6276de8ddaf4f1411fc', '6c89936b2baa95094dbdcf654ad6f89e', true, '{postgres=X/postgres}', 'p_invoice_id uuid, p_amount_cents bigint, p_reason text, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_amount_cents bigint, p_reason text, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_post_commission_payment_intent_impl_20260809(uuid,uuid,text)', '240fd81fd597136c195a62e7f60f3fbc', '865aed5ebe639bd2965c97224f484cf6', true, '{postgres=X/postgres}', 'p_payment_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_payment_id uuid, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true, '{postgres=X/postgres}', 'p_payment_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_payment_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true, '{postgres=X/postgres}', 'p_allocation_set_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_allocation_set_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true, '{postgres=X/postgres}', 'p_commission_ids uuid[], p_payment_method text, p_reference text, p_payment_date date, p_notes text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_commission_ids uuid[], p_payment_method text, p_reference text, p_payment_date date, p_notes text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true, '{postgres=X/postgres}', 'p_quote_id uuid, p_quote_payload jsonb, p_sections jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'p_quote_id uuid, p_quote_payload jsonb, p_sections jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false'),
+    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', 'addc85535a70c08ecb9dce6de54ba16b', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_job_id uuid, p_actor uuid', 'p_job_id uuid, p_actor uuid'),
+    ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_job_ids uuid[]', 'p_job_ids uuid[]'),
+    ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_days_ahead integer DEFAULT 7', 'p_days_ahead integer DEFAULT 7'),
+    ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true, '{postgres=X/postgres}', '', ''),
+    ('_create_inventory_hold_intent_impl_20260905(uuid,uuid,numeric,text,date,text,uuid,boolean,text,text)', '30ae56a0e1ee3b472abe5c95508b43fc', 'd7e98a25d9b194e8ede05047c0cb0b6a', true, '{postgres=X/postgres}', 'p_product_id uuid, p_customer_id uuid, p_quantity numeric, p_hold_type text, p_expires_at date, p_notes text, p_performed_by uuid, p_force boolean DEFAULT false, p_force_reason text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text', 'p_product_id uuid, p_customer_id uuid, p_quantity numeric, p_hold_type text, p_expires_at date, p_notes text, p_performed_by uuid, p_force boolean DEFAULT false, p_force_reason text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text'),
+    ('_transition_rebate_claim_replay_impl_20261015(uuid,text,bigint,text,text)', 'de22ed84218873c02023720f5f4d06e1', 'ab5e9d5210ff4aeabff662b56ff5c85d', true, '{postgres=X/postgres}', 'p_claim_id uuid, p_new_status text, p_paid_amount_cents bigint DEFAULT NULL::bigint, p_manufacturer_ref text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text', 'p_claim_id uuid, p_new_status text, p_paid_amount_cents bigint DEFAULT NULL::bigint, p_manufacturer_ref text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text'),
+    ('_create_rush_order_below_cost_impl_20260810(uuid,jsonb,text,text,uuid,text)', '00eb8676ef9f214baf0cfa9fc25b1924', '17fa918ed609b079ce8a3c08337368ca', true, '{postgres=X/postgres}', 'p_customer_id uuid, p_items jsonb DEFAULT ''[]''::jsonb, p_notes text DEFAULT NULL::text, p_customer_po_number text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_customer_id uuid, p_items jsonb DEFAULT ''[]''::jsonb, p_notes text DEFAULT NULL::text, p_customer_po_number text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_create_followup_delivery_replay_impl_20261015(uuid,date,uuid,text)', 'da4e748e6139cc43247fdcfbfccf5251', '286023631494a108ad1ecadec3011bff', true, '{postgres=X/postgres}', 'p_original_delivery_id uuid, p_scheduled_date date DEFAULT NULL::date, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_original_delivery_id uuid, p_scheduled_date date DEFAULT NULL::date, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_create_job_from_quote_section_replay_impl_20261015(uuid,uuid,uuid,text)', 'e1e701e0a096c0d022b5ac370aa4bb60', 'b567ac08aef7db8c747af5424439d7de', true, '{postgres=X/postgres}', 'p_quote_id uuid, p_section_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'p_quote_id uuid, p_section_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_batch_reschedule_deliveries_replay_impl_20261015(uuid[],date,uuid,text)', 'd87ef756d7e5c30e2fe9cf722e68b646', '9e36f19b08770f23b95c106fcdd1ead1', true, '{postgres=X/postgres}', 'p_delivery_ids uuid[], p_new_date date, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_delivery_ids uuid[], p_new_date date, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true, '{postgres=X/postgres}', 'p_field_id uuid, p_season integer, p_crop_type text, p_variety text DEFAULT NULL::text, p_planting_date date DEFAULT NULL::date, p_harvest_date date DEFAULT NULL::date, p_yield_per_acre numeric DEFAULT NULL::numeric, p_yield_unit text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_field_id uuid, p_season integer, p_crop_type text, p_variety text DEFAULT NULL::text, p_planting_date date DEFAULT NULL::date, p_harvest_date date DEFAULT NULL::date, p_yield_per_acre numeric DEFAULT NULL::numeric, p_yield_unit text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text, p_request_hash text', 'p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text, p_request_hash text'),
+    ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
+    ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''''::text, p_bill_date date DEFAULT CURRENT_DATE, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text, p_confirm_po_overage boolean DEFAULT false, p_po_overage_reason text DEFAULT NULL::text', 'p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''''::text, p_bill_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text, p_confirm_po_overage boolean DEFAULT false, p_po_overage_reason text DEFAULT NULL::text'),
+    ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_vendor_bill_id uuid, p_amount_cents bigint, p_payment_date date DEFAULT CURRENT_DATE, p_payment_method text DEFAULT NULL::text, p_reference_number text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text', 'p_vendor_bill_id uuid, p_amount_cents bigint, p_payment_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_payment_method text DEFAULT NULL::text, p_reference_number text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text'),
+    ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_blend_ticket_id uuid, p_order_number text, p_order_date date DEFAULT CURRENT_DATE, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT auth.uid(), p_idempotency_key text DEFAULT NULL::text', 'p_blend_ticket_id uuid, p_order_number text, p_order_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT auth.uid(), p_idempotency_key text DEFAULT NULL::text'),
+    ('create_quick_delivery(uuid,jsonb,uuid,date,text,uuid,text,boolean)', '69c1d569fb2e9eb913502d59e41a76fe', '69c1d569fb2e9eb913502d59e41a76fe', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_customer_id uuid, p_items jsonb, p_driver_id uuid DEFAULT NULL::uuid, p_scheduled_date date DEFAULT CURRENT_DATE, p_delivery_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_skip_invoice boolean DEFAULT false', 'p_customer_id uuid, p_items jsonb, p_driver_id uuid DEFAULT NULL::uuid, p_scheduled_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_delivery_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_skip_invoice boolean DEFAULT false'),
+    ('reverse_credit_memo_application(uuid,text,uuid,text)', '38cea043fc7dae4e65bc8593c95bddfb', 'ce8aa78e2dc0f2364f9e02f3a6170833', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_application_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_application_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_unapply_return_credit_guard_impl_20260826(uuid,text,uuid,text)', '8a304e41a63cac0043b3fe7bf75cc10b', '3a7f32364996e50474eed04a25d6e2de', true, '{postgres=X/postgres}', 'p_credit_memo_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_credit_memo_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', 'd5ac51bf7ae432e9c8360bc75247c087', '0a4fb2dda0b46a234ce6e397b332cfa5', true, '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
+  ) AS t(sig, pre_md5, post_md5, secdef, acl, args_pre, args_post)
   LOOP
     SELECT * INTO v_fn FROM pg_proc WHERE oid = to_regprocedure('public.' || v_row.sig);
     IF v_fn.oid IS NULL
        OR md5(replace(v_fn.prosrc, chr(13), '')) <> v_row.post_md5
        OR regexp_replace(v_fn.prosrc, '--[^\n]*', '', 'g') ~* '\mcurrent_date\M'
-       OR pg_get_function_arguments(v_fn.oid) ~* '\mcurrent_date\M'
+       OR pg_get_function_arguments(v_fn.oid) <> v_row.args_post
        OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
        OR v_fn.prosecdef IS DISTINCT FROM v_row.secdef
        OR coalesce((SELECT array_agg(g::text ORDER BY g::text COLLATE "C") FROM unnest(v_fn.proacl) g)::text, 'NULL') IS DISTINCT FROM v_row.acl

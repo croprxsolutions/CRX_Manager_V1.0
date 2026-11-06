@@ -192,7 +192,8 @@ commits while Sol found new bugs in how the pieces worked together each time.
 A commit that only fixes MED/LOW findings, or only refutes findings, needs no whole-branch rerun:
 list those fixes in the final report and name both heads (Mason, 2026-11-06, after one 5-line hint
 took four extra Luna rounds on #1572). A commit that fixes a BLOCKER or HIGH, or adds anything
-beyond the findings, still needs the round again.
+beyond the findings, still needs the round again. This holds in rule files too: the rule-file list
+above only says what counts as plain notes.
 When the whole-branch Luna round cannot run, a whole-branch Sol review counts instead: the
 branch is too large and the script falls back to per-commit commands (those do not count), or
 the guard-change round cap has stopped Luna. On a Sol-list change that is the Step 3B review;

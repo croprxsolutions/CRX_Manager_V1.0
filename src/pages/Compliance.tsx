@@ -25,7 +25,8 @@ import { exportToCSV, fmtCSV } from '../lib/csvExport';
 import { fetchAllRows } from '../lib/pagedRead';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import RupIncompleteNotice, { RUP_FLAGS_KNOWN_INCOMPLETE } from '../components/compliance/RupIncompleteNotice';
-import { localToday, localDatePlusDays, parseLocalDate } from '../lib/dateUtils';
+import { localToday, localDatePlusDays, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
+import { computeSeason, seasonStartDate } from '../utils/season';
 import { formatCents as fmtCurrency } from '../lib/money';
 import type { ApplicatorLicense, RUPSalesRecord } from '../types';
 
@@ -81,13 +82,9 @@ export default function Compliance() {
   // The last license load failed: an error shows instead of zero counts.
   const [licensesFailed, setLicensesFailed] = useState(false);
   const licenseLoadSeq = useRef(0);
-  const [rupStartDate, setRUPStartDate] = useState(() => {
-    // Default: current season start (Oct 1 of previous year or current year)
-    const now = new Date();
-    const seasonYear = now.getMonth() >= 9 ? now.getFullYear() : now.getFullYear() - 1;
-    return `${seasonYear}-10-01`;
-  });
-  const [rupEndDate, setRUPEndDate] = useState(localToday());
+  // Default: the current season so far, by the Chicago date (KI-18).
+  const [rupStartDate, setRUPStartDate] = useState(() => seasonStartDate(computeSeason()));
+  const [rupEndDate, setRUPEndDate] = useState(todayInBusinessTz);
   const [rupComplianceFilter, setRUPComplianceFilter] = useState('');
 
   // Field listing with FSA numbers (B8)

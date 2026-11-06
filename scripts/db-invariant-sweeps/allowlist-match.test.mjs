@@ -30,7 +30,10 @@ try {
   //    separately pinned entry for the candidate body of 20261027080400 (controlled rollout/rollback pair).
   // 23 after 2026-11-05 (20261107130000, PR #1486): apply_product_setup's insert wrapper passes p_performed_by to
   //    _apply_product_setup_update, which refuses a forged actor first.
-  equal(actorEntries.length, 23, '23 reviewed exceptions (save_job, save_field_app_invoice and apply_product_setup added; three unflagged order/application exceptions removed; convert_quote_to_order has a live and a candidate entry)');
+  // 29 after 2026-11-06 (20261114200000, KI-10 batch 4d, PR #1528): +6 batch 4d wrappers whose nested pre-lookup block
+  //    re-binds a shadowed v_actor := auth.uid() before ACTOR_MISMATCH (batch_approve/reject_blend_tickets,
+  //    dismiss_watchdog_flag, save_blend_ticket_fields, save_field, save_field_crop_history).
+  equal(actorEntries.length, 29, '29 reviewed exceptions (save_job, save_field_app_invoice, apply_product_setup and six batch 4d wrappers added; three unflagged order/application exceptions removed; convert_quote_to_order has a live and a candidate entry)');
   const convertEntries = actorEntries.filter((entry) => entry.violation_key.startsWith('convert_quote_to_order('));
   equal(convertEntries.length, 2, 'convert_quote_to_order has exactly one current-live and one candidate contract set');
   const convertImplKey = Object.keys(convertEntries[0].reviewed_contracts).find((key) => key.startsWith('public._convert_quote_to_order_below_cost_impl_20260810('));

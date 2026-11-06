@@ -7784,6 +7784,7 @@ export type Database = {
           id: number
           new_value: string | null
           old_value: string | null
+          parent_event_id: number | null
           product_id: string
         }
         Insert: {
@@ -7795,6 +7796,7 @@ export type Database = {
           id?: never
           new_value?: string | null
           old_value?: string | null
+          parent_event_id?: number | null
           product_id: string
         }
         Update: {
@@ -7806,6 +7808,7 @@ export type Database = {
           id?: never
           new_value?: string | null
           old_value?: string | null
+          parent_event_id?: number | null
           product_id?: string
         }
         Relationships: [

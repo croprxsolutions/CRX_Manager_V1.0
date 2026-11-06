@@ -1,9 +1,9 @@
--- Smoke chain: the product setup workbook (REQUIRES 20261107080000 and 20261107130000).
+-- Smoke chain: the product setup workbook (REQUIRES 20261107080000, 20261107130000 and 20261108120000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so every product and log row it writes is rolled
 -- back. Proves, as a real signed-in browser session (role authenticated with each live profile's
 -- claims) and as a signed-out visitor (role anon), on an invented product:
 --   * the installed bodies are exactly 20261107080000's (apply_product_setup's update body renamed
---     _apply_product_setup_update by 20261107130000, which owns apply_product_setup); anon cannot execute
+--     _apply_product_setup_update by 20261107130000, which owns apply_product_setup; the fingerprint helper is 20261108120000's, which adds a grouped size's parent); anon cannot execute
 --     any of the five functions and a signed-in user cannot call the fingerprint helper or the update body;
 --   * an admin downloads the product, previews a rate change for it, saves a setup change with
 --     apply_product_setup, a same-key replay answers the same, and the downloaded (now old) row is
@@ -26,7 +26,7 @@ DECLARE
   v_md5 text;
 BEGIN
   FOR v_sig, v_md5 IN SELECT * FROM (VALUES
-    ('public._product_setup_fingerprint(public.products)', '5e4d5ae6d5f8b7ce2186531f6f1ba806'),
+    ('public._product_setup_fingerprint(public.products)', 'ff3660ba6a4d3f7b1528a22f75985cdb'),
     ('public.get_product_setup_workbook()', '219acbf55ec555a29af3fe96250784a7'),
     ('public.preview_product_rates(jsonb)', '001a9d34bb4125c43daa4c22742415ab'),
     ('public._apply_product_setup_update(jsonb,uuid,text)', '9c1385aa3c9ce2c40f48415195db79b5'),

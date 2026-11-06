@@ -127,8 +127,11 @@ BEGIN
     END IF;
     EXECUTE 'RESET ROLE';
   END IF;
-  SELECT id INTO v_driver FROM public.profiles
-   WHERE is_active AND role NOT IN ('admin', 'sales_rep', 'driver') ORDER BY created_at, id LIMIT 1;
+  -- Row level security also shows anyone the deliveries assigned to them, so pick a user with none.
+  SELECT p.id INTO v_driver FROM public.profiles p
+   WHERE p.is_active AND p.role NOT IN ('admin', 'sales_rep', 'driver')
+     AND NOT EXISTS (SELECT 1 FROM public.deliveries d WHERE d.assigned_driver = p.id)
+   ORDER BY p.created_at, p.id LIMIT 1;
   IF v_driver IS NOT NULL THEN
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_driver, 'role', 'authenticated')::text, true);
     EXECUTE 'SET LOCAL ROLE authenticated';

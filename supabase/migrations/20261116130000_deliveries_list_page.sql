@@ -79,7 +79,12 @@ BEGIN
   END IF;
 
   RETURN (
-    WITH base AS (
+    -- Only the columns the filters, sort and counts need are carried through; the full row is
+    -- built for the returned page alone, and item counts come from one grouped read.
+    WITH item_counts AS (
+      SELECT di.delivery_id, count(*) AS item_count FROM public.delivery_items di GROUP BY di.delivery_id
+    ),
+    base AS (
       SELECT
         d.id,
         d.status,
@@ -89,7 +94,6 @@ BEGIN
         d.customer_id,
         d.completed_at,
         d.delivery_number,
-        to_jsonb(d) AS rec,
         COALESCE(NULLIF(c.farm_name, ''), 'Unknown') AS customer_name,
         CASE WHEN d.assigned_driver IS NULL THEN 'Unassigned'
              ELSE COALESCE(NULLIF(pv.full_name, ''), 'Unknown driver') END AS driver_name,
@@ -104,9 +108,10 @@ BEGIN
       SELECT * FROM base WHERE status NOT IN ('cancelled', 'voided')
     ),
     filtered AS (
-      SELECT b.*, (SELECT count(*) FROM public.delivery_items di WHERE di.delivery_id = b.id) AS item_count
+      SELECT b.*, COALESCE(ic.item_count, 0) AS item_count
       FROM base b
-      WHERE (CASE WHEN p_statuses IS NULL THEN b.status NOT IN ('cancelled', 'voided')
+      LEFT JOIN item_counts ic ON ic.delivery_id = b.id
+      WHERE (CASE WHEN COALESCE(cardinality(p_statuses), 0) = 0 THEN b.status NOT IN ('cancelled', 'voided')
                   ELSE b.status = ANY (p_statuses) END)
         AND (p_driver_id IS NULL OR b.assigned_driver = p_driver_id)
         AND (p_priority IS NULL OR b.priority = p_priority)
@@ -147,12 +152,13 @@ BEGIN
       'success', true,
       'total_count', (SELECT count(*) FROM filtered),
       'rows', COALESCE((
-        SELECT jsonb_agg(o.rec || jsonb_build_object(
+        SELECT jsonb_agg(to_jsonb(d) || jsonb_build_object(
                  'customer_name', o.customer_name,
                  'driver_name', o.driver_name,
                  'item_count', o.item_count,
                  'farm_group_name', o.farm_group_name) ORDER BY o.ord)
         FROM ordered o
+        JOIN public.deliveries d ON d.id = o.id
         WHERE o.ord > p_offset
           AND (p_limit IS NULL OR o.ord <= p_offset::bigint + p_limit)
       ), '[]'::jsonb),
@@ -197,8 +203,8 @@ BEGIN
   IF has_function_privilege('anon', v_fn, 'EXECUTE') OR has_function_privilege('public', v_fn, 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: anon or PUBLIC can execute get_deliveries_page';
   END IF;
-  IF NOT has_function_privilege('authenticated', v_fn, 'EXECUTE') THEN
-    RAISE EXCEPTION 'POSTFLIGHT_FAIL: authenticated cannot execute get_deliveries_page';
+  IF NOT has_function_privilege('authenticated', v_fn, 'EXECUTE') OR NOT has_function_privilege('service_role', v_fn, 'EXECUTE') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: authenticated or service_role cannot execute get_deliveries_page';
   END IF;
 END;
 $postflight$;

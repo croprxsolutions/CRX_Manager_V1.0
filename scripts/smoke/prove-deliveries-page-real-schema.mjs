@@ -37,7 +37,7 @@ const WEEK = '2026-06-14';
 
 function seed() {
   // Triggers (and so foreign keys) are off for the seed only, so fixtures need no orders or products.
-  // Dates repeat every 21 deliveries, so only the delivery number and id break ties.
+  // Dates repeat every 19 deliveries (not a multiple of the 7 statuses, so every status falls on every date), so only the delivery number and id break ties.
   const sql = `
 ${claims(USERS.admin)}
 SET session_replication_role = replica;
@@ -53,7 +53,7 @@ SELECT ('${P}' || lpad(to_hex(4096 + g), 4, '0'))::uuid,
        gen_random_uuid(),
        (ARRAY['${CUST[0]}', '${CUST[1]}', '${CUST[2]}'])[1 + g % 3]::uuid,
        '${USERS.admin}',
-       date '${TODAY}' + (g % 21) - 10,
+       date '${TODAY}' + (g % 19) - 9,
        (ARRAY['scheduled', 'scheduled', 'in_progress', 'completed', 'completed', 'cancelled', 'voided'])[1 + g % 7],
        (ARRAY['${USERS.driver}', NULL, '${USERS.admin}', '${USERS.driver}'])[1 + g % 4]::uuid,
        (ARRAY['low', 'normal', 'high', 'urgent', NULL])[1 + g % 5],
@@ -165,6 +165,7 @@ try {
 
   // 3. Filters and search equal a direct query.
   const cases = [
+    [{ statuses: [] }, NOT_DONE],
     [{ statuses: ['cancelled'] }, "d.status = 'cancelled'"],
     [{ statuses: ['scheduled', 'in_progress'] }, "d.status IN ('scheduled','in_progress')"],
     [{ driver_id: USERS.driver }, `${NOT_DONE} AND d.assigned_driver = '${USERS.driver}'`],

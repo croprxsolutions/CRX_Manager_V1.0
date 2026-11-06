@@ -9,6 +9,9 @@
 //
 // Exit codes: 0 clean, 1 findings, 2 DID NOT RUN (never a verdict).
 //
+// A diff that touches src/ first runs the code-health ratchet that pre-push runs. A failure stops
+// with exit 2 and calls no model: its fix changes the code and voids the round (Mason, 2026-11-06).
+//
 // ADVISORY ONLY: this writes no proof and touches no proof file, so it can neither satisfy nor
 // corrupt a gate. Never route a Luna round through write-codex-push-proof.mjs: that wrapper
 // unlinks the proof for the current HEAD when it starts.
@@ -328,6 +331,25 @@ function guardRounds(git, root) {
   };
 }
 
+// ── code-health ratchet ──────────────────────────────────────────────────────
+const SRC_DIFF_RE = /^diff --git (?:"?a\/src\/|.* "?b\/src\/)/m;
+const CODE_HEALTH_TIMEOUT_MS = 10 * 60 * 1000;
+
+// Only the check's own "FAIL - " verdict blocks. A check that could not run (no node_modules or
+// knip in this worktree, no origin/main) is no verdict: Luna goes ahead and the result says so;
+// pre-push and CI still run the real check.
+export function codeHealthGate(diff, root, spawn = spawnSync) {
+  if (!SRC_DIFF_RE.test(diff)) return { state: "skipped" };
+  const result = spawn(process.execPath, ["scripts/check-code-health.mjs"], {
+    cwd: root, encoding: "utf8", timeout: CODE_HEALTH_TIMEOUT_MS, maxBuffer: MAX_CAPTURE_BYTES, windowsHide: true, shell: false,
+  });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  if (!result.error && result.status === 0) return { state: "passed" };
+  if (!result.error && /^FAIL - /m.test(output)) return { state: "failed", output };
+  const firstError = output.split(/\r?\n/).find((line) => /error/i.test(line));
+  return { state: "unavailable", reason: (result.error?.message ?? firstError ?? `exit ${result.status}`).trim() };
+}
+
 // ── reporting ────────────────────────────────────────────────────────────────
 function oversizedAdvice(git, frozen) {
   const commits = frozen.baseSha
@@ -370,11 +392,13 @@ function reportDidNotRun(reason, advice) {
   return EXIT_DID_NOT_RUN;
 }
 
-function report(run, { label, diffLines, files, model, effort, dirty }) {
+function report(run, { label, diffLines, files, model, effort, dirty, healthNote }) {
   const exitCode = exitCodeFor(run);
   if (run.outcome === "void") {
     console.error(run.stderr.split(/\r?\n/).slice(-20).join("\n"));
-    return reportDidNotRun(run.reason, run.advice);
+    reportDidNotRun(run.reason, run.advice);
+    if (healthNote) console.log(healthNote);
+    return exitCode;
   }
   console.log(run.text.trimEnd());
   console.log();
@@ -385,10 +409,11 @@ function report(run, { label, diffLines, files, model, effort, dirty }) {
   if (hint) console.log(hint);
   const scope = scopeHint(label, dirty);
   if (scope) console.log(scope);
+  if (healthNote) console.log(healthNote);
   return exitCode;
 }
 
-export function main(argv = process.argv.slice(2), codexDeps = {}) {
+export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth = codeHealthGate } = {}) {
   try {
     const opts = parseArgs(argv);
     const model = opts.sol ? CODEX_REVIEW_MODEL : LUNA_MODEL;
@@ -428,6 +453,18 @@ export function main(argv = process.argv.slice(2), codexDeps = {}) {
       return EXIT_FINDINGS;
     }
 
+    const health = codeHealth(frozen.diff, rootDir);
+    if (health.state === "failed") {
+      return reportDidNotRun(
+        `src/ fails the code-health check that pre-push runs, so no model was called:\n${health.output}`,
+        "Next: fix it (node scripts/check-code-health.mjs), commit, then run Luna again.",
+      );
+    }
+    const healthNote = health.state === "unavailable"
+      ? `Code health: NOT CHECKED, the check could not run (${health.reason}). Luna ran anyway; pre-push and CI still run it.`
+      : null;
+    if (healthNote) console.error(`[luna-review] ${healthNote}`);
+
     const diffLines = frozen.diff.split("\n").length;
     const files = frozen.diff.match(/^diff --git /gm)?.length ?? 0;
     console.error(`[luna-review] ${model} at ${effort} reviewing ${frozen.label}: ${files} file(s), ${diffLines} diff lines.`);
@@ -436,7 +473,7 @@ export function main(argv = process.argv.slice(2), codexDeps = {}) {
     if (rounds && run.outcome !== "void") rounds.record();
     if (run.kind === "output-limit") run.advice = oversizedAdvice(git, frozen);
     const dirty = gitOutput(git, ["status", "--porcelain"]).trim() !== "";
-    return report(run, { label: frozen.label, diffLines, files, model, effort, dirty });
+    return report(run, { label: frozen.label, diffLines, files, model, effort, dirty, healthNote });
   } catch (error) {
     return reportDidNotRun(error.message);
   }

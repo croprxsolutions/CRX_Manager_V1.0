@@ -162,7 +162,7 @@ async function readDeliveriesPage(query: DeliveriesQuery, limit: number | null, 
     rows.push(...page.rows);
   }
   rows.sort((a, b) => (a.sort_position ?? 0) - (b.sort_position ?? 0));
-  return { ...first, rows };
+  return { ...first, rows, total_count: rows.length };
 }
 // Below every delivery id: the first page of a read by id.
 const FIRST_ID = '00000000-0000-0000-0000-000000000000';

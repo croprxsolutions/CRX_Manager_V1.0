@@ -241,7 +241,7 @@ and `20260903230000_commission_report_snapshot_contract`; PR #599 (2026-09-11, `
   (ledger `20260825142708`); any document still calling it parked is out of date.
 - **CRX-SEC-1 `20260813080000_lock_quote_versions_writes_to_rpc`** (row 886) applied 2026-08-16
   (ledger `20260816174353`). `quote_versions` has one policy, `qversions_select`; `authenticated`
-  and `anon` hold no table privileges (live 2026-11-06; MAINTAIN removed by `20261123130000`), so
+  holds SELECT plus MAINTAIN and `anon` holds MAINTAIN only (MAINTAIN reads and writes no rows), so
   browser roles cannot write it; `metabase_ro` holds SELECT but has no policy, so it reads zero rows. The assertion-only `20260813070000_pin_return_idempotency_helper_contract`
   keeps `check_idempotency_intent` a single `postgres`-owned SECURITY DEFINER overload with no
   anon/authenticated/service_role EXECUTE.

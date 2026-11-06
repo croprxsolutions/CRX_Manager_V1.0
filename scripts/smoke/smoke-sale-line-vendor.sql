@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: an order line carries a vendor through to its invoice
 -- ----------------------------------------------------------------------------
--- Migration 20261116110000_sale_line_vendor (billing plan M3).
+-- Migration 20261118110000_sale_line_vendor (billing plan M3).
 --   A  A new order line is filled from the product's preferred vendor
 --   B  A line created with a vendor keeps it
 --   C  A line's vendor changed on the sale reaches its invoice, and the product isn't touched

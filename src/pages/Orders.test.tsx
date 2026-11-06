@@ -131,6 +131,19 @@ describe('Orders list pages through the database', () => {
     })));
   });
 
+  it('a new filter hides the old totals while its own read is pending', async () => {
+    serveOrders(Array.from({ length: 120 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+
+    mockRpc.mockImplementation(() => new Promise(() => {}));
+    fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
+
+    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({ p_needs_split_billing: true })));
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Select All 120/ })).not.toBeInTheDocument();
+  });
+
   it('a failed read says so and shows no count or total', async () => {
     mockRpc.mockResolvedValue({ data: null, error: { message: 'statement timeout' } });
     renderPage();

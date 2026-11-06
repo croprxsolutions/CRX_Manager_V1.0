@@ -47,8 +47,9 @@ export default function Orders() {
   const canPeekCustomer = hasPageAccess(role, deniedPages, 'customers');
   // One page of rows, read from the database with the search, filters and sort applied there.
   const [orders, setOrders] = useState<OrderWithFulfillment[]>([]);
-  // Every matching order (count and summed totals), not just this page. null = not known: never shown as 0.
-  const [totals, setTotals] = useState<{ count: number; cents: number } | null>(null);
+  // Every matching order (count and summed totals), not just this page, for the query they were read for.
+  // null = not known: never shown as 0.
+  const [totalsState, setTotals] = useState<{ key: string; count: number; cents: number } | null>(null);
   // First read only: later reads keep the search box and filters on screen.
   const [loading, setLoading] = useState(true);
   const [pageLoading, setPageLoading] = useState(false);
@@ -127,7 +128,7 @@ export default function Orders() {
       return;
     } else {
       setOrders(data.rows);
-      setTotals({ count: data.total_count, cents: data.total_price_cents });
+      setTotals({ key: queryKey, count: data.total_count, cents: data.total_price_cents });
       setLoadFailed(false);
     }
     setLoading(false);
@@ -174,6 +175,8 @@ export default function Orders() {
     [allMatchingIds, selected, toggleRow]
   );
 
+  // A new search or filter hides the old totals until its own read lands: they never describe another query.
+  const totals = totalsState?.key === queryKey ? totalsState : null;
   const moreThanThisPage = totals !== null && totals.count > orders.length;
   const everythingSelected = allMatching !== null || (allSelected && !moreThanThisPage);
 

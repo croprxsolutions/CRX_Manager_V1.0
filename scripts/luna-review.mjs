@@ -347,8 +347,9 @@ function oversizedAdvice(git, frozen) {
 export function nextStepHint(text) {
   if (/\b(?:BLOCKER|HIGH)\b/i.test(text)) return null;
   return "Next: no BLOCKER or HIGH. Fix the cheap MED/LOW items (or refute them) in one commit. If that commit "
-    + "changes anything but plain notes, run the whole-branch round once more on it (codex-review Step 3A); "
-    + "refutations alone need no rerun. Then Sol if the change is on the Sol list.";
+    + "only fixes or refutes those findings and touches no rule file, it needs no whole-branch rerun; otherwise "
+    + "run the whole-branch round again (codex-review Step 3A). Report each fix and refutation with its reason, "
+    + "and name both heads. Then Sol if the change is on the Sol list.";
 }
 
 // A round on one commit or on uncommitted work never clears the change (Mason, 2026-11-06).

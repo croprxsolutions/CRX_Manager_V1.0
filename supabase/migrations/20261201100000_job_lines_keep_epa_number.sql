@@ -26,7 +26,11 @@
 --      a line whose product changed, a line moved to another job, two written lines sharing a
 --      position, and any line of a job not sprayed yet take the product's number.
 --      The job screen sends each saved line's id from this same change (an older save_job ignores
---      the key, so the screen can ship with or before this file).
+--      the key, so the screen can ship with or before this file). On a sprayed or finished job, a
+--      sent line id that is no longer a line of that job (a second tab or device saved meanwhile) is
+--      refused with "Reload the job", so a stale screen never silently swaps in the product's number;
+--      a replay of a stored save (same idempotency key) goes through. A screen that sends no ids
+--      (an older cached build) is never refused.
 --   5. No printout reads the new column yet: every printout keeps reading the product's number, so
 --      they all agree. A follow-up change moves the sent proof, applicator sheet, chemical
 --      application report and WPS notice onto the line's number together.
@@ -192,7 +196,7 @@ EXECUTE FUNCTION public._product_epa_to_unsprayed_job_lines();
 -- "id" and keeps the same product: its sort_order (the key the save writes it under), product and
 -- stored number. A line id or sort_order sent twice keeps nothing (it would be ambiguous), and a
 -- malformed value keeps nothing and is left to save_job's own refusals.
-CREATE FUNCTION public._job_line_epa_kept(p_job_id uuid, p_chemicals jsonb) RETURNS jsonb
+CREATE FUNCTION public._job_line_epa_kept(p_job_id uuid, p_chemicals jsonb, p_replay boolean) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
   v_uuid constant text := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
@@ -201,6 +205,17 @@ BEGIN
     RETURN '[]'::jsonb;
   END IF;
   PERFORM 1 FROM public.jobs WHERE id = p_job_id FOR UPDATE;
+  -- A sprayed or finished job: a sent line id that is no longer a line of this job means the screen is
+  -- stale (another tab or device saved since it loaded). Refuse, so it reloads instead of the save
+  -- silently giving that line the product's current number. A replay of a stored save goes through.
+  IF NOT p_replay AND NOT public._job_line_epa_follows_product(p_job_id) AND EXISTS (
+       SELECT 1 FROM jsonb_array_elements(p_chemicals) e
+        WHERE jsonb_typeof(e.value) = 'object' AND (e.value->>'id') ~ v_uuid
+          AND NOT EXISTS (SELECT 1 FROM public.job_chemicals jc
+                           WHERE jc.id = (e.value->>'id')::uuid AND jc.job_id = p_job_id)) THEN
+    RAISE EXCEPTION 'This job was saved somewhere else since you opened it. Reload the job, then make your changes again.'
+      USING ERRCODE = '40001';
+  END IF;
   RETURN COALESCE((
     WITH sent AS (
       SELECT e.value->>'id' AS line_id, e.value->>'product_id' AS product_id,
@@ -227,8 +242,8 @@ BEGIN
   ), '[]'::jsonb);
 END;
 $function$;
-ALTER FUNCTION public._job_line_epa_kept(uuid, jsonb) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._job_line_epa_kept(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
+ALTER FUNCTION public._job_line_epa_kept(uuid, jsonb, boolean) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._job_line_epa_kept(uuid, jsonb, boolean) FROM PUBLIC, anon, authenticated, service_role;
 
 -- After the save: when the job is sprayed or finished, each rewritten line at a kept sort_order with
 -- the same product takes back its stored number. A job not sprayed yet follows its products.
@@ -284,7 +299,9 @@ BEGIN
      WHERE p.id::text IN (SELECT lower(e->>'product_id') FROM jsonb_array_elements(
              CASE WHEN jsonb_typeof(p_chemicals) = 'array' THEN p_chemicals ELSE '[]'::jsonb END) e)
      ORDER BY p.id FOR SHARE;
-    v_kept := public._job_line_epa_kept(p_job_id, p_chemicals);
+    v_kept := public._job_line_epa_kept(p_job_id, p_chemicals,
+      p_idempotency_key IS NOT NULL AND EXISTS (SELECT 1 FROM public.idempotency_keys
+                                                WHERE idempotency_key = p_idempotency_key AND operation = 'save_job'));
   END IF;
   -- Cost is admin-only (Mason, 2026-10-15): a non-admin's chemical cost comes from the server.
   -- The impl keeps every check it had (actor, role, units, totals, idempotency).
@@ -319,7 +336,7 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r(role),
                     unnest(ARRAY['public._job_line_epa_follows_product(uuid)', 'public._job_chemical_epa()',
-                                 'public._product_epa_to_unsprayed_job_lines()', 'public._job_line_epa_kept(uuid,jsonb)',
+                                 'public._product_epa_to_unsprayed_job_lines()', 'public._job_line_epa_kept(uuid,jsonb,boolean)',
                                  'public._job_line_epa_restore(uuid,jsonb)']) f(sig)
               WHERE has_function_privilege(r.role, f.sig, 'EXECUTE')) THEN
     RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_POSTFLIGHT: an app role can run a new helper';

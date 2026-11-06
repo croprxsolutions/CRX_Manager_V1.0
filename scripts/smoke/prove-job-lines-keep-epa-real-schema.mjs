@@ -324,7 +324,7 @@ async function main() {
   refused(ADMIN, `UPDATE public.job_chemicals SET epa_registration = '1-1' WHERE job_id = '${JOLD}';`, /permission denied/);
   refused(ADMIN, `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, epa_registration, sort_order)
     VALUES ('${JOLD}', '${PB}', 0, 'Gal', 0, true, '1-1', 9);`, /permission denied/);
-  for (const fn of ['_job_line_epa_kept(NULL::uuid, NULL::jsonb)', '_job_line_epa_restore(NULL::uuid, NULL::jsonb)', '_job_line_epa_follows_product(NULL::uuid)']) {
+  for (const fn of ['_job_line_epa_kept(NULL::uuid, NULL::jsonb, NULL::boolean)', '_job_line_epa_restore(NULL::uuid, NULL::jsonb)', '_job_line_epa_follows_product(NULL::uuid)']) {
     refused(ADMIN, `SELECT public.${fn};`, /permission denied/);
   }
   console.log("[prover] existing lines got their product's number; signed-in users read it but cannot write it or call the helpers");
@@ -365,9 +365,18 @@ async function main() {
   ids = lineIds(sprayed);
   save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1, { id: ids[1] })]);
   assert.equal(lines(sprayed), `0:${NEW},1:${B_EPA}`, 'no id sent: the product\'s number');
+  // A line id that is not a line of this sprayed job (another job's, or one a second tab saw before a
+  // save replaced it) is refused: the screen must reload. The job keeps its numbers.
+  const before = lines(sprayed);
   ids = lineIds(JOTHER);
-  save(ADMIN, sprayed, [chem(PA, 0, { id: ids[0] })]);
-  assert.equal(lines(sprayed), `0:${NEW}`, 'a line id of another job keeps nothing');
+  refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: ids[0] })]), /saved somewhere else since you opened it/);
+  const staleTab = lineIds(sprayed);
+  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1, { id: staleTab[1] })]);
+  refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: staleTab[0] }), chem(PB, 1, { id: staleTab[1] })]), /Reload the job/);
+  assert.equal(lines(sprayed), before, 'a refused stale save changes nothing');
+  ids = lineIds(sprayed);
+  save(ADMIN, sprayed, [chem(PA, 0)]);
+  assert.equal(lines(sprayed), `0:${NEW}`);
   ids = lineIds(JOLD);
   save(ADMIN, JOLD, [chem(PB, 0, { id: ids[1] }), chem(PB, 1, { id: ids[0] })]);
   assert.equal(lines(JOLD), `0:${B_EPA},1:${B_EPA}`, 'a line moved to another product takes that product\'s number');
@@ -375,6 +384,9 @@ async function main() {
   save(ADMIN, JOTHER, [chem(PA, 0, { id: ids[0] }), chem(PA, 0, { id: ids[0] })]);
   assert.equal(lines(JOTHER), `0:${NEW},0:${NEW}`, 'an id or sort_order sent twice keeps nothing');
   // A job not sprayed yet follows its product on a re-save too.
+  const openStale = lineIds(open);
+  save(ADMIN, open, [chem(PA, 0), chem(PB, 1)]);
+  save(ADMIN, open, [chem(PA, 0, { id: openStale[0] }), chem(PB, 1, { id: openStale[1] })]);
   ids = lineIds(open);
   setProductEpa(PB, '100-1071');
   save(ADMIN, open, [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })]);
@@ -397,7 +409,7 @@ async function main() {
   setProductEpa(PA, OLD);
   ok(ADMIN, `UPDATE public.job_chemicals SET job_id = '${JOLD}', sort_order = 7 WHERE id = '${ids[0]}';`);
   assert.equal(scalar(`SELECT epa_registration FROM public.job_chemicals WHERE id = '${ids[0]}';`), OLD);
-  console.log("[prover] new lines, other jobs' ids, changed products, duplicates and unsprayed jobs take the product's number; a blank stays blank on a finished job; ambiguous positions and moved lines take the product's number");
+  console.log("[prover] stale or other jobs' line ids on a sprayed job are refused; new lines, changed products, duplicates and unsprayed jobs take the product's number; a blank stays blank on a finished job; ambiguous positions and moved lines take the product's number");
 
   // Lock order: a spray in flight when an EPA edit starts finishes first, and the edit then leaves
   // that job alone (the edit waits on the job lock the spray's foreign key holds).

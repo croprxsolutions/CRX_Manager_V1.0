@@ -8,7 +8,9 @@
   and finished jobs keep theirs.
 - Re-saving a sprayed or finished job keeps each line's number when the screen sends the line back by
   its id (same job, same product). The database reads the stored number itself. The job screen now
-  sends each saved line's id (`src/lib/jobChemicalPayload.ts`).
+  sends each saved line's id (`src/lib/jobChemicalPayload.ts`). If another tab or device saved a
+  sprayed job after this screen opened it, the save is refused with "Reload the job" instead of
+  quietly changing the number.
 - No printout reads the new number yet, so every printout still shows the product's number. A
   follow-up PR moves the sent proof, applicator sheet, chemical application report and WPS notice to
   it together.

@@ -41,7 +41,8 @@
 --   AG A payer's invoice takes its season from its date, as a plain delivery invoice does
 --   AH An inactive customer can't become a payer, on the card or on a line
 --   AI A line with its own shares can't move to another sale (ORDER_ITEM_SHARES_LINE_MOVE)
---   AJ A share under 0.01 of quantity bills its exact cents on 0.00 quantity; every payer quantity is returnable
+--   AJ A share under 0.01 of quantity bills its exact cents on 0.00 quantity; every payer quantity is returnable;
+--      that draft refuses edits (BILL_SPLIT_SLIVER_LOCKED) and the group still posts
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -698,11 +699,12 @@ BEGIN
   END IF;
 
   -- AB: one line too small for an invoice line, worth no cents, doesn't stop the rest of the delivery billing.
+  -- 0.00001 stays under half a cent up to about $500 a unit, whichever product the seed lists first.
   PERFORM pg_temp.smk_new_sale('ab' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
   v_r := complete_delivery(v_d, 'No proof — recorded by office', v_admin,
-    (SELECT jsonb_object_agg(di.id::text, CASE WHEN di.order_item_id = v_l1 THEN 0.00004 ELSE 5 END) FROM delivery_items di WHERE di.delivery_id = v_d),
+    (SELECT jsonb_object_agg(di.id::text, CASE WHEN di.order_item_id = v_l1 THEN 0.00001 ELSE 5 END) FROM delivery_items di WHERE di.delivery_id = v_d),
     NULL, NULL, 'smk-spl-ab-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
   IF COALESCE((v_r->>'bill_split_failed')::boolean, false)
      OR (SELECT count(*) FROM invoices WHERE delivery_id = v_d) <> 2
@@ -753,6 +755,32 @@ BEGIN
      OR EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
                  WHERE i.delivery_id = v_d AND ii.quantity <> round(ii.quantity, 2)) THEN
     v_fails := v_fails || ' (AJ) a payer''s small share lost its cents or has a quantity a return can''t hold;';
+  END IF;
+  -- A draft with such a line refuses edits (the save path needs a quantity), and the group still posts to the cent.
+  SELECT id, invoice_group_id INTO v_inv, v_group FROM invoices WHERE delivery_id = v_d AND customer_id = v_payer2;
+  SELECT jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type, 'status', i.status,
+           'season', i.season, 'salesman_id', i.salesman_id, 'invoice_date', i.invoice_date, 'payment_terms', i.payment_terms,
+           'header_notes', i.header_notes, 'footer_notes', i.footer_notes)
+    INTO v_header FROM invoices i WHERE i.id = v_inv;
+  SELECT jsonb_agg(jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id,
+           'description', it.description, 'quantity', it.quantity, 'unit_price_cents', it.unit_price_cents,
+           'extended_cents', it.extended_cents, 'cost_cents', it.cost_cents, 'sort_order', it.sort_order,
+           'unit_size', it.unit_size, 'notes', it.notes, 'charge_type', it.charge_type, 'vendor', it.vendor) ORDER BY it.sort_order)
+    INTO v_lines FROM invoice_items it WHERE it.invoice_id = v_inv;
+  BEGIN
+    PERFORM save_invoice(v_header, v_lines, 'smk-spl-aj-save-' || v_suffix);
+    v_fails := v_fails || ' (AJ) a draft with a line on 0.00 quantity saved;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_SLIVER_LOCKED:%' THEN v_fails := v_fails || ' (AJ) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+  SELECT jsonb_object_agg(id, _invoice_post_version(id)) INTO v_versions FROM invoices WHERE invoice_group_id = v_group;
+  BEGIN
+    PERFORM post_invoice_group(v_group, v_admin, v_versions, 'smk-spl-aj-post-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (AJ) the group did not post: ' || SQLERRM || ';';
+  END;
+  IF EXISTS (SELECT 1 FROM invoices WHERE invoice_group_id = v_group AND status <> 'posted') THEN
+    v_fails := v_fails || ' (AJ) a payer invoice did not post;';
   END IF;
 
   -- AE: a payer draft's unit and tote follow the split too, and re-saving a tote line as read still works.

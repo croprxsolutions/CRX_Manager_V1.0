@@ -29,6 +29,8 @@
 --     still can't). Its product lines (product, description, quantity, price, cents and cost) follow the
 --     split: changing them means voiding the group, so the cost the save recomputes stays the same.
 --   - The payers' drafts stand or fall together: delete_invoices refuses one member of a Bill Split group.
+--   - A payer's draft holding a line on 0.00 quantity refuses edits (BILL_SPLIT_SLIVER_LOCKED): every layer of the
+--     save path needs a quantity. It posts as drafted, and a group void redrafts it.
 --   - A posted group unposts together: unpost_invoice refuses any group member (GROUP_UNPOST_REQUIRED), as
 --     post_invoice does (GROUP_POST_REQUIRED). This covers field-split groups too: the screens already send
 --     them to unpost_invoice_group, which calls the inner function and isn't changed.
@@ -1564,6 +1566,15 @@ BEGIN
        AND i.invoice_group_id IS NOT NULL
        AND public._order_has_bill_split(i.order_id);
     v_bill_split_draft := FOUND;
+    -- A line on 0.00 quantity (a share under 0.01) can't pass the save path, which needs a quantity on every
+    -- line. Refuse here in plain words; the group still posts as drafted, or a group void redrafts it.
+    IF v_bill_split_draft AND EXISTS (
+      SELECT 1 FROM public.invoice_items ii
+       WHERE ii.invoice_id = v_invoice_id AND ii.charge_type IS NULL AND ii.quantity = 0
+    ) THEN
+      RAISE EXCEPTION 'BILL_SPLIT_SLIVER_LOCKED: this payer''s share is under 0.01 of a unit, so its draft can''t be edited. Post it as drafted, or void the group'
+        USING ERRCODE = 'check_violation';
+    END IF;
 
     IF EXISTS (
       SELECT 1

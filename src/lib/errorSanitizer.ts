@@ -142,6 +142,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. A line's shares can't total more than 100%"],
   [/^BILL_SPLIT_GROUP_DELETE_PARTIAL\b/,
    "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"],
+  [/^BILL_SPLIT_SLIVER_LOCKED\b/,
+   "Nothing was saved. This payer's share is under 0.01 of a unit, so its draft can't be edited. Post it as drafted, or void the group"],
   [/^BILL_SPLIT_CUSTOMER_INACTIVE\b/,
    "Nothing was changed. This customer is inactive, so they can't be added to a bill split. Reactivate them first"],
   [/^GROUP_UNPOST_REQUIRED\b/,

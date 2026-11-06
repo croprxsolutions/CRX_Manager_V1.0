@@ -7,6 +7,29 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "get_dispatch_board_jobs": {
+      "chain": "smoke-goal4-list-totals.sql",
+      "area": ["regression"],
+      "description": "REQUIRES 20261114080000. Goal 4 list totals, read only: as the oldest active admin, each of the five call lists returns success, at most 200 rows and a total_count that is at least the rows shown (equal when fewer than 200); for the applicator with the most jobs, every dispatch board row carries one _total_count, the board shows min(total, 500) rows in (job_date, id) DESC order and no row carries total_cost_cents; an active driver, when one exists, is refused every call list.",
+      "covers": [
+        "get_dispatch_board_jobs",
+        "get_call_list_prepay_prospects",
+        "get_call_list_no_recent_contact",
+        "get_call_list_stale_quotes",
+        "get_call_list_lapsed_products",
+        "get_call_list_unassigned_accounts"
+      ]
+    },
+    "get_receiving_log": {
+      "chain": "smoke-goal4-paged-list-reads.sql",
+      "area": ["regression", "inventory"],
+      "description": "REQUIRES 20261113110000. Goal 4 paged reads, read only: as the oldest active admin, the receiving log, the watchdog list (dismissed included) and the fields map each return no repeated id in one read, and pages of 50 return exactly the one-shot read in the same order; an active driver, when one exists, is still refused the receiving log and the watchdog list.",
+      "covers": [
+        "get_receiving_log",
+        "get_watchdog_flags",
+        "get_fields_with_geojson"
+      ]
+    },
     "create_product_with_parent": {
       "chain": "smoke-product_parents.sql",
       "container_prover": "prove-product-parents-real-schema.mjs",

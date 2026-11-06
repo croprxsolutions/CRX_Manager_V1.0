@@ -284,6 +284,20 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **2026-11-06 ~01:00 UTC (about 7 PM Central, 2026-11-05; #1302 send-email follow-ups, PR #1515):**
+  the `send-email` Edge Function was deployed live as v26 (was v25) on Mason's in-chat approval ("Yes, deploy"),
+  with `supabase functions deploy send-email --use-api`; the function files matched main `0e41b3f` byte for byte.
+  - What changed: reps can email invoices and statements (only A/R reminders stay admin-only); a retry can no longer
+    race another send (compare-and-set on `failed`, plus PR #1510's live one-pending-send lock on `email_log`);
+    the Resend call times out after 30 seconds, and a timeout or unreadable reply leaves the row `pending` and
+    returns 504 `needs_reconciliation` instead of `failed`, refusing new sends of that email until reconciled.
+  - ACTIVE, with JWT checking on. Before the deploy `email_log` had no `pending` or `failed` rows. Smoke: a signed-out
+    POST got 401, the OPTIONS preflight 200, and the function logged no errors after the deploy.
+  - Caller path exercised on croprxsolutions.app to an `[E2E]` test customer (mason@croprxsolutions.com): a delivery
+    receipt (DEL-00102), a new quote (Q-2026-2076) and an invoice (CS-2026-0173, voided afterwards) each emailed with
+    `email_log` status `sent`, a Resend id and `send_lock_key` set. The rep refusal of A/R reminders was not exercised
+    live (no rep login); the Deno behaviour tests in `send-email/send_email_test.ts` cover it.
+  - The rollback is redeploying v25 (from main `d4fb7ccb5`'s `send-email` files).
 - **2026-11-04 04:12 UTC (10:12 PM Central, 2026-11-03; Settings Company Info on emailed purchase order PDFs, PR #1413):**
   the `send-email` Edge Function was deployed live as v25 (was v24) on Mason's in-chat approval ("Yes, redeploy"),
   with `supabase functions deploy send-email --use-api` from main `d4fb7ccb5`.

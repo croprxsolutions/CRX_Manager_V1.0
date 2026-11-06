@@ -36,7 +36,8 @@
 -- Rollback (a reviewed migration; the proof runs exactly this block, then re-issues upsert_product_brand from
 -- 20261022086500_product_brands.sql). Legacy rows of retired brands are frozen, so they are already as they were;
 -- every active parent brand is projected onto every member size's legacy list; a legacy row that would block it
--- (same name, mapped to a retired variant) is archived whole first. The new tables stay as history.
+-- (same name, mapped to a retired variant) is archived whole first, and renamed aside when the size keeps its own
+-- mapped row (an active brand renamed after the move). The new tables stay as history.
 -- ROLLBACK-SQL-BEGIN
 -- CREATE TABLE public.product_brand_rollback_archive (
 --   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -52,12 +53,26 @@
 -- CREATE POLICY product_brand_rollback_archive_select ON public.product_brand_rollback_archive
 --   FOR SELECT TO authenticated USING ((SELECT public.is_admin()));
 -- REVOKE ALL ON TABLE public.product_brand_rollback_archive FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+-- REVOKE ALL ON SEQUENCE public.product_brand_rollback_archive_id_seq FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 -- GRANT SELECT ON TABLE public.product_brand_rollback_archive TO authenticated;
 -- DO $rollback$
 -- DECLARE
 --   r record;
 --   v_legacy public.product_brands%ROWTYPE;
+--   v_block public.product_brands%ROWTYPE;
+--   v_archive_id bigint;
 -- BEGIN
+--   -- Mapped rows of active brands step aside first, so renamed or swapped names cannot collide mid-way.
+--   CREATE TEMP TABLE rollback_brand_names ON COMMIT DROP AS
+--     SELECT b.id, b.brand_name FROM public.product_brands b
+--       JOIN public.product_parent_brand_sources s ON s.legacy_brand_id = b.id
+--       JOIN public.product_parent_brands pb ON pb.id = s.parent_brand_id AND pb.status = 'active'
+--       JOIN public.product_parent_members m ON m.parent_id = pb.parent_id AND m.product_id = b.product_id;
+--   UPDATE public.product_brands b SET brand_name = '~rollback ' || b.id::text
+--     FROM public.product_parent_brand_sources s
+--     JOIN public.product_parent_brands pb ON pb.id = s.parent_brand_id AND pb.status = 'active'
+--     JOIN public.product_parent_members m ON m.parent_id = pb.parent_id
+--    WHERE s.legacy_brand_id = b.id AND b.product_id = m.product_id;
 --   FOR r IN SELECT pb.*, m.product_id AS size_id FROM public.product_parent_brands pb
 --              JOIN public.product_parent_members m ON m.parent_id = pb.parent_id
 --             WHERE pb.status = 'active' ORDER BY pb.id, m.product_id LOOP
@@ -70,6 +85,19 @@
 --         INSERT INTO public.product_brand_rollback_archive (legacy_brand_id, legacy_row, parent_brand_id, replaced_by_parent_brand_id, reason)
 --         VALUES (v_legacy.id, to_jsonb(v_legacy), (SELECT s.parent_brand_id FROM public.product_parent_brand_sources s WHERE s.legacy_brand_id = v_legacy.id),
 --                 r.id, 'same name as the parent''s active brand; replaced by it at rollback');
+--       END IF;
+--     ELSE
+--       -- The size keeps its own mapped row; another row there with the target name is archived and renamed aside.
+--       SELECT b.* INTO v_block FROM public.product_brands b
+--        WHERE b.product_id = r.size_id AND lower(b.brand_name) = lower(r.brand_name) AND b.id <> v_legacy.id;
+--       IF FOUND THEN
+--         INSERT INTO public.product_brand_rollback_archive (legacy_brand_id, legacy_row, parent_brand_id, replaced_by_parent_brand_id, reason)
+--         VALUES (v_block.id, to_jsonb(v_block), (SELECT s.parent_brand_id FROM public.product_parent_brand_sources s WHERE s.legacy_brand_id = v_block.id),
+--                 r.id, 'same name as a renamed active brand; renamed aside at rollback')
+--         RETURNING id INTO v_archive_id;
+--         UPDATE public.product_brands SET brand_name = v_block.brand_name || ' (archived ' || v_archive_id || ')',
+--           row_version = row_version + 1
+--         WHERE id = v_block.id;
 --       END IF;
 --     END IF;
 --     IF v_legacy.id IS NOT NULL AND v_legacy.product_id = r.size_id THEN
@@ -85,6 +113,9 @@
 --     END IF;
 --     v_legacy := NULL;
 --   END LOOP;
+--   -- A stepped-aside row no active brand claimed gets its own name back (a collision aborts the whole rollback).
+--   UPDATE public.product_brands b SET brand_name = n.brand_name FROM rollback_brand_names n
+--    WHERE b.id = n.id AND b.brand_name = '~rollback ' || b.id::text;
 -- END;
 -- $rollback$;
 -- DROP FUNCTION public.get_product_brands(uuid);
@@ -121,8 +152,17 @@ BEGIN
      OR to_regprocedure('public.is_admin()') IS NULL OR to_regprocedure('public.is_active_profile()') IS NULL
      OR to_regprocedure('public.check_idempotency(text,text)') IS NULL
      OR to_regprocedure('public.save_idempotency(text,text,jsonb)') IS NULL
-     OR to_regprocedure('public.update_updated_at()') IS NULL THEN
+     OR to_regprocedure('public.update_updated_at()') IS NULL
+     OR to_regprocedure('public._product_parent_size_role(jsonb)') IS NULL
+     OR to_regprocedure('public.check_idempotency_intent(text,text,uuid,text)') IS NULL
+     OR to_regprocedure('public._replay_fingerprint_20261015(jsonb)') IS NULL
+     OR to_regprocedure('public._bind_replay_receipt_20261015(text,text,text)') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_PARENT_PROPOSALS_DEPENDENCY_MISSING';
+  END IF;
+  -- A size grouped by PAR-1 with its own legacy brand rows would lose them from view (its brands become the
+  -- parent's list, and no proposal ever reaches a grouped size), so those rows must be settled first.
+  IF EXISTS (SELECT 1 FROM public.product_brands b JOIN public.product_parent_members m ON m.product_id = b.product_id) THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRODUCT_PARENT_PROPOSALS_GROUPED_SIZE_HAS_BRANDS: settle those brand rows first';
   END IF;
   -- The PAR-1 steps this file calls, and the brand writer it re-issues, as installed when this was written.
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
@@ -172,9 +212,13 @@ CREATE TABLE public.product_parent_proposals (
   proposal_version bigint NOT NULL UNIQUE CHECK (proposal_version >= 1),
   status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'superseded', 'closed')),
   built_by uuid NOT NULL,
-  built_at timestamptz NOT NULL DEFAULT now()
+  built_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE public.product_parent_proposals OWNER TO postgres;
+CREATE TRIGGER set_product_parent_proposals_updated_at
+  BEFORE UPDATE ON public.product_parent_proposals
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 CREATE UNIQUE INDEX product_parent_proposals_one_open ON public.product_parent_proposals ((true)) WHERE status = 'open';
 COMMENT ON TABLE public.product_parent_proposals IS
   'PAR-2: one row per proposal build; one open at a time. Written only by the proposal functions.';
@@ -195,10 +239,14 @@ CREATE TABLE public.product_parent_proposal_groups (
   decided_by uuid,
   decided_at timestamptz,
   reason text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK ((status = 'approved') = (parent_id IS NOT NULL)),
   CHECK (status <> 'proposed' OR identity_basis IS NOT NULL)
 );
 ALTER TABLE public.product_parent_proposal_groups OWNER TO postgres;
+CREATE TRIGGER set_product_parent_proposal_groups_updated_at
+  BEFORE UPDATE ON public.product_parent_proposal_groups
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 CREATE INDEX product_parent_proposal_groups_proposal_idx ON public.product_parent_proposal_groups (proposal_id);
 COMMENT ON TABLE public.product_parent_proposal_groups IS
   'PAR-2: one proposed group per row. members holds allow-listed fields only (no cost, price or stock).';
@@ -387,7 +435,7 @@ BEGIN
     FROM jsonb_array_elements(v_members) m;
   IF jsonb_array_length(v_vals) > 1 THEN v_conflicts := v_conflicts || jsonb_build_object('rates', v_vals); END IF;
 
-  IF (SELECT count(DISTINCT lower(m->>'manufacturer')) FROM jsonb_array_elements(v_members) m) > 1 THEN
+  IF (SELECT count(DISTINCT COALESCE(lower(btrim(m->>'manufacturer')), '')) FROM jsonb_array_elements(v_members) m) > 1 THEN
     v_flags := v_flags || 'manufacturer_differs'::text;
   END IF;
   IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_members) m WHERE NOT (m->>'is_active')::boolean) THEN
@@ -704,6 +752,10 @@ BEGIN
   END LOOP;
   v_first := v_shape->'members'->0;
   v_category := CASE WHEN v_choices ? 'category' THEN v_choices->>'category' ELSE v_first->>'category' END;
+  IF NULLIF(btrim(v_category), '') IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM public.product_categories c WHERE c.name = v_category AND c.is_active) THEN
+    RAISE EXCEPTION 'PRODUCT_CATEGORY_RETIRED: choose an active category for "%"', v_name;
+  END IF;
   v_timings := CASE WHEN v_choices ? 'use_timings' THEN v_choices->'use_timings' ELSE v_first->'use_timings' END;
   v_rates := CASE WHEN v_choices ? 'rates' THEN v_choices->'rates'
                   ELSE jsonb_build_object('rate_per_acre', v_first->'rate_per_acre',
@@ -784,7 +836,7 @@ BEGIN
     v_copy := public._copy_parent_to_size(v_parent.id, v_pid, v_event, true, false, false);
     FOREACH v_tier IN ARRAY ARRAY['tier1_price_per_acre', 'tier2_price_per_acre', 'tier3_price_per_acre'] LOOP
       IF (v_copy->'after'->>v_tier)::numeric IS DISTINCT FROM
-         CASE WHEN v_expected IS NULL THEN (v_copy->'before'->>v_tier)::numeric ELSE (v_expected->>v_tier)::numeric END
+         (CASE WHEN v_expected IS NULL THEN (v_copy->'before'->>v_tier)::numeric ELSE (v_expected->>v_tier)::numeric END)
          OR (v_expected IS NOT NULL AND NOT (v_expected ? v_tier)) THEN
         RAISE EXCEPTION 'PRODUCT_RATE_PREVIEW_CHANGED: the per-acre prices changed since the preview; preview again: %',
           v_copy->'after'->>'product_name' USING ERRCODE = 'check_violation';
@@ -1018,7 +1070,7 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_PARENT_NOT_FOUND'; END IF;
   PERFORM 1 FROM public.products p WHERE p.id IN (SELECT m.product_id FROM public.product_parent_members m
                                                    WHERE m.parent_id = p_parent_id)
-   ORDER BY p.id FOR UPDATE;
+   ORDER BY p.id FOR NO KEY UPDATE;
 
   IF p_brand_id IS NULL THEN
     BEGIN
@@ -1186,7 +1238,7 @@ BEGIN
   -- An edit's brand row decides the size, so a mismatched p_product_id cannot dodge the refusal.
   PERFORM 1 FROM public.products
    WHERE id IN (p_product_id, (SELECT b.product_id FROM public.product_brands b WHERE b.id = p_brand_id))
-   ORDER BY id FOR UPDATE;
+   ORDER BY id FOR NO KEY UPDATE;
   SELECT pp.name INTO v_parent_name FROM public.product_parent_members m
     JOIN public.product_parents pp ON pp.id = m.parent_id
    WHERE m.product_id IN (p_product_id, (SELECT b.product_id FROM public.product_brands b WHERE b.id = p_brand_id))
@@ -1255,6 +1307,8 @@ $function$;
 ALTER FUNCTION public.upsert_product_brand(uuid, text, text, text, boolean, boolean, text, uuid, integer, text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.upsert_product_brand(uuid, text, text, text, boolean, boolean, text, uuid, integer, text) FROM PUBLIC, anon, service_role, metabase_ro;
 GRANT EXECUTE ON FUNCTION public.upsert_product_brand(uuid, text, text, text, boolean, boolean, text, uuid, integer, text) TO authenticated;
+COMMENT ON FUNCTION public.upsert_product_brand(uuid, text, text, text, boolean, boolean, text, uuid, integer, text) IS
+  'Admin-only add or edit of a product brand (product_brands) for an ungrouped size; a grouped size is refused with PRODUCT_BRANDS_BELONG_TO_PARENT (its brands are on the parent, upsert_parent_brand). Retry key required and bound to caller + request; an edit must pass the row_version it read. Never deletes; retire with p_is_currently_sourced = false.';
 
 -- ---------------------------------------------------------------------------------------------
 -- Postflight
@@ -1293,6 +1347,9 @@ BEGIN
        OR (SELECT proconfig FROM pg_proc WHERE oid = v_sig::regprocedure) IS DISTINCT FROM ARRAY['search_path=public, pg_temp'] THEN
       RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_PROPOSALS_FUNCTION: %', v_sig;
     END IF;
+    IF (SELECT proowner FROM pg_proc WHERE oid = v_sig::regprocedure) <> 'postgres'::regrole THEN
+      RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_PROPOSALS_OWNER: %', v_sig;
+    END IF;
   END LOOP;
   FOREACH v_sig IN ARRAY ARRAY[
     'public._product_parent_base_name(text)', 'public._product_parent_loose_key(text)',
@@ -1310,5 +1367,9 @@ BEGIN
       RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_PROPOSALS_HELPER: %', v_sig;
     END IF;
   END LOOP;
+  IF (SELECT count(*) FROM pg_proc WHERE oid IN (SELECT oid FROM pg_proc WHERE proname = 'upsert_product_brand'
+        AND pronamespace = 'public'::regnamespace)) <> 1 THEN
+    RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_PROPOSALS_BRAND_WRITER_OVERLOAD';
+  END IF;
 END;
 $postflight$;

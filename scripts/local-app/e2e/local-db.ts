@@ -1,13 +1,33 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PROJECT, Refused, assertLocalDockerEndpoint } from '../target.mjs';
 
 const here = fileURLToPath(new URL('..', import.meta.url));
 
-/** Runs SQL in the local test database as its owner (never live: the compose project is this test copy) and returns the output. */
+let targetChecked = false;
+
+// The same checks app.mjs runs before it touches the database: Docker on this computer, and the
+// crx-local-app stack started from a local-app compose file, not some other stack of that name.
+function assertLocalTarget() {
+  if (targetChecked) return;
+  const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8' }).trim();
+  assertLocalDockerEndpoint(docker(['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']));
+  const ids = docker(['ps', '-aq', '--filter', `label=com.docker.compose.project=${PROJECT}`]);
+  if (!ids) throw new Refused('The local test copy is not running.');
+  for (const container of JSON.parse(docker(['inspect', ...ids.split(/\s+/)]))) {
+    if (!/scripts[\\/]local-app[\\/]compose\.yaml$/.test(container.Config.Labels['com.docker.compose.project.config_files'] ?? '')) {
+      throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
+    }
+  }
+  targetChecked = true;
+}
+
+/** Runs SQL in the local test database as its owner, after the target checks, and returns the output. */
 export function localSql(input: string): string {
+  assertLocalTarget();
   return execFileSync('docker', [
-    'compose', '-p', 'crx-local-app', '-f', resolve(here, 'compose.yaml'), '--env-file', resolve(here, '.state/local.env'),
+    'compose', '-p', PROJECT, '-f', resolve(here, 'compose.yaml'), '--env-file', resolve(here, '.state/local.env'),
     'exec', '-T', 'db', 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1',
   ], { input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
 }

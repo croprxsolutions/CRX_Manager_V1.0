@@ -6,14 +6,42 @@ import { localSql } from './local-db';
 // Orders list paging and selection (Goal 4) on 5,250 invented [G4O] orders; Mason's 2026-11-06 rule:
 // every list read or page turn clears the selection, "Select All" included.
 const root = fileURLToPath(new URL('../../..', import.meta.url));
+// Deletes exactly the rows the seed made (its md5 ids), as the database owner with triggers off (the
+// invoice and order guards refuse deletes), then rolls back if any other row still points at one of them.
 const CLEAN = `BEGIN;
 SET LOCAL session_replication_role = replica;
-DELETE FROM public.invoices WHERE order_id IN (SELECT id FROM public.orders WHERE order_number LIKE 'G4O-%');
-DELETE FROM public.deliveries WHERE order_id IN (SELECT id FROM public.orders WHERE order_number LIKE 'G4O-%');
-DELETE FROM public.order_items WHERE order_id IN (SELECT id FROM public.orders WHERE order_number LIKE 'G4O-%');
-DELETE FROM public.orders WHERE order_number LIKE 'G4O-%';
-DELETE FROM public.products WHERE product_name LIKE '[G4O]%';
-DELETE FROM public.customers WHERE farm_name LIKE '[G4O]%';
+CREATE TEMP TABLE g4o (tbl text, id uuid) ON COMMIT DROP;
+INSERT INTO g4o SELECT 'invoices', md5('g4o-inv-' || g || '-' || k)::uuid FROM generate_series(1, 5200) g, generate_series(1, 4) k;
+INSERT INTO g4o SELECT 'deliveries', md5('g4o-del-' || g || '-' || k)::uuid FROM generate_series(1, 5200) g, generate_series(1, 3) k;
+INSERT INTO g4o SELECT 'order_items', md5('g4o-item-' || g || '-' || k)::uuid FROM generate_series(1, 5250) g, generate_series(1, 2) k;
+INSERT INTO g4o SELECT 'orders', md5('g4o-order-' || g)::uuid FROM generate_series(1, 5250) g;
+INSERT INTO g4o SELECT 'products', md5('g4o-prod-' || g)::uuid FROM generate_series(1, 40) g;
+INSERT INTO g4o VALUES ('products', md5('g4o-prod-zebra')::uuid), ('customers', md5('g4o-group')::uuid);
+INSERT INTO g4o SELECT 'customers', md5('g4o-cust-' || g)::uuid FROM generate_series(1, 60) g;
+DELETE FROM public.invoices WHERE id IN (SELECT id FROM g4o WHERE tbl = 'invoices');
+DELETE FROM public.deliveries WHERE id IN (SELECT id FROM g4o WHERE tbl = 'deliveries');
+DELETE FROM public.order_items WHERE id IN (SELECT id FROM g4o WHERE tbl = 'order_items');
+DELETE FROM public.orders WHERE id IN (SELECT id FROM g4o WHERE tbl = 'orders');
+DELETE FROM public.products WHERE id IN (SELECT id FROM g4o WHERE tbl = 'products');
+DELETE FROM public.customers WHERE id IN (SELECT id FROM g4o WHERE tbl = 'customers');
+DO $$
+DECLARE fk record; dangling boolean;
+BEGIN
+  FOR fk IN
+    SELECT c.conrelid::regclass AS child, a.attname AS col, p.relname AS parent
+      FROM pg_constraint c
+      JOIN pg_class p ON p.oid = c.confrelid
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+     WHERE c.contype = 'f' AND cardinality(c.conkey) = 1 AND p.relnamespace = 'public'::regnamespace
+       AND p.relname IN ('invoices', 'deliveries', 'order_items', 'orders', 'products', 'customers')
+  LOOP
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s WHERE %I::text IN (SELECT id::text FROM g4o WHERE tbl = %L))', fk.child, fk.col, fk.parent)
+      INTO dangling;
+    IF dangling THEN
+      RAISE EXCEPTION 'Not deleted: % still points at a test % row. Remove that row first.', fk.child, fk.parent;
+    END IF;
+  END LOOP;
+END $$;
 COMMIT;`;
 // The season the screen shows (October 1 to September 30, Chicago time), so the seed lands inside it.
 const SEASON_START = `make_date(extract(year from (now() AT TIME ZONE 'America/Chicago') - interval '9 months')::int, 10, 1)`;

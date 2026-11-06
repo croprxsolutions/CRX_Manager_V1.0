@@ -867,6 +867,10 @@ export default function ProductDetail() {
         // The parent changed since "Add a size" opened: show its current values; the next save uses them.
         void getParentOfProduct(addSizeTo.sizes[0].product_id).then((fresh) => {
           if (!fresh) return;
+          if (fresh.id !== addSizeTo.id) {
+            toast('error', 'That size moved to another parent. Reopen "Add a size" from the parent you want.');
+            return;
+          }
           setAddSizeTo(fresh);
           setProduct((current) => ({ ...current, category: fresh.category ?? '', use_timings: fresh.use_timings ?? [],
             epa_registration: fresh.generic_epa_registration ?? '' }));

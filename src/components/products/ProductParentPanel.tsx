@@ -55,8 +55,10 @@ function EditParentModal({ parent, profileId, categoryOptions, timingOptions, on
 
   // Only timings the chosen category takes stay selected; the rest would be cleared on every size.
   const allowed = new Set(timingOptions.filter((option) => option.category === category).map((option) => option.code));
-  const keptTimings = timings.filter((code) => allowed.has(code));
-  const cleared = (parent.use_timings ?? []).filter((code) => !allowed.has(code));
+  // While the options are still loading (or failed), no timing counts as cleared.
+  const optionsLoaded = timingOptions.length > 0;
+  const keptTimings = optionsLoaded ? timings.filter((code) => allowed.has(code)) : timings;
+  const cleared = optionsLoaded ? (parent.use_timings ?? []).filter((code) => !allowed.has(code)) : [];
   const changes: Record<string, unknown> = {};
   if (name.trim() !== parent.name) changes.name = name.trim();
   if ((nickname.trim() || null) !== parent.nickname) changes.nickname = nickname.trim();

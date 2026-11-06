@@ -260,6 +260,8 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
         throw new Error(`Save at most ${MAX_SETUP_WORKBOOK_SAVE_ROWS} changed rows per tab at a time.`);
       }
       setSetup(setupPreview);
+      // Keep the parent rows first, so a failed Rates preview still leaves them ready to preview again.
+      if (parentRows.length > 0) setParentRatesState({ rows: parentRows, previews: null });
       if (rateRows.length > 0) await previewRates(rateRows);
       else setRates({ rows: rateRows, preview: null });
       if (parentRows.length > 0) await previewParents(parentRows);
@@ -313,6 +315,8 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
       onSaved();
       setSetupSaved(saved.rows.map((row) => row.product_name));
       toast('success', `Saved setup changes to ${saved.changed_count} products`);
+      // The old parent previews are stale now; drop them first so a failed re-read cannot leave them confirmable.
+      if (parentRates && parentRatesSaved == null) setParentRatesState({ rows: parentRates.rows, previews: null });
       // Rates not yet saved: carry over this save's own version moves and show their preview again.
       if (rates && rates.rows.length > 0 && ratesSaved == null) {
         await previewRates(rebaseRateRowsAfterSetup(rates.rows, saved));

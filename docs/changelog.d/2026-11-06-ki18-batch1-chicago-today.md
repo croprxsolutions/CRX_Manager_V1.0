@@ -3,9 +3,10 @@
 - New migration `20261128100000_ki18_batch1_chicago_today.sql`. The database clock is UTC, so after 6 PM
   (7 PM in summer) Central it thought it was already tomorrow. 34 functions now take "today" from the
   Chicago date: overdue marking, accounting-month checks on payments and credits, commission payment
-  dates, quote expiry, AR reminder day counts, applicator-license expiry (RUP sale records now carry the invoice date and its season), inventory holds and
+  dates, quote expiry, AR reminder day counts, applicator-license expiry, inventory holds and
   stock checks, and default delivery, bill and payment dates. Four column defaults change the same way.
-  A RUP sale needs a license valid on the invoice date and today. Undoing a credit application or
+  A RUP sale record carries the earlier of the invoice date and the posting day; its license must be
+  valid on the invoice date and today and issued by the sale date. Undoing a credit application or
   write-off is refused when its UTC or Chicago date falls in a closed month (3 more functions).
 - Nothing else in those functions changes. Boards and reports follow in batch 2; statement and AR aging
   ranges in batch 3.

@@ -266,19 +266,29 @@ const CHI = "(now() AT TIME ZONE 'America/Chicago')::date";
 const CHI_ARG = "((now() AT TIME ZONE 'America/Chicago'::text))::date";
 const REMIND_OLD = 'EXTRACT(DAY FROM NOW() - COALESCE(i.due_date, i.invoice_date))::int';
 const REMIND_NEW = `(${CHI} - COALESCE(i.due_date, i.invoice_date))`;
+// Mason 2026-11-06: the sale date is the earlier of the invoice date and the posting day, so a backdated
+// invoice records its own day and a future-dated one never records a future sale; the season follows it.
+const RUP_SALE = 'LEAST(v_invoice.invoice_date, CURRENT_DATE)';
 const RUP_SWAPS = [
   ['c.farm_name, i.created_at,', 'c.farm_name, i.invoice_date,'],
-  ['v_invoice.created_at', 'v_invoice.invoice_date'],
-  ['CURRENT_DATE, v_item.product_name', 'v_invoice.invoice_date, v_item.product_name'],
-  // The license must be valid on the sale date and today, so a future-dated invoice is checked too.
+  ['v_invoice.created_at', RUP_SALE],
+  ['CURRENT_DATE, v_item.product_name', `${RUP_SALE}, v_item.product_name`],
+  ['SELECT al.license_number, al.license_type, al.expiry_date', 'SELECT al.license_number, al.license_type, al.expiry_date, al.issued_date'],
+  // The license must be unexpired on the invoice date and today, and issued by the sale date.
   ['v_license.expiry_date < CURRENT_DATE', 'v_license.expiry_date < GREATEST(v_invoice.invoice_date, CURRENT_DATE)'],
+  ["v_compliance_notes := 'Applicator license expired on ' || v_license.expiry_date::text;",
+    "v_compliance_notes := 'Applicator license expired on ' || v_license.expiry_date::text;\n"
+    + `    ELSIF v_license.issued_date IS NOT NULL AND v_license.issued_date > ${RUP_SALE} THEN\n`
+    + "      v_compliance_status := 'warning';\n"
+    + "      v_compliance_notes := 'Applicator license issued on ' || v_license.issued_date::text || ', after the sale date';"],
 ];
 // A reversal refuses when either the UTC or the Chicago date of the row it undoes is in a closed month
 // (older rows were checked on the UTC date when made, newer ones on the Chicago date; _fix_delivery_plan does the same).
 const PERIOD_FNS = ['_reverse_write_off_replay_impl_20261015(', 'reverse_credit_memo_application(',
   '_unapply_return_credit_guard_impl_20260826(', '_void_invoice_split_provenance_impl_20260719('];
 const PERIOD_OLD = /check_period_open\((v_\w+)\.(applied_at|created_at)::date\);/;
-const PERIOD_NEW = "check_period_open($1.$2::date); PERFORM check_period_open(($1.$2 AT TIME ZONE 'America/Chicago')::date);";
+// AT TIME ZONE 'UTC' so the UTC reading does not follow the session's time zone (Sol, PR 1579).
+const PERIOD_NEW = "check_period_open(($1.$2 AT TIME ZONE 'UTC')::date); PERFORM check_period_open(($1.$2 AT TIME ZONE 'America/Chicago')::date);";
 function swap(sig, def) {
   return def.split('\n').map((line) => {
     const c = line.indexOf('--');
@@ -448,16 +458,20 @@ function main() {
     invoice_date: plusDays(startDay, 30), due_date: plusDays(startDay, 60), total_amount_cents: 10000, paid_amount_cents: 0, prepay_applied_cents: 0,
   });
   seedRow('invoice_items', { invoice_id: futureInvoice, product_id: rupProduct, quantity: 1, unit_size: 'gal', unit_price_cents: 10000, extended_cents: 10000 });
-  const license = (expiry) => scalar(`SET TimeZone = '${zone}'; SET request.jwt.claim.sub = '${ADMIN}'; BEGIN;
+  const license = (expiry, issued = null, invoice = futureInvoice) => scalar(`SET TimeZone = '${zone}'; SET request.jwt.claim.sub = '${ADMIN}'; BEGIN;
     SET LOCAL session_replication_role = replica;
-    INSERT INTO public.applicator_licenses (customer_id, license_number, license_type, holder_name, expiry_date, is_active)
-      VALUES ('${ids.customer}', 'PROVER-1', 'private', '[PROVER] holder', '${expiry}', true);
+    INSERT INTO public.applicator_licenses (customer_id, license_number, license_type, holder_name, expiry_date, issued_date, is_active)
+      VALUES ('${ids.customer}', 'PROVER-1', 'private', '[PROVER] holder', '${expiry}', ${issued ? `'${issued}'` : 'NULL'}, true);
     SET LOCAL session_replication_role = origin;
-    SELECT public.generate_rup_sales_records('${futureInvoice}'::uuid);
-    SELECT string_agg(compliance_status, ',') FROM public.rup_sales_records WHERE invoice_id = '${futureInvoice}'; ROLLBACK;`);
-  assert.equal(license(plusDays(startDay, 5)), 'warning', 'a license that expires before the invoice date must warn');
-  assert.equal(license(plusDays(startDay, 90)), 'compliant', 'a license valid through the invoice date is compliant');
-  console.log('[prover] RUP license expiring before a future invoice date warns; one valid through it is compliant');
+    SELECT public.generate_rup_sales_records('${invoice}'::uuid);
+    SELECT string_agg(compliance_status || ' ' || sale_date::text, ',') FROM public.rup_sales_records WHERE invoice_id = '${invoice}'; ROLLBACK;`);
+  assert.equal(license(plusDays(startDay, 5)), `warning ${startDay}`, 'a license that expires before the invoice date must warn');
+  // Mason 2026-11-06 ("earlier of the two"): a future-dated invoice records the posting day, never a future sale.
+  assert.equal(license(plusDays(startDay, 90)), `compliant ${startDay}`, 'a future-dated invoice records today, compliant when licensed');
+  // Sol (PR 1579): a license issued after the sale date does not cover it.
+  assert.equal(license('2027-12-31', '2026-10-01', rupInvoice), 'warning 2026-09-30', 'a license issued after the sale date must warn');
+  assert.equal(license('2027-12-31', '2026-09-01', rupInvoice), 'compliant 2026-09-30', 'a license issued before the sale date is compliant');
+  console.log('[prover] RUP: future-dated invoice records today; license expiring before the invoice date or issued after the sale date warns');
 
   // Column defaults and argument defaults give the Chicago date in a session one day off.
   const defaults = scalar(`SET TimeZone = '${zone}'; SELECT string_agg(pg_get_expr(d.adbin, d.adrelid), '|' ORDER BY c.relname)

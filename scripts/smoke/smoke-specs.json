@@ -626,7 +626,7 @@
       "covers": [
         "delivery_signature_storage_access"
       ],
-      "description": "Delivery-signature Storage access is private and scoped to the delivery path and authorized actor; the shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
+      "description": "REQUIRES 20261116100000. Delivery-signature Storage access is private: an old fixed-path signature is readable only when its delivery records it, by an admin, a sales rep or the delivery's active assigned driver; nobody signed in can write, replace or delete one. The shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
       "area": [
         "security",
         "inventory"

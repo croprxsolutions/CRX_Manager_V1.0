@@ -38,6 +38,7 @@
 --   - A failed split doesn't stop the delivery completing: it leaves an activity record and a flag in the
 --     result, and Create Invoice on the delivery runs it again.
 --   - Reps read the card (order_shares_select): any rep can already write it and reps work any customer.
+--   - An inactive customer can't be added to a card or a line (BILL_SPLIT_CUSTOMER_INACTIVE).
 --   - One row per customer on a card: UNIQUE (order_id, customer_id). Live had 0 rows on 2026-11-06.
 --   - A card totals at most exactly 100%, without the old 0.01 tolerance, and a row can't move to another
 --     order or line, which would take it out of a frozen sale without the check.
@@ -242,6 +243,11 @@ BEGIN
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
   END IF;
+  IF (TG_OP = 'INSERT' OR NEW.customer_id IS DISTINCT FROM OLD.customer_id)
+     AND NOT EXISTS (SELECT 1 FROM public.customers WHERE id = NEW.customer_id AND is_active) THEN
+    RAISE EXCEPTION 'BILL_SPLIT_CUSTOMER_INACTIVE: an inactive customer can''t be added to a bill split'
+      USING ERRCODE = 'check_violation';
+  END IF;
   IF TG_OP = 'UPDATE' THEN
     NEW.updated_at := now();
   END IF;
@@ -293,6 +299,11 @@ BEGIN
   PERFORM public._refuse_bill_split_change((SELECT order_id FROM order_items WHERE id = v_item_id));
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
+  END IF;
+  IF (TG_OP = 'INSERT' OR NEW.customer_id IS DISTINCT FROM OLD.customer_id)
+     AND NOT EXISTS (SELECT 1 FROM public.customers WHERE id = NEW.customer_id AND is_active) THEN
+    RAISE EXCEPTION 'BILL_SPLIT_CUSTOMER_INACTIVE: an inactive customer can''t be added to a bill split'
+      USING ERRCODE = 'check_violation';
   END IF;
   SELECT COALESCE(sum(split_percentage), 0) + NEW.split_percentage INTO v_total
     FROM order_item_shares

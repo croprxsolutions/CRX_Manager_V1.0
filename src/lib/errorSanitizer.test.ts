@@ -255,6 +255,9 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_HAS_DRAFT: draft invoice CS-1 bills this sale to one customer.')).toBe(
       "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"
     );
+    expect(sanitizeError("BILL_SPLIT_CUSTOMER_INACTIVE: an inactive customer can't be added")).toBe(
+      "Nothing was changed. This customer is inactive, so they can't be added to a bill split. Reactivate them first",
+    );
     expect(sanitizeError('GROUP_UNPOST_REQUIRED')).toBe(
       'Nothing was unposted. This invoice is part of a split group, so the whole group unposts together. Refresh the page and try again',
     );

@@ -39,6 +39,7 @@
 --   AE A payer draft's unit follows the split; re-saving a tote line as read still works
 --   AF A card plus a field allocation, part delivered, then the allocation removed: Create Invoice drafts per payer
 --   AG A payer's invoice takes its season from its date, as a plain delivery invoice does
+--   AH An inactive customer can't become a payer, on the card or on a line
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -795,6 +796,27 @@ BEGIN
      OR EXISTS (SELECT 1 FROM invoices WHERE delivery_id = v_d AND season IS DISTINCT FROM compute_season(invoice_date)) THEN
     v_fails := v_fails || ' (AG) a payer invoice took the order''s season, not its date''s;';
   END IF;
+
+  -- AH: an inactive customer can't become a payer, on the card or on a line.
+  PERFORM pg_temp.smk_new_sale('ah' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  SELECT id INTO v_inv2 FROM customers
+   WHERE is_active = true AND id NOT IN (v_main, v_payer2, v_payer3)
+     AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = customers.id AND i.status IN ('posted', 'overdue'))
+   ORDER BY created_at LIMIT 1;
+  UPDATE customers SET is_active = false WHERE id = v_inv2;
+  BEGIN
+    PERFORM pg_temp.smk_card(v_o, v_inv2, 40);
+    v_fails := v_fails || ' (AH) the card took an inactive customer;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_CUSTOMER_INACTIVE:%' THEN v_fails := v_fails || ' (AH) wrong refusal on the card: ' || SQLERRM || ';'; END IF;
+  END;
+  BEGIN
+    INSERT INTO order_item_shares (order_item_id, customer_id, split_percentage) VALUES (v_l1, v_inv2, 100);
+    v_fails := v_fails || ' (AH) a line share took an inactive customer;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_CUSTOMER_INACTIVE:%' THEN v_fails := v_fails || ' (AH) wrong refusal on a line: ' || SQLERRM || ';'; END IF;
+  END;
 
   -- V: row security, last, because it changes role. The card and line shares of a soft-deleted order are hidden.
   PERFORM pg_temp.smk_new_sale('v' || v_suffix);

@@ -21,4 +21,4 @@ A Bill Split draft's product lines now follow the split: changing them means voi
 
 A posted split group now unposts together: `unpost_invoice` refuses one member (`GROUP_UNPOST_REQUIRED`), for field-split groups too, and the screens already use the group call. A payer's line bills in the order line's unit, so every payer can return it. One line too small to show and worth no cents no longer stops the rest of a delivery billing. The card can't be truncated by a signed-in user.
 
-Another payer's quantity is in whole hundredths, so a payer can return a share in full. Create Invoice works on a Bill Split sale after a field allocation is removed from a part delivery. A payer's invoice takes its season from its date. Line shares can't be written on a soft-deleted order.
+Another payer's quantity is in whole hundredths, so a payer can return a share in full. Create Invoice works on a Bill Split sale after a field allocation is removed from a part delivery. A payer's invoice takes its season from its date. Line shares can't be written on a soft-deleted order. An inactive customer can't be added to a bill split.

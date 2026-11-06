@@ -11,7 +11,8 @@
 --   D  A direct write to a payer's line is refused, and save_invoice can't bill past the delivery
 --   E  Re-saving a payer's draft keeps its cents; a freight charge goes on one payer's draft
 --   F  A one-customer chemical-sale or misc-charge invoice on this sale is refused (ORDER_HAS_BILL_SPLIT),
---      also with a made-up group id, and a plain draft can't be given one later
+--      also with a made-up group id, and a plain draft can't be given one later; a credit memo can't be
+--      retyped as a sale (INVOICE_TYPE_IMMUTABLE), while a draft still switches chemical sale / misc charge
 --   G  The group posts at its reviewed versions, and the second payer can return their share
 --   H  Void the delivery on a fresh sale: both drafts cancel and the card reopens
 --   I  Under 100%: the rest stays with the main customer
@@ -325,6 +326,24 @@ BEGIN
     END;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (F) a plain draft on a sale with no card was refused: ' || SQLERRM || ';';
+  END;
+  BEGIN
+    UPDATE invoices SET invoice_type = 'misc_charge' WHERE invoice_number = 'SMK-SPL-F4' || v_suffix;
+    UPDATE invoices SET invoice_type = 'chemical_sale' WHERE invoice_number = 'SMK-SPL-F4' || v_suffix;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (F) a draft could not switch chemical sale / misc charge: ' || SQLERRM || ';';
+  END;
+  BEGIN
+    INSERT INTO invoices (invoice_number, invoice_type, order_id, customer_id, status, invoice_date, total_amount_cents, total_cost_cents, created_by)
+      VALUES ('SMK-SPL-F5' || v_suffix, 'credit_memo', (SELECT o FROM smk_sale), v_main, 'draft', CURRENT_DATE, 0, 0, v_admin);
+    BEGIN
+      UPDATE invoices SET invoice_type = 'chemical_sale' WHERE invoice_number = 'SMK-SPL-F5' || v_suffix;
+      v_fails := v_fails || ' (F) a credit memo was retyped as a sale;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'INVOICE_TYPE_IMMUTABLE:%' THEN v_fails := v_fails || ' (F) wrong refusal on a retype: ' || SQLERRM || ';'; END IF;
+    END;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (F) setup: a draft credit memo was refused: ' || SQLERRM || ';';
   END;
 
   SELECT jsonb_object_agg(id, _invoice_post_version(id)) INTO v_versions FROM invoices WHERE invoice_group_id = v_group;

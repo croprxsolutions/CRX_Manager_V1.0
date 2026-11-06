@@ -655,6 +655,14 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'INVOICE_SOURCE_LINEAGE_IMMUTABLE: order_id and delivery_id cannot change after invoice creation';
   END IF;
+  -- An invoice keeps the type it was created with (Mason, 2026-11-06), except that a draft may switch
+  -- between chemical sale and misc charge, as the invoice editor offers. Otherwise a credit memo
+  -- retyped as a sale would bill one customer past the Bill Split checks, which run on insert.
+  IF TG_OP = 'UPDATE' AND NEW.invoice_type IS DISTINCT FROM OLD.invoice_type
+     AND NOT (OLD.invoice_type IN ('chemical_sale', 'misc_charge') AND NEW.invoice_type IN ('chemical_sale', 'misc_charge')) THEN
+    RAISE EXCEPTION 'INVOICE_TYPE_IMMUTABLE: an invoice keeps its type; void it and create the right one'
+      USING ERRCODE = 'check_violation';
+  END IF;
   -- Bill Split: a sale invoice joins a group only inside the split writer's claim, or a one-customer
   -- draft given a made-up group id would pass the Bill Split checks. Leaving a group stays open.
   IF TG_OP = 'UPDATE' AND NEW.invoice_type IN ('chemical_sale', 'misc_charge')

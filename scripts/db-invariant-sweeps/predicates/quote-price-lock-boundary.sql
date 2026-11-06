@@ -136,7 +136,7 @@ SELECT '_assert_quote_prices_as_sent:caller-lost:' || gate.sig AS violation_key,
     WHERE p.oid = to_regprocedure(gate.sig)
       AND regexp_replace(regexp_replace(p.prosrc, '/\*.*?\*/', '', 'g'), '--[^\n]*', '', 'g') ~ 'PERFORM\s+public\._assert_quote_prices_as_sent\s*\('
  )
- -- KI-10 batch 4e (20261117150000) renames the reviewed create_job_from_quote_section body
+ -- KI-10 batch 4e (20261118120000) renames the reviewed create_job_from_quote_section body
  -- unchanged to _create_job_from_quote_section_replay_impl_20261015 behind a receipt wrapper.
  -- That shape is accepted only with the exact reviewed wrapper and the renamed body still calling
  -- the check; any other shape is still reported.

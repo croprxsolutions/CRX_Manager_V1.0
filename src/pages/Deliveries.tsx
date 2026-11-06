@@ -153,28 +153,36 @@ const FULL_READ_PAGE_SIZE = 500;
 // limit null reads every matching row (exports, the load sheet, the calendar, the driver view), in pages of 500.
 async function readDeliveriesPage(query: DeliveriesQuery, limit: number | null, offset = 0): Promise<DeliveriesPage> {
   if (limit !== null) return readOnePage(query, limit, offset);
-  // Each page is its own snapshot: a list that changed between pages (its total moved, or the rows read
-  // do not add up to it) is read again, and after three tries reported as a failed read.
+  // Pages are separate reads, so the list can change between them. A read whose total moved, or whose
+  // rows do not add up to it, is read again. A count can stay equal through a change (one delivery
+  // cancelled, another created), so a read that needed more than one page is returned only once a second
+  // whole read matches it row for row, as fetchAllRows does. After three tries it is reported as failed.
+  let unconfirmed: string | null = null;
   for (let attempt = 0; attempt < FULL_READ_ATTEMPTS; attempt++) {
     const result = await readAllPagesOnce(query);
-    if (result) return result;
+    if (!result) { unconfirmed = null; continue; }
+    if (result.pages === 1) return result.page;
+    const key = JSON.stringify(result.page.rows);
+    if (key === unconfirmed) return result.page;
+    unconfirmed = key;
   }
   throw new Error('Deliveries kept changing while they were read. Please try again.');
 }
 const FULL_READ_ATTEMPTS = 3;
 // Walk the list by delivery id, which never changes, so a delivery edited between pages is never skipped
 // or repeated; then put the rows back in the chosen order. Null when the list changed mid-read.
-async function readAllPagesOnce(query: DeliveriesQuery): Promise<DeliveriesPage | null> {
+async function readAllPagesOnce(query: DeliveriesQuery): Promise<{ page: DeliveriesPage; pages: number } | null> {
   const first = await readOnePage(query, FULL_READ_PAGE_SIZE, 0, FIRST_ID);
   const rows = [...first.rows];
-  for (let page = first; page.rows.length === FULL_READ_PAGE_SIZE;) {
+  let pages = 1;
+  for (let page = first; page.rows.length === FULL_READ_PAGE_SIZE; pages++) {
     page = await readOnePage(query, FULL_READ_PAGE_SIZE, 0, page.rows[page.rows.length - 1].id);
     if (page.total_count !== first.total_count) return null;
     rows.push(...page.rows);
   }
   if (rows.length !== first.total_count) return null;
   rows.sort((a, b) => (a.sort_position ?? 0) - (b.sort_position ?? 0));
-  return { ...first, rows };
+  return { page: { ...first, rows }, pages };
 }
 // Below every delivery id: the first page of a read by id.
 const FIRST_ID = '00000000-0000-0000-0000-000000000000';
@@ -820,13 +828,13 @@ export default function Deliveries() {
     });
   };
 
-  useEffect(() => { void loadDeliveries(); }, [loadDeliveries]);
+  // Each page flip or filter change also re-checks stock, so a delivery added elsewhere gets its warning.
+  useEffect(() => { void loadDeliveries(); void loadShortages(); }, [loadDeliveries, loadShortages]);
   useEffect(() => {
-    void loadShortages();
     fetchDrivers();
     fetchCustomers();
     fetchRemainderCount();
-  }, [loadShortages, fetchDrivers, fetchCustomers, fetchRemainderCount]);
+  }, [fetchDrivers, fetchCustomers, fetchRemainderCount]);
 
   // Fetch unassigned deliveries for driver dashboard
   useEffect(() => {
@@ -1954,7 +1962,8 @@ export default function Deliveries() {
             />
           </div>
           <div className="md:hidden">
-            {searched.length === 0 ? (
+            {/* While a page loads, the old rows and their actions are hidden, as the table above hides them. */}
+            {pageLoading ? <SkeletonCard /> : searched.length === 0 ? (
               anyDeliveries ? (
                 <p className="py-8 text-center font-semibold text-nav-dark">No deliveries match your search or filters</p>
               ) : (

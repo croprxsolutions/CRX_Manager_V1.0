@@ -24,11 +24,16 @@ const H = vi.hoisted(() => ({
   // Just before this get_deliveries_page call, a delivery read on page 1 is cancelled and a new one is
   // saved at the end, so the total stays the same and every later row moves up one place.
   editDeliveriesAtCall: null as number | null,
+  // Just before this call, a delivery read on page 1 is cancelled and a new one is saved with an id below
+  // every other, in the part a whole-list read has already passed: the total stays the same.
+  swapBehindReadAtCall: null as number | null,
   // Every get_deliveries_page call first saves one more delivery, so no read ever sees a still list.
   growEveryPageCall: false,
   // While set, get_deliveries_page answers only once this settles, so a test can look at the screen mid-read.
   holdPageCalls: null as Promise<void> | null,
   failTable: null as string | null,
+  // Every table the screen reads, in order (the stock check reads inventory).
+  tableReads: [] as string[],
   pageCalls: [] as Array<Record<string, unknown>>,
   toast: vi.fn(),
   exportToCSV: vi.fn(),
@@ -88,7 +93,7 @@ function deliveriesPage(args: PageArgs) {
 
 vi.mock('../lib/db', () => ({
   supabase: {
-    from: (table: string) => serverQuery(table),
+    from: (table: string) => { H.tableReads.push(table); return serverQuery(table); },
     rpc: vi.fn((name: string, args: PageArgs) => {
       if (name !== 'get_deliveries_page') return Promise.resolve({ data: null, error: null });
       H.pageCalls.push(args);
@@ -98,6 +103,10 @@ vi.mock('../lib/db', () => ({
       if (H.editDeliveriesAtCall === H.pageCalls.length) {
         H.deliveries.splice(1, 1);
         H.deliveries.push({ ...H.deliveries[0], id: 'del-new', delivery_number: 'DEL-NEW' });
+      }
+      if (H.swapBehindReadAtCall === H.pageCalls.length) {
+        H.deliveries.splice(1, 1);
+        H.deliveries.push({ ...H.deliveries[0], id: 'a-new', delivery_number: 'DEL-SWAP' });
       }
       if (H.growEveryPageCall) H.deliveries.push({ ...H.deliveries[0], id: `del-grow-${H.pageCalls.length}`, delivery_number: `DEL-GROW-${H.pageCalls.length}` });
       if (H.holdPageCalls) return H.holdPageCalls.then(() => ({ data: deliveriesPage(args), error: null }));
@@ -145,8 +154,10 @@ beforeEach(() => {
   H.failPageFromCall = null;
   H.editDeliveriesAtCall = null;
   H.growEveryPageCall = false;
+  H.swapBehindReadAtCall = null;
   H.holdPageCalls = null;
   H.failTable = null;
+  H.tableReads = [];
   H.pageCalls = [];
   H.deliveries = Array.from({ length: TOTAL }, (_, i) => ({
     id: `del-${String(i).padStart(4, '0')}`,
@@ -232,7 +243,8 @@ describe('Deliveries list pages in the database', () => {
     fireEvent.click(button);
     fireEvent.click(button);
     await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
-    expect(H.pageCalls.filter((c) => c.p_after_id === FIRST_ID)).toHaveLength(1);
+    // One export: a whole read and its confirming second read, never two exports' worth.
+    expect(H.pageCalls.filter((c) => c.p_after_id === FIRST_ID)).toHaveLength(2);
   });
 
   it('reads the same page again from Try again after a failed read', async () => {
@@ -259,11 +271,24 @@ describe('Deliveries list pages in the database', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Cancel 1 Selected/ })).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: /Export CSV/ })).toBeDisabled();
+    // The phone list hides the old rows and their actions too, so none can open the wrong delivery.
+    expect(screen.queryAllByRole('checkbox', { name: 'Select DEL-0000' })).toHaveLength(0);
 
     await act(async () => { release(); });
     await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
     expect(screen.queryByRole('button', { name: /Cancel 1 Selected/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Export CSV/ })).toBeEnabled();
+  });
+
+  it('checks stock again on a page flip, so a delivery added elsewhere gets its shortage warning', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    await waitFor(() => expect(H.tableReads).toContain('inventory'));
+    const before = H.tableReads.filter((t) => t === 'inventory').length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
+    await waitFor(() => expect(H.tableReads.filter((t) => t === 'inventory').length).toBeGreaterThan(before));
   });
 
   it('exports nothing and says so when the export read fails', async () => {
@@ -291,6 +316,20 @@ describe('Deliveries list pages in the database', () => {
     expect(exported).toContain('DEL-NEW');
     expect(exported).toHaveLength(TOTAL);
     expect(new Set(exported).size).toBe(TOTAL);
+  });
+
+  it('reads an export twice and returns it only when both reads match, so a change that keeps the total is not missed', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    H.swapBehindReadAtCall = H.pageCalls.length + 2;
+    fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
+
+    await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
+    const exported = (H.exportToCSV.mock.calls[0][0] as Array<{ delivery_number: string }>).map((d) => d.delivery_number);
+    // The first pass still held the cancelled DEL-0001 and missed DEL-SWAP, yet added up to the total.
+    expect(exported).toContain('DEL-SWAP');
+    expect(exported).not.toContain('DEL-0001');
+    expect(exported).toHaveLength(TOTAL);
   });
 
   it('exports nothing and says so when deliveries keep changing during every read', async () => {
@@ -333,6 +372,7 @@ describe('Deliveries list pages in the database', () => {
     expect(screen.getAllByText('DEL-1499').length).toBeGreaterThan(0);
     expect(screen.queryByText('DEL-1498')).not.toBeInTheDocument();
     expect(H.pageCalls.every((c) => c.p_limit === 500 && c.p_driver_id === 'driver-1')).toBe(true);
-    expect(H.pageCalls.map((c) => c.p_after_id)).toEqual([FIRST_ID, 'del-0999']);
+    // Two pages, read twice: a list read in more than one page is kept only when a second read matches it.
+    expect(H.pageCalls.map((c) => c.p_after_id)).toEqual([FIRST_ID, 'del-0999', FIRST_ID, 'del-0999']);
   });
 });

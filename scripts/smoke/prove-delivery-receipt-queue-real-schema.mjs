@@ -586,6 +586,10 @@ function main() {
   psql(`UPDATE public.delivery_receipt_queue SET next_attempt_at = now() - interval '1 second' WHERE delivery_id IN ('${D(10)}', '${D(11)}');`);
   const [fa, fb] = claim();
   assert.ok(fa && fb);
+  // Only a claim confirm said 'send' to can record a send.
+  assert.match(finish(fa, 'sent', "NULL, 'msg-a', 'ki25-farm@example.invalid', 'ki25-finish-unconfirmed'").err, /RECEIPT_SEND_NOT_CONFIRMED/);
+  assert.equal(q(`SELECT status FROM public.delivery_receipt_queue WHERE id = '${fa.id}';`).out, 'sending', 'an unconfirmed send changes nothing');
+  assert.equal(confirm(fa).out, 'send'); assert.equal(confirm(fb).out, 'send');
   assert.equal(finish(fa, 'sent', "NULL, 'msg-a', 'ki25-farm@example.invalid', 'ki25-finish-bound'").out, 'sent');
   assert.match(finish(fb, 'sent', "NULL, 'msg-b', 'ki25-farm@example.invalid', 'ki25-finish-bound'").err, /IDEMPOTENCY_KEY_REUSED/);
   assert.equal(q(`SELECT status FROM public.delivery_receipt_queue WHERE id = '${fb.id}';`).out, 'sending', 'B is untouched');
@@ -593,7 +597,7 @@ function main() {
   assert.equal(finish(fa, 'sent', "NULL, 'msg-a', 'ki25-farm@example.invalid', 'ki25-finish-bound'").out, 'sent');
   assert.match(finish(fa, 'sent', "NULL, 'msg-other', 'ki25-farm@example.invalid', 'ki25-finish-bound'").err, /IDEMPOTENCY_KEY_REUSED/, 'bound to its proof');
   assert.equal(finish(fb, 'sent', "NULL, 'msg-b', 'ki25-farm@example.invalid', 'ki25-finish-b'").out, 'sent');
-  console.log('[prover] a finish key reused for another receipt, outcome or proof is refused');
+  console.log('[prover] an unconfirmed claim cannot record a send; a finish key reused for another receipt, outcome or proof is refused');
 
   // A retried claim only answers while its lease holds; after that the row belongs to a fresh claim, which
   // runs the 23-hour check.
@@ -614,12 +618,14 @@ function main() {
   seedDelivery(21); assert.equal(complete(21, { emailReceipt: 'true' }).status, 0);
   due(21);
   const v1 = claim();
+  assert.equal(confirm(v1[0]).out, 'send');
   psql(`SET session_replication_role = replica; UPDATE public.deliveries SET status = 'cancelled' WHERE id = '${D(21)}';`);
   assert.equal(finish(v1[0], 'sent', `NULL, 'msg-v', 'ki25-farm@example.invalid'`).out, 'needs_check');
   assert.match(row(21, "status || ' ' || resend_message_id || ' ' || (sent_at IS NOT NULL) || ' ' || last_error"), /^needs_check msg-v true The receipt was emailed, but/);
   seedDelivery(22); assert.equal(complete(22, { emailReceipt: 'true' }).status, 0);
   due(22);
   const v2 = claim();
+  assert.equal(confirm(v2[0]).out, 'send');
   psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}';`);
   assert.equal(finish(v2[0], 'sent', `NULL, 'msg-e', 'ki25-farm@example.invalid'`).out, 'needs_check');
   psql(`UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);

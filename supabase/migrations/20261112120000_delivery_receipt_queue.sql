@@ -146,6 +146,7 @@ CREATE TABLE public.delivery_receipt_queue (
   claimed_at timestamptz,
   attempt_to text, -- the address the latest claim fixed; after an authorized send, never changed
   send_authorized_at timestamptz, -- the first time confirm said 'send': an email may have gone out since
+  send_confirmed_token uuid, -- the claim confirm last said 'send' to: only that claim can record a send
   last_error text,
   sent_to text,
   resend_message_id text,
@@ -229,7 +230,7 @@ BEGIN
   ON CONFLICT (delivery_id) DO UPDATE
      SET customer_id = EXCLUDED.customer_id, requested_by = EXCLUDED.requested_by, status = EXCLUDED.status,
          last_error = EXCLUDED.last_error, receipt = EXCLUDED.receipt, attempts = 0, next_attempt_at = now(),
-         attempt_to = NULL, send_authorized_at = NULL, created_at = now()
+         attempt_to = NULL, send_authorized_at = NULL, send_confirmed_token = NULL, created_at = now()
    WHERE delivery_receipt_queue.status = 'cancelled' AND delivery_receipt_queue.send_authorized_at IS NULL;
 END;
 $function$;
@@ -667,7 +668,7 @@ BEGIN
     ELSE
       v_result := 'send';
       UPDATE public.delivery_receipt_queue
-         SET claimed_at = v_now, send_authorized_at = COALESCE(send_authorized_at, v_now)
+         SET claimed_at = v_now, send_authorized_at = COALESCE(send_authorized_at, v_now), send_confirmed_token = p_claim_token
        WHERE id = p_id;
     END IF;
   END IF;
@@ -724,6 +725,12 @@ BEGIN
       RAISE EXCEPTION 'IDEMPOTENCY_KEY_REUSED: this key finished a different receipt or outcome' USING ERRCODE = '22023';
     END IF;
     RETURN v_saved ->> 'status';
+  END IF;
+  -- Only a claim confirm said 'send' to can record a send.
+  IF p_outcome = 'sent' AND EXISTS (SELECT 1 FROM public.delivery_receipt_queue q
+                                     WHERE q.id = p_id AND q.claim_token = p_claim_token AND q.status = 'sending'
+                                       AND q.send_confirmed_token IS DISTINCT FROM p_claim_token) THEN
+    RAISE EXCEPTION 'RECEIPT_SEND_NOT_CONFIRMED: confirm_delivery_receipt_send did not authorize this claim to send' USING ERRCODE = '22023';
   END IF;
   -- A sent receipt must have gone to the address this claim fixed.
   IF p_outcome = 'sent' AND EXISTS (SELECT 1 FROM public.delivery_receipt_queue q

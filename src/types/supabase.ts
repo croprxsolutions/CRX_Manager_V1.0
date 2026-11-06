@@ -2959,6 +2959,7 @@ export type Database = {
           requested_by: string | null
           resend_message_id: string | null
           send_authorized_at: string | null
+          send_confirmed_token: string | null
           sent_at: string | null
           sent_to: string | null
           status: string
@@ -2979,6 +2980,7 @@ export type Database = {
           requested_by?: string | null
           resend_message_id?: string | null
           send_authorized_at?: string | null
+          send_confirmed_token?: string | null
           sent_at?: string | null
           sent_to?: string | null
           status?: string
@@ -2999,6 +3001,7 @@ export type Database = {
           requested_by?: string | null
           resend_message_id?: string | null
           send_authorized_at?: string | null
+          send_confirmed_token?: string | null
           sent_at?: string | null
           sent_to?: string | null
           status?: string

@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-06 — A Deliveries export may miss a delivery cancelled or reactivated while it runs
+
+**Decision:** Mason accepted that a multi-page Deliveries read (export, load sheet, calendar, driver view) includes every delivery that matches for the whole read exactly once, but a delivery cancelled, reactivated or moved in or out of the filters while it runs may or may not appear, and rows near an edit can sit a place out of order (Mason, 2026-11-06: "A: accept it").
+**Why:** each page of 500 is its own database call, so no snapshot spans the read; three review rounds in a row found a new HIGH in the same multi-page mechanism (PR #1549). The alternatives were a re-check that asks the user to export again, or lifting the 500-row cap Sol required.
+**What this forbids/implies:** `get_deliveries_page` with `p_after_id` and the screen's whole-list reads keep this behaviour; do not report it as a bug or add a lock or retry loop for it without a new decision.
+
 ## 2026-11-05 — A new HIGH from the same mechanism three rounds running also stops the work
 
 **Decision:** the `AGENTS.md` stop rule gains a trigger: a NEW BLOCKER/HIGH that traces to the same mechanism (one lock, timer, guard, or piece of design) for the third review round in a row. The agent stops patching, names the mechanism, asks Mason the business trade-off that would let it delete that mechanism (for example duplicate vs loss, block vs warn), then re-plans through Astra plan review, Luna, then Sol (Mason, 2026-11-05: "Yes, start it").

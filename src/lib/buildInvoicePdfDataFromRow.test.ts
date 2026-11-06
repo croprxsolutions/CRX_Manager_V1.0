@@ -167,6 +167,10 @@ describe('buildInvoicePdfDataFromRow — #33 list-print re-fetch', () => {
     // A closed field invoice the database never filled (live has a cancelled one) keeps "On receipt" (CodeRabbit, PR #1556).
     installFromMock({ customers: {}, invoice_items: [ONE_LINE], invoice_shares: [], invoices: billing });
     expect((await buildInvoicePdfDataFromRow(listRow({ status: 'cancelled' }))).due_date).toBeUndefined();
+    // Blank invoice and customer terms: the derived +30 date prints with the 'Net 30' the database saves (Sol).
+    installFromMock({ customers: {}, invoice_items: [ONE_LINE], invoice_shares: [], invoices: { ...billing, payment_terms: null } });
+    const blank = await buildInvoicePdfDataFromRow(listRow({ status: 'draft' }));
+    expect([blank.due_date, blank.payment_terms]).toEqual(['2026-07-01', 'Net 30']);
   });
 
   it('a caller-supplied value WINS over the DB re-fetch (in-editor live-form print)', async () => {

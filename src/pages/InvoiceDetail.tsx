@@ -1115,6 +1115,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'Choose a custom due date before saving.');
       return;
     }
+    // KI-14: the database marks a field invoice's date as typed only when the date changes, so a "custom" date equal
+    // to the date its terms already gave would be recalculated from the new terms on save (Sol, PR #1556).
+    if (paymentTerms === 'Custom date…' && invoice.invoice_type === 'field_application'
+      && !invoice.due_date_is_custom && customDueDate === (invoice.due_date || '')) {
+      toast('error', "That is already this invoice's due date from its terms. Keep the terms, or choose a different custom date.");
+      return;
+    }
     // Per-line split billing (Codex P1 #6, 2026-07-18): a split child's line detail lives in
     // invoice_line_shares, keyed to invoice_items by billing_line_id. The generic save_invoice
     // deletes + recreates invoice_items, which would CASCADE those shares away and silently

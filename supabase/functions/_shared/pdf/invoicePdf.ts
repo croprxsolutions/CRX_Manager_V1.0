@@ -462,12 +462,17 @@ export async function buildInvoicePdfDataFromRow(
     (items || []).map(mapInvoicePdfItem),
   );
 
+  // KI-14: an editable field-application invoice with no stored due date prints the one its terms give (the
+  // database fills it on save); other types and closed invoices keep "On receipt" (CodeRabbit, PR #1556).
+  // Blank terms print as the 'Net 30' the database saves, so the date never shows without its terms (Sol).
+  const termsDue = !pickDue && inv.invoice_date && (inv.invoice_type || 'field_application') === 'field_application'
+    && ['draft', 'unposted'].includes(inv.status || 'draft');
+  const printTerms = pickTerms || custRow?.payment_terms || (termsDue ? 'Net 30' : undefined);
+
   return {
     invoice_number: inv.invoice_number,
     invoice_date: inv.invoice_date,
-    // KI-14: an editable field-application invoice with no stored due date prints the one its terms give (the
-    // database fills it on save); other types and closed invoices keep "On receipt" (CodeRabbit, PR #1556).
-    due_date: pickDue || (inv.invoice_date && (inv.invoice_type || 'field_application') === 'field_application' && ['draft', 'unposted'].includes(inv.status || 'draft') ? dueDateFromTerms(inv.invoice_date, pickTerms || custRow?.payment_terms) : undefined),
+    due_date: pickDue || (termsDue && inv.invoice_date ? dueDateFromTerms(inv.invoice_date, printTerms) : undefined),
     invoice_type: inv.invoice_type || 'field_application',
     status: inv.status || 'draft',
     customer_name: inv.customer_name,
@@ -477,7 +482,7 @@ export async function buildInvoicePdfDataFromRow(
     customer_zip: custRow?.zip || undefined,
     account_number: custRow?.account_number || undefined,
     // #33: invoice-level payment terms override the customer default when present.
-    payment_terms: pickTerms || custRow?.payment_terms || undefined,
+    payment_terms: printTerms || undefined,
     salesman_name: inv.salesman_name || undefined,
     purchase_order_ref: pickPo || undefined,
     header_notes: pickHeader || undefined,

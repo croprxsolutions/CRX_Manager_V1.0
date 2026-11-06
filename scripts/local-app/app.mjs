@@ -193,6 +193,11 @@ function migrationBytes(file) {
 // Live held this one body with CRLF when 20260817120000 pinned it, so install that text
 // first, the same way the real-schema proofs under scripts/smoke/ do.
 function withLiveLineEndings(file, sql) {
+  // Live holds the Ea and Unit count units (data rows the schema baseline omits), which 20261117130000 checks
+  // for first; the smoke harness seeds them the same way (scripts/smoke/undo-paths/harness.mjs).
+  if (path.basename(file) === '20261117130000_tote_fill_from_bulk.sql') {
+    return `INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Ea', 1, 'both'), ('Unit', 1, 'both') ON CONFLICT DO NOTHING;\n${sql}`;
+  }
   // Live also holds validate_product_units with CRLF, which 20261104150000 pins by md5.
   if (path.basename(file) === '20261104150000_product_forms_seed_each.sql') {
     return `DO $live_crlf_validate$ BEGIN

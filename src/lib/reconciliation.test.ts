@@ -219,6 +219,33 @@ describe('checkInventoryLedger', () => {
     expect(checkInventoryLedger(inventory, transactions)).toEqual([]);
   });
 
+  it('matches stock after a tote fill from bulk and after its undo', () => {
+    const transactions: InventoryTransactionRow[] = [
+      { product_id: 'bulk', transaction_type: 'received', quantity: 4000 }, // quarts
+      { product_id: 'bulk', transaction_type: 'tote_fill_out', quantity: -1060 },
+      { product_id: 'tote', transaction_type: 'tote_fill_in', quantity: 1 },
+    ];
+    const afterFill: InventoryRow[] = [
+      { id: 'i1', product_id: 'bulk', product_name: 'Bulk', quantity_available: 2940 },
+      { id: 'i2', product_id: 'tote', product_name: 'Tote', quantity_available: 1 },
+    ];
+    expect(checkInventoryLedger(afterFill, transactions)).toEqual([]);
+
+    const undo: InventoryTransactionRow[] = [
+      { product_id: 'bulk', transaction_type: 'tote_fill_out', quantity: 1060 },
+      { product_id: 'tote', transaction_type: 'tote_fill_in', quantity: -1 },
+    ];
+    const afterUndo: InventoryRow[] = [
+      { id: 'i1', product_id: 'bulk', product_name: 'Bulk', quantity_available: 4000 },
+      { id: 'i2', product_id: 'tote', product_name: 'Tote', quantity_available: 0 },
+    ];
+    expect(checkInventoryLedger(afterUndo, [...transactions, ...undo])).toEqual([]);
+    // A fill the ledger missed shows up on the Bulk row (the tote has no rows, so it is skipped).
+    expect(checkInventoryLedger(afterFill, transactions.slice(0, 1))).toEqual([
+      expect.objectContaining({ entityId: 'i1', expected: 4000, actual: 2940 }),
+    ]);
+  });
+
   it('skips products with no transactions (initial load only)', () => {
     const inventory: InventoryRow[] = [
       { id: 'inv1', product_id: 'p1', product_name: 'Product A', quantity_available: 42 },

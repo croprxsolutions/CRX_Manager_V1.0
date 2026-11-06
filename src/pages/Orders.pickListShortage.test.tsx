@@ -20,8 +20,9 @@ import { buildPaginatedQueryChain as buildChain } from '../test-utils/supabaseCh
 import { MemoryRouter } from 'react-router-dom';
 import type { PickListData } from '../lib/orderPickListPdf';
 
-const { mockFrom, mockToast, mockDownloadPickList, selectedOrder, tables } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockDownloadPickList, selectedOrder, tables } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
+  mockRpc: vi.fn(),
   mockToast: vi.fn(),
   mockDownloadPickList: vi.fn(),
   selectedOrder: {
@@ -38,8 +39,12 @@ const { mockFrom, mockToast, mockDownloadPickList, selectedOrder, tables } = vi.
 }));
 
 vi.mock('../lib/db', () => ({
-  supabase: { from: mockFrom },
+  supabase: { from: mockFrom, rpc: mockRpc },
   checkMutationResult: vi.fn(),
+  assertRpcResult: (data: unknown, name: string) => {
+    if (data === null || data === undefined) throw new Error(`${name} returned no data`);
+    return data;
+  },
   sanitizeError: (error: unknown) => (error instanceof Error ? error.message : 'Request failed'),
 }));
 
@@ -114,6 +119,9 @@ async function printPickList(): Promise<PickListData[]> {
       Promise.resolve({ data: rows.slice(from, to + 1), error: null }));
     return chain;
   });
+
+  // The list itself is one page from get_orders_page holding the selected order.
+  mockRpc.mockResolvedValue({ data: { rows: [selectedOrder], total_count: 1, total_price_cents: 0 }, error: null });
 
   render(<MemoryRouter><Orders /></MemoryRouter>);
   fireEvent.click(await screen.findByRole('button', { name: /Print Pick Lists/i }));

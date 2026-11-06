@@ -71,6 +71,22 @@
         "security"
       ]
     },
+    "fill_tote_from_bulk": {
+      "chain": "smoke-tote_fill_from_bulk.sql",
+      "container_prover": "prove-tote-fill-real-schema.mjs",
+      "description": "REQUIRES 20261117130000. Tote fill from bulk (BLK-1a): anon cannot execute the three public functions; on an invented fertilizer parent an admin previews one 265-gal tote from 1,000 gal (nothing written), fills it (two signed ledger rows, one tote_fills row, no cost or price change), a same-key retry replays, the undo restores both counts and replays, a second undo is refused TOTE_FILL_ALREADY_REVERSED; an active non-admin profile is refused ADMIN_REQUIRED.",
+      "covers": [
+        "fill_tote_from_bulk",
+        "preview_tote_fill",
+        "reverse_tote_fill",
+        "_tote_fill_preview",
+        "_tote_fill_liquid_oz"
+      ],
+      "area": [
+        "inventory",
+        "security"
+      ]
+    },
     "apply_product_setup": {
       "chain": "smoke-product_setup_workbook.sql",
       "container_prover": "prove-product-setup-workbook-real-schema.mjs",
@@ -626,7 +642,7 @@
       "covers": [
         "delivery_signature_storage_access"
       ],
-      "description": "Delivery-signature Storage access is private and scoped to the delivery path and authorized actor; the shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
+      "description": "REQUIRES 20261116100000. Delivery-signature Storage access is private: an old fixed-path signature is readable only when its delivery records it, by an admin, a sales rep or the delivery's active assigned driver; nobody signed in can write, replace or delete one. The shared sales-rep helper is proven immune to a forged pg_temp profiles table.",
       "area": [
         "security",
         "inventory"
@@ -1988,6 +2004,12 @@
       "chain": "smoke-chem-sale-bill-split-invoices.sql",
       "description": "Migration 20261118130000 (billing plan M2): a delivery on a Bill Split sale drafts one invoice per payer, CS-...-1 / -2 in one group, each line adding up exactly with the main customer taking the rest; line shares override the card; the card and line shares refuse changes after the first delivery (BILL_SPLIT_FROZEN) and reopen when it is voided; a direct line write is refused, save_invoice can't bill past the delivery, re-saving a payer draft keeps its cents and takes a freight charge; a one-customer chemical-sale invoice is refused (ORDER_HAS_BILL_SPLIT); the group posts and the second payer can return; a card under 100% leaves the rest with the main customer; Create Invoice drafts per payer again after a group void; a sale with no card bills one plain invoice; a one-customer draft refuses a new payer (BILL_SPLIT_HAS_DRAFT); a payer draft's product lines can't change (BILL_SPLIT_LINES_LOCKED); each payer's invoice cost is its own lines' cost and survives a re-save; a change to a product line's cost or description can't land; a share too small for any quantity gets no cents; line shares and card rows record when they changed; one payer's draft can't be deleted or voided alone, the whole group can and Create Invoice redrafts; a delivery too small to share leaves an activity record and bill_split_failed; a field split can't take over a frozen Bill Split; Create Invoice with nothing to bill is refused; two deliveries under one card add up; replays draft nothing new; a rush sale waiting for prices drafts nothing, can be priced, then drafts; row security as rep and anon, soft-deleted orders hidden. Terminal rollback.",
       "covers": ["_create_bill_split_delivery_invoices", "_bill_split_line_shares", "_order_has_bill_split", "_refuse_bill_split_change", "guard_invoice_terminal_order", "_complete_delivery_authorized_impl", "save_invoice", "create_invoice_for_unbilled_delivery", "post_invoice_group", "void_delivery"],
+      "area": ["billing", "regression"]
+    },
+    "sale_line_vendor": {
+      "chain": "smoke-sale-line-vendor.sql",
+      "description": "Migration 20261118110000 (billing plan M3): a new order line is filled from the product's preferred vendor; a line created with a vendor keeps it; a line's vendor changed on the sale reaches its invoice and doesn't touch the product; an older line with no vendor invoices with the preferred vendor; a re-save that sends no vendor keeps it and one that sends a vendor changes it; a product with no preferred vendor stays blank; only the vendor column is open to UPDATE; a product swap on a line takes the new product's preferred vendor unless the same write names one. Terminal rollback.",
+      "covers": ["_fill_order_line_vendor", "_fill_invoice_line_vendor", "save_invoice", "complete_delivery"],
       "area": ["billing", "regression"]
     }
   }

@@ -368,9 +368,11 @@ const BOUNDARIES = [
   ['2026-11-02 00:00:00+00', 'Nov 1 6:00 pm CST (first evening after fall back)', '2026-11-02', '2026-11-01'],
 ];
 
+let startDay = null;  // the Chicago date the run started on
 function main() {
   buildContainer();  // always a fresh sealed container: no reuse of any existing database
   const T = today();
+  startDay = T;
   const zone = scalar(`SELECT CASE WHEN (now() AT TIME ZONE 'Pacific/Kiritimati')::date <> ${CHI} THEN 'Pacific/Kiritimati' ELSE 'Etc/GMT+12' END;`);
   const D = scalar(`SET TimeZone = '${zone}'; SELECT current_date::text;`);
   assert.notEqual(D, T, 'the test zone must put CURRENT_DATE on another day than Chicago');
@@ -465,4 +467,11 @@ function dump(dir) {
 
 const dumpAt = process.argv.indexOf('--dump');
 try { if (dumpAt >= 0) dump(process.argv[dumpAt + 1]); else main(); }
+// Fixtures use the start date; a run that crosses Chicago midnight cannot judge the dates, so say so.
+catch (e) {
+  let endDay = startDay;
+  try { if (startDay) endDay = today(); } catch { /* container gone: report the original error */ }
+  if (endDay !== startDay) throw new Error(`the run crossed Chicago midnight (${startDay} -> ${endDay}); rerun the proof`, { cause: e });
+  throw e;
+}
 finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

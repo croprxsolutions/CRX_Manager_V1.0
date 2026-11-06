@@ -229,7 +229,7 @@ describe('Delivery Remainders', () => {
 
 describe('Deliveries list', () => {
   it('a read that answers with no list says it could not be loaded, not "No deliveries scheduled"', async () => {
-    H.failing.set('get_deliveries_page', 'nodata');
+    H.failing.set('get_deliveries_keyset_page', 'nodata');
     at('/deliveries', <Deliveries />);
     expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument();
     expect(screen.queryByText('No deliveries scheduled')).not.toBeInTheDocument();

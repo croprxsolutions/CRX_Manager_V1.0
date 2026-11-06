@@ -14062,6 +14062,26 @@ export type Database = {
         Returns: Json
       }
       get_dashboard_action_items: { Args: { p_limit?: number }; Returns: Json }
+      get_deliveries_keyset_page: {
+        Args: {
+          p_after?: Json
+          p_after_id?: string
+          p_customer_id?: string
+          p_date_from?: string
+          p_date_to?: string
+          p_driver_id?: string
+          p_limit?: number
+          p_offset?: number
+          p_priority?: string
+          p_search?: string
+          p_sort_desc?: boolean
+          p_sort_key?: string
+          p_statuses?: string[]
+          p_today: string
+          p_week_start: string
+        }
+        Returns: Json
+      }
       get_deliveries_page: {
         Args: {
           p_after_id?: string

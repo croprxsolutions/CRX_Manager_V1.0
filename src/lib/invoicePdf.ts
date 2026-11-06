@@ -33,7 +33,6 @@ import {
 
 export {
   assertInvoiceLinesLoaded,
-  billSplitPayerShares,
   groupReturnCreditDisplayItems,
   InvoiceDetailsUnavailableError,
   loadBillSplitPayers,

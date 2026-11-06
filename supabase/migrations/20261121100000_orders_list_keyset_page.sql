@@ -86,6 +86,13 @@ BEGIN
        OR ((p_after->>'n') IS NOT NULL AND (p_sort_key IS NULL OR p_sort_key IN ('order_number', 'status'))) THEN
       RAISE EXCEPTION 'ORDERS_PAGE_BAD_CURSOR' USING ERRCODE = '22023';
     END IF;
+    -- ... and it must be there, as text or null (null = the last row's sort value was empty).
+    IF (p_sort_key IN ('order_number', 'status')
+        AND (NOT p_after ? 't' OR jsonb_typeof(p_after->'t') NOT IN ('string', 'null')))
+       OR (p_sort_key IN ('total_price', 'order_date', 'fulfillment_pct', 'invoiced_pct')
+        AND (NOT p_after ? 'n' OR jsonb_typeof(p_after->'n') NOT IN ('string', 'null'))) THEN
+      RAISE EXCEPTION 'ORDERS_PAGE_BAD_CURSOR' USING ERRCODE = '22023';
+    END IF;
     -- A bookmark already marks the place; an offset on top would skip rows.
     IF p_offset <> 0 THEN
       RAISE EXCEPTION 'ORDERS_PAGE_BAD_RANGE: a bookmark pages from its row, so offset must be 0' USING ERRCODE = '22023';

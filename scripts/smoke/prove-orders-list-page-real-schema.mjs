@@ -375,6 +375,16 @@ try {
     '{"k":null,"dir":"asc","n":"5","d":"2026-10-05","id":"00000000-0000-0000-0000-000000000000"}']) {
     assert.match(page(USERS.admin, { limit: 5, after: bad }).error ?? '', /ORDERS_PAGE_BAD_CURSOR/, `bookmark ${bad} must be refused`);
   }
+  // A bookmark missing its own sort value (or carrying it as a non-text JSON value) is refused, not read as "nothing after".
+  const ID0 = '"d":"2026-10-05","id":"00000000-0000-0000-0000-000000000000"';
+  for (const [key, bad] of [['order_number', `{"k":"order_number","dir":"asc",${ID0}}`],
+    ['status', `{"k":"status","dir":"asc","t":5,${ID0}}`],
+    ['total_price', `{"k":"total_price","dir":"asc",${ID0}}`],
+    ['order_date', `{"k":"order_date","dir":"asc","n":9000,${ID0}}`]]) {
+    assert.match(page(USERS.admin, { key, limit: 5, after: bad }).error ?? '', /ORDERS_PAGE_BAD_CURSOR/, `bookmark ${bad} must be refused`);
+  }
+  // A real bookmark whose sort value is null (nulls sort last) is still accepted.
+  assert.ok(!page(USERS.admin, { key: 'total_price', limit: 5, after: `{"k":"total_price","dir":"asc","n":null,${ID0}}` }).error, 'a null sort value is a valid bookmark');
   assert.match(page(null, { after: 'none' }).error ?? '', /permission denied for function get_orders_keyset_page/);
   assert.equal(page(USERS.driver, { after: 'none' }).total_count, 0, 'a driver must see no order (keyset)');
   const lastPage = page(USERS.admin, { limit: 1000, offset: ref.length - 3, after: 'none' });

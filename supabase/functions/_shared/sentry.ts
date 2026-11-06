@@ -65,6 +65,8 @@ export function warnIfSentryMisconfigured(functionName: string): void {
     }
   } catch {
     // Never let the alerting check stop the function from serving.
+    // eslint-disable-next-line no-console -- KI-38: must be ERROR level in Supabase logs
+    console.error(`[SENTRY_MISCONFIG] function=${functionName}: could not read SENTRY_DSN.`);
   }
 }
 

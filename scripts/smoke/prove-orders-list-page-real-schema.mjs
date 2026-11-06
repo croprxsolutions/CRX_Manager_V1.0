@@ -447,7 +447,7 @@ try {
     ${ms('rep_deep_page', rpc({ limit: 50, offset: 30000 }))} t := t || ',rep_deep_rows=' || jsonb_array_length(r->'rows');
     ${ms('rep_export', rpc({ limit: 1000, offset: 30000 }))} t := t || ',rep_export_rows=' || jsonb_array_length(r->'rows');
     ${ms('rep_sort', rpc({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }))} t := t || ',rep_sort_rows=' || jsonb_array_length(r->'rows');
-    ${ms('rep_search', rpc({ limit: 50, search: 'product 3' }))} t := t || ',rep_search_seen=' || (r->>'total_count');
+    ${ms('rep_search', rpc({ limit: 50, search: 'product 3' }))} t := t || ',rep_search_seen=' || (r->>'total_count') || ',rep_search_rows=' || jsonb_array_length(r->'rows');
     ${ms('rep_bookmark_first', keyset({ limit: 50 }, 'NULL'))} t := t || ',rep_bookmark_first_rows=' || jsonb_array_length(r->'rows');
     ${ms('rep_bookmark_next', keyset({ limit: 50 }, "r->'next_cursor'"))} t := t || ',rep_bookmark_next_rows=' || jsonb_array_length(r->'rows');
     ${ms('rep_bookmark_sort_first', keyset({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }, 'NULL'))}
@@ -460,7 +460,7 @@ try {
   console.log(`[orders-page] 60,000 more orders, ms: ${JSON.stringify(times)}`);
   // The rep's timed reads must have done the full work, not returned an empty list fast.
   assert.ok(times.admin_seen > 60000 && times.rep_first_seen > 60000, `the timed reads saw too few orders: ${timed}`);
-  assert.ok(times.rep_first_rows === 50 && times.rep_deep_rows === 50 && times.rep_export_rows === 1000 && times.rep_sort_rows === 50 && times.rep_search_seen > 1000
+  assert.ok(times.rep_first_rows === 50 && times.rep_deep_rows === 50 && times.rep_export_rows === 1000 && times.rep_sort_rows === 50 && times.rep_search_seen > 1000 && times.rep_search_rows === 50
     && times.rep_bookmark_first_rows === 50 && times.rep_bookmark_next_rows === 50 && times.rep_bookmark_sort_rows === 50,
     `a rep's timed read returned a short page: ${timed}`);
   for (const k of ['base', 'rep_first', 'rep_deep_page', 'rep_export', 'rep_sort', 'rep_search', 'rep_bookmark_first', 'rep_bookmark_next', 'rep_bookmark_sort_first', 'rep_bookmark_sort_next', 'admin_first']) {

@@ -325,6 +325,7 @@ function main() {
   assert.equal(a.new.hard_delete, true);
   assert.equal(a.new.admin_override_setting, false);
   assert.equal(a.new.allocation_entity_type, null);
+  assert.equal(a.new.claimed_jwt_sub, null);
   const cr = a.new.cascaded_rows;
   assert.equal(cr.invoice_items.length, 2, 'both invoice lines are kept');
   const { invoice_line_shares: shares1, ...line1 } = byId(cr.invoice_items, c.item1);
@@ -359,7 +360,9 @@ function main() {
     DELETE FROM public.allocation_sets WHERE id = '${ids.set}'; DELETE FROM public.payments WHERE id = '${ids.payment}'; COMMIT;`);
   assert.equal(r.status, 0, r.output);
   a = audit(ids.set);
-  assert.deepEqual([a.op, a.entity, a.actor], ['payment_deleted', 'allocation_set', ADMIN]);
+  // The session claimed the admin's subject, but only a back-office connection can delete: the actor is the
+  // system actor and the claim is kept, labelled unverified.
+  assert.deepEqual([a.op, a.entity, a.actor, a.new.claimed_jwt_sub], ['payment_deleted', 'allocation_set', SYSTEM_ACTOR, ADMIN]);
   assert.deepEqual(a.old, setRow);
   assert.deepEqual([a.new.allocation_entity_type, a.new.db_role], ['payment', 'service_role']);
   assert.deepEqual(a.new.cascaded_rows.invoice_line_allocations.sort((x, y) => x.id.localeCompare(y.id)),
@@ -367,10 +370,10 @@ function main() {
   assert.deepEqual(a.new.cascaded_rows.order_line_allocations, [kept.orderAlloc]);
   assert.equal(scalar(`SELECT count(*) FROM public.invoice_line_allocations WHERE allocation_set_id = '${ids.set}';`), '0');
   a = audit(ids.payment);
-  assert.deepEqual([a.op, a.entity, a.actor], ['payment_deleted', 'payment', ADMIN]);
+  assert.deepEqual([a.op, a.entity, a.actor, a.new.claimed_jwt_sub], ['payment_deleted', 'payment', SYSTEM_ACTOR, ADMIN]);
   assert.deepEqual(a.old, payRow);
   assert.equal(a.new.cascaded_rows, null, 'a legacy payment has no cascaded children');
-  console.log('[prover] service_role hard deletes of a payment set (with its 3 allocation lines kept) and a legacy payment -> payment_deleted rows, actor = JWT subject');
+  console.log('[prover] service_role hard deletes of a payment set (with its 3 allocation lines kept) and a legacy payment -> payment_deleted rows, actor = system actor, claimed subject kept');
 
   // 3b. A split-billing (non-payment) allocation set is labelled allocation_set_deleted, not payment_deleted.
   const splitRow = JSON.parse(rowJson('allocation_sets', ids.splitSet));

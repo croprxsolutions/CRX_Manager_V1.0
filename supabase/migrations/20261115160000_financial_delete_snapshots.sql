@@ -73,8 +73,10 @@ ALTER TABLE public.financial_audit_log
 
 -- SECURITY DEFINER: service_role (the only non-owner that can delete these rows) has no INSERT on
 -- financial_audit_log, and a delete must never fail for want of its audit row.
--- actor_user_id is filled by trg_fill_audit_actor (auth.uid(), else the system actor); db_role and
--- session_user record which connection really deleted, since a service-role session can set any JWT subject.
+-- Only a postgres or service-role connection can hard-delete these rows, and such a session can set any
+-- JWT subject, so actor_user_id is always the system actor (the same id trg_fill_audit_actor falls back
+-- to); the subject the session claimed is kept unverified in new_values.claimed_jwt_sub, beside db_role
+-- and session_user, which record the connection that really deleted.
 -- An allocation set is a payment only when its entity_type is 'payment' (others are split-billing sets).
 -- admin_override records only that the session set app.admin_override, not that anyone approved it.
 CREATE FUNCTION public._snapshot_financial_hard_delete()
@@ -109,7 +111,7 @@ BEGIN
   END IF;
 
   INSERT INTO public.financial_audit_log
-    (operation_type, entity_type, entity_id, old_values, new_values, description)
+    (operation_type, entity_type, entity_id, actor_user_id, old_values, new_values, description)
   VALUES (
     CASE WHEN TG_TABLE_NAME = 'invoices' THEN 'invoice_deleted'
          WHEN TG_TABLE_NAME = 'payments' OR v_kind = 'payment' THEN 'payment_deleted'
@@ -118,10 +120,12 @@ BEGIN
                        WHEN 'allocation_sets' THEN 'allocation_set'
                        ELSE 'payment' END,
     OLD.id,
+    '22c1fc50-4d2a-4baa-8ff8-341c0c7edd4f'::uuid,
     v_old,
     jsonb_build_object('hard_delete', true,
                        'allocation_entity_type', v_kind,
                        'cascaded_rows', v_children,
+                       'claimed_jwt_sub', auth.uid(),
                        'db_role', current_setting('role', true),
                        'session_user', session_user,
                        'admin_override_setting', COALESCE(public._is_admin_override(), false)),

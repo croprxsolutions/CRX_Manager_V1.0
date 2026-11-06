@@ -130,6 +130,8 @@ export default function DispatchBoard() {
 
   const [loading, setLoading] = useState(true);
   const [jobs, setJobs] = useState<DispatchJob[]>([]);
+  // Every job matching the filters, before the 500-row cut (from the database).
+  const [jobsTotal, setJobsTotal] = useState(0);
   const [applicators, setApplicators] = useState<Pick<Profile, 'id' | 'full_name' | 'role'>[]>([]);
   const [crews, setCrews] = useState<{ id: string; name: string }[]>([]);
   const [recipes, setRecipes] = useState<{ id: string; name: string }[]>([]);
@@ -185,6 +187,7 @@ export default function DispatchBoard() {
       // gateway). The row carries `_dispatches` (the per-location rows the caller can
       // see) so the label aggregation needs no second round-trip either.
       let filteredJobsData: Record<string, unknown>[] | null = null;
+      let filteredJobsCount: number | null = null;
       if (filters.applicatorId) {
         const { data: rpcRows, error: rpcErr } = await supabase.rpc('get_dispatch_board_jobs', {
           p_applicator_id: filters.applicatorId,
@@ -206,6 +209,8 @@ export default function DispatchBoard() {
           return;
         }
         filteredJobsData = assertRpcResult<Record<string, unknown>[]>(rpcRows, 'get_dispatch_board_jobs');
+        const rpcTotal = Number(filteredJobsData[0]?._total_count);
+        filteredJobsCount = Number.isFinite(rpcTotal) ? rpcTotal : filteredJobsData.length;
       }
 
       // The unfiltered (no applicator) path keeps the direct jobs query; the filtered
@@ -216,9 +221,10 @@ export default function DispatchBoard() {
           ${JOB_COLUMNS},
           customer:customers(farm_name),
           job_fields(id, field_id, acres_to_treat, sort_order, field:fields(id, field_name))
-        `)
+        `, { count: 'exact' })
         .is('deleted_at', null)
         .order('job_date', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: false })
         .limit(500);
       const scopedJobsQuery = (() => {
         let q = jobsQuery;
@@ -232,7 +238,7 @@ export default function DispatchBoard() {
         // When an applicator filter is active, the RPC already returned the rows; resolve
         // immediately so the rest of the load (names/crews/recipes) still runs in parallel.
         filteredJobsData !== null
-          ? Promise.resolve({ data: filteredJobsData, error: null })
+          ? Promise.resolve({ data: filteredJobsData, error: null, count: filteredJobsCount })
           : scopedJobsQuery,
         supabase
           .from('profile_public_view')
@@ -445,6 +451,7 @@ export default function DispatchBoard() {
       });
 
       setJobs(enriched);
+      setJobsTotal(Math.max(jobsRes.count ?? 0, enriched.length));
       setApplicators((applicatorsRes.data || []) as Pick<Profile, 'id' | 'full_name' | 'role'>[]);
       setCrews((crewsRes.data || []) as { id: string; name: string }[]);
       setRecipes((recipesRes.data || []) as { id: string; name: string }[]);
@@ -849,6 +856,11 @@ export default function DispatchBoard() {
                     </div>
                   )}
 
+                  {jobs.length > 0 && jobsTotal > jobs.length && (
+                    <p className="text-xs text-slate-400">
+                      Showing the newest {jobs.length} of {jobsTotal} matching jobs. Narrow the dates or filters to see older ones.
+                    </p>
+                  )}
                   {visibleJobs.length === 0 ? (
                     <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-10 text-center">
                       <p className="text-slate-400">No jobs match the current filters.</p>

@@ -199,6 +199,12 @@ describe('sanitizeError', () => {
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
+    expect(sanitizeError('TIER_ADMIN_ONLY: only an admin can change a customer\'s price tier'))
+      .toBe("Only an admin can set or change a customer's price tier");
+    expect(sanitizeError('CREDIT_LIMIT_ADMIN_ONLY: only an admin can change a customer\'s credit limit'))
+      .toBe("Only an admin can set or change a customer's credit limit");
+    expect(sanitizeError('QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE: a booking\'s tier and planned flag change only by saving the quote'))
+      .toBe("A booking's tier and planned flag change only by saving the quote");
     expect(sanitizeError('SALESMAN_SCOPE_DENIED')).toBe("Sales reps work under their own name: choose yourself as the salesman, or ask an admin to handle another salesman's work");
     expect(sanitizeError('INVOICE_SCOPE_DENIED')).toBe('You can only change or post invoices under your own name');
     // Replay-binding refusals (20261016060000): nothing changed, and the operator is told why.
@@ -206,7 +212,7 @@ describe('sanitizeError', () => {
     expect(intent).toContain('Nothing was changed');
     expect(intent).toContain('different, earlier request');
     expect(intent).toContain('Refresh');
-    const retired = sanitizeError({ message: 'IDEMPOTENCY_REQUEST_RETIRED: idempotency_key adjust_inventory_batch:u:1:2 belongs to a request an admin cleared; it cannot be saved' });
+    const retired = sanitizeError({ message: 'IDEMPOTENCY_REQUEST_RETIRED: idempotency_key adjust_inventory_batch:u:1:2 belongs to a request that was cleared after it got stuck; it cannot be saved' });
     expect(retired).toContain('Nothing was changed');
     expect(retired).toContain('This request was cleared');
     expect(retired).not.toMatch(/adjust_inventory|IDEMPOTENCY/);
@@ -246,6 +252,39 @@ describe('sanitizeError', () => {
     )).toBe("Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again");
     expect(sanitizeError("BILL_SPLIT_FROZEN: delivery DEL-1 is complete, so this sale's bill split can't change. Void the delivery to change it."))
       .toContain('its bill split is locked');
+    expect(sanitizeError('BILL_SPLIT_HAS_DRAFT: draft invoice CS-1 bills this sale to one customer.')).toBe(
+      "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"
+    );
+    expect(sanitizeError("BILL_SPLIT_SLIVER_LOCKED: this payer's share is under 0.01 of a unit")).toBe(
+      "Nothing was saved. This payer's share is under 0.01 of a unit, so its draft can't be edited. Post it as drafted, or void the group",
+    );
+    expect(sanitizeError("BILL_SPLIT_CUSTOMER_INACTIVE: an inactive customer can't be added")).toBe(
+      "Nothing was changed. This customer is inactive, so they can't be added to a bill split. Reactivate them first",
+    );
+    expect(sanitizeError('GROUP_UNPOST_REQUIRED')).toBe(
+      'Nothing was unposted. This invoice is part of a split group, so the whole group unposts together. Refresh the page and try again',
+    );
+    expect(sanitizeError('BILL_SPLIT_LINES_LOCKED: follow the split')).toBe(
+      "Nothing was saved. A Bill Split invoice's product lines follow the split. Void the group to change them; charges can still be added"
+    );
+    expect(sanitizeError('BILL_SPLIT_GROUP_DELETE_PARTIAL: select every payer')).toBe(
+      "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"
+    );
+    expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_SMALL: delivery D-1')).toBe(
+      "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"
+    );
+    expect(sanitizeError('PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted')).toBe(
+      'Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery'
+    );
+    expect(sanitizeError('SPLIT_INVOICE_PROVENANCE_IMMUTABLE: x')).toBe(
+      'Nothing was changed. This split invoice is locked to its group. Void the group and create a replacement'
+    );
+    expect(sanitizeError('ORDER_SHARES_OVER_100: order x')).toBe("Nothing was changed. The bill split can't total more than 100%");
+    expect(sanitizeError('ORDER_SHARES_ORDER_IMMUTABLE: x')).toBe("Nothing was changed. A bill split row can't move to another order");
+    expect(sanitizeError('ORDER_ITEM_SHARES_LINE_IMMUTABLE: x')).toBe("Nothing was changed. A line share can't move to another line");
+    expect(sanitizeError('BILL_SPLIT_NOTHING_TO_BILL: delivery D-1')).toBe(
+      'Nothing was billed. This delivery has no delivered quantity'
+    );
     expect(sanitizeError('ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice'))
       .toContain('billed per payer');
     expect(sanitizeError("ORDER_ITEM_SHARES_OVER_100: a line's shares can't total more than 100%"))

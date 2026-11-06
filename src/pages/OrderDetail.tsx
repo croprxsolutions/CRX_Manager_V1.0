@@ -855,24 +855,10 @@ export default function OrderDetail() {
             return;
           }
         } else {
-          // Simple status change (no inventory impact) — validate allowed transitions
-          // Manual status changes — partially_fulfilled/fulfilled happen via delivery RPCs, not manual update
-          const validTransitions: Record<string, string[]> = {
-            confirmed: ['cancelled'],
-            partially_fulfilled: ['cancelled'],
-          };
-          const allowed = validTransitions[order.status] || [];
-          if (!allowed.includes(targetStatus)) {
-            toast('error', `Cannot change status from '${order.status}' to '${targetStatus}'`);
-            return;
-          }
-          const statusResult = await supabase
-            .from('orders')
-            .update({ status: targetStatus, updated_at: new Date().toISOString() })
-            .eq('id', id!)
-            .select('id');
-          checkMutationResult(statusResult, 'Update order status');
-          toast('success', `Status changed to ${targetStatus.replace('_', ' ')}`);
+          // Cancel (above) is the only manual status change; delivery, void and pricing RPCs set the
+          // rest, and signed-in users have no direct UPDATE on orders.status (20261116100000).
+          toast('error', `Cannot change status from '${order.status}' to '${targetStatus}'`);
+          return;
         }
 
         logActivity({ event: 'order_status_changed', description: `Order ${order.order_number} status changed to ${targetStatus}`, performedBy: profile.id, entityType: 'order', entityId: order.id, customerId: order.customer_id });

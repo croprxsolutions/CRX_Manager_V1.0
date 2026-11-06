@@ -23,6 +23,7 @@ import { requireGroupVersions, requirePostVersion } from '../lib/invoicePostVers
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
+import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, type InvoiceBillTo } from '../lib/invoiceBulkEmail';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
@@ -234,6 +235,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
   // Email invoice
   const [emailing, setEmailing] = useState(false);
+  // The address an unchanged invoice already went to: asks before mailing another copy.
+  const [resendTo, setResendTo] = useState<string | null>(null);
+  // The extra copy's retry key, kept for the version-and-address key it follows until that copy is
+  // confirmed sent, so a retry after a lost reply cannot mail a second copy.
+  const copyKeyRef = useRef<{ forKey: string; key: string } | null>(null);
   const emailingRef = useRef(false);
 
   // Write-off modal + write-off list
@@ -1730,7 +1736,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   };
 
   // Build PDF data object (shared by print + email)
-  const buildInvoicePdfData = async (options?: InvoicePrintOptions): Promise<InvoicePdfData> => {
+  // billTo: the customer row an email already read for its key, so the PDF prints exactly what the key covers.
+  const buildInvoicePdfData = async (options?: InvoicePrintOptions, billTo?: InvoiceBillTo): Promise<InvoicePdfData> => {
     const { data: enrichedItems, error: itemsError } = await supabase
       .from('invoice_items')
       .select(`${INVOICE_ITEM_COLUMNS}, product:products(product_name, epa_registration, product_form)`)
@@ -1744,8 +1751,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
     // The billed customer's address, read by id: the picker list leaves out inactive customers and
     // may not have loaded, so a customer missing from it would print a blank address.
-    let cust: Pick<Customer, 'billing_address' | 'city' | 'state' | 'zip' | 'account_number' | 'payment_terms'> | null = null;
-    if (invoice.customer_id) {
+    let cust: InvoiceBillTo | null = null;
+    if (billTo) {
+      cust = billTo;
+    } else if (invoice.customer_id) {
       const { data: custRow, error: custError } = await supabase
         .from('customers')
         .select('billing_address, city, state, zip, account_number, payment_terms')
@@ -1779,7 +1788,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       due_date: invoice.due_date || undefined,
       invoice_type: invoice.invoice_type || 'chemical_sale',
       status: invoice.status || 'draft',
-      customer_name: customerName,
+      customer_name: billTo?.farm_name || customerName,
       customer_address: cust?.billing_address || undefined,
       customer_city: cust?.city || undefined,
       customer_state: cust?.state || undefined,
@@ -1835,7 +1844,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   };
 
   // Email invoice with PDF attachment
-  const handleEmailInvoice = async () => {
+  // resend: the address the "Email Another Copy?" dialog named; the copy goes only there.
+  const handleEmailInvoice = async (resend: string | false = false) => {
+    setResendTo(null);
     if (!profile) {
       toast('error', 'Cannot email invoice — profile not loaded. Please refresh.');
       return;
@@ -1850,22 +1861,23 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     emailingRef.current = true;
     setEmailing(true);
     try {
-      await sendInvoiceEmail();
+      await sendInvoiceEmail(resend);
     } finally {
       emailingRef.current = false;
       setEmailing(false);
     }
   };
 
-  const sendInvoiceEmail = async () => {
+  const sendInvoiceEmail = async (resend: string | false) => {
     if (!profile) return;
     // Read the billed customer by id: the picker list skips inactive customers and may not have
     // loaded, so a customer missing from it would read as "no email on file".
     let custEmail: string | null = null;
+    let billTo: InvoiceBillTo = {};
     if (invoice.customer_id) {
       const read = await supabase
         .from('customers')
-        .select('email')
+        .select(INVOICE_BILL_TO_COLUMNS)
         .eq('id', invoice.customer_id)
         .maybeSingle()
         .then((r) => r, () => null);
@@ -1874,16 +1886,22 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         return;
       }
       custEmail = read.data.email;
+      billTo = read.data;
     }
     const cust = { email: custEmail };
     if (!cust.email) {
       toast('error', 'Customer does not have an email address on file');
       return;
     }
+    if (resend && cust.email.trim().toLowerCase() !== resend.trim().toLowerCase()) {
+      setResendTo(null);
+      toast('error', `The customer's email changed to ${cust.email} since you were asked. Nothing was sent; click Email again.`);
+      return;
+    }
     await runCriticalAction({
       action: async () => {
         // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
-        const pdfData = await buildInvoicePdfData();
+        const pdfData = await buildInvoicePdfData(undefined, billTo);
 
         const amountStr = ((invoice.balance_cents || 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
         const html = buildEmailHtml(`
@@ -1895,7 +1913,16 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           <p style="margin:8px 0 0;color:#6b7280;font-size:13px;">If you have questions about this invoice, please contact us.</p>
         `);
 
-        await assertInvoiceSendable(id!);
+        const liveVersion = await assertInvoiceSendable(id!);
+        if (!liveVersion) throw new Error('Could not read this invoice. Reload and try again.');
+        // The PDF above is this page's copy: never send it under a newer version's key (Luna 9.6).
+        if (liveVersion !== invoice.updated_at) throw new Error('This invoice changed since you opened it. Reload the page and email it again.');
+        const version = { id: id!, updated_at: liveVersion };
+        const versionKey = await invoiceEmailKey(version, cust.email!, billTo);
+        if (copyKeyRef.current?.forKey !== versionKey) {
+          copyKeyRef.current = { forKey: versionKey, key: `invoice-email-${id}-copy-${crypto.randomUUID()}` };
+        }
+        const copyKey = copyKeyRef.current.key;
         const result = await sendEmail({
           to: cust.email!,
           subject: `Invoice ${invoice.invoice_number || ''} from Crop RX Solutions`,
@@ -1904,18 +1931,28 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           customer_id: invoice.customer_id!,
           resource_type: 'invoice',
           resource_id: id,
-          idempotency_key: `invoice-email-${id}-${Date.now()}`,
+          idempotency_key: resend ? copyKey : versionKey,
           invoice_snapshot: invoiceEmailSnapshot(pdfData),
         });
 
-        if (result.success) {
-          logActivity({ event: 'invoice_emailed', description: `Invoice ${invoice.invoice_number} emailed to ${cust.email}`, performedBy: profile.id, entityType: 'invoice', entityId: id, customerId: invoice.customer_id });
-        } else {
-          throw new Error(result.error || 'Failed to send email');
+        if (!result.success) throw new Error(result.error || 'Failed to send email');
+        // This version already went to this address (from either screen), so the server sent nothing:
+        // ask before mailing a deliberate extra copy, which gets its own key.
+        if (result.deduplicated && !resend) {
+          setResendTo(cust.email!);
+          return 'ask' as const;
         }
+        if (resend) copyKeyRef.current = null;
+        // A copy key the server already used means that copy went on an earlier try.
+        if (result.deduplicated) return 'copy_already_sent' as const;
+        logActivity({ event: 'invoice_emailed', description: `Invoice ${invoice.invoice_number} emailed to ${cust.email}`, performedBy: profile.id, entityType: 'invoice', entityId: id, customerId: invoice.customer_id });
+        return 'sent' as const;
       },
       toast,
-      successMessage: `Invoice emailed to ${cust.email}`,
+      onSuccess: (outcome) => {
+        if (outcome === 'sent') toast('success', `Invoice emailed to ${cust.email}`);
+        if (outcome === 'copy_already_sent') toast('info', `The extra copy already went to ${cust.email} on an earlier try; not sent again.`);
+      },
       sentryTag: 'email_invoice',
     });
   };
@@ -2085,7 +2122,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             <Button
               variant="secondary"
               icon={<Mail className="w-4 h-4" />}
-              onClick={handleEmailInvoice}
+              onClick={() => handleEmailInvoice()}
               loading={emailing}
               showChevron={false}
             >
@@ -2893,6 +2930,19 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         open={unsavedBlocker.state === 'blocked'}
         onStay={() => unsavedBlocker.reset?.()}
         onLeave={() => unsavedBlocker.proceed?.()}
+      />
+
+      {/* Already emailed: an extra copy only on a deliberate yes */}
+      <ConfirmModal
+        open={resendTo != null}
+        onClose={() => setResendTo(null)}
+        onConfirm={() => handleEmailInvoice(resendTo ?? false)}
+        title="Email Another Copy?"
+        message={`This invoice was already emailed to ${resendTo ?? ''} and has not changed since. Send another copy?`}
+        confirmLabel="Send Another Copy"
+        variant="info"
+        icon={Mail}
+        loading={emailing}
       />
 
       {/* Post Invoice Confirm */}

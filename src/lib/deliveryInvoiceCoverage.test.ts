@@ -161,10 +161,13 @@ describe('activeInvoiceCoversDelivery', () => {
     const orderDetail = readFileSync(resolve(root, 'src/pages/OrderDetail.tsx'), 'utf8');
     expect(orderDetail).toContain("activeInvoiceCoversOrder(inv, order?.id ?? '')");
 
+    // The Orders list computes invoiced % in get_orders_page, with the same active-invoice rule.
     const orders = readFileSync(resolve(root, 'src/pages/Orders.tsx'), 'utf8');
-    expect(orders).toContain('activeInvoiceCountsTowardBilling(inv)');
-    expect(orders).toContain('fetchActiveInvoiceCoveragePages(orderIds)');
-    expect(orders).toContain('Failed to load invoice coverage. Invoiced percentages are unavailable; refresh to try again.');
+    expect(orders).toContain('fetchOrdersPage(query, ORDERS_PAGE_SIZE');
+    const ordersPageSql = readFileSync(resolve(root, 'supabase/migrations/20261116120000_orders_list_page.sql'), 'utf8');
+    expect(ordersPageSql).toContain("i.status NOT IN ('voided', 'cancelled')");
+    expect(ordersPageSql).toContain('i.deleted_at IS NULL');
+    expect(ordersPageSql).toContain("i.invoice_type IS DISTINCT FROM 'credit_memo'");
 
     const integrityCleanup = readFileSync(resolve(root, 'src/components/integrity/IntegrityCleanupPanel.tsx'), 'utf8');
     expect(integrityCleanup).toContain('fetchActiveInvoiceCoveragePages(orderIds)');

@@ -19,7 +19,7 @@ Crop RX Solutions' production agricultural chemical distribution app. Repository
 - Review/audit/diagnosis/status/plan requests are read-only; build/change/fix/finish/handle/implement/ship authorizes reversible work through verification and protected delivery. Codex and Claude both proceed after a short plan without waiting for approval.
 - Deliver what was asked at the scope intended. Explain concerns and continue rather than quietly narrowing, widening, or transforming it. Guard/audit work needs a request, demonstrated blocker, or current production incident.
 - Obey all explicit limits and "stop", "pause", or "hold on" literally.
-- Stop and hand over both positions and a recommendation only when the same BLOCKER/HIGH survives two fix rounds, a checked BLOCKER remains disputed, a required gate cannot run, or a hard gate needs Mason. Round caps are ceilings, not targets.
+- Stop and hand over both positions and a recommendation only when the same BLOCKER/HIGH survives two fix rounds, a new BLOCKER/HIGH traces to the same mechanism (lock, timer, guard, design piece) for a third round in a row (then stop patching, name it, ask Mason the business trade-off that would delete it, e.g. duplicate vs loss or block vs warn, and re-plan through Astra, Luna, Sol), a checked BLOCKER remains disputed, a required gate cannot run, or a hard gate needs Mason. Round caps are ceilings, not targets.
 
 ## Start and Route
 

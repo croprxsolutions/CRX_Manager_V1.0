@@ -7,6 +7,7 @@ import { supabase, checkMutationResult } from '../../lib/db';
 import { processDocumentWithOCR, isCSVFile, isOCRSupported } from '../../lib/documentOCR';
 import { Sentry } from '../../lib/sentry';
 import { loadDefaultTier } from '../../lib/appSettingDefaults';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface BulkCustomerImportProps {
   open: boolean;
@@ -51,6 +52,8 @@ const FIELD_MAPPINGS: Record<string, string[]> = {
 
 export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCustomerImportProps) {
   const { toast } = useToast();
+  // Price tiers are admin-only (Mason 2026-11-01): a rep's rows always start on the Default Tier.
+  const isAdmin = useAuth().profile?.role === 'admin';
   const [file, setFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -250,7 +253,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
               if (!isNaN(num) && num >= 0) {
                 customer[field] = num;
               }
-            } else if (field === 'assigned_tier') {
+            } else if (field === 'assigned_tier' && isAdmin) {
               const tier = parseInt(value);
               if ([1, 2, 3].includes(tier)) {
                 customer[field] = tier;
@@ -359,6 +362,11 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
             <p className="text-xs text-green-600 mt-2">
               💡 <span className="font-medium">Tip:</span> Tier defaults to the Settings Default Tier if not specified. Valid tiers are 1, 2, or 3.
             </p>
+            {!isAdmin && (
+              <p className="text-xs text-secondary mt-1">
+                Every customer you import starts on the Settings Default Tier: only an admin can set a customer&apos;s tier.
+              </p>
+            )}
           </div>
         </div>
 

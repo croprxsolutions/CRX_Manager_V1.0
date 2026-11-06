@@ -250,7 +250,9 @@ beyond that refuses and needs the full review. Mason's owner approval never carr
 
 **Records updated after a live apply? Carry it (Mason, 2026-11-04).** After the migration is applied
 live, commit the paperwork as ONE commit on top of the reviewed head: the records of the PR's own migrations,
-`docs/changelog.d/*.md`, `docs/manual/KNOWN_ISSUES.md`, `.claude/schema-registry.json`, and
+`docs/changelog.d/*.md`, `docs/manual/KNOWN_ISSUES.md`, `.claude/schema-registry.json`, the PR's own
+migration timestamps added to `MIGRATIONS_AWAITING_TYPE_REGENERATION` in `src/lib/rpcContracts.test.ts`
+(that one list, nothing else in the file; Mason, 2026-11-05), and
 `scripts/db-invariant-sweeps/allowlist.json` re-keys (same signature, new 12-hex hash, wording appended to
 the justification, new `dated`; no entry added, removed or otherwise changed). Then run
 `node scripts/write-codex-push-proof.mjs --carry-post-apply`. Notes alone carry with no model call; a

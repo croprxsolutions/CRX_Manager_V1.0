@@ -1,16 +1,16 @@
 -- Written 2026-11-05. STATUS: NOT APPLIED. KI-10 replay-binding batch 4e: 15 operations.
 -- idempotency-body-check: exempt -- wrappers call the pinned body, check_idempotency_intent,
 -- and _bind_replay_receipt_20261015; the hook does not parse this delegated pattern.
--- APPLY ORDER: after 20261110160000_bind_money_inventory_replay_receipts_batch4c.
+-- APPLY ORDER: after 20261114200000_bind_records_replay_receipts_batch4d (applied live).
 -- APPLY ORDER: only after the app PR adding keys to confirm_job_notification_sent,
 -- log_failed_notification, and update_field_app_applied_info is deployed to production.
 -- ROLLBACK: a new reviewed migration restores the prior trigger list, drops the public
 -- wrappers, renames each pinned _<name>_replay_impl_20261015 back, and restores grants.
--- ORDERING: live high-water 20261110140000_rup_records_require_posted_invoice (generate_rup_sales_records
--- only); main also carries 20261108160000, 20261109120000, 20261110110000, 20261110120000; pending
--- 20261110130000 and 20261110150000 touch none of these functions.
--- This file requires the 53-operation post-4c guard and accepts it alone or with the other
--- batch's operations appended. Both orders are pinned; all other states are refused.
+-- ORDERING: live high-water 20261114200000_bind_records_replay_receipts_batch4d (ledger 20261106035950,
+-- re-checked 2026-11-05: every pin below and the internal-caller scan match live). Restamped from
+-- 20261111210000, which sat below applied batch 4d.
+-- This file requires the exact 78-operation post-4d guard (53 through 4c, then the 25 batch 4d
+-- operations, in that order) and appends its own 15; every other guard state is refused.
 -- KNOWN LIMITS: dynamic SQL callers cannot be found by catalog text scan; a keyless call
 -- still fails closed. An old browser bundle needs the key-adding app PR before batch 4e.
 -- EXCLUDED: the twelve 4c functions; generate_rup_sales_records (parked rewrite);
@@ -229,18 +229,10 @@ BEGIN
   END IF;
   v_expected := 'CREATE CONSTRAINT TRIGGER require_bound_replay_receipt_20261015 AFTER INSERT OR UPDATE ON public.idempotency_keys DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN ((new.operation = ANY (ARRAY['
     || (SELECT string_agg(quote_literal(o) || '::text', ', ' ORDER BY ord)
-        FROM unnest(v_prior) WITH ORDINALITY AS u(o,ord))
+        FROM unnest(v_prior || v_other) WITH ORDINALITY AS u(o,ord))
     || ']))) EXECUTE FUNCTION _require_bound_replay_receipt_20261015()';
-  IF v_def = v_expected THEN
-    v_ops := v_prior || v_this;
-  ELSE
-    v_expected := 'CREATE CONSTRAINT TRIGGER require_bound_replay_receipt_20261015 AFTER INSERT OR UPDATE ON public.idempotency_keys DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN ((new.operation = ANY (ARRAY['
-      || (SELECT string_agg(quote_literal(o) || '::text', ', ' ORDER BY ord)
-          FROM unnest(v_prior || v_other) WITH ORDINALITY AS u(o,ord))
-      || ']))) EXECUTE FUNCTION _require_bound_replay_receipt_20261015()';
-    IF v_def IS DISTINCT FROM v_expected THEN RAISE EXCEPTION 'PREFLIGHT_RECEIPT_GUARD_DRIFT'; END IF;
-    v_ops := v_prior || v_other || v_this;
-  END IF;
+  IF v_def IS DISTINCT FROM v_expected THEN RAISE EXCEPTION 'PREFLIGHT_RECEIPT_GUARD_DRIFT'; END IF;
+  v_ops := v_prior || v_other || v_this;
   INSERT INTO pg_temp.ops_replay_binding_batch4e_guard_ops(ord,operation)
   SELECT ord,o FROM unnest(v_ops) WITH ORDINALITY AS u(o,ord);
   DROP TRIGGER require_bound_replay_receipt_20261015 ON public.idempotency_keys;
@@ -1181,7 +1173,7 @@ BEGIN
         FROM aclexplode(p.proacl) a WHERE a.privilege_type='EXECUTE' ORDER BY 1)
         IS NOT DISTINCT FROM ARRAY['postgres']::text[]);
   IF v_bad IS NOT NULL THEN RAISE EXCEPTION 'POSTFLIGHT_4E_CONTRACT: %',v_bad; END IF;
-  IF (SELECT count(*) FROM pg_temp.ops_replay_binding_batch4e_guard_ops) NOT IN (68,93)
+  IF (SELECT count(*) FROM pg_temp.ops_replay_binding_batch4e_guard_ops) <> 93
     OR (SELECT count(*) FROM pg_temp.ops_replay_binding_batch4e_guard_ops g
         JOIN pg_temp.ops_replay_binding_batch4e_pins pin ON pin.name=g.operation)<>15 THEN
     RAISE EXCEPTION 'POSTFLIGHT_RECEIPT_GUARD_CONTRACT';

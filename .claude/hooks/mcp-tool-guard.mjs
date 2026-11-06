@@ -31,8 +31,10 @@ import { checkCommandDeep, checkMigrationModify } from "./bash-safety-lib.mjs";
 function out(decision, reason) {
   const payload = decision === "block"
     ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }
-    : { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } };
-  process.stdout.write(JSON.stringify(payload));
+    // No objection prints nothing ("allow" would pre-approve the call and skip the
+    // normal permission prompt).
+    : null;
+  if (payload) process.stdout.write(JSON.stringify(payload));
   process.exit(0);
 }
 function nothing() { process.exit(0); } // silent passthrough — normal flow, nothing to say

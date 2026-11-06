@@ -73,6 +73,7 @@ import { assertWrappable } from "../.claude/hooks/migration-wrappability-lib.mjs
 import { checkLiveMigrationOrdering } from "../.claude/hooks/migration-ordering-lib.mjs";
 import { assertApprovalStillValid, ownerOnceGuardSql, recordUsedApproval } from "../.claude/hooks/owner-approval-lib.mjs";
 import { CREDENTIAL_TARGET, readCredentialToken } from "./lib/supabase-credential.mjs";
+import { withRestampHint } from "./lib/migration-restamp-hint.mjs";
 
 // Every existing ledger row carries this; apply_migration fills it from the
 // authenticated Supabase account, and the personal access token this script uses
@@ -426,7 +427,7 @@ try {
 }
 
 if (verdict?.decision !== "allow") {
-  die(2, `APPLY GATE REFUSED\n\n${verdict?.reason || "(no reason returned — treating as refusal)"}`);
+  die(2, `APPLY GATE REFUSED\n\n${withRestampHint(verdict?.reason || "(no reason returned — treating as refusal)")}`);
 }
 
 console.log("APPLY GATE PASSED — ordering, autopilot state, destructive-content, reviewer proof and Codex gate all satisfied.");
@@ -469,7 +470,7 @@ if (!token) {
 // check into the transaction if two applies ever land that close together.
 {
   const live = await checkLiveMigrationOrdering({ fetchImpl: fetch, projectId, token, name: migName, sql });
-  if (!live.ok) die(2, live.reason);
+  if (!live.ok) die(2, withRestampHint(live.reason));
   console.log(`Live ordering re-check passed (${live.count} applied rows; newest stamp ${live.newestApplied || "n/a"}).`);
 }
 

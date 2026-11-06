@@ -45,12 +45,25 @@ vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
+// RPC reads are paged (rpc → order → range): wrap a reply in a builder that resolves to {data, error, count}.
+const { paged } = vi.hoisted(() => ({
+  paged: (reply: unknown) => {
+    const q: Record<string, unknown> = {
+      order: () => q,
+      range: () => q,
+      then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+        Promise.resolve(reply).then((x) => resolve({ ...(x as object), count: Array.isArray((x as { data?: unknown }).data) ? (x as { data: unknown[] }).data.length : null }), reject),
+    };
+    return q;
+  },
+}));
+
 vi.mock('../lib/db', async () => ({
   supabase: {
     from: vi.fn((table: string) => emptyQuery(table)),
     rpc: vi.fn((functionName: string) => {
       if (functionName === 'operational_dashboard_summary') {
-        return Promise.resolve({
+        return paged(Promise.resolve({
           data: {
             active_orders_count: 7,
             open_quotes_draft: 2,
@@ -65,10 +78,10 @@ vi.mock('../lib/db', async () => ({
             committed_order_count: 8,
           },
           error: null,
-        });
+        }));
       }
       if (functionName === 'financial_dashboard_summary') {
-        return Promise.resolve({
+        return paged(Promise.resolve({
           data: {
             open_ar_balance: 12345.67,
             total_profit: 5000,
@@ -78,16 +91,16 @@ vi.mock('../lib/db', async () => ({
             ar_aging_buckets: { days_61_90: 0, days_90_plus: 0 },
           },
           error: null,
-        });
+        }));
       }
       if (functionName === 'get_program_completion') {
-        return Promise.resolve({ data: [{ completion_pct: 75 }], error: null });
+        return paged(Promise.resolve({ data: [{ completion_pct: 75 }], error: null }));
       }
-      return Promise.resolve({ data: null, error: null });
+      return paged(Promise.resolve({ data: null, error: null }));
     }),
   },
   supabaseUntyped: {
-    rpc: vi.fn(() => Promise.resolve({ data: [], error: null })),
+    rpc: vi.fn(() => paged({ data: [], error: null })),
   },
   assertRpcResult: vi.fn((data: unknown) => data),
   hasRpcCode: vi.fn(() => false),

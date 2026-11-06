@@ -27,10 +27,12 @@ import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
+import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { computeBounds } from '../hooks/useFitBounds';
 import { formatLocalDate } from '../lib/dateUtils';
+import { computeSeason } from '../utils/season';
 import CRXMap from '../components/map/CRXMap';
 import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
 import type {
@@ -83,7 +85,12 @@ export default function FieldDashboard() {
       setCropHistory((histData || []) as CropHistoryRecord[]);
 
       // Fetch child fields if this is a parent
-      const { data: allFields, error: childErr } = await supabase.rpc('get_fields_with_geojson');
+      // Every page: the server cuts a function's rows off at 1,000, which could hide a child field.
+      const { data: allFields, error: childErr } = await fetchAllRows<{ id: string; field_name: string; total_acres: number | null; boundary_geojson?: string; centroid_geojson?: string; parent_field_id?: string }>((from, to) => pageWithList(supabase
+        .rpc('get_fields_with_geojson', undefined, { count: 'exact' })
+        .order('field_name')
+        .order('id')
+        .range(from, to)));
       if (!childErr) {
         const allRows = assertRpcResult<Array<{ id: string; field_name: string; total_acres: number | null; boundary_geojson?: string; centroid_geojson?: string; parent_field_id?: string }>>(allFields, 'get_fields_with_geojson');
         const childFields = allRows.filter((f) => f.parent_field_id === id);
@@ -593,16 +600,9 @@ interface CropForm {
   notes: string;
 }
 
-// Season runs Oct 1 → Sep 30 and is labelled by its END year (matches the DB
-// compute_season: months >= October belong to next year's season).
-function currentSeasonYear(): number {
-  const now = new Date();
-  return now.getMonth() + 1 >= 10 ? now.getFullYear() + 1 : now.getFullYear();
-}
-
 function blankCropForm(): CropForm {
   return {
-    season: currentSeasonYear(),
+    season: computeSeason(),
     crop_type: '',
     variety: '',
     planting_date: '',
@@ -634,7 +634,7 @@ function CropHistoryTab({
   const [editingSeason, setEditingSeason] = useState<number | null>(null);
   const [form, setForm] = useState<CropForm>(blankCropForm);
 
-  const cur = currentSeasonYear();
+  const cur = computeSeason();
   const existingSeasons = new Set(history.map((h) => h.season));
   const seasonOptions = Array.from({ length: 8 }, (_, i) => cur + 1 - i).map((s) => ({
     value: String(s),

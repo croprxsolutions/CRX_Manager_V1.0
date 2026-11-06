@@ -744,6 +744,22 @@ async function deleteCoordinatedRecord<T>(
   }
 }
 
+// One prepare at a time per operation and user in this page. Two prepares share this page's claim ID, so without
+// this a failing one's cleanup could delete a record a concurrent one (a double click) had already handed out.
+const prepareTurns = new Map<string, Promise<unknown>>();
+
+function inPrepareTurn<R>(storageKey: string | null, run: () => Promise<R>): Promise<R> {
+  if (!storageKey) return run();
+  const previous = prepareTurns.get(storageKey) ?? Promise.resolve();
+  const mine = previous.catch(() => undefined).then(run);
+  const settled = mine.catch(() => undefined);
+  prepareTurns.set(storageKey, settled);
+  void settled.then(() => {
+    if (prepareTurns.get(storageKey) === settled) prepareTurns.delete(storageKey);
+  });
+  return mine;
+}
+
 /**
  * A mirror write failed after IndexedDB took a record that beginIntent had just minted, and the caller never got
  * a key, so nothing was sent. Left in place, that hidden record would block the next request with no visible lock
@@ -977,7 +993,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   // If another tab resolved or replaced it in the meantime, this throws
   // UNCERTAIN_MUTATION_INTENT_CONFLICT without starting a new request, because a
   // new request would carry a new key and could apply the mutation twice.
-  const beginIntent = useCallback(async (
+  const beginIntentNow = useCallback(async (
     intent: T,
     beginOptions?: { requireIdempotencyKey?: string },
   ): Promise<T> => {
@@ -1066,6 +1082,12 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     setHasUnresolvedRecord(true);
     return intent;
   }, [acknowledgmentKey, activateCurrentIdentity, applyRecord, getIntentIdentityRef, options, scope, storageKey, surface]);
+
+  const beginIntent = useCallback(
+    (intent: T, beginOptions?: { requireIdempotencyKey?: string }): Promise<T> =>
+      inPrepareTurn(storageKey, () => beginIntentNow(intent, beginOptions)),
+    [beginIntentNow, storageKey],
+  );
 
   const getIdempotencyKey = useCallback((): string => {
     activateCurrentIdentity(true);

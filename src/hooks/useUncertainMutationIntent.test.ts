@@ -415,6 +415,44 @@ describe('useUncertainMutationIntent', () => {
     expect(reloaded.result.current.unresolvedIntent).toEqual({ file: 'a.csv' });
   });
 
+  it('a double click cannot let the first prepare’s cleanup delete the record the second one handed out (Sol HIGH r2)', async () => {
+    const options = { operation: 'apply_product_setup', userId: 'double-click', surface: 'bulk-product-import' };
+    const originalSetItem = Storage.prototype.setItem;
+    let ackFailures = 1;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.sessionStorage && key.startsWith('crx:uncertain-mutation-ack:v1:') && ackFailures-- > 0) {
+        throw new DOMException('full', 'QuotaExceededError');
+      }
+      return originalSetItem.call(this, key, value);
+    });
+    const page = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    let outcomes: PromiseSettledResult<{ file: string }>[] = [];
+    try {
+      await act(async () => {
+        outcomes = await Promise.allSettled([
+          page.result.current.beginIntent({ file: 'a.csv' }),
+          page.result.current.beginIntent({ file: 'a.csv' }),
+        ]);
+      });
+    } finally {
+      writes.mockRestore();
+    }
+    expect(outcomes.map((o) => o.status)).toEqual(['rejected', 'fulfilled']);
+    const sentKey = page.result.current.getIdempotencyKey();
+    expect(sentKey).toBeTruthy();
+    page.unmount();
+    // A real second tab has none of this tab's session notes and no local copy to go by: only IndexedDB.
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    const otherTab = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    await expect(act(async () => otherTab.result.current.beginIntent({ file: 'b.csv' })))
+      .rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    await act(async () => {
+      await otherTab.result.current.beginIntent({ file: 'a.csv' });
+    });
+    expect(otherTab.result.current.getIdempotencyKey()).toBe(sentKey);
+  });
+
   it('a failed mirror write never removes an earlier request that may have committed', async () => {
     const options = { operation: 'apply_product_setup', userId: 'kept-earlier', surface: 'bulk-product-import' };
     const first = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));

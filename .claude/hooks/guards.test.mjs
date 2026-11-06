@@ -193,6 +193,7 @@ ok(!classifySql("INSERT INTO customers (name) VALUES ('[E2E] Farm Alpha')").bloc
 ok(classifySql("DELETE FROM invoices WHERE id = 5").block, "financial delete blocked");
 ok(classifySql("UPDATE invoices SET status = 'voided' WHERE id = 5").block, "void real invoice blocked");
 ok(!classifySql("SELECT * FROM invoices").block, "select allowed");
+ok(classifySql("INSERT INTO public.tote_fills (id) VALUES (gen_random_uuid())").block, "raw tote_fills insert blocked (Sol 2026-11-06)");
 ok(!classifySql("INSERT INTO some_log_table (x) VALUES (1)").block, "non-business table allowed");
 eq(classifySql("DELETE FROM customers WHERE id = 5").kind, "real-delete", "non-financial business delete blocked (PR #352)");
 eq(classifySql("SELECT setval('invoice_number_seq', 1, false)").kind, "sequence-mutation", "setval via SELECT blocked (PR #352)");

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { billSplitPayerShares, buildInvoicePdfDataFromRow } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
+import { billSplitCompletion } from './billSplitCompletion';
+import { billSplitPayerShares, buildInvoicePdfDataFromRow, isBillSplitInvoice } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
 
 const row = (id: string, name: string | null, cents: number) => ({
   id, invoice_number: `CS-2026-0412-${id}`, total_amount_cents: cents, customer: name ? { farm_name: name } : null,
@@ -18,6 +19,11 @@ describe('billSplitPayerShares', () => {
     const payers = billSplitPayerShares([row('1', 'A', 3334), row('2', 'B', 3333), row('3', 'C', 3333)]);
     expect(payers.map((p) => p.split_percentage)).toEqual([33.34, 33.33, 33.33]);
     expect(payers.reduce((s, p) => s + p.amount_cents, 0)).toBe(10000);
+  });
+
+  it('lists payers in number order, so -10 comes after -2', () => {
+    const payers = billSplitPayerShares([row('10', 'J', 100), row('2', 'B', 100), row('1', 'A', 100)]);
+    expect(payers.map((p) => p.invoice_number)).toEqual(['CS-2026-0412-1', 'CS-2026-0412-2', 'CS-2026-0412-10']);
   });
 
   it('does not divide by zero on an all-$0 sale, and names a missing customer', () => {
@@ -53,12 +59,26 @@ describe('buildInvoicePdfDataFromRow on a Bill Split invoice', () => {
     expect(data.shares).toBeUndefined();
   });
 
+  it('prints no payer table on a field split, whose invoices have a group but no delivery', async () => {
+    const client = {
+      from: (t: string) => {
+        if (t !== 'invoices') return read({ data: t === 'customers' ? {} : [], error: null });
+        const q = read({ data: [row('1', 'Farmer', 6000), row('2', 'Landlord', 4000)], error: null });
+        q.maybeSingle = () => Promise.resolve({ data: { invoice_group_id: 'g1', delivery_id: null }, error: null });
+        return q;
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await buildInvoicePdfDataFromRow(client as any, inv as any);
+    expect(data.shares).toBeUndefined();
+  });
+
   it('stops the print when the payers cannot be read, rather than leaving the table out', async () => {
     const client = {
       from: (t: string) => {
         if (t !== 'invoices') return read({ data: t === 'customers' ? {} : [], error: null });
         const q = read({ data: null, error: new Error('down') });
-        q.maybeSingle = () => Promise.resolve({ data: { invoice_group_id: 'g1' }, error: null });
+        q.maybeSingle = () => Promise.resolve({ data: { invoice_group_id: 'g1', delivery_id: 'd1' }, error: null });
         return q;
       },
     };
@@ -71,7 +91,7 @@ describe('buildInvoicePdfDataFromRow on a Bill Split invoice', () => {
       from: (t: string) => {
         if (t !== 'invoices') return read({ data: t === 'customers' ? {} : [], error: null });
         const q = read({ data: [row('1', 'Farmer', 6000), row('2', 'Landlord', 4000)], error: null });
-        q.maybeSingle = () => Promise.resolve({ data: { invoice_group_id: 'g1' }, error: null });
+        q.maybeSingle = () => Promise.resolve({ data: { invoice_group_id: 'g1', delivery_id: 'd1' }, error: null });
         return q;
       },
     };
@@ -81,5 +101,23 @@ describe('buildInvoicePdfDataFromRow on a Bill Split invoice', () => {
       ['Farmer', 60, 6000],
       ['Landlord', 40, 4000],
     ]);
+  });
+});
+
+describe('isBillSplitInvoice', () => {
+  it('is a chemical sale in a group, from a delivery', () => {
+    expect(isBillSplitInvoice({ invoice_type: 'chemical_sale', invoice_group_id: 'g1', delivery_id: 'd1' })).toBe(true);
+    expect(isBillSplitInvoice({ invoice_type: 'chemical_sale', invoice_group_id: 'g1', delivery_id: null })).toBe(false);
+    expect(isBillSplitInvoice({ invoice_type: 'chemical_sale', invoice_group_id: null, delivery_id: 'd1' })).toBe(false);
+    expect(isBillSplitInvoice({ invoice_type: 'field_application', invoice_group_id: 'g1', delivery_id: 'd1' })).toBe(false);
+  });
+});
+
+describe('billSplitCompletion', () => {
+  it('reads what the delivery completion says about its split', () => {
+    expect(billSplitCompletion({ bill_split_failed: true, bill_split_invoices: null })).toEqual({ failed: true, numbers: [] });
+    expect(billSplitCompletion({ bill_split_failed: false, bill_split_invoices: [{ invoice_id: 'a', invoice_number: 'CS-1-1' }, { invoice_id: 'b', invoice_number: 'CS-1-2' }] }))
+      .toEqual({ failed: false, numbers: ['CS-1-1', 'CS-1-2'] });
+    expect(billSplitCompletion(null)).toEqual({ failed: false, numbers: [] });
   });
 });

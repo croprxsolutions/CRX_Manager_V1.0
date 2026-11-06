@@ -34,7 +34,33 @@ describe('LineBillSplit', () => {
 
   it('with no card, a line with no shares bills the main customer', () => {
     render(<LineBillSplit {...props} hasCard={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
     expect(screen.getAllByText('Billed to Farmer')).toHaveLength(2);
+  });
+
+  it('keeps the list closed until someone asks for it or a line has its own shares', () => {
+    const { rerender } = render(<LineBillSplit {...props} />);
+    expect(screen.queryByText('Glyphosate')).not.toBeInTheDocument();
+    rerender(<LineBillSplit {...props} canEdit={false} />);
+    expect(screen.queryByRole('button', { name: 'Split by line' })).not.toBeInTheDocument();
+    rerender(<LineBillSplit {...props} lineShares={[{ id: 's1', order_item_id: 'l1', customer_id: 'c1', split_percentage: 60, customer: { farm_name: 'Farmer' } }]} />);
+    expect(screen.getByText('Glyphosate')).toBeInTheDocument();
+  });
+
+  it('rounds what is left on a line, so database decimals stay readable', () => {
+    render(<LineBillSplit {...props} lineShares={[{ id: 's1', order_item_id: 'l1', customer_id: 'c1', split_percentage: 33.333333, customer: { farm_name: 'Farmer' } }, { id: 's2', order_item_id: 'l1', customer_id: 'c2', split_percentage: 0.1, customer: { farm_name: 'Other' } }]} />);
+    expect(screen.getByText(/Other 66\.57% stays with Farmer/)).toBeInTheDocument();
+  });
+
+  it('refuses a share with more than two decimals before saving', () => {
+    render(<LineBillSplit {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Line split customer' }));
+    fireEvent.change(screen.getByLabelText('Line split percent'), { target: { value: '33.333' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringContaining('two decimals'));
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 
   it('saves a line share', async () => {
@@ -42,6 +68,7 @@ describe('LineBillSplit', () => {
     const insert = vi.fn(() => ({ select }));
     mocks.from.mockReturnValue({ insert });
     render(<LineBillSplit {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
     fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));
     fireEvent.click(screen.getByRole('button', { name: 'Line split customer' }));
     fireEvent.change(screen.getByLabelText('Line split percent'), { target: { value: '100' } });
@@ -64,6 +91,7 @@ describe('LineBillSplit', () => {
   it('shows the database refusal when a save fails, and stays unchanged', async () => {
     mocks.from.mockReturnValue({ insert: () => ({ select: () => Promise.resolve({ data: null, error: new Error('BILL_SPLIT_FROZEN') }) }) });
     render(<LineBillSplit {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
     fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));
     fireEvent.click(screen.getByRole('button', { name: 'Line split customer' }));
     fireEvent.change(screen.getByLabelText('Line split percent'), { target: { value: '100' } });

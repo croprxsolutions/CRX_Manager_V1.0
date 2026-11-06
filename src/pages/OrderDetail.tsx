@@ -2046,7 +2046,11 @@ export default function OrderDetail() {
             <p className="mb-3 text-xs text-amber-700">This order is split by field below, so the field split bills it, not this card.</p>
           )}
 
-          {shares.length === 0 && !showShareEditor && (
+          {shares.length === 0 && lineShares.length > 0 && !showShareEditor && (
+            <p className="text-sm text-secondary text-center py-4">No split on the whole sale. Some lines have their own below.</p>
+          )}
+
+          {shares.length === 0 && lineShares.length === 0 && !showShareEditor && (
             <p className="text-sm text-secondary text-center py-4">No bill splits — 100% billed to primary customer</p>
           )}
 

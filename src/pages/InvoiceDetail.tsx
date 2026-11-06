@@ -29,7 +29,7 @@ import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyM
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
-import { assertInvoiceLinesLoaded, loadBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
+import { assertInvoiceLinesLoaded, isBillSplitInvoice, loadBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
@@ -823,8 +823,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     if (!Array.isArray(shareData)) throw new Error('The invoice share read returned no list');
     setShares(shareData as InvoiceShare[]);
 
-    // A chemical sale split across payers: every payer's invoice shows the whole sale's share table.
-    const payers = data.invoice_type === 'chemical_sale' && data.invoice_group_id && shareData.length === 0
+    // A chemical sale split across payers: each payer's invoice shows that delivery's payers.
+    const payers = isBillSplitInvoice(data) && data.invoice_group_id && shareData.length === 0
       ? await loadBillSplitPayers(supabase, data.invoice_group_id)
       : [];
     if (isStale()) return;
@@ -2450,7 +2450,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
       {billSplitPayers.length > 1 && (
         <Card>
-          <h2 className="text-sm font-semibold text-nav-dark mb-3">Bill Split</h2>
+          <h2 className="text-sm font-semibold text-nav-dark mb-1">Bill Split</h2>
+          <p className="text-xs text-secondary mb-3">The payers on this delivery</p>
           <div className="space-y-2">
             {billSplitPayers.map((payer) => (
               <div key={payer.invoice_id} className="flex items-center justify-between gap-3 text-sm">
@@ -2916,7 +2917,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
       {/* Print Dialog */}
       <InvoicePrintDialog
-        key={billSplitPayers.length > 1 ? 'bill-split' : 'plain'}
+        key={`${invoice.id}:${billSplitPayers.length > 1 ? 'bill-split' : 'plain'}`}
         sharesOnByDefault={billSplitPayers.length > 1}
         open={showPrintDialog}
         onClose={() => setShowPrintDialog(false)}

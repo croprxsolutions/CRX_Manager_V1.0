@@ -28,6 +28,7 @@ interface Props {
 export default function LineBillSplit({ items, lineShares, hasCard, mainCustomerName, canEdit, locked, onChanged }: Props) {
   const { toast } = useToast();
   const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [showList, setShowList] = useState(false);
   const [customer, setCustomer] = useState<{ id: string; name: string } | null>(null);
   const [pct, setPct] = useState('');
   const [saving, setSaving] = useState(false);
@@ -52,6 +53,10 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
       toast('error', 'Pick a customer and a share between 0 and 100');
       return;
     }
+    if (Math.round(value * 100) / 100 !== value) {
+      toast('error', 'Use at most two decimals for a share');
+      return;
+    }
     if (used + value > 100) {
       toast('error', `A line's shares can't total more than 100% (currently ${used}%)`);
       return;
@@ -59,6 +64,15 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
     void write('Add line share', () => supabase.from('order_item_shares')
       .insert({ order_item_id: itemId, customer_id: customer.id, split_percentage: value }).select());
   };
+
+  if (!showList && lineShares.length === 0) {
+    if (!canEdit || locked) return null;
+    return (
+      <div className="mt-3 border-t border-gray-100 pt-3">
+        <Button variant="ghost" size="sm" showChevron={false} onClick={() => setShowList(true)}>Split by line</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
@@ -78,7 +92,7 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
                 ) : (
                   <p className="text-xs text-secondary">
                     {own.map((s) => `${s.customer?.farm_name || 'Unknown'} ${s.split_percentage}%`).join(' · ')}
-                    {used < 100 && <span className="text-amber-600"> Other {100 - used}% stays with {mainCustomerName}</span>}
+                    {used < 100 && <span className="text-amber-600"> Other {Math.round((100 - used) * 100) / 100}% stays with {mainCustomerName}</span>}
                   </p>
                 )}
               </div>
@@ -97,7 +111,7 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
                     <span className="flex items-center gap-3">
                       <span className="font-semibold text-blue-600">{s.split_percentage}%</span>
                       <button type="button" disabled={saving} aria-label={`Remove ${s.customer?.farm_name || 'Unknown'}`}
-                        className="text-red-400 hover:text-red-600 transition-colors"
+                        className="p-2 -m-2 text-red-400 hover:text-red-600 transition-colors"
                         onClick={() => void write('Remove line share', () => supabase.from('order_item_shares').delete().eq('id', s.id).select())}>
                         <Trash2 className="w-4 h-4" />
                       </button>

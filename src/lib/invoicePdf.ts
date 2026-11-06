@@ -35,6 +35,7 @@ export {
   assertInvoiceLinesLoaded,
   groupReturnCreditDisplayItems,
   InvoiceDetailsUnavailableError,
+  isBillSplitInvoice,
   loadBillSplitPayers,
   InvoiceLinesUnavailableError,
   isFuelSurchargeLine,

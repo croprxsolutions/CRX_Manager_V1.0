@@ -202,6 +202,11 @@ export interface BillSplitPayer extends InvoicePdfShare {
   invoice_id: string;
 }
 
+/** A Bill Split draws per delivery. A field split's chemical-sale invoices have a group but no delivery. */
+export function isBillSplitInvoice(row: { invoice_type?: string | null; invoice_group_id?: string | null; delivery_id?: string | null }): boolean {
+  return row.invoice_type === 'chemical_sale' && !!row.invoice_group_id && !!row.delivery_id;
+}
+
 export function billSplitPayerShares(rows: Array<{
   id: string;
   invoice_number: string | null;
@@ -209,7 +214,9 @@ export function billSplitPayerShares(rows: Array<{
   customer?: { farm_name?: string | null } | null;
 }>): BillSplitPayer[] {
   const total = rows.reduce((sum, r) => sum + (r.total_amount_cents ?? 0), 0);
-  return rows.map((r) => ({
+  // Numeric, so -10 follows -2. The database sorts the suffix as text.
+  const ordered = [...rows].sort((a, b) => (a.invoice_number ?? '').localeCompare(b.invoice_number ?? '', undefined, { numeric: true }));
+  return ordered.map((r) => ({
     invoice_id: r.id,
     invoice_number: r.invoice_number,
     customer_name: r.customer?.farm_name || 'Unknown',
@@ -441,7 +448,7 @@ export async function buildInvoicePdfDataFromRow(
     // print of unsaved live form edits is unchanged.
     db
       .from('invoices')
-      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id')
+      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id')
       .eq('id', inv.id)
       .maybeSingle(),
   ]).catch(() => { throw new InvoiceDetailsUnavailableError(); });
@@ -466,9 +473,10 @@ export async function buildInvoicePdfDataFromRow(
     discount_earned_cents?: number | null; discount_date?: string | null;
     payment_terms?: string | null; purchase_order_ref?: string | null;
     header_notes?: string | null; footer_notes?: string | null; due_date?: string | null;
-    diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null;
+    diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null; delivery_id?: string | null;
   } | null;
-  const billSplitPayers = inv.invoice_type === 'chemical_sale' && billingRow?.invoice_group_id && shares.length === 0
+  const billSplitPayers = billingRow?.invoice_group_id && shares.length === 0
+      && isBillSplitInvoice({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id })
     ? await loadBillSplitPayers(db, billingRow.invoice_group_id)
     : [];
   const pickPo = inv.purchase_order_ref !== undefined ? inv.purchase_order_ref : billingRow?.purchase_order_ref;

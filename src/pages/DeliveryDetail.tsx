@@ -53,6 +53,7 @@ import RelatedNotes from '../components/team/RelatedNotes';
 import TransactionThread from '../components/ui/TransactionThread';
 import PrivatePhoto, { PrivatePhotoButton } from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
+import { billSplitCompletion } from '../lib/billSplitCompletion';
 import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
@@ -1312,7 +1313,12 @@ export default function DeliveryDetail() {
         toast('warning', `Delivery completed, but ${shortN} product(s) were short — on-hand inventory went negative. Admins have been notified to review.`);
       }
 
-      if (invoiceNum) {
+      const billSplit = billSplitCompletion(completeResult);
+      if (billSplit.failed) {
+        toast('warning', 'Delivery completed, but its Bill Split invoices could not be drafted. Admins have been told. Use Create Invoice on this delivery to try again.');
+      } else if (billSplit.numbers.length > 0) {
+        toast('success', `Delivery completed${isPartialDelivery ? ' (partial)' : ''}. Draft invoices ${billSplit.numbers.join(', ')} created.`);
+      } else if (invoiceNum) {
         toast('success', isPartialDelivery
           ? `Delivery completed (partial). Draft invoice ${invoiceNum} created.`
           : `Delivery completed. Draft invoice ${invoiceNum} created.`);

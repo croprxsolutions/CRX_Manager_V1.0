@@ -330,6 +330,16 @@ function main() {
     INSERT INTO public.invoices (customer_id, status, invoice_number, invoice_date)
     VALUES ('${ids.customer}', 'draft', 'PROVER-FAR-${randomUUID().slice(0, 6)}', '${plus(366)}');`);
   assert.notEqual(r.status, 0); assert.match(r.output, /INVOICE_DATE_TOO_FAR_AHEAD/, r.output);
+  // An earlier BEFORE UPDATE trigger that moves the date while another column is updated is caught too.
+  r = run(`BEGIN;
+    CREATE FUNCTION pg_temp.prover_bump_date() RETURNS trigger LANGUAGE plpgsql AS $b$
+      BEGIN NEW.invoice_date := (now() AT TIME ZONE 'America/Chicago')::date + 400; RETURN NEW; END $b$;
+    CREATE TRIGGER aa_prover_bump_date BEFORE UPDATE OF due_date ON public.invoices
+      FOR EACH ROW EXECUTE FUNCTION pg_temp.prover_bump_date();
+    UPDATE public.invoices SET due_date = '${plus(5)}' WHERE id = '${ids.draft}';
+    COMMIT;`);
+  assert.notEqual(r.status, 0); assert.match(r.output, /INVOICE_DATE_TOO_FAR_AHEAD/, r.output);
+  assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'aa_prover_bump_date';"), '0', 'the test trigger rolled back');
 
   // Re-running the file passes its preflight (the new bodies are accepted) and changes nothing.
   r = apply('candidate.sql');
@@ -343,7 +353,7 @@ function main() {
   assert.equal(r.status, 0, r.output);
   r = run(`UPDATE public.invoices SET invoice_date = invoice_date WHERE id = '${ids.farOld}';`);
   assert.equal(r.status, 0, r.output);
-  console.log('[prover] invoice date: +365 accepted; +366 refused on insert and update; an old far-dated row still edits');
+  console.log('[prover] invoice date: +365 accepted; +366 refused on insert, update, and when another trigger moves the date; an old far-dated row still edits');
   console.log('KI18_DB_DATES_PROOF_PASS');
 }
 

@@ -6,7 +6,7 @@
 --    Dashboard and the AR Aging page. Its season panels and month label read the Chicago date too.
 --    JSON keys, filters, money expressions, grants and settings are unchanged.
 -- 3. invoices.invoice_date: a new trigger refuses a date more than 365 days after today's Chicago
---    date (a typed year like 2206). It fires only on insert or when invoice_date changes, so
+--    date (a typed year like 2206). It checks only an insert or an update that changes the date, so
 --    existing rows are never touched; live has no row past the limit (2026-11-06 read: max 2026-11-05).
 -- Rollback: a forward migration re-emitting the prior bodies (20261028185500, 20260812115235) and
 -- dropping the trigger and its function. Never renumber tickets.
@@ -429,10 +429,11 @@ $fn$;
 
 REVOKE ALL ON FUNCTION public.refuse_far_future_invoice_date() FROM PUBLIC, anon, authenticated, service_role;
 
--- zz_ so it runs after the BEFORE triggers that may set invoice_date and sees the final value.
+-- zz_ so it runs after the BEFORE triggers that may set invoice_date and sees the final value; on every
+-- UPDATE (not only UPDATE OF invoice_date), so a date another trigger changes is checked too.
 DROP TRIGGER IF EXISTS zz_refuse_far_future_invoice_date ON public.invoices;
 CREATE TRIGGER zz_refuse_far_future_invoice_date
-  BEFORE INSERT OR UPDATE OF invoice_date ON public.invoices
+  BEFORE INSERT OR UPDATE ON public.invoices
   FOR EACH ROW EXECUTE FUNCTION public.refuse_far_future_invoice_date();
 
 DO $postflight$

@@ -6,11 +6,13 @@
 -- log_failed_notification, and update_field_app_applied_info is deployed to production.
 -- ROLLBACK: a new reviewed migration restores the prior trigger list, drops the public
 -- wrappers, renames each pinned _<name>_replay_impl_20261015 back, and restores grants.
--- ORDERING: live high-water 20261118110000_sale_line_vendor (ledger 20261106135401; it replaces
--- only _save_invoice_scoped_impl). Re-checked 2026-11-06: every pin below, the 78-operation guard
--- and the internal-caller scan match live.
+-- ORDERING: live high-water 20261120100000_field_invoice_due_date_follows_owner_terms (ledger
+-- 20261106145427; it replaces only invoice due-date and field-billing functions, none pinned here).
+-- Re-checked 2026-11-06 after it: every pin below matches live, each of the 15 names has exactly
+-- one live overload (the keyed signature), and no unexpired receipt exists for these operations.
 -- Restamped from 20261111210000 (below applied batch 4d), then from 20261117110000 (below open
--- PR #1524, 20261117140000), then from 20261117150000 (below applied sale_line_vendor).
+-- PR #1524, 20261117140000), then from 20261117150000 (below applied sale_line_vendor), then from
+-- 20261118120000 (below applied 20261120100000; highest local stamp 20261123100000).
 -- This file requires the exact 78-operation post-4d guard (53 through 4c, then the 25 batch 4d
 -- operations, in that order) and appends its own 15; every other guard state is refused.
 -- KNOWN LIMITS: dynamic SQL callers cannot be found by catalog text scan; a keyless call

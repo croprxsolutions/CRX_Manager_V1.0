@@ -966,7 +966,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["1a9179b05963dc315c90e54b2fd18445e21d58cae9bdb743111607b9de7e8e86", "plpgsql-check.sql"],
   ["071d89aae1ef714720386c43c9ac6a4c11cc03edb0f00bdcd152ba52079db216", "product-name-vs-return-policy.sql"],
   ["5ea47dde9df5671b8b4acce4e274f242467e3eb71eeb0b3487c8940316a3019d", "profile-role-lock-insert-arm.sql"],
-  ["338abbce132717ebef6a2dd03a56c9e2cb832d4e6cdeb0ba007466590d0acb97", "quote-price-lock-boundary.sql"],
+  ["201e22f0b21de39e663a7e732475a759b1e56a34316bed517dba68415ffc35cc", "quote-price-lock-boundary.sql"],
   ["976e6060a4cb346c6b96f05f156b84da5db9df2e8e3f58ce24b98498ca0f1a29", "quote-versions-rpc-owned.sql"],
   ["7c6edab973d810b5c6e7abc34b4121376609fd82cb82f3905075e01975e29e17", "return-credit-intent-binding.sql"],
   ["e86e0b0d2f61073fce6110913bf9260a9332f92d29c295a61d1a7810345dda49", "returns-lifecycle-rpc-owned.sql"],

@@ -14,11 +14,14 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 let CANDIDATE;
 let OTHER;
+let OTHER_IN_BASELINE = false;
 // Live but not replayable here (storage.objects policies, storage.buckets settings); it must not touch what this proves.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
   '20261016030000_staff_photo_buckets_private.sql',
+  // Its preflight needs live unit and category rows this database lacks; it touches nothing proven here.
+  '20261117130000_tote_fill_from_bulk.sql',
 ]);
 // PR #889's data migrations rewrite live rows this disposable database does not have; they are
 // recorded in the ledger (as live has them) instead of replayed.
@@ -125,9 +128,13 @@ function plan() {
   const fourc = '20261110160000_bind_money_inventory_replay_receipts_batch4c.sql';
   assert.ok(all.some((f) => path.basename(f) === fourc),
     'needs 20261110160000 from the batch 4c PR until it lands on main');
-  const before = all.filter((f) => f !== CANDIDATE && f !== OTHER);
+  // Replay only what is ordered before the candidate (a later file assumes the candidate is live).
+  const before = all.filter((f) => f !== CANDIDATE && (OTHER_IN_BASELINE || f !== OTHER)
+    && path.basename(f) < path.basename(CANDIDATE));
+  if (OTHER_IN_BASELINE) assert.ok(before.includes(OTHER), `${path.basename(OTHER)} must be replayed before the candidate`);
   const touched = new RegExp([...WRAPPED, 'idempotency_keys'].join('|'));
   for (const name of PARKED) {
+    if (name >= path.basename(CANDIDATE)) continue; // sorts after this candidate: never replayed for it
     const file = before.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
     assert.ok(!touched.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
@@ -311,7 +318,9 @@ export function proveReplayBinding(config) {
   FIRST = config.first;
   NAME = `crx-replay-${TAG}-${process.pid}-${Date.now().toString(36)}`;
   CANDIDATE = path.join(MIGRATIONS, config.candidate);
-  OTHER = path.join(MIGRATIONS, config.other);
+  OTHER = config.other ? path.join(MIGRATIONS, config.other) : null;
+  OTHER_IN_BASELINE = config.otherInBaseline === true;
+  assert.ok(!OTHER_IN_BASELINE || OTHER, 'otherInBaseline needs the other file');
   CHAIN = path.join(SMOKE, config.chain);
   WRAPPED = guardArrays(CANDIDATE).self;
   IMPLS = WRAPPED.map((n) => `_${n}_replay_impl_20261015`);
@@ -323,13 +332,15 @@ function run() {
   buildContainer();
   fidelity();
   seed();
-  const { prior, other, self } = guardArrays(CANDIDATE);
-  assert.equal(prior.length, 53, 'the post-4c guard must have 53 operations');
+  const { prior: post4c, other, self } = guardArrays(CANDIDATE);
+  assert.equal(post4c.length, 53, 'the post-4c guard must have 53 operations');
   assert.equal(other.length, TAG === '4d' ? 15 : 25, 'the other batch has the wrong operation count');
   assert.equal(self.length, TAG === '4d' ? 25 : 15, 'this batch has the wrong operation count');
-  assert.deepEqual(guardOps(), prior, 'baseline guard differs from the post-4c state');
+  // `prior` is the guard the candidate starts from: post-4c, or post-4c plus the live other batch.
+  const prior = OTHER_IN_BASELINE ? [...post4c, ...other] : post4c;
+  assert.deepEqual(guardOps(), prior, 'baseline guard differs from the expected starting state');
   stageText('candidate.sql', lf(CANDIDATE));
-  const hasOther = existsSync(OTHER);
+  const hasOther = Boolean(OTHER) && !OTHER_IN_BASELINE && existsSync(OTHER);
   if (hasOther) stageText('other.sql', lf(OTHER));
   const before = chain();
   assert.ok(!before.pass, 'BEFORE: chain unexpectedly passed');
@@ -349,8 +360,9 @@ function run() {
   refusedAfter('pending receipt', `INSERT INTO public.idempotency_keys (idempotency_key, operation, result) VALUES ('prover-pending-${TAG}', '${self[0]}', '{"success":true}'::jsonb);`, /PREFLIGHT_UNEXPIRED_RECEIPTS/, prior);
   refusedAfter('unreviewed caller', `CREATE FUNCTION public.prover_unreviewed_${TAG}() RETURNS void LANGUAGE plpgsql AS $$ BEGIN PERFORM public.${self[0]}(NULL); END; $$;`, /PREFLIGHT_UNREVIEWED_INTERNAL_CALLER/, prior);
   refusedAfter('unknown guard list', recreateGuardSql([...prior, 'unknown_prover_operation']), /PREFLIGHT_RECEIPT_GUARD_DRIFT/, prior);
-  refusedAfter('pre-4c guard', recreateGuardSql(prior.slice(0, 41)), /PREFLIGHT_RECEIPT_GUARD_DRIFT/, prior);
-  console.log('[prover] AUTOCOMMIT + PREFLIGHT: transaction, body, receipt, internal caller, unknown and pre-4c guard refusals leave no changes');
+  refusedAfter('pre-4c guard', recreateGuardSql(post4c.slice(0, 41)), /PREFLIGHT_RECEIPT_GUARD_DRIFT/, prior);
+  if (OTHER_IN_BASELINE) refusedAfter('post-4c guard without the live other batch', recreateGuardSql(post4c), /PREFLIGHT_RECEIPT_GUARD_DRIFT/, prior);
+  console.log(`[prover] AUTOCOMMIT + PREFLIGHT: transaction, body, receipt, internal caller, unknown, pre-4c${OTHER_IN_BASELINE ? ' and post-4c-only' : ''} guard refusals leave no changes`);
 
   // Clone only when both independent migration files are present.
   if (hasOther) cloneBaseline();

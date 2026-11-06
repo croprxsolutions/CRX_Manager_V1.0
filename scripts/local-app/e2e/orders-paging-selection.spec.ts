@@ -158,6 +158,8 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   expect(pageTwo).toHaveLength(50);
   await page.getByRole('button', { name: 'Previous' }).click();
   await expect(page.getByText(`Showing 1–50 of ${G4O_IN_SEASON.toLocaleString('en-US')} orders`, { exact: false })).toBeVisible();
+  // The label can change before the rows do: wait until page two's rows have gone.
+  await expect(page.getByText(pageTwo[0], { exact: true })).toHaveCount(0, { timeout: 15000 });
   const removed = (await orderNumbers())[2];
   expect(removed).toMatch(/^G4O-\d{5}$/);
   // Soft-deleted as the owner with triggers off (an invented row; CLEAN deletes it with the rest).

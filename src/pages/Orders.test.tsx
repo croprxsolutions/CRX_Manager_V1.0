@@ -189,6 +189,10 @@ describe('Orders list pages through the database', () => {
       : { data: pageOf(all, args), error: null }));
     fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
     expect(await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total')).toBeInTheDocument();
+    // Fresh page-one rows arrived from a read with no bookmark, not just the label.
+    expect(await screen.findByText('ORD-0')).toBeInTheDocument();
+    expect(screen.queryByText('ORD-50')).not.toBeInTheDocument();
+    expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({ p_after: undefined }));
     expect(mockToast).not.toHaveBeenCalledWith('error', 'Failed to load orders. Please try again.');
   });
 

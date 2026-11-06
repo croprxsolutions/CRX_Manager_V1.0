@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-05 — A new HIGH from the same mechanism three rounds running also stops the work
+
+**Decision:** the `AGENTS.md` stop rule gains a trigger: a NEW BLOCKER/HIGH that traces to the same mechanism (one lock, timer, guard, or piece of design) for the third review round in a row. The agent stops patching, names the mechanism, asks Mason the business trade-off that would let it delete that mechanism (for example duplicate vs loss, block vs warn), then re-plans through Astra plan review, Luna, then Sol (Mason, 2026-11-05: "Yes, start it").
+**Why:** on PR #1495 (KI-25 delivery receipt queue) Sol rounds 7-12 each found a different HIGH, all from one send lock and its timeouts, so the "same HIGH survives two rounds" rule never fired and about 6 hours were lost. One business answer ("a duplicate receipt is better than a lost one") deleted the lock and the simpler design went clean in 3 rounds.
+**What this forbids/implies:** never keep patching a mechanism that has produced a fresh BLOCKER/HIGH three rounds running; the round cap in `.claude/commands/ship.md` restates the trigger.
+
 ## 2026-11-05 — A quote's price tier check is parked until the rep-only database rule (To-Do 1.6)
 
 **Decision:** Mason chose a screen-only tier check (2026-11-05: "A: screen only"); the parked screen check stays unmerged on `claude/quote-tier-credit-status` until the database rule is built (KNOWN_ISSUES KI-105).

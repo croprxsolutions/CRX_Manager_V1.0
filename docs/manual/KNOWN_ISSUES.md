@@ -368,21 +368,18 @@ can make old splits refuse to save (LOW-MED).
   changes rounding on every quote line, so it needs its own money PR. LOW.
 
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock
-**MED / LOW · OPEN · money/UI · unassigned (the pre-harvest warning part is fixed, see the archive)**
-- Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
-  `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
-  (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
-- `invoices.season` defaults to `current_season()`, and the blend-ticket path uses it
-  (`20261020210000:1050,1227`). Fixed by `20261103120000` (applied live 2026-11-03, ledger `20261103003731`), which makes `current_season()` read the
-  Chicago date; the same migration moves the `invoices.invoice_date` default to the Chicago date, so the two
-  defaults agree. LOW.
-- Client season reads: FIXED 2026-11-05 (branch `claude/ki18-season-central-1f821d`). `computeSeason()` now uses
-  the America/Chicago date, matching `current_season()`; details and proof are in the archive. Left open: other
-  screens still default some dates and "this month"/"last 30 days" filters from the browser clock (only the season
-  part was changed).
-- Two AR-aging views bucket a 30-day-old invoice differently; invoice dates have no future-date limit; three
-  filters cut the day at UTC midnight. UNVERIFIED (PR #991 fixed the AR strip; the rest not re-checked). MED.
-  Checked 2026-11-05: none of these live in the season helpers, so they were left out of the season fix.
+**MED · OPEN · money/UI · unassigned (fixed parts: seasons, screens, blend-ticket year, dashboard aging and the invoice date limit; see below)**
+- Fixed 2026-11-06 by `20261121090000` (applied live, ledger `20261106152929`, PR #1560): blend-ticket numbers take
+  the Chicago year; the Financial Dashboard's AR-aging strip uses the AR Aging page's ranges on the Chicago date; the
+  database refuses an invoice date more than 365 days after the Chicago date. Earlier fixes: `20261103120000`
+  (`current_season()` and the `invoice_date` default) and `20261029160300` (quote, order and rebate-claim years).
+- Customer statements (`get_detailed_statement_data`) age by <=30 / 31-60 / 61-90 / 91-120 / >120 days; the AR Aging
+  page uses 0-29 / 30-59 / 60-89 / 90-119 / 120+, so a 30-day-old invoice is "current" on the statement and 30-59 on
+  AR Aging. Which ranges both use is Mason's decision (recommended: the AR Aging ones). MED.
+- The live database clock is UTC, and many functions still take "today" from `CURRENT_DATE` or `now()`, so from
+  6-7 pm Central they act on tomorrow: overdue marking, AR reminders, license expiry, RUP record dates, quote expiry,
+  holds, dispatch windows, default invoice and bill dates, `get_customer_summary`, and `operational_dashboard_summary`
+  (season, today, and days left in the period). A Sol scan on 2026-11-06 listed about 30; not yet checked one by one. MED.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**

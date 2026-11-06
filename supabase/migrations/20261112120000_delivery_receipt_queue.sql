@@ -487,6 +487,7 @@ DECLARE
   v_saved jsonb;
   v_replay boolean;
   v_customer uuid;
+  v_claimed integer := 0;
 BEGIN
   IF p_limit IS NULL OR p_limit < 1 OR p_limit > 50 THEN
     RAISE EXCEPTION 'CLAIM_LIMIT_INVALID: p_limit must be 1 to 50' USING ERRCODE = '22023';
@@ -505,9 +506,11 @@ BEGIN
                 ELSE (q.status = 'pending' AND q.next_attempt_at <= now())
                      OR (q.status = 'sending' AND q.claimed_at < now() - interval '10 minutes') END
      ORDER BY q.next_attempt_at, q.id
-     LIMIT CASE WHEN v_replay THEN 50 ELSE p_limit END
+     -- Rows settled without sending do not use up p_limit: scan up to 500 due rows for p_limit claims.
+     LIMIT CASE WHEN v_replay THEN 50 ELSE 500 END
      FOR UPDATE SKIP LOCKED
   LOOP
+    EXIT WHEN NOT v_replay AND v_claimed >= p_limit;
     IF v_replay THEN
       v_out := v_out || jsonb_build_array(jsonb_build_object(
         'id', v_row.id, 'claim_token', v_row.claim_token, 'delivery_id', v_row.delivery_id,
@@ -559,7 +562,7 @@ BEGIN
     -- After a send that may have gone out, a retry must be the identical request (same provider key, address and
     -- body), so it keeps that address exactly; a changed address goes to the office instead.
     IF v_row.send_authorized_at IS NOT NULL THEN
-      IF lower(v_email) IS DISTINCT FROM lower(btrim(v_row.attempt_to)) THEN
+      IF v_email IS DISTINCT FROM btrim(v_row.attempt_to) THEN
         UPDATE public.delivery_receipt_queue
            SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
                last_error = 'The customer''s email changed after a send that may have gone out; check whether the customer got it.'
@@ -575,6 +578,7 @@ BEGIN
     UPDATE public.delivery_receipt_queue
        SET status = 'sending', claim_token = v_token, claimed_at = now(), attempts = attempts + 1, attempt_to = v_to
      WHERE id = v_row.id;
+    v_claimed := v_claimed + 1;
     v_out := v_out || jsonb_build_array(jsonb_build_object(
       'id', v_row.id,
       'claim_token', v_token,
@@ -658,7 +662,7 @@ BEGIN
          SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
              last_error = 'The delivery now belongs to another customer; check who should get the receipt.'
        WHERE id = p_id;
-    ELSIF v_email IS NULL OR lower(v_email) IS DISTINCT FROM lower(btrim(v_row.attempt_to)) THEN
+    ELSIF v_email IS NULL OR v_email IS DISTINCT FROM btrim(v_row.attempt_to) THEN
       v_result := 'needs_check';
       UPDATE public.delivery_receipt_queue
          SET status = 'needs_check', claim_token = NULL, claimed_at = NULL,
@@ -740,7 +744,7 @@ BEGIN
   -- A sent receipt must have gone to the address this claim fixed.
   IF p_outcome = 'sent' AND EXISTS (SELECT 1 FROM public.delivery_receipt_queue q
                                      WHERE q.id = p_id AND q.claim_token = p_claim_token AND q.status = 'sending'
-                                       AND lower(q.attempt_to) IS DISTINCT FROM lower(btrim(p_sent_to))) THEN
+                                       AND btrim(q.attempt_to) IS DISTINCT FROM btrim(p_sent_to)) THEN
     RAISE EXCEPTION 'RECEIPT_SENT_TO_MISMATCH: the receipt was claimed for a different address' USING ERRCODE = '22023';
   END IF;
   UPDATE public.delivery_receipt_queue q
@@ -772,7 +776,7 @@ BEGIN
   -- in-flight edit and reads what it committed.
   IF v_status = 'sent' THEN
     SELECT (d.status = 'completed' AND d.deleted_at IS NULL AND d.customer_id = q.customer_id
-            AND lower(btrim(COALESCE(c.email, ''))) = lower(btrim(p_sent_to)))
+            AND btrim(COALESCE(c.email, '')) = btrim(p_sent_to))
       INTO v_still_right
       FROM public.delivery_receipt_queue q
       JOIN public.deliveries d ON d.id = q.delivery_id
@@ -857,7 +861,7 @@ CREATE TRIGGER delivery_receipt_hold_while_sending AFTER UPDATE OF status, delet
   EXECUTE FUNCTION public._delivery_receipt_hold_while_sending();
 CREATE TRIGGER delivery_receipt_hold_while_sending AFTER UPDATE OF email ON public.customers
   FOR EACH ROW
-  WHEN (lower(btrim(COALESCE(NEW.email, ''))) IS DISTINCT FROM lower(btrim(COALESCE(OLD.email, ''))))
+  WHEN (btrim(COALESCE(NEW.email, '')) IS DISTINCT FROM btrim(COALESCE(OLD.email, '')))  -- exact: case can name another mailbox
   EXECUTE FUNCTION public._delivery_receipt_hold_while_sending();
 COMMENT ON FUNCTION public._delivery_receipt_hold_while_sending() IS
   'KI-25 (trigger on deliveries and customers): while a receipt send confirm_delivery_receipt_send authorized may be in flight, its delivery cannot be voided, soft-deleted or moved and its customer''s email cannot change.';

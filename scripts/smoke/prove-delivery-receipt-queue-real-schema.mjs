@@ -481,13 +481,13 @@ function main() {
   fresh(8); assert.equal(claim().length, 0); assert.equal(row(8, 'status'), 'cancelled');
   console.log('[prover] settled at claim without sending: no email now, delivery no longer completed');
 
-  // Confirm, right before the send. A retried claim keeps its address; confirm accepts the same address in
-  // another letter case and spacing, binds its key, and re-checks on a retry.
+  // Confirm, right before the send. A retried claim keeps its address; confirm accepts the same address with
+  // extra spacing (letter case counts: another case is another address), binds its key, and re-checks on a retry.
   seedDelivery(9); assert.equal(complete(9, { emailReceipt: 'true' }).status, 0);
   due(9);
   const k1 = claim('ki25-claim-recheck-1');
   assert.equal(k1.length, 1);
-  psql(`UPDATE public.customers SET email = ' KI25-Farm@example.invalid ' WHERE id = '${CUST}';`);
+  psql(`UPDATE public.customers SET email = ' ki25-farm@example.invalid ' WHERE id = '${CUST}';`);
   assert.deepEqual(claim('ki25-claim-recheck-1').map((c) => [c.id, c.claim_token, c.attempt, c.to]),
     [[k1[0].id, k1[0].claim_token, 1, 'ki25-farm@example.invalid']], 'a retried claim keeps its address');
   psql(`UPDATE public.delivery_receipt_queue SET claimed_at = now() - interval '9 minutes' WHERE id = '${k1[0].id}';`);
@@ -615,7 +615,7 @@ function main() {
   console.log('[prover] a retried claim past its lease returns nothing; the fresh claim stops it at 23 hours');
 
   // While a confirmed send may be in flight, its delivery cannot be voided, soft-deleted or moved and the
-  // customer's email cannot change; other edits, a same-address case change and later edits are allowed.
+  // customer's email cannot change (exactly, case included); other edits and later edits are allowed.
   const refused = (sql) => psql(sql, { allowFailure: true });
   seedDelivery(21); assert.equal(complete(21, { emailReceipt: 'true' }).status, 0);
   due(21);
@@ -628,7 +628,10 @@ function main() {
   const h3 = refused(`SET app.admin_override = 'true'; UPDATE public.deliveries SET status = 'voided' WHERE id = '${D(21)}';`);
   assert.notEqual(h3.status, 0); assert.match(h3.stderr, /DELIVERY_RECEIPT_SENDING/, 'void refused mid-send');
   assert.equal(q(`SELECT status || ' ' || (deleted_at IS NULL) FROM public.deliveries WHERE id = '${D(21)}';`).out, 'completed true');
-  psql(`UPDATE public.customers SET email = upper(email) WHERE id = '${CUST}'; UPDATE public.customers SET email = lower(email) WHERE id = '${CUST}';`);
+  // Addresses compare exactly: a change of capital letters is a change of address.
+  const h4 = refused(`UPDATE public.customers SET email = upper(email) WHERE id = '${CUST}';`);
+  assert.notEqual(h4.status, 0); assert.match(h4.stderr, /DELIVERY_RECEIPT_SENDING/, 'case-only email change refused mid-send');
+  psql(`UPDATE public.customers SET contact_name = contact_name WHERE id = '${CUST}';`); // other edits are fine
   // A change that bypasses triggers (replica mode) is still caught by finish: office list, send kept.
   psql(`SET session_replication_role = replica; UPDATE public.deliveries SET status = 'cancelled' WHERE id = '${D(21)}';`);
   assert.equal(finish(v1[0], 'sent', `NULL, 'msg-v', 'ki25-farm@example.invalid'`).out, 'needs_check');
@@ -650,6 +653,19 @@ function main() {
   psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}'; UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
   assert.equal(finish(v3[0], 'sent', `NULL, 'msg-x', 'ki25-farm@example.invalid'`).out, 'sent', 'its own finish still records the send');
   console.log('[prover] mid-send, a void, a move to another customer and an email change are refused; replica-mode changes reach the office list; holds end at finish or lease');
+
+  // A row settled without sending does not use up the batch: a limit-1 claim still returns the next valid receipt.
+  seedDelivery(28); assert.equal(complete(28, { emailReceipt: 'true' }).status, 0);
+  seedDelivery(29); assert.equal(complete(29, { emailReceipt: 'true' }).status, 0);
+  psql(`UPDATE public.delivery_receipt_queue SET next_attempt_at = now() + interval '1 day' WHERE status = 'pending';
+    UPDATE public.delivery_receipt_queue SET next_attempt_at = now() - interval '2 minutes' WHERE delivery_id = '${D(28)}';
+    UPDATE public.delivery_receipt_queue SET next_attempt_at = now() - interval '1 minute' WHERE delivery_id = '${D(29)}';
+    SET session_replication_role = replica; UPDATE public.deliveries SET status = 'cancelled' WHERE id = '${D(28)}';`);
+  const one = JSON.parse(worker(`SELECT public.claim_delivery_receipts(1)::text`).out);
+  assert.deepEqual(one.map((c) => c.delivery_id), [D(29)], 'the settled row did not use up the limit of 1');
+  assert.equal(row(28, 'status'), 'cancelled');
+  assert.equal(finish(one[0], 'check', "'[PROVER] done', NULL, NULL").out, 'needs_check');
+  console.log('[prover] rows settled without sending do not use up the claim limit');
 
   // The timer: nothing due -> nothing posted; due but not switched on -> nothing posted; switched on -> one post.
   // pg_net's worker moves a queued call to net._http_response once tried (here: no network, so it fails).

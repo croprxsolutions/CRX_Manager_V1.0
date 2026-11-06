@@ -15,3 +15,5 @@
   voided or moved and the customer's email cannot change (the office gets "try again in a minute"), so a receipt
   never goes to an address that was changed right after the final check. Only the attempt the final check
   approved can record a receipt as sent.
+- Sol round 2: email addresses now compare exactly (a change of capital letters counts as a new address), and
+  receipts the worker skips no longer use up its batch.

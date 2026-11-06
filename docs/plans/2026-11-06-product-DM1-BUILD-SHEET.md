@@ -224,10 +224,10 @@ Builds on PAR-1's screens (PR #1553) once they are on `main`; it shares `Product
 
 **Sol list:** yes, both PRs (`supabase/`; `ProductDetail.tsx`). **Mason-gated:** none at apply (no live rows written, no existing-table grants). Live data steps are Mason's: resolving possible duplicates and review of any drafted chemistry (DATA-5, through DM-1b or DM-4).
 
-## 9. Questions for Mason
+## 9. Questions for Mason (all answered 2026-11-06)
 
-1. **Herbicides and other EPA-numbered products get no ingredients or cost per lb of active until the EPA auto-fill (DM-4) is built.** Your settled rule (D-Z) says a product with an EPA number gets its chemistry only from the EPA lookup, never typed. DM-1 alone therefore helps fertilizers, adjuvants and other products with no EPA number. *Recommendation: keep the rule and build DM-4 soon after DM-1; typing herbicide chemistry by hand now would mean checking every value again when the EPA data arrives.*
-2. **Two dry products are stocked in "MG" (milligrams).** If that is a typo for pounds or another unit, their stock, prices and cost figures are all off. *Recommendation: let an agent list the two privately for you to check, and fix the unit through the existing reviewed unit process before entering their chemistry.*
+1. **Herbicides and other EPA-numbered products get no ingredients or cost per lb of active until the EPA auto-fill (DM-4) is built.** Your settled rule (D-Z) says a product with an EPA number gets its chemistry only from the EPA lookup, never typed. DM-1 alone therefore helps fertilizers, adjuvants and other products with no EPA number. *Recommendation: keep the rule and build DM-4 soon after DM-1; typing herbicide chemistry by hand now would mean checking every value again when the EPA data arrives.* **Answered (2026-11-06, relayed by the status session): yes, keep the rule; build DM-4 soon after DM-1.**
+2. **Two dry products are stocked in "MG" (milligrams).** If that is a typo for pounds or another unit, their stock, prices and cost figures are all off. *Recommendation: let an agent list the two privately for you to check, and fix the unit through the existing reviewed unit process before entering their chemistry.* **Answered (2026-11-06, relayed by the status session): yes. An agent lists the two privately for Mason to check, the unit is fixed through the normal reviewed process, and until then the cost screen refuses them by name.**
 3. **Answered (2026-11-06): duplicate ingredients are fixed by "replace", not "link".** Section 3 is written that way.
 
 ## 10. Review record

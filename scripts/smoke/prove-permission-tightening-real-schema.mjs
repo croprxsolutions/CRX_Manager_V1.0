@@ -41,9 +41,11 @@ const O = { sig: X('d1'), cancel: X('d2'), voiddel: X('d3'), voidord: X('d4'), d
 const OI = Object.fromEntries(Object.entries(O).map(([k], i) => [k, X(`e${i + 1}`)]));
 const D = { sig: X('b1'), voiddel: X('b3'), voidord: X('b4') };
 const DI = { sig: X('91'), voiddel: X('93'), voidord: X('94') };
-// Completed before 20261022075000: one recorded old-path signature, one stray old-path file, one with none.
+// Completed before 20261022075000: one recorded old-path signature, one stray old-path file, one with none;
+// plus an old-path file with no delivery row at all (ORPHAN).
 const OLD = { recorded: X('b6'), stray: X('b7'), none: X('b8') };
 const OLD_ORDER = X('d6');
+const ORPHAN = X('b9');
 const oldPath = (d) => `signatures/${d}.png`;
 
 const POLICIES = ['delivery_signatures_scoped_delete', 'delivery_signatures_scoped_insert',
@@ -112,7 +114,8 @@ function seed() {
     ${old('none', false)}
     INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES
       ('delivery-signatures', '${oldPath(OLD.recorded)}', '${USERS.driver}', '{"size": 2400, "mimetype": "image/png"}'),
-      ('delivery-signatures', '${oldPath(OLD.stray)}', '${USERS.driver}', '{"size": 2400, "mimetype": "image/png"}');`);
+      ('delivery-signatures', '${oldPath(OLD.stray)}', '${USERS.driver}', '{"size": 2400, "mimetype": "image/png"}'),
+      ('delivery-signatures', '${oldPath(ORPHAN)}', '${USERS.driver}', '{"size": 2400, "mimetype": "image/png"}');`);
 }
 
 const status = (k) => `(SELECT status FROM public.orders WHERE id = '${O[k]}')`;
@@ -132,6 +135,7 @@ function permissionProbes() {
     oldDelete: rowsTouched(USERS.admin, `DELETE FROM storage.objects WHERE bucket_id = 'delivery-signatures' AND name = '${oldPath(OLD.recorded)}';`),
     readRecorded: ['admin', 'rep', 'driver'].map((r) => visible(USERS[r], oldPath(OLD.recorded))).join(',') + ',' + visible(DRIVER2, oldPath(OLD.recorded)),
     readStray: visible(USERS.admin, oldPath(OLD.stray)),
+    readOrphan: [USERS.admin, USERS.rep, USERS.driver].map((u) => visible(u, oldPath(ORPHAN))).join(','),
   };
 }
 
@@ -217,6 +221,7 @@ try {
   assert.equal(after.oldDelete, 'ok|0');
   assert.equal(after.readRecorded, 'ok|1,ok|1,ok|1,ok|0', 'after: the recorded old signature reads as before');
   assert.equal(after.readStray, 'ok|0', 'after: an unrecorded old-path file is no longer readable');
+  assert.equal(after.readOrphan, 'ok|0,ok|0,ok|0', 'after: an old-path file with no delivery row is readable by nobody signed in');
 
   const done = flows();
   console.log('[perm] FLOWS ', JSON.stringify(done));

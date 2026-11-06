@@ -240,9 +240,10 @@ const TAHA = [[U1, U2], [I1, I2], [T1, T2], [S1, S2]];
 // Strengths the base name still loses (written "lb./gal", "lb ai/gal", "oz ai/gal", or with the size's own number):
 // each pair shares a base name, and the numbers check must hold it.
 const [A1, A2, L1, L2, O1, O2, W1, W2, R3, ZD] = ['31', '32', '33', '34', '35', '36', '37', '38', '39', '3a'].map(id);
-const [M1, M2, B1, B2, E1, E2] = ['3c', '3d', '3e', '3f', '40', '41'].map(id);
+const [M1, M2, B1, B2, E1, E2, F1, F2] = ['3c', '3d', '3e', '3f', '40', '41', '42', '43'].map(id);
 // E: no size in the name, and the container size equals the strength's number (Luna round 7).
-const STRENGTH_PAIRS = [[A1, A2], [L1, L2], [O1, O2], [W1, W2], [M1, M2], [B1, B2], [E1, E2]];
+// F: the container size's number and unit written as a ratio before the real size (Sol).
+const STRENGTH_PAIRS = [[A1, A2], [L1, L2], [O1, O2], [W1, W2], [M1, M2], [B1, B2], [E1, E2], [F1, F2]];
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -290,12 +291,14 @@ function seed() {
     // No container unit: the stock unit (Gal) is the product's unit.
     p(E1, '[PROVER] Emo 2 lb ai/gal', 'EM-2', 'Herbicide', null, 'liquid', 'Gal', 2, null),
     p(E2, '[PROVER] Emo 4 lb ai/gal', 'EM-4', 'Herbicide', null, 'liquid', 'Gal', 4, null),
+    p(F1, '[PROVER] Blend 2 gal concentrate per 10 gal', 'BL-2', 'Herbicide', null, 'liquid', 'Gal', 2, 'Gal'),
+    p(F2, '[PROVER] Blend 4 gal concentrate per 10 gal', 'BL-4', 'Herbicide', null, 'liquid', 'Gal', 4, 'Gal'),
     // 1.0 and 1 are one number: Rho 1.0 gal joins Rho.
     p(R3, '[PROVER] Rho 1.0 gal', 'RH-1', 'Herbicide', '600-2', 'liquid', 'Gal', 1, 'Gal'),
     // Zeta's EPA number and name, but dry: another product, never held as a second Zeta.
     p(ZD, '[PROVER] Zeta 25 lb', 'ZE-D', 'Herbicide', '300-1', 'dry', 'Lb', 25, 'Lb'),
   ].join(',\n    ')};`);
-  console.log('[prover] seeded an admin, a sales rep and 34 invented products');
+  console.log('[prover] seeded an admin, a sales rep and 36 invented products');
 }
 
 const PINS = {
@@ -395,7 +398,9 @@ async function main() {
     // Order kept, last match removed: a strength and a pack count cannot trade places (Luna round 5).
     ['Mix 2 lb./gal 4 x 2 gal', 2, 'Gal', '{"2 lb","4 x"}'], ['Mix 4 lb./gal 2 x 4 gal', 4, 'Gal', '{"4 lb","2 x"}'],
     // The unit word decides which number is the size (Luna round 7).
-    ['Imida 2 lb ai/gal', 2, 'Gal', '{"2 lb"}'], ['Mix 2 gal 2 lb/gal', 2, 'Gal', '{"2 lb"}'], ['Acc 18 oz', 18, 'Dry oz', '{}'],
+    ['Imida 2 lb ai/gal', 2, 'Gal', '{"2 lb"}'], ['Acc 18 oz', 18, 'Dry oz', '{}'],
+    // Only the last number written with a unit is the size (Sol): a ratio or a size written first stays.
+    ['Blend 2 gal concentrate per 10 gal', 2, 'Gal', '{"2 gal","10 gal"}'], ['Mix 2 gal 2 lb/gal', 2, 'Gal', '{"2 gal","2 lb"}'],
     ['Gen 1LB: 1 Gal', 1, 'Gal', '{"1 lb"}'], ['Sack 50 lbs', 50, 'Lb', '{}'], ['Rho 2.5 gallons', 2.5, 'GAL', '{}'],
     // No size or no usable unit: nothing is removed, so the group is held, never merged.
     ['Rho 1 gal', null, 'Gal', '{"1 gal"}'], ['Rho 2.5 gal', 2.5, null, '{"2.5 gal"}'], ['Rho 2.5 gal', 2.5, 'Ea', '{"2.5 gal"}'],
@@ -484,7 +489,14 @@ async function main() {
     VALUES ('${id('2b')}', '[PROVER] Xeno 30 gal', 'XE-30', 'Herbicide', '900-1', 'liquid', 'Gal', true, 30, 'Gal');`);
   x = groupOf(groups(build('k-build-5').proposal_id), X1);
   assert.equal(x.status, 'proposed'); assert.ok(!x.flags.includes('rejected_before'));
-  console.log('[case] rejection carried: a rebuild keeps a rejection (reason, who, when) while its sizes are unchanged; a changed size proposes it again with the earlier rejection named; a different set of sizes starts fresh');
+  // Rejected, then held for another reason (a parent with its EPA number, form and name appears): the rejection stays named.
+  call(ADMIN, decide('reject', x, 5, 'xeno again', 'k-x-reject-3'));
+  create({ name: '[PROVER] Xeno', product_form: 'liquid', generic_epa_registration: '900-1', category: 'Herbicide' },
+    { product_name: '[PROVER] Xeno Pail 5 gal', sku: 'XE-P', inventory_unit: 'Gal' }, 'k-xeno-parent');
+  x = groupOf(groups(build('k-build-6').proposal_id), X1);
+  assert.equal(x.status, 'held'); assert.ok(x.flags.includes('rejected_before'));
+  assert.match(x.reason, /already has EPA number 900-1.*; rejected on \d{4}-\d{2}-\d{2} \(xeno again\)$/);
+  console.log('[case] rejection carried: a rebuild keeps a rejection (reason, who, when) while its sizes are unchanged; a changed size proposes it again with the earlier rejection named; a different set of sizes starts fresh; a rejected group later held keeps the rejection in its reason');
 
   // [case] duplicate parents are warned, not blocked (Mason, 2026-11-06)
   // A hand-made parent with Kappa's EPA number, form and base name (also one carrying approval's "(EPA ...)"
@@ -571,10 +583,14 @@ async function main() {
   assert.equal(scalar(`SELECT to_regprocedure('public._product_parent_identity_name(text)') IS NULL;`), 't');
   for (const [sig, want] of Object.entries(PINS)) assert.equal(bodyMd5(sig), want, `${sig}: the rollback did not restore the live body`);
   for (const s of Object.keys(PINS)) assert.equal(aclOf(s), aclBefore[s], `${s}: the rollback changed grants, settings, owner or security`);
-  // The candidate's preflight accepts the rolled-back database again.
+  // An open proposal built by the old rules refuses the install; once superseded, the candidate installs again.
+  assert.ok(Number(scalar(`SELECT count(*) FROM public.product_parent_proposals WHERE status = 'open';`)) > 0, 'no open proposal to refuse on');
+  const blocked = apply('cand.sql');
+  assert.notEqual(blocked.status, 0); assert.match(blocked.output, /PREFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_OPEN_PROPOSAL/);
+  asOwner(`UPDATE public.product_parent_proposals SET status = 'superseded' WHERE status = 'open';`);
   const reinstalled = apply('cand.sql');
   assert.equal(reinstalled.status, 0, reinstalled.output);
-  console.log('[case] rollback: re-issuing the five old bodies and dropping the two new helpers restores exactly the bodies the preflight pins (and their grants); the candidate installs again on top');
+  console.log('[case] rollback: re-issuing the five old bodies and dropping the two new helpers restores exactly the bodies the preflight pins (and their grants); an open proposal refuses the install, and once superseded the candidate installs again on top');
 
   console.log('PRODUCT_PARENT_REVIEW_FIXES_PROOF_PASS');
 }

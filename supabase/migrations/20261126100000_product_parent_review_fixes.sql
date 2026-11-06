@@ -18,8 +18,9 @@
 --    * size_numbers_differ (held): the sizes' names, less each one's recorded container size, carry different
 --      numbers or units (a number by value, with the word written right after it), so the base name lost a
 --      strength or analysis however it was written ("2 lb./gal", "2 lb ai/gal" vs "2 oz ai/gal"). A number counts
---      as the container size only when its unit word is the product's own unit (container unit, else stock
---      unit), so "2 lb ai/gal" on a 2 gal jug stays a strength (Mason, 2026-11-06: match the unit word). Sizes
+--      as the container size only when it is the last number written with a unit word and that word is the
+--      product's own unit (container unit, else stock unit), so "2 lb ai/gal" on a 2 gal jug and "2 gal
+--      concentrate per 10 gal" stay strengths (Mason, 2026-11-06: match the unit word; when unsure, hold). Sizes
 --      whose names carry the same numbers and units are not held, with or without a recorded container size.
 --    * epa_has_parent (flag): an active parent already has the group's EPA number. Held when that parent's form
 --      and base name are the group's too (a second parent for the same product); otherwise it stays a flag, as
@@ -73,6 +74,12 @@ BEGIN
      OR to_regclass('public.product_parent_brands') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_DEPENDENCY_MISSING';
   END IF;
+  -- Approval does not re-run the build's holds, so no proposal built by the old rules may stay open (live: no
+  -- proposals, 2026-11-06). The build's own lock keeps one from opening until this commits.
+  PERFORM pg_advisory_xact_lock(hashtext('crx.product_parent_proposal.build'));
+  IF EXISTS (SELECT 1 FROM public.product_parent_proposals WHERE status = 'open') THEN
+    RAISE EXCEPTION 'PREFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_OPEN_PROPOSAL: an open proposal was built by the old rules; mark it superseded first';
+  END IF;
 END;
 $preflight$;
 
@@ -114,9 +121,9 @@ ALTER FUNCTION public._product_parent_identity_name(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_parent_identity_name(text) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 -- Every number in a size's name, by value with the word written right after it ("2 lb", "2 oz", "28"), in the
--- order written, less the last one whose number equals its recorded container size and whose unit word is the
--- product's own unit (p_unit: "Gal", "Dry oz"; "2 gal" is a 2 Gal jug, "2 lb" never is). No unit, nothing removed:
--- the group is held, never merged. Sizes of one product differ only in that number, so two members whose
+-- order written, less the size: the last number written with a unit word, removed only when it equals the recorded
+-- container size and its unit word is the product's own unit (p_unit: "Gal", "Dry oz"; "2 gal" is a 2 Gal jug,
+-- "2 lb" never is). Otherwise nothing is removed and the group is held, never merged. Sizes of one product differ only in that number, so two members whose
 -- lists differ carry a strength or analysis the base name lost ("2 lb./gal 2.5 gal" vs "4 lb./gal 30 gal"),
 -- however it is written. Order is kept so a strength and a pack count cannot trade places ("2 lb./gal 4 x 2 gal"
 -- vs "4 lb./gal 2 x 4 gal"). A different pack count also holds the group: names group less, never wrongly.
@@ -134,9 +141,9 @@ LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
   )
   SELECT COALESCE(array_agg(btrim(trim_scale(v)::text || ' ' || u) ORDER BY i), '{}')
     FROM n WHERE i IS DISTINCT FROM (
-      SELECT max(n.i) FROM n JOIN units ON units.w = n.u
-       WHERE n.v = p_size
-         AND units.c = (SELECT c FROM units WHERE w = lower(regexp_replace(btrim(p_unit), '^(dry|fl)[[:space:]]*', '', 'i'))));
+      SELECT l.i FROM (SELECT n.i, n.v, units.c FROM n JOIN units ON units.w = n.u ORDER BY n.i DESC LIMIT 1) l
+       WHERE l.v = p_size
+         AND l.c = (SELECT c FROM units WHERE w = lower(regexp_replace(btrim(p_unit), '^(dry|fl)[[:space:]]*', '', 'i'))));
 $function$;
 ALTER FUNCTION public._product_name_strength_tokens(text, numeric, text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_name_strength_tokens(text, numeric, text) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
@@ -274,6 +281,9 @@ BEGIN
         v_rejected := v_rejected + 1;
       ELSIF v_status = 'proposed' THEN
         v_reason := format('rejected on %s (%s); a size changed since, so it is proposed again',
+          to_char(v_prior.decided_at AT TIME ZONE 'America/Chicago', 'YYYY-MM-DD'), v_prior.reason);
+      ELSE
+        v_reason := format('%s; rejected on %s (%s)', v_reason,
           to_char(v_prior.decided_at AT TIME ZONE 'America/Chicago', 'YYYY-MM-DD'), v_prior.reason);
       END IF;
     END IF;
@@ -612,6 +622,8 @@ BEGIN
   IF public._product_name_strength_tokens('Imidacloprid 2 lb/gal 2.5 gal', 2.5, 'Gal') <> ARRAY['2 lb']
      OR public._product_name_strength_tokens('Rho 1.0 gal', 1, 'Gal') <> '{}'::text[]
      OR public._product_name_strength_tokens('Imida 2 lb ai/gal', 2, 'Gal') <> ARRAY['2 lb']
+     OR public._product_name_strength_tokens('Blend 2 gal concentrate per 10 gal', 2, 'Gal')
+        = public._product_name_strength_tokens('Blend 4 gal concentrate per 10 gal', 4, 'Gal')
      OR public._product_name_strength_tokens('Mix 2 lb./gal 4 x 2 gal', 2, 'Gal')
         = public._product_name_strength_tokens('Mix 4 lb./gal 2 x 4 gal', 4, 'Gal')
      OR public._product_name_strength_tokens('Lam 2 lb ai/gal 2.5 gal', 2.5, 'Gal')

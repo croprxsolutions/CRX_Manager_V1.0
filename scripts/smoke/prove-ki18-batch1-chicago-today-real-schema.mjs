@@ -256,20 +256,23 @@ const SYSTEM_ACTOR = '22c1fc50-4d2a-4baa-8ff8-341c0c7edd4f';  // mark_overdue_in
 const CHI = "(now() AT TIME ZONE 'America/Chicago')::date";
 
 // The candidate's only edit: CURRENT_DATE (outside -- comments) becomes the Chicago date,
-// get_ar_reminder_candidates counts calendar days, and generate_rup_sales_records takes its season from the
-// same Chicago date as the sale date. Applied to the pre-image, it must give the post-image.
+// get_ar_reminder_candidates counts calendar days, and generate_rup_sales_records records the invoice date as
+// the sale date and takes its season from it (Mason, 2026-11-06). Applied to the pre-image, it must give the post-image.
 // Postgres re-prints an argument default in normalized form, so the header line expects that form.
 const CHI_ARG = "((now() AT TIME ZONE 'America/Chicago'::text))::date";
 const REMIND_OLD = 'EXTRACT(DAY FROM NOW() - COALESCE(i.due_date, i.invoice_date))::int';
 const REMIND_NEW = `(${CHI} - COALESCE(i.due_date, i.invoice_date))`;
-const RUP_OLD = 'FROM v_invoice.created_at)';
-const RUP_NEW = "FROM (now() AT TIME ZONE 'America/Chicago'))";
+const RUP_SWAPS = [
+  ['c.farm_name, i.created_at,', 'c.farm_name, i.invoice_date,'],
+  ['v_invoice.created_at', 'v_invoice.invoice_date'],
+  ['CURRENT_DATE, v_item.product_name', 'v_invoice.invoice_date, v_item.product_name'],
+];
 function swap(sig, def) {
   return def.split('\n').map((line) => {
     const c = line.indexOf('--');
     const code = c >= 0 ? line.slice(0, c) : line;
     let next = sig.startsWith('get_ar_reminder_candidates') ? code.split(REMIND_OLD).join(REMIND_NEW) : code;
-    if (sig.startsWith('generate_rup_sales_records')) next = next.split(RUP_OLD).join(RUP_NEW);
+    if (sig.startsWith('generate_rup_sales_records')) for (const [from, to] of RUP_SWAPS) next = next.split(from).join(to);
     next = next.replace(/\bcurrent_date\b/gi, line.startsWith('CREATE OR REPLACE FUNCTION') ? CHI_ARG : CHI);
     return next + (c >= 0 ? line.slice(c) : '');
   }).join('\n');
@@ -405,6 +408,22 @@ function main() {
   const after = decisions(ids);
   assert.deepEqual(after, want, `AFTER ${JSON.stringify(after)} must follow the Chicago date ${JSON.stringify(want)}`);
   console.log(`[prover] AFTER (same session zone): ${JSON.stringify(after)} = the Chicago answer`);
+
+  // Mason 2026-11-06: a RUP record carries the invoice date and its season. A Sep 30 invoice posted on
+  // Oct 1 records Sep 30 in the 2026 season, whatever day the record is written.
+  const rupOrder = seedRow('orders', { customer_id: ids.customer, order_number: `PO-${randomUUID().slice(0, 8)}` });
+  const rupInvoice = seedRow('invoices', {
+    customer_id: ids.customer, order_id: rupOrder, status: 'posted', posted_at: '2026-10-01T15:00:00Z',
+    created_at: '2026-10-01T15:00:00Z', invoice_type: 'chemical_sale', invoice_number: `PROVER-${randomUUID().slice(0, 8)}`,
+    invoice_date: '2026-09-30', due_date: '2026-10-30', total_amount_cents: 10000, paid_amount_cents: 0, prepay_applied_cents: 0,
+  });
+  const rupProduct = seedRow('products', { product_name: '[PROVER] RUP', sku: `RUP-${randomUUID().slice(0, 8)}`, is_rup: true, is_active: true });
+  seedRow('invoice_items', { invoice_id: rupInvoice, product_id: rupProduct, quantity: 1, unit_size: 'gal', unit_price_cents: 10000, extended_cents: 10000 });
+  const rup = scalar(`SET TimeZone = '${zone}'; SET request.jwt.claim.sub = '${ADMIN}'; BEGIN;
+    SELECT public.generate_rup_sales_records('${rupInvoice}'::uuid);
+    SELECT string_agg(sale_date::text || ' ' || season, ',') FROM public.rup_sales_records WHERE invoice_id = '${rupInvoice}'; ROLLBACK;`);
+  assert.equal(rup, '2026-09-30 2026', `RUP record must carry the invoice date and its season, got ${rup}`);
+  console.log(`[prover] RUP record for a Sep 30 invoice posted Oct 1: sale date and season ${rup}`);
 
   // Column defaults and argument defaults give the Chicago date in a session one day off.
   const defaults = scalar(`SET TimeZone = '${zone}'; SELECT string_agg(pg_get_expr(d.adbin, d.adrelid), '|' ORDER BY c.relname)

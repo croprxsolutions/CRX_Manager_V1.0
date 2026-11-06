@@ -141,8 +141,9 @@ BEGIN
      AND NULLIF(btrim(vendor), '') IS NOT NULL AND vendor <> v_preferred AND id <> v_p.id ORDER BY created_at LIMIT 1;
   IF v_other.id IS NOT NULL THEN
     PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+    -- Priced above both products' costs, so a swap either way stays above cost (the below-cost rule).
     INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit, total_units_needed, total_price, quantity_delivered, quantity_remaining, sort_order)
-      VALUES (v_o, v_p.id, '[SMOKE] Swapped', 'gal', v_p.current_cost + 1, v_p.current_cost, 5, (v_p.current_cost + 1) * 5, 0, 5, 4) RETURNING id INTO v_l4;
+      VALUES (v_o, v_p.id, '[SMOKE] Swapped', 'gal', greatest(v_p.current_cost, v_other.current_cost) + 1, v_p.current_cost, 5, (greatest(v_p.current_cost, v_other.current_cost) + 1) * 5, 0, 5, 4) RETURNING id INTO v_l4;
     UPDATE order_items SET product_id = v_other.id, cost_per_unit = v_other.current_cost WHERE id = v_l4;
     IF (SELECT vendor FROM order_items WHERE id = v_l4) IS DISTINCT FROM v_other.vendor THEN
       v_fails := v_fails || format(' (H) a product swap kept %s, want %s;', (SELECT vendor FROM order_items WHERE id = v_l4), v_other.vendor);

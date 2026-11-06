@@ -17,8 +17,8 @@
 --   * AR reminders: get_ar_reminder_candidates counts Chicago calendar days past due
 --     (Chicago date - due date) instead of whole 24-hour periods since UTC midnight
 --   * applicator licenses and RUP: _enforce_applicator_license, _dispatch_job_locations_replay_impl_20261015,
---     generate_rup_sales_records (license expiry, the RUP record date, and its season, which now reads the
---     invoice's creation time in Chicago so a Sep 30 evening invoice is not put in the next season)
+--     generate_rup_sales_records (license expiry, the RUP record date, and its season, which now comes from
+--     that same Chicago sale date, so the record's sale date and season always agree)
 --   * holds and stock: _sync_job_holds, get_dispatch_stock_status, get_job_inventory_shortfalls,
 --     _get_inventory_position_cost_impl_20261019 (also its season start), _create_inventory_hold_intent_impl_20260905
 --   * other business dates: _transition_rebate_claim_replay_impl_20261015, _create_rush_order_below_cost_impl_20260810,
@@ -58,7 +58,7 @@ BEGIN
     ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}'),
-    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '33bd21749b60bfa6c3dd9e7d71336d7c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '1e89d3d1cbcc5c5756751e635e7b10f6', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
@@ -2494,9 +2494,9 @@ BEGIN
   END IF;
 
   v_season := CASE
-    WHEN EXTRACT(MONTH FROM (v_invoice.created_at AT TIME ZONE 'America/Chicago')) >= 10
-    THEN EXTRACT(YEAR FROM (v_invoice.created_at AT TIME ZONE 'America/Chicago'))::integer + 1
-    ELSE EXTRACT(YEAR FROM (v_invoice.created_at AT TIME ZONE 'America/Chicago'))::integer
+    WHEN EXTRACT(MONTH FROM (now() AT TIME ZONE 'America/Chicago')) >= 10
+    THEN EXTRACT(YEAR FROM (now() AT TIME ZONE 'America/Chicago'))::integer + 1
+    ELSE EXTRACT(YEAR FROM (now() AT TIME ZONE 'America/Chicago'))::integer
   END;
 
   FOR v_item IN
@@ -5650,7 +5650,7 @@ BEGIN
     ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}'),
-    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '33bd21749b60bfa6c3dd9e7d71336d7c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
+    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '1e89d3d1cbcc5c5756751e635e7b10f6', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}'),
     ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),
     ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}'),

@@ -256,14 +256,14 @@ const SYSTEM_ACTOR = '22c1fc50-4d2a-4baa-8ff8-341c0c7edd4f';  // mark_overdue_in
 const CHI = "(now() AT TIME ZONE 'America/Chicago')::date";
 
 // The candidate's only edit: CURRENT_DATE (outside -- comments) becomes the Chicago date,
-// get_ar_reminder_candidates counts calendar days, and generate_rup_sales_records reads the invoice's
-// creation time in Chicago for its season. Applied to the pre-image, it must give the post-image.
+// get_ar_reminder_candidates counts calendar days, and generate_rup_sales_records takes its season from the
+// same Chicago date as the sale date. Applied to the pre-image, it must give the post-image.
 // Postgres re-prints an argument default in normalized form, so the header line expects that form.
 const CHI_ARG = "((now() AT TIME ZONE 'America/Chicago'::text))::date";
 const REMIND_OLD = 'EXTRACT(DAY FROM NOW() - COALESCE(i.due_date, i.invoice_date))::int';
 const REMIND_NEW = `(${CHI} - COALESCE(i.due_date, i.invoice_date))`;
 const RUP_OLD = 'FROM v_invoice.created_at)';
-const RUP_NEW = "FROM (v_invoice.created_at AT TIME ZONE 'America/Chicago'))";
+const RUP_NEW = "FROM (now() AT TIME ZONE 'America/Chicago'))";
 function swap(sig, def) {
   return def.split('\n').map((line) => {
     const c = line.indexOf('--');

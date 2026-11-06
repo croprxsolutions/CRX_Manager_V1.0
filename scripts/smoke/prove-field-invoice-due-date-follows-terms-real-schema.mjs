@@ -128,9 +128,9 @@ try {
   // Committed editable invoices for the one-pass touch.
   for (const k of ['JPRE30', 'JPRE15', 'JPREBLANK']) assert.match(attempt(ADMIN, transfer(k), { commit: true }), /^ok\|/);
   assert.equal(ok(`${summary('JPRE15', false)}`, 'pre'), '<blank>=+30');
-  assert.match(attempt(ADMIN, `${transfer('JPRETYPED')} UPDATE public.invoices SET due_date = due_date + 5 WHERE job_id = '${J.JPRETYPED}';`, { commit: true }), /^ok|/);
+  assert.match(attempt(ADMIN, `${transfer('JPRETYPED')} UPDATE public.invoices SET due_date = due_date + 5 WHERE job_id = '${J.JPRETYPED}';`, { commit: true }), /^ok\|/);
   // Committed posted invoices from before the change: a +30 on a Net 15 owner, and one that matches Net 30.
-  for (const k of ['JPOST15', 'JPOST30']) assert.match(attempt(ADMIN, `${transfer(k)} ${post(k)}`, { commit: true }), /^ok|/);
+  for (const k of ['JPOST15', 'JPOST30']) assert.match(attempt(ADMIN, `${transfer(k)} ${post(k)}`, { commit: true }), /^ok\|/);
 
   // APPLY.
   const applied = applyCandidate();

@@ -441,7 +441,7 @@ export default function JobDetail() {
         : "This job's customer is still loading. Try again in a moment.");
     return null;
   };
-  const [jobDate, setJobDate] = useState(todayInBusinessTz());
+  const [jobDate, setJobDate] = useState(todayInBusinessTz);
   const [scheduledTime, setScheduledTime] = useState('');
   const [applicatorId, setApplicatorId] = useState('');
   // Scheduling fields (Locations tab)

@@ -13,7 +13,7 @@ import { fetchAllRows } from '../lib/pagedRead';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, fmtCurrency } from '../lib/reportPdf';
 import { computeSeason, seasonStartDate, seasonEndDate, getSeasonDates } from '../utils/season';
-import { formatLocalDate } from '../lib/dateUtils';
+import { formatLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import type { SalesDetailRow, SalesSummaryRow, FarmGroupMember } from '../types';
 
 // ─── Types ──────────────────────────────────────────────────
@@ -33,7 +33,7 @@ function getPresetDates(preset: string): { start: string; end: string } {
     }
     case 'ytd': {
       const s = computeSeason();
-      return { start: seasonStartDate(s), end: formatLocalDate(now) };
+      return { start: seasonStartDate(s), end: todayInBusinessTz() };
     }
     case 'last30': {
       const d = new Date(now.getTime() - 30 * 86400000);

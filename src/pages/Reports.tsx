@@ -152,7 +152,7 @@ function getPresetDates(preset: string): { start: string; end: string } {
     }
     case 'ytd': {
       const s = computeSeason();
-      return { start: seasonStartDate(s), end: formatLocalDate(now) };
+      return { start: seasonStartDate(s), end: todayInBusinessTz() };
     }
     case 'last30':
       return { start: daysBefore(30), end: formatLocalDate(now) };

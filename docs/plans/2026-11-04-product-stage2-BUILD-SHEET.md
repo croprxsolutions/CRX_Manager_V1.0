@@ -216,7 +216,7 @@ Every preview that changes a copied rate (parent rates, approval, move) lists th
 6. moves brands (below) and marks each group `approved`.
 **There is no other way to group existing rows**: PAR-1's public RPCs create new rows only, so nothing existing is grouped without this approval.
 
-`hold_product_parent_group(p_group_id, p_expected_proposal_version, p_group_fingerprint, p_reason, p_idempotency_key)` and `reject_product_parent_group(...)` with the same arguments keep a group out with a reason: admin, retry key, authorization before replay, refused when the proposal or the group changed, a repeat returns the first result. Held and rejected products keep today's behaviour; a new proposal may propose them again.
+`hold_product_parent_group(p_group_id, p_expected_proposal_version, p_group_fingerprint, p_reason, p_idempotency_key)` and `reject_product_parent_group(...)` with the same arguments keep a group out with a reason: admin, retry key, authorization before replay, refused when the proposal or the group changed, a repeat returns the first result. Held and rejected products keep today's behaviour; a new proposal may propose them again. **Review fixes (3a, `20261126100000`):** a new proposal carries a rejection (reason, who, when) while the group's sizes are unchanged and proposes it again, with the earlier rejection named, once one changes; it holds a group whose EPA number and base name match an active parent (a different name stays a flag), and approval refuses one that matches a parent made after the build; it holds a group whose same-size names carry different numbers; base names keep strengths and analyses (`28/0/0`, `2 lb/gal`, `2 G`); and PAR-1's move refuses a size between parents with different brand lists and retires an emptied parent's brands.
 
 **Label facts are not merged.** PAR-2 never writes `epa_registration`, signal word, RUP, REI/PHI or label maxima. REG-1 reconciles them per EPA number.
 
@@ -442,7 +442,8 @@ Sol's rounds 6 to 8 kept finding depth gaps in these outlines, and three of them
 | 1 | PAR-1 database PR | 11a-1 (live), 11a-2 and PM-10 landed | none |
 | 2 | PAR-1 screen PR | 1 applied | none |
 | 3 | PAR-2 database PR | 1 | none |
-| 4 | PAR-2 screen PR | 3 applied; 2 deployed | none |
+| 3a | PAR-2 review fixes (`20261126100000_product_parent_review_fixes`, Taha's review of #1555) | 3 applied | none |
+| 4 | PAR-2 screen PR | 3 and **3a applied** (it turns the grouping switch on, so 3a must be live first); 2 deployed | none |
 | 5 | **PAR-2 data step (DATA-9, DATA-12)** | 4 deployed | **every approval batch, conflict and brand picks, owner ticks, tote answers** |
 | 6 | BLK-1a database and screen PRs (fertilizer) | 1 (build); 5 (use) | none |
 | 7 | DM-2 database and screen PRs | 1 (build); 5 for real data | review of drafted weights |

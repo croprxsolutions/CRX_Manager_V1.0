@@ -1082,6 +1082,11 @@ for (const command of [
   // cd, and a variable that is not provably one literal still count.
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && echo .. | xargs rm -rf",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && xargs rm -rf <<EOF\n..\nEOF",
+  // Luna round 2: climbs fed through a pipe, a here-document or a later cd.
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && printf ../../wt-b | xargs rm -rf",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && xargs rm -rf <<EOF\n../../wt-b\nEOF",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && cat <<EOF | xargs rm -rf\n../../wt-b\nEOF",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && cd src && cd ../.. && rm -rf wt-b",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && timeout 5 rm -rf ..",
   "cd C:/CRX_Manager/.claude/worktrees/wt-a && cd .. && rm -rf wt-b",
   "D=..; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$D\"",

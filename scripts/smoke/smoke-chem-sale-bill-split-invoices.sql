@@ -57,6 +57,7 @@ DO $smoke$
 DECLARE
   v_admin uuid;
   v_main uuid;
+  v_d2 uuid;
   v_payer2 uuid;
   v_payer3 uuid;
   v_p1 public.products%ROWTYPE;
@@ -508,7 +509,7 @@ BEGIN
   PERFORM pg_temp.smk_new_sale('o' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   INSERT INTO order_item_shares (order_item_id, customer_id, split_percentage, updated_at) VALUES (v_l1, v_payer2, 0.001, '2000-01-01');
-  IF EXISTS (SELECT 1 FROM _bill_split_line_shares(v_l1, 100000, 10000) x WHERE x.customer_id = v_payer2 AND (x.units <> 0 OR x.cents <> 1))
+  IF NOT EXISTS (SELECT 1 FROM _bill_split_line_shares(v_l1, 100000, 10000) x WHERE x.customer_id = v_payer2 AND x.units = 0 AND x.cents = 1)
      OR (SELECT sum(x.cents) FROM _bill_split_line_shares(v_l1, 100000, 10000) x) <> 100000
      OR (SELECT sum(x.units) FROM _bill_split_line_shares(v_l1, 100000, 10000) x) <> 10000 THEN
     v_fails := v_fails || ' (O) a share with no quantity lost its exact cents, or the line stopped adding up;';
@@ -891,7 +892,8 @@ BEGIN
     IF SQLERRM NOT LIKE 'GENERATED_INVOICE_LINEAGE_IDENTITY_IMMUTABLE%' THEN v_fails := v_fails || ' (AE) wrong refusal on unit: ' || SQLERRM || ';'; END IF;
   END;
 
-  -- AF: a card plus a field allocation, part delivered, then the allocation removed: Create Invoice drafts per payer.
+  -- AF: a card plus a field allocation, delivered in two parts, then the allocation removed: Create Invoice drafts
+  -- per payer, and the order keeps its billing flag until the second delivery is billed too.
   PERFORM pg_temp.smk_new_sale('af' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
@@ -900,12 +902,23 @@ BEGIN
   PERFORM complete_delivery(v_d, 'No proof — recorded by office', v_admin,
     (SELECT jsonb_object_agg(di.id::text, 5) FROM delivery_items di WHERE di.delivery_id = v_d),
     NULL, NULL, 'smk-spl-af-done-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
+  INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+    VALUES ('SMK-SPL-af2' || v_suffix, v_o, v_main, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_d2;
+  INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+    SELECT v_d2, oi.id, oi.product_id, 2, 'gal' FROM order_items oi WHERE oi.order_id = v_o;  -- still partial, so no automatic split
+  PERFORM confirm_delivery(v_d2, v_admin, 'smk-spl-af2-confirm-' || v_suffix);
+  PERFORM pg_temp.smk_done(v_d2, 'af2' || v_suffix);
   DELETE FROM order_item_field_allocations WHERE order_item_id = v_l1;
   BEGIN
     PERFORM create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-af-' || v_suffix);
     IF (SELECT count(*) FROM invoices WHERE delivery_id = v_d) <> 2
+       OR NOT (SELECT needs_split_billing FROM orders WHERE id = v_o) THEN
+      v_fails := v_fails || ' (AF) Create Invoice did not draft per payer, or cleared the flag with a delivery still unbilled;';
+    END IF;
+    PERFORM create_invoice_for_unbilled_delivery(v_d2, v_admin, 'smk-spl-af2-' || v_suffix);
+    IF (SELECT count(*) FROM invoices WHERE delivery_id = v_d2) <> 2
        OR (SELECT needs_split_billing FROM orders WHERE id = v_o) THEN
-      v_fails := v_fails || ' (AF) Create Invoice did not draft per payer and clear the flag;';
+      v_fails := v_fails || ' (AF) billing the last delivery did not draft per payer and clear the flag;';
     END IF;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (AF) the delivery has no billing path: ' || SQLERRM || ';';
@@ -961,6 +974,7 @@ BEGIN
   PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
   INSERT INTO order_item_shares (order_item_id, customer_id, split_percentage) VALUES (v_l1, v_payer2, 30);
   v_rep := (SELECT id FROM profiles WHERE role = 'sales_rep' AND is_active = true ORDER BY created_at LIMIT 1);
+  IF v_rep IS NULL THEN RAISE EXCEPTION 'SMOKE_SETUP: an active sales rep is required for the row-security step'; END IF;
   IF v_rep IS NOT NULL THEN
     PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
     PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);

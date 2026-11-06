@@ -32,3 +32,4 @@ A single invoice with a made-up group number cannot slip past the Bill Split rul
 A plain invoice can not be given a group number later either. Each line splits on its own: another payer rounds down to the cent and the main customer takes the leftover cent (Mason accepted, 2026-11-06).
 
 An invoice keeps the type it was created with; a draft can still switch between chemical sale and misc charge (Mason, 2026-11-06).
+The Delivery and Integrity screens offer Create Invoice on a Bill Split sale left to bill after a field split was removed, and the sale keeps its billing flag until every delivery is billed.

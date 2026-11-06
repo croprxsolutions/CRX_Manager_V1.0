@@ -1520,8 +1520,17 @@ BEGIN
       RAISE EXCEPTION 'BILL_SPLIT_NOTHING_TO_BILL: delivery % delivered no quantity, so there is nothing to bill', v_delivery.delivery_number
         USING ERRCODE = 'check_violation';
     END IF;
+    -- The flag stays while another completed delivery on the order is still unbilled.
     UPDATE orders SET needs_split_billing = false, updated_at = now()
-     WHERE id = v_delivery.order_id AND needs_split_billing;
+     WHERE id = v_delivery.order_id AND needs_split_billing
+       AND NOT EXISTS (
+         SELECT 1 FROM deliveries d
+          WHERE d.order_id = v_delivery.order_id AND d.id <> p_delivery_id
+            AND d.status = 'completed' AND d.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM invoices i
+               WHERE i.delivery_id = d.id AND i.status NOT IN ('voided', 'cancelled')
+                 AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL));
     SELECT id, invoice_number INTO v_invoice_id, v_invoice_number FROM invoices WHERE id = v_invoice_ids[1];
     v_result := jsonb_build_object('success', true, 'delivery_id', p_delivery_id,
       'invoice_id', v_invoice_id, 'invoice_number', v_invoice_number, 'invoice_ids', to_jsonb(v_invoice_ids),

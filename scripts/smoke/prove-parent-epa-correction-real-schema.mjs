@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for 20261127100000_job_line_epa_snapshot: spray-job lines keep their own EPA
- * number, invoice lines are never written without one, the proof and year-end readers use the
- * copies, and the parent EPA correction (switched off by the file, switched on here for the test)
+ * number, invoice lines are never written without one, the readers are unchanged (they move to
+ * the copies with the screens PR), and the parent EPA correction (switched off by the file, switched on here for the test)
  * writes the parent, every size and open jobs only, refuses while an invoice line has no copy,
  * and leaves finished jobs and invoices as they were. Also: "New product" and "Add a size" save the
  * size's quoting and internal notes in the same step.
@@ -42,7 +42,7 @@ const LEDGER_ONLY = new Set([
   '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(job_chemicals|_product_parent_identity_after|correct_product_parent_identity|_copy_parent_to_size|_product_parent_epa_correction_enabled|get_job_proof_data|get_customer_year_end_summary|_fill_invoice_line_epa|_job_chemical_epa|_insert_parent_size|create_product_with_parent|add_product_size)/i;
+const TOUCHED = /(job_chemicals|_product_parent_identity_after|correct_product_parent_identity|_copy_parent_to_size|_product_parent_epa_correction_enabled|_fill_invoice_line_epa|_job_chemical_epa|_insert_parent_size|create_product_with_parent|add_product_size)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -343,12 +343,17 @@ async function main() {
   const draftLineEpa = () => scalar(`SELECT epa_registration FROM public.invoice_items WHERE ${blankLine};`);
   psql(`UPDATE public.invoice_items SET description = description WHERE ${blankLine};`);
   assert.equal(draftLineEpa(), OLD);
-  // A line made before this file with no copy gets one on any later edit.
-  psql(`ALTER TABLE public.invoice_items DISABLE TRIGGER trg_fill_invoice_line_epa;
-    UPDATE public.invoice_items SET epa_registration = NULL WHERE ${blankLine};
-    ALTER TABLE public.invoice_items ENABLE TRIGGER trg_fill_invoice_line_epa;`);
+  // A line made before this file with no copy gets one on a later edit of a draft invoice. A posted
+  // invoice's blank line is never filled by the cost-only edits its lock still allows (filling it would
+  // make the lock refuse those edits).
+  const postedLine = `invoice_id = '${IPOST}' AND description = '[PROVER] a gly line'`;
+  const asFixture = (sql) => psql(`SET session_replication_role = replica; ${sql} SET session_replication_role = origin;`);
+  asFixture(`UPDATE public.invoice_items SET epa_registration = NULL WHERE ${blankLine} OR ${postedLine};`);
   psql(`UPDATE public.invoice_items SET description = description WHERE ${blankLine};`);
   assert.equal(draftLineEpa(), OLD);
+  psql(`UPDATE public.invoice_items SET cost_cents = cost_cents + 1 WHERE ${postedLine};`);
+  assert.equal(scalar(`SELECT COALESCE(epa_registration, '<null>') FROM public.invoice_items WHERE ${postedLine};`), '<null>');
+  asFixture(`UPDATE public.invoice_items SET epa_registration = '${OLD}', cost_cents = cost_cents - 1 WHERE ${postedLine};`);
   psql(`UPDATE public.invoice_items SET product_id = '${OTHER}' WHERE ${blankLine};`);
   assert.equal(draftLineEpa(), OTHER_EPA);
   psql(`UPDATE public.invoice_items SET product_id = '${S2}', epa_registration = '9-9' WHERE ${blankLine};`);
@@ -450,45 +455,29 @@ async function main() {
   refused(ADMIN, correctSql({ generic_epa_registration: '524-477' }, 'k-stale', ver), /STALE|version/i);
   console.log('[prover] a retried correction returns the same receipt and writes nothing; a reused key or a stale version is refused');
 
-  // save_job re-saves a job by deleting its lines and inserting them again in one transaction.
-  const resave = (job) => psql(`BEGIN;
+  // save_job re-saves a job by deleting its lines and inserting them again in one transaction, with no
+  // line identity. The database does not guess: a sprayed, finished or invoiced job's line keeps only a
+  // number its writer supplies (the screens PR sends each line's number back), else the product's.
+  const resave = (job, epa) => psql(`BEGIN;
     DELETE FROM public.job_chemicals WHERE job_id = '${job}';
-    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES
-      ('${job}', '${S1}', 5, 'gal', 1500, 1), ('${job}', '${OTHER}', 5, 'gal', 1500, 2);
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order, epa_registration) VALUES
+      ('${job}', '${S1}', 5, 'gal', 1500, 1, ${epa === null ? 'NULL' : `'${epa}'`}), ('${job}', '${OTHER}', 5, 'gal', 1500, 2, ${epa === null ? 'NULL' : `'${OTHER_EPA}'`});
     COMMIT;`);
-  for (const j of [JDONE, JSPRAY, JINV]) { resave(j); assert.equal(lineEpa(j, S1), OLD, `re-saved ${j}`); }
+  for (const j of [JDONE, JSPRAY, JINV]) { resave(j, ` ${OLD} `); assert.equal(lineEpa(j, S1), OLD, `re-saved ${j} with its number`); }
+  resave(JINV, null);
+  assert.equal(lineEpa(JINV, S1), NEW);
+  resave(JINV, OLD);
+  assert.equal(lineEpa(JINV, S1), OLD);
   psql(`UPDATE public.job_chemicals SET product_id = product_id WHERE job_id = '${JDONE}';`);
   assert.equal(lineEpa(JDONE, S1), OLD);
-  // Two lines for one product carrying different numbers each keep their own through a re-save.
-  psql(`INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES ('${JDONE}', '${S1}', 1, 'gal', 1500, 5);`);
-  assert.equal(lineEpa(JDONE, S1), `${OLD},${NEW}`);
-  psql(`BEGIN;
-    DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}';
-    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES
-      ('${JDONE}', '${S1}', 5, 'gal', 1500, 1), ('${JDONE}', '${OTHER}', 5, 'gal', 1500, 2), ('${JDONE}', '${S1}', 1, 'gal', 1500, 5);
-    COMMIT;`);
-  assert.equal(lineEpa(JDONE, S1), `${OLD},${NEW}`);
-  psql(`DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}' AND sort_order = 5;`);
-  // A line the screen appends to a finished job during a re-save takes today's number, not a deleted line's.
-  psql(`BEGIN;
-    DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}';
-    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES
-      ('${JDONE}', '${S1}', 5, 'gal', 1500, 1), ('${JDONE}', '${OTHER}', 5, 'gal', 1500, 2), ('${JDONE}', '${S1}', 2, 'gal', 1500, 6);
-    COMMIT;`);
-  assert.equal(lineEpa(JDONE, S1), `${OLD},${NEW}`);
-  psql(`DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}' AND sort_order = 6;`);
-  // An unsprayed job re-saved follows the product; a line newly added to a finished job takes today's number.
+  // An unsprayed job ignores a supplied number and follows the product; a line newly added to a finished job takes today's number.
   psql(`UPDATE public.job_chemicals SET product_id = '${OTHER}' WHERE job_id = '${JOPEN}' AND product_id = '${S1}';`);
-  resave(JOPEN);
+  resave(JOPEN, OLD);
   assert.equal(lineEpa(JOPEN, S1), NEW);
   psql(`INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES ('${JDONE}', '${S2}', 1, 'gal', 1500, 3);`);
   assert.equal(lineEpa(JDONE, S2), NEW);
   psql(`DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}' AND product_id = '${S2}';`);
-  // The remembered number lasts only for its own transaction.
-  psql(`DELETE FROM public.job_chemicals WHERE job_id = '${JINV}' AND product_id = '${S1}';`);
-  psql(`INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES ('${JINV}', '${S1}', 5, 'gal', 1500, 1);`);
-  assert.equal(lineEpa(JINV, S1), NEW);
-  console.log("[prover] a sprayed, finished or invoiced job re-saved keeps its lines' numbers; an unsprayed one follows the product; the kept number lasts one transaction");
+  console.log("[prover] a sprayed, finished or invoiced job re-saved keeps a number its writer supplies, else takes the product's; an unsprayed one follows the product");
 
   // A product outside any parent, its EPA number edited directly: unsprayed jobs follow, the rest keep theirs.
   psql(`UPDATE public.products SET epa_registration = '300-3' WHERE id = '${OTHER}';`);
@@ -503,15 +492,10 @@ async function main() {
   psql(`INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES ('${JPROG}', '${S2}', 1, 'gal', 1500, 4);`);
   assert.equal(lineEpa(JPROG, S2), NEW);
 
-  // Readers of old records use the copies.
+  // The readers are unchanged here: the sent proof still shows the product's number.
   const proof = JSON.parse(ok(ADMIN, `SELECT public.get_job_proof_data('${JDONE}');`));
-  assert.deepEqual(proof.products.map((x) => x.epa_registration).sort(), [OLD, OTHER_EPA].sort());
-  const openProof = JSON.parse(ok(ADMIN, `SELECT public.get_job_proof_data('${JOPEN}');`));
-  assert.ok(openProof.products.some((x) => x.epa_registration === NEW));
-  const yearEnd = JSON.parse(ok(ADMIN, `SELECT public.get_customer_year_end_summary('${CUST}', 2026);`));
-  assert.deepEqual(yearEnd.product_usage.map((u) => `${u.product_name}|${u.epa_registration}`).sort(),
-    [`[PROVER] Gly 2.5 Gal|${OLD}`, `[PROVER] Other Chem|${OTHER_EPA}`].sort());
-  console.log('[prover] the sent-proof and year-end readers show the number each record was made with');
+  assert.ok(proof.products.some((x) => x.epa_registration === NEW));
+  console.log('[prover] the sent-proof reader is unchanged (it moves to the copies with the screens PR)');
 
   // Correcting back is a new event; finished jobs still keep theirs.
   ok(ADMIN, correctSql({ generic_epa_registration: OLD }, 'k-back'));

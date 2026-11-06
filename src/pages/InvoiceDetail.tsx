@@ -43,7 +43,7 @@ import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
-import { latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
+import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import WriteOffModal from '../components/invoices/WriteOffModal';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
@@ -1132,6 +1132,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     }
     if (!invoice.customer_id) {
       toast('error', 'Please select a customer');
+      return;
+    }
+    const dateProblem = invoiceDateTooFarProblem(invoice.invoice_date);
+    if (dateProblem) {
+      toast('error', dateProblem);
       return;
     }
     if (takesCharges) {

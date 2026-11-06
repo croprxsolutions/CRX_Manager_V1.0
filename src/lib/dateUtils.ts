@@ -58,6 +58,14 @@ export function latestInvoiceDate(): string {
   return localDatePlusDays(INVOICE_DATE_MAX_DAYS_AHEAD);
 }
 
+/** The save-time message when an invoice date is past latestInvoiceDate() (a date box's max does not stop a typed value), else null. */
+export function invoiceDateTooFarProblem(date: string | null | undefined): string | null {
+  const day = (date ?? '').slice(0, 10);
+  return day > latestInvoiceDate()
+    ? `The invoice date ${day} is more than ${INVOICE_DATE_MAX_DAYS_AHEAD} days from today. Check the year.`
+    : null;
+}
+
 /** A YYYY-MM-DD date plus N calendar days (date-only arithmetic, so daylight saving cannot shift it). */
 export function addDaysToDate(dateStr: string, days: number): string {
   const [year, month, day] = dateStr.split('-').map(Number);

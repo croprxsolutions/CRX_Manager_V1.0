@@ -17,7 +17,7 @@ import { INVOICES_POSTABLE } from '../lib/costFields';
 import { formatCents } from '../lib/money';
 import { pctsToMicro } from '../lib/splitVectorMath';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
-import { latestInvoiceDate, todayInBusinessTz } from '../lib/dateUtils';
+import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz } from '../lib/dateUtils';
 import { SPLIT_BILLING_SETTING_KEY, parseSplitBillingEnabled } from '../lib/splitBillingSetting';
 import ProductSearchPicker from '../components/products/ProductSearchPicker';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
@@ -468,6 +468,8 @@ export default function FieldAppSplitInvoiceEditor() {
   function validateForSave(): string | null {
     if (!profile?.id) return 'Your sign-in could not be verified. Refresh and try again.';
     if (!invoiceDate) return 'Choose an invoice date.';
+    const dateProblem = invoiceDateTooFarProblem(invoiceDate);
+    if (dateProblem) return dateProblem;
     if (fields.length === 0) return 'Add at least one field with applied acres greater than zero.';
     // Codex round-6 P1: every SELECTED field must carry positive acres. The save path bills only
     // fields with acres > 0, so a selected field left blank/zero would be silently dropped from

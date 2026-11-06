@@ -22,7 +22,7 @@ import { logActivity } from '../lib/activityLogger';
 import { Sentry } from '../lib/sentry';
 import { formatCents as fmt } from '../lib/money';
 import { DISCOUNT_EARNED_INPUT_MESSAGE, parseDiscountEarnedCents } from '../lib/parseCents';
-import { latestInvoiceDate, todayInBusinessTz } from '../lib/dateUtils';
+import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz } from '../lib/dateUtils';
 import { billableAcres, acreDivergence, appliedMatchesSystem } from '../lib/fieldGeometry';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -1873,6 +1873,11 @@ export default function FieldApplicationInvoice() {
     // with an actionable message before allocating an idempotency key or starting save.
     if (!transactionDate) {
       toast('error', 'Choose a transaction date before saving.');
+      return;
+    }
+    const dateProblem = invoiceDateTooFarProblem(transactionDate);
+    if (dateProblem) {
+      toast('error', dateProblem);
       return;
     }
     if (fetchingWeather !== null) {

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { addDaysToDate, businessDayStartIso, todayInBusinessTz } from './dateUtils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { addDaysToDate, businessDayStartIso, invoiceDateTooFarProblem, todayInBusinessTz } from './dateUtils';
 
 describe('todayInBusinessTz', () => {
   it('keeps the late Central evening on the prior business date', () => {
@@ -123,5 +123,20 @@ describe('addDaysToDate', () => {
     expect(addDaysToDate('2026-09-30', 1)).toBe('2026-10-01');
     expect(addDaysToDate('2026-12-31', 1)).toBe('2027-01-01');
     expect(addDaysToDate('2026-11-01', -1)).toBe('2026-10-31');
+  });
+});
+
+describe('invoiceDateTooFarProblem (KI-18)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('allows up to 365 days after the Chicago date and refuses the day after, even in the evening', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T02:00:00Z')); // Sep 30, 9 PM CDT
+    expect(invoiceDateTooFarProblem('2027-09-30')).toBeNull();
+    expect(invoiceDateTooFarProblem('2027-10-01')).toMatch(/2027-10-01 is more than 365 days/);
+    expect(invoiceDateTooFarProblem('2206-09-30T00:00:00')).toMatch(/Check the year/);
+    expect(invoiceDateTooFarProblem('2026-09-30')).toBeNull();
+    expect(invoiceDateTooFarProblem('')).toBeNull();
+    expect(invoiceDateTooFarProblem(null)).toBeNull();
   });
 });

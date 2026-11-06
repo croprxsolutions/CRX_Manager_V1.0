@@ -211,6 +211,12 @@ try {
   assert.equal(done.voidDelivery, 'ok|fulfilled -> confirmed');
   assert.equal(done.voidOrder, 'ok|fulfilled -> voided');
   console.log('[perm] after: signature completion, cancel, void delivery and void order all work as the signed-in user');
+
+  // The rewritten live smoke chain passes here first (it must end in SMOKE_PASS_ROLLBACK).
+  const chain = lf(path.join(ROOT, 'scripts', 'smoke', 'smoke-delivery_signature_storage_access.sql'));
+  const smoked = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-1'], { input: chain, allowFailure: true });
+  assert.match(smoked.stderr, /SMOKE_PASS_ROLLBACK/, `smoke-delivery_signature_storage_access.sql did not pass:\n${smoked.stderr}`);
+  console.log('[perm] smoke-delivery_signature_storage_access.sql: PASS (rolled back)');
   console.log('\nPERMISSION_TIGHTENING_PROOF_PASS');
 } finally {
   if (!reuse) removeContainer();

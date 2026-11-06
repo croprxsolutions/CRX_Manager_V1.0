@@ -744,6 +744,85 @@ async function deleteCoordinatedRecord<T>(
   }
 }
 
+// One prepare at a time per operation and user in this page. Two prepares share this page's claim ID, so without
+// this a failing one's cleanup could delete a record a concurrent one (a double click) had already handed out.
+const prepareTurns = new Map<string, Promise<unknown>>();
+
+function inPrepareTurn<R>(storageKey: string | null, run: () => Promise<R>): Promise<R> {
+  if (!storageKey) return run();
+  const previous = prepareTurns.get(storageKey) ?? Promise.resolve();
+  const mine = previous.catch(() => undefined).then(run);
+  const settled = mine.catch(() => undefined);
+  prepareTurns.set(storageKey, settled);
+  void settled.then(() => {
+    if (prepareTurns.get(storageKey) === settled) prepareTurns.delete(storageKey);
+  });
+  return mine;
+}
+
+/**
+ * A mirror write failed after IndexedDB took a record that beginIntent had just minted, and the caller never got
+ * a key, so nothing was sent. Left in place, that hidden record would block the next request with no visible lock
+ * to clear. Only that exact version is removed: an earlier request's record may have committed and is kept.
+ * A record that could not be removed is shown as a lock rather than left hidden.
+ */
+async function discardUnsentRecord<T>({ storageKey, options, proposed, coordinated, tabId, showLock }: {
+  storageKey: string;
+  options: DurableMutationIntentOptions<T>;
+  proposed: DurableMutationIntentRecord<T>;
+  coordinated: { record: DurableMutationIntentRecord<T>; conflict: boolean } | null;
+  tabId: string;
+  showLock: (record: DurableMutationIntentRecord<T>) => void;
+}): Promise<void> {
+  // Only a record this call minted: not a conflict, and not an earlier request it restored or reopened.
+  if (!coordinated || coordinated.conflict || coordinated.record.requestVersion !== proposed.requestVersion) return;
+  const cleanup = await deleteSoleClaimRecord(storageKey, options, proposed.requestVersion, tabId).catch(() => null);
+  if (!cleanup?.deleted) {
+    // Kept: another tab joined it (and may have sent it), or the delete failed. Keep the mirror so a reload shows it too.
+    showLock(cleanup?.current ?? proposed);
+    return;
+  }
+  if (readDurableRecord(storageKey, options)?.requestVersion === proposed.requestVersion) removeDurableRecord(storageKey);
+}
+
+/**
+ * Deletes a pending record only while this tab is its sole claimant. Unlike deleteCoordinatedRecord, a tab that
+ * joined and has since closed still counts: it may have sent the request before closing.
+ */
+async function deleteSoleClaimRecord<T>(
+  storageKey: string,
+  options: DurableMutationIntentOptions<T>,
+  requestVersion: string,
+  tabId: string,
+): Promise<{ deleted: boolean; current: DurableMutationIntentRecord<T> | null }> {
+  const db = await openDurableIntentDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(DURABLE_INTENT_STORE, 'readwrite');
+      const store = transaction.objectStore(DURABLE_INTENT_STORE);
+      const request = store.get(storageKey);
+      let outcome: { deleted: boolean; current: DurableMutationIntentRecord<T> | null } = { deleted: false, current: null };
+      request.onsuccess = () => {
+        const stored = request.result as { record?: unknown } | undefined;
+        if (!stored) { outcome = { deleted: true, current: null }; return; }
+        const candidate = stored.record as Partial<DurableMutationIntentRecord<T>> | undefined;
+        if (!candidate || !isValidRecord(candidate, options)) return;
+        const sole = candidate.status === 'pending' && candidate.requestVersion === requestVersion
+          && candidate.claimTabIds.length === 1 && candidate.claimTabIds[0] === tabId;
+        if (!sole) { outcome = { deleted: false, current: candidate }; return; }
+        store.delete(storageKey);
+        outcome = { deleted: true, current: null };
+      };
+      request.onerror = () => reject(request.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'));
+      transaction.oncomplete = () => resolve(outcome);
+      transaction.onerror = () => reject(transaction.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
 /**
  * Freezes the exact payload of a mutation whose outcome is not yet known.
  *
@@ -914,7 +993,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
   // If another tab resolved or replaced it in the meantime, this throws
   // UNCERTAIN_MUTATION_INTENT_CONFLICT without starting a new request, because a
   // new request would carry a new key and could apply the mutation twice.
-  const beginIntent = useCallback(async (
+  const beginIntentNow = useCallback(async (
     intent: T,
     beginOptions?: { requireIdempotencyKey?: string },
   ): Promise<T> => {
@@ -967,8 +1046,9 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
         createdAtMs,
         retryNotAfterMs,
       };
+      let coordinated: { record: DurableMutationIntentRecord<T>; conflict: boolean } | null = null;
       try {
-        const coordinated = await coordinateDurableRecord(
+        coordinated = await coordinateDurableRecord(
           storageKey,
           proposed,
           intent,
@@ -991,6 +1071,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
         applyRecord(coordinated.record);
         return coordinated.record.intent;
       } catch (error) {
+        await discardUnsentRecord({ storageKey, options, proposed, coordinated, tabId: currentClaimId, showLock: applyRecord });
         releaseLiveClaim(currentClaimId);
         throw error;
       }
@@ -1001,6 +1082,12 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
     setHasUnresolvedRecord(true);
     return intent;
   }, [acknowledgmentKey, activateCurrentIdentity, applyRecord, getIntentIdentityRef, options, scope, storageKey, surface]);
+
+  const beginIntent = useCallback(
+    (intent: T, beginOptions?: { requireIdempotencyKey?: string }): Promise<T> =>
+      inPrepareTurn(storageKey, () => beginIntentNow(intent, beginOptions)),
+    [beginIntentNow, storageKey],
+  );
 
   const getIdempotencyKey = useCallback((): string => {
     activateCurrentIdentity(true);

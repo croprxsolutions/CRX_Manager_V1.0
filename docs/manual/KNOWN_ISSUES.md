@@ -378,7 +378,7 @@ tiers is not built; the linkage field is not used for money today.
   Central they get next year's number. Cosmetic. LOW. (Quote, order and rebate-claim numbers use the Chicago
   year since `20261029160300`, applied live 2026-10-31.)
 - `invoices.invoice_date` has no future-date limit in the database, so a typed year like 2206 is accepted
-  through any writer. The invoice date boxes stop at one year ahead since 2026-11-06. LOW.
+  through any writer. The invoice date boxes stop 365 days ahead since 2026-11-06. LOW.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**

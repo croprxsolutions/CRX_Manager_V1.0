@@ -53,7 +53,7 @@ export function localDatePlusDays(days: number): string {
 /** How far ahead an invoice may be dated; matches the database check on invoices.invoice_date (KI-18). */
 export const INVOICE_DATE_MAX_DAYS_AHEAD = 365;
 
-/** Latest invoice date accepted: one year after today's Chicago date, so a typed year like 2206 is caught. */
+/** Latest invoice date accepted: 365 days after today's Chicago date (a fixed day count, not a calendar year), so a typed year like 2206 is caught. */
 export function latestInvoiceDate(): string {
   return localDatePlusDays(INVOICE_DATE_MAX_DAYS_AHEAD);
 }

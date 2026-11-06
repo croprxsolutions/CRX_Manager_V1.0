@@ -7168,7 +7168,7 @@ window from them (about 35, including the CustomerDetail 90-day window) follows 
 reports' Last 30d / Last 90d buttons use them too. Two filters that cut the day at UTC midnight now cut at Chicago
 midnight (`businessDayStartIso()`): the closed-invoice season window on the Invoices and Field Invoices lists, and the
 TeamBoard activity date filter. A TeamBoard task is overdue only after its due day, by the Chicago date. Rebate
-program and quote-rollover year defaults use the Chicago year. The invoice date boxes stop at one year ahead
+program and quote-rollover year defaults use the Chicago year. The invoice date boxes stop 365 days ahead
 (`latestInvoiceDate()`). The original May 2026 review's three filters are covered: the Invoices season filter and the
 TeamBoard date filter as above, and the CustomerDetail 90-day window through the shared helper.
 Proof: `src/lib/tests/dateUtils.test.ts` (Chicago evening on Sept 30 and Dec 31) fails on the old helpers;

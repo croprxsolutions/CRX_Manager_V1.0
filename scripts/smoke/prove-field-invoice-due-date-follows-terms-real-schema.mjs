@@ -126,7 +126,9 @@ try {
   assert.equal(JSON.parse(before.JSPLIT).length, 2, 'the split job did not bill two owners');
   console.log('[prover] BEFORE: every transfer stamps +30 whatever the terms, and posting keeps it');
   // Committed editable invoices for the one-pass touch.
-  for (const k of ['JPRE30', 'JPRE15', 'JPREBLANK']) assert.match(attempt(ADMIN, transfer(k), { commit: true }), /^ok\|/);
+  for (const k of ['JPRE30', 'JPRE15']) assert.match(attempt(ADMIN, transfer(k), { commit: true }), /^ok\|/);
+  // A draft with no due date at all (a save can leave one): the touch fills it, and the postflight allows that.
+  assert.match(attempt(ADMIN, `${transfer('JPREBLANK')} UPDATE public.invoices SET due_date = NULL WHERE job_id = '${J.JPREBLANK}';`, { commit: true }), /^ok\|/);
   assert.equal(ok(`${summary('JPRE15', false)}`, 'pre'), '<blank>=+30');
   assert.match(attempt(ADMIN, `${transfer('JPRETYPED')} UPDATE public.invoices SET due_date = due_date + 5 WHERE job_id = '${J.JPRETYPED}';`, { commit: true }), /^ok\|/);
   // Committed posted invoices from before the change: a +30 on a Net 15 owner, and one that matches Net 30.
@@ -163,7 +165,7 @@ try {
   assert.equal(ok(summary('JPREBLANK'), 'backfill blank'), 'Net 30=+30');
   assert.equal(ok(summary('JPRE15'), 'backfill 15'), 'Net 15=+30*');
   assert.equal(ok(summary('JPRETYPED'), 'backfill typed'), 'Net 15=+35*');
-  console.log('[prover] BACKFILL: no existing due date moves; blank terms gain the owner terms; a date off its stamp (old +30 on Net 15, typed) is kept as typed');
+  console.log('[prover] BACKFILL: no existing due date moves; blank terms gain the owner terms; a missing date is filled; a date off its stamp (old +30 on Net 15, typed) is kept as typed');
 
   // AFTER: each owner on its own terms, set at transfer and kept by posting.
   const EXPECT = { J15: 'Net 15=+15', J30: 'Net 30=+30', JRCPT: 'Due on receipt=+0', JSPLIT: 'Net 15=+15, Net 30=+30', JBLANK: 'Net 30=+30', J210: '2/10 Net 30=+30' };

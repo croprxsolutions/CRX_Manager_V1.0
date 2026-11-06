@@ -3,7 +3,8 @@
 -- bodies, one signature change on update_field_app_invoice_billing; a one-pass touch of editable
 -- field-application invoices so the trigger fills their terms. No row is deleted, and no existing due date
 -- moves: one may already be on a document the customer holds. A date that is not its terms' stamp is kept
--- and marked typed (the screen re-derives it in one click); the postflight refuses any changed due date.
+-- and marked typed (the screen re-derives it in one click); a draft with no date gains its terms' date; the
+-- postflight refuses any changed existing due date.
 --
 -- Before: the job transfer stamped every field invoice due = today + 30 whatever the customer's terms; posting
 -- fills the due date only when blank, so +30 survived. The field-application editor saved one set of terms
@@ -279,7 +280,8 @@ CREATE TRIGGER zzz_field_invoice_due_date_follows_terms
   EXECUTE FUNCTION public._field_invoice_due_date_follows_terms();
 
 -- 4. Existing editable field invoices: mark a date that is not its terms' stamp as typed, then let the trigger
---    fill blank terms; every due date stays exactly as it was (checked in the postflight). Live 2026-11-06:
+--    fill blank terms (and a missing due date); every existing due date stays exactly as it was (checked in the
+--    postflight). Live 2026-11-06:
 --    one row, blank terms on a blank-terms customer at +30, so derived and unchanged.
 CREATE TEMP TABLE ki14_due_before ON COMMIT DROP AS
   SELECT id, due_date FROM public.invoices
@@ -1266,7 +1268,7 @@ BEGIN
     RAISE EXCEPTION 'KI14_POSTFLIGHT: an editable field invoice still lacks its own terms or a derived due date';
   END IF;
   IF EXISTS (SELECT 1 FROM ki14_due_before b JOIN invoices i ON i.id = b.id
-              WHERE i.due_date IS DISTINCT FROM b.due_date) THEN
+              WHERE b.due_date IS NOT NULL AND i.due_date IS DISTINCT FROM b.due_date) THEN
     RAISE EXCEPTION 'KI14_POSTFLIGHT: the one-pass touch moved an existing due date';
   END IF;
 END $postflight$;

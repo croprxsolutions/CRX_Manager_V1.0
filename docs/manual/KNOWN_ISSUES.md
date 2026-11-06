@@ -233,7 +233,7 @@ Accepted without a wrapper (reason): `void_invoice` (already binds its request);
 path is bound; the single save is an edit of one record); `increment_customer_prepay`, `restore_cancelled_delivery`
 and the `_section9_*` inner bodies (no app caller; only the database owner and service role can run them);
 `apply_remaining_prepayments` and `batch_apply_all_prepayments` (always refused, disabled);
-`admin_save_application_service` (admin-only edit of one setting row). Batch 4d (`20261111200000`, not yet applied; apply any time after batch 4c) binds 25 records
+`admin_save_application_service` (admin-only edit of one setting row). Batch 4d (`20261113300000`, not yet applied; apply any time after batch 4c) binds 25 records
 functions and requires a key on each: `admin_update_profile`, `batch_approve_blend_tickets`,
 `batch_reject_blend_tickets`, `bulk_create_label_drafts`, `commit_label_draft`, `create_label_draft`,
 `create_blend_ticket`, `save_blend_ticket`, `save_blend_ticket_fields`, `dismiss_watchdog_flag`, `delete_vendor`,

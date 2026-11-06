@@ -125,5 +125,16 @@ BEGIN
                    || 'delivery_signatures_scoped_select=PERMISSIVE=2384b70ad2be19dbe718ca42e744138e' THEN
     RAISE EXCEPTION 'PERMISSION_TIGHTENING_POSTFLIGHT: the narrowed read rule or the restrictive evidence rules are not as intended';
   END IF;
+  -- Permissive rules are OR-ed, so the narrowing above only holds if no permissive rule on
+  -- storage.objects reaches another bucket: each one's expressions must open with a single
+  -- bucket_id = '<bucket>' conjunct (true of every live rule, read 2026-11-05).
+  IF EXISTS (SELECT 1
+               FROM pg_policies
+              WHERE schemaname = 'storage' AND tablename = 'objects' AND permissive = 'PERMISSIVE'
+                AND ((qual IS NULL AND with_check IS NULL)
+                     OR qual !~ '^(\(bucket_id = ''[a-z0-9_-]+''::text\)|\(\(bucket_id = ''[a-z0-9_-]+''::text\) AND .*\))$'
+                     OR with_check !~ '^(\(bucket_id = ''[a-z0-9_-]+''::text\)|\(\(bucket_id = ''[a-z0-9_-]+''::text\) AND .*\))$')) THEN
+    RAISE EXCEPTION 'PERMISSION_TIGHTENING_POSTFLIGHT: a permissive storage.objects policy is not limited to one bucket';
+  END IF;
 END
 $postflight$;

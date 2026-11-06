@@ -71,6 +71,16 @@ BEGIN
       v_policy_set, v_bucket_public;
   END IF;
 
+  -- Permissive rules are OR-ed: none may reach beyond its own single bucket.
+  IF EXISTS (SELECT 1
+               FROM pg_policies
+              WHERE schemaname = 'storage' AND tablename = 'objects' AND permissive = 'PERMISSIVE'
+                AND ((qual IS NULL AND with_check IS NULL)
+                     OR qual !~ '^(\(bucket_id = ''[a-z0-9_-]+''::text\)|\(\(bucket_id = ''[a-z0-9_-]+''::text\) AND .*\))$'
+                     OR with_check !~ '^(\(bucket_id = ''[a-z0-9_-]+''::text\)|\(\(bucket_id = ''[a-z0-9_-]+''::text\) AND .*\))$')) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a permissive storage.objects policy is not limited to one bucket';
+  END IF;
+
   -- A completed delivery whose recorded signature is its old fixed-path file, with an active driver.
   SELECT d.id, d.assigned_driver, o.id
   INTO v_delivery_id, v_driver_id, v_object_id

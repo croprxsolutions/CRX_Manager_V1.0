@@ -185,6 +185,20 @@ try {
   assert.equal(before.readRecorded, 'ok|1,ok|1,ok|1,ok|0');
   assert.equal(before.readStray, 'ok|1', 'before: an old-path file no delivery records was readable');
 
+  // A bucket-agnostic permissive rule would undo the narrowing (rules are OR-ed): the postflight refuses.
+  // (The second names the bucket, so the policy-set check refuses it first; either refusal is enough.)
+  for (const [broad, why] of [["FOR SELECT TO authenticated USING (true)", /not limited to one bucket/],
+    ["FOR SELECT TO authenticated USING (bucket_id = 'delivery-signatures' OR true)", /policy set is not as intended|not limited to one bucket/],
+    ["FOR UPDATE TO authenticated USING ((bucket_id = 'job-attachments') OR true)", /not limited to one bucket/]]) {
+    psql(`CREATE POLICY zz_broad ON storage.objects ${broad};`);
+    const refused = applyCandidate();
+    psql('DROP POLICY zz_broad ON storage.objects;');
+    assert.notEqual(refused.status, 0, `apply must be refused with a broad rule: ${broad}`);
+    assert.match(refused.stderr, why);
+  }
+  assert.equal(policyMd5(), LIVE_MD5, 'a refused apply changes nothing');
+  console.log('[perm] a bucket-agnostic storage rule makes the apply refuse (all three shapes)');
+
   const first = applyCandidate();
   assert.equal(first.status, 0, first.stderr);
   const again = applyCandidate();

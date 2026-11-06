@@ -258,7 +258,7 @@ for (const bad of [
 }
 
 // Only MED/LOW findings point at Sol; any BLOCKER or HIGH keeps the Luna loop going.
-assert.match(nextStepHint("- **MED — a.ts:1** — footer\n- LOW — b.ts:2 — nit\nLUNA_REVIEW: FINDINGS 2\n"), /whole-branch round once more/);
+assert.match(nextStepHint("- **MED — a.ts:1** — footer\n- LOW — b.ts:2 — nit\nLUNA_REVIEW: FINDINGS 2\n"), /needs no whole-branch rerun/);
 assert.equal(nextStepHint("- **HIGH — a.ts:1** — wrong total\nLUNA_REVIEW: FINDINGS 1\n"), null);
 assert.match(scopeHint("commit abc123"), /whole-branch round/);
 assert.match(scopeHint("uncommitted changes"), /whole-branch round/);

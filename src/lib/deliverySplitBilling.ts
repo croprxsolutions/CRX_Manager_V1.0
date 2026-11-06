@@ -128,13 +128,19 @@ async function fetchBillSplitOrderIds(
     !!orderId && !!customerId && customerId !== customerOf.get(orderId);
 
   for (const orderIdChunk of chunkIds(orderIds, SPLIT_BILLING_ORDER_ID_CHUNK_SIZE)) {
-    const { data: cardRows, error: cardError } = await supabase
-      .from('order_shares')
-      .select('order_id, customer_id')
-      .in('order_id', orderIdChunk);
-    if (cardError) return { data: null, error: cardError };
-    for (const row of cardRows || []) {
-      if (isOtherPayer(row.order_id, row.customer_id)) found.add(row.order_id);
+    for (let from = 0; ;) {
+      const { data: cardRows, error: cardError } = await supabase
+        .from('order_shares')
+        .select('id, order_id, customer_id')
+        .in('order_id', orderIdChunk)
+        .order('id', { ascending: true })
+        .range(from, from + SPLIT_BILLING_PAGE_SIZE - 1);
+      if (cardError) return { data: null, error: cardError };
+      if (!cardRows || cardRows.length === 0) break;
+      for (const row of cardRows) {
+        if (isOtherPayer(row.order_id, row.customer_id)) found.add(row.order_id);
+      }
+      from += cardRows.length;
     }
 
     for (let from = 0; ;) {

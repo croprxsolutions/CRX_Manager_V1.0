@@ -58,6 +58,8 @@ export const SOL_REQUIRED_PATHS = Object.freeze([
   ".claude/hooks/codex-bot-review-lib.mjs",
   ".claude/hooks/codex-push-lib.mjs",
   ".claude/hooks/pr-merge-guard.mjs",
+  ".claude/hooks/merge-guard-launcher.mjs",
+  ".claude/hooks/codex-push-guard.mjs",
   ".claude/hooks/migration-apply-guard.mjs",
   ".claude/hooks/migration-apply-lib.mjs",
   ".claude/hooks/migration-landing-gate-lib.mjs",

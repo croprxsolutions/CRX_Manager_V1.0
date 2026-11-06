@@ -46,6 +46,7 @@ Folders end in `/`. The match ignores case, from the repository root.
 **The gates themselves (Mason, 2026-11-06):** a change that could weaken a gate must not
 land on green checks alone. `.claude/hooks/sol-risk-lib.mjs`, `.claude/hooks/codex-bot-review-lib.mjs`
 (the money word list), `.claude/hooks/codex-push-lib.mjs`, `.claude/hooks/pr-merge-guard.mjs`,
+`.claude/hooks/merge-guard-launcher.mjs`, `.claude/hooks/codex-push-guard.mjs`,
 `.claude/hooks/migration-apply-guard.mjs`, `.claude/hooks/migration-apply-lib.mjs`,
 `.claude/hooks/migration-landing-gate-lib.mjs`, `.claude/hooks/migration-access-lib.mjs`,
 `.claude/hooks/owner-approval-lib.mjs`, `.codex/hooks/production-action-guard.mjs`,

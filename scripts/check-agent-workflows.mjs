@@ -92,11 +92,28 @@ requireIncludes(".claude/settings.json", claudeSettingsText, "review-proof-guard
 requireIncludes(".codex/hooks.json", codexHooksText, "review-proof-guard.mjs");
 requireIncludes(".codex/hooks.json", codexHooksText, "production-action-guard.mjs");
 // The gate hooks must stay wired (Mason, 2026-11-06): unwiring one is how a gate could be
-// switched off without touching a file on the Sol list.
-for (const gate of ["pr-merge-guard.mjs", "merge-guard-launcher.mjs", "codex-push-guard.mjs", "migration-apply-guard.mjs"]) {
-  requireIncludes(".claude/settings.json", claudeSettingsText, gate);
+// switched off without touching a file on the Sol list. Read the real PreToolUse
+// registrations, not the raw text, so a name left in a comment or other string does not count.
+function preToolUseCommands(text) {
+  try {
+    const entries = JSON.parse(text)?.hooks?.PreToolUse;
+    if (!Array.isArray(entries)) return [];
+    return entries.flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
+      .filter((hook) => hook?.type === "command")
+      .flatMap((hook) => [hook.command, hook.commandWindows].filter((c) => typeof c === "string"));
+  } catch {
+    return [];
+  }
 }
-requireIncludes(".codex/hooks.json", codexHooksText, "migration-apply-guard.mjs");
+function requireGateWired(relative, text, gate) {
+  const name = `${relative} wires gate hook ${gate} on PreToolUse`;
+  if (preToolUseCommands(text).some((command) => command.includes(`.claude/hooks/${gate}`))) pass(name);
+  else fail(name);
+}
+for (const gate of ["pr-merge-guard.mjs", "merge-guard-launcher.mjs", "codex-push-guard.mjs", "migration-apply-guard.mjs"]) {
+  requireGateWired(".claude/settings.json", claudeSettingsText, gate);
+}
+requireGateWired(".codex/hooks.json", codexHooksText, "migration-apply-guard.mjs");
 // Scope to the [mcp_servers.supabase] url line, parsed line-by-line so a
 // commented heading, a commented url, a backup_url key, or a url in a later
 // TOML table can never satisfy the check; the read_only flag is matched at

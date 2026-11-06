@@ -1,6 +1,6 @@
 ## 2026-11-06 — The Bill Split card bills: one invoice per payer on a chemical sale (billing plan M2)
 
-- New migration `20261118130000_chem_sale_bill_split_invoices.sql` (not applied; record in
+- New migration `20261125110000_chem_sale_bill_split_invoices.sql` (not applied; record in
   `docs/reference/migrations.d/`). Until now the Bill Split card saved percentages nothing read.
   When a delivery on a sale with other payers completes, it now drafts one invoice per payer:
   one sale number with a suffix (CS-2026-0412-1, -2), in one split group that posts together.
@@ -22,3 +22,5 @@ A Bill Split draft's product lines now follow the split: changing them means voi
 A posted split group now unposts together: `unpost_invoice` refuses one member (`GROUP_UNPOST_REQUIRED`), for field-split groups too, and the screens already use the group call. A payer's line bills in the order line's unit, so every payer can return it. One line too small to show and worth no cents no longer stops the rest of a delivery billing. The card can't be truncated by a signed-in user.
 
 Another payer's quantity is in whole hundredths, so a payer can return a share in full. Create Invoice works on a Bill Split sale after a field allocation is removed from a part delivery. A payer's invoice takes its season from its date. Line shares can't be written on a soft-deleted order. An inactive customer can't be added to a bill split. A draft holding a share under 0.01 of a unit can't be edited: it posts as drafted, or the group is voided.
+
+A restricted-use line too small to show refuses the split instead of being left off, so the restricted-use register never misses it (Mason, 2026-11-06).

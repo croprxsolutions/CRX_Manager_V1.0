@@ -255,6 +255,9 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_HAS_DRAFT: draft invoice CS-1 bills this sale to one customer.')).toBe(
       "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"
     );
+    expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split')).toBe(
+      'Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order',
+    );
     expect(sanitizeError("BILL_SPLIT_SLIVER_LOCKED: this payer's share is under 0.01 of a unit")).toBe(
       "Nothing was saved. This payer's share is under 0.01 of a unit, so its draft can't be edited. Post it as drafted, or void the group",
     );

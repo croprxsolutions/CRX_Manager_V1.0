@@ -317,6 +317,11 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // orphan existing receipts.
   _manual_inventory_add_replay_impl_20261015: ['manual_inventory_add'],
   _complete_job_replay_impl_20261015: ['complete_job'],
+  // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live
+  // update_field_app_invoice_billing body to this name, so it kept the public literal the wrapper binds.
+  // 20261120100000 (KI-14) re-creates it with one more trailing argument (per-invoice terms); changing
+  // the literal would orphan every existing receipt.
+  _update_field_app_invoice_billing_replay_impl_20261015: ['update_field_app_invoice_billing'],
   // Direct EXECUTE is revoked (postgres-only). 20260914100800 renamed the live transfer_job_to_invoice
   // body to this name behind its public wrapper, so it kept the public literal the wrapper binds.
   // 20261104190000 re-emits it only to label invoice lines with the job line's unit.

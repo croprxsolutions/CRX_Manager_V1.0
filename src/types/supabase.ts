@@ -4984,6 +4984,7 @@ export type Database = {
           discount_date: string | null
           discount_earned_cents: number
           due_date: string | null
+          due_date_is_custom: boolean
           end_humidity_pct: number | null
           end_temp_f: number | null
           end_weather_source: string | null
@@ -5051,6 +5052,7 @@ export type Database = {
           discount_date?: string | null
           discount_earned_cents?: number
           due_date?: string | null
+          due_date_is_custom?: boolean
           end_humidity_pct?: number | null
           end_temp_f?: number | null
           end_weather_source?: string | null
@@ -5118,6 +5120,7 @@ export type Database = {
           discount_date?: string | null
           discount_earned_cents?: number
           due_date?: string | null
+          due_date_is_custom?: boolean
           end_humidity_pct?: number | null
           end_temp_f?: number | null
           end_weather_source?: string | null
@@ -6830,6 +6833,7 @@ export type Database = {
           total_price: number
           total_units_needed: number
           unit_size: string | null
+          vendor: string | null
         }
         Insert: {
           acres?: number | null
@@ -6856,6 +6860,7 @@ export type Database = {
           total_price?: number
           total_units_needed?: number
           unit_size?: string | null
+          vendor?: string | null
         }
         Update: {
           acres?: number | null
@@ -6882,6 +6887,7 @@ export type Database = {
           total_price?: number
           total_units_needed?: number
           unit_size?: string | null
+          vendor?: string | null
         }
         Relationships: [
           {
@@ -11606,6 +11612,7 @@ export type Database = {
           discount_date: string | null
           discount_earned_cents: number | null
           due_date: string | null
+          due_date_is_custom: boolean | null
           end_humidity_pct: number | null
           end_temp_f: number | null
           end_weather_source: string | null
@@ -16119,6 +16126,7 @@ export type Database = {
           p_payment_terms?: string
           p_performed_by?: string
           p_purchase_order_ref?: string
+          p_terms_by_invoice?: Json
         }
         Returns: Json
       }

@@ -4,8 +4,8 @@
  * every post-baseline migration on this checkout (the candidate included) in a network-disabled PostgreSQL
  * container (scripts/smoke/undo-paths/harness.mjs), seeds 1,203 deliveries (every status, dates with many
  * ties, three drivers, a farm group, items on a quarter of them), then checks, calling as `authenticated`:
- *   - pages of 37 return exactly the one-shot read (p_limit NULL), with no repeated id, for the default
- *     order and every sort key in both directions; total_count equals the one-shot row count;
+ *   - pages of 37 return exactly the full read (pages of 500 joined), with no repeated id, for the default
+ *     order and every sort key in both directions; total_count equals the full read's row count;
  *   - the default order matches the screen's own comparator (today, upcoming soonest, past newest, then
  *     delivery number, then id), and each column sort matches a direct ORDER BY <column>, id;
  *   - every filter (statuses, driver, priority, customer, date range) and the search (number, customer,
@@ -93,9 +93,20 @@ const ids = (payload) => payload.rows.map((row) => row.id);
 const sorted = (a) => [...a].sort();
 const NOT_DONE = "d.status NOT IN ('cancelled','voided')";
 
-/** Reads every page of `size` and checks it against the one-shot read. Returns the one-shot payload. */
+/** The full read, as the screen's exports make it: pages of 500 joined end to end. */
+function callAll(uid, o) {
+  const first = call(uid, { ...o, limit: 500, offset: 0 });
+  for (let offset = 500; offset < first.total_count; offset += 500) {
+    const page = call(uid, { ...o, limit: 500, offset });
+    assert.equal(page.total_count, first.total_count, `${JSON.stringify(o)}: total_count moved between pages of 500`);
+    first.rows.push(...page.rows);
+  }
+  return first;
+}
+
+/** Reads every page of `size` and checks it against the full read. Returns the full read. */
 function pagesMatch(uid, o, size = 37) {
-  const all = call(uid, { ...o, limit: null });
+  const all = callAll(uid, o);
   assert.equal(all.total_count, all.rows.length, `${JSON.stringify(o)}: total_count ${all.total_count} but ${all.rows.length} rows`);
   assert.equal(new Set(ids(all)).size, all.rows.length, `${JSON.stringify(o)}: a repeated id`);
   const paged = [];
@@ -105,7 +116,7 @@ function pagesMatch(uid, o, size = 37) {
     assert.ok(page.rows.length <= size);
     paged.push(...ids(page));
   }
-  assert.deepEqual(paged, ids(all), `${JSON.stringify(o)}: pages of ${size} differ from the one-shot read`);
+  assert.deepEqual(paged, ids(all), `${JSON.stringify(o)}: pages of ${size} differ from the full read`);
   return all;
 }
 
@@ -214,8 +225,8 @@ try {
   const driverAll = pagesMatch(USERS.driver, {});
   assert.deepEqual(sorted(ids(driverAll)), sorted(directIds(`${NOT_DONE} AND d.assigned_driver = '${USERS.driver}'`)), 'driver: own deliveries only');
   assert.equal(driverAll.summary.visible_count, driverAll.total_count, 'driver: summary counts own deliveries only');
-  assert.deepEqual(ids(call(USERS.rep, { limit: null })), ids(all), 'sales rep: same rows as admin');
-  const applicator = call(USERS.applicator, { limit: null });
+  assert.deepEqual(ids(callAll(USERS.rep, {})), ids(all), 'sales rep: same rows as admin');
+  const applicator = callAll(USERS.applicator, {});
   assert.equal(applicator.total_count, 0, 'applicator: sees no delivery');
   assert.equal(applicator.summary.visible_count, 0);
   console.log(`[deliveries-page] driver sees ${driverAll.total_count} own rows; rep = admin; applicator 0`);
@@ -242,14 +253,14 @@ try {
   console.log('[deliveries-page] edit + older insert: first 100 rows unchanged, new row last');
 
   // 7. Bad arguments refused; anon cannot execute.
-  for (const bad of ["p_today => NULL, p_week_start => '2026-06-14'", `${args()}, p_limit => 0`, `${args()}, p_limit => 501`,
+  for (const bad of ["p_today => NULL, p_week_start => '2026-06-14'", `${args()}, p_limit => 0`, `${args()}, p_limit => 501`, `${args()}, p_limit => NULL`,
     `${args()}, p_offset => -1`, `${args()}, p_sort_key => 'id'`, `${args()}, p_sort_desc => NULL`, `${args()}, p_search => repeat('a', 201)`]) {
     const refused = attempt(USERS.admin, `${refuse(`PERFORM public.get_deliveries_page(${bad});`)} v := t;`);
     assert.match(refused, /DELIVERIES_PAGE_BAD_ARGS/, `not refused: ${bad}`);
   }
   assert.equal(scalar("SELECT has_function_privilege('anon', 'public.get_deliveries_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer)', 'EXECUTE');"), 'f');
   assert.equal(scalar("SELECT prosecdef FROM pg_proc WHERE proname = 'get_deliveries_page';"), 'f');
-  console.log('[deliveries-page] 7 bad argument sets refused; anon cannot execute; SECURITY INVOKER');
+  console.log('[deliveries-page] 8 bad argument sets refused; anon cannot execute; SECURITY INVOKER');
 
   // 8. The live smoke chain passes here first (it must end in SMOKE_PASS_ROLLBACK).
   const chain = readFileSync(path.join(ROOT, 'scripts', 'smoke', 'smoke-goal4-deliveries-page.sql'), 'utf8');

@@ -55,11 +55,10 @@ BEGIN
   IF p_today IS NULL OR p_week_start IS NULL THEN
     RAISE EXCEPTION 'DELIVERIES_PAGE_BAD_ARGS: p_today and p_week_start are required';
   END IF;
-  -- p_limit NULL returns every matching row in one snapshot (exports, the calendar, the load sheet).
-  -- shortcut: one response holds every matching row; move those callers to keyset pages if one filter
-  -- ever matches tens of thousands of deliveries.
-  IF p_limit IS NOT NULL AND (p_limit < 1 OR p_limit > 500) THEN
-    RAISE EXCEPTION 'DELIVERIES_PAGE_BAD_ARGS: p_limit must be 1 to 500, or NULL for every row';
+  -- Every call returns at most 500 rows, so no single response can hold the whole delivery history.
+  -- Callers that need every matching row (exports, the calendar, the load sheet) read pages of 500.
+  IF p_limit IS NULL OR p_limit < 1 OR p_limit > 500 THEN
+    RAISE EXCEPTION 'DELIVERIES_PAGE_BAD_ARGS: p_limit must be 1 to 500';
   END IF;
   IF p_offset IS NULL OR p_offset < 0 THEN
     RAISE EXCEPTION 'DELIVERIES_PAGE_BAD_ARGS: p_offset must be 0 or more';
@@ -81,11 +80,8 @@ BEGIN
 
   RETURN (
     -- Only the columns the filters, sort and counts need are carried through; the full row is
-    -- built for the returned page alone, and item counts come from one grouped read.
-    WITH item_counts AS (
-      SELECT di.delivery_id, count(*) AS item_count FROM public.delivery_items di GROUP BY di.delivery_id
-    ),
-    base AS (
+    -- built for the returned page alone, and item counts are read only for the matching deliveries.
+    WITH base AS (
       SELECT
         d.id,
         d.status,
@@ -109,9 +105,8 @@ BEGIN
       SELECT * FROM base WHERE status NOT IN ('cancelled', 'voided')
     ),
     filtered AS (
-      SELECT b.*, COALESCE(ic.item_count, 0) AS item_count
+      SELECT b.*
       FROM base b
-      LEFT JOIN item_counts ic ON ic.delivery_id = b.id
       WHERE (CASE WHEN COALESCE(cardinality(p_statuses), 0) = 0 THEN b.status NOT IN ('cancelled', 'voided')
                   ELSE b.status = ANY (p_statuses) END)
         AND (p_driver_id IS NULL OR b.assigned_driver = p_driver_id)
@@ -124,6 +119,11 @@ BEGIN
              OR lower(b.customer_name) LIKE v_pattern ESCAPE '\'
              OR lower(b.driver_name) LIKE v_pattern ESCAPE '\'
              OR lower(b.farm_group_name) LIKE v_pattern ESCAPE '\')
+    ),
+    -- Item counts for the matching rows only (idx_del_items_delivery), never the whole items table.
+    counted AS (
+      SELECT f.*, (SELECT count(*) FROM public.delivery_items di WHERE di.delivery_id = f.id) AS item_count
+      FROM filtered f
     ),
     ordered AS (
       SELECT f.*, row_number() OVER (ORDER BY
@@ -147,7 +147,7 @@ BEGIN
         -- The unique tie-breaker: no row repeats or goes missing across pages.
         f.id
       ) AS ord
-      FROM filtered f
+      FROM counted f
     )
     SELECT jsonb_build_object(
       'success', true,
@@ -161,7 +161,7 @@ BEGIN
         FROM ordered o
         JOIN public.deliveries d ON d.id = o.id
         WHERE o.ord > p_offset
-          AND (p_limit IS NULL OR o.ord <= p_offset::bigint + p_limit)
+          AND o.ord <= p_offset::bigint + p_limit
       ), '[]'::jsonb),
       'summary', jsonb_build_object(
         'visible_count', (SELECT count(*) FROM visible),

@@ -6,13 +6,13 @@
 -- one exists) and calls the function as the authenticated role, so row level security applies as it
 -- does in the app. Writes nothing.
 -- Proves:
---   * pages of 50 return exactly the one-shot read (p_limit NULL) in the same order, with no repeated id,
---     and total_count equals the one-shot row count, for the default order and for two column sorts;
+--   * pages of 50 return exactly the full read (pages of 500 joined) in the same order, with no repeated
+--     id, and total_count equals the full read's row count, for the default order and two column sorts;
 --   * total_count equals a direct count of the deliveries that are not cancelled or voided, and the
 --     summary's visible_count and open_count equal direct counts;
 --   * searching the delivery number of the last row of the default order finds that row;
 --   * a driver sees only deliveries assigned to them;
---   * a bad page size is refused.
+--   * a bad page size is refused, and so is a request for every row at once (p_limit NULL).
 --
 -- Always ends by raising SMOKE_PASS_ROLLBACK: nothing is ever committed.
 
@@ -46,7 +46,15 @@ BEGIN
 
   -- 1. Pages equal the one-shot read, for the default order and two column sorts.
   FOR v_sort, v_desc IN SELECT * FROM (VALUES (NULL::text, false), ('customer_name', false), ('item_count', true)) s LOOP
-    v_all := public.get_deliveries_page(v_today, v_today - 6, p_sort_key => v_sort, p_sort_desc => v_desc, p_limit => NULL);
+    -- The full read, as the screen's exports make it: pages of 500 joined end to end.
+    v_all := NULL;
+    v_offset := 0;
+    LOOP
+      v_r := public.get_deliveries_page(v_today, v_today - 6, p_sort_key => v_sort, p_sort_desc => v_desc, p_limit => 500, p_offset => v_offset);
+      v_all := CASE WHEN v_all IS NULL THEN v_r ELSE jsonb_set(v_all, '{rows}', (v_all->'rows') || (v_r->'rows')) END;
+      v_offset := v_offset + 500;
+      EXIT WHEN v_offset >= (v_r->>'total_count')::bigint;
+    END LOOP;
     v_total := (v_all->>'total_count')::bigint;
     IF (v_all->>'success') IS DISTINCT FROM 'true' OR v_total IS DISTINCT FROM jsonb_array_length(v_all->'rows')::bigint THEN
       RAISE EXCEPTION 'SMOKE_FAIL: sort % one-shot read has % rows but total_count %', v_sort, jsonb_array_length(v_all->'rows'), v_total;
@@ -73,24 +81,24 @@ BEGIN
     RAISE NOTICE 'get_deliveries_page sort %: % rows, pages of 50 match', COALESCE(v_sort, 'default'), v_total;
   END LOOP;
 
-  -- 2. Summary counts.
-  v_all := public.get_deliveries_page(v_today, v_today - 6, p_limit => NULL);
+  -- 2. Summary counts (the admin reads every delivery under row level security).
+  v_all := public.get_deliveries_page(v_today, v_today - 6, p_limit => 1, p_offset => GREATEST(v_n - 1, 0)::integer);
   IF (v_all->'summary'->>'visible_count')::bigint <> v_n
      OR (v_all->'summary'->>'open_count')::bigint
-        <> (SELECT count(*) FROM jsonb_array_elements(v_all->'rows') e WHERE e->>'status' IN ('scheduled', 'in_progress')) THEN
+        <> (SELECT count(*) FROM public.deliveries WHERE status IN ('scheduled', 'in_progress')) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: summary counts disagree: %', v_all->'summary';
   END IF;
 
   -- 3. Search finds the last row of the default order.
   IF v_n > 0 THEN
-    v_last := v_all->'rows'->(jsonb_array_length(v_all->'rows') - 1)->>'delivery_number';
+    v_last := v_all->'rows'->0->>'delivery_number';
     v_r := public.get_deliveries_page(v_today, v_today - 6, p_search => v_last, p_limit => 50);
     IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_r->'rows') e WHERE e->>'delivery_number' = v_last) THEN
       RAISE EXCEPTION 'SMOKE_FAIL: search % did not find its row', v_last;
     END IF;
   END IF;
 
-  -- 4. A bad page size is refused.
+  -- 4. A bad page size is refused, and so is a request for every row at once.
   v_refused := false;
   BEGIN
     v_r := public.get_deliveries_page(v_today, v_today - 6, p_limit => 501);
@@ -98,6 +106,13 @@ BEGIN
     IF SQLERRM LIKE 'DELIVERIES_PAGE_BAD_ARGS%' THEN v_refused := true; ELSE RAISE; END IF;
   END;
   IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: p_limit 501 was not refused'; END IF;
+  v_refused := false;
+  BEGIN
+    v_r := public.get_deliveries_page(v_today, v_today - 6, p_limit => NULL);
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'DELIVERIES_PAGE_BAD_ARGS%' THEN v_refused := true; ELSE RAISE; END IF;
+  END;
+  IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: p_limit NULL was not refused'; END IF;
 
   -- 5. A driver sees only their own deliveries.
   IF v_driver IS NOT NULL THEN
@@ -106,11 +121,16 @@ BEGIN
      WHERE assigned_driver = v_driver AND status NOT IN ('cancelled', 'voided');
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_driver, 'role', 'authenticated')::text, true);
     EXECUTE 'SET LOCAL ROLE authenticated';
-    v_all := public.get_deliveries_page(v_today, v_today - 6, p_limit => NULL);
-    IF (v_all->>'total_count')::bigint <> v_n
-       OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_all->'rows') e WHERE (e->>'assigned_driver')::uuid IS DISTINCT FROM v_driver) THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: the driver sees % rows, % assigned to them', v_all->>'total_count', v_n;
-    END IF;
+    v_offset := 0;
+    LOOP
+      v_r := public.get_deliveries_page(v_today, v_today - 6, p_limit => 500, p_offset => v_offset);
+      IF (v_r->>'total_count')::bigint <> v_n
+         OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_r->'rows') e WHERE (e->>'assigned_driver')::uuid IS DISTINCT FROM v_driver) THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: the driver sees % rows, % assigned to them', v_r->>'total_count', v_n;
+      END IF;
+      v_offset := v_offset + 500;
+      EXIT WHEN v_offset >= v_n;
+    END LOOP;
     RAISE NOTICE 'get_deliveries_page driver: % own rows', v_n;
   END IF;
 

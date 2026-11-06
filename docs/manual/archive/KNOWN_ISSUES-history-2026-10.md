@@ -7157,3 +7157,25 @@ A blocked turn-off is reported as “Product details changed,” hiding the actu
 ### KI-88 — Inventory loads the full catalog on mount
 **LOW · UNVERIFIED · inventory UI · LOCAL CANDIDATE — NOT APPLIED**
 Inventory pages through all products on mount to label inactive rows; product status could instead come from the position RPC.
+
+---
+
+## KI-18 (part) — Client season read the browser clock: FIXED 2026-11-05
+
+Branch `claude/ki18-season-central-1f821d`. `computeSeason()` and `getSeasonDates()` in `src/utils/season.ts` now
+take "today" from the America/Chicago date (`todayInBusinessTz()`), the same rule as the database's `current_season()`
+(`20261103120000`). A `YYYY-MM-DD` string is read as written. Callers that passed the browser's `new Date()` now pass
+nothing; the job and field-invoice pre-harvest lookups pass the date text. A new job's default date is the Chicago
+date, and the pre-harvest check's fallback "today" is the Chicago date, not the UTC date. Four screens that worked
+the season out by hand from the browser clock now use `computeSeason()`: the field crop-history form (it sets the
+season the pre-harvest lookup reads), application-service rates, the program tracker and the compliance RUP range.
+The reports' "year to date" range ends on the Chicago date, so both ends agree.
+Proof: `src/utils/season.test.ts` covers 6 PM, 7 PM and 11:59 PM Central on Sept 30 and Oct 1 and fails on the old
+code. In the local test app with the browser set to UTC and the clock at 8 PM Central on Sept 30, 2026, the old code
+defaulted a new job to Oct 1 and hid the pre-harvest warning on a job with no date; the new code keeps Sept 30 and
+shows the warning.
+
+Original text:
+- Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
+  interval warning in `src/pages/JobDetail.tsx:1449`: a wrong season at the 1 October boundary can silently
+  suppress the warning. MED (safety).

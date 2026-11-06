@@ -2845,6 +2845,8 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261105160000',
   '20261106150000',
   '20261107060000',
+  '20261108120000',
+  '20261110150000',
 ]);
 
 /**
@@ -3036,6 +3038,16 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // required-key public wrapper. Prune once the registry high-water passes 20261102200000.
   '_manual_inventory_add_replay_impl_20261015',
   '_complete_job_replay_impl_20261015',
+  // 20261108120000 (PAR-1, applied live 2026-11-05): admin-only parent writers; each replays through
+  // _product_parent_replay (check_idempotency + actor/fingerprint match) and saves its receipt.
+  // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  'add_product_size',
+  'correct_parent_rates',
+  'correct_product_parent_identity',
+  'create_product_with_parent',
+  'move_product_size',
+  'set_parent_rates',
+  'update_product_parent',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3066,6 +3078,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  // KI-25 receipt queue (20261113140000).
+  _enqueue_delivery_receipt:
+    'internal helper called only by complete_delivery after its required-key replay binding; one row per delivery (ON CONFLICT (delivery_id), reopening only a cancelled never-sent row); every API-role EXECUTE (incl. service_role) is revoked',
   _close_undelivered_order_remainder_20260718:
     'preserved internal cancel-remainder impl (Phase 1a closeout); the required-key public cancel_order wrapper owns idempotency and every application-role EXECUTE is revoked',
   _post_deleted_delivery_recovery_invoice_20260719:
@@ -3085,6 +3100,16 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Local candidate 20261107060000 (WP-PM-11a-1): internal helper behind the two rate writers.
   _write_product_rates:
     'internal rate writer (20261107060000): only set_product_rates and correct_product_rates call it after their own idempotency checks; every API-role EXECUTE is revoked',
+  // 20261108120000 (PAR-1, applied live 2026-11-05): private helpers behind the keyed parent writers, and the
+  // trigger-only history writer it re-issues. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  _apply_parent_rates: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
+  _copy_parent_to_size: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
+  _insert_parent_size: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
+  _product_parent_event: 'internal PAR-1 helper (20261108120000): called only by the keyed parent writers after their own replay check; every API-role EXECUTE is revoked',
+  _product_parent_replay:
+    'idempotency infrastructure helper (20261108120000): locks the key and replays through check_idempotency with an actor and fingerprint match; every API-role EXECUTE is revoked',
+  write_product_change_history:
+    'trigger-only history writer re-issued by 20261108120000 (PAR-1); it runs inside the calling product write and is never an RPC',
   // Pruned on the 2026-08-11 merge of origin/main, per the standing rule below that a
   // dead exemption silently pre-suppresses any future RPC reusing the name:
   //   _guard_job_commission_split_immutable remains parked with Wave A under

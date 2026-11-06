@@ -2,7 +2,7 @@
 
 **Last verified:** 2026-11-05 for the live ledger only (see the void-delivery-order-status-guards-applied-live note); other evidence retains its stated dates.
 
-**WP-PM-3 local candidate source review: 2026-11-02.** KI-86–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
+**WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
@@ -36,10 +36,10 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
-| Accepted by Mason (KI-60 to KI-71, KI-79, KI-80) | 14 |
-| Closed as FIXED, with proof (bottom of file and archive) | 9 |
-| WP-PM-3 local candidate items (KI-86–KI-92; not applied) | 7 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
+| Accepted by Mason (KI-60 to KI-71, KI-79, KI-80, KI-104) | 15 |
+| Closed as FIXED, with proof (bottom of file and archive) | 14 |
+| WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
 Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
@@ -133,12 +133,6 @@ writes, Supabase feedback — are now `ask` rules in `.claude/settings.json` (ri
 connected connector, or one whose id changes on reconnect, is unlisted until someone adds it. The two PR #605 hook
 gaps are accepted in KI-78.
 
-### KI-05 — A sales rep can write RUP register rows for an invoice that was never posted
-**MED · OPEN · security/money · unassigned**
-`generate_rup_sales_records` (latest body `20260707040000`) checks the caller's role but not that the invoice is
-posted, so a rep can add restricted-use-pesticide register rows for a draft. PR #927 hid register reads from
-reps but explicitly left this function unchanged. Live had 0 register rows when last checked (older record's claim).
-
 ### KI-06 — Financial audit log can point at hard-deleted records
 **HIGH (per older record) · UNVERIFIED · database/money · Mason (migration decision)**
 Some audit-trail rows refer to invoices or payments that were later hard-deleted and carry no snapshot of what
@@ -231,7 +225,16 @@ PR #967), batch 4a (`20261102180000`, PR #1288, applied 2026-11-02: `unpost_invo
 `update_field_app_invoice_billing`, `consolidate_draft_invoices`, `update_blend_ticket_billing_status`,
 `create_rebate_claim`, `transition_rebate_claim`). Batch 4b (`20261103130000`, PR #1299, applied live 2026-11-03, ledger `20261103013009`) binds
 `price_order`, `update_order_items` and `mark_inventory_row_verified` (MED, PR #1042 follow-up 3; Mason: "batch
-it"). Remaining: notification RPCs and about 45 MED/LOW functions (batches 4c and 4d).
+it"). Batch 4c (`20261110160000`, applied live 2026-11-05) binds the purchase-order, quote-copy, delivery, cycle-count
+and blend-ticket writes: `submit_purchase_order`, `cancel_purchase_order`, `delete_purchase_order`,
+`duplicate_quote`, `edit_delivery`, `reassign_delivery`, `batch_reschedule_deliveries`, `confirm_delivery`,
+`create_delivery_with_items`, `create_followup_delivery`, `cancel_cycle_count`, `reverse_blend_ticket_approval`.
+Accepted without a wrapper (reason): `void_invoice` (already binds its request); `save_purchase_order` (its bulk
+path is bound; the single save is an edit of one record); `increment_customer_prepay`, `restore_cancelled_delivery`
+and the `_section9_*` inner bodies (no app caller; only the database owner and service role can run them);
+`apply_remaining_prepayments` and `batch_apply_all_prepayments` (always refused, disabled);
+`admin_save_application_service` (admin-only edit of one setting row). Remaining: notification RPCs and the
+LOW functions (batch 4d).
 
 ### KI-11 — Browser screens throw away or share their retry key (double-apply risk)
 **HIGH on money paths · FIXED IN CODE 2026-11-02 (branch `claude/crx-idempotency-keys-4a3741`; live once merged) · money**
@@ -268,7 +271,7 @@ a reload and Finish it left one order and 100 gal drawn. Other screens still kee
 **Remaining risk:** for the unbound functions, a create retried with different details after a lost reply opens
 the record already created without the later edits, and an edited retry of an existing record applies the new edit
 after the old one. Neither makes a second record or moves money twice; a clear refusal needs server-side binding
-(KI-10 batches 4c/4d), not a screen change. Quotes' Convert to Order
+(KI-10 batches 4c/4d; batch 4c binds `edit_delivery` and `reassign_delivery`), not a screen change. Quotes' Convert to Order
 starts a new key each time its dialog opens, which is accepted: the server answers a repeat with
 `already_converted` and opens the existing order. `KNOWN_UNFIXED_SITES` in
 `src/__tests__/idempotency-reset-order.test.ts` lists only three documented scanner false positives (CustomerDetail,
@@ -304,9 +307,28 @@ hold sub-cent values, adding the checks is Mason's call (LOW-MED); the old name-
 can make old splits refuse to save (LOW-MED).
 
 ### KI-14 — Transfer-created field invoices are always Net 30
-**MED · OPEN · money · unassigned**
-`20260914100500` lines ~2587 and 2820 stamp invoice date + 30 days regardless of the customer's terms. The post
-path was not traced.
+**MED · PARKED (Mason, 2026-11-05) · money · needs one database-plus-screen fix**
+- The transfer (`_transfer_job_to_invoice_intent_impl_20260908`) stamps due date = invoice date + 30 days whatever
+  the customer's terms say. Every posting route ends in `_post_invoice_impl_20260714`, which fills the due date only
+  when blank, so the +30 survives posting.
+- Not reachable today: on 2026-11-05 every live customer was Net 30 or blank, so +30 days is right for all of them,
+  and no saved invoice disagreed with its customer's terms. Fix this before any customer gets other terms.
+- A database-only fix is parked on branch `claude/ki14-transfer-due-date-terms` (candidate `20261112090000`, never
+  applied; real-schema proof `scripts/smoke/prove-transfer-invoice-due-date-real-schema.mjs`). Sol blocked four
+  versions, each for a gap outside the database:
+  1. A blank due date until posting: an unposted invoice can be emailed, and the server PDF prints a blank due date
+     as "On receipt".
+  2. Stamping the date from the customer's terms without copying them: the PDF falls back to the customer's later
+     terms beside the older date.
+  3. Copying the terms onto the invoice: the field-application split editor saves one set of terms (and a blank due
+     date) over every owner of a split.
+  4. Refusing a mixed-terms split save in the database: the screen saves the invoice date before the billing call,
+     so a refusal leaves stale due dates, and adding an owner (blank terms) is refused.
+- Every version was also flagged because `parse_payment_terms_days` reads the first number, so `2/10 Net 30` is due
+  in 2 days on every posting route.
+- The redo needs, as one planned piece (database PR first, then the screen): per-owner terms in the split editor, a
+  terms parser that reads "Net N", a PDF due-date fallback from terms, and the field-application screen not writing
+  Net 30 onto invoices with no terms of their own.
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**
@@ -418,6 +440,13 @@ unrebuildable on a current-date report. Neither payment screen sends a date. Pro
 **LOW · product UI · `20261107060000` — APPLIED LIVE 2026-11-04**
 If another admin locks rates while a product page is open, the page still offers rate edits; the save is refused by the database and the page then resets the rate fields to the saved values, so typed rate edits are lost. Other edits on the page save. Source: the WP-PM-11a-1 changelog note.
 
+### KI-103 — Bulk product import: a row with an unknown extra field previews "ready", then the save refuses the file
+**LOW · OPEN, no fix planned · products/import · found 2026-11-05 (Sol LOW on #1486)**
+`preview_product_import` ignores unknown top-level keys on a row, but `apply_product_setup` refuses them, so such a
+file previews "ready" and then the whole save is refused with nothing written. The screen never sends extra keys,
+and keys inside `insert` or `rates` are already refused by the preview. The Check File timeout first filed under
+this number is fixed and live (archive, 2026-11-05).
+
 ---
 
 ## Inventory and deliveries
@@ -434,12 +463,6 @@ Following `20261022075000` (PR #1024): old app versions are refused until reload
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
 abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test, and
 Mason's approval to narrow four older signature policies.
-
-### KI-27 — An expired uncertain request locks its dialog
-**MED · OPEN · UI/inventory · unassigned (PR #624 closed)**
-If a stock receive/adjust or vendor-bill save loses its reply and 23 hours pass, the dialog locks in that browser
-with a "do not submit again" message and no way to dismiss it (`src/hooks/useUncertainMutationIntent.ts:69`). Fix
-is an admin-only "I checked, clear this" control.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
 **MED · OPEN · database · unassigned**
@@ -465,12 +488,14 @@ WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup chec
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
 **MED · PARTIAL · UI/database · Mason (Goal 4)**
 Most lists now page through every row (PRs #959, #1017, #1048). The order, job and purchase-order pickers now search
-the database, and cycle-count locations read every row (PR #1048). Still capped: Customers (1000), Jobs (500),
-Crop Programs (500), Dispatch Board (500); a Jobs `.or(id.in)` URL-size risk; the blend-ticket scanner Edge
-Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk
-PO Import products (open PRs #1018/#1021 at the time), Label Data Quality, Product Detail choice lists, bulk import
-name matching, and the Field Customer Assignment dropdown. A customer-name search looks through only the first 50
-matching customers (alphabetical) without saying so. Past a cap, a record cannot be chosen.
+the database, and cycle-count locations read every row (PR #1048). The Customers and Jobs lists now read every row,
+the Jobs Applicators/Customers filters match their job-id lists on the rows read (no URL-size risk), and the order and job
+pickers match a customer name in the database instead of only the first 50 matching names (2026-11-05). Crop
+Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Still
+capped: Dispatch Board (500, waits on KI-28 work, issue #1497); the blend-ticket scanner Edge Function (needs a
+deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
+Label Data Quality, Product Detail choice lists, bulk import name matching, and the Field Customer Assignment
+dropdown. Past a cap, a record cannot be chosen.
 
 ---
 
@@ -486,18 +511,6 @@ sent, but every outbound path uses Main Warehouse only and no transfer exists, s
 ship. A live check on 2026-11-02 found all 117 inventory rows at Main Warehouse, so nothing has been stranded yet.
 Fix: list active `warehouses` rows only, refuse unknown locations on the server, and print the real location.
 Multi-warehouse support stays (`docs/manual/DECISION_LOG.md`, 2026-11-02; checklist in `docs/workflows/INVENTORY_RULES.md`).
-
-### KI-86 — Direct admin turn-off skips warnings
-**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
-Direct admin updates of `products.is_active` bypass the preview warning step; database blockers still refuse unsafe turn-off.
-
-### KI-87 — Refused turn-off uses the stale-review message
-**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
-A blocked turn-off is reported as “Product details changed,” hiding the actual blocker in that dialog.
-
-### KI-88 — Inventory loads the full catalog on mount
-**LOW · UNVERIFIED · inventory UI · LOCAL CANDIDATE — NOT APPLIED**
-Inventory pages through all products on mount to label inactive rows; product status could instead come from the position RPC.
 
 ### KI-89 — Inventory position uses UTC dates
 **LOW · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
@@ -568,6 +581,17 @@ put that stock back a second time and reopened the voided order. Reproduced 2026
 hand, deliver 10, void the order, void the delivery: 110 on hand, order `confirmed`). The fix refuses that delivery
 void (`ORDER_VOIDED_DELIVERY_LOCKED`); nothing moves. Live 2026-11-04: 0 voided orders, 0 completed deliveries on
 voided orders. Proof: as KI-101.
+
+### KI-105 — A quote's price tier is not checked against the customer's assigned tier
+**LOW today, MUST before the first regular rep · PARKED 2026-11-05 · quotes/pricing · To-Do 1.6**
+Quote Builder lets any tier be picked, so a quote can be priced at a tier other than the customer's assigned one
+with no warning. A screen check (a note with "Use Tier N" and a "Quote at Tier M anyway" tick box that Save
+needs) is built on branch `claude/quote-tier-credit-status` and parked unmerged (Mason, 2026-11-05: screen only,
+then parked until the database rule exists). Only office staff and admins quote today. Before the first regular
+rep gets an account: the database must refuse a different tier from reps (admins may override). When it resumes,
+also fix Sol's two MED findings on that branch: (1) the customer's assigned tier is read once, so an admin
+changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
+quote changes the tier label without repricing its locked lines.
 
 ## Database and release process
 
@@ -757,6 +781,7 @@ Delete with a grep of every reference first; keep one copy of each helper.
 | KI-71 | Renaming/deactivating a profile named in a commission split fails closed; PWA needs two reloads after a deploy; ExcelJS tests slow on a cold cache; JobDetail save test must re-click | Deliberate / expected behaviour |
 | KI-79 | A saved quote line forgets whether its acres were typed or filled in from the section's field (`save_quote` stores the acres, not the source; Quote Builder's `acres_source` lives only in the browser). Totals stay correct. After reopening, switching a section's field leaves those lines' acres as they were and shows "This section's saved lines keep their acres. Check them against the new field." Options weighed 2026-10-23: (1) keep as is, no cost; (2) store a typed/field flag on `quote_items`: a migration plus changes to `save_quote` (a money RPC) and every quote-copy path (duplicate, versions, rollover, template), which fall back to today's warning if they drop it; (3) save each line's field link and have the server recompute acres: a large `save_quote` rewrite, highest risk | Mason chose option 1, keep as is (2026-10-23, #1060 follow-up); revisit if reps report wrong acres after switching fields |
 | KI-80 | A job line priced from a product's tier price is not re-checked when that tier price is later removed or the customer's tier changes; it is re-checked (`job_chemicals_price_required`, #1060) only when the line is next edited | Mason declined the re-check (2026-10-23, #1060 follow-up): rare case |
+| KI-104 | Invoice email: the invoice page's Email button does not recognise a send made before 2026-11-05 under the old clock-based retry key, so it can send an unchanged invoice once more. The bulk Email on the Invoices list also checks the email log (a key that starts with the server-written `invoice:invoice:<id>:` prefix, to the same address, since the invoice last changed), so it skips those. A bulk skip does not see a bill-to correction made without changing the invoice; the invoice page's Email sends it. From then on the shared record key (invoice, its last change, the address and bill-to) stops repeats exactly | Mason, option A, 2026-11-05, narrowed by option A2 (To-Do 9.6): the email service change that would catch every old send was not approved |
 
 ---
 
@@ -839,7 +864,7 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   for the same product (LOW).
 - `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (applied live 2026-11-03, ledger `20261103003731`) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
-- Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
+- Transfer Net 30 (KI-14): traced 2026-11-05; posting keeps the +30. Parked; see KI-14.
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).
@@ -935,6 +960,11 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 8. **KI-85, stale sweep fingerprints on quote functions** — closed 2026-11-01 by the pin-refresh change on branch `fix/refresh-quote-sweep-pins-2026-11-01`; the 2026-11-01 live sweep adjudicated all 29 predicates `ok: true`, `complete: true`.
 
 9. **KI-39, customer-facing PDF polish** — closed 2026-11-05: quote-PDF section notes wrap instead of overprinting (PR #1480); the year-end "Change" column shows green/red again (PR #1477). Both checked on a rendered PDF; original text appended to the archive.
+10. **KI-27, an expired uncertain request locked its dialog** — closed 2026-11-05 by branch `claude/uncertain-intent-admin-clear-5591c7`: an admin-only "I checked the records — clear this" control (with a confirm) appears only once the safe retry window has passed, removes that browser's expired saved request, and is logged to Sentry. Proven on the local test app (admin clears and the form works again; a sales rep and a still-retryable request show no control) and by hook and component tests.
+11. **KI-86, a direct admin turn-off skipped the warnings** — closed 2026-11-05: already fixed by `20261103100000_product_active_guard` (PR #1315, applied live 2026-11-02), whose trigger refuses any `is_active` change outside `set_product_active` with `PRODUCT_ACTIVE_RPC_REQUIRED`, so every turn-off passes the preview. Proven on the local test app: an admin's turn-off showed the "stock remains on hand" warning, and a direct admin `UPDATE` was refused.
+12. **KI-87, a refused turn-off said "Product details changed"** — closed 2026-11-05: already fixed by PR #1321, which shows the database's blocker text. Proven on the local test app: a draft purchase order added after the review made Confirm show "purchase order TEST-KI87-PO" and reopen the review naming it.
+13. **KI-88, Inventory loaded the whole catalog on mount** — closed 2026-11-05 by branch `claude/ki86-88-product-turnoff`: on mount the page reads only the ids of turned-off products (`select=id&is_active=eq.false`) for the Inactive label; the full catalog loads only when the Add Inventory or Create Hold picker opens. No migration. Proven on the local test app's network log (2,116 products: no catalog read until a picker opened) and by a component test.
+14. **KI-05, RUP register rows for an unposted invoice** — closed 2026-11-05: `20261110140000_rup_records_require_posted_invoice` (PR #1513) applied live 2026-11-05 21:32:09 UTC (3:32 PM Central), ledger `20261105213209`. `generate_rup_sales_records` refuses an invoice that is not posted, paid or overdue (`RUP_INVOICE_NOT_POSTED`), and a trigger on `rup_sales_records` applies the same rule to a direct insert. Proven by the real-schema prover and, after the apply, the live smoke chain (`SMOKE_PASS_ROLLBACK`: a real draft invoice is refused, posting still writes one register row); live body, trigger and guard re-read after the apply.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

@@ -153,6 +153,11 @@ describe('sanitizeError', () => {
     expect(unknown).not.toContain('DELIVERY_INVOICE_EXCEEDS_DELIVERED');
   });
 
+  it('explains a delivery invoice line with no product and no charge type (billing plan M1)', () => {
+    expect(sanitizeError('DELIVERY_INVOICE_EXCEEDS_DELIVERED: invoice CS-2026-0281 has a line with no product and no charge type, or a negative quantity; a delivery invoice bills the products delivery DEL-00001 delivered, plus typed charges (freight, application fee, service, other)'))
+      .toBe('Nothing was changed. Every line on this invoice needs a product, or a charge type (freight, application fee, service or other), and no quantity can be negative (invoice CS-2026-0281)');
+  });
+
   it('explains an order billed both per delivery and whole-order', () => {
     expect(sanitizeError('ORDER_INVOICE_OVERLAPS_DELIVERY_INVOICE: this order is already billed per delivery (invoice CS-2026-0055), so a whole-order invoice would bill those goods again; invoice each remaining delivery instead'))
       .toBe('Nothing was saved. This order is already billed delivery by delivery, so a whole-order invoice would bill those goods twice. Invoice each remaining delivery instead');
@@ -194,6 +199,12 @@ describe('sanitizeError', () => {
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
+    expect(sanitizeError('TIER_ADMIN_ONLY: only an admin can change a customer\'s price tier'))
+      .toBe("Only an admin can set or change a customer's price tier");
+    expect(sanitizeError('CREDIT_LIMIT_ADMIN_ONLY: only an admin can change a customer\'s credit limit'))
+      .toBe("Only an admin can set or change a customer's credit limit");
+    expect(sanitizeError('QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE: a booking\'s tier and planned flag change only by saving the quote'))
+      .toBe("A booking's tier and planned flag change only by saving the quote");
     expect(sanitizeError('SALESMAN_SCOPE_DENIED')).toBe("Sales reps work under their own name: choose yourself as the salesman, or ask an admin to handle another salesman's work");
     expect(sanitizeError('INVOICE_SCOPE_DENIED')).toBe('You can only change or post invoices under your own name');
     // Replay-binding refusals (20261016060000): nothing changed, and the operator is told why.
@@ -201,6 +212,10 @@ describe('sanitizeError', () => {
     expect(intent).toContain('Nothing was changed');
     expect(intent).toContain('different, earlier request');
     expect(intent).toContain('Refresh');
+    const retired = sanitizeError({ message: 'IDEMPOTENCY_REQUEST_RETIRED: idempotency_key adjust_inventory_batch:u:1:2 belongs to a request that was cleared after it got stuck; it cannot be saved' });
+    expect(retired).toContain('Nothing was changed');
+    expect(retired).toContain('This request was cleared');
+    expect(retired).not.toMatch(/adjust_inventory|IDEMPOTENCY/);
     const actor = sanitizeError('IDEMPOTENCY_ACTOR_MISMATCH');
     expect(actor).toContain('Nothing was changed');
     expect(actor).toContain('another user');

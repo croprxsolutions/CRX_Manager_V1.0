@@ -34,6 +34,7 @@ import { getIdempotencyMismatchResult } from '../lib/idempotency';
 import PurchaseOrderSearchPicker from '../components/purchase-orders/PurchaseOrderSearchPicker';
 import { purchaseOrderSearchLabel } from '../lib/recordLabels';
 import type { Vendor, PurchaseOrder, POStatus } from '../types';
+import ClearExpiredIntentButton from '../components/ClearExpiredIntentButton';
 
 // Purchase orders a bill can be linked to (the PO picker's status filter).
 const LINKABLE_PO_STATUSES: readonly POStatus[] = ['submitted', 'partially_received', 'fully_received'];
@@ -516,6 +517,7 @@ export default function NewVendorBill() {
             : billCleanupFailed
             ? 'This bill was recorded once. Browser cleanup failed; retry this same bill unchanged. If it stays locked after reloading, report it before creating another bill on this device.'
             : 'This saved bill request needs reconciliation before another can be created. Retry this exact bill unchanged.'}
+          <ClearExpiredIntentButton intent={createBillIntent} operation="create_vendor_bill" />
         </div>
       )}
       {overageBlockedMessage && (

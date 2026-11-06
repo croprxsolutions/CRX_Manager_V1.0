@@ -21,8 +21,18 @@ const fromSelect = vi.fn();
 
 vi.mock('../lib/db', () => ({
   supabase: {
-    rpc: (...args: unknown[]) => rpc(...args),
-    from: () => ({ select: (...args: unknown[]) => fromSelect(...args) }),
+    // The rpc read is paged (rpc → order → range): resolve the mocked reply with a count.
+    rpc: (...args: unknown[]) => {
+      const q: Record<string, unknown> = {
+        order: () => q,
+        range: () => q,
+        then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+          Promise.resolve(rpc(...args)).then((x: { data: unknown }) => resolve({ ...x, count: Array.isArray(x?.data) ? x.data.length : null }), reject),
+      };
+      return q;
+    },
+    // The acres read is paged: select → order → range, and the range call answers.
+    from: () => ({ select: (...args: unknown[]) => { const q = { order: () => q, range: () => fromSelect(...args) }; return q; } }),
   },
   assertRpcResult: (data: unknown, rpcName: string) => {
     if (data === null || data === undefined) {

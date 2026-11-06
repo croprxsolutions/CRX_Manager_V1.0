@@ -218,6 +218,7 @@ BEGIN
   RETURNING id INTO v_delivery;
   INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
   VALUES (v_delivery, v_oitem, v_product, 100, 100, 'gal');
+  PERFORM set_config('crx.delivery_completion_evidence', v_delivery::text, true);
   PERFORM set_config('app.admin_override', 'true', true);
   UPDATE public.deliveries SET status = 'completed', signed_by = 'E2E Signer' WHERE id = v_delivery;
   PERFORM set_config('app.admin_override', 'false', true);

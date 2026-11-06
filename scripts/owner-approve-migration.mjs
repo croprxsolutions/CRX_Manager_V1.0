@@ -47,6 +47,7 @@ import {
   promptHookSeen,
   writeApprovalRequest,
 } from "../.claude/hooks/owner-approval-lib.mjs";
+import { approvalPullRequestProblem } from "./lib/owner-approval-pr.mjs";
 
 function die(code, msg) {
   console.error(msg);
@@ -160,17 +161,14 @@ try {
 }
 let pr;
 try {
-  pr = JSON.parse(String(execFileSync("gh", ["pr", "view", branch, "--json", "number,state,headRefOid,baseRefName"], {
+  pr = JSON.parse(String(execFileSync("gh", ["pr", "view", branch, "--json", "number,state,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup"], {
     cwd: checkout, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
   })));
 } catch (err) {
   die(1, `owner-approve-migration: could not find the open pull request for branch "${branch}" (${err?.message || err}).`);
 }
-if (String(pr?.state).toUpperCase() !== "OPEN" || String(pr?.baseRefName) !== "main" || String(pr?.headRefOid).toLowerCase() !== head.toLowerCase()) {
-  die(1,
-    `owner-approve-migration: pull request #${pr?.number ?? "?"} must be open against main with head ${head.slice(0, 12)} ` +
-    `(GitHub: state ${pr?.state}, base ${pr?.baseRefName}, head ${String(pr?.headRefOid || "?").slice(0, 12)}). Push first.`);
-}
+const prProblem = approvalPullRequestProblem(pr, head);
+if (prProblem) die(1, `owner-approve-migration: ${prProblem}`);
 
 // The reply hook and the code building what Mason reads must be the reviewed
 // bytes at this head, so he never approves through a locally edited summary or

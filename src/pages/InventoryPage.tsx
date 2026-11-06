@@ -1,4 +1,4 @@
-import { useEffect, useState , useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState , useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Package, ArrowDownToLine, Pencil, Plus, AlertTriangle, ChevronDown, ChevronUp, Trash2, Download, FileText, TrendingUp, ShoppingCart } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -40,6 +40,7 @@ import Tabs from '../components/ui/Tabs';
 import type { Inventory, InventoryPositionRow, Product, InventoryHold, Customer } from '../types';
 import type { ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
+import ClearExpiredIntentButton from '../components/ClearExpiredIntentButton';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
 
@@ -222,7 +223,7 @@ export default function InventoryPage() {
   const [adjustCleanupFailed, setAdjustCleanupFailed] = useState(false);
   const [adjustNote, setAdjustNote] = useState('');
   const [products, setProducts] = useState<PickerProduct[]>([]);
-  const inactiveProductIds = useMemo(() => new Set(products.filter((product) => !product.is_active).map((product) => product.id)), [products]);
+  const [inactiveProductIds, setInactiveProductIds] = useState<Set<string>>(() => new Set());
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [productsFailed, setProductsFailed] = useState(false);
   // True while the newest product read is in flight: the list on screen may be an older one.
@@ -506,8 +507,25 @@ export default function InventoryPage() {
     setProductsFailed(false);
   }, [toast]);
 
-  // The position RPC omits status, so load the catalog for an internal Inactive label.
-  useEffect(() => { void fetchProducts(); }, [fetchProducts]);
+  // The position RPC omits status, so read just the turned-off product ids for the Inactive label (KI-88).
+  // The full catalog loads only when a picker opens. A failed read only hides the label.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAllRows((from, to) => pageWithList(supabase
+      .from('products')
+      .select('id', { count: 'exact' })
+      .eq('is_active', false)
+      .order('id')
+      .range(from, to))).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) {
+        Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory' } });
+        return;
+      }
+      setInactiveProductIds(new Set((data || []).map((row) => (row as { id: string }).id)));
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const fetchCustomers = useCallback(async () => {
     const readId = ++customersReadRef.current;
@@ -1942,6 +1960,7 @@ export default function InventoryPage() {
                 : holdCleanupFailed
                 ? 'This hold was recorded once. Browser cleanup failed; retry this same hold unchanged. If it stays locked after reloading, report it before creating another hold on this device.'
                 : 'This saved hold request needs reconciliation before another can be created. Retry it unchanged so stock cannot be reserved twice.'}
+              <ClearExpiredIntentButton intent={createHoldIntent} operation="create_inventory_hold" />
             </div>
           )}
           <div>
@@ -2153,6 +2172,7 @@ export default function InventoryPage() {
                 : receiveCleanupFailed
                 ? 'These goods were recorded once. Browser cleanup failed; retry this same receipt unchanged. If it stays locked after reloading, report it before recording another receipt on this device.'
                 : 'This saved receiving request needs reconciliation before another can be recorded. Retry it unchanged so stock cannot be received twice.'}
+              <ClearExpiredIntentButton intent={receivePoIntent} operation="receive_po_items" />
             </div>
           )}
           {receivePoIntent.isForeignIntentLocked ? null : receivePOsFailed ? (
@@ -2227,6 +2247,7 @@ export default function InventoryPage() {
                     : adjustCleanupFailed
                     ? 'This adjustment was recorded once. Browser cleanup failed; retry this same adjustment unchanged. If it stays locked after reloading, report it before applying another adjustment on this device.'
                     : 'This saved adjustment needs reconciliation before another can be applied. Retry it unchanged so stock cannot be adjusted twice.'}
+                  <ClearExpiredIntentButton intent={adjustIntent} operation="adjust_inventory" />
                 </div>
               )}
               {selectedRow && (

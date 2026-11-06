@@ -7117,3 +7117,43 @@ if the save had worked. Migration `20261107140000_save_field_refuses_missing_fie
 The disposable PostgreSQL proof failed without the migration and passed with it; the live smoke chain (rolled back)
 expects the refusal. Two older `field_saved` activity rows that name a missing field were left as they are. With the
 stale-acres and delete-every-polygon sub-items closed earlier the same day, KI-31 is fully closed.
+
+### Closed 2026-11-05 — KI-27
+
+Closed by branch `claude/uncertain-intent-admin-clear-5591c7`. `useUncertainMutationIntent` gained `clearExpiredIntent()`, which refuses while any stored copy (IndexedDB coordinator, localStorage mirror, or this tab's acknowledgement) could still be retried or is damaged, and otherwise removes the expired request; a resolved tombstone is kept and damaged state stays locked for manual reconciliation. The shared `ClearExpiredIntentButton` shows it to admins only, only after expiry, behind a `ConfirmModal`, and logs each clear to Sentry. It is wired into every dialog that uses the hook (Quick Receive, Receiving Hub, Inventory receive/adjust/hold, Batch Adjust, Purchase Order receive, New Vendor Bill, Vendor Bill payment). Limit: the saved request is keyed to the signed-in user, so a non-admin who is locked out still needs browser storage cleared for that site.
+
+Original text:
+
+### KI-27 — An expired uncertain request locks its dialog
+**MED · OPEN · UI/inventory · unassigned (PR #624 closed)**
+If a stock receive/adjust or vendor-bill save loses its reply and 23 hours pass, the dialog locks in that browser
+with a "do not submit again" message and no way to dismiss it (`src/hooks/useUncertainMutationIntent.ts:69`). Fix
+is an admin-only "I checked, clear this" control.
+
+### Closed 2026-11-05 — KI-103 Bulk product import: a large file with per-acre rates timed out at Check File
+PR #1502 (merged 2026-11-05 12:46 PM Central, merge `48ff46a7f`): Check File sends 100 rows per request and joins
+the answers in order; a reply with the wrong row count is refused, and so is a check where rates were locked or
+unlocked between requests. In-file duplicates are still refused across the whole file first; Import stays one
+all-or-nothing save. Proved live 2026-11-05 12:52 PM Central on bundle `index-Cxon6mgH.js` (read-only: Check File
+then Cancel; the save call was blocked in the page): 500 rows that all carry a per-acre rate were checked in 5
+requests (1.6 to 2.7 s each, about 10 s in all), all ready; products, change history and supplier links unchanged
+afterwards. Before the fix, 500 such rows failed after 9.2 s on the signed-in role's 8 s statement limit. The
+unknown-extra-field quirk stays open under KI-103.
+
+### Closed 2026-11-05 — KI-86, KI-87, KI-88
+
+KI-86 and KI-87 were already fixed on `main` when re-checked: the live product-active guard (`20261103100000`, PR #1315) refuses direct `is_active` writes, and PR #1321 shows the blocker text when `set_product_active` refuses. KI-88 was fixed by branch `claude/ki86-88-product-turnoff` (`src/pages/InventoryPage.tsx`): the mount read is now the turned-off product ids only. All three were proven on the local test app on 2026-11-05.
+
+Original text:
+
+### KI-86 — Direct admin turn-off skips warnings
+**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
+Direct admin updates of `products.is_active` bypass the preview warning step; database blockers still refuse unsafe turn-off.
+
+### KI-87 — Refused turn-off uses the stale-review message
+**LOW · UNVERIFIED · product UI · LOCAL CANDIDATE — NOT APPLIED**
+A blocked turn-off is reported as “Product details changed,” hiding the actual blocker in that dialog.
+
+### KI-88 — Inventory loads the full catalog on mount
+**LOW · UNVERIFIED · inventory UI · LOCAL CANDIDATE — NOT APPLIED**
+Inventory pages through all products on mount to label inactive rows; product status could instead come from the position RPC.

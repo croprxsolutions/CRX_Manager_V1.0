@@ -6,6 +6,7 @@ import {
   getConversionFactor,
   recalcItem,
   billedLine,
+  pricedLine,
   exactRound2,
   catalogPricePerAcre,
   computeQuoteTotals,
@@ -217,6 +218,15 @@ describe('getConversionFactor', () => {
 // ---------------------------------------------------------------------------
 
 describe('recalcItem', () => {
+  it('figures a line at a price and cost the screen supplies (a manual or locked price, the quoted cost)', () => {
+    const product = makeProduct({ tier1_price: 20, current_cost: 10, inventory_unit: 'Gallon' });
+    const result = recalcItem(makeItem({ actual_rate: 32, rate_unit: 'fl oz', acres: 100 }), product, 1, conversions, { pricePerUnit: 30, cost: 12 });
+    expect(result.price_per_unit).toBe(30);
+    expect(result.current_cost).toBe(12);
+    expect(result.total_units_needed).toBe(25);
+    expect(result.total_price).toBe(750);
+    expect(result.profit).toBe(450);
+  });
   it('prices a seed line with a blank rate unit per stock Lb', () => {
     const product = makeProduct({ product_form: 'seed', inventory_unit: 'Lb', unit_size: 'Ea', tier1_price: 12.5, rate_per_acre: 2, rate_unit: '' });
     const result = recalcItem(makeItem({ actual_rate: 2, rate_unit: '', acres: 10 }), product, 1, conversions);
@@ -829,5 +839,14 @@ describe('recalcItem per-acre total (S09)', () => {
     const line = recalcItem({ calc_mode: 'rate_acres', actual_rate: 0.145, rate_unit: 'Gallon', acres: 100 } as CalcItem, product, 1, conversions);
     expect(line.price_per_acre).toBe(0.15);
     expect(line.total_price).toBe(14.5);
+  });
+});
+
+describe('pricedLine', () => {
+  it('rounds an order line half a cent up from the exact decimals, as create_direct_order stores it', () => {
+    // 128.13 x 32.5 = 4164.225 exactly; float math gives 4164.22 (6 of 20 such live order lines were a cent off).
+    expect(pricedLine(128.13, 100, 32.5)).toEqual({ totalPrice: 4164.23, profit: 914.23, netMargin: 21.95 });
+    expect(Math.round(128.13 * 32.5 * 100) / 100).toBe(4164.22);
+    expect(pricedLine(10, 0, 0)).toEqual({ totalPrice: 0, profit: 0, netMargin: 0 });
   });
 });

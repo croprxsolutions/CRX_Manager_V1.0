@@ -1410,11 +1410,12 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     let columns: string[] | null = null;
     const self: Record<string, unknown> = {};
     const passthrough = (..._args: unknown[]) => self;
-    for (const m of ['eq', 'order', 'limit', 'in', 'maybeSingle', 'single']) self[m] = passthrough;
+    for (const m of ['eq', 'order', 'limit', 'range', 'in', 'maybeSingle', 'single']) self[m] = passthrough;
     self.select = (cols: string) => { columns = cols.split(',').map((c) => c.trim()); return self; };
     const result = () => ({
       data: rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => columns?.includes(key)))),
       error: null,
+      count: rows.length,
     });
     self.then = (onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) =>
       Promise.resolve(result()).then(onFulfilled, onRejected);
@@ -1437,7 +1438,7 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     expect(savedItems[0]).toMatchObject({ product_id: 'product-tier-uuid', unit_price_cents: expectedCents });
   });
 
-  // The picker list holds only active customers (capped at 500) and may not have loaded yet. A
+  // The picker list holds only active customers and may not have loaded yet. A
   // customer missing from it must still be priced at their own tier, read by id (CodeRabbit and
   // the Codex connector on PR #908).
   it('reads the tier by id when the invoice customer is not in the picker list', async () => {
@@ -1854,12 +1855,57 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     });
   });
 
-  it('keeps Add Product on an order-backed invoice', async () => {
+  it('offers Add Product and Add Charge on an order-backed chemical sale (billing plan M1)', async () => {
     setupInvoice({ invoice_type: 'chemical_sale', order_id: 'ord-1' });
     renderInvoiceDetail('inv-scratch');
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
     expect(screen.getByRole('button', { name: 'Add Product' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Add Charge' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add Charge' })).toBeInTheDocument();
+  });
+
+  it('saves a freight charge beside the delivered product line on a chemical sale (billing plan M1)', async () => {
+    const productLine = {
+      id: 'item-1', product_id: 'prod-1', order_item_id: 'oi-1', product: { product_name: 'Roundup' }, description: 'Roundup',
+      quantity: 100, unit_price_cents: 1237, extended_cents: 123700, cost_cents: 900, sort_order: 0,
+    };
+    setupInvoice({ invoice_type: 'chemical_sale', order_id: 'ord-1', delivery_id: 'del-1' }, [productLine]);
+    mockIntentAwareRpc({ data: 'inv-scratch', error: null });
+    renderInvoiceDetail('inv-scratch');
+    await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'freight' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Freight' } });
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('tr')!;
+    expect(within(row).getAllByRole('spinbutton')).toHaveLength(1);
+    fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '45.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
+      expect(saveCall?.[1].p_items).toEqual([
+        expect.objectContaining({ id: 'item-1', product_id: 'prod-1', quantity: 100, unit_price_cents: 1237 }),
+        expect.objectContaining({
+          charge_type: 'freight', product_id: null, description: 'Freight',
+          quantity: 1, unit_price_cents: 4500, extended_cents: 4500, cost_cents: 0,
+        }),
+      ]);
+    });
+  });
+
+  it('refuses to save a chemical sale charge until staff pick its type', async () => {
+    setupInvoice({ invoice_type: 'chemical_sale', order_id: 'ord-1', delivery_id: 'del-1' });
+    mockIntentAwareRpc({ data: 'inv-scratch', error: null });
+    renderInvoiceDetail('inv-scratch');
+    await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Freight' } });
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('tr')!;
+    fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '45.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Pick a charge type for every line.'));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
   });
 });
 

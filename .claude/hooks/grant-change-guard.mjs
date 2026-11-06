@@ -41,12 +41,11 @@ function emit(payload) {
   process.stdout.write(JSON.stringify(payload));
   process.exit(0);
 }
+// No objection prints nothing ("allow" would pre-approve the call and skip the
+// normal permission prompt); a stale-graph warning still goes out on its own.
 function allow(systemMessage) {
-  const payload = {
-    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" },
-  };
-  if (systemMessage) payload.systemMessage = systemMessage;
-  emit(payload);
+  if (systemMessage) emit({ systemMessage });
+  process.exit(0);
 }
 function deny(reason) {
   emit({

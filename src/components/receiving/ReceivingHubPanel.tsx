@@ -7,6 +7,7 @@ import Modal from '../ui/Modal';
 import { SkeletonCard } from '../ui/Skeleton';
 import EmptyState, { LoadFailedState } from '../ui/EmptyState';
 import { supabase, assertRpcResult } from '../../lib/db';
+import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { runCriticalAction } from '../../lib/criticalAction';
 import { Sentry } from '../../lib/sentry';
 import { useToast } from '../ui/Toast';
@@ -18,6 +19,7 @@ import {
 } from '../../hooks/useUncertainMutationIntent';
 import { getIdempotencyMismatchResult } from '../../lib/idempotency';
 import type { InventoryPositionRow } from '../../types';
+import ClearExpiredIntentButton from '../ClearExpiredIntentButton';
 
 // F5 — Receiving Hub: "To-Ship for inbound". Search a product and see every open
 // purchase-order line for it across vendors (ordered − received), with a
@@ -112,12 +114,15 @@ export default function ReceivingHubPanel() {
       setLoading(true);
       setLoadError(false);
       try {
-        const poRes = await supabase
+        // Every open PO, read page by page (Goal 4): a fixed cap hid the oldest-due POs past it.
+        const poRes = await fetchAllRows((from, to) => pageWithList(supabase
           .from('purchase_orders')
-          .select('id, po_number, vendor, status, expected_delivery_date, items:purchase_order_items(id, product_name, product_id, quantity_ordered, quantity_received, unit_size)')
+          .select('id, po_number, vendor, status, expected_delivery_date, items:purchase_order_items(id, product_name, product_id, quantity_ordered, quantity_received, unit_size)', { count: 'exact' })
           .in('status', ['submitted', 'partially_received'])
           .order('expected_delivery_date', { ascending: true, nullsFirst: false })
-          .limit(500);
+          .order('id')
+          .order('id', { referencedTable: 'items' }) // the embed alias, not the table name
+          .range(from, to)));
         // A failed PO load must NOT look like "nothing on order" — surface it.
         // (Codex P2: poRes.data || [] below would silently swallow an RLS/drift
         // error and render an empty board.)
@@ -478,6 +483,7 @@ export default function ReceivingHubPanel() {
                 : receiveCleanupFailed
                 ? 'These goods were recorded once. Browser cleanup failed; retry this same receipt unchanged. If it stays locked after reloading, report it before recording another receipt on this device.'
                 : 'This saved receiving request needs reconciliation before another can be recorded. Retry it unchanged so stock cannot be received twice.'}
+              <ClearExpiredIntentButton intent={receiveIntent} operation="receive_po_items" />
             </div>
           )}
           <p className="text-sm text-secondary">

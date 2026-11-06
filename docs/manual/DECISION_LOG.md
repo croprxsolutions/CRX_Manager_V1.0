@@ -10,11 +10,6 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
-## 2026-11-06 — PAR-1 screens ship before parent EPA-number correction (temporary)
-
-**Decision:** Mason accepted (2026-11-06, in the PAR-1 screens session) that PR #1553 lands while a new product's EPA number cannot yet be corrected after it is created. Every new product now gets a parent, and a parent's EPA number is read-only until the reviewed EPA correction is built; that correction is being built in its own session rather than holding this PR.
-**Why:** Sol round 1 on PR #1553 rated this HIGH: before PAR-1 a typo in a new product's EPA number could still be edited on the product page. The fix needs a database change, which this screens-only PR does not carry; waiting would hold every other PAR-1 screen for it.
-**What this forbids/implies:** this is a deliberate, temporary acceptance, not the end state. Until EPA correction ships, check the EPA number before pressing Create; a wrong one stays until the correction lands. The correction follows the 2026-10-30 rule for reviewed parent corrections.
 ## 2026-11-06 — Cross-checking: whole-branch final Luna round, tests for screen bugs, no Terra; gate-file protection parked
 
 **Decision (Mason, 2026-11-06: "i agree with the plan build it", then "Ship rules, park guards"):** (1) the Luna round that clears a change reads the whole branch at the head to be pushed, not just the newest fix commit; (2) a confirmed BLOCKER/HIGH in a screen that saves, uploads or imports is fixed only with a failing-then-passing test or observed behavior, and disputes are settled by a test or Sol, not Mason; (3) Terra is not added as a second reviewer; (4) Sol stays as it is; (5) putting the gate files themselves back under Sol is parked.

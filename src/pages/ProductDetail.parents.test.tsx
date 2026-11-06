@@ -59,7 +59,6 @@ vi.mock('../components/products/ProductPriceHistory', () => ({ default: () => nu
 vi.mock('../components/products/ProductBrandsSection', () => ({ default: () => null }));
 
 import ProductDetailRoute from '../components/ProductDetailRoute';
-import { checkMutationResult } from '../lib/db';
 
 const product = {
   id: 'product-1', product_name: 'Atrazine 4L 2.5 Gal', sku: 'ATZ-25', category: 'Herbicide', use_timings: ['pre_emerge_corn'],
@@ -199,13 +198,13 @@ describe('ProductDetail — parents (PAR-1)', () => {
     const [parentFields, size] = H.createParent.mock.calls[0] as [Record<string, unknown>, Record<string, unknown>];
     expect(parentFields).toEqual(expect.objectContaining({ name: 'Brand New', nickname: 'BN', category: 'Herbicide' }));
     expect(size).toEqual(expect.objectContaining({ product_name: 'Brand New Herbicide', size_role: 'fixed_tote' }));
+    // Blank notes are left out, not sent as empty text.
+    expect(size).not.toHaveProperty('quoting_notes');
+    expect(size).not.toHaveProperty('internal_notes');
     expect(H.addSize).not.toHaveBeenCalled();
   });
 
-  it('a failed notes save after a create keeps the notes on the new product, unsaved, with no success toast', async () => {
-    vi.mocked(checkMutationResult).mockImplementation((_result, label) => {
-      if (label === 'Save product notes') throw new Error('notes write refused');
-    });
+  it('a new size sends its notes in the same database call as the size, with no second write', async () => {
     const router = renderAt('/products/product-1');
     await parentLoaded();
     fireEvent.click(screen.getByRole('button', { name: 'Add a size' }));
@@ -213,27 +212,18 @@ describe('ProductDetail — parents (PAR-1)', () => {
     fireEvent.change(screen.getByLabelText(/Product Name/), { target: { value: 'Atrazine 4L 30 Gal' } });
     fireEvent.change(screen.getByLabelText('Internal Notes'), { target: { value: 'Keep in the cold room' } });
     fireEvent.change(screen.getByLabelText('Quoting Notes'), { target: { value: 'Quote by the gallon' } });
-    const created = { ...product, id: 'product-2', product_name: 'Atrazine 4L 30 Gal' };
-    H.mockFrom.mockImplementation((table: string) => chain(table === 'products' ? [created] : [], table === 'products' ? created : null));
+    H.mockUpdate.mockClear();
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/products/product-2'));
-    expect(H.mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/notes were not saved/));
-    expect(H.mockToast).not.toHaveBeenCalledWith('success', expect.anything());
-    await parentLoaded();
-    expect(screen.getByLabelText('Internal Notes')).toHaveValue('Keep in the cold room');
-    expect(screen.getByLabelText('Quoting Notes')).toHaveValue('Quote by the gallon');
-
-    // Still unsaved: Save writes the carried notes.
-    vi.mocked(checkMutationResult).mockReset();
-    H.mockUpdate.mockClear();
-    fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
-    await waitFor(() => expect(H.mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      internal_notes: 'Keep in the cold room', quoting_notes: 'Quote by the gallon',
-    })));
-    // The saved notes leave the history entry, so a reload cannot put them back.
-    await waitFor(() => expect(router.state.location.state).toEqual({ justCreated: true }));
-    expect(router.state.location.pathname).toBe('/products/product-2');
+    await waitFor(() => expect(H.addSize).toHaveBeenCalled());
+    const size = H.addSize.mock.calls[0][2] as Record<string, unknown>;
+    expect(size).toEqual(expect.objectContaining({
+      product_name: 'Atrazine 4L 30 Gal', internal_notes: 'Keep in the cold room', quoting_notes: 'Quote by the gallon',
+    }));
+    await waitFor(() => expect(router.state.location.pathname).not.toBe('/products/new'));
+    expect(H.mockUpdate).not.toHaveBeenCalled();
+    expect(H.mockToast).toHaveBeenCalledWith('success', 'Product created. Now set its prices.');
+    expect(H.mockToast).not.toHaveBeenCalledWith('error', expect.stringMatching(/notes/i));
   });
 
   it('Add a size is disabled for a product with no parent, and New product stays available', async () => {

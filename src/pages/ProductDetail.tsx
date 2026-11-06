@@ -259,14 +259,11 @@ export default function ProductDetail() {
   // PAR-1: "Add a size" also carries the parent the new size joins; "New product" carries none.
   const routeState = useLocation().state as {
     duplicateFrom?: DuplicateProductSource; addSizeTo?: ProductParent; justCreated?: boolean;
-    unsavedNotes?: Partial<Pick<Product, 'quoting_notes' | 'internal_notes'>>;
   } | null;
   const duplicateSource = isNew ? routeState?.duplicateFrom : undefined;
   // State, so a stale parent can be refreshed in place after the database refuses it.
   const [addSizeTo, setAddSizeTo] = useState<ProductParent | undefined>(isNew ? routeState?.addSizeTo : undefined);
   const justCreated = !isNew && routeState?.justCreated === true;
-  // Notes whose save failed right after a create: every load puts them back, unsaved, until a save succeeds.
-  const unsavedNotesRef = useRef(isNew ? undefined : routeState?.unsavedNotes);
   // undefined while loading or after a failed load, null when the product has no parent.
   const [parent, setParent] = useState<ProductParent | null | undefined>(isNew ? null : undefined);
   const [parentLoadFailed, setParentLoadFailed] = useState(false);
@@ -428,8 +425,7 @@ export default function ProductDetail() {
     if (productIdRef.current !== id) return false;
     if (withCost) {
       const loadedProduct = withCost;
-      const carriedNotes = unsavedNotesRef.current;
-      setProduct(carriedNotes ? { ...loadedProduct, ...carriedNotes } : loadedProduct);
+      setProduct(loadedProduct);
       setNameRequired(false);
       setReiDraft(loadedProduct.rei_hours == null ? '' : String(loadedProduct.rei_hours));
       setPhiDraft(loadedProduct.phi_days == null ? '' : String(loadedProduct.phi_days));
@@ -438,7 +434,7 @@ export default function ProductDetail() {
       setPricingMoneyDrafts({});
       setPricingMarginDrafts({});
       setPricingReloadRequired(false);
-      setIsDirty(Boolean(carriedNotes));
+      setIsDirty(false);
       setPersistedLabelFields({
         signalWord: loadedProduct.signal_word,
         epaRegistration: loadedProduct.epa_registration,
@@ -826,7 +822,10 @@ export default function ProductDetail() {
       if (isNew) {
         // PAR-1: every new product is a size of a parent, created through the database's checked path.
         const normalized = normalizedProductSetup(product, reiDraft, phiDraft);
-        const size = newSizeFields(normalized as Record<string, unknown>, sizeRole);
+        // The notes are not setup fields, but the database saves them in the same step as the size.
+        const notes = Object.fromEntries((['quoting_notes', 'internal_notes'] as const)
+          .filter((field) => (normalized[field] ?? '').trim() !== '').map((field) => [field, normalized[field]]));
+        const size = { ...newSizeFields(normalized as Record<string, unknown>, sizeRole), ...notes };
         const addSize = addSizeTo ? { ...size, epa_registration: null } : null;
         const newParentFields = {
           name: newParent.name.trim() || normalized.product_name, nickname: newParent.nickname,
@@ -841,34 +840,13 @@ export default function ProductDetail() {
           : await createProductWithParent(newParentFields, size, getCreateKeyFor(scope));
         resetCreateKeyFor(scope);
         const newProductId = created.product_id;
-        // These two are not setup fields; the size's own row takes them after the create.
-        const extraNotes = Object.fromEntries((['quoting_notes', 'internal_notes'] as const)
-          .filter((field) => (normalized[field] ?? '').trim() !== '').map((field) => [field, normalized[field]]));
-        let notesSaved = true;
-        if (newProductId && Object.keys(extraNotes).length > 0) {
-          try {
-            const notesResult = await supabaseUntyped.from('products')
-              .update({ ...extraNotes, updated_at: new Date().toISOString() }).eq('id', newProductId).select('id');
-            checkMutationResult(notesResult, 'Save product notes');
-          } catch (notesError) {
-            Sentry.captureException(notesError, { extra: { context: 'product_create_notes' } });
-            notesSaved = false;
-          }
-        }
         setIsDirty(false);
         logActivity({ event: 'product_created', description: `Product ${product.product_name} created`, performedBy: profile!.id, entityType: 'product', entityId: newProductId });
         skipUnsavedPromptRef.current = true;
         if (!newProductId) {
           // Saved, but the id did not come back: the list still shows the new product.
-          if (Object.keys(extraNotes).length > 0) toast('error', 'Product created, but its quoting or internal notes were not saved. Open it and add them again.');
-          else toast('success', 'Product created');
+          toast('success', 'Product created');
           navigate('/products');
-          return;
-        }
-        if (!notesSaved) {
-          // The product exists; open it with the typed notes still filled in and unsaved, so Save keeps them.
-          toast('error', 'Product created, but its quoting or internal notes were not saved. They are still filled in: press Save.');
-          navigate(`/products/${newProductId}`, { state: { justCreated: true, unsavedNotes: extraNotes } });
           return;
         }
         toast('success', isAdmin ? 'Product created. Now set its prices.' : 'Product created');
@@ -877,12 +855,6 @@ export default function ProductDetail() {
       }
 
       await saveExistingProductDetails();
-      if (unsavedNotesRef.current) {
-        unsavedNotesRef.current = undefined;
-        // Drop the carried notes from the history entry too, so a reload or Back never brings them back.
-        skipUnsavedPromptRef.current = true;
-        navigate(`/products/${id}`, { replace: true, state: { justCreated } });
-      }
       await fetchProduct();
       setPriceHistoryReloadToken((current) => current + 1);
       setIsDirty(false);

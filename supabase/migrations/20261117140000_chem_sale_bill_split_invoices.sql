@@ -9,7 +9,8 @@
 --   - Each line shares its delivered cents and quantity: every other payer gets their share rounded
 --     down and the main customer (the sale's customer) gets the rest, so each line bills exactly. If
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
---     the rest with the main customer. A share too small for any quantity gets no cents.
+--     the rest with the main customer. Another payer's quantity rounds down to whole hundredths, as a return
+--     holds it, so a payer can return a share in full. A share too small for 0.01 of quantity gets no cents.
 --   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
 --     invoice and in the month-end report (Mason, 2026-11-05, Option 1). Summed across payers it can top
 --     the line's cost by about a cent where a share splits a unit, and more where the unit cost itself has
@@ -147,11 +148,17 @@ CREATE POLICY order_item_shares_select ON public.order_item_shares FOR SELECT TO
                   WHERE oi.id = order_item_shares.order_item_id AND o.deleted_at IS NULL
                     AND (public.is_admin() OR public.is_sales_rep())));
 CREATE POLICY order_item_shares_insert ON public.order_item_shares FOR INSERT TO authenticated
-  WITH CHECK (public.is_admin() OR public.is_sales_rep());
+  WITH CHECK (EXISTS (SELECT 1 FROM public.order_items oi JOIN public.orders o ON o.id = oi.order_id
+                       WHERE oi.id = order_item_shares.order_item_id AND o.deleted_at IS NULL
+                         AND (public.is_admin() OR public.is_sales_rep())));
 CREATE POLICY order_item_shares_update ON public.order_item_shares FOR UPDATE TO authenticated
-  USING (public.is_admin() OR public.is_sales_rep());
+  USING (EXISTS (SELECT 1 FROM public.order_items oi JOIN public.orders o ON o.id = oi.order_id
+                  WHERE oi.id = order_item_shares.order_item_id AND o.deleted_at IS NULL
+                    AND (public.is_admin() OR public.is_sales_rep())));
 CREATE POLICY order_item_shares_delete ON public.order_item_shares FOR DELETE TO authenticated
-  USING (public.is_admin() OR public.is_sales_rep());
+  USING (EXISTS (SELECT 1 FROM public.order_items oi JOIN public.orders o ON o.id = oi.order_id
+                  WHERE oi.id = order_item_shares.order_item_id AND o.deleted_at IS NULL
+                    AND (public.is_admin() OR public.is_sales_rep())));
 
 DROP POLICY order_shares_select ON public.order_shares;
 CREATE POLICY order_shares_select ON public.order_shares FOR SELECT TO authenticated
@@ -342,7 +349,8 @@ $function$;
 -- One line's shares of p_cents and p_units (ten-thousandths): the line's own shares, else the card; any
 -- share left over belongs to the main customer. The taker (the main customer, else the largest share)
 -- gets the rest after everyone else rounds down, so each line adds up exactly. A share too small for any
--- quantity gets no cents either, so no line bills money for nothing. The taker comes first.
+-- quantity gets no cents either, so no line bills money for nothing. Other payers' quantity is whole
+-- hundredths (100 of p_units), because return_items.quantity holds two decimals. The taker comes first.
 CREATE FUNCTION public._bill_split_line_shares(p_order_item_id uuid, p_cents bigint, p_units bigint)
 RETURNS TABLE (customer_id uuid, cents bigint, units bigint)
 LANGUAGE sql
@@ -369,8 +377,8 @@ AS $function$
     SELECT s.customer_id, sum(s.pct) AS pct FROM shares s GROUP BY s.customer_id HAVING sum(s.pct) > 0
   ), ranked AS (
     SELECT p.customer_id,
-           CASE WHEN floor(p_units * p.pct / 100) = 0 THEN 0 ELSE floor(p_cents * p.pct / 100)::bigint END AS floor_cents,
-           floor(p_units * p.pct / 100)::bigint AS floor_units,
+           CASE WHEN floor(p_units * p.pct / 10000) = 0 THEN 0 ELSE floor(p_cents * p.pct / 100)::bigint END AS floor_cents,
+           floor(p_units * p.pct / 10000)::bigint * 100 AS floor_units,
            row_number() OVER (ORDER BY p.customer_id = line.main DESC, p.pct DESC, p.customer_id) AS rn
       FROM payers p, line
   )
@@ -452,7 +460,7 @@ BEGIN
         INSERT INTO invoices (invoice_number, invoice_type, order_id, customer_id, delivery_id, status, invoice_date,
           season, salesman_id, total_amount_cents, total_cost_cents, created_by, invoice_group_id)
         VALUES (v_base || '-' || (cardinality(v_ids) + 1), 'chemical_sale', v_order.id, v_share.customer_id, p_delivery_id,
-          'draft', p_invoice_date, COALESCE(v_order.season, compute_season(p_invoice_date)), v_order.salesman_id,
+          'draft', p_invoice_date, compute_season(p_invoice_date), v_order.salesman_id,
           0, 0, p_actor, v_group)
         RETURNING id INTO v_invoice_id;
         v_map := v_map || jsonb_build_object(v_share.customer_id::text, v_invoice_id);
@@ -1400,7 +1408,10 @@ BEGIN
    ORDER BY id
    FOR UPDATE;
 
-  IF (SELECT COALESCE(needs_split_billing, false) FROM orders WHERE id = v_delivery.order_id)
+  -- The flag alone doesn't refuse a Bill Split sale: a field allocation removed after a part delivery
+  -- leaves it set with no field split to bill through.
+  IF ((SELECT COALESCE(needs_split_billing, false) FROM orders WHERE id = v_delivery.order_id)
+      AND NOT public._order_has_bill_split(v_delivery.order_id))
      OR EXISTS (
        SELECT 1 FROM order_item_field_allocations oifa
        JOIN order_items oi ON oi.id = oifa.order_item_id
@@ -1424,6 +1435,8 @@ BEGIN
       RAISE EXCEPTION 'BILL_SPLIT_NOTHING_TO_BILL: delivery % delivered no quantity, so there is nothing to bill', v_delivery.delivery_number
         USING ERRCODE = 'check_violation';
     END IF;
+    UPDATE orders SET needs_split_billing = false, updated_at = now()
+     WHERE id = v_delivery.order_id AND needs_split_billing;
     SELECT id, invoice_number INTO v_invoice_id, v_invoice_number FROM invoices WHERE id = v_invoice_ids[1];
     v_result := jsonb_build_object('success', true, 'delivery_id', p_delivery_id,
       'invoice_id', v_invoice_id, 'invoice_number', v_invoice_number, 'invoice_ids', to_jsonb(v_invoice_ids),

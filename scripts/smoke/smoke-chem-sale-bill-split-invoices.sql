@@ -35,6 +35,10 @@
 --   AA A line bills in the order line's unit, so every payer can return it
 --   AB One line too small to show, worth no cents, doesn't stop the rest of the delivery billing
 --   AC A line too small to show but worth cents still refuses, so no billed money is dropped
+--   AD A payer's quantity is in whole hundredths, as a return holds it
+--   AE A payer draft's unit follows the split; re-saving a tote line as read still works
+--   AF A card plus a field allocation, part delivered, then the allocation removed: Create Invoice drafts per payer
+--   AG A payer's invoice takes its season from its date, as a plain delivery invoice does
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -716,6 +720,79 @@ BEGIN
     v_fails := v_fails || ' (AC) a line worth cents was dropped from the billing;';
   END IF;
 
+  -- AD: a payer's quantity is in whole hundredths, as a return holds it, so a payer can return a share in full.
+  PERFORM pg_temp.smk_new_sale('ad' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 33.33);
+  PERFORM pg_temp.smk_done(v_d, 'ad' || v_suffix);
+  IF EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+              WHERE i.delivery_id = v_d AND ii.quantity <> CASE WHEN i.customer_id = v_payer2 THEN 3.33 ELSE 6.67 END)
+     OR (SELECT sum(total_amount_cents) FROM invoices WHERE delivery_id = v_d)
+          IS DISTINCT FROM (SELECT round(sum(total_price) * 100)::bigint FROM order_items WHERE order_id = v_o) THEN
+    v_fails := v_fails || ' (AD) a payer''s quantity is not in whole hundredths, or the line no longer adds up;';
+  END IF;
+
+  -- AE: a payer draft's unit and tote follow the split too, and re-saving a tote line as read still works.
+  PERFORM pg_temp.smk_new_sale('ae' || v_suffix, false);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  UPDATE delivery_items SET tote_number = 'T-1' WHERE delivery_id = v_d AND order_item_id = v_l1;
+  PERFORM confirm_delivery(v_d, v_admin, 'smk-spl-confirm-ae' || v_suffix);
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+  PERFORM pg_temp.smk_done(v_d, 'ae' || v_suffix);
+  SELECT id INTO v_inv FROM invoices WHERE delivery_id = v_d AND customer_id = v_payer2;
+  SELECT jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type, 'status', i.status,
+           'season', i.season, 'salesman_id', i.salesman_id, 'invoice_date', i.invoice_date, 'payment_terms', i.payment_terms,
+           'header_notes', i.header_notes, 'footer_notes', i.footer_notes)
+    INTO v_header FROM invoices i WHERE i.id = v_inv;
+  SELECT jsonb_agg(jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id,
+           'description', it.description, 'quantity', it.quantity, 'unit_price_cents', it.unit_price_cents,
+           'extended_cents', it.extended_cents, 'cost_cents', it.cost_cents, 'sort_order', it.sort_order,
+           'unit_size', it.unit_size, 'notes', it.notes, 'charge_type', it.charge_type, 'vendor', it.vendor) ORDER BY it.sort_order)
+    INTO v_lines FROM invoice_items it WHERE it.invoice_id = v_inv;
+  BEGIN
+    PERFORM save_invoice(v_header, v_lines, 'smk-spl-ae1-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (AE) re-saving a draft as read was refused: ' || SQLERRM || ';';
+  END;
+  BEGIN
+    PERFORM save_invoice(v_header, (SELECT jsonb_agg(l || jsonb_build_object('unit_size', 'bag')) FROM jsonb_array_elements(v_lines) l),
+      'smk-spl-ae2-' || v_suffix);
+    v_fails := v_fails || ' (AE) a payer draft''s unit changed;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'GENERATED_INVOICE_LINEAGE_IDENTITY_IMMUTABLE%' THEN v_fails := v_fails || ' (AE) wrong refusal on unit: ' || SQLERRM || ';'; END IF;
+  END;
+
+  -- AF: a card plus a field allocation, part delivered, then the allocation removed: Create Invoice drafts per payer.
+  PERFORM pg_temp.smk_new_sale('af' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+  INSERT INTO fields (customer_id, field_name, total_acres) VALUES (v_main, '[SMOKE] Split AF ' || v_suffix, 10) RETURNING id INTO v_inv2;
+  INSERT INTO order_item_field_allocations (order_item_id, field_id, acres) VALUES (v_l1, v_inv2, 5);
+  PERFORM complete_delivery(v_d, 'No proof — recorded by office', v_admin,
+    (SELECT jsonb_object_agg(di.id::text, 5) FROM delivery_items di WHERE di.delivery_id = v_d),
+    NULL, NULL, 'smk-spl-af-done-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
+  DELETE FROM order_item_field_allocations WHERE order_item_id = v_l1;
+  BEGIN
+    PERFORM create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-af-' || v_suffix);
+    IF (SELECT count(*) FROM invoices WHERE delivery_id = v_d) <> 2
+       OR (SELECT needs_split_billing FROM orders WHERE id = v_o) THEN
+      v_fails := v_fails || ' (AF) Create Invoice did not draft per payer and clear the flag;';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (AF) the delivery has no billing path: ' || SQLERRM || ';';
+  END;
+
+  -- AG: a payer's invoice takes its season from its date, as a plain delivery invoice does.
+  PERFORM pg_temp.smk_new_sale('ag' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  UPDATE orders SET season = compute_season(CURRENT_DATE) - 1 WHERE id = v_o;
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+  PERFORM pg_temp.smk_done(v_d, 'ag' || v_suffix);
+  IF (SELECT count(*) FROM invoices WHERE delivery_id = v_d) <> 2
+     OR EXISTS (SELECT 1 FROM invoices WHERE delivery_id = v_d AND season IS DISTINCT FROM compute_season(invoice_date)) THEN
+    v_fails := v_fails || ' (AG) a payer invoice took the order''s season, not its date''s;';
+  END IF;
+
   -- V: row security, last, because it changes role. The card and line shares of a soft-deleted order are hidden.
   PERFORM pg_temp.smk_new_sale('v' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
@@ -765,6 +842,12 @@ BEGIN
   IF EXISTS (SELECT 1 FROM order_item_shares WHERE order_item_id = v_l1) OR EXISTS (SELECT 1 FROM order_shares WHERE order_id = v_o) THEN
     v_fails := v_fails || ' (V) a soft-deleted order''s split is still readable;';
   END IF;
+  BEGIN
+    INSERT INTO order_item_shares (order_item_id, customer_id, split_percentage) VALUES (v_l1, v_payer3, 5);
+    v_fails := v_fails || ' (V) a line share was added on a soft-deleted order;';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
   RESET ROLE;
 
   IF v_fails <> '' THEN

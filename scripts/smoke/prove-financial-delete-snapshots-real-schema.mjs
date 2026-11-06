@@ -214,7 +214,7 @@ const FN = 'public._snapshot_financial_hard_delete()';
 function seedRow(table, fields) {
   const id = randomUUID();
   const overrides = JSON.stringify({ id, ...fields }).replaceAll("'", "''");
-  psql(`SET session_replication_role = replica;
+  psql(`SET session_replication_role = replica; SET request.jwt.claim.sub = '${ADMIN}';  -- auth.uid() defaults (created_by)
 DO $seed$
 DECLARE v_o jsonb := '${overrides}'::jsonb; v_cols text := ''; v_vals text := ''; c record;
 BEGIN
@@ -257,12 +257,12 @@ function seed() {
   const customer = seedRow('customers', {});
   return {
     customer,
-    draft: seedRow('invoices', { customer_id: customer, status: 'draft' }),
-    draft2: seedRow('invoices', { customer_id: customer, status: 'draft' }),
-    posted: seedRow('invoices', { customer_id: customer, status: 'posted' }),
+    draft: seedRow('invoices', { customer_id: customer, status: 'draft', invoice_number: `PROVER-${randomUUID().slice(0, 8)}` }),
+    draft2: seedRow('invoices', { customer_id: customer, status: 'draft', invoice_number: `PROVER-${randomUUID().slice(0, 8)}` }),
+    posted: seedRow('invoices', { customer_id: customer, status: 'posted', posted_at: new Date().toISOString(), invoice_number: `PROVER-${randomUUID().slice(0, 8)}` }),
     set: seedRow('allocation_sets', { customer_id: customer, entity_type: 'payment' }),
     splitSet: seedRow('allocation_sets', { customer_id: customer, entity_type: 'order' }),
-    payment: seedRow('payments', { customer_id: customer }),
+    payment: seedRow('payments', { customer_id: customer, amount: 12.34 }),
   };
 }
 

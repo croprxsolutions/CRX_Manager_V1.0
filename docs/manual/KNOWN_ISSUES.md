@@ -246,7 +246,7 @@ functions and requires a key on each: `admin_update_profile`, `batch_approve_ble
 It also limits `save_blend_recipe` to an active admin or sales rep, as both app recipe screens already were.
 `link_fields_to_parent`, `unlink_field_from_parent` and `save_field_polygons` also refuse a "performed by" naming someone
 other than the signed-in user (the app always sends the signed-in user).
-Batch 4e (`20261117110000`, not yet applied; the app PR #1518 that sends a key on the six keyless notification and
+Batch 4e (`20261117150000`, not yet applied; the app PR #1518 that sends a key on the six keyless notification and
 applied-info calls is merged) binds 15 operations
 functions and requires a key on each: `confirm_job_notification_sent`, `record_job_pre_notifications`,
 `record_job_post_notifications`, `log_failed_notification`, `assign_job_applicator`, `dispatch_job_locations`,

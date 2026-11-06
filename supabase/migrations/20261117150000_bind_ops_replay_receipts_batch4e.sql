@@ -6,9 +6,10 @@
 -- log_failed_notification, and update_field_app_applied_info is deployed to production.
 -- ROLLBACK: a new reviewed migration restores the prior trigger list, drops the public
 -- wrappers, renames each pinned _<name>_replay_impl_20261015 back, and restores grants.
--- ORDERING: live high-water 20261114200000_bind_records_replay_receipts_batch4d (ledger 20261106035950,
--- re-checked 2026-11-05: every pin below and the internal-caller scan match live). Restamped from
--- 20261111210000, which sat below applied batch 4d.
+-- ORDERING: live high-water 20261116120000_orders_list_page (ledger 20261106062918, re-checked
+-- 2026-11-06: every pin below, the 78-operation guard and the internal-caller scan match live).
+-- Restamped from 20261111210000 (below applied batch 4d), then from 20261117110000 (below open
+-- PR #1524, 20261117140000).
 -- This file requires the exact 78-operation post-4d guard (53 through 4c, then the 25 batch 4d
 -- operations, in that order) and appends its own 15; every other guard state is refused.
 -- KNOWN LIMITS: dynamic SQL callers cannot be found by catalog text scan; a keyless call

@@ -6,10 +6,13 @@
 --   a delivery on a sale with other payers completes, it drafts one chemical-sale invoice per payer,
 --   numbered with one sale number and a suffix (CS-2026-0412-1, -2), in one governed split group.
 --   - New table order_item_shares: a line's own shares, overriding the card for that line.
---   - Each line shares its delivered cents, cost and quantity: every other payer gets their share rounded
---     down and the main customer (the sale's customer) gets the rest, so each line adds up exactly. If
+--   - Each line shares its delivered cents and quantity: every other payer gets their share rounded
+--     down and the main customer (the sale's customer) gets the rest, so each line bills exactly. If
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
---     the rest with the main customer. A share too small for any quantity gets no cents or cost.
+--     the rest with the main customer. A share too small for any quantity gets no cents.
+--   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
+--     invoice and in the month-end report (Mason, 2026-11-05, Option 1). Summed across payers it can top
+--     the line's cost by about a cent where a share splits a unit; billed cents are exact.
 --   - The card and the line shares freeze at the first completed delivery (voiding it reopens them), and
 --     refuse a change while a one-customer draft is on the sale, which would never bill the new payer.
 --   - guard_invoice_terminal_order admits a payer on the sale's card or line shares, only inside the
@@ -17,8 +20,8 @@
 --     accepts that invoice. A sale with other payers refuses a one-customer chemical-sale invoice.
 --   - Create Invoice on a delivery (backfill) drafts per payer too.
 --   - A Bill Split draft takes charges and header edits through save_invoice until it posts (a field split
---     still can't). Its product lines follow the split: changing them means voiding the group. A save keeps
---     the draft's cost, because the line-by-line total the save recomputes wouldn't add up across payers.
+--     still can't). Its product lines (product, description, quantity, price, cents and cost) follow the
+--     split: changing them means voiding the group, so the cost the save recomputes stays the same.
 --   - Reps read the card (order_shares_select): any rep can already write it and reps work any customer.
 --   - One row per customer on a card: UNIQUE (order_id, customer_id). Live had 0 rows on 2026-11-06.
 --   - A card totals at most exactly 100%, without the old 0.01 tolerance, and a row can't move to another
@@ -372,7 +375,6 @@ DECLARE
   v_ids uuid[] := '{}';
   v_line_cents bigint;
   v_line_units bigint;
-  v_costs jsonb := '{}'::jsonb;
 BEGIN
   SELECT * INTO STRICT v_delivery FROM deliveries WHERE id = p_delivery_id;
   SELECT * INTO STRICT v_order FROM orders WHERE id = v_delivery.order_id;
@@ -393,12 +395,9 @@ BEGIN
     v_line_cents := _allocated_delivery_cents(v_item.order_item_id, v_item.quantity_delivered, NULL);
     v_line_units := round(v_item.quantity_delivered * 10000)::bigint;
     FOR v_share IN
-      SELECT c.customer_id, c.cents, c.units, k.cents AS cost
+      SELECT c.customer_id, c.cents, c.units
         FROM _bill_split_line_shares(v_item.order_item_id, v_line_cents, v_line_units)
              WITH ORDINALITY c(customer_id, cents, units, n)
-        JOIN _bill_split_line_shares(v_item.order_item_id,
-               ROUND(v_item.quantity_delivered * COALESCE(v_item.cost_per_unit, 0) * 100)::bigint, v_line_units) k
-          ON k.customer_id = c.customer_id
        ORDER BY c.n
     LOOP
       CONTINUE WHEN v_share.cents = 0 AND v_share.units = 0;
@@ -418,14 +417,15 @@ BEGIN
       VALUES (v_invoice_id, v_item.order_item_id, v_item.product_id, COALESCE(v_item.oi_product_name, v_item.p_name),
         v_share.units::numeric / 10000, ROUND(v_item.price_per_unit * 100)::bigint, v_share.cents,
         ROUND(COALESCE(v_item.cost_per_unit, 0) * 100)::bigint, v_item.unit_size, v_item.tote_number);
-      v_costs := v_costs || jsonb_build_object(v_invoice_id::text,
-        COALESCE((v_costs ->> v_invoice_id::text)::bigint, 0) + v_share.cost);
     END LOOP;
   END LOOP;
 
+  -- Cost is the sum of each payer's own lines, as on every invoice and in the month-end report (Mason,
+  -- 2026-11-05: Option 1). Across payers it can top the line's cost by a cent where a share splits a unit.
   UPDATE invoices i
-     SET total_amount_cents = t.cents, total_cost_cents = (v_costs ->> i.id::text)::bigint
-    FROM (SELECT ii.invoice_id, sum(ii.extended_cents)::bigint AS cents
+     SET total_amount_cents = t.cents, total_cost_cents = t.cost
+    FROM (SELECT ii.invoice_id, sum(ii.extended_cents)::bigint AS cents,
+                 sum(ROUND(ii.cost_cents * ii.quantity))::bigint AS cost
             FROM invoice_items ii
            WHERE ii.invoice_id = ANY (v_ids)
            GROUP BY ii.invoice_id) t
@@ -455,7 +455,7 @@ BEGIN
 END;
 $function$;
 
--- A draft's product lines as they bill. Charge lines (no product, no order line) are free to change.
+-- A draft's product lines as they bill and cost. Charge lines (no product, no order line) are free to change.
 CREATE FUNCTION public._bill_split_product_lines(p_invoice_id uuid)
 RETURNS jsonb
 LANGUAGE sql
@@ -463,7 +463,8 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
-  SELECT COALESCE(jsonb_agg(jsonb_build_array(ii.order_item_id, ii.product_id, ii.quantity, ii.unit_price_cents, ii.extended_cents)
+  SELECT COALESCE(jsonb_agg(jsonb_build_array(ii.order_item_id, ii.product_id, ii.description, ii.quantity,
+                                    ii.unit_price_cents, ii.extended_cents, ii.cost_cents)
                   ORDER BY ii.order_item_id, ii.quantity, ii.extended_cents), '[]'::jsonb)
     FROM invoice_items ii
    WHERE ii.invoice_id = p_invoice_id
@@ -1397,7 +1398,6 @@ DECLARE
   v_invoice_id uuid := NULLIF(p_invoice->>'id', '')::uuid;
   v_bill_split_draft boolean := false;
   v_lines_before jsonb;
-  v_cost_before bigint;
   v_saved_id uuid;
 BEGIN
   IF v_invoice_id IS NOT NULL THEN
@@ -1408,8 +1408,8 @@ BEGIN
 
     -- Billing plan M2: a Bill Split draft takes charges and header edits until it posts. The layer below
     -- already refreshes its provenance under a mutation claim.
-    SELECT i.total_cost_cents, public._bill_split_product_lines(i.id)
-      INTO v_cost_before, v_lines_before
+    SELECT public._bill_split_product_lines(i.id)
+      INTO v_lines_before
       FROM public.invoices i
      WHERE i.id = v_invoice_id
        AND i.status = 'draft'
@@ -1441,9 +1441,6 @@ BEGIN
         'BILL_SPLIT_LINES_LOCKED: a Bill Split invoice''s product lines follow the split. Void the group to change them; charges can still be added.'
         USING ERRCODE = 'check_violation';
     END IF;
-    -- The save recomputes cost line by line, which wouldn't add up across the payers. Charges cost nothing,
-    -- so with the product lines unchanged the cost is unchanged.
-    UPDATE public.invoices SET total_cost_cents = v_cost_before WHERE id = v_invoice_id;
   END IF;
 
   RETURN v_saved_id;

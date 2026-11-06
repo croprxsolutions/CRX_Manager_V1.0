@@ -18,7 +18,8 @@
 --   L  A one-customer draft on the sale refuses a new payer (BILL_SPLIT_HAS_DRAFT) until it is gone
 --   M  A payer draft's product lines follow the split: quantity, price and removal are refused
 --      (BILL_SPLIT_LINES_LOCKED) and a charge still saves
---   N  Cost: the payers' costs add up exactly to the line's cost, and a re-save keeps them
+--   N  Cost: each payer's cost is the sum of its own lines (Option 1), a charge re-save keeps it, and a
+--      change to a product line's cost or description is refused (BILL_SPLIT_LINES_LOCKED)
 --   O  A share too small for one unit of quantity gets no cents either
 --   P  A line share records when its percentage changed
 --
@@ -355,17 +356,24 @@ BEGIN
     v_fails := v_fails || ' (L) the card stayed shut once the draft was cancelled: ' || SQLERRM || ';';
   END;
 
-  -- N: Sol's half-cent case: 10 units at $0.015 cost 15 cents; 50/50 rounds each payer's 7.5 up to 8.
+  -- N: 10 units at 5 cents, 15% to payer 2: 1.5 units cost 7.5 -> 8, 8.5 units cost 42.5 -> 43. Each payer's
+  -- cost is its own lines, like every invoice and the month-end report; summed it tops the line's 50 by 1.
   PERFORM pg_temp.smk_new_sale('n' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
-  UPDATE order_items SET cost_per_unit = 0.015 WHERE id = v_l1;
-  UPDATE order_items SET cost_per_unit = 0.015 WHERE id = v_l2;
+  UPDATE order_items SET cost_per_unit = 0.05 WHERE id IN (v_l1, v_l2);
   PERFORM set_config('app.crx_below_cost_operation', '', true);
-  PERFORM pg_temp.smk_card(v_o, v_payer2, 50);
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 15);
   PERFORM pg_temp.smk_done(v_d, 'n' || v_suffix);
-  IF (SELECT sum(total_cost_cents) FROM invoices WHERE delivery_id = v_d) IS DISTINCT FROM 30::bigint THEN
-    v_fails := v_fails || format(' (N) payer costs total %s, want 30;', (SELECT sum(total_cost_cents) FROM invoices WHERE delivery_id = v_d));
+  IF EXISTS (SELECT 1 FROM invoices i WHERE i.delivery_id = v_d AND i.total_cost_cents IS DISTINCT FROM
+              (SELECT COALESCE(sum(ROUND(ii.cost_cents * ii.quantity)::bigint), 0) FROM invoice_items ii WHERE ii.invoice_id = i.id)) THEN
+    v_fails := v_fails || ' (N) a payer cost is not the sum of its own lines;';
+  END IF;
+  IF (SELECT total_cost_cents FROM invoices WHERE delivery_id = v_d AND customer_id = v_payer2) IS DISTINCT FROM 16::bigint
+     OR (SELECT total_cost_cents FROM invoices WHERE delivery_id = v_d AND customer_id = v_main) IS DISTINCT FROM 86::bigint THEN
+    v_fails := v_fails || format(' (N) payer costs %s / %s, want 16 / 86;',
+      (SELECT total_cost_cents FROM invoices WHERE delivery_id = v_d AND customer_id = v_payer2),
+      (SELECT total_cost_cents FROM invoices WHERE delivery_id = v_d AND customer_id = v_main));
   END IF;
   v_inv := (SELECT id FROM invoices WHERE delivery_id = v_d AND customer_id = v_payer2);
   v_cents := (SELECT total_cost_cents FROM invoices WHERE id = v_inv);
@@ -382,8 +390,26 @@ BEGIN
     'unit_price_cents', 4500, 'extended_cents', 4500, 'cost_cents', 0, 'sort_order', 9, 'charge_type', 'freight')),
     'smk-spl-n-' || v_suffix);
   IF (SELECT total_cost_cents FROM invoices WHERE id = v_inv) IS DISTINCT FROM v_cents THEN
-    v_fails := v_fails || format(' (N) a re-save moved the payer cost %s to %s;', v_cents, (SELECT total_cost_cents FROM invoices WHERE id = v_inv));
+    v_fails := v_fails || format(' (N) a charge re-save moved the payer cost %s to %s;', v_cents, (SELECT total_cost_cents FROM invoices WHERE id = v_inv));
   END IF;
+  -- A cost edit on an order line is put back by the save (20261106140000) or refused; either way it can't land.
+  BEGIN
+    PERFORM save_invoice(v_header, jsonb_set(v_lines, '{0,cost_cents}', to_jsonb((v_lines #>> '{0,cost_cents}')::bigint + 1)),
+      'smk-spl-n2-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_LINES_LOCKED:%' THEN v_fails := v_fails || ' (N) wrong refusal on a cost change: ' || SQLERRM || ';'; END IF;
+  END;
+  IF (SELECT cost_cents FROM invoice_items WHERE id = (v_lines #>> '{0,id}')::uuid) IS DISTINCT FROM (v_lines #>> '{0,cost_cents}')::bigint
+     OR (SELECT total_cost_cents FROM invoices WHERE id = v_inv) IS DISTINCT FROM v_cents THEN
+    v_fails := v_fails || ' (N) a save changed a payer product line''s cost;';
+  END IF;
+  BEGIN
+    PERFORM save_invoice(v_header, jsonb_set(v_lines, '{0,description}', to_jsonb('[SMOKE] renamed'::text)),
+      'smk-spl-n3-' || v_suffix);
+    v_fails := v_fails || ' (N) a save re-described a payer product line;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_LINES_LOCKED:%' THEN v_fails := v_fails || ' (N) wrong refusal on a description change: ' || SQLERRM || ';'; END IF;
+  END;
 
   -- O and P: a 0.001% share of one $1,000 unit rounds to no quantity, so it gets no cents.
   PERFORM pg_temp.smk_new_sale('o' || v_suffix);

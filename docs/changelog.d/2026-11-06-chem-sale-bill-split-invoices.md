@@ -17,4 +17,4 @@
 - Proof: billing scenarios B05, B06, B07 and B08 pass on the local test copy (all four failed
   before); smoke chain `smoke-chem-sale-bill-split-invoices.sql` passes.
 
-A Bill Split draft's product lines now follow the split: changing them means voiding the group, while charges can still be added. A one-customer draft on a sale has to go before a payer can be added. The payers' costs add up exactly to each line's cost.
+A Bill Split draft's product lines now follow the split: changing them means voiding the group, while charges can still be added. A one-customer draft on a sale has to go before a payer can be added. Each payer's cost is the sum of its own lines, like every other invoice and the month-end report (Mason, 2026-11-05); across payers it can be about a cent above the line's cost where a share splits a unit. A payer's product line can't be re-described or re-costed either.

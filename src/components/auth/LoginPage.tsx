@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate, Navigate, Link } from 'react-router-dom';
-import { ChevronRight, Loader2 } from 'lucide-react';
+import { ChevronRight, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import logoWhite from '../../assets/logo_3-01_(3).png';
 import logoDark from '../../assets/logo_3-02_(2).png';
@@ -10,6 +10,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -20,6 +21,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    setShowPassword(false);
     setLoading(true);
     const { error: err } = await signIn(email, password);
     if (err) {
@@ -88,17 +90,29 @@ export default function LoginPage() {
               <label htmlFor="password" className="block text-sm font-medium text-secondary mb-1">
                 Password
               </label>
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg
-                  focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green
-                  transition-colors"
-                placeholder="Enter your password"
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2.5 pr-11 text-sm border border-gray-200 rounded-lg
+                    focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green
+                    transition-colors"
+                  placeholder="Enter your password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((shown) => !shown)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 rounded-r-lg text-secondary
+                    hover:text-crx-green focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/20
+                    transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" aria-hidden="true" /> : <Eye className="w-4 h-4" aria-hidden="true" />}
+                </button>
+              </div>
             </div>
 
             <div className="flex justify-end">

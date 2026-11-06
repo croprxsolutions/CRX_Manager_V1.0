@@ -123,6 +123,28 @@ describe('ReportShell', () => {
     }
   });
 
+  it('ends Last 30d and Last 90d on the Chicago date in the evening (KI-18)', () => {
+    // Sep 30, 9 PM CDT = Oct 1 in UTC
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T02:00:00Z'));
+    try {
+      const onDateChange = vi.fn();
+      render(
+        <ReportShell onDateChange={onDateChange}>
+          <div>Content</div>
+        </ReportShell>
+      );
+      fireEvent.click(screen.getByText('Last 30d'));
+      fireEvent.click(screen.getByText('Last 90d'));
+      expect(onDateChange.mock.calls).toEqual([
+        ['2026-08-31', '2026-09-30'],
+        ['2026-07-02', '2026-09-30'],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows CSV export button when onExportCSV is provided', () => {
     const onExportCSV = vi.fn();
     render(

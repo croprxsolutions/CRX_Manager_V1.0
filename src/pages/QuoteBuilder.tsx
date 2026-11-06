@@ -703,7 +703,7 @@ export default function QuoteBuilder() {
   const [templateName, setTemplateName] = useState('');
   const [templateDescription, setTemplateDescription] = useState('');
   const [showRolloverModal, setShowRolloverModal] = useState(false);
-  const [rolloverSeason, setRolloverSeason] = useState(new Date().getFullYear() + 1);
+  const [rolloverSeason, setRolloverSeason] = useState(() => computeSeason() + 1);
   const [createOrderMenuOpen, setCreateOrderMenuOpen] = useState(false);
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
   const createOrderMenuRef = useRef<HTMLDivElement>(null);

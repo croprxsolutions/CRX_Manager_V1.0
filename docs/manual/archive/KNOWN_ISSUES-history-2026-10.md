@@ -7160,6 +7160,21 @@ Inventory pages through all products on mount to label inactive rows; product st
 
 ---
 
+## KI-18 (part) — Screens took "today" from the browser clock or cut the day at UTC midnight: FIXED 2026-11-06
+
+Branch `claude/ki18-remaining-dates`. The shared helpers `localToday()` and `localDatePlusDays()` in
+`src/lib/dateUtils.ts` now return the America/Chicago date, so every screen that defaults a date or a "last N days"
+window from them (about 35, including the CustomerDetail 90-day window) follows Chicago on any device clock. The
+reports' Last 30d / Last 90d buttons use them too. Two filters that cut the day at UTC midnight now cut at Chicago
+midnight (`businessDayStartIso()`): the closed-invoice season window on the Invoices and Field Invoices lists, and the
+TeamBoard activity date filter. A TeamBoard task is overdue only after its due day, by the Chicago date. Rebate
+program and quote-rollover year defaults use the Chicago year. The invoice date boxes stop 365 days ahead
+(`latestInvoiceDate()`). The original May 2026 review's three filters are covered: the Invoices season filter and the
+TeamBoard date filter as above, and the CustomerDetail 90-day window through the shared helper.
+Proof: `src/lib/tests/dateUtils.test.ts` (Chicago evening on Sept 30 and Dec 31) fails on the old helpers;
+`src/lib/dateUtils.test.ts` covers the day-start helper across both daylight-saving changes; `ReportShell.test.tsx`
+covers the 30/90-day buttons at 9 PM Central on Sept 30.
+
 ## KI-18 (part) — Client season read the browser clock: FIXED 2026-11-05
 
 Branch `claude/ki18-season-central-1f821d`. `computeSeason()` and `getSeasonDates()` in `src/utils/season.ts` now

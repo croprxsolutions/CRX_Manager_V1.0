@@ -19,20 +19,32 @@ export function tempDir(prefix) {
   return dir;
 }
 
+// Windows briefly locks a path an indexer or antivirus has open; these clear in milliseconds.
+const sleep = new Int32Array(new SharedArrayBuffer(4));
+function retryBusy(fn, codes) {
+  for (let attempt = 1; ; attempt++) {
+    try { return fn(); } catch (e) {
+      if (attempt >= 5 || !codes.includes(e.code)) throw e;
+      Atomics.wait(sleep, 0, 0, 100 * attempt);
+    }
+  }
+}
+
 // Remove a folder tree. Links and junctions are unlinked, never descended into.
 export function removeTree(target) {
   let st;
   try { st = lstatSync(target); } catch (e) { if (e.code === "ENOENT") return; throw e; }
   if (st.isSymbolicLink() || !st.isDirectory()) {
-    try { unlinkSync(target); } catch (e) {
+    // EPERM on a file means read-only (handled below), so only EBUSY is retried here.
+    try { retryBusy(() => unlinkSync(target), ["EBUSY"]); } catch (e) {
       // Git writes its objects read-only; Windows refuses to delete those until writable.
       // chmod follows links, so never retry a link this way.
       if (st.isSymbolicLink() || (e.code !== "EPERM" && e.code !== "EACCES")) throw e;
       chmodSync(target, 0o666);
-      unlinkSync(target);
+      retryBusy(() => unlinkSync(target), ["EBUSY"]);
     }
     return;
   }
   for (const name of readdirSync(target)) removeTree(path.join(target, name));
-  rmdirSync(target);
+  retryBusy(() => rmdirSync(target), ["EBUSY", "ENOTEMPTY", "EPERM"]);
 }

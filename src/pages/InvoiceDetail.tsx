@@ -43,7 +43,7 @@ import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
-import { todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
+import { latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import WriteOffModal from '../components/invoices/WriteOffModal';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
@@ -170,7 +170,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     invoice_type: isMiscChargeLocked ? 'misc_charge' : 'chemical_sale',
     status: 'draft',
     // An invoice date is a company-wide accounting fact, so it follows Crop RX's business
-    // timezone, not the browser's. localToday() would let a user outside Chicago open a new
+    // timezone, not the browser's. The browser's own date would let a user outside Chicago open a new
     // invoice dated 2026-09-30 while Chicago is already on 2026-10-01, filing it in season 2026
     // when the business day says 2027 (the server derives season from invoice_date since
     // migration 20260904180000).
@@ -2287,6 +2287,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                   type="date"
                   value={invoice.invoice_date?.split('T')[0] || ''}
                   onChange={(e) => setInvoice((prev) => ({ ...prev, invoice_date: e.target.value }))}
+                  max={latestInvoiceDate()}
                   className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 />
               ) : (

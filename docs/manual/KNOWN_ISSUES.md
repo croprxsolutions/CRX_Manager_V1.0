@@ -6,7 +6,7 @@
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**KI-18 verified: 2026-10-29 (America/Chicago)** for KI-18 only: read-only live function definitions confirm `generate_quote_number`, `generate_order_number`, `create_rebate_claim`, and `generate_ticket_number` still take the year from `current_date`. The live ledger includes `20261028185500_order_edit_and_number_concurrency` (version `20261029143642`); its blend-ticket generator retains the same year rule. PR #1181 is still an unapplied candidate and is not part of this check. KI-18 stands. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
+**KI-18 verified: 2026-11-06 (America/Chicago)** for KI-18 only: read-only live function definitions show `generate_quote_number`, `generate_order_number` and the rebate-claim body take the Chicago year; `generate_ticket_number` still uses `current_date`; `financial_dashboard_summary` still ages invoices from `NOW()` with "current" up to 30 days, while `get_ar_aging` uses 0–29 days by the Chicago date. KI-18 stands for those parts. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
 Every "applied live" statement not re-read since is the older record's claim, marked as such.
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything
@@ -370,21 +370,15 @@ when tier prices differ and asks staff to pick (PRs #982, #995, #1020). Automati
 tiers is not built; the linkage field is not used for money today.
 
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock
-**MED / LOW · OPEN · money/UI · unassigned (the pre-harvest warning part is fixed, see the archive)**
-- Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
-  `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
-  (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
-- `invoices.season` defaults to `current_season()`, and the blend-ticket path uses it
-  (`20261020210000:1050,1227`). Fixed by `20261103120000` (applied live 2026-11-03, ledger `20261103003731`), which makes `current_season()` read the
-  Chicago date; the same migration moves the `invoices.invoice_date` default to the Chicago date, so the two
-  defaults agree. LOW.
-- Client season reads: FIXED 2026-11-05 (branch `claude/ki18-season-central-1f821d`). `computeSeason()` now uses
-  the America/Chicago date, matching `current_season()`; details and proof are in the archive. Left open: other
-  screens still default some dates and "this month"/"last 30 days" filters from the browser clock (only the season
-  part was changed).
-- Two AR-aging views bucket a 30-day-old invoice differently; invoice dates have no future-date limit; three
-  filters cut the day at UTC midnight. UNVERIFIED (PR #991 fixed the AR strip; the rest not re-checked). MED.
-  Checked 2026-11-05: none of these live in the season helpers, so they were left out of the season fix.
+**MED / LOW · OPEN · money/UI · unassigned (the screens part is fixed, see the archive)**
+- The Financial Dashboard's AR-aging strip (`financial_dashboard_summary`) counts "current" as up to 30 days
+  past due by the UTC clock; the AR Aging page (`get_ar_aging`) counts 0–29 days by the Chicago date. A
+  30-day-old invoice is "current" on one and "30–59" on the other. Its season panels also read the UTC date. MED.
+- Blend-ticket numbers (`generate_ticket_number`) take their year from the UTC date, so on 31 Dec 6 pm–midnight
+  Central they get next year's number. Cosmetic. LOW. (Quote, order and rebate-claim numbers use the Chicago
+  year since `20261029160300`, applied live 2026-10-31.)
+- `invoices.invoice_date` has no future-date limit in the database, so a typed year like 2206 is accepted
+  through any writer. The invoice date boxes stop at one year ahead since 2026-11-06. LOW.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**
@@ -954,7 +948,7 @@ service-role tools (LOW).
 ## Unverified items (could not confirm either way; treat as open until checked)
 
 KI-06 (audit log), KI-07 (customer-document post-apply check), KI-16 (split-acre
-rounding), KI-18 (AR-aging parts), KI-20 (per-delivery split, commission design choices), KI-29/KI-30
+rounding), KI-20 (per-delivery split, commission design choices), KI-29/KI-30
 (live-data counts), KI-35 (ledger reconciliation), KI-41 (offline recovery), KI-52 (prover, live-testdata false
 positives). Live-database facts need a read-only query by someone with access.
 

@@ -23,7 +23,7 @@ import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
-import { parseLocalDate } from '../lib/dateUtils';
+import { localToday, parseLocalDate } from '../lib/dateUtils';
 import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import type { RebateProgram, RebateClaim, RebateClaimStatus } from '../types';
@@ -92,7 +92,7 @@ export default function Rebates() {
   const [pForm, setPForm] = useState({
     program_name: '',
     manufacturer: '',
-    season: new Date().getFullYear(),
+    season: Number(localToday().slice(0, 4)),
     product_id: '',
     rebate_type: 'per_unit' as string,
     rebate_amount: '',
@@ -211,7 +211,7 @@ export default function Rebates() {
     setPForm({
       program_name: '',
       manufacturer: '',
-      season: new Date().getFullYear(),
+      season: Number(localToday().slice(0, 4)),
       product_id: '',
       rebate_type: 'per_unit',
       rebate_amount: '',

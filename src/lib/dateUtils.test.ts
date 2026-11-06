@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { todayInBusinessTz } from './dateUtils';
+import { addDaysToDate, businessDayStartIso, todayInBusinessTz } from './dateUtils';
 
 describe('todayInBusinessTz', () => {
   it('keeps the late Central evening on the prior business date', () => {
@@ -96,5 +96,32 @@ describe('daysSinceBusinessDate', () => {
     // Fall-back night: 11:30pm Central on Nov 1 is still day 0.
     expect(daysSinceBusinessDate('2026-11-01', new Date('2026-11-02T05:30:00Z'))).toBe(0);
     expect(daysSinceBusinessDate('', evening)).toBe(0);
+  });
+});
+
+describe('businessDayStartIso (KI-18)', () => {
+  it('starts a daylight-time day at 05:00 UTC', () => {
+    expect(businessDayStartIso('2026-10-01')).toBe('2026-10-01T05:00:00.000Z');
+  });
+
+  it('starts a standard-time day at 06:00 UTC', () => {
+    expect(businessDayStartIso('2026-12-15')).toBe('2026-12-15T06:00:00.000Z');
+  });
+
+  it('handles both daylight-saving change days', () => {
+    expect(businessDayStartIso('2026-11-01')).toBe('2026-11-01T05:00:00.000Z');
+    expect(businessDayStartIso('2026-03-08')).toBe('2026-03-08T06:00:00.000Z');
+  });
+
+  it('refuses a value that is not a date', () => {
+    expect(() => businessDayStartIso('not-a-date')).toThrow();
+  });
+});
+
+describe('addDaysToDate', () => {
+  it('crosses month, year and daylight-saving boundaries by calendar day', () => {
+    expect(addDaysToDate('2026-09-30', 1)).toBe('2026-10-01');
+    expect(addDaysToDate('2026-12-31', 1)).toBe('2027-01-01');
+    expect(addDaysToDate('2026-11-01', -1)).toBe('2026-10-31');
   });
 });

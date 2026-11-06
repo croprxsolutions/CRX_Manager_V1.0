@@ -90,7 +90,7 @@ BEGIN
     LEFT JOIN LATERAL (
       SELECT sum(COALESCE(oi.total_units_needed, 0) * COALESCE(oi.price_per_unit, 0)) AS needed,
              sum(COALESCE(oi.quantity_delivered, 0) * COALESCE(oi.price_per_unit, 0)) AS delivered,
-             string_agg(DISTINCT NULLIF(oi.product_name, ''), ', ') AS product_names
+             string_agg(DISTINCT NULLIF(oi.product_name, ''), ', ' ORDER BY NULLIF(oi.product_name, '')) AS product_names
         FROM order_items oi
        WHERE oi.order_id = o.id
     ) it ON true

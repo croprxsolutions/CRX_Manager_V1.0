@@ -185,7 +185,8 @@ const SEARCH_KEYS = ['order_number', 'farm_group_name', 'customer_name', 'produc
 /** The reference rows the screen would show: its filters, then its search and sort (stable over the read order). */
 function expected(ref, { search = '', status = null, planned = null, pricing = null, split = null, key = null, dir = 'asc' } = {}) {
   const filtered = ref.filter((o) => (!status || o.status === status)
-    && (planned === null || o.is_planned === planned)
+    // As the screen: "committed" is every order not marked planned, a missing flag included.
+    && (planned === null || Boolean(o.is_planned) === planned)
     && (!pricing || o.pricing_status === pricing)
     && (!split || o.needs_split_billing));
   // The screen's sort is stable over its read order (order_date DESC, id): equal values stay newest first.

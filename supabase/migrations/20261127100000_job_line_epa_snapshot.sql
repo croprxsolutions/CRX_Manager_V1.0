@@ -19,9 +19,9 @@
 --     sets it from the product whenever a line is inserted or its product changes, whichever path
 --     writes the line (save_job, recipes, quote sections). Existing lines get their product's number
 --     today, which is what every printout shows today. Read-only to the app (SELECT grant only).
---   - invoice_items: a line written or saved with no EPA number, or moved to another product without
---     one, gets the product's number (chemical-sale lines were still made blank, and blank lines print
---     the product's current number). No existing invoice line is written by this file.
+--   - invoice_items: a line written or saved (any edit) with no EPA number, or moved to another product
+--     without one, gets the product's number (chemical-sale lines were still made blank, and blank lines
+--     print the product's current number). No existing invoice line is written by this file.
 --   - get_job_proof_data reads the job line's copy; get_customer_year_end_summary reads the invoice
 --     line's copy first. Each is re-emitted from its live body (pinned below) with that one change.
 --   - The parent identity correction can change the generic EPA number: the parent, every size
@@ -118,9 +118,11 @@ ALTER FUNCTION public._job_line_epa_follows_product(uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._job_line_epa_follows_product(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
 -- save_job deletes a job's lines and inserts them again. A deleted line leaves its number for the rest
--- of the transaction (transaction-local settings keyed by job, product and sort order, and by job and
--- product), so a sprayed or finished job re-saved keeps its lines' numbers. A line whose product is
--- unchanged keeps its number.
+-- of the transaction (transaction-local settings: one per job, product and sort order, and a list per
+-- job and product), so a sprayed or finished job re-saved keeps its lines' numbers. Each remembered
+-- number is used once: the line at the same sort order takes its own, other lines of that product take
+-- the rest in order, and a line beyond the deleted count takes the product's number today. A line whose
+-- product is unchanged keeps its number.
 -- FOR SHARE: a line written while a parent EPA correction holds the product waits for it and then
 -- takes the corrected number; a correction that starts after the line waits for the line's save, so
 -- its open-job update sees the line. Either way no unsprayed job keeps the old number.
@@ -133,6 +135,8 @@ DECLARE
   v_key text;
   v_line_key text;
   v_kept text;
+  v_list jsonb;
+  v_idx int;
 BEGIN
   IF TG_OP = 'DELETE' THEN
     v_job := OLD.job_id; v_product := OLD.product_id; v_sort := OLD.sort_order::text;
@@ -142,7 +146,8 @@ BEGIN
   v_key := 'crx_job_line_epa.k' || md5(COALESCE(v_job::text, '') || ':' || COALESCE(v_product::text, ''));
   v_line_key := 'crx_job_line_epa.l' || md5(COALESCE(v_job::text, '') || ':' || COALESCE(v_product::text, '') || ':' || COALESCE(v_sort, ''));
   IF TG_OP = 'DELETE' THEN
-    PERFORM set_config(v_key, 'v:' || COALESCE(OLD.epa_registration, ''), true);
+    v_list := COALESCE(NULLIF(current_setting(v_key, true), '')::jsonb, '[]'::jsonb);
+    PERFORM set_config(v_key, (v_list || to_jsonb(COALESCE(OLD.epa_registration, '')))::text, true);
     PERFORM set_config(v_line_key, 'v:' || COALESCE(OLD.epa_registration, ''), true);
     RETURN OLD;
   END IF;
@@ -151,9 +156,20 @@ BEGIN
     RETURN NEW;
   END IF;
   IF TG_OP = 'INSERT' AND NOT public._job_line_epa_follows_product(NEW.job_id) THEN
-    v_kept := COALESCE(NULLIF(current_setting(v_line_key, true), ''), current_setting(v_key, true));
+    v_list := COALESCE(NULLIF(current_setting(v_key, true), '')::jsonb, '[]'::jsonb);
+    v_kept := current_setting(v_line_key, true);
+    v_idx := NULL;
     IF v_kept LIKE 'v:%' THEN
-      NEW.epa_registration := NULLIF(substr(v_kept, 3), '');
+      SELECT e.ord - 1 INTO v_idx FROM jsonb_array_elements_text(v_list) WITH ORDINALITY e(v, ord)
+       WHERE e.v = substr(v_kept, 3) ORDER BY e.ord LIMIT 1;
+      PERFORM set_config(v_line_key, '', true);
+    END IF;
+    IF v_idx IS NULL AND jsonb_array_length(v_list) > 0 THEN
+      v_idx := 0;
+    END IF;
+    IF v_idx IS NOT NULL THEN
+      NEW.epa_registration := NULLIF(v_list->>v_idx, '');
+      PERFORM set_config(v_key, (v_list - v_idx)::text, true);
       RETURN NEW;
     END IF;
   END IF;
@@ -223,7 +239,7 @@ $function$;
 ALTER FUNCTION public._fill_invoice_line_epa() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._fill_invoice_line_epa() FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE TRIGGER trg_fill_invoice_line_epa BEFORE INSERT OR UPDATE OF product_id, epa_registration ON public.invoice_items
+CREATE TRIGGER trg_fill_invoice_line_epa BEFORE INSERT OR UPDATE ON public.invoice_items
 FOR EACH ROW EXECUTE FUNCTION public._fill_invoice_line_epa();
 
 -- ---------------------------------------------------------------------------------------------

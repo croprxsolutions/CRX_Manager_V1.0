@@ -343,6 +343,12 @@ async function main() {
   const draftLineEpa = () => scalar(`SELECT epa_registration FROM public.invoice_items WHERE ${blankLine};`);
   psql(`UPDATE public.invoice_items SET description = description WHERE ${blankLine};`);
   assert.equal(draftLineEpa(), OLD);
+  // A line made before this file with no copy gets one on any later edit.
+  psql(`ALTER TABLE public.invoice_items DISABLE TRIGGER trg_fill_invoice_line_epa;
+    UPDATE public.invoice_items SET epa_registration = NULL WHERE ${blankLine};
+    ALTER TABLE public.invoice_items ENABLE TRIGGER trg_fill_invoice_line_epa;`);
+  psql(`UPDATE public.invoice_items SET description = description WHERE ${blankLine};`);
+  assert.equal(draftLineEpa(), OLD);
   psql(`UPDATE public.invoice_items SET product_id = '${OTHER}' WHERE ${blankLine};`);
   assert.equal(draftLineEpa(), OTHER_EPA);
   psql(`UPDATE public.invoice_items SET product_id = '${S2}', epa_registration = '9-9' WHERE ${blankLine};`);
@@ -463,6 +469,14 @@ async function main() {
     COMMIT;`);
   assert.equal(lineEpa(JDONE, S1), `${OLD},${NEW}`);
   psql(`DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}' AND sort_order = 5;`);
+  // A line the screen appends to a finished job during a re-save takes today's number, not a deleted line's.
+  psql(`BEGIN;
+    DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}';
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES
+      ('${JDONE}', '${S1}', 5, 'gal', 1500, 1), ('${JDONE}', '${OTHER}', 5, 'gal', 1500, 2), ('${JDONE}', '${S1}', 2, 'gal', 1500, 6);
+    COMMIT;`);
+  assert.equal(lineEpa(JDONE, S1), `${OLD},${NEW}`);
+  psql(`DELETE FROM public.job_chemicals WHERE job_id = '${JDONE}' AND sort_order = 6;`);
   // An unsprayed job re-saved follows the product; a line newly added to a finished job takes today's number.
   psql(`UPDATE public.job_chemicals SET product_id = '${OTHER}' WHERE job_id = '${JOPEN}' AND product_id = '${S1}';`);
   resave(JOPEN);

@@ -14,7 +14,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision:** Mason accepted that a multi-page Deliveries read (export, load sheet, calendar, driver view) includes every delivery that matches for the whole read exactly once, but a delivery cancelled, reactivated or moved in or out of the filters while it runs may or may not appear, and rows near an edit can sit a place out of order (Mason, 2026-11-06: "A: accept it").
 **Why:** each page of 500 is its own database call, so no snapshot spans the read; three review rounds in a row found a new HIGH in the same multi-page mechanism (PR #1549). The alternatives were a re-check that asks the user to export again, or lifting the 500-row cap Sol required.
-**What this forbids/implies:** `get_deliveries_page` with `p_after_id` and the screen's whole-list reads keep this behaviour; do not report it as a bug or add a lock or retry loop for it without a new decision.
+**What this forbids/implies:** `get_deliveries_page` with `p_after_id` and the screen's whole-list reads keep this behaviour; changing it (one snapshot across pages, a lock, or a re-check that refuses or retries the export) needs a new decision from Mason.
 
 ## 2026-11-05 — A new HIGH from the same mechanism three rounds running also stops the work
 

@@ -134,6 +134,7 @@ function plan() {
   if (OTHER_IN_BASELINE) assert.ok(before.includes(OTHER), `${path.basename(OTHER)} must be replayed before the candidate`);
   const touched = new RegExp([...WRAPPED, 'idempotency_keys'].join('|'));
   for (const name of PARKED) {
+    if (name >= path.basename(CANDIDATE)) continue; // sorts after this candidate: never replayed for it
     const file = before.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
     assert.ok(!touched.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);

@@ -166,10 +166,11 @@ const KNOWN_UNGUARDED: Record<string, string> = {
   // pinned before the gate, so the role can only be NULL if profiles.role is
   // NULL, and the gate is a secondary owner-mismatch check, not the auth gate.
   'get_offline_action_status|v_actor_role': 'active-profile pinned upstream (NOT FOUND raise) before the gate',
-  // Safe BY DESIGN: `new_role IS NOT NULL AND new_role NOT IN (...)` — NULL
-  // means "caller is not changing the role", so skipping the value check on
-  // NULL is fail-closed for this validation (nothing is written).
-  'admin_update_profile|new_role': 'NULL new_role means no role change; the NOT IN is a value whitelist, not an auth gate',
+  // admin_update_profile|new_role was listed here (safe by design: NULL new_role
+  // means "no role change"; the NOT IN is a value whitelist, not an auth gate).
+  // KI-10 batch 4d (20261114200000) renamed that body verbatim into
+  // _admin_update_profile_replay_impl_20261015, which is never re-emitted on
+  // disk, so the scanner no longer sees it; the new public wrapper has no such gate.
   // create_inventory_hold|v_role was listed here as "parked, never applied". The
   // 2026-07-27 production schema dump proves the parked_010 body IS live. The
   // public wrapper in 20260908130000 gates NULL-safely (NOT EXISTS ... is_active)

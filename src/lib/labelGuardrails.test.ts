@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   normalizeRateUnit,
   compareToMaxRate,
@@ -141,5 +141,17 @@ describe('needsOverride', () => {
     expect(needsOverride('block', [{ status: 'within' }, { status: 'no_label_max' }])).toBe(false);
     expect(needsOverride('block', [{ status: 'cannot_compare' }])).toBe(false);
     expect(needsOverride('block', [])).toBe(false);
+  });
+});
+
+// KI-18: with no application date, "today" is the Chicago date, not the UTC date.
+describe('phiHarvestWarning with no application date', () => {
+  afterEach(() => { vi.useRealTimers(); });
+  it('uses the Chicago date at 8:30 PM CDT on Sep 30 (Oct 1 in UTC)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T01:30:00Z'));
+    const r = phiHarvestWarning(30, '2026-10-30', null);
+    expect(r.earliestHarvest).toBe('2026-10-30'); // Sep 30 + 30 days; UTC would give Oct 31
+    expect(r.status).toBe('clear');
   });
 });

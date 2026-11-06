@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261106145427",
+    "migrations_high_water": "20261106161512",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -530,6 +530,9 @@
       "20261117130000_tote_fill_from_bulk",
       "20261118110000_sale_line_vendor",
       "20261120100000_field_invoice_due_date_follows_owner_terms",
+      "20261121090000_ki18_chicago_ticket_year_dashboard_aging_invoice_date_limit",
+      "20261123110000_bind_ops_replay_receipts_batch4e",
+      "20261123120000_product_parent_proposals",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1359,6 +1362,21 @@
       "rejected",
       "needs_manual"
     ],
+    "product_parent_brands.status": [
+      "active",
+      "retired"
+    ],
+    "product_parent_proposal_groups.status": [
+      "proposed",
+      "approved",
+      "rejected",
+      "held"
+    ],
+    "product_parent_proposals.status": [
+      "open",
+      "superseded",
+      "closed"
+    ],
     "product_supplier_links.comparison_status": [
       "pending",
       "comparable",
@@ -1520,6 +1538,8 @@
     "product_form_units",
     "product_info_change_set_rows",
     "product_margin_floor_changes",
+    "product_parent_brand_events",
+    "product_parent_brand_sources",
     "product_parent_copy_passes",
     "product_parent_events",
     "product_rate_correction_passes",
@@ -2614,6 +2634,36 @@
         "product_label_drafts_status_check"
       ]
     },
+    "product_parent_brand_events.event_type": {
+      "values": [
+        "created",
+        "updated",
+        "retired"
+      ],
+      "constraints": [
+        "product_parent_brand_events_event_type_check"
+      ]
+    },
+    "product_parent_brands.signal_word": {
+      "values": [
+        "Danger",
+        "Warning",
+        "Caution"
+      ],
+      "constraints": [
+        "product_parent_brands_signal_word_check"
+      ],
+      "nullable": true
+    },
+    "product_parent_brands.status": {
+      "values": [
+        "active",
+        "retired"
+      ],
+      "constraints": [
+        "product_parent_brands_status_check"
+      ]
+    },
     "product_parent_events.event_type": {
       "values": [
         "created",
@@ -2636,6 +2686,37 @@
       ],
       "constraints": [
         "product_parent_members_size_role_check"
+      ]
+    },
+    "product_parent_proposal_groups.identity_basis": {
+      "values": [
+        "epa_number",
+        "owner_confirmed"
+      ],
+      "constraints": [
+        "product_parent_proposal_groups_identity_basis_check"
+      ],
+      "nullable": true
+    },
+    "product_parent_proposal_groups.status": {
+      "values": [
+        "proposed",
+        "approved",
+        "rejected",
+        "held"
+      ],
+      "constraints": [
+        "product_parent_proposal_groups_status_check"
+      ]
+    },
+    "product_parent_proposals.status": {
+      "values": [
+        "open",
+        "superseded",
+        "closed"
+      ],
+      "constraints": [
+        "product_parent_proposals_status_check"
       ]
     },
     "product_parents.product_form": {
@@ -4327,10 +4408,52 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "product_parent_brands",
+      "constraint": "product_parent_brands_brand_name_check",
+      "def": "CHECK (((btrim(brand_name) <> ''::text) AND (brand_name = btrim(brand_name)) AND (char_length(brand_name) <= 200)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_brands",
+      "constraint": "product_parent_brands_epa_registration_check",
+      "def": "CHECK (((epa_registration IS NULL) OR (epa_registration ~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$'::text)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_brands",
+      "constraint": "product_parent_brands_manufacturer_check",
+      "def": "CHECK (((manufacturer IS NULL) OR ((btrim(manufacturer) <> ''::text) AND (manufacturer = btrim(manufacturer)) AND (char_length(manufacturer) <= 200))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_brands",
+      "constraint": "product_parent_brands_row_version_check",
+      "def": "CHECK ((row_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "product_parent_members",
       "constraint": "product_parent_members_check",
       "def": "CHECK (((fill_source_product_id IS NULL) OR (size_role = 'fixed_tote'::text)))",
       "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_proposal_groups",
+      "constraint": "product_parent_proposal_groups_check",
+      "def": "CHECK (((status = 'approved'::text) = (parent_id IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_proposal_groups",
+      "constraint": "product_parent_proposal_groups_check1",
+      "def": "CHECK (((status <> 'proposed'::text) OR (identity_basis IS NOT NULL)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_proposals",
+      "constraint": "product_parent_proposals_proposal_version_check",
+      "def": "CHECK ((proposal_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
       "table": "product_parents",
@@ -6455,6 +6578,47 @@
         "updated_at"
       ]
     },
+    "product_parent_brand_events": {
+      "no_default": [
+        "parent_brand_id",
+        "parent_id",
+        "event_type",
+        "after_values",
+        "changed_by"
+      ],
+      "with_default": [
+        "id",
+        "changed_at"
+      ]
+    },
+    "product_parent_brand_sources": {
+      "no_default": [
+        "legacy_brand_id",
+        "parent_brand_id",
+        "legacy_row_version",
+        "mapped_by"
+      ],
+      "with_default": [
+        "mapped_at"
+      ]
+    },
+    "product_parent_brands": {
+      "no_default": [
+        "parent_id",
+        "brand_name",
+        "created_by",
+        "updated_by"
+      ],
+      "with_default": [
+        "id",
+        "is_currently_sourced",
+        "row_version",
+        "status",
+        "legacy_brand_ids",
+        "created_at",
+        "updated_at"
+      ]
+    },
     "product_parent_copy_passes": {
       "no_default": [
         "txid",
@@ -6484,6 +6648,33 @@
       "with_default": [
         "size_role",
         "added_at",
+        "updated_at"
+      ]
+    },
+    "product_parent_proposal_groups": {
+      "no_default": [
+        "proposal_id",
+        "suggested_name",
+        "members",
+        "group_fingerprint"
+      ],
+      "with_default": [
+        "id",
+        "conflicts",
+        "flags",
+        "status",
+        "updated_at"
+      ]
+    },
+    "product_parent_proposals": {
+      "no_default": [
+        "proposal_version",
+        "built_by"
+      ],
+      "with_default": [
+        "id",
+        "status",
+        "built_at",
         "updated_at"
       ]
     },
@@ -9076,6 +9267,42 @@
       "created_at",
       "updated_at"
     ],
+    "product_parent_brand_events": [
+      "id",
+      "parent_brand_id",
+      "parent_id",
+      "event_type",
+      "reason",
+      "before_values",
+      "after_values",
+      "changed_by",
+      "changed_by_name",
+      "changed_at"
+    ],
+    "product_parent_brand_sources": [
+      "legacy_brand_id",
+      "parent_brand_id",
+      "legacy_row_version",
+      "mapped_at",
+      "mapped_by"
+    ],
+    "product_parent_brands": [
+      "id",
+      "parent_id",
+      "brand_name",
+      "epa_registration",
+      "manufacturer",
+      "is_currently_sourced",
+      "is_rup",
+      "signal_word",
+      "row_version",
+      "status",
+      "legacy_brand_ids",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at"
+    ],
     "product_parent_copy_passes": [
       "txid",
       "product_id",
@@ -9101,6 +9328,32 @@
       "fill_source_product_id",
       "added_by",
       "added_at",
+      "updated_at"
+    ],
+    "product_parent_proposal_groups": [
+      "id",
+      "proposal_id",
+      "suggested_name",
+      "product_form",
+      "generic_epa_registration",
+      "identity_basis",
+      "members",
+      "conflicts",
+      "flags",
+      "group_fingerprint",
+      "status",
+      "parent_id",
+      "decided_by",
+      "decided_at",
+      "reason",
+      "updated_at"
+    ],
+    "product_parent_proposals": [
+      "id",
+      "proposal_version",
+      "status",
+      "built_by",
+      "built_at",
       "updated_at"
     ],
     "product_parents": [

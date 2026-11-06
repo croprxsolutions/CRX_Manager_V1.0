@@ -194,11 +194,14 @@ The matrix row below reads `Admin / Sales Rep` for SELECT, marking only INSERT a
 CREATE POLICY "del_select" ON public.deliveries
   FOR SELECT TO authenticated
   USING (
-    is_admin()
-    OR is_sales_rep()
+    (select public.is_admin())
+    OR (select public.is_sales_rep())
     OR assigned_driver = (select auth.uid())
   );
 ```
+Wrap the role helpers in `(select ...)` so they run once per query, not once per row
+(migration `20261129100000`; at 60,000 deliveries the per-row form made a sales rep's list
+several times slower).
 Live carries no `is_driver()` conjunct: the ownership test alone decides it, so a driver reaches
 a delivery by being assigned to it rather than by holding the role. That is the same distinction
 the matrix banner draws for the `Driver` cells. This block used to show the `is_driver() AND`

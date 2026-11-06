@@ -13,7 +13,8 @@
 --   * no INSERT/UPDATE/DELETE/FOR ALL policy on quote_versions;
 --   * no direct INSERT/UPDATE/DELETE/TRUNCATE/TRIGGER/REFERENCES privilege for
 --     anon/authenticated — six, which is the full write-capable set minus
---     MAINTAIN, deliberately kept and explained at the migration's REVOKE.
+--     MAINTAIN, deliberately kept and explained at the migration's REVOKE
+--     (20261122100000 later revoked MAINTAIN too; predicate browser-table-maintenance checks it).
 --     (TRUNCATE matters independently — RLS policies do not apply to it at all);
 --   * reads and qversions_select preserved, because version history must keep
 --     rendering and this predicate must not pass by having broken reads. Since

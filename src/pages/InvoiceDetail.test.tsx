@@ -145,6 +145,8 @@ vi.mock('../lib/dateUtils', () => ({
   // and the suite would still have been green. The two dates must differ for that test to
   // discriminate at all.
   todayInBusinessTz: vi.fn(() => '2026-09-30'),
+  latestInvoiceDate: vi.fn(() => '2027-09-30'),
+  invoiceDateTooFarProblem: vi.fn(() => null),
   parseLocalDate: vi.fn((d: string) => new Date(d)),
 }));
 // parseCents is deliberately NOT mocked: the real parser refuses more than two

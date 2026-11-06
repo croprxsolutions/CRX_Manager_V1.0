@@ -7,6 +7,12 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "get_orders_keyset_page": {
+      "chain": "smoke-goal4-orders-keyset-page.sql",
+      "area": ["regression"],
+      "description": "REQUIRES 20261125100000. Goal 4 Orders list bookmark paging, read only: as the oldest active admin under the authenticated role, following next_cursor in pages of 7 through the current season lists each order once in (order_date DESC, id) order with total_count and total_price_cents equal to the table, get_orders_page (now its wrapper) returns the same first page, a bookmark from another sort is refused; an active driver, when one exists, sees no order.",
+      "covers": ["get_orders_keyset_page", "get_orders_page"]
+    },
     "ops_replay_binding_batch4e": {
       "chain": "smoke-ops-replay-binding-batch4e.sql",
       "container_only": true,

@@ -153,16 +153,28 @@ const FULL_READ_PAGE_SIZE = 500;
 // limit null reads every matching row (exports, the load sheet, the calendar, the driver view), in pages of 500.
 async function readDeliveriesPage(query: DeliveriesQuery, limit: number | null, offset = 0): Promise<DeliveriesPage> {
   if (limit !== null) return readOnePage(query, limit, offset);
-  // Walk the list by delivery id, which never changes, so a delivery edited between pages is never skipped
-  // or repeated; then put the rows back in the chosen order.
+  // Each page is its own snapshot: a list that changed between pages (its total moved, or the rows read
+  // do not add up to it) is read again, and after three tries reported as a failed read.
+  for (let attempt = 0; attempt < FULL_READ_ATTEMPTS; attempt++) {
+    const result = await readAllPagesOnce(query);
+    if (result) return result;
+  }
+  throw new Error('Deliveries kept changing while they were read. Please try again.');
+}
+const FULL_READ_ATTEMPTS = 3;
+// Walk the list by delivery id, which never changes, so a delivery edited between pages is never skipped
+// or repeated; then put the rows back in the chosen order. Null when the list changed mid-read.
+async function readAllPagesOnce(query: DeliveriesQuery): Promise<DeliveriesPage | null> {
   const first = await readOnePage(query, FULL_READ_PAGE_SIZE, 0, FIRST_ID);
   const rows = [...first.rows];
   for (let page = first; page.rows.length === FULL_READ_PAGE_SIZE;) {
     page = await readOnePage(query, FULL_READ_PAGE_SIZE, 0, page.rows[page.rows.length - 1].id);
+    if (page.total_count !== first.total_count) return null;
     rows.push(...page.rows);
   }
+  if (rows.length !== first.total_count) return null;
   rows.sort((a, b) => (a.sort_position ?? 0) - (b.sort_position ?? 0));
-  return { ...first, rows, total_count: rows.length };
+  return { ...first, rows };
 }
 // Below every delivery id: the first page of a read by id.
 const FIRST_ID = '00000000-0000-0000-0000-000000000000';
@@ -876,7 +888,10 @@ export default function Deliveries() {
   }, [searched]);
 
   /* ─── Batch actions ─── */
-  const selectedDeliveries = searched.filter((d) => selected.has(d.id));
+  // While a new page, search or filter loads, the rows on screen belong to the old query: nothing acts on them.
+  const selectedDeliveries = pageLoading ? [] : searched.filter((d) => selected.has(d.id));
+  // Exports read the query on screen; a search still being typed has not reached it yet.
+  const listSettling = pageLoading || listSearch.trim() !== searchTerm;
   const selectableShown = searched.filter((d) => SELECTABLE_STATUSES.includes(d.status));
   const allShownSelected = selectableShown.length > 0 && selectableShown.every((d) => selected.has(d.id));
   const activeFilterCount = [statusFilter, driverFilter, priorityFilter, customerFilter, scheduleDate || datePreset].filter(Boolean).length;
@@ -1646,6 +1661,7 @@ export default function Deliveries() {
             icon={<Download className="w-4 h-4" />}
             onClick={handleExportCSV}
             loading={exportingCsv}
+            disabled={listSettling}
           >
             Export CSV
           </Button>
@@ -1655,6 +1671,7 @@ export default function Deliveries() {
             icon={<FileText className="w-4 h-4" />}
             onClick={handleExportPDF}
             loading={exportingPdf}
+            disabled={listSettling}
           >
             Download PDF
           </Button>
@@ -1664,6 +1681,7 @@ export default function Deliveries() {
             icon={<FileText className="w-4 h-4" />}
             onClick={handlePrintLoadSheet}
             loading={printingLoadSheet}
+            disabled={listSettling}
           >
             {selectedDeliveries.length > 0 ? `Load Sheet (${selectedDeliveries.length})` : 'Load Sheet'}
           </Button>
@@ -1931,6 +1949,7 @@ export default function Deliveries() {
               )}
               sortState={sortState}
               onSortChange={setSortState}
+              serverSide
               loading={loading || pageLoading}
             />
           </div>

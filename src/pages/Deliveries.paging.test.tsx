@@ -24,6 +24,10 @@ const H = vi.hoisted(() => ({
   // Just before this get_deliveries_page call, a delivery read on page 1 is cancelled and a new one is
   // saved at the end, so the total stays the same and every later row moves up one place.
   editDeliveriesAtCall: null as number | null,
+  // Every get_deliveries_page call first saves one more delivery, so no read ever sees a still list.
+  growEveryPageCall: false,
+  // While set, get_deliveries_page answers only once this settles, so a test can look at the screen mid-read.
+  holdPageCalls: null as Promise<void> | null,
   failTable: null as string | null,
   pageCalls: [] as Array<Record<string, unknown>>,
   toast: vi.fn(),
@@ -95,6 +99,8 @@ vi.mock('../lib/db', () => ({
         H.deliveries.splice(1, 1);
         H.deliveries.push({ ...H.deliveries[0], id: 'del-new', delivery_number: 'DEL-NEW' });
       }
+      if (H.growEveryPageCall) H.deliveries.push({ ...H.deliveries[0], id: `del-grow-${H.pageCalls.length}`, delivery_number: `DEL-GROW-${H.pageCalls.length}` });
+      if (H.holdPageCalls) return H.holdPageCalls.then(() => ({ data: deliveriesPage(args), error: null }));
       return Promise.resolve({ data: deliveriesPage(args), error: null });
     }),
   },
@@ -138,6 +144,8 @@ beforeEach(() => {
   H.auth.profile = { id: 'user-1', role: 'admin' };
   H.failPageFromCall = null;
   H.editDeliveriesAtCall = null;
+  H.growEveryPageCall = false;
+  H.holdPageCalls = null;
   H.failTable = null;
   H.pageCalls = [];
   H.deliveries = Array.from({ length: TOTAL }, (_, i) => ({
@@ -240,6 +248,24 @@ describe('Deliveries list pages in the database', () => {
     expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0050');
   });
 
+  it('offers no batch action or export on the old rows while a new page loads', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    fireEvent.click(screen.getAllByRole('checkbox', { name: 'Select DEL-0000' })[0]);
+    expect(screen.getByRole('button', { name: /Cancel 1 Selected/ })).toBeInTheDocument();
+
+    let release!: () => void;
+    H.holdPageCalls = new Promise<void>((resolve) => { release = resolve; });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Cancel 1 Selected/ })).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Export CSV/ })).toBeDisabled();
+
+    await act(async () => { release(); });
+    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
+    expect(screen.queryByRole('button', { name: /Cancel 1 Selected/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Export CSV/ })).toBeEnabled();
+  });
+
   it('exports nothing and says so when the export read fails', async () => {
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
     await screen.findByText('Scheduled Today');
@@ -250,7 +276,7 @@ describe('Deliveries list pages in the database', () => {
     expect(H.exportToCSV).not.toHaveBeenCalled();
   });
 
-  it('exports every delivery once when deliveries change between the pages of an export', async () => {
+  it('reads an export again when deliveries change between its pages, so it never mixes two moments', async () => {
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
     await screen.findByText('Scheduled Today');
     H.editDeliveriesAtCall = H.pageCalls.length + 2;
@@ -258,11 +284,23 @@ describe('Deliveries list pages in the database', () => {
 
     await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
     const exported = (H.exportToCSV.mock.calls[0][0] as Array<{ delivery_number: string }>).map((d) => d.delivery_number);
-    // Reading by place would skip DEL-0500 here (it moved up onto page 1); reading by id cannot.
+    // The first pass read DEL-0001 before it was cancelled and DEL-NEW after it was saved: it does not
+    // add up to the total, so the export is read again and holds only the list as it now stands.
+    expect(exported).not.toContain('DEL-0001');
     expect(exported).toContain('DEL-0500');
     expect(exported).toContain('DEL-NEW');
-    expect(exported).toHaveLength(TOTAL + 1);
-    expect(new Set(exported).size).toBe(TOTAL + 1);
+    expect(exported).toHaveLength(TOTAL);
+    expect(new Set(exported).size).toBe(TOTAL);
+  });
+
+  it('exports nothing and says so when deliveries keep changing during every read', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    H.growEveryPageCall = true;
+    fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
+
+    await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'The deliveries could not be read for the export. Nothing was exported; try again.'));
+    expect(H.exportToCSV).not.toHaveBeenCalled();
   });
 
   it('keeps a warning on screen when the stock check fails, so no badge is not read as enough stock', async () => {

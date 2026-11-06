@@ -42,9 +42,9 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: need an active admin';
   END IF;
 
-  INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, container_size, container_unit, current_cost, tier1_price, is_active) VALUES
-    (v_bulk, '[SMOKE] Tote Fill Bulk ' || v_tag, 'SMOKE-TFB-' || v_tag, 'liquid', 'Gal', NULL, NULL, NULL, NULL, true),
-    (v_tote, '[SMOKE] Tote Fill 265 ' || v_tag, 'SMOKE-TFT-' || v_tag, 'liquid', 'Ea', 265, 'Gal', NULL, NULL, true);
+  INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, container_size, container_unit, is_active) VALUES
+    (v_bulk, '[SMOKE] Tote Fill Bulk ' || v_tag, 'SMOKE-TFB-' || v_tag, 'liquid', 'Gal', NULL, NULL, true),
+    (v_tote, '[SMOKE] Tote Fill 265 ' || v_tag, 'SMOKE-TFT-' || v_tag, 'liquid', 'Ea', 265, 'Gal', true);
   INSERT INTO public.product_parents (id, name, product_form, category, created_by, updated_by)
     VALUES (v_parent, '[SMOKE] Tote Fill ' || v_tag, 'liquid', 'Liquid Fertilizer', v_admin, v_admin);
   INSERT INTO public.product_parent_members (product_id, parent_id, size_role, fill_source_product_id, added_by) VALUES

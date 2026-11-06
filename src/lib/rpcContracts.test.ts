@@ -3100,7 +3100,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER DELETE row trigger on invoices, allocation_sets and payments: appends one audit snapshot per row a delete really erased, so a replayed delete matches no row and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   _refuse_financial_truncate:
     'BEFORE TRUNCATE statement trigger on invoices, allocation_sets and payments: only raises (the word TRUNCATE is in its message), writes nothing; every API-role EXECUTE is revoked',
-  // Job-line EPA snapshot (local candidate 20261123100000).
+  // Job-line EPA snapshot (local candidate 20261127100000).
   _product_epa_to_unsprayed_job_lines:
     "AFTER UPDATE OF epa_registration row trigger on products: copies the product's new number onto lines of jobs not sprayed yet, a replay finds them already equal and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked",
   // KI-25 receipt queue (20261113140000).

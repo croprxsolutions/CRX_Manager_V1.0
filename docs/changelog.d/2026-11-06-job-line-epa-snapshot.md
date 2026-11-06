@@ -1,6 +1,6 @@
 ## 2026-11-06 — Spray-job lines keep their EPA number; parent EPA correction built, switched off (database)
 
-- New migration `20261123100000_job_line_epa_snapshot.sql` (record in `docs/reference/migrations.d/`).
+- New migration `20261127100000_job_line_epa_snapshot.sql` (record in `docs/reference/migrations.d/`).
   Each spray-job chemical line now carries its own copy of the EPA number, filled by the database
   from the product whenever a line is written or its product changes. Existing lines got their
   product's number, which is what every printout shows today. When a product's EPA number is edited,

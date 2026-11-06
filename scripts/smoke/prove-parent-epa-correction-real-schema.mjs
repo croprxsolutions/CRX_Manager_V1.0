@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261123100000_job_line_epa_snapshot: spray-job lines keep their own EPA
+ * Real-schema proof for 20261127100000_job_line_epa_snapshot: spray-job lines keep their own EPA
  * number, invoice lines are never written without one, the proof and year-end readers use the
  * copies, and the parent EPA correction (switched off by the file, switched on here for the test)
  * writes the parent, every size and open jobs only, refuses while an invoice line has no copy,
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261123100000_job_line_epa_snapshot.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261127100000_job_line_epa_snapshot.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

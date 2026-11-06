@@ -4,7 +4,7 @@
 --  the same pattern as 20261108120000_product_parents.sql.)
 --
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261123100000_job_line_epa_snapshot.md.
+-- docs/reference/migrations.d/20261127100000_job_line_epa_snapshot.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (Mason, 2026-11-06: "yes i want to be able to fix epa issues"): a parent's EPA number can be
@@ -345,7 +345,7 @@ BEGIN
 
   -- ── Products applied (job-wide — the same tank mix went on every field). REI/PHI prefer
   -- the job line's captured value, else the product master. The EPA number is the job line's
-  -- own copy (20261123100000), so a later parent correction leaves a sent proof as it was.
+  -- own copy (20261127100000), so a later parent correction leaves a sent proof as it was.
   SELECT COALESCE(jsonb_agg(pr ORDER BY (pr->>'sort_order')::int NULLS LAST, pr->>'product_name'), '[]'::jsonb)
   INTO v_products
   FROM (
@@ -437,7 +437,7 @@ BEGIN
     AND status IN ('posted', 'overdue', 'paid') AND deleted_at IS NULL;
 
   -- The EPA number is the invoice line's own copy (the product's only for a line made without
-  -- one; a parent correction refuses while such a line exists: 20261123100000).
+  -- one; a parent correction refuses while such a line exists: 20261127100000).
   SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb ORDER BY t.category, t.product_name), '[]'::jsonb)
   INTO v_product_usage
   FROM (

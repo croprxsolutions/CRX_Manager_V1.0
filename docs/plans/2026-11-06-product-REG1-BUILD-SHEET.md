@@ -126,9 +126,9 @@ Rules that follow:
 - The four tables in 3.1, with RLS, `SELECT` policies, the event table's append-only triggers, and the adjuvant validator.
 - `preview_epa_registration_seed()` (admin, read-only): per distinct normalized number on active and inactive sizes and on brand rows, the proposed registration facts, every disagreement (column, values, row counts, product IDs), and a `fingerprint` of the whole result. RUP proposal: any row `true` → `yes`, else the seed's RUP default.
 - `seed_epa_registrations(p_picks jsonb, p_rup_default text, p_expected_fingerprint text, p_idempotency_key text)` (admin, key required, `_product_parent_replay` pattern): `p_rup_default` in (`unknown`, `no`) is Mason's answer to Q1 and sets `rup_status` for numbers with no `true` row (no default value; a missing one is refused); refuses a stale fingerprint; refuses unless every disagreement has a pick; inserts all registrations, writes one `seeded` event each, and copies each pick onto disagreeing sizes and brands under passes. All-or-nothing. Refuses if any registration already exists (one-time). **Until the seed has run** (a `seeded` event exists), `set_epa_registration`, `assign_epa_registration` and `settle_epa_registration_drift` refuse with `EPA_REGISTRATION_NOT_SEEDED`, so nothing can create a registration that would block the seed; the insert trigger and the PR 2a/PR 3 re-issues ship only after the seed.
-- `set_epa_registration(p_epa_registration, p_expected_version, p_changes jsonb, p_reason, p_idempotency_key)` (admin, key): locks the registration, then the sizes (ID order) and brands carrying it; refuses a stale version; updates it; writes one event; copies the changed facts to every size and brand under passes. Creates the registration when `p_expected_version` is null and none exists (create rule in 3.2), writing a `created` event. When `rup_status` changes to `yes` (PR 2a onward) it also runs the RUP catch-up for that number in the same transaction (section 5). Every successful save also sets `updated_by`/`updated_at` and replaces `source = 'unverified_insert'` with `admin`.
+- `set_epa_registration(p_epa_registration, p_expected_version, p_changes jsonb, p_reason, p_idempotency_key)` (admin, key): locks the registration, then the sizes (ID order) and brands carrying it; refuses a stale version; updates it; writes one event; copies the changed facts to every size and brand under passes. Creates the registration when `p_expected_version` is null and none exists (create rule in 3.2), writing a `created` event. Every successful save also sets `updated_by`/`updated_at` and replaces `source = 'unverified_insert'` with `admin`.
 - `preview_epa_assignment(p_target_table, p_target_id, p_new_number)` and `assign_epa_registration(p_target_table, p_target_id, p_new_number, p_expected_target_fingerprint, p_reason, p_idempotency_key)` (admin, key): Change EPA number on one ungrouped size or one brand. Locks old and new registration (number order), then the target; refuses a grouped size (`EPA_REGISTRATION_GROUPED_USE_PARENT`, which points to 7.7's correction); writes the number and the new registration's facts under a pass; creates the new registration from the target's facts if none (create rule in 3.2, `created` event; `rup_status` = `yes` when the target's `is_rup` is true, else `unknown`, the same mapping as the insert trigger). Writes one `assigned` event on each of the old and new registrations (only the new one when the target had no number, or when its old number has no registration, with the old number recorded in the event either way), carrying the target, old and new number, reason and actor.
-- `get_epa_registrations(p_numbers text[] default null)`: open to active users, checked inside the function (`auth.uid()` must be an active `profiles` row), because a `SECURITY DEFINER` function does not apply the table's RLS; no cost or price. The same check is in `get_rup_unreviewed_sales`.
+- `get_epa_registrations(p_numbers text[] default null)`: open to active users, checked inside the function (`auth.uid()` must be an active `profiles` row), because a `SECURITY DEFINER` function does not apply the table's RLS; no cost or price.
 - `preview_epa_registration_drift()` (admin, read-only) and `settle_epa_registration_drift(p_picks jsonb, p_expected_fingerprint text, p_idempotency_key text)` (admin, key): used before PR 3 (section 7).
 - **Draft targets:** `create_label_draft` and `bulk_create_label_drafts` implementations re-issued from their live bodies with one addition: insert the `label_draft_targets` row (number, product, the product's label-fact fingerprint, the registration version if one exists). Public wrappers unchanged.
 - Grants: public RPCs `EXECUTE` to `authenticated`, helpers none. **No grant or policy change on an existing table.**
@@ -152,9 +152,9 @@ Rules that follow:
 
 ---
 
-## 5. PR 2a · Commit label drafts into the registration, and RUP tri-state posting (database only)
+## 5. PR 2a · Commit label drafts into the registration (database only)
 
-**Depends on:** PR 1 applied and seeded; KI-18's re-issue of `generate_rup_sales_records` (`20261128100000`, worktree `mystifying-chandrasekhar-760465`) landed first, so PR 2a re-issues from that body.
+**Depends on:** PR 1 applied and seeded.
 
 **Migration** `<stamp>_label_draft_commit_registration`:
 - **`_commit_label_draft_replay_impl_20261015`** re-issued from its live body (md5 `dee9e34d…` at writing; diffed again before build):
@@ -166,7 +166,7 @@ Rules that follow:
   5. **Different number on the draft:** do not write; return `LABEL_DRAFT_EPA_CHANGE` so the screen opens Change EPA number (ungrouped) or the parent correction (grouped).
   6. **Product with no number:** keep today's direct size commit, checked against the target row's fingerprint.
   7. RUP: drafts have no RUP field, so a commit never changes `rup_status`.
-- **RUP posting** (simplified after review: no new table and no move-between-lists step). `generate_rup_sales_records(p_invoice_id, p_idempotency_key)` is re-issued from the KI-18 body. It decides each line by **the EPA number stored on the invoice line** (`invoice_items.epa_registration`, a copy made when the line was saved; falls back to the product's number only when the line's copy is blank), so a later reassignment of the product cannot change how an old sale is classed. For those numbers it takes the registrations `FOR SHARE`, in number order, after the invoice lock it already holds; no product lock is taken, so there is no retry loop and no lock inversion. A line posts to `rup_sales_records` when its registration's `rup_status = 'yes'`, or, when the number has no registration (numberless, or a new number before PR 3), when `products.is_rup = true` as today. It keeps today's de-duplication (one active record per invoice and product). **Catch-up instead of moving rows:** when `set_epa_registration` or a seed/settlement pick changes a registration to `yes` (drafts carry no RUP field, so a draft commit never does), the same transaction (still holding the registration `FOR UPDATE`) posts every posted, not-deleted invoice line carrying that number that has no active record, through the same per-line insert code. A generation run on that number waits for the lock, so it either committed before the catch-up's read (its lines are then seen and skipped as already recorded, or posted by the catch-up) or runs after and reads `yes`. **"Not reviewed" is a read, not a table:** `get_rup_unreviewed_sales(p_from, p_to)` (admin and sales rep, like the register) lists posted invoice lines whose number's registration is `unknown`, or which carries a number with no registration and whose product is not marked restricted-use (numberless lines are not listed, as today), and that have no active record. Nothing can be stranded on it: the list is computed from the current status every time. Old register rows are unchanged.
+- **RUP posting is not changed** (decided after Luna rounds 4-6 kept finding races in every design that re-classed sales by registration; the mechanism is deleted rather than patched). Each size's `is_rup` is already a copy of its registration (`is_rup = (rup_status = 'yes')`, written under a pass by the seed, `set_epa_registration` and the insert trigger), so `generate_rup_sales_records` keeps working exactly as today and is not re-issued. A registration changed to `yes` later posts only new sales, which is today's behaviour when someone ticks the RUP box. "Not reviewed" is a list of **registrations** (`rup_status = 'unknown'`), shown on Compliance through `get_epa_registrations`, so Mason can work through the labels; a list of past sales of not-reviewed products is Q2 and, if wanted, a separate later package.
 
 **Files:** migration, changelog note, migrations.d record, `scripts/smoke/prove-label-draft-registration-real-schema.mjs`, types, rpc-functions doc.
 
@@ -174,20 +174,16 @@ Rules that follow:
 - A draft for a number shared by two sizes commits once and both sizes plus the registration change; one event.
 - A non-admin call to every admin RPC is refused before any read of the replay table, and every event's actor equals the caller (a forged actor parameter is not accepted because none exists).
 - A draft accepted after a client changed its REI directly is refused with `LABEL_DRAFT_CHANGED`; a non-admin commit on a registered number is refused; the numberless commit keeps today's role rule.
-- An invoice line keeps its class by its own stored number: reassigning the product from A to B after the sale does not move the line between the register and the not-reviewed list.
+- RUP: setting a registration to `yes` sets `is_rup = true` on every size carrying it; to `no` or `unknown`, false; `generate_rup_sales_records` is byte-identical to its live body (md5 compared) and an invoice posted afterwards records exactly the `yes` sizes.
 - A draft whose `product_id` or EPA number was changed directly after creation is refused with `LABEL_DRAFT_TARGET_MISMATCH` and writes nothing.
 - Draft on a number with no registration: held, nothing written; after creating the registration, commit succeeds.
 - Draft with a different number: nothing written, code returned.
 - Product edited after the draft was made: refused unless force.
 - Numberless product: today's behaviour, byte for byte.
 - A grouped size's draft no longer fails on the parent guard for same-number facts.
-- A size created with a new EPA number after the seed (no registration yet): `is_rup = true` posts to the register; `false` appears on the not-reviewed list.
-- Race: a generation run and a `set_epa_registration` change from `unknown` to `yes` on the same number, started in both orders; the line ends on the register exactly once and never on the not-reviewed list.
-- Changing a registration from `unknown` to `yes` posts its past lines once; running it again (or a later generation) adds nothing; changing to `no` removes its lines from the not-reviewed list and posts nothing.
-- RUP: `yes` line posts to the register; `unknown` line appears on the not-reviewed list; `no` line on neither; existing register rows unchanged.
 - Replay and admin checks as PR 1. Two sessions committing drafts on the same number serialize without deadlock.
 
-**Risks:** re-issuing a function KI-18 is also changing; build only after it lands and diff the body. **Sol list:** yes. **Mason-gated:** none.
+**Risks:** the commit impl is re-issued from its live body; diff it against `pg_get_functiondef` before review. **Sol list:** yes. **Mason-gated:** none.
 
 ---
 
@@ -204,11 +200,11 @@ Rules that follow:
 - **RUP readers** (`rupCompliance.ts:56`, `Compliance.tsx:179`, `LogbookReport.tsx:313`, `:343`, `epaDataQualityReport.ts:207`, `ProductChangeHistory.tsx:16`, `:28`, `costFields.ts:34`): read `rup_status`; Compliance shows an "RUP not reviewed" count and list (§7.8 item 1).
 - **Warnings** (grand plan §8): quote-add warning for a cancelled registration. Delivery brand-pick warning stays Stage 3.
 
-- **Saving safely** (every new save: registration edit, Change EPA number, draft commit outcomes, drift settlement): each modal keeps its retry key from `useIdempotencyKey` until the database confirms the save (or refuses by name), so a retry after a lost reply reuses the same key; a save in flight disables its button. The retry key is held at page level, keyed by the target, not inside the modal, so closing and reopening the same target before a reply keeps the same key. Each open of a panel or modal gets a fresh request token; a reply is applied only if the same open is still showing (same token), otherwise it is dropped and the panel reloads from the database.
+- **Saving safely** (every new save: registration edit, Change EPA number, draft commit outcomes, drift settlement): each modal keeps its retry key from `useIdempotencyKey` until the database confirms the save (or refuses by name), so a retry after a lost reply reuses the same key; the key is bound to the submitted values, and any edit to them after a failed or lost save starts a new key. While a save is in flight, the whole form (inputs and buttons) is disabled, so a reply can never overwrite a newer unsaved value. The retry key is held at page level, keyed by the target, not inside the modal, so closing and reopening the same target before a reply keeps the same key. Each open of a panel or modal gets a fresh request token; a reply is applied only if the same open is still showing (same token), otherwise it is dropped and the panel reloads from the database.
 
 **Files:** the screens above, their tests, `src/lib/epaRegistrations.ts` (new: the RPC calls), `docs/workflows/UI_PATTERNS.md` untouched.
 
-**Done when:** in the private test copy, observed: Registration panel, edit on one size changes its sibling, Change EPA number on an ungrouped size, grouped size pointing to the parent correction, label-review commit for each outcome, RUP tri-state on product page, list, CSV and Compliance, cancelled banner and quote warning. Unit tests for the tri-state mapping, error-code handling, key kept across a retry after a lost reply (one event in the database), a late reply for registration A ignored while B is shown, and a late reply ignored after A was closed and reopened.
+**Done when:** in the private test copy, observed: Registration panel, edit on one size changes its sibling, Change EPA number on an ungrouped size, grouped size pointing to the parent correction, label-review commit for each outcome, RUP tri-state on product page, list, CSV and Compliance, cancelled banner and quote warning. Unit tests for the tri-state mapping, error-code handling, key kept across a retry after a lost reply (one event in the database), a late reply for registration A ignored while B is shown, a late reply ignored after A was closed and reopened, a new key after the values were edited, and inputs disabled while saving.
 
 **Sol list:** no unless it touches a listed path (check with the classifier at build). **Mason-gated:** none.
 
@@ -276,7 +272,7 @@ That covers §7.8 item 4 (job snapshot lost on `save_job` delete-recreate) throu
 
 | §7.8 item | Settled by |
 |---|---|
-| RUP tri-state through `generate_rup_sales_records`, Compliance list, Products CSV | `rup_status` on the registration (PR 1); posting rule and unreviewed list (PR 2a); readers (PR 2b); Q1, Q2 below |
+| RUP tri-state through `generate_rup_sales_records`, Compliance list, Products CSV | `rup_status` on the registration (PR 1); sizes' `is_rup` copied from it, so posting is unchanged (section 5); not-reviewed registrations listed on Compliance and the CSV shows the tri-state (PR 2b); Q1, Q2 below |
 | Insert-created registration starts as `unknown` | Insert trigger rule (3.3): `is_rup` true → `yes`, else `unknown` |
 | PR 2a commit when no registration exists | Held with `LABEL_DRAFT_NO_REGISTRATION`; screen offers create (section 5) |
 | 7.7 job snapshot lost on `save_job` delete/recreate | Parked branch's column-plus-trigger design; harness must prove the recreate case (section 8) |
@@ -291,7 +287,7 @@ That covers §7.8 item 4 (job snapshot lost on `save_job` delete-recreate) throu
 |---|---|---|---|
 | PR #1581 size notes | `20261127110000_product_size_notes_in_one_step.sql` re-issues `_insert_parent_size` | PR 3 re-issues the same function | PR 3 builds after #1581 merges, from its body |
 | Taha's PAR-2 fixes | worktree `happy-mendel-a24b2b`, `20261126100000_product_parent_review_fixes.sql`; re-issues `move_product_size`, `_product_size_move_refusal`, approval functions; does **not** touch the brand RPCs | PR 3 re-issues `move_product_size` | PR 3 builds after it merges, from its body |
-| KI-18 batch 1 | worktree `mystifying-chandrasekhar-760465`, `20261128100000` re-issues `generate_rup_sales_records` | PR 2a re-issues it | PR 2a builds after it merges |
+| KI-18 batch 1 | worktree `mystifying-chandrasekhar-760465`, `20261128100000` re-issues `generate_rup_sales_records` | none: REG-1 no longer re-issues it (section 5) | only if Q2 is answered yes, the later sales-list package builds on its body |
 | Parked EPA correction | local branch `claude/sweet-bun-f7920f`, `20261127100000_job_line_epa_snapshot.sql` | 7.7 | Section 8 |
 | PAR-1 screens #1553 | `ProductDetail.tsx` | PR 2b | PR 2b after #1553 |
 | DM-1 / DM-2 screens | `ProductDetail.tsx` | PR 2b | Rebase on whichever lands first |
@@ -315,7 +311,7 @@ Database PRs 1 and 2a can be built in parallel with DM-1 and DM-2 database PRs (
 ## 12. Questions for Mason
 
 1. **Today's "not restricted-use" ticks: count them as "No" or "Not reviewed"?** Right now every product except two is marked not restricted-use, mostly because the box starts unticked. **Recommendation: "Not reviewed"**, then you confirm each label once; the two marked "Yes" stay "Yes".
-2. **Should sales of "Not reviewed" products show in the RUP register as a separate "not reviewed" list?** **Recommendation: yes**, so nothing restricted slips through while the reviews are done.
+2. **Do you also need a list of past sales of "Not reviewed" products, or is a list of the labels still to review enough?** REG-1 gives you the label list on the Compliance page; sales keep going to the RUP register exactly as today. **Recommendation: the label list is enough for now.** With only two products marked restricted-use today, reviewing the labels is the fix; a sales list would be a separate, later piece of work.
 3. **Who may edit a registration's label facts?** **Recommendation: admins only**, as for parents and brands today.
 4. **The parked EPA-number correction work (branch `claude/sweet-bun-f7920f`) is only on this computer and not pushed.** **Recommendation:** have its session push it and land its database part first; REG-1 then builds on it (section 8).
 

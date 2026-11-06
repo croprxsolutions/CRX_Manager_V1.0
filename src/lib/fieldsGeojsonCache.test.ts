@@ -1,9 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { rpc, assertRpcResult } = vi.hoisted(() => ({
-  rpc: vi.fn(),
-  assertRpcResult: vi.fn(<T,>(value: T) => value),
-}));
+// The read is paged: rpc(...) returns a builder whose order/range chain resolves to the mocked reply.
+const { reply, rpc, assertRpcResult } = vi.hoisted(() => {
+  const reply = vi.fn();
+  const rpc = vi.fn((..._args: unknown[]) => {
+    const q: Record<string, unknown> = {
+      order: () => q,
+      range: () => q,
+      then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+        Promise.resolve(reply()).then((x: { data: unknown }) => resolve({ ...x, count: Array.isArray(x.data) ? x.data.length : null }), reject),
+    };
+    return q;
+  });
+  return { reply, rpc, assertRpcResult: vi.fn(<T,>(value: T) => value) };
+});
 
 vi.mock('./db', () => ({
   supabase: { rpc },
@@ -33,7 +43,7 @@ describe('fieldsGeojsonCache', () => {
   beforeEach(() => {
     resetFieldsGeojsonCacheForTests();
     vi.clearAllMocks();
-    rpc.mockResolvedValue({ data: fields, error: null });
+    reply.mockResolvedValue({ data: fields, error: null });
   });
 
   it('shares a successful full-geometry RPC response for five minutes', async () => {
@@ -41,17 +51,17 @@ describe('fieldsGeojsonCache', () => {
     await expect(getCachedFieldsGeojson(1_000 + FIELDS_GEOJSON_CACHE_TTL_MS - 1)).resolves.toEqual(fields);
 
     expect(rpc).toHaveBeenCalledTimes(1);
-    expect(rpc).toHaveBeenCalledWith('get_fields_with_geojson');
+    expect(rpc).toHaveBeenCalledWith('get_fields_with_geojson', undefined, { count: 'exact' });
     expect(assertRpcResult).toHaveBeenCalledWith(fields, 'get_fields_with_geojson');
   });
 
   it('refreshes after the cache expires and does not cache a failed RPC', async () => {
     await getCachedFieldsGeojson(1_000);
-    rpc.mockResolvedValueOnce({ data: [{ ...fields[0], id: 'field-2' }], error: null });
+    reply.mockResolvedValueOnce({ data: [{ ...fields[0], id: 'field-2' }], error: null });
     await expect(getCachedFieldsGeojson(1_000 + FIELDS_GEOJSON_CACHE_TTL_MS)).resolves.toEqual([{ ...fields[0], id: 'field-2' }]);
 
     resetFieldsGeojsonCacheForTests();
-    rpc.mockResolvedValueOnce({ data: null, error: new Error('RLS denied') });
+    reply.mockResolvedValueOnce({ data: null, error: new Error('RLS denied') });
     await expect(getCachedFieldsGeojson(1_000)).rejects.toThrow('RLS denied');
     await getCachedFieldsGeojson(1_001);
 

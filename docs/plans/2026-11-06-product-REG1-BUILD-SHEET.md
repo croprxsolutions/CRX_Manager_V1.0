@@ -395,6 +395,22 @@ Migration stamps in this project run ahead of the calendar, so the November 26-2
 |---|---|---|---|---|
 | 2026-11-06 | gpt-6-sol high (advisory; plan is off the Sol list) | d6f15baf9 | 1 BLOCKER, 3 HIGH, 3 MED/LOW | admin re-check, draft target numbers, open-invoice block fixed; RUP past sales → Q2 |
 | 2026-11-06 | gpt-6-sol high (advisory) | 6842bfbf0 | 5 HIGH, 2 MED | RUP at sale **or** at posting records; existing lines captured once (Mason-gated); admin line correction RPC; sprayed line product change refused; brand signature moved into PR 2a's list; Not reviewed sales listed |
+| 2026-11-06 | gpt-6-sol high (advisory) | 2189fa23b | 7 HIGH, 3 MED | **Stopped; not fixed.** See "Open findings" below. |
+
+**Status: NOT CLEAN. Do not build PR 2a onward from this sheet as written.** After 17 Luna and 6 Sol rounds, new HIGHs keep coming from two areas: restricted-use posting (section 5a) and the staged rollout between the seed and PR 3 (direct edits allowed until the guards exist). Per `AGENTS.md`, these go to a re-plan (Astra, then Luna, then Sol), not more patching. PR 1 (section 4) drew no new HIGH of its own in the Sol rounds except item 4 below, which comes from the rollout order.
+
+**Open findings from Sol round 6 (head 2189fa23b), for the re-plan:**
+1. HIGH: `move_product_size` routes through `_assign_epa_registration`, which refuses grouped sizes; a move needs its own internal path.
+2. HIGH: `save_invoice` must re-check the product's number after locking its registration (pre-lock, then re-check, as in 3.2).
+3. HIGH: the line-correction RPC must refuse any posted line (or post the RUP record itself), not only one with an active RUP record.
+4. HIGH: `set_epa_registration` ships in PR 1, before RUP-POST; a Yes→No change copies to products that unposted invoices still read. Either hold PR 1's edit RPCs until RUP-POST, or run RUP-POST first.
+5. HIGH: direct label-fact edits stay possible from PR 2a until PR 3 (staged rollout).
+6. HIGH: explicit `is_rup = false` on a direct insert (Q7 removes the path).
+7. HIGH: past RUP sales (Q2).
+8. MED: the existing-line capture must take RUP from the line's own number's registration, not the product's.
+9. MED: RUP-POST must also capture and post the line's signal word.
+10. MED: the correction RPC must refuse a number with no registration.
+
 | 2026-11-06 | gpt-6-sol high (advisory) | 453af6e73 | 5 HIGH, 3 MED | early RUP guard, history-first assignment, destination version, kept job lines, import retry fixed |
 | 2026-11-06 | gpt-6-sol high (advisory) | 0598fb3c2 | 3 HIGH, 4 MED, 1 LOW | **stopped**: HIGHs 1, 2 and 7 trace to RUP posting reading the product's current state, a third Sol round in a row on that mechanism; per `AGENTS.md` it goes to Mason as Q5; the MED/LOW items are fixed. **Not a clean Sol.** |
 | 2026-11-06 | gpt-6-sol high (advisory) | b5be085bf | 7 HIGH, 3 MED | after Mason's Q5: RUP-POST now snapshots each line's RUP answer, no automatic fill of old lines, job lock under assignment, destination-none stale check, insert path creates the registration first; new-line-on-sprayed-job and direct product inserts → Q6, Q7; past sales → Q2 |

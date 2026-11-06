@@ -2952,13 +2952,13 @@ export type Database = {
           created_at: string
           customer_id: string
           delivery_id: string
-          first_attempt_at: string | null
           id: string
           last_error: string | null
           next_attempt_at: string
           receipt: Json
           requested_by: string | null
           resend_message_id: string | null
+          send_authorized_at: string | null
           sent_at: string | null
           sent_to: string | null
           status: string
@@ -2972,13 +2972,13 @@ export type Database = {
           created_at?: string
           customer_id: string
           delivery_id: string
-          first_attempt_at?: string | null
           id?: string
           last_error?: string | null
           next_attempt_at?: string
           receipt: Json
           requested_by?: string | null
           resend_message_id?: string | null
+          send_authorized_at?: string | null
           sent_at?: string | null
           sent_to?: string | null
           status?: string
@@ -2992,13 +2992,13 @@ export type Database = {
           created_at?: string
           customer_id?: string
           delivery_id?: string
-          first_attempt_at?: string | null
           id?: string
           last_error?: string | null
           next_attempt_at?: string
           receipt?: Json
           requested_by?: string | null
           resend_message_id?: string | null
+          send_authorized_at?: string | null
           sent_at?: string | null
           sent_to?: string | null
           status?: string
@@ -13373,6 +13373,14 @@ export type Database = {
           p_performed_by?: string
         }
         Returns: Json
+      }
+      confirm_delivery_receipt_send: {
+        Args: {
+          p_claim_token: string
+          p_id: string
+          p_idempotency_key?: string
+        }
+        Returns: string
       }
       confirm_job_notification_sent: {
         Args: {

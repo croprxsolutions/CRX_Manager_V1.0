@@ -7,3 +7,7 @@
 - `complete_delivery` gains an optional `p_email_receipt`; left out, it behaves exactly as before.
 - Nothing is sent yet: the worker, its secrets and the app change ship in the next PR.
 - New proof `scripts/smoke/prove-delivery-receipt-queue-real-schema.mjs`.
+- Simplified the same day (Mason's decision after six review rounds): the lock that stopped the office emailing a
+  receipt while the worker owed one is gone, so a customer may occasionally get two receipts, never none. The worker
+  now re-checks right before each send (delivery still completed, same customer, same email) and the migration no
+  longer touches the email log.

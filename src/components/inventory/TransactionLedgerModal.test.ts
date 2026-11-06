@@ -29,6 +29,10 @@ describe('signedQuantity', () => {
     ['adjusted', -5, -5],
     ['transferred', -8, -8],
     ['prebook_reconciliation', -12, -12],
+    ['tote_fill_out', -265, -265],
+    ['tote_fill_out', 265, 265],
+    ['tote_fill_in', 1, 1],
+    ['tote_fill_in', -1, -1],
   ])('normalizes %s quantities', (type, quantity, expected) => {
     expect(signedQuantity(quantity as number, type as string)).toBe(expected);
   });

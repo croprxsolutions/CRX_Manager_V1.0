@@ -1606,6 +1606,18 @@
       "violation_key": "_save_invoice_scoped_impl(p_invoice jsonb, p_items jsonb, p_idempotency_key text)",
       "justification": "Wrapper false positive, not a dropped audit write. Live pg_get_functiondef read 2026-11-04 (prosrc md5 594f85411f0c40f2ab980a264ac799f6, EXECUTE postgres only): this private wrapper calls _save_invoice_lineage_unaware_impl_20260827 (the save_invoice writer, which writes the activity_feed invoice_created row on a new invoice), then re-sets total_amount_cents and total_cost_cents from that same invoice's lines, only WHERE status IN (draft, unposted). It joined the population only because 20261106130000 (S16b, PR #1439, applied) added total_amount_cents to that UPDATE so a line delivered in parts keeps its cents; the previous body (20260827041500, md5 622210352fd3c9fa3e293a8e48957429) set only total_cost_cents and also wrote no audit row, so no audit write was removed. It touches no payment, write-off, prepay, credit, commission, allocation or vendor table and never changes a posted invoice; posting is what puts an invoice into receivables and the post path writes financial_audit_log (20261022022000). Known, unchanged gap (not this entry's to fix): neither function logs an edit to an existing draft. Re-verify when either function next changes.",
       "dated": "2026-11-04"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "fill_tote_from_bulk(p_tote_product_id uuid, p_totes integer, p_expected jsonb, p_idempotency_key text)#705296c5a87c",
+      "justification": "New in 20261117130000_tote_fill_from_bulk (BLK-1a, PR #1554, ledger 20261106065456), read live 2026-11-06 after the apply: SAFE. SECURITY DEFINER, owner postgres, search_path public, pg_temp; EXECUTE to authenticated only (anon refused; live smoke chain smoke-tote_fill_from_bulk.sql passed). _product_parent_require_admin() runs first, so a caller that is not an active admin is refused before any read or write. Flagged through the private helper _tote_fill_preview, which reads the two sizes' catalog current_cost to report whether the tote's cost equals the Bulk cost per gallon. The fill only compares that preview with the one the admin confirmed; its reply and saved idempotency receipt are fill_id, the two ledger row ids, bulk unit, quantities, shortfall and requires_review: no cost, margin or price field. It writes no cost, price or valuation. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-06"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "preview_tote_fill(p_tote_product_id uuid, p_totes integer)#676b7097232f",
+      "justification": "New in 20261117130000_tote_fill_from_bulk (BLK-1a, PR #1554, ledger 20261106065456), read live 2026-11-06 after the apply: SAFE. SECURITY DEFINER, owner postgres, search_path public, pg_temp; EXECUTE to authenticated only (anon refused; live smoke chain smoke-tote_fill_from_bulk.sql passed). _product_parent_require_admin() runs first, so a caller that is not an active admin is refused before any read or write. Flagged through the private helper _tote_fill_preview, which reads the two sizes' catalog current_cost to report whether the tote's cost equals the Bulk cost per gallon. The preview returns bulk_cost_cents, tote_cost_cents, estimate_before_cents, estimate_after_cents and cost_check to that admin only, the same catalog cost an admin already sees on the product screen; it writes nothing. No margin or price field. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-06"
     }
   ]
 }

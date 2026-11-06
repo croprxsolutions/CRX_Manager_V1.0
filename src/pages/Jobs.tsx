@@ -166,7 +166,7 @@ function getPresetDates(preset: string): { start: string; end: string } {
       return { start: formatLocalDate(startOfWeek), end: formatLocalDate(endOfWeek) };
     }
     case 'this_season':
-      return getSeasonDates(now);
+      return getSeasonDates();
     default:
       return { start: '', end: '' };
   }

@@ -6791,6 +6791,7 @@ export type Database = {
           total_price: number
           total_units_needed: number
           unit_size: string | null
+          vendor: string | null
         }
         Insert: {
           acres?: number | null
@@ -6817,6 +6818,7 @@ export type Database = {
           total_price?: number
           total_units_needed?: number
           unit_size?: string | null
+          vendor?: string | null
         }
         Update: {
           acres?: number | null
@@ -6843,6 +6845,7 @@ export type Database = {
           total_price?: number
           total_units_needed?: number
           unit_size?: string | null
+          vendor?: string | null
         }
         Relationships: [
           {
@@ -14441,6 +14444,22 @@ export type Database = {
       }
       get_open_booking_rollover: {
         Args: { p_customer_id?: string; p_season?: number }
+        Returns: Json
+      }
+      get_orders_page: {
+        Args: {
+          p_from: string
+          p_limit?: number
+          p_needs_split_billing?: boolean
+          p_offset?: number
+          p_planned?: boolean
+          p_pricing_status?: string
+          p_search?: string
+          p_sort_dir?: string
+          p_sort_key?: string
+          p_status?: string
+          p_to: string
+        }
         Returns: Json
       }
       get_product_cost_basis_workspace: {

@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-06 for the live ledger only (KI-06 snapshots applied, ledger `20261106060243`); other evidence retains its stated dates.
+**Last verified:** 2026-11-06 for the live ledger only (permission tightening applied, ledger `20261106062807`); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -36,8 +36,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 57 |
-| Accepted by Mason (KI-60 to KI-71, KI-79, KI-80, KI-104) | 15 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 56 |
+| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104) | 16 |
 | Closed as FIXED, with proof (bottom of file and archive) | 14 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
@@ -144,8 +144,8 @@ nothing is back-filled or deleted without his approval. A database owner who dis
 
 ### KI-07 — Other small security gaps
 **MED/LOW · mixed · unassigned**
-- `profiles` still grants `TRUNCATE`/`TRIGGER` to signed-in users (no revoking migration found; confirmed live
-  read-only 2026-10-25 with `has_table_privilege('authenticated', ...)`) — OPEN, LOW-MED.
+- `profiles` grants `TRUNCATE`/`TRIGGER` to signed-in users (confirmed live read-only 2026-10-25 and
+  2026-11-05) — revoked by `20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`), LOW-MED.
 - Customer-document post-apply check (browser storage policies removed, Documents tab still works) was never
   recorded; and a removed document cannot be reopened even by an admin — UNVERIFIED, LOW.
 - Three older "reps work any customer" leftovers: signed-in rep click-through of `customer-document-files`
@@ -157,8 +157,8 @@ nothing is back-filled or deleted without his approval. A database owner who dis
   `get_fields_with_geojson`, `get_job_fields_with_geojson`, `get_job_proof_data`, `save_field_geometry`,
   `save_field_polygons`, `set_field_boundary`, `set_field_override_acres` (read-only `execute_sql`, 2026-10-26 UTC; same 12 re-read
   2026-10-25 10:52 PM Central).
-  They need `extensions` for PostGIS. Either document a PostGIS exception to the rule or schema-qualify the
-  PostGIS calls and drop `extensions` from the path. Promised to CodeRabbit on PR #1065 (thread 4373018174) — LOW.
+  They need `extensions` for PostGIS. DOCUMENTED 2026-11-05 (Mason): `docs/workflows/RLS_SECURITY_GUIDE.md`
+  records the PostGIS exception; live has sixteen (these twelve plus four internal helpers). No function changed — CLOSED.
 
 ---
 
@@ -367,22 +367,19 @@ can make old splits refuse to save (LOW-MED).
   in dollars, not integer cents. Found by CodeRabbit on PR #1078 (2026-10-23) and deferred: moving it to cents
   changes rounding on every quote line, so it needs its own money PR. LOW.
 
-### KI-17 — Blend-ticket linkage picks one order line per product
-**MED · PARTIAL · money · automatic matching unassigned**
-`link_blend_ticket_to_order` still takes `ORDER BY sort_order, id LIMIT 1`. The invoice side now refuses to guess
-when tier prices differ and asks staff to pick (PRs #982, #995, #1020). Automatic matching or splitting across
-tiers is not built; the linkage field is not used for money today.
-
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock
-**MED / LOW · OPEN · money/UI · unassigned (the screens part is fixed, see the archive)**
-- The Financial Dashboard's AR-aging strip (`financial_dashboard_summary`) counts "current" as up to 30 days
-  past due by the UTC clock; the AR Aging page (`get_ar_aging`) counts 0–29 days by the Chicago date. A
-  30-day-old invoice is "current" on one and "30–59" on the other. Its season panels also read the UTC date. MED.
-- Blend-ticket numbers (`generate_ticket_number`) take their year from the UTC date, so on 31 Dec 6 pm–midnight
-  Central they get next year's number. Cosmetic. LOW. (Quote, order and rebate-claim numbers use the Chicago
-  year since `20261029160300`, applied live 2026-10-31.)
-- `invoices.invoice_date` has no future-date limit in the database, so a typed year like 2206 is accepted
-  through any writer. The invoice date boxes stop 365 days ahead since 2026-11-06. LOW.
+**MED · OPEN · money/UI · unassigned (fixed parts: seasons, screens, blend-ticket year, dashboard aging and the invoice date limit; see below)**
+- Fixed 2026-11-06 by `20261121090000` (applied live, ledger `20261106152929`, PR #1560): blend-ticket numbers take
+  the Chicago year; the Financial Dashboard's AR-aging strip uses the AR Aging page's ranges on the Chicago date; the
+  database refuses an invoice date more than 365 days after the Chicago date. Earlier fixes: `20261103120000`
+  (`current_season()` and the `invoice_date` default) and `20261029160300` (quote, order and rebate-claim years).
+- Customer statements (`get_detailed_statement_data`) age by <=30 / 31-60 / 61-90 / 91-120 / >120 days; the AR Aging
+  page uses 0-29 / 30-59 / 60-89 / 90-119 / 120+, so a 30-day-old invoice is "current" on the statement and 30-59 on
+  AR Aging. Which ranges both use is Mason's decision (recommended: the AR Aging ones). MED.
+- The live database clock is UTC, and many functions still take "today" from `CURRENT_DATE` or `now()`, so from
+  6-7 pm Central they act on tomorrow: overdue marking, AR reminders, license expiry, RUP record dates, quote expiry,
+  holds, dispatch windows, default invoice and bill dates, `get_customer_summary`, and `operational_dashboard_summary`
+  (season, today, and days left in the period). A Sol scan on 2026-11-06 listed about 30; not yet checked one by one. MED.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**
@@ -473,11 +470,14 @@ receipt; the driver is warned and the office can resend by hand. A queue table p
 and not built (needs a new Edge Function deploy). No `delivery_receipt_queue` exists in `supabase/`.
 
 ### KI-26 — Delivery completion-evidence leftovers
-**LOW · OPEN · UI/database/process · Mason for the access-policy item**
+**LOW · OPEN · UI/database/process**
 Following `20261022075000` (PR #1024): old app versions are refused until reloaded; offline completions queued
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
-abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test, and
-Mason's approval to narrow four older signature policies.
+abandoned signature files stay stored; file contents are not inspected. Real-phone airplane-mode test PASSED
+(Mason 2026-11-06, after the narrowing below): an offline signed completion synced and showed its signature.
+The four older signature policies (fixed path `signatures/<id>.png`) are narrowed by
+`20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`): insert, update and delete dropped,
+and reading needs the file to be the delivery's recorded signature.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
 **MED · OPEN · database · unassigned**
@@ -506,7 +506,8 @@ Most lists now page through every row (PRs #959, #1017, #1048). The order, job a
 the database, and cycle-count locations read every row (PR #1048). The Customers and Jobs lists now read every row,
 the Jobs Applicators/Customers filters match their job-id lists on the rows read (no URL-size risk), and the order and job
 pickers match a customer name in the database instead of only the first 50 matching names (2026-11-05). Crop
-Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Dispatch
+Programs was not capped: its programs are one settings record and its product picker searches (PR #944).
+The Orders list pages in the database with the true count and total of every match (`get_orders_page`, PR #1550). Dispatch
 Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1538; rest waits on KI-28, issue
 #1497); Call Lists say how many customers match beyond their 200 (same PRs). Still capped: the blend-ticket scanner
 Edge Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
@@ -575,7 +576,7 @@ together match the real total applied, rounded once, and holds at least each dra
 `scripts/smoke/prove-job-reservation-whole-hundredths-real-schema.mjs`.
 
 ### KI-101 — Voiding a delivery on a cancelled order reopens the order
-**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471); the grant item below is still open · database/lifecycle · found 2026-11-04 (KI-93 design review)**
+**MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471); the grant item below is in `20261116100000` · database/lifecycle · found 2026-11-04 (KI-93 design review)**
 `_void_delivery_replay_impl_20261015` recomputed the order's status and wrote it under the admin override without
 checking for `cancelled`, so voiding a delivery of a cancelled, part-delivered order reopened it and put back the
 reservation the cancel had released. Reproduced 2026-11-04 on the throwaway copy. Such orders come from cancels before
@@ -585,9 +586,11 @@ not put back (a full cancel released it and nobody will deliver a cancelled orde
 deliver, and the stock-ledger note says so. An order cancelled through the direct status change released nothing;
 its reservation is left as it was. Live 2026-11-04: 4 cancelled orders, none with a completed delivery or
 delivered quantity. Proof: `scripts/smoke/prove-void-delivery-order-status-guards-real-schema.mjs`.
-- **Still open (needs Mason's yes: a permissions change).** Signed-in admins hold a direct UPDATE grant on
-  `orders.status`, so they can move an order between allowed statuses (for example confirmed to fulfilled, or
-  partially fulfilled to cancelled) with no delivery and no stock movement. Revoking it is its own PR.
+- **Grant item (Mason 2026-11-05).** Signed-in admins held a direct UPDATE grant on `orders.status`, so they
+  could move an order between allowed statuses with no delivery and no stock movement.
+  `20261116100000_permission_tightening.sql` revokes it, and the matching INSERT grant so an order cannot be created
+  already fulfilled (APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`); the order screen's unreachable direct
+  status write is removed.
 
 ### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice
 **MED · FIXED: migration `20261107120000` APPLIED LIVE 2026-11-05 (ledger `20261105060300`, PR #1471) · database/inventory · found 2026-11-04 (KI-93 design review, Sol r2 #8)**
@@ -787,6 +790,7 @@ Delete with a grep of every reference first; keep one copy of each helper.
 
 | ID | What | Why accepted |
 |---|---|---|
+| KI-17 | Blend-ticket linkage picks one order line per product: `link_blend_ticket_to_order` still takes `ORDER BY sort_order, id LIMIT 1`; automatic matching or splitting across tiers is not built | ACCEPTED limit (Mason 2026-11-05): the linkage is not used for money; the invoice side asks staff to pick (PRs #982, #995, #1020) |
 | KI-60 | A permitted staff member can mint a temporary link to a private photo | Mason, option A, 2026-10-14 |
 | KI-61 | A `LOCK TABLE` in a migration does not stop an already-running call of the OLD function body | Mason 2026-09-03; both instances applied with zero activity; future migrations of that shape need a quiet rollout and a concurrency proof |
 | KI-62 | Live migration ledger has older entries with no file on `main` | Pre-existing drift, not new |
@@ -908,7 +912,8 @@ per order, and a payload change is refused with a conflict dialog that reloads t
 **MED/LOW · OPEN · UI/database**
 Still row-capped: the Invoice Detail customer selector, Bulk PO Import products, bulk-import name matching,
 Label Data Quality choices, Product Detail choice lists (MED). Paging caveats: two identical reads can still miss
-concurrent changes, load/count cost grows on large tables, more than 20 identical-name search results are hard to
+concurrent changes, load/count cost grows on large tables (the Orders list now reads one page at a time, but each page
+still recomputes the season's line, invoice and delivery totals), more than 20 identical-name search results are hard to
 reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer
 one fails (LOW). `SelectLocationsModal` map/list split stays 50/50 on tablets (LOW). CRM gaps: applicator-license
 visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate-customer detection, bulk

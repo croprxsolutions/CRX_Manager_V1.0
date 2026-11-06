@@ -3,30 +3,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { buildPaginatedQueryChain as buildChain, type QueryResult } from '../test-utils/supabaseChain';
-import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
 
 const {
   mockFrom,
+  mockRpc,
   mockToast,
   mockCheckMutationResult,
-  mockClearSelection,
-  selectedOrder,
 } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
+  mockRpc: vi.fn(),
   mockToast: vi.fn(),
   mockCheckMutationResult: vi.fn(),
-  mockClearSelection: vi.fn(),
-  selectedOrder: {
-    id: 'order-1',
-    order_number: 'ORD-DELETE-1',
-    customer_id: 'customer-1',
-    status: 'confirmed' as 'confirmed' | 'cancelled' | 'voided',
-  },
 }));
 
 vi.mock('../lib/db', () => ({
-  supabase: { from: mockFrom },
+  supabase: { from: mockFrom, rpc: mockRpc },
   checkMutationResult: mockCheckMutationResult,
+  assertRpcResult: (data: unknown, name: string) => {
+    if (data === null || data === undefined) throw new Error(`${name} returned no data`);
+    return data;
+  },
   sanitizeError: (error: unknown) => error instanceof Error ? error.message : 'Request failed',
 }));
 
@@ -38,29 +34,30 @@ vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
-vi.mock('../hooks/useRowSelection', () => ({
-  useRowSelection: () => ({
-    selected: new Set(['order-1']),
-    toggleSelect: vi.fn(),
-    toggleAll: vi.fn(),
-    clearSelection: mockClearSelection,
-    selectedCount: 1,
-    selectedRows: [selectedOrder],
-    allSelected: true,
-  }),
-  createCheckboxColumn: () => ({ key: 'select', header: '' }),
-}));
-
 vi.mock('../components/ui/PageHeader', () => ({
   default: ({ actions }: { actions?: ReactNode }) => <div>{actions}</div>,
 }));
+// The table shows each row's tick box (the first column) and the filters, so selection can be driven.
 vi.mock('../components/ui/DataTable', () => ({
-  default: ({ data }: { data: Array<{ id: string; invoiced_pct: number | null; fulfillment_pct: number }> }) => (
+  default: ({ data, columns, filters, loading, loadError, searchValue, onSearchChange }: {
+    data: Array<{ id: string; order_number: string }>;
+    searchValue?: string;
+    onSearchChange?: (v: string) => void;
+    columns: Array<{ key: string; render?: (row: unknown) => ReactNode }>;
+    filters?: ReactNode;
+    loading?: boolean;
+    loadError?: boolean;
+  }) => (
     <div>
-      orders table
-      <span>{`${data.length} orders`}</span>
-      {data.map((row) => <span key={row.id}>{row.invoiced_pct == null ? 'Invoiced unavailable' : `Invoiced ${row.invoiced_pct}%`}</span>)}
-      {data.map((row) => <span key={`${row.id}-fulfilled`}>{`${row.id} fulfilled ${row.fulfillment_pct}%`}</span>)}
+      <input aria-label="Search orders or products…" value={searchValue ?? ''} onChange={(e) => onSearchChange?.(e.target.value)} />
+      {filters}
+      {loadError ? <span>could not be loaded</span> : <span>{`${data.length} rows shown`}</span>}
+      {loading ? <span>rows loading</span> : data.map((row) => (
+        <div key={row.id}>
+          {row.order_number}
+          {columns[0].key === '_select' && columns[0].render?.(row)}
+        </div>
+      ))}
     </div>
   ),
 }));
@@ -69,52 +66,289 @@ vi.mock('../components/ui/BulkDeleteConfirmModal', () => ({
     ? <button onClick={onConfirm}>Confirm order delete</button>
     : null,
 }));
-vi.mock('../components/orders/BulkOrderImport', () => ({ default: () => null }));
+vi.mock('../components/orders/BulkOrderImport', () => ({
+  default: ({ onSuccess }: { onSuccess: () => void }) => <button onClick={onSuccess}>Finish import</button>,
+}));
 vi.mock('../components/customers/CustomerDrawer', () => ({ default: () => null }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 
 import Orders from './Orders';
 
-/** A table read page by page: each .range(from, to) returns that slice of the rows. */
-function pagedChain(rows: unknown[]) {
-  const chain = buildChain({ data: rows, error: null });
-  chain.range = vi.fn((from: number, to: number) =>
-    Promise.resolve({ data: rows.slice(from, to + 1), error: null }));
-  return chain;
+const order = (i: number, status = 'confirmed') => ({
+  id: `order-${i}`, order_number: `ORD-${i}`, customer_id: 'customer-1', status,
+  order_date: '2026-10-01', total_price: 10, fulfillment_pct: 0, invoiced_pct: 0,
+  customer: { farm_name: 'Test Farm', parent_customer_id: null }, customer_name: 'Test Farm',
+  farm_group_name: null, active_delivery_count: 0, earliest_delivery_date: null, product_names: '',
+});
+
+/** get_orders_page over `all`: each call returns its p_offset/p_limit slice and the totals of every row. */
+function serveOrders(all: ReturnType<typeof order>[]) {
+  mockRpc.mockImplementation((_fn: string, args: { p_limit: number; p_offset: number }) => Promise.resolve({
+    data: { rows: all.slice(args.p_offset, args.p_offset + args.p_limit), total_count: all.length, total_price_cents: all.length * 1000 },
+    error: null,
+  }));
 }
 
 function renderPage() {
   return render(<MemoryRouter><Orders /></MemoryRouter>);
 }
 
-describe('Orders bulk-delete lifecycle guard', () => {
+describe('Orders list pages through the database', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    selectedOrder.status = 'confirmed';
     mockCheckMutationResult.mockImplementation((result: QueryResult) => {
       if (result.error) throw new Error(result.error.message);
     });
   });
 
-  function arrange(mutationResult: QueryResult) {
-    const load = buildChain({ data: [], error: null });
-    const mutation = buildChain(mutationResult);
-    let orderCalls = 0;
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'orders') {
-        orderCalls += 1;
-        return orderCalls === 2 ? mutation : load;
-      }
-      return buildChain({ data: [], error: null });
+  it('shows one page and the true count and total of every matching order', async () => {
+    serveOrders(Array.from({ length: 5200 }, (_, i) => order(i)));
+    renderPage();
+
+    expect(await screen.findByText('50 rows shown')).toBeInTheDocument();
+    expect(screen.getByText('Showing 1–50 of 5,200 orders · $52,000.00 total')).toBeInTheDocument();
+    expect(mockRpc).toHaveBeenCalledWith('get_orders_page', expect.objectContaining({
+      p_sort_dir: 'asc', p_limit: 50, p_offset: 0,
+    }));
+    // No filter chosen: those arguments are left out, so the database reads them as NULL.
+    const firstArgs = mockRpc.mock.calls[0][1];
+    for (const k of ['p_search', 'p_status', 'p_planned', 'p_pricing_status', 'p_needs_split_billing', 'p_sort_key']) {
+      expect(firstArgs[k]).toBeUndefined();
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Showing 51–100 of 5,200 orders · $52,000.00 total')).toBeInTheDocument();
+    expect(screen.getByText('ORD-50')).toBeInTheDocument();
+    expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({ p_limit: 50, p_offset: 50 }));
+  });
+
+  it('sends the filters to the database and starts again at page one', async () => {
+    serveOrders(Array.from({ length: 120 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Showing 51–100 of 120 orders · $1,200.00 total');
+
+    fireEvent.change(screen.getByLabelText('Filter by planned or committed'), { target: { value: 'committed' } });
+    fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
+
+    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({
+      p_planned: false, p_needs_split_billing: true, p_offset: 0,
+    })));
+  });
+
+  it('a new filter hides the old totals while its own read is pending', async () => {
+    serveOrders(Array.from({ length: 120 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+
+    mockRpc.mockImplementation(() => new Promise(() => {}));
+    fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
+
+    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({ p_needs_split_billing: true })));
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Select All 120/ })).not.toBeInTheDocument();
+  });
+
+  it('a failed read says so and shows no count or total', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'statement timeout' } });
+    renderPage();
+
+    expect(await screen.findByText('could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/total/)).not.toBeInTheDocument();
+    expect(mockToast).toHaveBeenCalledWith('error', 'Failed to load orders. Please try again.');
+  });
+
+  it('a reply with no totals counts as a failed read, never as $0', async () => {
+    mockRpc.mockResolvedValue({ data: { rows: [] }, error: null });
+    renderPage();
+
+    expect(await screen.findByText('could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
+  });
+
+  it('"Select All" with more orders than the page reads every matching order for export', async () => {
+    serveOrders(Array.from({ length: 1500 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('50 rows shown');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 1,500' }));
+
+    expect(await screen.findByText('1500 selected')).toBeInTheDocument();
+    // Pages of 1000 with the 50-row seam overlap, read twice to confirm the list did not change.
+    const pageCalls = mockRpc.mock.calls.map(([, args]) => [args.p_offset, args.p_limit]).filter(([, limit]) => limit === 1000);
+    expect(pageCalls).toEqual([[0, 1000], [950, 1000], [1450, 1000], [0, 1000], [950, 1000], [1450, 1000]]);
+    expect(screen.getByRole('button', { name: 'Deselect All' })).toBeInTheDocument();
+
+    // Unticking one row after "select all" brings the Select All button back.
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    expect(await screen.findByText('1499 selected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select All 1,500' })).toBeInTheDocument();
+  });
+
+  it('a ticked row does not follow the user to another page, and "Select All" does not come back after a filter round trip', async () => {
+    serveOrders(Array.from({ length: 120 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    expect(await screen.findByText('1 selected')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Showing 51–100 of 120 orders · $1,200.00 total');
+    expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));
+    expect(await screen.findByText('120 selected')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
+    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({ p_needs_split_billing: true })));
+    fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: '' } });
+    await screen.findByText(/of 120 orders · \$1,200\.00 total/);
+    expect(screen.queryByText('120 selected')).not.toBeInTheDocument();
+  });
+
+  it('"Select All" does nothing while a new filter is still loading (the rows shown are the old query\'s)', async () => {
+    serveOrders(Array.from({ length: 30 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–30 of 30 orders · $300.00 total');
+
+    mockRpc.mockImplementation(() => new Promise(() => {}));
+    fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
+    await waitFor(() => expect(screen.queryByText(/Showing/)).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it('"Select All" is greyed out while a page read is running, so a click is never silently dropped', async () => {
+    serveOrders(Array.from({ length: 120 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+    expect(screen.getByRole('button', { name: 'Select All 120' })).toBeEnabled();
+
+    mockRpc.mockImplementation(() => new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('rows loading');
+    expect(screen.getByRole('button', { name: 'Select All 120' })).toBeDisabled();
+  });
+
+  it('while a typed search waits to run, the old rows are hidden and "Select All" is greyed out', async () => {
+    serveOrders(Array.from({ length: 120 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+
+    fireEvent.change(screen.getByLabelText('Search orders or products…'), { target: { value: 'ORD-2' } });
+    expect(screen.getByText('rows loading')).toBeInTheDocument();
+    expect(screen.queryByText('ORD-0')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select All 120' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+
+  it('a refresh that fails drops "Select All": no bulk action is offered over rows nobody can see', async () => {
+    serveOrders(Array.from({ length: 1500 }, (_, i) => order(i, 'cancelled')));
+    renderPage();
+    await screen.findByText('50 rows shown');
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 1,500' }));
+    expect(await screen.findByText('1500 selected')).toBeInTheDocument();
+
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'statement timeout' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
+
+    expect(await screen.findByText('could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+
+  it('a refresh that succeeds also drops "Select All": an order that left the filter is never acted on (Mason, 2026-11-06)', async () => {
+    serveOrders(Array.from({ length: 1500 }, (_, i) => order(i, 'cancelled')));
+    renderPage();
+    await screen.findByText('50 rows shown');
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 1,500' }));
+    expect(await screen.findByText('1500 selected')).toBeInTheDocument();
+
+    // Someone reopened order 0: it is no longer in the list.
+    serveOrders(Array.from({ length: 1499 }, (_, i) => order(i + 1, 'cancelled')));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
+
+    expect(await screen.findByText(/of 1,499 orders/)).toBeInTheDocument();
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+
+  it('a refresh that lands while "Select All" is still reading wins: the late read selects nothing', async () => {
+    const all = Array.from({ length: 120 }, (_, i) => order(i));
+    serveOrders(all);
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    mockRpc.mockImplementation(async (_fn: string, args: { p_limit: number; p_offset: number }) => {
+      if (args.p_limit === 1000) await gate;
+      return { data: { rows: all.slice(args.p_offset, args.p_offset + args.p_limit), total_count: all.length, total_price_cents: all.length * 1000 }, error: null };
     });
-    return mutation;
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Select All 120' })).toBeEnabled());
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it('typing a search drops the selection at once, before the search runs', async () => {
+    serveOrders(Array.from({ length: 30 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–30 of 30 orders · $300.00 total');
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    await screen.findByText('1 selected');
+
+    fireEvent.change(screen.getByLabelText('Search orders or products…'), { target: { value: 'ORD-2' } });
+    expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+  });
+
+  it('Deselect while a "Select All" read is still running wins: the late read selects nothing', async () => {
+    const all = Array.from({ length: 120 }, (_, i) => order(i));
+    serveOrders(all);
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    await screen.findByText('1 selected');
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    mockRpc.mockImplementation(async (_fn: string, args: { p_limit: number; p_offset: number }) => {
+      if (args.p_limit === 1000) await gate;
+      return { data: { rows: all.slice(args.p_offset, args.p_offset + args.p_limit), total_count: all.length, total_price_cents: all.length * 1000 }, error: null };
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect' }));
+    release();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Select All 120' })).toBeEnabled());
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Orders bulk-delete lifecycle guard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCheckMutationResult.mockImplementation((result: QueryResult) => {
+      if (result.error) throw new Error(result.error.message);
+    });
+  });
+
+  async function selectOnlyOrder(status: string, mutationResult: QueryResult) {
+    serveOrders([order(1, status)]);
+    const mutation = buildChain(mutationResult);
+    mockFrom.mockImplementation(() => mutation);
+    renderPage();
+    await screen.findByText('1 rows shown');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    // Wrapped: the chain is thenable, so returning it bare from an async function would unwrap it.
+    return { mutation };
   }
 
   it('refuses an active selected order before opening confirmation', async () => {
-    const mutation = arrange({ data: [{ id: 'order-1' }], error: null });
-
-    renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    const { mutation } = await selectOnlyOrder('confirmed', { data: [{ id: 'order-1' }], error: null });
 
     expect(mockToast).toHaveBeenCalledWith(
       'error',
@@ -125,11 +359,7 @@ describe('Orders bulk-delete lifecycle guard', () => {
   });
 
   it('soft-deletes a terminal selected order after confirmation', async () => {
-    selectedOrder.status = 'cancelled';
-    const mutation = arrange({ data: [{ id: 'order-1' }], error: null });
-
-    renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    const { mutation } = await selectOnlyOrder('cancelled', { data: [{ id: 'order-1' }], error: null });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm order delete' }));
 
     await waitFor(() => {
@@ -140,14 +370,7 @@ describe('Orders bulk-delete lifecycle guard', () => {
   });
 
   it('translates the database race guard into plain English', async () => {
-    selectedOrder.status = 'voided';
-    arrange({
-      data: null,
-      error: { message: 'ORDER_MUST_BE_TERMINAL_BEFORE_DELETE' },
-    });
-
-    renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    await selectOnlyOrder('voided', { data: null, error: { message: 'ORDER_MUST_BE_TERMINAL_BEFORE_DELETE' } });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm order delete' }));
 
     await waitFor(() => {
@@ -158,96 +381,4 @@ describe('Orders bulk-delete lifecycle guard', () => {
     });
     expect(mockCheckMutationResult).not.toHaveBeenCalled();
   });
-
-  it('calculates invoiced percent from active sale invoices only', async () => {
-    const invoiceQuery = buildChain({
-      data: [
-        { order_id: 'order-1', total_amount_cents: 60000, invoice_type: 'chemical_sale', status: 'posted', deleted_at: null },
-        { order_id: 'order-1', total_amount_cents: -15000, invoice_type: 'credit_memo', status: 'posted', deleted_at: null },
-        { order_id: 'order-1', total_amount_cents: 40000, invoice_type: 'chemical_sale', status: 'posted', deleted_at: '2026-08-26T12:00:00Z' },
-      ],
-      error: null,
-    });
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'orders') {
-        return pagedChain([{
-          id: 'order-1', order_number: 'ORD-1', customer_id: 'customer-1',
-          status: 'confirmed', order_date: '2026-04-01', total_price: 1000,
-          customer: { farm_name: 'Test Farm', parent_customer_id: null },
-        }]);
-      }
-      if (table === 'invoices') return invoiceQuery;
-      return buildChain({ data: [], error: null });
-    });
-
-    renderPage();
-
-    expect(await screen.findByText('Invoiced 60%')).toBeInTheDocument();
-    expect(invoiceQuery.in).toHaveBeenCalledWith('order_id', ['order-1']);
-  });
-
-  it('shows invoice coverage as unavailable when the coverage query fails', async () => {
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'orders') {
-        return pagedChain([{
-          id: 'order-1', order_number: 'ORD-1', customer_id: 'customer-1',
-          status: 'confirmed', order_date: '2026-04-01', total_price: 1000,
-          customer: { farm_name: 'Test Farm', parent_customer_id: null },
-        }]);
-      }
-      if (table === 'invoices') return buildChain({ data: null, error: { message: 'coverage unavailable' } });
-      return buildChain({ data: [], error: null });
-    });
-
-    renderPage();
-
-    expect(await screen.findByText('Invoiced unavailable')).toBeInTheDocument();
-    expect(mockToast).toHaveBeenCalledWith(
-      'error',
-      'Failed to load invoice coverage. Invoiced percentages are unavailable; refresh to try again.',
-    );
-  });
-
-  it('loads all 1,500 orders and their items, past the 1,000-row server cap', async () => {
-    const manyOrders = Array.from({ length: 1500 }, (_, i) => ({
-      id: `order-${i}`, order_number: `ORD-${i}`, customer_id: 'customer-1',
-      status: 'confirmed', order_date: '2026-04-01', total_price: 100,
-      customer: { farm_name: 'Test Farm', parent_customer_id: null },
-    }));
-    // One line per order, half delivered. The in-memory query applies the page's
-    // .in('order_id', chunk) filter, so each order's fulfillment proves its item was read.
-    const items = manyOrders.map((o) => ({
-      order_id: o.id, total_units_needed: 10, quantity_delivered: 5, price_per_unit: 10, product_name: 'Widget',
-    }));
-    const orders = pagedChain(manyOrders);
-    const itemChunks: unknown[][] = [];
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'orders') return orders;
-      if (table === 'order_items') {
-        const query = buildInMemoryQuery(items);
-        const filterIn = query.in as (column: string, values: unknown[]) => unknown;
-        query.in = vi.fn((column: string, values: unknown[]) => {
-          itemChunks.push(values);
-          return filterIn(column, values);
-        });
-        return query;
-      }
-      return buildChain({ data: [], error: null });
-    });
-
-    renderPage();
-
-    expect(await screen.findByText('1500 orders')).toBeInTheDocument();
-    expect(screen.getByText('order-0 fulfilled 50%')).toBeInTheDocument();
-    expect(screen.getByText('order-1499 fulfilled 50%')).toBeInTheDocument();
-    // Read twice: a list that took more than one request is confirmed by a matching second read.
-    const pass = [[0, 999], [950, 1949], [1450, 2449]];
-    expect(orders.range.mock.calls).toEqual([...pass, ...pass]);
-    expect(orders.order).toHaveBeenCalledWith('id');
-    expect(orders.limit).not.toHaveBeenCalled();
-    // The order ids go out in URL-sized chunks, never one 1,500-id list.
-    expect(Math.max(...itemChunks.map((chunk) => chunk.length))).toBeLessThanOrEqual(200);
-    expect(new Set(itemChunks.flat()).size).toBe(1500);
-    expect(mockToast).not.toHaveBeenCalled();
-  }, 30000);
 });

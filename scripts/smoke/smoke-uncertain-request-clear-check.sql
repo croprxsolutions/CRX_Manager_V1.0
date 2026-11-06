@@ -1,10 +1,10 @@
--- Smoke chain: retire_uncertain_request (REQUIRES 20261110120000).
+-- Smoke chain: retire_uncertain_request (REQUIRES 20261111120000).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so the receipts it seeds and the
 -- retired-request rows the function writes are all rolled back. It needs one active
 -- admin profile: every receipt it reads it seeds itself. Proves, as a real signed-in
 -- session (role authenticated with that profile's claims) and with those claims cleared:
 --   * the installed bodies (the function and the receipt insert guard) are
---     20261110120000's and 20261107150000's, only authenticated can execute the function, and no client role
+--     20261110120000's and 20261111120000's, only authenticated can execute the function, and no client role
 --     can reach the signing-key or retired-request tables;
 --   * a request key recorded under the operation it names is safe ('recorded'), even
 --     when the receipt has expired; a receipt under another operation is not;
@@ -16,7 +16,7 @@
 --     another operation, or one not ending in a UUID, does not count;
 --   * after a safe answer the database refuses any later save of the request key, of
 --     any row of a batch under it (known or not, any ending), and of an expired one
---     (IDEMPOTENCY_REQUEST_RETIRED); an unrelated key, and a longer key of another
+--     (IDEMPOTENCY_REQUEST_RETIRED, worded for any staff clearer); an unrelated key, and a longer key of another
 --     operation that starts with a retired key, still save, and a retry of a
 --     retired request that still has a live receipt keeps its replay handling
 --     (allocate_payment's claim-row replay included);
@@ -54,8 +54,8 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: retire_uncertain_request is not the body of 20261110120000';
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._guard_idempotency_key_insert()'::regprocedure), chr(13), ''))
-     <> 'a9e47f3ea8b2b5b76b15ed1d745a8140' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: _guard_idempotency_key_insert is not the body of 20261107150000';
+     <> 'b6d31e7221291e5fb9c40aa146c93ef6' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: _guard_idempotency_key_insert is not the body of 20261111120000';
   END IF;
   IF has_function_privilege('anon', v_fn, 'EXECUTE') OR has_function_privilege('service_role', v_fn, 'EXECUTE')
      OR has_function_privilege('metabase_ro', v_fn, 'EXECUTE') OR NOT has_function_privilege('authenticated', v_fn, 'EXECUTE') THEN
@@ -265,7 +265,7 @@ BEGIN
       VALUES (v_bad, CASE WHEN v_bad LIKE 'adjust_inventory_batch:%' THEN 'adjust_inventory' ELSE 'save_vendor' END,
               '{"late": true}', v_actor, 'late');
     EXCEPTION WHEN OTHERS THEN
-      IF SQLERRM NOT LIKE 'IDEMPOTENCY_REQUEST_RETIRED%' THEN
+      IF SQLERRM NOT LIKE 'IDEMPOTENCY_REQUEST_RETIRED:%cleared after it got stuck%' THEN
         RAISE EXCEPTION 'SMOKE_FAIL: a late save of a retired request failed oddly: % %', SQLSTATE, SQLERRM;
       END IF;
       v_refused := true;

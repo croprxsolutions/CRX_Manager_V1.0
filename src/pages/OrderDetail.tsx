@@ -31,6 +31,7 @@ import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { runCriticalAction } from '../lib/criticalAction';
 import { parseLocalDate } from '../lib/dateUtils';
 import { formatUSD as fmt } from '../lib/money';
+import { exactRound2 } from '../lib/quoteCalc';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import HelpTip from '../components/ui/HelpTip';
@@ -1994,9 +1995,9 @@ export default function OrderDetail() {
                         New Total:
                       </td>
                       <td colSpan={5} className="px-4 py-3 font-semibold text-nav-dark">
+                        {/* Each line as the order functions store it, exact to the cent (To-Do 1.7). */}
                         {fmt(
-                          editItems.reduce((s, i) => s + i.price_per_unit * i.total_units_needed, 0) +
-                          newItems.reduce((s, i) => s + i.price_per_unit * i.total_units_needed, 0)
+                          [...editItems, ...newItems].reduce((cents, i) => cents + Math.round(exactRound2([i.price_per_unit, i.total_units_needed]) * 100), 0) / 100
                         )}
                       </td>
                     </tr>

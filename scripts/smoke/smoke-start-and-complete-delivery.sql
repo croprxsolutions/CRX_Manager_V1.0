@@ -120,7 +120,7 @@ BEGIN
 
   -- a. Scheduled delivery, today: one call starts and completes it.
   v_key := v_prefix || 'start-complete';
-  v_res := public.start_and_complete_delivery(v_del[1], '[SMOKE] Receiver', v_today, v_admin, NULL, NULL, NULL, v_key);
+  v_res := public.start_and_complete_delivery(v_del[1], 'No proof — recorded by office', v_today, v_admin, NULL, NULL, NULL, v_key, 'no_proof', '[SMOKE] test delivery, no proof kept');
   IF v_res->>'status' IS DISTINCT FROM 'completed' OR (v_res->>'started')::boolean IS DISTINCT FROM true THEN
     RAISE EXCEPTION 'SMOKE_FAIL: start_and_complete_delivery did not start and complete delivery 1: %', v_res;
   END IF;
@@ -149,7 +149,7 @@ BEGIN
   END IF;
 
   -- b. The exact retry replays and moves no extra stock.
-  v_res2 := public.start_and_complete_delivery(v_del[1], '[SMOKE] Receiver', v_today, v_admin, NULL, NULL, NULL, v_key);
+  v_res2 := public.start_and_complete_delivery(v_del[1], 'No proof — recorded by office', v_today, v_admin, NULL, NULL, NULL, v_key, 'no_proof', '[SMOKE] test delivery, no proof kept');
   IF v_res2 IS DISTINCT FROM v_res THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the exact retry did not replay: % vs %', v_res2, v_res;
   END IF;
@@ -166,7 +166,7 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[1], '[SMOKE] Receiver', v_today, v_admin, NULL, NULL, NULL, v_key);
+    v_res2 := public.start_and_complete_delivery(v_del[1], 'No proof — recorded by office', v_today, v_admin, NULL, NULL, NULL, v_key, 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: a deactivated account replayed its completion: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -182,7 +182,7 @@ BEGIN
 
   -- c. The same key for a different delivery is refused; delivery 2 stays scheduled.
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', v_today, v_admin, NULL, NULL, NULL, v_key);
+    v_res2 := public.start_and_complete_delivery(v_del[2], 'No proof — recorded by office', v_today, v_admin, NULL, NULL, NULL, v_key, 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: delivery 1''s key replayed as success for delivery 2: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -195,7 +195,7 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin_b, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin_b::text, true);
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[1], '[SMOKE] Receiver', v_today, NULL, NULL, NULL, NULL, v_key);
+    v_res2 := public.start_and_complete_delivery(v_del[1], 'No proof — recorded by office', v_today, NULL, NULL, NULL, NULL, v_key, 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: another admin received delivery 1''s saved result: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -212,12 +212,13 @@ BEGIN
   -- chain, so the saved receipt is planted exactly as the function writes and binds it.
   v_aged := (v_today - interval '1 year')::date - 1;
   v_fp := public._replay_fingerprint_20261015(jsonb_build_object(
-    'actor_id', v_admin, 'delivery_id', v_del[1], 'signed_by', '[SMOKE] Receiver', 'delivered_on', v_aged,
-    'quantities', NULL::jsonb, 'issue_type', NULL::text, 'issue_notes', NULL::text));
+    'actor_id', v_admin, 'delivery_id', v_del[1], 'signed_by', 'No proof — recorded by office', 'delivered_on', v_aged,
+    'quantities', NULL::jsonb, 'issue_type', NULL::text, 'issue_notes', NULL::text,
+    'evidence', 'no_proof', 'evidence_ref', '[SMOKE] test delivery, no proof kept'));
   PERFORM public.save_idempotency(v_prefix || 'aged', 'start_and_complete_delivery', v_res);
   PERFORM public._bind_replay_receipt_20261015(v_prefix || 'aged', 'start_and_complete_delivery', v_fp);
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[1], '[SMOKE] Receiver', v_aged, v_admin, NULL, NULL, NULL, v_prefix || 'aged');
+    v_res2 := public.start_and_complete_delivery(v_del[1], 'No proof — recorded by office', v_aged, v_admin, NULL, NULL, NULL, v_prefix || 'aged', 'no_proof', '[SMOKE] test delivery, no proof kept');
   EXCEPTION WHEN OTHERS THEN
     RAISE EXCEPTION 'SMOKE_FAIL: an exact retry of an aged-out date was refused: %', SQLERRM;
   END;
@@ -227,7 +228,7 @@ BEGIN
 
   -- e. Refusals before any change.
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', v_today, v_admin, NULL, NULL, NULL, NULL);
+    v_res2 := public.start_and_complete_delivery(v_del[2], 'No proof — recorded by office', v_today, v_admin, NULL, NULL, NULL, NULL, 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: a keyless call ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -237,35 +238,35 @@ BEGIN
     END IF;
   END;
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', NULL, v_admin, NULL, NULL, NULL, v_prefix || 'no-date');
+    v_res2 := public.start_and_complete_delivery(v_del[2], 'No proof — recorded by office', NULL, v_admin, NULL, NULL, NULL, v_prefix || 'no-date', 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: a dateless call ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF SQLERRM NOT LIKE 'DELIVERED_ON_REQUIRED%' THEN RAISE EXCEPTION 'SMOKE_FAIL: dateless refusal was %', SQLERRM; END IF;
   END;
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', v_today, v_admin_b, NULL, NULL, NULL, v_prefix || 'forged');
+    v_res2 := public.start_and_complete_delivery(v_del[2], 'No proof — recorded by office', v_today, v_admin_b, NULL, NULL, NULL, v_prefix || 'forged', 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: a forged p_performed_by ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF SQLERRM NOT LIKE 'ACTOR_MISMATCH%' THEN RAISE EXCEPTION 'SMOKE_FAIL: forged-actor refusal was %', SQLERRM; END IF;
   END;
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', v_today + 1, v_admin, NULL, NULL, NULL, v_prefix || 'future');
+    v_res2 := public.start_and_complete_delivery(v_del[2], 'No proof — recorded by office', v_today + 1, v_admin, NULL, NULL, NULL, v_prefix || 'future', 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: a future date ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF SQLERRM NOT LIKE 'DELIVERED_ON_IN_FUTURE%' THEN RAISE EXCEPTION 'SMOKE_FAIL: future-date refusal was %', SQLERRM; END IF;
   END;
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', (v_today - interval '1 year')::date - 1, v_admin, NULL, NULL, NULL, v_prefix || 'too-old');
+    v_res2 := public.start_and_complete_delivery(v_del[2], 'No proof — recorded by office', (v_today - interval '1 year')::date - 1, v_admin, NULL, NULL, NULL, v_prefix || 'too-old', 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: a date more than a year back ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF SQLERRM NOT LIKE 'DELIVERED_ON_TOO_OLD%' THEN RAISE EXCEPTION 'SMOKE_FAIL: too-old refusal was %', SQLERRM; END IF;
   END;
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', '-infinity'::date, v_admin, NULL, NULL, NULL, v_prefix || 'neg-infinity');
+    v_res2 := public.start_and_complete_delivery(v_del[2], 'No proof — recorded by office', '-infinity'::date, v_admin, NULL, NULL, NULL, v_prefix || 'neg-infinity', 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: a -infinity date ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -277,7 +278,7 @@ BEGIN
   END IF;
 
   -- f. Yesterday: completed at midday of yesterday.
-  v_res := public.start_and_complete_delivery(v_del[2], '[SMOKE] Receiver', v_today - 1, v_admin, NULL, NULL, NULL, v_prefix || 'yesterday');
+  v_res := public.start_and_complete_delivery(v_del[2], 'No proof — recorded by office', v_today - 1, v_admin, NULL, NULL, NULL, v_prefix || 'yesterday', 'no_proof', '[SMOKE] test delivery, no proof kept');
   SELECT status, completed_at INTO v_status, v_completed FROM public.deliveries WHERE id = v_del[2];
   IF v_status IS DISTINCT FROM 'completed'
      OR v_completed IS DISTINCT FROM ((v_today - 1) + time '17:00') AT TIME ZONE 'UTC'
@@ -295,7 +296,7 @@ BEGIN
     VALUES (v_closed_start, (v_closed_start + interval '1 month' - interval '1 day')::date, 'closed', '[SMOKE] closed period');
   END IF;
   BEGIN
-    v_res2 := public.start_and_complete_delivery(v_del[3], '[SMOKE] Receiver', v_closed_start + 14, v_admin, NULL, NULL, NULL, v_prefix || 'closed');
+    v_res2 := public.start_and_complete_delivery(v_del[3], 'No proof — recorded by office', v_closed_start + 14, v_admin, NULL, NULL, NULL, v_prefix || 'closed', 'no_proof', '[SMOKE] test delivery, no proof kept');
     RAISE EXCEPTION 'SMOKE_FAIL: a completion in a closed period ran: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -311,7 +312,7 @@ BEGIN
   END IF;
 
   -- h. An in_progress delivery completes without a start.
-  v_res := public.start_and_complete_delivery(v_del[4], '[SMOKE] Receiver', v_today, v_admin, NULL, NULL, NULL, v_prefix || 'in-progress');
+  v_res := public.start_and_complete_delivery(v_del[4], 'No proof — recorded by office', v_today, v_admin, NULL, NULL, NULL, v_prefix || 'in-progress', 'no_proof', '[SMOKE] test delivery, no proof kept');
   IF v_res->>'status' IS DISTINCT FROM 'completed' OR (v_res->>'started')::boolean IS DISTINCT FROM false THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the in_progress delivery did not complete without a start: %', v_res;
   END IF;

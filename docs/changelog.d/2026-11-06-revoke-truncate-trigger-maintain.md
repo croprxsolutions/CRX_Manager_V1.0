@@ -1,6 +1,6 @@
 ## 2026-11-06 — Browser roles lose table-maintenance rights (KI-07 follow-up, database)
 
-- New migration `20261122100000_revoke_truncate_trigger_maintain.sql` (CANDIDATE, not applied; record in
+- New migration `20261123130000_revoke_truncate_trigger_maintain.sql` (CANDIDATE, not applied; record in
   `docs/reference/migrations.d/`). Signed-in and signed-out app users no longer hold the TRUNCATE, TRIGGER or
   MAINTAIN rights on any app table or view, and tables created by later migrations no longer get them. No screen,
   Edge Function or scheduled job uses them. Every other grant is unchanged; the migration checks that itself and

@@ -242,7 +242,7 @@ const MODELLED_ROLES = ["public", "anon", "authenticated", "service_role", "post
 // adds to it, it does not replace it). "table" covers views too. `metabase_ro`'s
 // default read was set outside the migrations at an unknown date, so an object
 // older than it is modelled as having that read — the one known way this model
-// can overstate earlier access. Since 20261122100000 the browser roles get no
+// can overstate earlier access. Since 20261123130000 the browser roles get no
 // TRUNCATE, TRIGGER or MAINTAIN on new tables (that file also revoked them from
 // every existing table, so older objects converge on these defaults too).
 const DEFAULT_GRANTS = {
@@ -257,7 +257,7 @@ const DEFAULT_GRANTS = {
 // started from defaults this model does not know.
 const ABSORBED_DEFAULT_PRIVILEGES_FILES = new Set([
   "20260526151856_execute_full_codebase_ultra_review.sql",
-  "20261122100000_revoke_truncate_trigger_maintain.sql",
+  "20261123130000_revoke_truncate_trigger_maintain.sql",
 ]);
 const DYNAMIC_SQL_RE = /\bexecute\b(?!\s+(?:on|function|procedure)\b)(?!\s*,)/i;
 // Cheap raw-text test for history files that must be read even when they never

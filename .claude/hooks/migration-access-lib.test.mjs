@@ -186,8 +186,8 @@ const VIEW_HISTORY = [file("20260101000000_view", `CREATE VIEW public.widget_tot
 REVOKE ALL ON public.widget_totals FROM anon;`)];
 routine(`CREATE OR REPLACE VIEW public.widget_totals AS SELECT 2 AS n;
 GRANT SELECT ON public.widget_totals TO authenticated;`, "replacing a view authenticated could already read", { history: VIEW_HISTORY });
-// 20261122100000 changed the defaults but revoked the same rights everywhere, so it is absorbed, not unknown.
-const TTM_FILE = file("20261122100000_revoke_truncate_trigger_maintain",
+// 20261123130000 changed the defaults but revoked the same rights everywhere, so it is absorbed, not unknown.
+const TTM_FILE = file("20261123130000_revoke_truncate_trigger_maintain",
   "REVOKE TRUNCATE, TRIGGER, MAINTAIN ON ALL TABLES IN SCHEMA public FROM authenticated, anon;\nALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE TRUNCATE, TRIGGER, MAINTAIN ON TABLES FROM authenticated, anon;");
 routine(`CREATE OR REPLACE VIEW public.widget_totals AS SELECT 2 AS n;
 GRANT SELECT ON public.widget_totals TO authenticated;`, "the table-maintenance default change is absorbed, so older access stays known",

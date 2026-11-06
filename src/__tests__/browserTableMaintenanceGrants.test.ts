@@ -2,13 +2,13 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// Standing guard for 20261122100000: signed-in (authenticated) and anonymous (anon) users hold no
+// Standing guard for 20261123130000: signed-in (authenticated) and anonymous (anon) users hold no
 // TRUNCATE, TRIGGER or MAINTAIN on any public table or view, and new tables do not get them. A later
 // migration that GRANTs one of them (or ALL, which includes them) to anon, authenticated or PUBLIC on a
 // public table, on ALL TABLES IN SCHEMA public, or through ALTER DEFAULT PRIVILEGES re-opens that hole.
 const root = process.cwd();
 const MIGRATIONS = path.join(root, 'supabase/migrations');
-const LOCK = '20261122100000_revoke_truncate_trigger_maintain.sql';
+const LOCK = '20261123130000_revoke_truncate_trigger_maintain.sql';
 
 const strip = (sql: string) => sql.replace(/\r\n/g, '\n').replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 const NOT_TABLES = /^(FUNCTION|PROCEDURE|ROUTINE|SCHEMA|SEQUENCE|DATABASE|DOMAIN|TYPE|LANGUAGE|LARGE\s+OBJECT|FOREIGN\s+(DATA\s+WRAPPER|SERVER)|TABLESPACE|PARAMETER|ALL\s+(FUNCTIONS|PROCEDURES|ROUTINES|SEQUENCES)|FUNCTIONS|ROUTINES|SEQUENCES|TYPES|SCHEMAS)\b/i;
@@ -51,7 +51,7 @@ const later = readdirSync(MIGRATIONS)
   .filter((name) => name.endsWith('.sql') && name > LOCK)
   .map((name) => ({ name, sql: readFileSync(path.join(MIGRATIONS, name), 'utf8') }));
 
-describe('browser roles: no TRUNCATE, TRIGGER or MAINTAIN on public tables (20261122100000)', () => {
+describe('browser roles: no TRUNCATE, TRIGGER or MAINTAIN on public tables (20261123130000)', () => {
   it('the lock revokes all three on every public table and in the postgres default privileges', () => {
     const lock = strip(readFileSync(path.join(MIGRATIONS, LOCK), 'utf8'));
     expect(lock).toMatch(/REVOKE TRUNCATE, TRIGGER, MAINTAIN ON ALL TABLES IN SCHEMA public FROM authenticated, anon;/);

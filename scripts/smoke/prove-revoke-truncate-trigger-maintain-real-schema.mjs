@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261122100000_revoke_truncate_trigger_maintain.sql (KI-07 follow-up).
+ * Real-schema proof for 20261123130000_revoke_truncate_trigger_maintain.sql (KI-07 follow-up).
  * Builds the checked-in baseline plus every post-baseline migration BEFORE the candidate in a
  * network-disabled PostgreSQL container (scripts/smoke/undo-paths/harness.mjs, stopBefore). Then:
  *   1. BEFORE: the grants exist exactly as live had them (the generated rollback equals the live read,
@@ -27,7 +27,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, psql, scalar, attempt, asUser, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20261122100000_revoke_truncate_trigger_maintain.sql';
+const CANDIDATE = '20261123130000_revoke_truncate_trigger_maintain.sql';
 const STEM = CANDIDATE.replace('.sql', '');
 const reuse = process.env.REVOKE_TTM_PROOF_REUSE === '1';
 const lf = (f) => readFileSync(f, 'utf8').replaceAll('\r\n', '\n');

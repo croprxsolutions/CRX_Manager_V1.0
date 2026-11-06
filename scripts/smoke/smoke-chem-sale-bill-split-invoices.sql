@@ -36,9 +36,9 @@
 --   Y  A rush sale waiting for prices drafts nothing at completion, can still be priced, then Create Invoice drafts it
 --   Z  One payer's posted invoice can't be unposted alone (GROUP_UNPOST_REQUIRED); the group call unposts every payer
 --   AA A line bills in the order line's unit, so every payer can return it
---   AB One line too small to show, worth no cents, doesn't stop the rest of the delivery billing
---   AK The same tiny line on a restricted-use product refuses (the register reads invoice lines)
---   AC A line too small to show but worth cents still refuses, so no billed money is dropped
+--   AB A delivered amount beyond whole hundredths (2.125) refuses the split; the office is told, Create Invoice refuses
+--   AK A tiny restricted-use line refuses too (not hundredths)
+--   AC A tiny line worth cents refuses, so no billed money is dropped
 --   AD A payer's quantity is in whole hundredths, as a return holds it
 --   AE A payer draft's unit follows the split; re-saving a tote line as read still works
 --   AF A card plus a field allocation, part delivered, then the allocation removed: Create Invoice drafts per payer
@@ -363,9 +363,9 @@ BEGIN
   -- B: shares unevenly three ways. The main customer takes the rest of each line.
   PERFORM pg_temp.smk_new_sale('b' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
-  PERFORM pg_temp.smk_card(v_o, v_main, 33.333334);
-  PERFORM pg_temp.smk_card(v_o, v_payer2, 33.333333);
-  PERFORM pg_temp.smk_card(v_o, v_payer3, 33.333333);
+  PERFORM pg_temp.smk_card(v_o, v_main, 33.3334);
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 33.3333);
+  PERFORM pg_temp.smk_card(v_o, v_payer3, 33.3333);
   PERFORM pg_temp.smk_done(v_d, 'b' || v_suffix);
   IF (SELECT count(*) FROM invoices WHERE delivery_id = v_d) <> 3
      OR (SELECT sum(total_amount_cents) FROM invoices WHERE delivery_id = v_d)
@@ -374,7 +374,7 @@ BEGIN
           < (SELECT total_amount_cents FROM invoices WHERE delivery_id = v_d AND customer_id = v_payer2)
      OR EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
                  WHERE i.delivery_id = v_d AND i.customer_id = v_payer2
-                   AND ii.extended_cents <> floor((SELECT total_price * 100 FROM order_items WHERE id = ii.order_item_id) * 33.333333 / 100)) THEN
+                   AND ii.extended_cents <> floor((SELECT total_price * 100 FROM order_items WHERE id = ii.order_item_id) * 33.3333 / 100)) THEN
     v_fails := v_fails || ' (B) three-way shares are wrong;';
   END IF;
 
@@ -576,7 +576,7 @@ BEGIN
     PERFORM create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-s2-' || v_suffix);
     v_fails := v_fails || ' (S) Create Invoice billed a delivery too small to share;';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT LIKE 'BILL_SPLIT_QUANTITY_TOO_SMALL:%' THEN v_fails := v_fails || ' (S) wrong refusal: ' || SQLERRM || ';'; END IF;
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS:%' THEN v_fails := v_fails || ' (S) wrong refusal: ' || SQLERRM || ';'; END IF;
   END;
 
   -- T: after the first delivery a field split can't take the rest of the sale away from the frozen card.
@@ -646,12 +646,12 @@ BEGIN
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
   PERFORM complete_delivery(v_d, 'No proof — recorded by office', v_admin,
-    (SELECT jsonb_object_agg(di.id::text, 3.3333) FROM delivery_items di WHERE di.delivery_id = v_d),
+    (SELECT jsonb_object_agg(di.id::text, 3.33) FROM delivery_items di WHERE di.delivery_id = v_d),
     NULL, NULL, 'smk-spl-w1-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
   INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
     VALUES ('SMK-SPL-W2' || v_suffix, v_o, v_main, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_inv2;
   INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
-    SELECT v_inv2, oi.id, oi.product_id, oi.total_units_needed - 3.3333, 'gal' FROM order_items oi WHERE oi.order_id = v_o;
+    SELECT v_inv2, oi.id, oi.product_id, oi.total_units_needed - 3.33, 'gal' FROM order_items oi WHERE oi.order_id = v_o;
   PERFORM confirm_delivery(v_inv2, v_admin, 'smk-spl-w2c-' || v_suffix);
   PERFORM pg_temp.smk_done(v_inv2, 'w2' || v_suffix);
   IF (SELECT count(*) FROM invoices WHERE order_id = v_o AND deleted_at IS NULL) <> 4
@@ -769,24 +769,28 @@ BEGIN
     v_fails := v_fails || ' (AA) a payer cannot return a line because of its unit;';
   END IF;
 
-  -- AB: one line too small for an invoice line, worth no cents, doesn't stop the rest of the delivery billing.
-  -- 0.00001 stays under half a cent up to about $500 a unit, whichever product the seed lists first.
+  -- AB: a delivered amount beyond whole hundredths (2.125) refuses the split, so every payer's share, the
+  -- remainder included, can be returned in full (Mason, 2026-11-06). The delivery completes and the office is told.
   PERFORM pg_temp.smk_new_sale('ab' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   SELECT p.is_rup INTO v_rup FROM products p JOIN order_items oi ON oi.product_id = p.id WHERE oi.id = v_l1;
-  UPDATE products SET is_rup = false WHERE id = (SELECT product_id FROM order_items WHERE id = v_l1);
   PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
   v_r := complete_delivery(v_d, 'No proof — recorded by office', v_admin,
-    (SELECT jsonb_object_agg(di.id::text, CASE WHEN di.order_item_id = v_l1 THEN 0.00001 ELSE 5 END) FROM delivery_items di WHERE di.delivery_id = v_d),
+    (SELECT jsonb_object_agg(di.id::text, CASE WHEN di.order_item_id = v_l1 THEN 2.125 ELSE 5 END) FROM delivery_items di WHERE di.delivery_id = v_d),
     NULL, NULL, 'smk-spl-ab-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; bill split');
-  IF COALESCE((v_r->>'bill_split_failed')::boolean, false)
-     OR (SELECT count(*) FROM invoices WHERE delivery_id = v_d) <> 2
-     OR (SELECT sum(total_amount_cents) FROM invoices WHERE delivery_id = v_d)
-          IS DISTINCT FROM (SELECT round(price_per_unit * 5 * 100)::bigint FROM order_items WHERE id = v_l2)
-     OR EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
-                 WHERE i.delivery_id = v_d AND ii.order_item_id = v_l1) THEN
-    v_fails := v_fails || ' (AB) one tiny line stopped or changed the delivery''s billing: ' || v_r::text || ';';
+  IF COALESCE((v_r->>'bill_split_failed')::boolean, false) IS NOT TRUE
+     OR (SELECT status FROM deliveries WHERE id = v_d) IS DISTINCT FROM 'completed'
+     OR EXISTS (SELECT 1 FROM invoices WHERE delivery_id = v_d)
+     OR NOT EXISTS (SELECT 1 FROM activity_feed WHERE event_type = 'bill_split_invoices_failed' AND related_entity_id = v_o
+                     AND description LIKE '%BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS%') THEN
+    v_fails := v_fails || ' (AB) a delivered amount beyond hundredths was billed, or the office was not told: ' || v_r::text || ';';
   END IF;
+  BEGIN
+    PERFORM create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-ab2-' || v_suffix);
+    v_fails := v_fails || ' (AB) Create Invoice billed a delivered amount beyond hundredths;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS:%' THEN v_fails := v_fails || ' (AB) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
 
   -- AK: the same tiny line on a restricted-use product refuses, since the register reads invoice lines
   -- (Mason, 2026-11-06). The delivery still completes and the office is told.

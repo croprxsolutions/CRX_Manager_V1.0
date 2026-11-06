@@ -36,9 +36,10 @@
 --     post_invoice does (GROUP_POST_REQUIRED). This covers field-split groups too: the screens already send
 --     them to unpost_invoice_group, which calls the inner function and isn't changed.
 --   - A line bills in the order line's unit, as the return checks compare it, so every payer can return it.
---   - A line too small to show (under 0.00005) and worth no cents is left off; the rest of the delivery bills.
---     A restricted-use line that small refuses instead, since the register reads invoice lines (Mason, 2026-11-06).
---     If it is worth cents, or nothing else bills, the split refuses, so no billed money is dropped.
+--   - A Bill Split bills only delivered quantities in whole hundredths, as a return holds them, so every payer's
+--     share, the remainder included, can be returned in full (Mason, 2026-11-06). Any other line refuses the split
+--     (BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS): the delivery completes, the office is told and corrects it with Fix
+--     Delivery, then Create Invoice drafts the payers. A one-customer sale is unchanged.
 --   - A price-later (rush) sale drafts nothing until it is priced (PRICING_INCOMPLETE, as for field
 --     splits): the delivery completes, the office is told, and Create Invoice drafts per payer after.
 --   - A failed split doesn't stop the delivery completing: it leaves an activity record and a flag in the
@@ -314,6 +315,7 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_item_id uuid := COALESCE(NEW.order_item_id, OLD.order_item_id);
+  v_order_id uuid := (SELECT order_id FROM order_items WHERE id = COALESCE(NEW.order_item_id, OLD.order_item_id));
   v_total numeric;
 BEGIN
   -- A share that moved would leave a frozen sale without the check on it.
@@ -321,8 +323,18 @@ BEGIN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_IMMUTABLE: a line share cannot move to another line'
       USING ERRCODE = 'check_violation';
   END IF;
-  -- FOR SHARE holds the line on its sale until commit (trg_order_items_bill_split_move).
-  PERFORM public._refuse_bill_split_change((SELECT order_id FROM order_items WHERE id = v_item_id FOR SHARE));
+  -- The sale is locked before its line, as Create Invoice and completion lock them, so the two can't deadlock.
+  -- FOR SHARE then holds the line on its sale until commit (trg_order_items_bill_split_move).
+  -- A line being deleted takes its shares with it; trg_order_items_bill_split_move checked its sale.
+  IF v_order_id IS NULL AND TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  PERFORM 1 FROM orders WHERE id = v_order_id FOR UPDATE;
+  IF NOT EXISTS (SELECT 1 FROM order_items WHERE id = v_item_id AND order_id = v_order_id FOR SHARE) THEN
+    RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_MOVED: the line moved to another order; try again'
+      USING ERRCODE = 'serialization_failure';
+  END IF;
+  PERFORM public._refuse_bill_split_change(v_order_id);
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
   END IF;
@@ -483,7 +495,6 @@ DECLARE
   v_ids uuid[] := '{}';
   v_line_cents bigint;
   v_line_units bigint;
-  v_too_small boolean := false;
 BEGIN
   SELECT * INTO STRICT v_delivery FROM deliveries WHERE id = p_delivery_id;
   SELECT * INTO STRICT v_order FROM orders WHERE id = v_delivery.order_id;
@@ -510,15 +521,11 @@ BEGIN
   LOOP
     v_line_cents := _allocated_delivery_cents(v_item.order_item_id, v_item.quantity_delivered, NULL);
     v_line_units := round(v_item.quantity_delivered * 10000)::bigint;
-    -- An invoice line holds four decimals of quantity, so this line can't be shown or shared. Worth no
-    -- cents, it stays off the invoices; worth cents, it refuses, so no billed money is dropped. A
-    -- restricted-use line always refuses: the register reads invoice lines (Mason, 2026-11-06).
-    IF v_line_units = 0 AND v_line_cents = 0 AND NOT v_item.is_rup THEN
-      v_too_small := true;
-      CONTINUE;
-    END IF;
-    IF v_line_units = 0 THEN
-      RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: delivery % delivered too little of a line to bill it', v_delivery.delivery_number
+    -- Whole hundredths only, as a return holds them: every payer's share then lands on hundredths too, so each
+    -- can be returned in full (Mason, 2026-11-06). The office corrects the delivery with Fix Delivery.
+    IF v_item.quantity_delivered <> round(v_item.quantity_delivered, 2) THEN
+      RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS: delivery % delivered % of %, which is not in whole hundredths; correct it with Fix Delivery',
+        v_delivery.delivery_number, v_item.quantity_delivered, COALESCE(v_item.oi_product_name, v_item.p_name)
         USING ERRCODE = 'check_violation';
     END IF;
     FOR v_share IN
@@ -553,10 +560,6 @@ BEGIN
         ROUND(COALESCE(v_item.cost_per_unit, 0) * 100)::bigint, COALESCE(v_item.oi_unit_size, 'ea'), v_item.tote_number);
     END LOOP;
   END LOOP;
-  IF cardinality(v_ids) = 0 AND v_too_small THEN
-    RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: delivery % delivered too little to bill', v_delivery.delivery_number
-      USING ERRCODE = 'check_violation';
-  END IF;
   IF cardinality(v_ids) = 0 THEN
     DELETE FROM split_invoice_creation_claims WHERE transaction_id = pg_current_xact_id();
     RETURN v_ids;

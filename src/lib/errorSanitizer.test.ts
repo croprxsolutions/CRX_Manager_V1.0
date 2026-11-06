@@ -274,7 +274,10 @@ describe('sanitizeError', () => {
       "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"
     );
     expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_SMALL: delivery D-1')).toBe(
-      "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"
+      "Nothing was billed. A payer's share of a product is under 0.01 of a unit. Change the bill split so each payer gets at least 0.01"
+    );
+    expect(sanitizeError('BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS: delivery D-1 delivered 1.2345')).toBe(
+      "Nothing was billed. A Bill Split sale bills delivered amounts in whole hundredths (like 1.23). Correct the delivered amount with Fix Delivery, then choose Create Invoice"
     );
     expect(sanitizeError('PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted')).toBe(
       'Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery'

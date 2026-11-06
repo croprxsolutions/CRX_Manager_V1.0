@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-05 for the live ledger only (see the void-delivery-order-status-guards-applied-live note); other evidence retains its stated dates.
+**Last verified:** 2026-11-06 for the live ledger only (KI-06 snapshots applied, ledger `20261106060243`); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -133,10 +133,14 @@ connected connector, or one whose id changes on reconnect, is unlisted until som
 gaps are accepted in KI-78.
 
 ### KI-06 — Financial audit log can point at hard-deleted records
-**HIGH (per older record) · UNVERIFIED · database/money · Mason (migration decision)**
-Some audit-trail rows refer to invoices or payments that were later hard-deleted and carry no snapshot of what
-the record was. Newer invoice deletes are soft; hard-delete paths for payments and the admin override remain.
-No snapshot/guard migration was found, but the live row count could not be checked.
+**FIXED 2026-11-06 12:02 AM Central (PR #1546, migration `20261115160000_financial_delete_snapshots`) · database/money**
+The app never hard-deletes these rows: invoice deletes are soft (`deleted_at`), payment deletes are voids
+(`allocation_sets.is_active = false`), and signed-in users hold no DELETE on `invoices`, `allocation_sets` or
+`payments`. Any remaining back-office (postgres/service-role) hard delete now writes a `financial_audit_log` row
+with the whole erased row plus every row that cascades away with it, naming the system actor; TRUNCATE on the
+three tables is refused. Residual (accepted, recorded): 206 older audit rows (162 invoice, 43 payment, March
+2026 test-era data plus one August E2E demo invoice) still point at rows erased before the fix; Mason decided
+nothing is back-filled or deleted without his approval. A database owner who disables triggers can still bypass.
 
 ### KI-07 — Other small security gaps
 **MED/LOW · mixed · unassigned**
@@ -947,7 +951,7 @@ service-role tools (LOW).
 
 ## Unverified items (could not confirm either way; treat as open until checked)
 
-KI-06 (audit log), KI-07 (customer-document post-apply check), KI-16 (split-acre
+KI-07 (customer-document post-apply check), KI-16 (split-acre
 rounding), KI-20 (per-delivery split, commission design choices), KI-29/KI-30
 (live-data counts), KI-35 (ledger reconciliation), KI-41 (offline recovery), KI-52 (prover, live-testdata false
 positives). Live-database facts need a read-only query by someone with access.

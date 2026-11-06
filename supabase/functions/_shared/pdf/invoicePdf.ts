@@ -194,6 +194,50 @@ export interface InvoicePdfShare {
   amount_cents: number;
   price_per_acre_cents?: number | null;
   pricing_note?: string | null;
+  /** A Bill Split payer's own invoice, printed as its reference on Old Print. */
+  invoice_number?: string | null;
+}
+
+/** One payer of a Bill Split sale (billing plan M2): their invoice and their share of the whole sale. */
+export interface BillSplitPayer extends InvoicePdfShare {
+  invoice_id: string;
+}
+
+/** A Bill Split draws per delivery. A field split's chemical-sale invoices have a group but no delivery. */
+export function isBillSplitInvoice(row: { invoice_type?: string | null; invoice_group_id?: string | null; delivery_id?: string | null }): boolean {
+  return row.invoice_type === 'chemical_sale' && !!row.invoice_group_id && !!row.delivery_id;
+}
+
+export function billSplitPayerShares(rows: Array<{
+  id: string;
+  invoice_number: string | null;
+  total_amount_cents: number | null;
+  customer?: { farm_name?: string | null } | null;
+}>): BillSplitPayer[] {
+  const total = rows.reduce((sum, r) => sum + (r.total_amount_cents ?? 0), 0);
+  // Numeric, so -10 follows -2. The database sorts the suffix as text.
+  const ordered = [...rows].sort((a, b) => (a.invoice_number ?? '').localeCompare(b.invoice_number ?? '', undefined, { numeric: true }));
+  return ordered.map((r) => ({
+    invoice_id: r.id,
+    invoice_number: r.invoice_number,
+    customer_name: r.customer?.farm_name || 'Unknown',
+    split_percentage: total > 0 ? Math.round(((r.total_amount_cents ?? 0) / total) * 1000000) / 10000 : 0,
+    acres: null,
+    amount_cents: r.total_amount_cents ?? 0,
+  }));
+}
+
+/** Read from each group's invoices, not invoice_shares: those rows split one invoice, and a re-save rescales them to it. */
+export async function loadBillSplitPayers(db: SupabaseClient, invoiceGroupId: string): Promise<BillSplitPayer[]> {
+  const { data, error } = await db
+    .from('invoices')
+    .select('id, invoice_number, total_amount_cents, customer:customers!invoices_customer_id_fkey(farm_name)')
+    .eq('invoice_group_id', invoiceGroupId)
+    .is('deleted_at', null)
+    .not('status', 'in', '("voided","cancelled")')
+    .order('invoice_number');
+  if (error || !Array.isArray(data)) throw new InvoiceDetailsUnavailableError();
+  return billSplitPayerShares(data as unknown as Parameters<typeof billSplitPayerShares>[0]);
 }
 
 export interface InvoicePdfData {
@@ -405,7 +449,7 @@ export async function buildInvoicePdfDataFromRow(
     // print of unsaved live form edits is unchanged.
     db
       .from('invoices')
-      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id')
+      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id')
       .eq('id', inv.id)
       .maybeSingle(),
   ]).catch(() => { throw new InvoiceDetailsUnavailableError(); });
@@ -430,8 +474,12 @@ export async function buildInvoicePdfDataFromRow(
     discount_earned_cents?: number | null; discount_date?: string | null;
     payment_terms?: string | null; purchase_order_ref?: string | null;
     header_notes?: string | null; footer_notes?: string | null; due_date?: string | null;
-    diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null;
+    diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null; delivery_id?: string | null;
   } | null;
+  const billSplitPayers = billingRow?.invoice_group_id && shares.length === 0
+      && isBillSplitInvoice({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id })
+    ? await loadBillSplitPayers(db, billingRow.invoice_group_id)
+    : [];
   const pickPo = inv.purchase_order_ref !== undefined ? inv.purchase_order_ref : billingRow?.purchase_order_ref;
   const pickTerms = inv.payment_terms !== undefined ? inv.payment_terms : billingRow?.payment_terms;
   const pickDue = inv.due_date !== undefined ? inv.due_date : billingRow?.due_date;
@@ -504,7 +552,7 @@ export async function buildInvoicePdfDataFromRow(
           price_per_acre_cents: s.price_per_acre_cents ?? null,
           pricing_note: s.pricing_note ?? null,
         }))
-      : undefined,
+      : billSplitPayers.length > 0 ? billSplitPayers : undefined,
     items: pdfItems,
     total_amount_cents: inv.total_amount_cents || 0,
     total_cost_cents: inv.total_cost_cents || 0,

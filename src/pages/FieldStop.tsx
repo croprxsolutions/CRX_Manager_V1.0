@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import PhoneHeader from '../components/ui/PhoneHeader';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
+import { billSplitCompletion } from '../lib/billSplitCompletion';
 import { supabase, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/ui/Toast';
@@ -494,7 +495,10 @@ export default function FieldStop() {
       // Only the stop still on screen shows the Done step; the follow-ups below run regardless.
       const stillOnStop = activeStopIdRef.current === id;
       if (invoiceNum && stillOnStop) setAutoInvoiceNumber(invoiceNum);
-      toast('success', invoiceNum
+      const billSplit = billSplitCompletion(result);
+      if (billSplit.failed) {
+        toast('warning', 'Delivery completed. The office has been told its invoices still need drafting.');
+      } else toast('success', invoiceNum
         ? `Delivery completed${isPartial ? ' (partial)' : ''}. Draft invoice ${invoiceNum} created.`
         : `Delivery completed${isPartial ? ' (partial)' : ''}`);
 

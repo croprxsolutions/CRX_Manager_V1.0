@@ -9,6 +9,8 @@ interface InvoicePrintDialogProps {
   onClose: () => void;
   invoiceType: string;
   hasShares: boolean;
+  /** A Bill Split invoice prints its payer table unless someone unticks it. */
+  sharesOnByDefault?: boolean;
   onPrint: (options: InvoicePrintOptions) => void;
   loading?: boolean;
 }
@@ -18,12 +20,13 @@ export default function InvoicePrintDialog({
   onClose,
   invoiceType,
   hasShares,
+  sharesOnByDefault = false,
   onPrint,
   loading = false,
 }: InvoicePrintDialogProps) {
   const isFieldApp = invoiceType === 'field_application';
 
-  const [showShares, setShowShares] = useState(isFieldApp && hasShares);
+  const [showShares, setShowShares] = useState(sharesOnByDefault || (isFieldApp && hasShares));
   const [showPricePerAcre, setShowPricePerAcre] = useState(isFieldApp);
   const [showEpa, setShowEpa] = useState(true);
   // Field-app parity #30: ChemMan "Print" (current) vs "Old Print" (legacy).

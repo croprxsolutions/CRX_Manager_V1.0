@@ -87,6 +87,11 @@ BEGIN
   END;
   IF (SELECT status FROM public.job_notifications WHERE id=notice2)<>'failed' THEN RAISE EXCEPTION 'SMOKE_FAIL: confirm changed notice 2'; END IF;
   IF NOT EXISTS(SELECT 1 FROM public.idempotency_keys WHERE idempotency_key=k AND operation='confirm_job_notification_sent' AND request_actor_id=a AND request_fingerprint ~ '^[0-9a-f]{64}$') THEN RAISE EXCEPTION 'SMOKE_FAIL: confirm receipt'; END IF;
+  -- An old tab (before PR #1518) confirms without a key: it still works and writes no receipt.
+  SELECT count(*) INTO n FROM public.idempotency_keys WHERE operation='confirm_job_notification_sent';
+  PERFORM public.confirm_job_notification_sent(notice2,'[SMOKE] sent','[SMOKE] sent',a,NULL);
+  IF (SELECT status FROM public.job_notifications WHERE id=notice2)<>'sent' THEN RAISE EXCEPTION 'SMOKE_FAIL: keyless confirm did not confirm'; END IF;
+  IF n<>(SELECT count(*) FROM public.idempotency_keys WHERE operation='confirm_job_notification_sent') THEN RAISE EXCEPTION 'SMOKE_FAIL: keyless confirm wrote a receipt'; END IF;
 
   k := 'smk-4e-failed-'||s;
   failed := public.log_failed_notification('post','job',j,'[SMOKE] failure','{}'::jsonb,k);
@@ -237,8 +242,15 @@ BEGIN
       IF SQLERRM NOT LIKE 'INSUFFICIENT_ROLE%' THEN RAISE EXCEPTION 'SMOKE_FAIL: % role gave %',op,SQLERRM; END IF;
     END;
   END LOOP;
+  BEGIN
+    PERFORM public.confirm_job_notification_sent(notice,'[SMOKE] sent','[SMOKE] sent',NULL,NULL);
+    RAISE EXCEPTION 'SMOKE_FAIL: keyless confirm bypassed role';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'INSUFFICIENT_ROLE%' THEN RAISE EXCEPTION 'SMOKE_FAIL: keyless confirm role gave %',SQLERRM; END IF;
+  END;
   PERFORM set_config('request.jwt.claims',json_build_object('sub',a,'role','authenticated')::text,true);
-  FOREACH op IN ARRAY ARRAY['confirm_job_notification_sent','record_job_pre_notifications','record_job_post_notifications','log_failed_notification','apply_remaining_prepayments','batch_apply_all_prepayments','assign_job_applicator','dispatch_job_locations','undispatch_job_locations','start_job','create_job_from_quote_section','update_field_app_applied_info','create_quote_from_template','rollover_quote_to_season','save_quote_template'] LOOP
+  FOREACH op IN ARRAY ARRAY['record_job_pre_notifications','record_job_post_notifications','log_failed_notification','apply_remaining_prepayments','batch_apply_all_prepayments','assign_job_applicator','dispatch_job_locations','undispatch_job_locations','start_job','create_job_from_quote_section','update_field_app_applied_info','create_quote_from_template','rollover_quote_to_season','save_quote_template'] LOOP
     SELECT * INTO STRICT p FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname=op;
     call_args := NULL;
     FOR i IN 1..p.pronargs LOOP call_args := concat_ws(', ',call_args,'NULL::'||format_type(p.proargtypes[i-1],NULL)); END LOOP;

@@ -13,7 +13,9 @@
 -- This file requires the exact 78-operation post-4d guard (53 through 4c, then the 25 batch 4d
 -- operations, in that order) and appends its own 15; every other guard state is refused.
 -- KNOWN LIMITS: dynamic SQL callers cannot be found by catalog text scan; a keyless call
--- still fails closed. An old browser bundle needs the key-adding app PR before batch 4e.
+-- still fails closed, except confirm_job_notification_sent, which keeps its pre-4e keyless path
+-- (unchanged body, no receipt) so a tab older than PR #1518 can still confirm an email it sent.
+-- Every other old-bundle call needs the key-adding app PR before batch 4e.
 -- EXCLUDED: the twelve 4c functions; generate_rup_sales_records (parked rewrite);
 -- service-role-only commit_blend_ticket_ocr_result, increment_customer_prepay,
 -- load_recipe_into_job, restore_cancelled_delivery; save_job_applied_record (own request hash);
@@ -262,8 +264,11 @@ DECLARE
   v_replay jsonb;
   v_result jsonb;
 BEGIN
+  -- Transition: a tab opened before the key-sending app update (PR #1518) confirms an email it
+  -- already sent without a key. Refusing it would leave the notice unconfirmed and invite a resend,
+  -- so a keyless call runs the unchanged body exactly as before 4e; it writes no receipt to bind.
   IF p_idempotency_key IS NULL THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: confirm_job_notification_sent requires p_idempotency_key' USING ERRCODE = '22023';
+    RETURN public._confirm_job_notification_sent_replay_impl_20261015(p_notification_id, p_subject, p_message, p_performed_by, NULL);
   END IF;
   -- The pinned body runs these statements before its own receipt lookup.
   DECLARE
@@ -478,6 +483,8 @@ GRANT EXECUTE ON FUNCTION public.record_job_post_notifications(uuid, text, text,
 
 -- 4. log_failed_notification
 ALTER FUNCTION public.log_failed_notification(text, text, uuid, text, jsonb, text) RENAME TO _log_failed_notification_replay_impl_20261015;
+-- Only signed-in browser screens call this (Dashboard, notificationTriggers); no Edge Function, cron job or
+-- database function does (checked live 2026-11-06), so requiring a signed-in caller loses no current path.
 REVOKE ALL ON FUNCTION public._log_failed_notification_replay_impl_20261015(text, text, uuid, text, jsonb, text)
   FROM PUBLIC, anon, authenticated, service_role;
 CREATE FUNCTION public.log_failed_notification(p_notification_type text, p_entity_type text DEFAULT NULL::text, p_entity_id uuid DEFAULT NULL::uuid, p_error_message text DEFAULT NULL::text, p_payload jsonb DEFAULT NULL::jsonb, p_idempotency_key text DEFAULT NULL::text)

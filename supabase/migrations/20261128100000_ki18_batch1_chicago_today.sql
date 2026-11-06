@@ -45,6 +45,14 @@
 -- (a lock name, not a business date); internal impls whose date default is never used (their wrapper
 -- always passes the date); boards and reports (batch 2); statement and AR aging (batch 3).
 -- Rollback: a forward migration re-emitting the pre-images (their md5s are in the preflight).
+--
+-- idempotency-body-check: exempt
+-- These are live bodies re-emitted with only their dates changed; no signature, caller or grant changes.
+-- mark_overdue_invoices, auto_expire_quotes and run_morning_notification_checks take no arguments, are
+-- executable only by postgres and service_role (scheduled jobs), and a rerun finds nothing left to change.
+-- _sync_job_holds(p_job_id, p_actor) is an internal helper (postgres and service_role only); its callers
+-- are the _trg_sync_job_holds and _trg_release_job_holds_on_lifecycle triggers, which pass auth.uid(), and
+-- reserve_job_inventory, which passes its own bound actor, so p_actor is never caller-chosen.
 DO $preflight$
 DECLARE
   v_row record;

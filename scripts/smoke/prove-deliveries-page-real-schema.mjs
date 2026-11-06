@@ -367,6 +367,9 @@ try {
     assert.ok(times[k] < 8000, `${k} took ${times[k]} ms at 60,000 deliveries (authenticated statement_timeout is 8 s)`);
     assert.ok(times[k] < 3 * Math.max(times.base, 100), `${k} took ${times[k]} ms, over 3x a rep's plain read (${times.base} ms): the per-page cost regressed`);
   }
+  // Sorting by item count still counts every match (known limit, in the migration record and KNOWN_ISSUES); it must
+  // at least stay under the timeout here.
+  assert.ok(times.rep_items_sort < 8000, `rep_items_sort took ${times.rep_items_sort} ms at 60,000 deliveries`);
   console.log('\nDELIVERIES_PAGE_PROOF_PASS');
 } finally {
   if (!reuse) removeContainer();

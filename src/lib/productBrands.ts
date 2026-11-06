@@ -1,9 +1,6 @@
-import { assertRpcResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from './db';
+import { assertRpcResult, hasRpcCode, RpcErrorCodes, supabaseUntyped } from './db';
 import { sanitizeError } from './errorSanitizer';
 import type { BrandSignalWord, ProductBrand } from '../types';
-
-const PRODUCT_BRAND_COLUMNS =
-  'id, product_id, brand_name, epa_registration, manufacturer, is_currently_sourced, is_rup, signal_word, row_version, created_by, updated_by, created_at, updated_at';
 
 /**
  * Same shapes the database and the EPA lookup accept: a Section 3 number (524-475) or a distributor
@@ -22,6 +19,8 @@ export function epaLabelSearchUrl(epaRegistration: string | null | undefined): s
 
 export interface ProductBrandInput {
   productId: string;
+  /** Set when the size is grouped: the brand is saved on the parent's list instead. */
+  parentId?: string | null;
   /** Omit to add a new brand. */
   brandId?: string;
   /** The row_version the editor read; required when brandId is set. */
@@ -34,20 +33,39 @@ export interface ProductBrandInput {
   signalWord: BrandSignalWord | null;
 }
 
-export async function listProductBrands(productId: string): Promise<ProductBrand[]> {
-  const { data, error } = await supabase
-    .from('product_brands')
-    .select(PRODUCT_BRAND_COLUMNS)
-    .eq('product_id', productId)
-    .order('brand_name');
+/** A product's brand list: its parent's list once the size is grouped (PAR-2), otherwise its own. */
+export interface ProductBrandList {
+  parentId: string | null;
+  parentName: string | null;
+  brands: ProductBrand[];
+}
+
+interface ProductBrandsReply {
+  source: 'product' | 'parent';
+  parent_id: string | null;
+  parent_name: string | null;
+  brands: (Omit<ProductBrand, 'product_id'> & { product_id?: string })[];
+}
+
+export async function getProductBrands(productId: string): Promise<ProductBrandList> {
+  // Untyped client: get_product_brands (20261123120000) is not in the generated types yet.
+  const { data, error } = await supabaseUntyped.rpc('get_product_brands', { p_product_id: productId });
   if (error) throw error;
-  return (data ?? []) as ProductBrand[];
+  const reply = assertRpcResult<ProductBrandsReply>(data, 'get_product_brands');
+  return {
+    parentId: reply.source === 'parent' ? reply.parent_id : null,
+    parentName: reply.source === 'parent' ? reply.parent_name : null,
+    // A parent's brand rows carry parent_id, not product_id; the screen shows them on this size.
+    brands: (reply.brands ?? []).map((brand) => ({ ...brand, product_id: productId })),
+  };
+}
+
+export async function listProductBrands(productId: string): Promise<ProductBrand[]> {
+  return (await getProductBrands(productId)).brands;
 }
 
 export async function saveProductBrand(input: ProductBrandInput, idempotencyKey: string): Promise<ProductBrand> {
-  // Untyped client: the generated Args type marks the nullable parameters non-null.
-  const { data, error } = await supabaseUntyped.rpc('upsert_product_brand', {
-    p_product_id: input.productId,
+  const fields = {
     p_brand_id: input.brandId ?? null,
     p_expected_row_version: input.expectedRowVersion ?? null,
     p_brand_name: input.brandName.trim(),
@@ -57,7 +75,14 @@ export async function saveProductBrand(input: ProductBrandInput, idempotencyKey:
     p_is_rup: input.isRup,
     p_signal_word: input.signalWord,
     p_idempotency_key: idempotencyKey,
-  });
+  };
+  if (input.parentId) {
+    const { data, error } = await supabaseUntyped.rpc('upsert_parent_brand', { p_parent_id: input.parentId, ...fields });
+    if (error) throw error;
+    return { ...assertRpcResult<ProductBrand>(data, 'upsert_parent_brand'), product_id: input.productId };
+  }
+  // Untyped client: the generated Args type marks the nullable parameters non-null.
+  const { data, error } = await supabaseUntyped.rpc('upsert_product_brand', { p_product_id: input.productId, ...fields });
   if (error) throw error;
   return assertRpcResult<ProductBrand>(data, 'upsert_product_brand');
 }

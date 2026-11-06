@@ -64,6 +64,7 @@
 | `/cycle-counts` | CycleCounts | Admin-only. Inventory cycle counting with variance tracking |
 | `/returns` | Returns | Returns/RMA workflow (request -> approve -> receive -> credit) |
 | `/brand-vs-generic` | BrandVsGeneric | Ingredient mapping: branded vs generic |
+| `/group-products` | GroupProducts | Admin: group product sizes under one parent (build, hold, reject, approve proposals) |
 | `/crop-programs` | CropPrograms | Seasonal crop program management |
 | `/compliance` | Compliance | Applicator license tracking, RUP product list, RUP Sales Register (auto-generated from invoices, filterable, CSV export; the register tab is admin-only, the rest is admin and sales rep) |
 | `/lot-trace` | LotTrace | **B1 Lot Capture & Trace** — recall/compliance lookup: enter a lot number → every application that used it (product, field(s), date, customer, applicator, record #, invoice, source). Admin/sales. The `get_lot_application_trace` RPC is live (B1 migration `20260622170000`, applied 2026-06-23). |

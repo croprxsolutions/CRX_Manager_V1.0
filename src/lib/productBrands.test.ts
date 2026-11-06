@@ -22,6 +22,7 @@ vi.mock('./db', async () => {
 import {
   EPA_REGISTRATION_PATTERN,
   epaLabelSearchUrl,
+  getProductBrands,
   productBrandErrorMessage,
   saveProductBrand,
   suggestBrandNamesFromProductName,
@@ -154,6 +155,37 @@ describe('saveProductBrand', () => {
       productId: 'p1', brandName: 'x', epaRegistration: '', manufacturer: '',
       isCurrentlySourced: true, isRup: null, signalWord: null,
     }, 'k')).rejects.toMatchObject({ message: 'BRAND_NAME_TAKEN: x' });
+  });
+});
+
+describe('getProductBrands (PAR-2)', () => {
+  beforeEach(() => mockRpc.mockReset());
+
+  it('returns the parent list of a grouped size, shown on this size', async () => {
+    mockRpc.mockResolvedValue({ data: { source: 'parent', parent_id: 'par1', parent_name: 'Roundup', brands: [{ id: 'pb1', parent_id: 'par1', brand_name: 'Slam' }] }, error: null });
+    const list = await getProductBrands('p1');
+    expect(mockRpc).toHaveBeenCalledWith('get_product_brands', { p_product_id: 'p1' });
+    expect(list).toMatchObject({ parentId: 'par1', parentName: 'Roundup', brands: [{ id: 'pb1', product_id: 'p1', brand_name: 'Slam' }] });
+  });
+
+  it('returns the own list of an ungrouped size with no parent', async () => {
+    mockRpc.mockResolvedValue({ data: { source: 'product', parent_id: null, parent_name: null, brands: [{ id: 'b1', product_id: 'p1', brand_name: 'Slam' }] }, error: null });
+    expect(await getProductBrands('p1')).toMatchObject({ parentId: null, parentName: null, brands: [{ id: 'b1' }] });
+  });
+});
+
+describe('saveProductBrand on a parent', () => {
+  beforeEach(() => mockRpc.mockReset());
+
+  it('saves the brand of a grouped size through upsert_parent_brand', async () => {
+    mockRpc.mockResolvedValue({ data: { id: 'pb1', parent_id: 'par1', brand_name: 'Slam' }, error: null });
+    const saved = await saveProductBrand({
+      productId: 'p1', parentId: 'par1', brandName: 'Slam', epaRegistration: '', manufacturer: '',
+      isCurrentlySourced: true, isRup: null, signalWord: null,
+    }, 'k');
+    expect(mockRpc).toHaveBeenCalledWith('upsert_parent_brand', expect.objectContaining({ p_parent_id: 'par1', p_brand_name: 'Slam', p_idempotency_key: 'k' }));
+    expect(mockRpc.mock.calls[0][1]).not.toHaveProperty('p_product_id');
+    expect(saved).toMatchObject({ id: 'pb1', product_id: 'p1' });
   });
 });
 

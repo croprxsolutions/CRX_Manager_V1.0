@@ -17,8 +17,10 @@
 -- 2. Build (build_product_parent_proposal, re-issued), three new holds, a flag and a list:
 --    * size_numbers_differ (held): the sizes' names, less each one's recorded container size, carry different
 --      numbers or units (a number by value, with the word written right after it), so the base name lost a
---      strength or analysis however it was written ("2 lb./gal", "2 lb ai/gal" vs "2 oz ai/gal"). Sizes whose
---      names carry the same numbers and units are not held, with or without a recorded container size.
+--      strength or analysis however it was written ("2 lb./gal", "2 lb ai/gal" vs "2 oz ai/gal"). A number counts
+--      as the container size only when its unit word is the product's own unit (container unit, else stock
+--      unit), so "2 lb ai/gal" on a 2 gal jug stays a strength (Mason, 2026-11-06: match the unit word). Sizes
+--      whose names carry the same numbers and units are not held, with or without a recorded container size.
 --    * epa_has_parent (flag): an active parent already has the group's EPA number. Held when that parent's form
 --      and base name are the group's too (a second parent for the same product); otherwise it stays a flag, as
 --      the build sheet's same-EPA-different-name rule says (Gen Liberty / Gen Liberty: Higher Quality).
@@ -48,7 +50,7 @@
 -- Rollback: re-issue _product_parent_base_name, build_product_parent_proposal and approve_product_parent_groups
 -- from 20261123120000_product_parent_proposals.sql, and _product_size_move_refusal and move_product_size from
 -- 20261110150000_product_parent_stock_units.sql, then DROP FUNCTION public._product_parent_identity_name(text) and
--- public._product_name_strength_tokens(text, numeric). Brands retired by an emptying move stay retired (retired
+-- public._product_name_strength_tokens(text, numeric, text). Brands retired by an emptying move stay retired (retired
 -- is final; their events record it).
 
 SET LOCAL lock_timeout = '10s';
@@ -112,22 +114,32 @@ ALTER FUNCTION public._product_parent_identity_name(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._product_parent_identity_name(text) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 -- Every number in a size's name, by value with the word written right after it ("2 lb", "2 oz", "28"), in the
--- order written, less the last one whose number equals its recorded container size (sizes are written last). Sizes of one product differ only in that number, so two members whose
+-- order written, less the last one whose number equals its recorded container size and whose unit word is the
+-- product's own unit (p_unit: "Gal", "Dry oz"; "2 gal" is a 2 Gal jug, "2 lb" never is). No unit, nothing removed:
+-- the group is held, never merged. Sizes of one product differ only in that number, so two members whose
 -- lists differ carry a strength or analysis the base name lost ("2 lb./gal 2.5 gal" vs "4 lb./gal 30 gal"),
 -- however it is written. Order is kept so a strength and a pack count cannot trade places ("2 lb./gal 4 x 2 gal"
 -- vs "4 lb./gal 2 x 4 gal"). A different pack count also holds the group: names group less, never wrongly.
-CREATE FUNCTION public._product_name_strength_tokens(p_name text, p_size numeric) RETURNS text[]
+CREATE FUNCTION public._product_name_strength_tokens(p_name text, p_size numeric, p_unit text) RETURNS text[]
 LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $function$
-  WITH n AS (
+  WITH units(w, c) AS (VALUES ('gal', 'gal'), ('gals', 'gal'), ('gallon', 'gal'), ('gallons', 'gal'), ('gl', 'gal'),
+      ('ga', 'gal'), ('qt', 'qt'), ('qts', 'qt'), ('quart', 'qt'), ('quarts', 'qt'), ('pt', 'pt'), ('pts', 'pt'),
+      ('pint', 'pt'), ('pints', 'pt'), ('oz', 'oz'), ('fl', 'oz'), ('lb', 'lb'), ('lbs', 'lb'), ('pound', 'lb'),
+      ('pounds', 'lb'), ('kg', 'kg'), ('ml', 'ml'), ('l', 'l'), ('liter', 'l'), ('liters', 'l'), ('litre', 'l'),
+      ('litres', 'l'), ('ton', 'ton'), ('tons', 'ton')
+  ), n AS (
     SELECT x.m[1]::numeric AS v, lower(x.m[2]) AS u, x.i
       FROM regexp_matches(COALESCE(p_name, ''), '([0-9]+(?:\.[0-9]+)?|\.[0-9]+)[[:space:]]?([[:alpha:]]*)', 'g')
            WITH ORDINALITY AS x(m, i)
   )
   SELECT COALESCE(array_agg(btrim(trim_scale(v)::text || ' ' || u) ORDER BY i), '{}')
-    FROM n WHERE i IS DISTINCT FROM (SELECT max(i) FROM n WHERE v = p_size);
+    FROM n WHERE i IS DISTINCT FROM (
+      SELECT max(n.i) FROM n JOIN units ON units.w = n.u
+       WHERE n.v = p_size
+         AND units.c = (SELECT c FROM units WHERE w = lower(regexp_replace(btrim(p_unit), '^(dry|fl)[[:space:]]*', '', 'i'))));
 $function$;
-ALTER FUNCTION public._product_name_strength_tokens(text, numeric) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._product_name_strength_tokens(text, numeric) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+ALTER FUNCTION public._product_name_strength_tokens(text, numeric, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._product_name_strength_tokens(text, numeric, text) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. Build a proposal
@@ -212,7 +224,8 @@ BEGIN
     v_decided_at := NULL;
     v_basis := CASE WHEN v_g.epa IS NULL THEN 'owner_confirmed' ELSE 'epa_number' END;
     -- Sizes whose names carry different numbers besides their own container size: a strength or analysis.
-    v_numbers_differ := (SELECT count(DISTINCT public._product_name_strength_tokens(p.product_name, p.container_size))
+    v_numbers_differ := (SELECT count(DISTINCT public._product_name_strength_tokens(p.product_name, p.container_size,
+                                                 COALESCE(p.container_unit, p.inventory_unit)))
                            FROM public.products p WHERE p.id = ANY(v_g.ids)) > 1;
     -- An active parent already carries this EPA number (made by PAR-1, or approved from an earlier proposal).
     SELECT string_agg(pp.name, ', ' ORDER BY pp.name),
@@ -575,7 +588,7 @@ BEGIN
     END IF;
   END LOOP;
   FOREACH v_sig IN ARRAY ARRAY['public._product_parent_base_name(text)', 'public._product_size_move_refusal(uuid,uuid)',
-                               'public._product_parent_identity_name(text)', 'public._product_name_strength_tokens(text,numeric)'] LOOP
+                               'public._product_parent_identity_name(text)', 'public._product_name_strength_tokens(text,numeric,text)'] LOOP
     IF (SELECT array_agg(DISTINCT grantee::regrole::text ORDER BY grantee::regrole::text)
           FROM pg_proc p, aclexplode(p.proacl) WHERE p.oid = v_sig::regprocedure AND privilege_type = 'EXECUTE')
        IS DISTINCT FROM ARRAY['postgres']
@@ -594,13 +607,15 @@ BEGIN
   IF public._product_parent_identity_name('Base (EPA 600-1) (liquid) #2') <> public._product_parent_identity_name('Base 2.5 gal') THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_IDENTITY_NAME: approval''s name suffixes are not ignored';
   END IF;
-  -- Numbers other than the size's own container size are compared by value, so 1 and 1.0 match.
-  IF public._product_name_strength_tokens('Imidacloprid 2 lb/gal 2.5 gal', 2.5) <> ARRAY['2 lb']
-     OR public._product_name_strength_tokens('Rho 1.0 gal', 1) <> '{}'::text[]
-     OR public._product_name_strength_tokens('Mix 2 lb./gal 4 x 2 gal', 2)
-        = public._product_name_strength_tokens('Mix 4 lb./gal 2 x 4 gal', 4)
-     OR public._product_name_strength_tokens('Lam 2 lb ai/gal 2.5 gal', 2.5)
-        = public._product_name_strength_tokens('Lam 2 oz ai/gal 2.5 gal', 2.5) THEN
+  -- Numbers other than the size's own container size are compared by value, so 1 and 1.0 match; only a number
+  -- written with the product's own unit is taken as its size.
+  IF public._product_name_strength_tokens('Imidacloprid 2 lb/gal 2.5 gal', 2.5, 'Gal') <> ARRAY['2 lb']
+     OR public._product_name_strength_tokens('Rho 1.0 gal', 1, 'Gal') <> '{}'::text[]
+     OR public._product_name_strength_tokens('Imida 2 lb ai/gal', 2, 'Gal') <> ARRAY['2 lb']
+     OR public._product_name_strength_tokens('Mix 2 lb./gal 4 x 2 gal', 2, 'Gal')
+        = public._product_name_strength_tokens('Mix 4 lb./gal 2 x 4 gal', 4, 'Gal')
+     OR public._product_name_strength_tokens('Lam 2 lb ai/gal 2.5 gal', 2.5, 'Gal')
+        = public._product_name_strength_tokens('Lam 2 oz ai/gal 2.5 gal', 2.5, 'Gal') THEN
     RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_STRENGTH: name numbers are not compared by value';
   END IF;
   IF public._product_parent_base_name('Rho 2 x 2.5 gal') <> 'Rho' THEN

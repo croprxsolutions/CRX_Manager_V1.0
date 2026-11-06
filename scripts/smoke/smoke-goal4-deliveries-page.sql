@@ -92,7 +92,8 @@ BEGIN
       EXIT WHEN jsonb_array_length(v_r->'rows') < 500;
       v_after := (v_r->'rows'->-1->>'id')::uuid;
     END LOOP;
-    IF v_byid IS DISTINCT FROM (SELECT string_agg(e->>'id', ',' ORDER BY (e->>'id')::uuid) FROM jsonb_array_elements(v_all->'rows') e) THEN
+    -- Both sides empty (no active deliveries) compare as equal: concat_ws gives '', string_agg gives NULL.
+    IF NULLIF(v_byid, '') IS DISTINCT FROM (SELECT string_agg(e->>'id', ',' ORDER BY (e->>'id')::uuid) FROM jsonb_array_elements(v_all->'rows') e) THEN
       RAISE EXCEPTION 'SMOKE_FAIL: sort % read by id differs from the full read', v_sort;
     END IF;
     RAISE NOTICE 'get_deliveries_page sort %: % rows, pages of 50 match', COALESCE(v_sort, 'default'), v_total;

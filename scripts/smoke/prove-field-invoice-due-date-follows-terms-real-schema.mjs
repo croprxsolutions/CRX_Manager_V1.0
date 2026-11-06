@@ -17,8 +17,8 @@
  *           invoice-date change re-derives; a typed date (even one equal to the stamp) survives both;
  *           save_invoice-style writes infer the flag from the date they write; a posted row is untouched.
  *   BILLING per-invoice terms save each owner's own terms and dates; malformed maps are refused; an old
- *           app tab (no map) still saves same-terms groups but is refused on mixed terms or on moving a
- *           typed date; replay returns the first result and refuses a changed map under the same key.
+ *           app tab (no map, or a JSON null map) is refused with FIELD_INVOICE_RELOAD_REQUIRED and changes
+ *           nothing; replay returns the first result and refuses a changed map under the same key.
  *   RE-APPLY refused by the preflight, nothing changes.
  *
  * Run: node scripts/smoke/prove-field-invoice-due-date-follows-terms-real-schema.mjs   (needs Docker; never touches live)
@@ -224,15 +224,14 @@ try {
     [`p_terms_by_invoice => (SELECT jsonb_object_agg(id::text, '"Net 15"'::jsonb) FROM public.invoices WHERE job_id = '${J.JSPLIT}')`, /YYYY-MM-DD/],
   ];
   for (const [args, pattern] of bad) refused(`${transfer('JSPLIT')} ${billing('JSPLIT', args)}`, pattern, `bad map ${args.slice(0, 60)}`);
-  // An old app tab (no map).
-  assert.equal(ok(`${transfer('J30')} ${billing('J30', "p_payment_terms => 'Net 30'")} ${summary('J30')}`, 'legacy single'), 'Net 30=+30');
-  assert.equal(ok(`${transfer('JSPLIT')} ${billing('JSPLIT', termsMap('JSPLIT', [['Net 30', null], ['Net 30', null]]))}
-    ${billing('JSPLIT', "p_payment_terms => 'Net 15'")} ${summary('JSPLIT')}`, 'legacy same-terms group'), 'Net 15=+15, Net 15=+15');
-  refused(`${transfer('JSPLIT')} ${billing('JSPLIT', "p_payment_terms => 'Net 30'")}`, /FIELD_INVOICE_RELOAD_REQUIRED: these invoices have different payment terms/, 'legacy mixed');
-  refused(`${transfer('J15')} ${billing('J15', termsMap('J15', [['Net 15', "(now() AT TIME ZONE 'America/Chicago')::date + 9"]]))}
-    ${billing('J15', "p_payment_terms => 'Net 15'")}`, /FIELD_INVOICE_RELOAD_REQUIRED: an invoice has a typed due date/, 'legacy clears typed date');
-  assert.equal(ok(`${transfer('J15')} ${billing('J15', termsMap('J15', [['Net 15', "(now() AT TIME ZONE 'America/Chicago')::date + 9"]]))}
-    ${billing('J15', "p_payment_terms => 'Net 15', p_due_date => (now() AT TIME ZONE 'America/Chicago')::date + 9")} ${summary('J15')}`, 'legacy resends typed'), 'Net 15=+9*');
+  // An old app tab (no map) is refused, even on a single invoice, and leaves the row as it was.
+  const oldTabBefore = ok(`${transfer('JSPLIT')} ${summary('JSPLIT')}`, 'old tab before');
+  for (const [args, label] of [["p_payment_terms => 'Net 30'", 'old tab terms'], ["p_payment_terms => NULL", 'old tab blank'],
+    ["p_terms_by_invoice => 'null'::jsonb", 'old tab json null']]) {
+    refused(`${transfer('JSPLIT')} ${billing('JSPLIT', args)}`, /FIELD_INVOICE_RELOAD_REQUIRED: this screen needs the latest app version/, label);
+  }
+  refused(`${transfer('J30')} ${billing('J30', "p_payment_terms => 'Net 30'")}`, /FIELD_INVOICE_RELOAD_REQUIRED/, 'old tab single');
+  assert.equal(ok(`${transfer('JSPLIT')} BEGIN ${billing('JSPLIT', "p_payment_terms => 'Net 15'")} EXCEPTION WHEN OTHERS THEN RESET ROLE; END; ${summary('JSPLIT')}`, 'old tab unchanged'), oldTabBefore);
   // Replay: same key, same map -> first result; same key, changed map -> refused.
   assert.equal(ok(`${transfer('J15')} SELECT array_agg(id) INTO STRICT f0 FROM public.invoices WHERE job_id = '${J.J15}';
     SET LOCAL ROLE authenticated;
@@ -244,7 +243,7 @@ try {
     EXCEPTION WHEN OTHERS THEN t := SQLERRM; END;
     RESET ROLE;
     v := (r = r2)::text || '|' || (t ~ 'IDEMPOTENCY');`, 'replay'), 'true|true', 'REPLAY');
-  console.log('[prover] BILLING: per-owner terms and typed dates save per invoice; 7 malformed maps refused; old tabs save same-terms groups, refused on mixed terms or a moved typed date; replay holds');
+  console.log('[prover] BILLING: per-owner terms and typed dates save per invoice; 7 malformed maps refused; old tabs (no map) refused and change nothing; replay holds');
 
   // RE-APPLY.
   const again = applyCandidate();

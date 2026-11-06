@@ -558,7 +558,7 @@ export default function Deliveries() {
       }
       setDeliveries(result.rows);
       setLoadedPage(listPage);
-      setNextState({ key: loadQueryKey, page: listPage, cursor: result.next_cursor });
+      setNextState({ key: loadQueryKey, page: listPage, cursor: result.next_cursor ?? null });
       setTotalCount(result.total_count);
       setSummary(result.summary);
       setLoadFailed(false);

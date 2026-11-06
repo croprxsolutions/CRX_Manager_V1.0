@@ -32,6 +32,8 @@ const H = vi.hoisted(() => ({
   growEveryPageCall: false,
   // While set, every bookmark is refused as stale.
   refuseBookmarks: false,
+  // While set, answers leave next_cursor out (as an older database function would).
+  omitNextCursor: false,
   // While set, get_deliveries_page answers only once this settles, so a test can look at the screen mid-read.
   holdPageCalls: null as Promise<void> | null,
   failTable: null as string | null,
@@ -106,7 +108,9 @@ function deliveriesPage(args: PageArgs) {
 // The function's own refusals come back as an error, as PostgREST returns a raised exception.
 function answer(args: PageArgs) {
   try {
-    return { data: deliveriesPage(args), error: null };
+    const data = deliveriesPage(args);
+    if (H.omitNextCursor) delete (data as { next_cursor?: unknown }).next_cursor;
+    return { data, error: null };
   } catch (e) {
     return { data: null, error: { message: (e as Error).message } };
   }
@@ -178,6 +182,7 @@ beforeEach(() => {
   H.swapBehindReadAtCall = null;
   H.holdPageCalls = null;
   H.refuseBookmarks = false;
+  H.omitNextCursor = false;
   H.failTable = null;
   H.holdStockCheck = null;
   H.tableReads = [];
@@ -493,5 +498,15 @@ describe('Deliveries list pages by bookmark, so a removed delivery never skips o
     await waitFor(() => expect(H.pageCalls.some((c) => c.p_after)).toBe(true));
     await waitFor(() => expect(showing()).toHaveTextContent('Showing 1–50 of 50'));
     expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0000');
+  });
+});
+
+describe('Deliveries list with no bookmark in the answer', () => {
+  it('greys out Next instead of reading page one again', async () => {
+    H.omitNextCursor = true;
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 1–50 of ${TOTAL}`));
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 });

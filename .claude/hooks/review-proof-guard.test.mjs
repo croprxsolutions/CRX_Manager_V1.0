@@ -1015,6 +1015,13 @@ for (const command of [
   "echo x > C:/CRX_Manager/.claude/worktrees/wt-a/src/log.txt",
   "git add .claude/schema-registry.json src/a.ts && git commit -q -m \"move the rows; rm the stub\"",
   "W=C:/CRX_Manager/.claude/worktrees/wt-a; git -C \"$W\" mv a.md b.md && git -C \"$W\" commit -m \"Move a to b\"",
+  // 2026-11-05 refusals: a scratch folder held in a variable set first, and a `..`
+  // that is not part of the delete or move itself.
+  "D=C:/Users/mason/AppData/Local/Temp/claude/x/scratchpad/luna; rm -rf \"$D\"; mkdir -p \"$D\" && cd \"$D\" && node \"C:/CRX_Manager/.claude/worktrees/wt-a/scripts/luna-review.mjs\"",
+  "S=\"C:/Users/mason/AppData/Local/Temp/claude/x/scratchpad\"; R=\"$S/conflict-demo\"; rm -rf \"$R\"; mkdir \"$R\" && cd \"$R\" && git init -q && node C:/CRX_Manager/.claude/worktrees/wt-a/scripts/x.mjs",
+  "O=20261108110000; N=20261108150000; cd C:/CRX_Manager/.claude/worktrees/wt-a && git mv supabase/migrations/${O}_a.sql supabase/migrations/${N}_a.sql",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && git mv a.md b.md && ls ../wt-b",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src/pages && python - <<'EOF'\ndef rm(t): pass\nprint(open('../x.ts').read())\nEOF",
 ]) {
   assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `narrowed rule allows: ${command}`);
 }
@@ -1071,6 +1078,18 @@ for (const command of [
   "W=C:/CRX_Manager/.claude/worktrees/wt-a; rm -rf $W/.claude",
   "W=C:/CRX_Manager/.claude/worktrees/wt-a; cd \"$W\" && rm -rf ../wt-b",
   "W=C:/CRX_Manager/.claude/worktrees/wt-a; W=/tmp; git -C \"$W\" rm -r x",
+  // 2026-11-05: the delete's own words, a pipe, a heredoc, a climbing or unreadable
+  // cd, and a variable that is not provably one literal still count.
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && echo .. | xargs rm -rf",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && xargs rm -rf <<EOF\n..\nEOF",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && timeout 5 rm -rf ..",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && cd .. && rm -rf wt-b",
+  "D=..; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$D\"",
+  "D=C:/CRX_Manager/.claude/worktrees/wt-a; cd \"$D\" && rm -rf .",
+  "D=/tmp/x; D=C:/CRX_Manager/.claude/worktrees/wt-a; cd \"$D\" && rm -rf .",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && D=..; rm -rf \"$D\"",
+  "R='$(echo ..)'; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf $R",
+  "S=/tmp/x; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$S\" ../wt-b",
   "git add a && mv /tmp/x .claude/schema-registry.json",
   "rm -f .claude/caller-graph.json",
   // The home exclusion is anchored to a real home folder (Luna, PR #956 round 1).

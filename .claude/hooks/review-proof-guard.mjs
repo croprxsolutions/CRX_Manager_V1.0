@@ -303,6 +303,21 @@ const WORKTREE_DEEP_UNSURE_RE = /\.claude[/\\]+worktrees[/\\][^\s;&|<>]*?(?:[$`%
 // A worktree root written plainly (`…/.claude/worktrees/<name>`), nothing below it.
 const WORKTREE_ROOT_RE = /^(?:[A-Za-z]:|\/[A-Za-z])?[^\s"';&|<>$`%!^*?[\]{}]*[/\\]\.claude[/\\]+worktrees[/\\]+[^/\\\s"';&|<>$`%!^*?[\]{}]+[/\\]*$|^\.claude[/\\]+worktrees[/\\]+[^/\\\s"';&|<>$`%!^*?[\]{}]+[/\\]*$/i;
 
+// The variables a command sets at its very start (`S=<literal>; R="$S/x"; …`), each
+// proven by folderVariableValue to be set once and only read after. Nothing runs
+// before them, so no condition or subshell can skip the assignment.
+function headVariables(cmd) {
+  const vars = new Map();
+  let rest = String(cmd || "");
+  for (;;) {
+    const m = rest.match(/^\s*([A-Za-z_]\w*)=(?:"([^"$`\\]*)"|'([^'$`\\%~]*)'|([^\s"'$`\\;&|<>()~*?[\]{}#%]+))[^\S\r\n]*(?:;(?!;)|&&|\r?\n)/);
+    const value = m && (m[2] ?? m[3] ?? m[4]);
+    if (value == null || vars.has(m[1]) || folderVariableValue(rest, m[1]) !== value) return vars;
+    vars.set(m[1], value);
+    rest = rest.slice(m[0].length).replace(new RegExp(`\\$\\{${m[1]}\\}|\\$${m[1]}(?!\\w)`, "g"), () => value);
+  }
+}
+
 function redirectTargetsStateDir(value) {
   const norm = String(value || "").replace(/\\/g, "/");
   for (const m of norm.matchAll(/>>?\s*("[^"]*"|'[^']*'|[^\s;&|()<>]+)/g)) {
@@ -606,14 +621,20 @@ if (shellTool) {
   // (CodeRabbit, PR #956).
   const commandNamesRepoClaude = () =>
     destructiveViews.some((v) => v.split(/[\s;&|()<>=,{}]+/).some(namesRepoClaude));
-  const cdEntersRepoClaude = cdTargetsSeen.some(namesRepoClaude) ||
-    (cdTargetsSeen.some((t) => /[$%`*?[\]{}]/.test(t)) && commandNamesRepoClaude());
+  // A variable the command sets first and only reads after (`S=<scratchpad>; rm -rf
+  // "$S"; cd "$S"`) reads here as its literal, exactly as if typed (2026-11-05).
+  const headVars = headVariables(command);
+  const readHeadVars = (t) => String(t).replace(/\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)/g, (all, a, b) => headVars.get(a ?? b) ?? all);
+  const cdTargets = cdTargetsSeen.map(readHeadVars);
+  const cdViews = destructiveViews.map(readHeadVars);
+  const cdEntersRepoClaude = cdTargets.some(namesRepoClaude) ||
+    (cdTargets.some((t) => /[$%`*?[\]{}]/.test(t)) && commandNamesRepoClaude());
   // From inside a worktree, `..` steps up toward `.claude/worktrees` and the
   // repo's own `.claude` (pinned exploit rounds 2 and 4).
   // `git -C <worktree> rm -rf .` runs there too (Luna round 2).
-  const cdEntersWorktree = cdTargetsSeen.some((t) => /(?:^|[/\\])\.claude[/\\]+worktrees(?:[/\\]|$)/i.test(t)) ||
-    destructiveViews.some((v) => /\bgit(?:\.exe)?\s+-C\s+["']?[^\s"';&|]*\.claude[/\\]+worktrees(?![\w-])/i.test(v)) ||
-    (cdTargetsSeen.some((t) => /[$%`*?[\]{}]/.test(t)) && destructiveViews.some((v) => /\.claude[/\\]+worktrees(?![\w-])/i.test(v)));
+  const cdEntersWorktree = cdTargets.some((t) => /(?:^|[/\\])\.claude[/\\]+worktrees(?:[/\\]|$)/i.test(t)) ||
+    cdViews.some((v) => /\bgit(?:\.exe)?\s+-C\s+["']?[^\s"';&|]*\.claude[/\\]+worktrees(?![\w-])/i.test(v)) ||
+    (cdTargets.some((t) => /[$%`*?[\]{}]/.test(t)) && cdViews.some((v) => /\.claude[/\\]+worktrees(?![\w-])/i.test(v)));
   // …and a target that is the worktree root itself or can glob onto its `.claude`
   // (`.`, `./`, `*`, `.*`, `.[!.]*`, `.?*`) erases its state (Luna, 2026-11-03).
   const climbsOut = (v) => /(?:^|[\s"'=:/\\({,])\.\.(?=[/\\]|$|[\s"';&|)<>,}])/.test(v) ||
@@ -621,8 +642,16 @@ if (shellTool) {
     // …or a delete/move whose own target the guard cannot read (`rm -rf "$TARGET"`,
     // `%X%`, `!X!`, a cmd `^` escape, a backtick) could be its `.claude`.
     v.split(/&&|\|\||[;|\r\n]/).some((part) => hitsDestructiveVerb(part) && /[$%`!^]/.test(part));
+  // The climb must be in the delete or move's own command (2026-11-05: a `..` or
+  // `$X` anywhere else, such as a later `cd ..` or a script's text, refused about
+  // twenty harmless commands in one day). Pipes stay joined (`echo .. | xargs rm`),
+  // and the whole command still counts after a cd that climbs or cannot be read,
+  // or when the delete reads a heredoc, whose lines are split apart here.
+  const cdClimbs = cdTargets.some((t) => !t || /(?:^|[/\\])\.\.(?:[/\\]|$)/.test(t) || /[$%`*?[\]{}!^]/.test(t));
+  const deleteClimbsOut = (v) => cdClimbs ? climbsOut(v) : v.split(/&&|\|\||[;\r\n]/).some((part) =>
+    hitsDestructiveVerb(part) && (climbsOut(part) || (/<</.test(part) && climbsOut(v))));
   if ((cdEntersRepoClaude && destructiveViews.some(hitsDestructiveVerb)) ||
-      (cdEntersWorktree && destructiveViews.some((v) => hitsDestructiveVerb(v) && climbsOut(v)))) {
+      (cdEntersWorktree && cdViews.some((v) => hitsDestructiveVerb(v) && deleteClimbsOut(v)))) {
     deny("REVIEW PROOF GUARD: a delete or move after cd into the repo's .claude folder is blocked — that folder holds the guard hooks, workflow sources and wrapper-owned review state. Run the command from the repo root with the full path so the guard can see what it touches.");
   }
 

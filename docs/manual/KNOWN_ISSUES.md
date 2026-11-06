@@ -141,7 +141,7 @@ No snapshot/guard migration was found, but the live row count could not be check
 ### KI-07 — Other small security gaps
 **MED/LOW · mixed · unassigned**
 - `profiles` grants `TRUNCATE`/`TRIGGER` to signed-in users (confirmed live read-only 2026-10-25 and
-  2026-11-05) — revoked by `20261116100000_permission_tightening.sql` (Mason 2026-11-05; NOT YET APPLIED), LOW-MED.
+  2026-11-05) — revoked by `20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`), LOW-MED.
 - Customer-document post-apply check (browser storage policies removed, Documents tab still works) was never
   recorded; and a removed document cannot be reopened even by an admin — UNVERIFIED, LOW.
 - Three older "reps work any customer" leftovers: signed-in rep click-through of `customer-document-files`
@@ -474,7 +474,7 @@ Following `20261022075000` (PR #1024): old app versions are refused until reload
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
 abandoned signature files stay stored; file contents are not inspected. Owed: a real-phone airplane-mode test.
 The four older signature policies (fixed path `signatures/<id>.png`) are narrowed by
-`20261116100000_permission_tightening.sql` (Mason 2026-11-05; NOT YET APPLIED): insert, update and delete dropped,
+`20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`): insert, update and delete dropped,
 and reading needs the file to be the delivery's recorded signature.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
@@ -586,7 +586,7 @@ delivered quantity. Proof: `scripts/smoke/prove-void-delivery-order-status-guard
 - **Grant item (Mason 2026-11-05).** Signed-in admins held a direct UPDATE grant on `orders.status`, so they
   could move an order between allowed statuses with no delivery and no stock movement.
   `20261116100000_permission_tightening.sql` revokes it, and the matching INSERT grant so an order cannot be created
-  already fulfilled (NOT YET APPLIED); the order screen's unreachable direct
+  already fulfilled (APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`); the order screen's unreachable direct
   status write is removed.
 
 ### KI-102 — Voiding an order, then one of its deliveries, puts the stock back twice

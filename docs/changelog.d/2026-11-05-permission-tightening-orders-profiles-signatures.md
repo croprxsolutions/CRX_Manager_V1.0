@@ -1,6 +1,6 @@
 ## 2026-11-05 — Order status only through the server; profiles and old signature files locked down
 
-- New migration `20261116100000_permission_tightening.sql` (not yet applied; record in
+- New migration `20261116100000_permission_tightening.sql` (APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`; record in
   `docs/reference/migrations.d/`). Mason's decisions of 5 Nov, about 10:30 PM Central.
 - KI-101 grant item: signed-in users (admins included) can no longer set an order's status with a direct
   database update, nor create an order with a status already set. Delivery completion, cancel, void and pricing still set it through their server functions.
@@ -19,3 +19,6 @@
 - Live ledger re-read 2026-11-06 about 12:15 AM Central (stamps in `CURRENT_STATE.md` and `KNOWN_ISSUES.md`):
   newest live `20261115160000_financial_delete_snapshots` (ledger `20261106060243`; its records land in PR #1552);
   `20261116100000` not yet applied.
+- Applied live 2026-11-06 12:28 AM Central (ledger `20261106062807`) after Mason approved it in the session.
+  Live checks: the grants and signature rules are as intended; a rolled-back live check showed an admin's direct
+  order-status change refused and old signature files read-only.

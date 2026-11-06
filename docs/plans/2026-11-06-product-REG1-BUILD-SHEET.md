@@ -90,7 +90,8 @@ Rules that follow:
 - **No UPDATE trigger locks a registration.** Guards only compare.
 - **The INSERT trigger** (PR 3) takes the registration `FOR SHARE` (or inserts it). Any function that already holds parent or product locks before inserting a size (`add_product_size`, `create_product_with_parent`, `_insert_parent_size`, `apply_product_setup` insert mode) first locks the registration it is about to use, so the trigger's lock is already held.
 - Today's PAR-1/PAR-2 order (parent → products → brands; approval: proposal → products → rate lock; Taha's `move_product_size`: both parents in ID order → size → brands) is a suffix of this order, so adding registrations in front does not invert anything.
-- The harness runs two-session races for each pair in section 9.
+- **Creating a registration that does not exist yet** cannot be serialized by a row lock. Every create path uses `INSERT … ON CONFLICT (epa_registration) DO NOTHING`, then `SELECT … FOR UPDATE` (or `FOR SHARE` in the insert trigger) on the row that now exists, whoever inserted it. An admin create (`set_epa_registration` with a null expected version) that loses that race is refused as stale (`EPA_REGISTRATION_STALE`), never with a raw key error. Two creators of the same new number therefore end with one row and no uniqueness error.
+- The harness runs two-session races for each pair in sections 4 to 8.
 
 ### 3.3 Guards (PR 3)
 
@@ -125,8 +126,8 @@ Rules that follow:
 - The four tables in 3.1, with RLS, `SELECT` policies, the event table's append-only triggers, and the adjuvant validator.
 - `preview_epa_registration_seed()` (admin, read-only): per distinct normalized number on active and inactive sizes and on brand rows, the proposed registration facts, every disagreement (column, values, row counts, product IDs), and a `fingerprint` of the whole result. RUP proposal: any row `true` → `yes`, else `unknown`.
 - `seed_epa_registrations(p_picks jsonb, p_expected_fingerprint text, p_idempotency_key text)` (admin, key required, `_product_parent_replay` pattern): refuses a stale fingerprint; refuses unless every disagreement has a pick; inserts all registrations, writes one `seeded` event each, and copies each pick onto disagreeing sizes and brands under passes. All-or-nothing. Refuses if any registration already exists (one-time).
-- `set_epa_registration(p_epa_registration, p_expected_version, p_changes jsonb, p_reason, p_idempotency_key)` (admin, key): locks the registration, then the sizes (ID order) and brands carrying it; refuses a stale version; updates it; writes one event; copies the changed facts to every size and brand under passes. Creates the registration when `p_expected_version` is null and none exists.
-- `preview_epa_assignment(p_target_table, p_target_id, p_new_number)` and `assign_epa_registration(p_target_table, p_target_id, p_new_number, p_expected_target_fingerprint, p_reason, p_idempotency_key)` (admin, key): Change EPA number on one ungrouped size or one brand. Locks old and new registration (number order), then the target; refuses a grouped size (`EPA_REGISTRATION_GROUPED_USE_PARENT`, which points to 7.7's correction); writes the number and the new registration's facts under a pass; creates the new registration from the target's facts if none.
+- `set_epa_registration(p_epa_registration, p_expected_version, p_changes jsonb, p_reason, p_idempotency_key)` (admin, key): locks the registration, then the sizes (ID order) and brands carrying it; refuses a stale version; updates it; writes one event; copies the changed facts to every size and brand under passes. Creates the registration when `p_expected_version` is null and none exists (create rule in 3.2), writing a `created` event. When `rup_status` changes away from `unknown` (PR 2a onward) it also resolves that number's open `rup_unreviewed_sales` rows in the same transaction (section 5).
+- `preview_epa_assignment(p_target_table, p_target_id, p_new_number)` and `assign_epa_registration(p_target_table, p_target_id, p_new_number, p_expected_target_fingerprint, p_reason, p_idempotency_key)` (admin, key): Change EPA number on one ungrouped size or one brand. Locks old and new registration (number order), then the target; refuses a grouped size (`EPA_REGISTRATION_GROUPED_USE_PARENT`, which points to 7.7's correction); writes the number and the new registration's facts under a pass; creates the new registration from the target's facts if none (create rule in 3.2, `created` event). Writes one `assigned` event on each of the old and new registrations, carrying the target, old and new number, reason and actor.
 - `get_epa_registrations(p_numbers text[] default null)`: open to active users; no cost or price.
 - `preview_epa_registration_drift()` (admin, read-only) and `settle_epa_registration_drift(p_picks jsonb, p_expected_fingerprint text, p_idempotency_key text)` (admin, key): used before PR 3 (section 7).
 - **Draft targets:** `create_label_draft` and `bulk_create_label_drafts` implementations re-issued from their live bodies with one addition: insert the `label_draft_targets` row (number, product, the product's label-fact fingerprint, the registration version if one exists). Public wrappers unchanged.
@@ -138,7 +139,8 @@ Rules that follow:
 - Seed preview on a copy shaped like live (counts above): 203 proposed registrations, one disagreement listed; seed without a pick for it refused; with a pick, all 203 created, the disagreeing row now matches, one `seeded` event each; a second seed refused; a changed product between preview and seed refuses on fingerprint.
 - `is_rup` true → `yes`; false → `unknown`.
 - `set_epa_registration` changes signal word on a number shared by three sizes and one brand: all four updated, one event, each size's history shows the change; a stale version refused.
-- Assignment: ungrouped size moved from number A to B gets B's facts; grouped size refused by name; brand assignment works.
+- Assignment: ungrouped size moved from number A to B gets B's facts and writes an `assigned` event on A and on B; grouped size refused by name; brand assignment works.
+- Two sessions creating the same new number (two admin creates, or an admin create racing an assignment to it) end with one registration; the loser gets `EPA_REGISTRATION_STALE` or proceeds on the existing row, never a uniqueness error.
 - Draft create writes a target row; a direct client insert or select on `label_draft_targets` and every new table is refused.
 - Every RPC: non-admin writes nothing; one key twice writes once; one key with a different request refused.
 
@@ -161,7 +163,7 @@ Rules that follow:
   5. **Different number on the draft:** do not write; return `LABEL_DRAFT_EPA_CHANGE` so the screen opens Change EPA number (ungrouped) or the parent correction (grouped).
   6. **Product with no number:** keep today's direct size commit, checked against the target row's fingerprint.
   7. RUP: drafts have no RUP field, so a commit never changes `rup_status`.
-- **RUP posting:** `generate_rup_sales_records` re-issued from the KI-18 body: select lines whose product's registration has `rup_status = 'yes'` (fall back to `products.is_rup` for numberless sizes). Lines on registrations with `rup_status = 'unknown'` go to a new private-write table `rup_unreviewed_sales` (same RLS pattern as `rup_sales_records`, `SELECT` for active users, no write grants), deduplicated by invoice line. `get_rup_sales_register` gains `p_include_unreviewed boolean default false` only if Mason answers Q2 yes; otherwise a separate read RPC. Old register rows are unchanged.
+- **RUP posting:** `generate_rup_sales_records` re-issued from the KI-18 body: select lines whose product's registration has `rup_status = 'yes'`. A line whose product has **no registration** (a numberless size, or, until PR 3, a size created with a new number after the seed) falls back to today's rule, `products.is_rup = true`, so no RUP sale is ever dropped between PR 2a and PR 3; the drift preview also lists such numbers so they get a registration. Lines on registrations with `rup_status = 'unknown'` go to a new private-write table `rup_unreviewed_sales` (same RLS pattern as `rup_sales_records`, `SELECT` for active users, no write grants), deduplicated by invoice line, with `resolved_at`, `resolution` (`posted`, `not_rup`) and `resolved_by`. When `set_epa_registration` (or a draft commit, or the parent correction) moves a registration from `unknown` to `yes`, its open unreviewed rows are posted to `rup_sales_records` through the same insert code and marked `posted`; to `no`, they are marked `not_rup`. The list shows open rows only. `get_rup_sales_register` gains `p_include_unreviewed boolean default false` only if Mason answers Q2 yes; otherwise a separate read RPC. Old register rows are unchanged.
 
 **Files:** migration, changelog note, migrations.d record, `scripts/smoke/prove-label-draft-registration-real-schema.mjs`, types, rpc-functions doc.
 
@@ -172,6 +174,8 @@ Rules that follow:
 - Product edited after the draft was made: refused unless force.
 - Numberless product: today's behaviour, byte for byte.
 - A grouped size's draft no longer fails on the parent guard for same-number facts.
+- A size created with a new EPA number after the seed (no registration yet) and `is_rup = true` still posts to the register.
+- Moving a registration from `unknown` to `yes` posts its open unreviewed sales once and marks them `posted`; to `no` marks them `not_rup`; repeating the change posts nothing twice.
 - RUP: `yes` line posts to the register; `unknown` line goes to the unreviewed list, once; `no` line posts nowhere; existing register rows unchanged.
 - Replay and admin checks as PR 1. Two sessions committing drafts on the same number serialize without deadlock.
 
@@ -242,7 +246,7 @@ Rules that follow:
 - adds `job_chemicals.epa_registration`, filled by trigger, read-only to clients, and fills blank invoice-line copies;
 - re-issues `_product_parent_identity_after` and `correct_product_parent_identity` so an EPA change reaches the parent, its sizes (under the copy pass) and job lines of jobs not yet sprayed, refused while any invoice line lacks its own copy;
 - adds the switch `_product_parent_epa_correction_enabled()`, returning false;
-- claims stamps `20261123100000` and `20261123150000` (the switch-on).
+- claimed stamps `20261123100000` and `20261123150000` (the switch-on) in its notes, but its base migration is now stamped `20261127100000`. A switch-on stamped `20261123150000` would sort **before** the base and fail (the switch function would not exist yet). **The switch-on must get a fresh stamp later than the base migration's**, picked when it is built; the harness applies the files in stamp order to prove it.
 
 That covers §7.8 item 4 (job snapshot lost on `save_job` delete-recreate) through the column-and-trigger design, as long as its harness proves a `save_job` recreate keeps the value. **REG-1 does not redesign it.**
 
@@ -282,7 +286,7 @@ That covers §7.8 item 4 (job snapshot lost on `save_job` delete-recreate) throu
 | DM-1 / DM-2 screens | `ProductDetail.tsx` | PR 2b | Rebase on whichever lands first |
 | PAR-2 grouping switch | `_product_parent_grouping_open()` false | brand RPCs refuse while closed; REG-1 re-issues keep that refusal | none |
 
-Stamps already claimed by others (do not reuse): `20261115120000`, `20261117130000`, `20261117160000`, `20261123100000`, `20261123150000`, `20261126100000`, `20261127100000`, `20261127110000`, `20261128100000`. REG-1 picks fresh stamps at build time.
+Stamps already claimed by others (do not reuse): `20261115120000`, `20261117130000`, `20261117160000`, `20261123100000`, `20261123150000` (not usable for the switch-on, see section 8), `20261126100000`, `20261127100000`, `20261127110000`, `20261128100000`. REG-1 picks fresh stamps at build time.
 
 Database PRs 1 and 2a can be built in parallel with DM-1 and DM-2 database PRs (no shared functions). PR 3 waits for the items above.
 

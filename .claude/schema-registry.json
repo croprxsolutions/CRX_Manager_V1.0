@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261105162551",
+    "migrations_high_water": "20261105224006",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -510,6 +510,13 @@
       "20261107130000_product_import",
       "20261107140000_save_field_refuses_missing_field",
       "20261107150000_uncertain_request_clear_check",
+      "20261108120000_product_parents",
+      "20261108160000_delivery_invoice_charge_lines",
+      "20261109120000_dashboard_action_true_counts",
+      "20261110110000_email_log_one_pending_send",
+      "20261110120000_uncertain_request_clear_any_staff",
+      "20261110140000_rup_records_require_posted_invoice",
+      "20261110150000_product_parent_stock_units",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1493,6 +1500,8 @@
     "product_form_units",
     "product_info_change_set_rows",
     "product_margin_floor_changes",
+    "product_parent_copy_passes",
+    "product_parent_events",
     "product_rate_correction_passes",
     "product_rate_events",
     "product_rate_lock",
@@ -2485,7 +2494,8 @@
     "product_change_history.change_type": {
       "values": [
         "created",
-        "updated"
+        "updated",
+        "parent_copy"
       ],
       "constraints": [
         "product_change_history_change_type_check"
@@ -2565,6 +2575,41 @@
       ],
       "constraints": [
         "product_label_drafts_status_check"
+      ]
+    },
+    "product_parent_events.event_type": {
+      "values": [
+        "created",
+        "updated",
+        "size_added",
+        "size_moved",
+        "identity_corrected",
+        "rates_set",
+        "rates_corrected"
+      ],
+      "constraints": [
+        "product_parent_events_event_type_check"
+      ]
+    },
+    "product_parent_members.size_role": {
+      "values": [
+        "package",
+        "bulk",
+        "fixed_tote"
+      ],
+      "constraints": [
+        "product_parent_members_size_role_check"
+      ]
+    },
+    "product_parents.product_form": {
+      "values": [
+        "liquid",
+        "dry",
+        "seed",
+        "each"
+      ],
+      "constraints": [
+        "product_parents_product_form_check"
       ]
     },
     "product_rate_events.event_type": {
@@ -4085,8 +4130,14 @@
     {
       "table": "product_change_history",
       "constraint": "product_change_history_check",
-      "def": "CHECK ((((change_type = 'created'::text) AND (field_name IS NULL)) OR ((change_type = 'updated'::text) AND (field_name IS NOT NULL))))",
+      "def": "CHECK ((((change_type = 'created'::text) AND (field_name IS NULL)) OR ((change_type = ANY (ARRAY['updated'::text, 'parent_copy'::text])) AND (field_name IS NOT NULL))))",
       "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_change_history",
+      "constraint": "product_change_history_parent_event_chk",
+      "def": "CHECK (((change_type = 'parent_copy'::text) = (parent_event_id IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
       "table": "product_cost_basis",
@@ -4206,6 +4257,42 @@
       "table": "product_margin_floors",
       "constraint": "product_margin_floors_reason_length",
       "def": "CHECK (((set_reason IS NULL) OR ((char_length(set_reason) >= 1) AND (char_length(set_reason) <= 500))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_members",
+      "constraint": "product_parent_members_check",
+      "def": "CHECK (((fill_source_product_id IS NULL) OR (size_role = 'fixed_tote'::text)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_formulation_type_check",
+      "def": "CHECK (((formulation_type IS NULL) OR ((btrim(formulation_type) <> ''::text) AND (length(formulation_type) <= 100))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_generic_epa_registration_check",
+      "def": "CHECK (((generic_epa_registration IS NULL) OR ((generic_epa_registration ~ '^[A-Z0-9-]+$'::text) AND (length(generic_epa_registration) <= 40))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_name_check",
+      "def": "CHECK (((btrim(name) <> ''::text) AND (name = btrim(name)) AND (length(name) <= 200)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_nickname_check",
+      "def": "CHECK (((nickname IS NULL) OR ((btrim(nickname) <> ''::text) AND (nickname = btrim(nickname)) AND (length(nickname) <= 200))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parents",
+      "constraint": "product_parents_safener_check",
+      "def": "CHECK (((safener IS NULL) OR ((btrim(safener) <> ''::text) AND (length(safener) <= 200))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6243,6 +6330,54 @@
         "updated_at"
       ]
     },
+    "product_parent_copy_passes": {
+      "no_default": [
+        "txid",
+        "product_id",
+        "parent_event_id"
+      ],
+      "with_default": []
+    },
+    "product_parent_events": {
+      "no_default": [
+        "parent_id",
+        "event_type",
+        "changed_by"
+      ],
+      "with_default": [
+        "id",
+        "affected",
+        "changed_at"
+      ]
+    },
+    "product_parent_members": {
+      "no_default": [
+        "product_id",
+        "parent_id",
+        "added_by"
+      ],
+      "with_default": [
+        "size_role",
+        "added_at",
+        "updated_at"
+      ]
+    },
+    "product_parents": {
+      "no_default": [
+        "name",
+        "product_form",
+        "created_by",
+        "updated_by"
+      ],
+      "with_default": [
+        "id",
+        "use_timings",
+        "parent_version",
+        "is_active",
+        "created_at",
+        "updated_at"
+      ]
+    },
     "product_rate_correction_passes": {
       "no_default": [
         "txid",
@@ -7625,7 +7760,8 @@
       "error_message",
       "idempotency_key",
       "created_by",
-      "created_at"
+      "created_at",
+      "send_lock_key"
     ],
     "external_identities": [
       "id",
@@ -8668,7 +8804,8 @@
       "new_value",
       "changed_by",
       "changed_by_name",
-      "changed_at"
+      "changed_at",
+      "parent_event_id"
     ],
     "product_cost_basis": [
       "id",
@@ -8765,6 +8902,53 @@
       "set_by",
       "set_reason",
       "created_at",
+      "updated_at"
+    ],
+    "product_parent_copy_passes": [
+      "txid",
+      "product_id",
+      "parent_event_id"
+    ],
+    "product_parent_events": [
+      "id",
+      "parent_id",
+      "event_type",
+      "reason",
+      "evidence",
+      "before_values",
+      "after_values",
+      "affected",
+      "changed_by",
+      "changed_by_name",
+      "changed_at"
+    ],
+    "product_parent_members": [
+      "product_id",
+      "parent_id",
+      "size_role",
+      "fill_source_product_id",
+      "added_by",
+      "added_at",
+      "updated_at"
+    ],
+    "product_parents": [
+      "id",
+      "name",
+      "nickname",
+      "product_form",
+      "formulation_type",
+      "safener",
+      "generic_epa_registration",
+      "category",
+      "use_timings",
+      "rate_per_acre",
+      "rate_unit",
+      "suggested_rate",
+      "parent_version",
+      "is_active",
+      "created_by",
+      "created_at",
+      "updated_by",
       "updated_at"
     ],
     "product_rate_correction_passes": [

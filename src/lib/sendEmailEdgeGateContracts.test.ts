@@ -68,7 +68,9 @@ describe('send-email content and replay contracts (audit findings 7 and 8)', () 
     expect(source).toContain('`${email_type}:${recordRef}:${idempotency_key}`');
     expect(source).toContain('.in("idempotency_key", [scopedIdempotencyKey, idempotency_key])');
     expect(source).toContain('existing.email_type !== email_type || existing.customer_id !== (customer_id ?? null)');
-    expect(source).toContain('idempotency_key: scopedIdempotencyKey,');
+    // A keyless send stores a generated key in the same type:record scope, so the lock sees it too.
+    expect(source).toContain('const storedIdempotencyKey = scopedIdempotencyKey ?? `${email_type}:${recordRef}:auto-${crypto.randomUUID()}`;');
+    expect(source).toContain('idempotency_key: storedIdempotencyKey,');
     // A raw pre-scoping key counts only when it names this record; a failed legacy row is never overwritten (Sol HIGH).
     expect(source).toContain('const legacyMatchesRecord = notificationRow != null ||');
     expect(source).toContain('(!!recordId && idempotency_key.includes(recordId)) ||');

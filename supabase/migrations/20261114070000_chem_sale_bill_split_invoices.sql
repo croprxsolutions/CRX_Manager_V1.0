@@ -1,5 +1,5 @@
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261111120000_chem_sale_bill_split_invoices.md.
+-- docs/reference/migrations.d/20261114070000_chem_sale_bill_split_invoices.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M2, Mason 4 Nov: "splits work line by line"): the Bill Split card now bills. When

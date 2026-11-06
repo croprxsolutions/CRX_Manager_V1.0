@@ -1,6 +1,6 @@
 ## 2026-11-06 — The Bill Split card bills: one invoice per payer on a chemical sale (billing plan M2)
 
-- New migration `20261111120000_chem_sale_bill_split_invoices.sql` (not applied; record in
+- New migration `20261114070000_chem_sale_bill_split_invoices.sql` (not applied; record in
   `docs/reference/migrations.d/`). Until now the Bill Split card saved percentages nothing read.
   When a delivery on a sale with other payers completes, it now drafts one invoice per payer:
   one sale number with a suffix (CS-2026-0412-1, -2), in one split group that posts together.

@@ -41,11 +41,16 @@ import { buildInvoicePostTargets, describeInvoicePostScope } from '../lib/invoic
 import { postInvoiceTarget } from '../lib/invoicePostVersion';
 import { applyTableSearchSort } from '../lib/tableSearchSort';
 import PageHeader from '../components/ui/PageHeader';
+import Modal from '../components/ui/Modal';
+import { sendEmail, buildEmailHtml, invoiceEmailSnapshot } from '../lib/emailService';
+import { assertInvoiceSendDisposition } from '../lib/invoiceSendDisposition';
+import { logActivity } from '../lib/activityLogger';
+import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, invoiceEmailLogPrefix, isBulkEmailable, isEmailRateLimit, sentSinceInvoiceChanged, summarizeBulkEmail, type BulkEmailResult, type InvoiceBillTo, type InvoiceEmailLogRow } from '../lib/invoiceBulkEmail';
 
 type InvoiceRow = Invoice & { customer_name: string; salesman_name: string | null; order_number: string | null };
 
 // Only these statuses get a row checkbox, so only these can be part of a selection.
-const SELECTABLE_STATUSES: readonly InvoiceStatus[] = ['draft', 'unposted', 'posted', 'voided'];
+const SELECTABLE_STATUSES: readonly InvoiceStatus[] = ['draft', 'unposted', 'posted', 'overdue', 'voided'];
 const SEARCH_KEYS = ['invoice_number', 'customer_name', 'salesman_name'];
 
 type InvoiceStatusFilter = InvoiceStatus | '' | 'ready_to_post';
@@ -94,6 +99,64 @@ const typeBadge = (t: string) => {
 };
 
 
+type InvoiceShareRow = { customer?: { farm_name: string }; split_percentage: number; acres: number; amount_cents: number; price_per_acre_cents: number | null; pricing_note: string | null };
+
+// The invoice-row half of a printed invoice (the list row already holds these).
+function invoiceRowPdfFields(inv: InvoiceRow) {
+  return {
+    invoice_number: inv.invoice_number,
+    invoice_date: inv.invoice_date,
+    due_date: inv.due_date || undefined,
+    invoice_type: inv.invoice_type || 'chemical_sale',
+    status: inv.status || 'draft',
+    customer_name: inv.customer_name,
+    salesman_name: inv.salesman_name || undefined,
+    purchase_order_ref: inv.purchase_order_ref || undefined,
+    header_notes: inv.header_notes || undefined,
+    footer_notes: inv.footer_notes || undefined,
+    crop_type: inv.crop_type || undefined,
+    field_names: inv.field_names || undefined,
+    total_acres: inv.total_acres || undefined,
+    applicator_name: inv.applicator_name || undefined,
+    vehicle_name: inv.vehicle_name || undefined,
+    application_date: inv.application_date || undefined,
+    total_amount_cents: inv.total_amount_cents || 0,
+    total_cost_cents: inv.total_cost_cents || 0,
+    paid_amount_cents: inv.paid_amount_cents || 0,
+    prepay_applied_cents: inv.prepay_applied_cents || 0,
+    balance_cents: inv.balance_cents || 0,
+  };
+}
+
+function invoicePdfShares(shares: InvoiceShareRow[]) {
+  return shares.map((s) => ({
+    customer_name: s.customer?.farm_name || 'Unknown',
+    split_percentage: s.split_percentage,
+    acres: s.acres,
+    amount_cents: s.amount_cents,
+    price_per_acre_cents: s.price_per_acre_cents || null,
+    pricing_note: s.pricing_note || null,
+  }));
+}
+
+// Re-read the server-owned gate and the version the retry key names: an invoice unposted or
+// edited since the list loaded is refused, never sent under its old key.
+async function assertStillSendable(inv: InvoiceRow): Promise<void> {
+  const { data: live, error } = await supabase
+    .from('invoices')
+    .select('send_disposition, status, deleted_at, updated_at')
+    .eq('id', inv.id)
+    .maybeSingle();
+  if (error) throw error;
+  assertInvoiceSendDisposition(live?.send_disposition, live?.status, live?.deleted_at);
+  if (live?.status !== 'posted' && live?.status !== 'overdue') {
+    throw new Error('This invoice is no longer posted. Reload the list.');
+  }
+  if (live.updated_at !== inv.updated_at) {
+    throw new Error('This invoice changed since the list loaded. Reload the list and email it again.');
+  }
+}
+
 export default function Invoices() {
   const navigate = useNavigate();
   const { profile, role, deniedPages } = useAuth();
@@ -122,6 +185,10 @@ export default function Invoices() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [posting, setPosting] = useState(false);
   const [showPostModal, setShowPostModal] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailing, setEmailing] = useState(false);
+  const emailingRef = useRef(false);
+  const [emailResults, setEmailResults] = useState<BulkEmailResult[] | null>(null);
   const [voiding, setVoiding] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [showVoidModal, setShowVoidModal] = useState(false);
@@ -305,6 +372,7 @@ export default function Invoices() {
     : basePostConfirmation;
   const selectedVoidable = selectedInvoices.filter((i) => ['posted', 'overdue'].includes(i.status));
   const selectedDeletable = selectedInvoices.filter((i) => ['draft', 'voided'].includes(i.status));
+  const selectedEmailable = selectedInvoices.filter(isBulkEmailable);
 
   // Batch post — standalone invoices post independently, while split invoices
   // are deduplicated by group and posted atomically through post_invoice_group.
@@ -416,6 +484,149 @@ export default function Invoices() {
     setShowVoidModal(false);
   };
 
+  // One invoice's printable data, read fresh. Print and Email both use it, so an emailed
+  // invoice's money check matches what Print would show.
+  // billTo: the customer row an email already read for its key, so the PDF prints exactly what the key covers.
+  const loadInvoicePdfData = async (inv: InvoiceRow, options?: InvoicePrintOptions, billTo?: InvoiceBillTo): Promise<InvoicePdfData> => {
+    // Fetch customer details
+    // A dropped request is a failed read too: the same refusal, not a raw network error.
+    const detailsUnavailable = () => { throw new InvoiceDetailsUnavailableError(); };
+    const { data: cust, error: custError } = billTo
+      ? { data: billTo, error: null }
+      : await supabase
+        .from('customers')
+        .select('billing_address, city, state, zip, account_number, payment_terms')
+        .eq('id', inv.customer_id)
+        .maybeSingle()
+        .then((r) => r, detailsUnavailable);
+    // A failed or missing customer read refuses the PDF: printing on would send the
+    // customer an invoice with a blank address block (To-Do 10.5 follow-up).
+    if (custError || !cust) throw new InvoiceDetailsUnavailableError();
+
+    // Fetch items with product details
+    const { data: items, error: itemsError } = await supabase
+      .from('invoice_items')
+      .select(`${INVOICE_ITEM_COLUMNS}, product:products(product_name, epa_registration, product_form)`)
+      .eq('invoice_id', inv.id)
+      .order('sort_order');
+    // Checked against the same total the PDF prints (total_amount_cents below).
+    assertInvoiceLinesLoaded(itemsError, items, inv.total_amount_cents || 0);
+
+    // Fetch shares
+    const { data: shares, error: sharesError } = await supabase
+      .from('invoice_shares')
+      .select('*, customer:customers!invoice_shares_customer_id_fkey(farm_name)')
+      .eq('invoice_id', inv.id)
+      .then((r) => r, detailsUnavailable);
+    // A split invoice printed without its shares would hide who owes what.
+    if (sharesError || !Array.isArray(shares)) throw new InvoiceDetailsUnavailableError();
+
+    return {
+      ...invoiceRowPdfFields(inv),
+      ...(billTo ? { customer_name: billTo.farm_name || inv.customer_name } : {}),
+      customer_address: cust.billing_address || undefined,
+      customer_city: cust.city || undefined,
+      customer_state: cust.state || undefined,
+      customer_zip: cust.zip || undefined,
+      account_number: cust.account_number || undefined,
+      payment_terms: inv.payment_terms || cust.payment_terms || undefined,
+      shares: shares.length > 0 ? invoicePdfShares(shares as InvoiceShareRow[]) : undefined,
+      items: groupReturnCreditDisplayItems(inv.invoice_type, (items || []).map(mapInvoicePdfItem)),
+      options,
+    };
+  };
+
+  // Bulk email (To-Do 9.6): one invoice at a time through the same send-email path and
+  // checks as the invoice page's Email button. Every invoice gets its own result.
+  const handleBulkEmail = async () => {
+    setShowEmailModal(false);
+    if (!profile || emailingRef.current) return;
+    emailingRef.current = true;
+    setEmailing(true);
+    const targets = selectedEmailable;
+    const results: BulkEmailResult[] = [];
+    try {
+      for (const [index, inv] of targets.entries()) {
+        const base = { invoiceId: inv.id, invoiceNumber: inv.invoice_number, customerName: inv.customer_name };
+        try {
+          // Read the address and bill-to right before each send, so a change made mid-batch is used.
+          const { data: cust, error: custError } = await supabase
+            .from('customers')
+            .select(INVOICE_BILL_TO_COLUMNS)
+            .eq('id', inv.customer_id)
+            .maybeSingle();
+          if (custError) throw custError;
+          const to = cust?.email?.trim() || '';
+          if (!to) {
+            results.push({ ...base, outcome: 'skipped', detail: 'No email address on file' });
+            continue;
+          }
+          // The log check below trusts the list's version, so confirm it is still current first (Sol 9.6 r2).
+          await assertStillSendable(inv);
+          // Sent since it last changed, under any key (KI-104, option A2): skip before the send, so the
+          // hourly cap cannot turn an already-sent invoice into "Not sent". A read error sends nothing.
+          const { data: logRows, error: logError } = await supabase
+            .from('email_log')
+            .select('idempotency_key, recipient_email, status, created_at')
+            .eq('email_type', 'invoice')
+            .like('idempotency_key', `${invoiceEmailLogPrefix(inv.id)}%`)
+            .gte('created_at', inv.updated_at);
+          if (logError) throw logError;
+          if (sentSinceInvoiceChanged((logRows ?? []) as InvoiceEmailLogRow[], inv, to)) {
+            results.push({ ...base, outcome: 'already_sent', detail: `Already emailed to ${to} since it last changed; not sent again` });
+            continue;
+          }
+          // The server draws the PDF from the saved invoice; this copy is only what the screen would print (KI-98).
+          const pdfData = await loadInvoicePdfData(inv, undefined, cust ?? undefined);
+          await assertStillSendable(inv);
+          const result = await sendEmail({
+            to,
+            subject: `Invoice ${inv.invoice_number} from Crop RX Solutions`,
+            html: buildEmailHtml('<p style="margin:0;color:#374151;">Please find your invoice attached to this email.</p>'),
+            email_type: 'invoice',
+            customer_id: inv.customer_id,
+            resource_type: 'invoice',
+            resource_id: inv.id,
+            idempotency_key: await invoiceEmailKey(inv, to, cust ?? {}),
+            invoice_snapshot: invoiceEmailSnapshot(pdfData),
+          });
+          if (!result.success) throw new Error(result.error || 'Failed to send email');
+          if (result.deduplicated) {
+            // The same key already went (from either screen): the server sent nothing new.
+            results.push({ ...base, outcome: 'already_sent', detail: `Already emailed to ${to}; not sent again` });
+          } else {
+            results.push({ ...base, outcome: 'sent', detail: to });
+            logActivity({ event: 'invoice_emailed', description: `Invoice ${inv.invoice_number} emailed to ${to}`, performedBy: profile.id, entityType: 'invoice', entityId: inv.id, customerId: inv.customer_id });
+          }
+        } catch (err) {
+          if (err instanceof Error && isEmailRateLimit(err.message)) {
+            // Every later send would be refused too: stop, and leave the rest ticked for a retry.
+            const detail = 'Not sent: the hourly email limit (50 an hour) was reached. Try again later.';
+            results.push(...targets.slice(index).map((t) => ({ invoiceId: t.id, invoiceNumber: t.invoice_number, customerName: t.customer_name, outcome: 'failed' as const, detail })));
+            break;
+          }
+          Sentry.captureException(err, { tags: { action: 'bulk_email_invoices' }, extra: { invoiceId: inv.id } });
+          results.push({ ...base, outcome: 'failed', detail: sanitizeError(err) });
+        }
+      }
+    } finally {
+      emailingRef.current = false;
+      setEmailing(false);
+    }
+    // Untick what went out and keep what did not, so a retry is one click; other ticks made meanwhile stay.
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const r of results) {
+        // A row unticked during the run stays unticked, even if it failed.
+        if (r.outcome === 'sent' || r.outcome === 'already_sent') next.delete(r.invoiceId);
+      }
+      return next;
+    });
+    setEmailResults(results);
+    const done = summarizeBulkEmail(results);
+    toast(done.type, done.message);
+  };
+
   // Batch print
   const handleBatchPrint = async (options: InvoicePrintOptions) => {
     setShowBatchPrintDialog(false);
@@ -423,79 +634,7 @@ export default function Invoices() {
       action: async () => {
         // Fetch full data for each selected invoice. An invoice whose lines could not be
         // read is skipped and named; the rest still print.
-        const { list: pdfDataList, skipped } = await buildBatchInvoicePdfData(selectedInvoices, async (inv) => {
-          // Fetch customer details
-          // A dropped request is a failed read too: the same refusal, not a raw network error.
-          const detailsUnavailable = () => { throw new InvoiceDetailsUnavailableError(); };
-          const { data: cust, error: custError } = await supabase
-            .from('customers')
-            .select('billing_address, city, state, zip, account_number, payment_terms')
-            .eq('id', inv.customer_id)
-            .maybeSingle()
-            .then((r) => r, detailsUnavailable);
-          // A failed or missing customer read refuses the PDF: printing on would send the
-          // customer an invoice with a blank address block (To-Do 10.5 follow-up).
-          if (custError || !cust) throw new InvoiceDetailsUnavailableError();
-
-          // Fetch items with product details
-          const { data: items, error: itemsError } = await supabase
-            .from('invoice_items')
-            .select(`${INVOICE_ITEM_COLUMNS}, product:products(product_name, epa_registration, product_form)`)
-            .eq('invoice_id', inv.id)
-            .order('sort_order');
-          // Checked against the same total the PDF prints (total_amount_cents below).
-          assertInvoiceLinesLoaded(itemsError, items, inv.total_amount_cents || 0);
-
-          // Fetch shares
-          const { data: shares, error: sharesError } = await supabase
-            .from('invoice_shares')
-            .select('*, customer:customers!invoice_shares_customer_id_fkey(farm_name)')
-            .eq('invoice_id', inv.id)
-            .then((r) => r, detailsUnavailable);
-          // A split invoice printed without its shares would hide who owes what.
-          if (sharesError || !Array.isArray(shares)) throw new InvoiceDetailsUnavailableError();
-
-          const pdfData: InvoicePdfData = {
-            invoice_number: inv.invoice_number,
-            invoice_date: inv.invoice_date,
-            due_date: inv.due_date || undefined,
-            invoice_type: inv.invoice_type || 'chemical_sale',
-            status: inv.status || 'draft',
-            customer_name: inv.customer_name,
-            customer_address: cust?.billing_address || undefined,
-            customer_city: cust?.city || undefined,
-            customer_state: cust?.state || undefined,
-            customer_zip: cust?.zip || undefined,
-            account_number: cust?.account_number || undefined,
-            payment_terms: inv.payment_terms || cust?.payment_terms || undefined,
-            salesman_name: inv.salesman_name || undefined,
-            purchase_order_ref: inv.purchase_order_ref || undefined,
-            header_notes: inv.header_notes || undefined,
-            footer_notes: inv.footer_notes || undefined,
-            crop_type: inv.crop_type || undefined,
-            field_names: inv.field_names || undefined,
-            total_acres: inv.total_acres || undefined,
-            applicator_name: inv.applicator_name || undefined,
-            vehicle_name: inv.vehicle_name || undefined,
-            application_date: inv.application_date || undefined,
-            shares: (shares || []).length > 0 ? (shares as Array<{ customer?: { farm_name: string }; split_percentage: number; acres: number; amount_cents: number; price_per_acre_cents: number | null; pricing_note: string | null }>).map(s => ({
-              customer_name: s.customer?.farm_name || 'Unknown',
-              split_percentage: s.split_percentage,
-              acres: s.acres,
-              amount_cents: s.amount_cents,
-              price_per_acre_cents: s.price_per_acre_cents || null,
-              pricing_note: s.pricing_note || null,
-            })) : undefined,
-            items: groupReturnCreditDisplayItems(inv.invoice_type, (items || []).map(mapInvoicePdfItem)),
-            total_amount_cents: inv.total_amount_cents || 0,
-            total_cost_cents: inv.total_cost_cents || 0,
-            paid_amount_cents: inv.paid_amount_cents || 0,
-            prepay_applied_cents: inv.prepay_applied_cents || 0,
-            balance_cents: inv.balance_cents || 0,
-            options,
-          };
-          return pdfData;
-        });
+        const { list: pdfDataList, skipped } = await buildBatchInvoicePdfData(selectedInvoices, (inv) => loadInvoicePdfData(inv, options));
 
         if (pdfDataList.length === 0) {
           throw new Error('No invoices to print');
@@ -840,14 +979,16 @@ export default function Invoices() {
                 >
                   Print {selectedInvoices.length} Selected
                 </Button>
-                <Button
-                  variant="secondary"
-                  icon={<Mail className="w-4 h-4" />}
-                  disabled
-                  title="Coming soon — requires email integration"
-                >
-                  Email
-                </Button>
+                {isAdmin && selectedEmailable.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    icon={<Mail className="w-4 h-4" />}
+                    onClick={() => setShowEmailModal(true)}
+                    loading={emailing}
+                  >
+                    Email {selectedEmailable.length} Selected
+                  </Button>
+                )}
                 {isAdmin && selectedDeletable.length > 0 && (
                   <Button
                     variant="danger"
@@ -1068,6 +1209,46 @@ export default function Invoices() {
         icon={Send}
         loading={posting}
       />
+
+      <ConfirmModal
+        open={showEmailModal}
+        onClose={() => setShowEmailModal(false)}
+        onConfirm={handleBulkEmail}
+        title="Email Selected Invoices"
+        message={
+          `Email ${selectedEmailable.length} posted or overdue invoice(s) to each customer's email on file? ` +
+          (selectedInvoices.length > selectedEmailable.length
+            ? `${selectedInvoices.length - selectedEmailable.length} selected invoice(s) are left out (only posted or overdue invoices are emailed). `
+            : '') +
+          'An invoice already emailed to the same address and unchanged since is not sent twice. Up to 50 emails go out an hour.'
+        }
+        confirmLabel={`Email ${selectedEmailable.length}`}
+        variant="info"
+        icon={Mail}
+        loading={emailing}
+      />
+
+      <Modal open={!!emailResults} onClose={() => setEmailResults(null)} title="Email Results">
+        {emailResults && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-700">{summarizeBulkEmail(emailResults).message}.</p>
+            <ul className="divide-y divide-gray-100 text-sm max-h-96 overflow-y-auto">
+              {emailResults.map((r) => (
+                <li key={r.invoiceId} className="py-2 flex items-start justify-between gap-3">
+                  <span>
+                    <span className="font-medium">{r.invoiceNumber}</span>
+                    <span className="text-gray-500"> · {r.customerName}</span>
+                    {r.detail && <span className="block text-xs text-gray-500">{r.detail}</span>}
+                  </span>
+                  <Badge variant={r.outcome === 'sent' ? 'success' : r.outcome === 'already_sent' ? 'info' : 'error'}>
+                    {r.outcome === 'sent' ? 'Sent' : r.outcome === 'already_sent' ? 'Already sent' : 'Not sent'}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Modal>
 
       {/* Batch Print Dialog */}
       <InvoicePrintDialog

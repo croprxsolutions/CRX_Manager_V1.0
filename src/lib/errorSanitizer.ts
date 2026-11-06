@@ -84,6 +84,13 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // Admin-only since 2026-10-14 (migration 20261027080200).
   [/^COMMISSION_SPLIT_ADMIN_ONLY\b/i,
    "Only an admin can set or change a customer's default commission split"],
+  // Admin-only since 2026-11-01 (migration 20261111100000).
+  [/^TIER_ADMIN_ONLY\b/i,
+   "Only an admin can set or change a customer's price tier"],
+  [/^CREDIT_LIMIT_ADMIN_ONLY\b/i,
+   "Only an admin can set or change a customer's credit limit"],
+  [/^QUOTE_TIER_PLANNED_VIA_SAVE_QUOTE\b/i,
+   "A booking's tier and planned flag change only by saving the quote"],
   [/^SALESMAN_SCOPE_DENIED\b/i,
    "Sales reps work under their own name: choose yourself as the salesman, or ask an admin to handle another salesman's work"],
   [/^INVOICE_SCOPE_DENIED\b/i,

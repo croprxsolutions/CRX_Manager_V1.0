@@ -1,0 +1,96 @@
+// Invoice email (To-Do 9.6 bulk, 9.8 record key). The list's bulk Email and the invoice page's
+// Email button share these rules: which invoices can go and each send's retry key. The server
+// dedupes that key exactly, so it alone decides whether this version already went to this address.
+
+export type BulkEmailOutcome = 'sent' | 'already_sent' | 'failed' | 'skipped';
+
+export interface BulkEmailResult {
+  invoiceId: string;
+  invoiceNumber: string;
+  customerName: string;
+  outcome: BulkEmailOutcome;
+  detail?: string;
+}
+
+/** Same rule as the invoice page's Email button: a posted (or overdue) chemical or misc invoice, not a suppressed $0 split. */
+export function isBulkEmailable(inv: { status?: string | null; send_disposition?: string | null; deleted_at?: string | null }): boolean {
+  return (inv.status === 'posted' || inv.status === 'overdue')
+    && inv.send_disposition !== 'suppressed_zero_total'
+    && !inv.deleted_at;
+}
+
+/** The customer columns the emailed PDF prints (bill-to), read with the address at send time. */
+export const INVOICE_BILL_TO_COLUMNS = 'email, farm_name, billing_address, city, state, zip, account_number, payment_terms';
+
+export interface InvoiceBillTo {
+  farm_name?: string | null;
+  billing_address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  account_number?: string | null;
+  payment_terms?: string | null;
+}
+
+/**
+ * The retry key comes from the record (To-Do 9.8): the invoice id, the time it last changed,
+ * and a short code for the address and the bill-to details the PDF prints. Both screens use it,
+ * so the server never mails the same version to the same address twice; an edit, a payment,
+ * a corrected bill-to or a new address sends again. Hashed so the key stays within 256 characters.
+ */
+export async function invoiceEmailKey(inv: { id: string; updated_at: string }, to: string, billTo: InvoiceBillTo): Promise<string> {
+  const printed = [to.trim().toLowerCase(), billTo.farm_name, billTo.billing_address, billTo.city, billTo.state, billTo.zip, billTo.account_number, billTo.payment_terms]
+    .map((v) => v ?? '');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(printed)));
+  const code = Array.from(new Uint8Array(digest).slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
+  return `invoice-email-${inv.id}-v${inv.updated_at}-to-${code}`;
+}
+
+/**
+ * The start of every key send-email writes for an invoice email: `invoice:invoice:<invoice id>:`.
+ * The server builds it from the invoice it checked, so a caller cannot put another invoice's id
+ * there (KI-104, Mason's option A2, 2026-11-05).
+ */
+export function invoiceEmailLogPrefix(invoiceId: string): string {
+  return `invoice:invoice:${invoiceId}:`;
+}
+
+export interface InvoiceEmailLogRow {
+  idempotency_key: string | null;
+  recipient_email: string | null;
+  status: string | null;
+  created_at: string;
+}
+
+/**
+ * Bulk only: true when the log shows this invoice was emailed to this address since it last
+ * changed. It catches sends made under the old clock keys, which the record key cannot match.
+ * Strict: the key must START with the server-written prefix for this exact invoice.
+ */
+export function sentSinceInvoiceChanged(rows: InvoiceEmailLogRow[], inv: { id: string; updated_at: string }, to: string): boolean {
+  const prefix = invoiceEmailLogPrefix(inv.id);
+  const changedAt = Date.parse(inv.updated_at);
+  const address = to.trim().toLowerCase();
+  return rows.some((r) => r.status === 'sent'
+    && !!r.idempotency_key?.startsWith(prefix)
+    && (r.recipient_email ?? '').trim().toLowerCase() === address
+    && Date.parse(r.created_at) >= changedAt);
+}
+
+/** The server's hourly cap (50 per user): later sends in the batch would be refused too. */
+export function isEmailRateLimit(message: string): boolean {
+  return message.startsWith('Rate limit:');
+}
+
+export function summarizeBulkEmail(results: BulkEmailResult[]): { type: 'success' | 'warning' | 'error'; message: string } {
+  const count = (o: BulkEmailOutcome) => results.filter((r) => r.outcome === o).length;
+  const sent = count('sent');
+  const already = count('already_sent');
+  const failed = count('failed') + count('skipped');
+  const parts = [`${sent} emailed`];
+  if (already) parts.push(`${already} already emailed (not sent again)`);
+  if (failed) parts.push(`${failed} not sent`);
+  const message = parts.join(', ');
+  if (failed === 0) return { type: 'success', message };
+  return { type: sent + already > 0 ? 'warning' : 'error', message };
+}

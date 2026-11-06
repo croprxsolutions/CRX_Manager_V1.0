@@ -184,10 +184,15 @@ gate. List each deferral explicitly when you report SHIP-WITH-FOLLOWUPS, then pr
 `--commit <sha>`, but the round that clears the change for the PR (and for Sol) must be the default
 branch scope against `origin/main`, run on the committed head that will be pushed. Its `Reviewed:`
 line names that head; quote it when you report the result. If a later commit changes anything
-but notes or docs, run the whole-branch round again; if it changes only notes or docs, say so and
-name both heads. Why: on PR #1494 Luna came back clean on five fix commits while Sol found
-new bugs in how the pieces worked together each time. If the whole branch is too large and the
-script falls back to per-commit commands, say so: that does not count as the whole-branch round.
+but plain notes, run the whole-branch round again; if it changes only plain notes (status
+records, changelog entries, plans), say so and name both heads. Rules are not plain notes:
+`AGENTS.md`, `CLAUDE.md`, anything under `.claude/` or `.agents/`, `docs/reference/` and
+`docs/workflows/` always need the round again. Why: on PR #1494 Luna came back clean on five fix
+commits while Sol found new bugs in how the pieces worked together each time.
+When the whole-branch Luna round cannot run, a whole-branch Sol review counts instead: the
+branch is too large and the script falls back to per-commit commands (those do not count), or
+the guard-change round cap has stopped Luna. On a Sol-list change that is the Step 3B review;
+on any other change run `node scripts/luna-review.mjs --sol --reason "<which of the two>"`.
 
 **A serious screen bug needs proof it is fixed (Mason, 2026-11-06).** A confirmed BLOCKER or HIGH
 in a screen that saves, uploads or imports counts as fixed only with a test that reproduces it (two

@@ -57,6 +57,15 @@ land on green checks alone. `.claude/hooks/sol-risk-lib.mjs`, `.claude/hooks/cod
 routine reasons to put behind Sol, so that CI check guards them instead. The gate files' tests and every
 other hook stay off the list.
 
+**Best effort, not airtight (Mason, 2026-11-06, chose this over putting every hook behind Sol).**
+The list catches an agent accidentally weakening a main gate. Accepted holes, each needing a
+deliberate edit: a hook's `matcher` can be changed so a wired gate never fires; other guard
+files (`review-proof-guard.mjs`, `codex-hook-adapter.mjs`, `scripts/run-claude-review.mjs` and
+the rest of the hooks) stay off the list; and the merge guards judge a pull request with that
+pull request's own copy of this module, so one that deletes an entry and its test also escapes
+Sol. Putting every hook and both wiring files behind Sol would close these, at roughly 20 extra
+Sol runs a week (59 of 479 merged pull requests touched them from 2026-10-23 to 2026-11-06).
+
 ## What stays separate
 
 A migration still needs a Sol proof bound to its exact head before it applies (a full

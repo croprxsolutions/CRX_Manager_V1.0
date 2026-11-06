@@ -105,15 +105,18 @@ function preToolUseCommands(text) {
     return [];
   }
 }
-function requireGateWired(relative, text, gate) {
-  const name = `${relative} wires gate hook ${gate} on PreToolUse`;
-  if (preToolUseCommands(text).some((command) => command.includes(`.claude/hooks/${gate}`))) pass(name);
+// shortcut: a changed `matcher` can still stop a wired gate firing (accepted, Mason 2026-11-06 "Best effort (B)").
+function requireGateWired(relative, text, gatePath) {
+  const name = `${relative} wires gate hook ${gatePath} on PreToolUse`;
+  if (preToolUseCommands(text).some((command) => command.includes(gatePath))) pass(name);
   else fail(name);
 }
-for (const gate of ["pr-merge-guard.mjs", "merge-guard-launcher.mjs", "codex-push-guard.mjs", "migration-apply-guard.mjs"]) {
-  requireGateWired(".claude/settings.json", claudeSettingsText, gate);
+for (const gate of ["pr-merge-guard.mjs", "merge-guard-launcher.mjs", "codex-push-guard.mjs", "migration-apply-guard.mjs", "review-proof-guard.mjs"]) {
+  requireGateWired(".claude/settings.json", claudeSettingsText, `.claude/hooks/${gate}`);
 }
-requireGateWired(".codex/hooks.json", codexHooksText, "migration-apply-guard.mjs");
+for (const gatePath of [".claude/hooks/migration-apply-guard.mjs", ".claude/hooks/review-proof-guard.mjs", ".codex/hooks/production-action-guard.mjs"]) {
+  requireGateWired(".codex/hooks.json", codexHooksText, gatePath);
+}
 // Scope to the [mcp_servers.supabase] url line, parsed line-by-line so a
 // commented heading, a commented url, a backup_url key, or a url in a later
 // TOML table can never satisfy the check; the read_only flag is matched at

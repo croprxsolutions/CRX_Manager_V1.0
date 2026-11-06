@@ -157,7 +157,7 @@ Rules that follow:
 
 ## 5. PR 2a · Commit label drafts into the registration (database only)
 
-**Depends on:** PR 1 applied and seeded.
+**Depends on:** PR 1 applied and seeded, **and RUP-POST (section 5a) live** (Mason, 2026-11-06, Q5).
 
 **Early RUP guard** (in this migration, ahead of PR 3's full guard): a narrow `BEFORE UPDATE` trigger on `products` (`trigger_zz_guard_product_rup`, same security settings as 3.3; dropped by PR 3 when the full guard replaces it) refuses, without a pass, a change to `is_rup` on a size whose number has a registration (`EPA_REGISTRATION_FACT: is_rup belongs to EPA registration <number>; reload the app`). An old page resending the unchanged value passes, so nothing breaks, but no old page or direct client can flip one size's RUP flag away from its registration before posting reads it.
 
@@ -207,6 +207,31 @@ Rules that follow:
 - Replay and admin checks as PR 1. Two sessions committing drafts on the same number serialize without deadlock.
 
 **Risks:** the commit impl is re-issued from its live body; diff it against `pg_get_functiondef` before review. **Sol list:** yes. **Mason-gated:** none.
+
+---
+
+## 5a. RUP-POST · Posting reads what was sold (prerequisite for PR 2a onward)
+
+**Why:** Mason decided (2026-11-06, Q5) to hold PR 2a, PR 2b, PR 3 and 7.7 until restricted-use posting reads each invoice line's own copy instead of the product's current state. That removes the mechanism behind every repeating RUP finding: once posting reads the line, a later change to a product's number or RUP answer cannot change what an earlier sale records. **Correction to the Q5 wording:** KI-18 batch 1 does **not** do this; its re-issued `generate_rup_sales_records` still selects `p.epa_registration` and filters on `p.is_rup` (`20261128100000_ki18_batch1_chicago_today.sql:2535-2542`, read 2026-11-06). So this is a small new package, built on KI-18 batch 1's body after it merges.
+
+**Facts (live, read-only, 2026-11-06):** `invoice_items.epa_registration` exists; 27 invoice lines, 9 blank where the product has a number, 0 that differ from their product. `save_invoice` takes each line's number from the screen's payload (`20261106140000_invoice_resave_keeps_cost.sql:322-336`).
+
+**Depends on:** REG-1 PR 1 applied and seeded (registrations exist); KI-18 batch 1 merged.
+
+**Migration** `<stamp>_rup_posting_reads_invoice_line`:
+- `save_invoice` re-issued from its body on `main`: a new line takes its EPA number from its product on the server (the payload's value is ignored); an existing line keeps the number it already has, so a re-save never rewrites it.
+- `generate_rup_sales_records` re-issued from KI-18 batch 1's body: selects the line's own `ii.epa_registration`; a line is restricted-use when that number's registration says `yes`, or, for a number with no registration, when the product's `is_rup` is true (today's rule); the record names the line's number. Roles, posted-invoice check and de-duplication are unchanged.
+- No row is written at apply.
+
+**Mason-gated live step:** a one-time fill of the 9 blank invoice lines from their product's current number. It changes live rows, so it needs his explicit `I approve` with the preview (line count and numbers, no customer names). Until it runs, a blank line falls back to the product's number at posting, exactly as today.
+
+**Done when (harness):**
+- A line saved under A, product then moved to B, posts a record naming A.
+- A registration changed to `yes` after a line was posted adds nothing (Q2 is still separate); one changed to `yes` before posting records the sale.
+- A re-save of an invoice with a forged line number keeps the stored number; a new line's forged number is replaced by the product's.
+- A blank line posts using the product's number (fallback).
+
+**Files:** migration, changelog note, migrations.d record, types, rpc-functions doc. **Sol list:** yes (money and RUP compliance). **Mason-gated:** the blank-line fill.
 
 ---
 
@@ -319,7 +344,7 @@ Rules that follow:
 |---|---|---|---|
 | PR #1581 size notes | `20261127110000_product_size_notes_in_one_step.sql` re-issues `_insert_parent_size` | PR 3 re-issues the same function | PR 3 builds after #1581 merges, from its body |
 | Taha's PAR-2 fixes | worktree `happy-mendel-a24b2b`, `20261126100000_product_parent_review_fixes.sql`; re-issues `move_product_size`, `_product_size_move_refusal`, approval functions; does **not** touch the brand RPCs | PR 3 re-issues `move_product_size` | PR 3 builds after it merges, from its body |
-| KI-18 batch 1 | worktree `mystifying-chandrasekhar-760465`, `20261128100000` re-issues `generate_rup_sales_records` | none: REG-1 no longer re-issues it (section 5) | only if Q2 is answered yes, the later sales-list package builds on its body |
+| KI-18 batch 1 | worktree `mystifying-chandrasekhar-760465`, `20261128100000` re-issues `generate_rup_sales_records` (dates only; still reads the product) | RUP-POST (section 5a) re-issues it again | RUP-POST builds after KI-18 batch 1 merges, from its body |
 | Parked EPA correction | local branch `claude/sweet-bun-f7920f`, `20261127100000_job_line_epa_snapshot.sql` | 7.7 | Section 8 |
 | PAR-1 screens #1553 | `ProductDetail.tsx` | PR 2b | PR 2b after #1553 |
 | DM-1 / DM-2 screens | `ProductDetail.tsx` | PR 2b | Rebase on whichever lands first |
@@ -327,7 +352,7 @@ Rules that follow:
 
 Migration stamps in this project run ahead of the calendar, so the November 26-28 stamps above are open work that exists today in the named worktrees and branch (checked by path on 2026-11-06), not future work. Stamps already claimed by others (do not reuse): `20261115120000`, `20261117130000`, `20261117160000`, `20261123100000`, `20261123150000` (not usable for the switch-on, see section 8), `20261126100000`, `20261127100000`, `20261127110000`, `20261128100000`. REG-1 picks fresh stamps at build time.
 
-Database PRs 1 and 2a can be built in parallel with DM-1 and DM-2 database PRs (no shared functions). PR 3 waits for the items above.
+**Order (Mason, 2026-11-06):** PR 1 → seed → KI-18 batch 1 merged → RUP-POST (and its blank-line fill) → PR 2a → PR 2b → drift settlement → PR 3 → 7.7. PR 1 can be built now and in parallel with DM-1 and DM-2 database PRs (no shared functions). PR 3 also waits for the items above.
 
 ---
 
@@ -335,8 +360,9 @@ Database PRs 1 and 2a can be built in parallel with DM-1 and DM-2 database PRs (
 
 1. **Seed picks**: one shared number disagrees on signal word today; Mason picks the right value from the seed preview (shown with the product names in the app, never in the repo).
 2. **Seed run**: the one-time live back-fill (`seed_epa_registrations`) writes about 203 rows and may change one size's signal word. Mason's explicit yes in the conversation that runs it.
-3. **Drift settlement** before PR 3, if any drift appears after the seed.
-4. Answers to the questions below (Q1 changes the seed).
+3. **RUP-POST blank-line fill** (section 5a): the one-time copy of each product's number onto the 9 invoice lines that have none. Mason's explicit yes in the conversation that runs it.
+4. **Drift settlement** before PR 3, if any drift appears after the seed.
+5. Answers to the questions below (Q1 changes the seed).
 
 ---
 
@@ -345,7 +371,7 @@ Database PRs 1 and 2a can be built in parallel with DM-1 and DM-2 database PRs (
 1. **Today's "not restricted-use" ticks: count them as "No" or "Not reviewed"?** Right now every product except two is marked not restricted-use, mostly because the box starts unticked. **Recommendation: "Not reviewed"**, then you confirm each label once; the two marked "Yes" stay "Yes".
 2. **Today, if a product is sold before anyone marks it restricted-use, that sale never reaches the RUP register, even after the box is ticked. REG-1 does not change this. Do you want a separate piece of work to catch those past sales?** It needs care: every way of re-recording past sales that we tried in review hit timing problems, so it would be its own small, carefully tested package. **Recommendation: not now.** First review the labels REG-1 lists as "Not reviewed" (only two products are marked restricted-use today); if a review turns up a restricted-use product with past sales, record those few by hand and then decide. A related choice: REG-1 blocks changing a product's EPA number while it sits on an invoice that has not been posted yet, so the restricted-use record always names the number that was sold. **Recommendation: keep the block** (post or void the invoice first); the alternative, a warning only, could post a sale under the wrong number.
 3. **Who may edit a registration's label facts?** **Recommendation: admins only**, as for parents and brands today.
-5. **NEEDS MASON - DECISION REQUIRED. Should the new EPA-number tools wait until restricted-use (RUP) sales are recorded from each invoice line's own copy?** Today the RUP register is filled at posting from the product's *current* EPA number and RUP flag. Every reviewer round (Luna 1-17, Sol 1-3) found another way that a later change to a product (a new number, a RUP flag, an earlier sale) leaves the register wrong, because posting reads the product instead of what was actually sold. Patching each case has not converged. The change that removes the whole family is for posting to use each invoice line's own saved number and its registration's RUP answer. That is the KI-18 work in another worktree. **Recommendation: yes. Build REG-1 PR 1 (storage and seed tools, no behaviour change) now, but hold PR 2a onward until KI-18 makes posting read the invoice line's own copy.** The cost is a few weeks' delay on the Registration panel. The alternative is to ship on the current design with the named gaps and catch any problems in the daily drift sweep.
+5. **ANSWERED (Mason, 2026-11-06): yes, hold.** Correction since he answered: KI-18 batch 1 does not make posting read the invoice line (it changes dates only), so the hold is on a new small package, RUP-POST (section 5a), built on KI-18's body. Original question: **Should the new EPA-number tools wait until restricted-use (RUP) sales are recorded from each invoice line's own copy?** Today the RUP register is filled at posting from the product's *current* EPA number and RUP flag. Every reviewer round (Luna 1-17, Sol 1-3) found another way that a later change to a product (a new number, a RUP flag, an earlier sale) leaves the register wrong, because posting reads the product instead of what was actually sold. Patching each case has not converged. The change that removes the whole family is for posting to use each invoice line's own saved number and its registration's RUP answer. That is the KI-18 work in another worktree. **Recommendation: yes. Build REG-1 PR 1 (storage and seed tools, no behaviour change) now, but hold PR 2a onward until posting reads the invoice line's own copy.** The cost is a few weeks' delay on the Registration panel. The alternative is to ship on the current design with the named gaps and catch any problems in the daily drift sweep.
 4. **The parked EPA-number correction work (branch `claude/sweet-bun-f7920f`) is only on this computer and not pushed.** **Recommendation:** have its session push it and land its database part first; REG-1 then builds on it (section 8).
 
 ---

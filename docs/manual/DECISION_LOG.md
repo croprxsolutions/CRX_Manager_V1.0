@@ -15,6 +15,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision:** Mason accepted that a multi-page Deliveries read (export, load sheet, calendar, driver view) includes every delivery that matches for the whole read exactly once, but a delivery cancelled, reactivated or moved in or out of the filters while it runs may or may not appear, and rows near an edit can sit a place out of order (Mason, 2026-11-06: "A: accept it").
 **Why:** each page of 500 is its own database call, so no snapshot spans the read; three review rounds in a row found a new HIGH in the same multi-page mechanism (PR #1549). The alternatives were a re-check that asks the user to export again, or lifting the 500-row cap Sol required.
 **What this forbids/implies:** `get_deliveries_page` with `p_after_id` and the screen's whole-list reads keep this behaviour; changing it (one snapshot across pages, a lock, or a re-check that refuses or retries the export) needs a new decision from Mason.
+## 2026-11-06 — A paged list clears its selection on every refresh and page turn
+
+**Decision:** on the paged Orders list, any list read (a page turn, a new search, filter or sort, a refresh after an import or bulk action, a failed read) clears both the ticked rows and "Select All" (Mason, 2026-11-06: "Yes, clear it").
+**Why:** "Select All" across pages holds a snapshot of every matching order. Sol found a new HIGH from that snapshot three rounds running on PR #1559: after a refresh, a bulk Delete or Export could include an order that had since left the filter. Clearing on every read deletes the snapshot's staleness instead of patching each refresh path; the cost is one extra click after a refresh.
+**What this forbids/implies:** a bulk action on a paged list acts only on rows read for the list the user is looking at now. Other paged lists (Deliveries, and later Quotes and Invoices) follow the same rule.
 
 ## 2026-11-05 — A new HIGH from the same mechanism three rounds running also stops the work
 

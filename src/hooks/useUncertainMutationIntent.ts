@@ -745,6 +745,27 @@ async function deleteCoordinatedRecord<T>(
 }
 
 /**
+ * A mirror write failed after IndexedDB took a record that beginIntent had just minted, and the caller never got
+ * a key, so nothing was sent. Left in place, that hidden record would block the next request with no visible lock
+ * to clear. Only that exact version is removed: an earlier request's record may have committed and is kept.
+ * A record that could not be removed is shown as a lock rather than left hidden.
+ */
+async function discardUnsentRecord<T>({ storageKey, options, proposed, coordinated, tabId, showLock }: {
+  storageKey: string;
+  options: DurableMutationIntentOptions<T>;
+  proposed: DurableMutationIntentRecord<T>;
+  coordinated: { record: DurableMutationIntentRecord<T>; conflict: boolean } | null;
+  tabId: string;
+  showLock: (record: DurableMutationIntentRecord<T>) => void;
+}): Promise<void> {
+  // Only a record this call minted: not a conflict, and not an earlier request it restored or reopened.
+  if (!coordinated || coordinated.conflict || coordinated.record.requestVersion !== proposed.requestVersion) return;
+  const cleanup = await deleteCoordinatedRecord(storageKey, options, proposed.requestVersion, tabId).catch(() => null);
+  if (readDurableRecord(storageKey, options)?.requestVersion === proposed.requestVersion) removeDurableRecord(storageKey);
+  if (!cleanup?.deleted) showLock(cleanup?.current ?? proposed);
+}
+
+/**
  * Freezes the exact payload of a mutation whose outcome is not yet known.
  *
  * A transport failure can arrive after PostgreSQL committed. Until an exact
@@ -967,10 +988,9 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
         createdAtMs,
         retryNotAfterMs,
       };
-      // Set once IndexedDB holds the record this call just minted. No request has gone out under it until this returns.
-      let mintedVersion: string | null = null;
+      let coordinated: { record: DurableMutationIntentRecord<T>; conflict: boolean } | null = null;
       try {
-        const coordinated = await coordinateDurableRecord(
+        coordinated = await coordinateDurableRecord(
           storageKey,
           proposed,
           intent,
@@ -980,9 +1000,6 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
           attemptRecordRef.current?.requestVersion ?? null,
           requiredKey,
         );
-        if (!coordinated.conflict && coordinated.record.requestVersion === proposed.requestVersion) {
-          mintedVersion = proposed.requestVersion;
-        }
         writeDurableRecord(storageKey, coordinated.record);
         if (coordinated.conflict) {
           applyRecord(coordinated.record);
@@ -996,15 +1013,7 @@ export function useUncertainMutationIntent<T>(options?: DurableMutationIntentOpt
         applyRecord(coordinated.record);
         return coordinated.record.intent;
       } catch (error) {
-        if (mintedVersion !== null) {
-          // A mirror write failed after IndexedDB took this call's new record, and the caller never got a key,
-          // so nothing was sent. Left in place, that hidden record would block the next request with no
-          // visible lock to clear. An earlier request's record (a different version) is never removed here.
-          const cleanup = await deleteCoordinatedRecord(storageKey, options, mintedVersion, currentClaimId).catch(() => null);
-          if (readDurableRecord(storageKey, options)?.requestVersion === mintedVersion) removeDurableRecord(storageKey);
-          // If the record could not be removed, show it as a lock rather than leave it hidden.
-          if (!cleanup?.deleted) applyRecord(cleanup?.current ?? proposed);
-        }
+        await discardUnsentRecord({ storageKey, options, proposed, coordinated, tabId: currentClaimId, showLock: applyRecord });
         releaseLiveClaim(currentClaimId);
         throw error;
       }

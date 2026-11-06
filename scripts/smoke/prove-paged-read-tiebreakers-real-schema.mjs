@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261111110000_paged_read_tiebreakers.sql (Goal 4 part 4). Builds the checked-in
+ * Real-schema proof for 20261113110000_paged_read_tiebreakers.sql (Goal 4 part 4). Builds the checked-in
  * baseline plus every post-baseline migration on this checkout (the candidate included) in a
  * network-disabled PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), seeds 25 rows that tie on
  * each function's old sort key, then checks:
@@ -23,7 +23,7 @@ import { buildContainer, removeContainer, seedUsers, psql, scalar, attempt, asUs
 import { functionContractSql } from '../../.claude/hooks/live-testdata-lib.mjs';
 
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = '20261111110000_paged_read_tiebreakers.sql';
+const CANDIDATE = '20261113110000_paged_read_tiebreakers.sql';
 const reuse = process.env.TIEBREAKER_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(MIGRATIONS, CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const N = 25;

@@ -30,17 +30,20 @@ export function changedEdgeFolders(paths) {
 
 // Vitest files whose text names a changed folder, as a path or as join(..., 'functions', 'name', ...).
 // Source-reading tests break when a function's text changes (PR #1515 reached CI before anyone saw it).
+// paths === null means the changed files are unknown: pick every test that names any function folder.
 export function edgeSourceTests(paths, tests) {
-  const folders = changedEdgeFolders(paths);
-  if (!folders.length) return [];
-  const names = folders.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const folders = paths === null ? null : changedEdgeFolders(paths);
+  if (folders && !folders.length) return [];
+  const names = folders ? folders.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') : '[\\w-]+';
   const mention = new RegExp(`functions['"/\\\\,\\s]+(?:${names})(?![\\w-])`);
   return tests.filter((t) => mention.test(t.text)).map((t) => t.path).sort();
 }
 
 function vitestFiles() {
   return execFileSync('git', ['ls-files', 'src/*.test.ts', 'src/*.test.tsx'], { encoding: 'utf8' })
-    .split('\n').filter(Boolean).map((path) => ({ path, text: readFileSync(path, 'utf8') }));
+    .split('\n').filter(Boolean).flatMap((path) => {
+      try { return [{ path, text: readFileSync(path, 'utf8') }]; } catch { return []; } // deleted in the working tree
+    });
 }
 
 function changedPaths(refLines) {
@@ -59,10 +62,15 @@ function changedPaths(refLines) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && process.argv.includes('--edge-tests')) {
-  // One test file per line; empty means nothing to run. Any doubt prints nothing (CI still runs everything).
+  // One test file per line; empty means nothing to run. Unknown changed files run every source-reading
+  // test; only an unlistable test tree prints nothing (CI still runs everything).
   try {
     const refs = readFileSync(0, 'utf8');
-    if (refs.trim()) console.log(edgeSourceTests(changedPaths(refs), vitestFiles()).join('\n'));
+    if (refs.trim()) {
+      let paths = null;
+      try { paths = changedPaths(refs); } catch { /* unknown: run them all */ }
+      console.log(edgeSourceTests(paths, vitestFiles()).join('\n'));
+    }
   } catch { /* nothing to run */ }
 } else if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const map = process.argv.includes('--map');

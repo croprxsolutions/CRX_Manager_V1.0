@@ -27,6 +27,7 @@ const edgeTests = [
 ];
 assert.deepEqual(edgeSourceTests(['supabase/functions/send-email/index.ts'], edgeTests), ['src/a.test.ts', 'src/b.test.ts']);
 assert.deepEqual(edgeSourceTests(['supabase/functions/_shared/x.ts'], edgeTests), ['src/c.test.ts']);
+assert.deepEqual(edgeSourceTests(null, edgeTests), ['src/a.test.ts', 'src/b.test.ts', 'src/c.test.ts', 'src/d.test.ts']);
 assert.deepEqual(edgeSourceTests(['src/App.tsx', 'supabase/migrations/1_x.sql', 'supabase/functions/README.md'], edgeTests), []);
 
 const verdict = (stdin) => spawnSync(process.execPath, ['scripts/prepush-needs-build.mjs'], { input: stdin, encoding: 'utf8' }).stdout.trim();

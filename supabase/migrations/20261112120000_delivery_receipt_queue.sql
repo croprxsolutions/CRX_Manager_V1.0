@@ -28,8 +28,9 @@
 --        'send'. It re-checks, under locks that wait for an in-flight edit of the delivery or customer: the claim
 --        is still held and inside its lease ('stale' otherwise, nothing changes); the delivery is still completed
 --        and this customer's; the customer's email is still the claimed address; the 23 hours have not passed.
---        On 'send' it records the authorization and renews the lease.
---      finish_delivery_receipt: reports sent / retry / check against the token. Backoff 2, 4, 8, 16 minutes;
+--        On 'send' it records the authorization (send_confirmed_token = this claim) and renews the lease.
+--      finish_delivery_receipt: reports sent / retry / check against the token; 'sent' only from the claim
+--        confirm authorized. Backoff 2, 4, 8, 16 minutes;
 --        after five attempts needs_check. A sent finish whose delivery, customer or email changed while sending
 --        is kept as needs_check with the send recorded.
 --      claim and finish take p_idempotency_key (a retried claim returns the claims it still holds, a retried
@@ -39,6 +40,10 @@
 --      overlapping stale worker, is answered by the provider instead of emailing the customer twice.
 --   3c. _delivery_receipt_keep_owed (trigger on delivery_receipt_queue): an owed receipt, or one on the office list
 --      (needs_check), cannot be deleted, so a hard delete of its delivery is refused instead of erasing it.
+--   3d. _delivery_receipt_hold_while_sending (triggers on deliveries and customers): while a confirmed send may be
+--      in flight (until finish, at most the 10-minute lease) its delivery cannot be voided, soft-deleted or moved
+--      to another customer and that customer's email cannot change (DELIVERY_RECEIPT_SENDING; retry in a
+--      minute), so a receipt never goes to an address or customer that changed after confirm checked it.
 --   4. pg_net is enabled and a pg_cron job (every 2 minutes) runs _wake_delivery_receipt_worker(), which posts to
 --      the worker only when a row is due AND both Vault secrets delivery_receipt_worker_url and
 --      delivery_receipt_worker_secret exist. Neither is created here: until they are stored (a separate approved
@@ -51,15 +56,14 @@
 --      worker's calls stay service_role-only, and its reply carries no customer data.
 --
 -- ACCEPTED LIMITS (Mason, 2026-11-05: a duplicate receipt is preferred to a lost one): nothing stops the office's
---   own Email Confirmation and the worker both sending a receipt for one delivery; an edit committed between a
---   'send' and the provider call is caught only by finish (needs_check, send recorded); a finish from a worker
+--   own Email Confirmation and the worker both sending a receipt for one delivery; a finish from a worker
 --   whose lease was taken over returns 'stale' and its send evidence is not kept (the receipt is resent under the
 --   same provider key, or is already on the office list).
 -- BEFORE THE APP ASKS FOR RECEIPTS (PR 2): the worker, the office list (needs_check rows, plus pending or sending
 --   rows created over an hour ago) with an action to close a row, and provider bounce handling must be live.
 --
 -- NOT CHANGED: what completion does to deliveries, stock, invoices or evidence; start_and_complete_delivery;
---   process_offline_action; send-email; email_log; every grant on existing objects except complete_delivery's
+--   process_offline_action; send-email; email_log; any edit of deliveries or customers outside 3d; every grant on existing objects except complete_delivery's
 --   (re-created with the same grants). No existing row changes.
 --
 -- idempotency-body-check: exempt -- claim_delivery_receipts, confirm_delivery_receipt_send and
@@ -117,6 +121,7 @@ BEGIN
      OR to_regproc('public._enqueue_delivery_receipt') IS NOT NULL
      OR to_regproc('public._wake_delivery_receipt_worker') IS NOT NULL
      OR to_regproc('public._delivery_receipt_keep_owed') IS NOT NULL
+     OR to_regproc('public._delivery_receipt_hold_while_sending') IS NOT NULL
      OR EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'deliver-receipt-queue') THEN
     RAISE EXCEPTION 'PREFLIGHT_DELIVERY_RECEIPT_QUEUE_DRIFT: an object this file creates already exists';
   END IF;
@@ -818,6 +823,46 @@ COMMENT ON FUNCTION public._delivery_receipt_keep_owed() IS
   'KI-25 (trigger on delivery_receipt_queue): an owed receipt (pending or sending) or one waiting for the office (needs_check) cannot be deleted, so a hard delete of its delivery is refused instead of erasing it.';
 
 -- ---------------------------------------------------------------------------------------------
+-- 4c. While a confirmed send may be in flight, its delivery cannot be voided or moved to another
+--     customer, and that customer's email cannot change. Confirm checked all of these under FOR SHARE; this
+--     keeps them true until finish (or the 10-minute lease) ends the send, so a receipt never goes to an
+--     address or customer that changed after the check. An edit that commits first makes confirm wait and
+--     see it. Rare and short (seconds after a completion); the office retries the edit. (A hard delete is
+--     already refused by 4b.)
+-- ---------------------------------------------------------------------------------------------
+CREATE FUNCTION public._delivery_receipt_hold_while_sending()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER -- sees every queue row, whatever the editor's own read access
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  -- No lock here: confirm holds the queue row and waits on this edit's row, so a lock would deadlock.
+  IF EXISTS (SELECT 1 FROM public.delivery_receipt_queue q
+              WHERE q.status = 'sending' AND q.send_confirmed_token = q.claim_token
+                AND q.claimed_at > clock_timestamp() - interval '10 minutes'
+                AND CASE WHEN TG_TABLE_NAME = 'customers' THEN q.customer_id = OLD.id ELSE q.delivery_id = OLD.id END) THEN
+    RAISE EXCEPTION 'DELIVERY_RECEIPT_SENDING: this delivery''s receipt is being emailed right now; try again in a minute'
+      USING ERRCODE = '55006';
+  END IF;
+  RETURN NULL;
+END;
+$function$;
+ALTER FUNCTION public._delivery_receipt_hold_while_sending() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._delivery_receipt_hold_while_sending() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER delivery_receipt_hold_while_sending AFTER UPDATE OF status, deleted_at, customer_id ON public.deliveries
+  FOR EACH ROW
+  WHEN (OLD.status = 'completed' AND (NEW.status IS DISTINCT FROM OLD.status OR NEW.deleted_at IS DISTINCT FROM OLD.deleted_at
+                                      OR NEW.customer_id IS DISTINCT FROM OLD.customer_id))
+  EXECUTE FUNCTION public._delivery_receipt_hold_while_sending();
+CREATE TRIGGER delivery_receipt_hold_while_sending AFTER UPDATE OF email ON public.customers
+  FOR EACH ROW
+  WHEN (lower(btrim(COALESCE(NEW.email, ''))) IS DISTINCT FROM lower(btrim(COALESCE(OLD.email, ''))))
+  EXECUTE FUNCTION public._delivery_receipt_hold_while_sending();
+COMMENT ON FUNCTION public._delivery_receipt_hold_while_sending() IS
+  'KI-25 (trigger on deliveries and customers): while a receipt send confirm_delivery_receipt_send authorized may be in flight, its delivery cannot be voided, soft-deleted or moved and its customer''s email cannot change.';
+
+-- ---------------------------------------------------------------------------------------------
 -- 5. The timer: wake the worker every 2 minutes, only when a receipt is due and the worker is configured.
 -- ---------------------------------------------------------------------------------------------
 CREATE FUNCTION public._wake_delivery_receipt_worker()
@@ -884,7 +929,7 @@ BEGIN
     END IF;
   END LOOP;
   FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()',
-                                '_delivery_receipt_keep_owed()'] LOOP
+                                '_delivery_receipt_keep_owed()', '_delivery_receipt_hold_while_sending()'] LOOP
     IF has_function_privilege('authenticated', ('public.' || v_name)::regprocedure, 'EXECUTE')
        OR has_function_privilege('anon', ('public.' || v_name)::regprocedure, 'EXECUTE')
        OR has_function_privilege('service_role', ('public.' || v_name)::regprocedure, 'EXECUTE') THEN
@@ -895,6 +940,12 @@ BEGIN
        WHERE tgrelid = 'public.delivery_receipt_queue'::regclass AND tgname = 'delivery_receipt_keep_owed' AND tgenabled = 'O'
          AND tgfoid = 'public._delivery_receipt_keep_owed()'::regprocedure) <> 1 THEN
     RAISE EXCEPTION 'POSTFLIGHT: the keep-owed trigger is missing';
+  END IF;
+  IF (SELECT count(*) FROM pg_trigger
+       WHERE tgrelid IN ('public.deliveries'::regclass, 'public.customers'::regclass) AND tgenabled = 'O'
+         AND tgname = 'delivery_receipt_hold_while_sending'
+         AND tgfoid = 'public._delivery_receipt_hold_while_sending()'::regprocedure) <> 2 THEN
+    RAISE EXCEPTION 'POSTFLIGHT: the hold-while-sending triggers are missing';
   END IF;
   IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.delivery_receipt_queue'::regclass)
      OR has_table_privilege('authenticated', 'public.delivery_receipt_queue', 'INSERT')
@@ -910,7 +961,7 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT: the deliver-receipt-queue job is missing or not the expected postgres job';
   END IF;
   FOREACH v_name IN ARRAY ARRAY['_enqueue_delivery_receipt(uuid, uuid)', '_wake_delivery_receipt_worker()',
-                                'claim_delivery_receipts(integer, text)', 'confirm_delivery_receipt_send(uuid, uuid, text)',
+                                '_delivery_receipt_hold_while_sending()', 'claim_delivery_receipts(integer, text)', 'confirm_delivery_receipt_send(uuid, uuid, text)',
                                 'finish_delivery_receipt(uuid, uuid, text, text, text, text, text)'] LOOP
     SELECT * INTO p FROM pg_proc WHERE oid = ('public.' || v_name)::regprocedure;
     IF NOT p.prosecdef OR p.proowner <> 'postgres'::regrole

@@ -11,3 +11,7 @@
   receipt while the worker owed one is gone, so a customer may occasionally get two receipts, never none. The worker
   now re-checks right before each send (delivery still completed, same customer, same email) and the migration no
   longer touches the email log.
+- Sol round 1 on the simplified version: for the few seconds a receipt is being emailed, its delivery cannot be
+  voided or moved and the customer's email cannot change (the office gets "try again in a minute"), so a receipt
+  never goes to an address that was changed right after the final check. Only the attempt the final check
+  approved can record a receipt as sent.

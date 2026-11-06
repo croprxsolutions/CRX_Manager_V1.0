@@ -614,22 +614,42 @@ function main() {
   assert.match(row(27, "status || ' ' || last_error"), /^needs_check .*Stopped retrying/);
   console.log('[prover] a retried claim past its lease returns nothing; the fresh claim stops it at 23 hours');
 
-  // A send finished after a void or an email change goes to the office list, keeping the send it recorded.
+  // While a confirmed send may be in flight, its delivery cannot be voided, soft-deleted or moved and the
+  // customer's email cannot change; other edits, a same-address case change and later edits are allowed.
+  const refused = (sql) => psql(sql, { allowFailure: true });
   seedDelivery(21); assert.equal(complete(21, { emailReceipt: 'true' }).status, 0);
   due(21);
   const v1 = claim();
   assert.equal(confirm(v1[0]).out, 'send');
+  const h1 = refused(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}';`);
+  assert.notEqual(h1.status, 0); assert.match(h1.stderr, /DELIVERY_RECEIPT_SENDING/, 'email change refused mid-send');
+  const h2 = refused(`UPDATE public.deliveries SET customer_id = '${CUST_NOEMAIL}' WHERE id = '${D(21)}';`);
+  assert.notEqual(h2.status, 0); assert.match(h2.stderr, /DELIVERY_RECEIPT_SENDING/, 'move to another customer refused mid-send');
+  const h3 = refused(`SET app.admin_override = 'true'; UPDATE public.deliveries SET status = 'voided' WHERE id = '${D(21)}';`);
+  assert.notEqual(h3.status, 0); assert.match(h3.stderr, /DELIVERY_RECEIPT_SENDING/, 'void refused mid-send');
+  assert.equal(q(`SELECT status || ' ' || (deleted_at IS NULL) FROM public.deliveries WHERE id = '${D(21)}';`).out, 'completed true');
+  psql(`UPDATE public.customers SET email = upper(email) WHERE id = '${CUST}'; UPDATE public.customers SET email = lower(email) WHERE id = '${CUST}';`);
+  // A change that bypasses triggers (replica mode) is still caught by finish: office list, send kept.
   psql(`SET session_replication_role = replica; UPDATE public.deliveries SET status = 'cancelled' WHERE id = '${D(21)}';`);
   assert.equal(finish(v1[0], 'sent', `NULL, 'msg-v', 'ki25-farm@example.invalid'`).out, 'needs_check');
   assert.match(row(21, "status || ' ' || resend_message_id || ' ' || (sent_at IS NOT NULL) || ' ' || last_error"), /^needs_check msg-v true The receipt was emailed, but/);
+  // Once the send is finished, the email can change.
+  psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}'; UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
+  // An unconfirmed claim does not hold edits (confirm will see them), and the hold ends with the lease.
   seedDelivery(22); assert.equal(complete(22, { emailReceipt: 'true' }).status, 0);
   due(22);
   const v2 = claim();
-  assert.equal(confirm(v2[0]).out, 'send');
   psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}';`);
-  assert.equal(finish(v2[0], 'sent', `NULL, 'msg-e', 'ki25-farm@example.invalid'`).out, 'needs_check');
+  assert.equal(confirm(v2[0]).out, 'needs_check', 'confirm sees an edit made before it');
   psql(`UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
-  console.log('[prover] a send finished after a void or an email change goes to the office list, send kept');
+  seedDelivery(23); assert.equal(complete(23, { emailReceipt: 'true' }).status, 0);
+  due(23);
+  const v3 = claim();
+  assert.equal(confirm(v3[0]).out, 'send');
+  psql(`UPDATE public.delivery_receipt_queue SET claimed_at = now() - interval '11 minutes' WHERE id = '${v3[0].id}';`);
+  psql(`UPDATE public.customers SET email = 'ki25-other@example.invalid' WHERE id = '${CUST}'; UPDATE public.customers SET email = 'ki25-farm@example.invalid' WHERE id = '${CUST}';`);
+  assert.equal(finish(v3[0], 'sent', `NULL, 'msg-x', 'ki25-farm@example.invalid'`).out, 'sent', 'its own finish still records the send');
+  console.log('[prover] mid-send, a void, a move to another customer and an email change are refused; replica-mode changes reach the office list; holds end at finish or lease');
 
   // The timer: nothing due -> nothing posted; due but not switched on -> nothing posted; switched on -> one post.
   // pg_net's worker moves a queued call to net._http_response once tried (here: no network, so it fails).

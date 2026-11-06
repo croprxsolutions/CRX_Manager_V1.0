@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261116180000 (KI-18: the last database dates that followed UTC). Builds the
+ * Real-schema proof for 20261121090000 (KI-18: the last database dates that followed UTC). Builds the
  * checked-in schema baseline in a network-disabled PostgreSQL container, replays every migration before
  * the candidate, then checks BEFORE and AFTER:
  *  - financial_dashboard_summary's AR-aging strip: BEFORE an invoice 30 days past due sits in "current"
@@ -28,7 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261116180000_ki18_chicago_ticket_year_dashboard_aging_invoice_date_limit.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261121090000_ki18_chicago_ticket_year_dashboard_aging_invoice_date_limit.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

@@ -148,7 +148,7 @@ try {
   // (src/lib/tableSearchSort.ts, a stable sort) applied to the rows in default order.
   const screenSort = (rows, key, desc) => [...rows].sort((a, b) => {
     const av = a[key]; const bv = b[key];
-    if (av == null && bv == null) return 0; // the screen returns 1 here; equal keeps ties in default order
+    if (av == null && bv == null) return 0; // the screen returns 1 for two nulls, which is not a consistent comparator (its result depends on the sort algorithm); the database keeps such ties in default order, and that order is what the new screen shows
     if (av == null) return 1;
     if (bv == null) return -1;
     if (typeof av === 'number' && typeof bv === 'number') return desc ? bv - av : av - bv;

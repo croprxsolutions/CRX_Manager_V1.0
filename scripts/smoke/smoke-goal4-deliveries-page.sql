@@ -114,7 +114,7 @@ BEGIN
     RAISE NOTICE 'get_deliveries_page driver: % own rows', v_n;
   END IF;
 
-  -- 6. A sales rep sees every delivery an admin sees; a role with no delivery access sees none.
+  -- 6. A sales rep sees every delivery an admin sees; a user of another role with no delivery assigned to them sees none.
   EXECUTE 'RESET ROLE';
   SELECT count(*) INTO v_n FROM public.deliveries WHERE status NOT IN ('cancelled', 'voided');
   SELECT id INTO v_driver FROM public.profiles WHERE role = 'sales_rep' AND is_active ORDER BY created_at, id LIMIT 1;

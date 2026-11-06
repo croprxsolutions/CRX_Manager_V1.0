@@ -12,7 +12,8 @@
 --
 -- Security: SECURITY INVOKER, so row level security decides what each person sees, exactly as the
 -- screen's direct table reads do today (admins and sales reps: every delivery; drivers: only deliveries
--- assigned to them; everyone else: none). It reads only; it writes nothing.
+-- assigned to them; anyone else: only a delivery assigned to them, normally none). It reads only;
+-- it writes nothing.
 --
 -- New function only: no table, row, policy or existing function changes. Grants: authenticated and
 -- service_role only.

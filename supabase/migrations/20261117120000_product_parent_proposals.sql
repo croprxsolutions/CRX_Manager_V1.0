@@ -920,7 +920,7 @@ BEGIN
    WHERE p.id IN (SELECT (m->>'product_id')::uuid FROM public.product_parent_proposal_groups g,
                          jsonb_array_elements(g.members) m
                    WHERE g.proposal_id = p_proposal_id
-                     AND g.id::text IN (SELECT e->>'group_id' FROM jsonb_array_elements(p_groups) e))
+                     AND g.id IN (SELECT (e->>'group_id')::uuid FROM jsonb_array_elements(p_groups) e))
    ORDER BY p.id FOR UPDATE;
   SELECT is_locked INTO v_locked FROM public.product_rate_lock WHERE id FOR SHARE;
 

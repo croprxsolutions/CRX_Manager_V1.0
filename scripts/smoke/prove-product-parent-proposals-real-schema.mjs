@@ -556,7 +556,8 @@ async function main() {
   assert.equal(scalar(inFlight), '1', 'the background brand edit did not start');
   const nitroEntry = (g) => entry(g, { owner_confirmed: true, totes: { [N3]: { shop_filled: true, fill_source_product_id: N2 } }, brands: { 'nitrogen co': { keep: true } } });
   const t0 = Date.now();
-  refused(ADMIN, approve(P1, [nitroEntry(nitro)], 'k-n-race'), /PRODUCT_PARENT_GROUP_CHANGED/);
+  // An uppercase group ID is the same group: it must take the same member locks.
+  refused(ADMIN, approve(P1, [{ ...nitroEntry(nitro), group_id: nitro.id.toUpperCase() }], 'k-n-race'), /PRODUCT_PARENT_GROUP_CHANGED/);
   const waited = Date.now() - t0;
   const raced = await race;
   assert.equal(raced.status, 0, raced.output);

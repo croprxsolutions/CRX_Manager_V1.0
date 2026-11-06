@@ -1,0 +1,3 @@
+## 2026-11-06 - Live ledger re-read; status-doc stamps moved to 2026-11-06
+
+- Live ledger re-read 2026-11-06 06:14 UTC (2026-11-06 12:14 AM Central), read only, for PR #1549: 1144 rows; high-water `20261115160000_financial_delete_snapshots` (ledger `20261106060243`, PR #1546). Every migration `KNOWN_ISSUES.md` describes as not applied or in review was checked against the ledger; none of them is live, and the three live stamps named near such wording (`20260813080000`, `20261027040000`, `20261028185500`) are already described as live. `20261116130000_deliveries_list_page` is not in the ledger. The `CURRENT_STATE.md` and `KNOWN_ISSUES.md` "Last verified" stamps move to 2026-11-06 for the live ledger only; nothing else was re-certified.

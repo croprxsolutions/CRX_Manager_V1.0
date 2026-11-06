@@ -152,8 +152,11 @@ test('Orders list: true totals, selection cleared on every read, Select All grey
   await page.getByLabel('Search orders or products…').fill('G4O-');
   await expect(page.getByRole('button', { name: 'Next' })).toBeEnabled({ timeout: 30000 });
   await expect(page.getByText(`Showing 1–50 of ${G4O_IN_SEASON.toLocaleString('en-US')} orders`, { exact: false })).toBeVisible({ timeout: 30000 });
+  const pageOne = await orderNumbers();
   await page.getByRole('button', { name: 'Next' }).click();
   await expect(page.getByText(`Page 2 · 50 shown of ${G4O_IN_SEASON.toLocaleString('en-US')} orders`, { exact: false })).toBeVisible();
+  // The label can change before the rows do: wait until page one's rows have gone.
+  await expect(page.getByText(pageOne[0], { exact: true })).toHaveCount(0, { timeout: 15000 });
   const pageTwo = await orderNumbers();
   expect(pageTwo).toHaveLength(50);
   await page.getByRole('button', { name: 'Previous' }).click();

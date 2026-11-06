@@ -261,7 +261,7 @@ All reviews are advisory, because a docs-only plan is off the Sol list. Each fou
     - the Brand vs Generic notice says "coming soon" until the chemistry screen ships.
   - **Refuted:** "a same-name entry naming a different canonical parent should stay separate". The settled rule D-AA-3 refuses a name or CAS match that claims a different canonical parent.
 - **STOP under the contract's three-rounds rule.** Merge HIGHs came back in Sol rounds 2, 3 and 4, each time from the same mechanism: the merge alias (`merged_into_id`). The merge design is not patched further. Mason chose **replace** on 2026-11-06, which deletes the alias and with it every merge finding (candidate race, undo, CAS move, repointing). Sections 2, 3, 5, 6, 7 and 8 were re-planned that way and reviewed again (below).
-- **Astra blind plan review** (gpt-6-astra high, plan pasted inline after a first run could not open the file; head `ee9216920`): 24 findings. Fixed 23:
+- **Astra blind plan review** (gpt-6-astra high, plan pasted inline after a first run could not open the file; text as of `35182909e`): 24 findings. Fixed 23:
   - ingredient edits are checked against everything that depends on them (acid flag, canonical parent, `acid_equivalent` rows), and the acid flag needs reason and evidence like the other established fields;
   - an established ingredient edit is refused while any parent using it is EPA-gated; a duplicate on an EPA-gated parent waits for DM-4;
   - corrections carry a preview fingerprint (chemistry version, member sizes, touched ingredients);

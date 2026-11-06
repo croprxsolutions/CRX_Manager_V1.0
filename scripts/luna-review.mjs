@@ -40,7 +40,7 @@ import {
   runCodexWithSandboxFallback,
 } from "./write-codex-push-proof.mjs";
 
-// The newest Luna this account can use (`gpt-6.1-luna` is refused as of 2026-11-01). A new Luna is
+// The newest Luna this account can use (`gpt-6.1-luna` is refused as of 2026-11-06). A new Luna is
 // a one-line change here; see docs/reference/codex-model-tuning.md for how to probe a name.
 export const LUNA_MODEL = "gpt-6-luna";
 export const LUNA_EFFORT = "xhigh";
@@ -116,6 +116,10 @@ Hunt these failure classes first, then anything else:
 4. Migration drift — CHECK-constraint regressions (a new list must be a SUPERSET of the old),
    function-overload collisions, missing SET search_path = public, pg_temp, missing updated_at.
 5. Lifecycle violations in the quote / order / delivery / invoice / return state machines.
+6. Screens that save, upload or import — for each request, say which request owns the screen
+   now: a stale or late reply overwriting newer state, a control still usable while a request
+   is in flight, a retry that drops its idempotency key before the save is confirmed, close or
+   reopen not resetting, legacy input formats silently dropped, a row error skipping later checks.
 
 For each finding give: severity (BLOCKER/HIGH/MED/LOW), file:line, what breaks, and a concrete
 failure scenario (inputs -> wrong result).
@@ -280,10 +284,12 @@ function freezeDiff(git, opts) {
   }
   const base = opts.base ?? GUARDED_BASE;
   const baseSha = resolveCommit(git, base);
+  // Freeze the head too, so the printed result names exactly what was read.
+  const headSha = resolveCommit(git, "HEAD");
   return {
-    label: `branch against ${base} (${baseSha.slice(0, 9)})`,
+    label: `branch against ${base} (${baseSha.slice(0, 9)}) at head ${headSha}`,
     baseSha,
-    diff: gitOutput(git, ["diff", "--no-ext-diff", "--no-textconv", `${baseSha}...HEAD`]),
+    diff: gitOutput(git, ["diff", "--no-ext-diff", "--no-textconv", `${baseSha}...${headSha}`]),
   };
 }
 

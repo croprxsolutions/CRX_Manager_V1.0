@@ -56,7 +56,7 @@
 >
 > **Sol list (Mason, 2026-10-30; cut 2026-11-01 to the database, logins and permissions, and money and inventory).**
 > `.claude/hooks/sol-risk-lib.mjs` decides which PRs need Sol; the readable copy is
-> `docs/reference/sol-required-paths.md`. Dependency, deployment and guard-file changes land on green checks. Both merge guards ask it when no valid proof was found. It reads GitHub's
+> `docs/reference/sol-required-paths.md`. Dependency, deployment and most guard-file changes land on green checks; the files that enforce the Sol, migration-apply and owner-approval gates are on the list (Mason, 2026-11-06). Both merge guards ask it when no valid proof was found. It reads GitHub's
 > compare API for the PR's own changes, and any uncertainty means Sol is required. The module is in the Codex guard's
 > protected-file list.
 >

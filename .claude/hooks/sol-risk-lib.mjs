@@ -4,8 +4,10 @@
 // .codex/hooks/production-action-guard.mjs) ask this module when no Sol proof was
 // found. A pull request needs Sol when it touches the database, logins and
 // permissions, or money and inventory code (the list below; readable copy with the
-// reasons: docs/reference/sol-required-paths.md). Everything else, dependencies,
-// deployment files and the guards themselves included, relies on CI.
+// reasons: docs/reference/sol-required-paths.md), or the files that enforce the
+// Sol, migration-apply and owner-approval gates themselves (Mason, 2026-11-06).
+// Everything else, dependencies, deployment files and the other hooks included,
+// relies on CI.
 //
 // FAIL CLOSED: any GitHub failure, a comparison that does not end at the head, a
 // list that may be truncated or an unknown change status answers "Sol required".
@@ -51,6 +53,21 @@ export const SOL_REQUIRED_PATHS = Object.freeze([
   "src/components/receiving/",
   "src/components/integrity/",
   "src/components/field-app/",
+  // The gates themselves (Mason, 2026-11-06): weakening one must not land on green checks alone.
+  ".claude/hooks/sol-risk-lib.mjs",
+  ".claude/hooks/codex-bot-review-lib.mjs",
+  ".claude/hooks/codex-push-lib.mjs",
+  ".claude/hooks/pr-merge-guard.mjs",
+  ".claude/hooks/migration-apply-guard.mjs",
+  ".claude/hooks/migration-apply-lib.mjs",
+  ".claude/hooks/migration-landing-gate-lib.mjs",
+  ".claude/hooks/migration-access-lib.mjs",
+  ".claude/hooks/owner-approval-lib.mjs",
+  ".codex/hooks/production-action-guard.mjs",
+  "scripts/write-codex-push-proof.mjs",
+  "scripts/write-apply-proofs.mjs",
+  "scripts/apply-migration-file.mjs",
+  "scripts/owner-approve-migration.mjs",
 ]);
 
 // GitHub's compare lists at most 300 files and says nothing when it stops.

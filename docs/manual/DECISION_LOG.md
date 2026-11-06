@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-06 — Cross-checking: whole-branch final Luna round, tests for screen bugs, gate files back under Sol, no Terra
+
+**Decision (Mason, 2026-11-06: "i agree with the plan build it"):** (1) the Luna round that clears a change reads the whole branch at the head to be pushed, not just the newest fix commit; (2) a confirmed BLOCKER/HIGH in a screen that saves, uploads or imports is fixed only with a failing-then-passing test or observed behavior, and disputes are settled by a test or Sol, not Mason; (3) the files that enforce the Sol, migration-apply and owner-approval gates go back on the Sol list (`docs/reference/sol-required-paths.md`); (4) Terra is not added as a second reviewer; (5) Sol stays as it is.
+**Why:** on PR #1494 Luna came back clean on five fix commits while Sol found new HIGH/MED bugs each round (stale replies, in-flight clicks, a lost idempotency key), because Luna read only each fix. Mason first proposed Terra as a second reviewer for off-list changes; web research, a Sol plan review (27 findings) and an independent Opus review agreed that a mid-tier model from the same vendor adds little, and that scope and tests address the miss. Sol also flagged that since 2026-11-01 an edit weakening a gate could land on green checks alone.
+**What this forbids/implies:** never count a `--commit` round as the clearing round. A PR touching a gate file needs Sol. `gpt-6.1-luna` does not exist for this account (re-probed 2026-11-06 beside a bogus control), so Luna stays `gpt-6-luna`; moving Sol to `gpt-6.1-sol` waits for a side-by-side on a known #1494 commit at a time when no Sol proof or parked migration is in flight. If the whole-branch round still misses what Sol finds, try Grok (`cursor` skill) on past cases before adding any reviewer. Known gap left open: hook wiring in `.claude/settings.json` and `.codex/hooks.json` stays off the list.
+
 ## 2026-11-06 — A paged list clears its selection on every refresh and page turn
 
 **Decision:** on the paged Orders list, any list read (a page turn, a new search, filter or sort, a refresh after an import or bulk action, a failed read) clears both the ticked rows and "Select All" (Mason, 2026-11-06: "Yes, clear it").

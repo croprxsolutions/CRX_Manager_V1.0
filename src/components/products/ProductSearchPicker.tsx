@@ -13,6 +13,8 @@ import type { ProductSearchResult } from '../../types';
 async function parentSizeIds(text: string): Promise<string[]> {
   try {
     const parents = await searchProductParents(text);
+    // shortcut: 200 ids keep the request URL short; text matching that many sizes already fills the 20-row
+    // page, so the picker shows "Keep typing to narrow the list". Page by parent if a parent ever has 200+ sizes.
     return parents.flatMap((parent) => parent.sizes.map((size) => size.product_id)).slice(0, 200);
   } catch (error) {
     Sentry.captureException(error, { extra: { context: 'product_search_picker_parents' } });

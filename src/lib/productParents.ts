@@ -233,6 +233,7 @@ export const correctParentIdentity = async (input: {
  */
 export async function loadOpenWork(productIds: string[]): Promise<OpenWorkEntry[]> {
   if (productIds.length === 0) return [];
+  // shortcut: the review RPC refuses more than 500 ids; a parent's sizes are a handful of packages. Batch if that changes.
   const { data, error } = await supabaseUntyped.rpc('preview_product_active_change', { p_product_ids: productIds.slice(0, 500), p_active: false });
   if (error) throw error;
   const review = assertRpcResult<{ blockers: OpenWorkEntry[]; warnings: OpenWorkEntry[] }>(data, 'preview_product_active_change');

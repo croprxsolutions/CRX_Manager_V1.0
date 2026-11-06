@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261130120000_product_size_notes_in_one_step: "New product" and "Add a size"
+ * Real-schema proof for 20261202110000_product_size_notes_in_one_step: "New product" and "Add a size"
  * (create_product_with_parent, add_product_size) save the size's quoting and internal notes in the
  * same step: text or null, at most 5000 characters, trimmed, blank is none; a retry compares them;
  * a call without them is unchanged.
@@ -24,7 +24,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261130120000_product_size_notes_in_one_step.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261202110000_product_size_notes_in_one_step.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

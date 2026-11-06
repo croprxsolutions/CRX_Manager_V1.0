@@ -33,12 +33,12 @@ const NEW = {
 };
 // Every other rule on the two tables, as live had it on 2026-11-06 (read-only pg_policies read).
 const OTHERS = [
-  'deliveries|del_delete|DELETE|is_admin()|',
-  'deliveries|del_insert|INSERT||(is_admin() OR is_sales_rep())',
-  "deliveries|del_update|UPDATE|(is_admin() OR is_sales_rep() OR ((assigned_driver = ( SELECT auth.uid() AS uid)) AND (status = ANY (ARRAY['in_progress'::text, 'completed'::text]))))|(is_admin() OR is_sales_rep() OR ((assigned_driver = ( SELECT auth.uid() AS uid)) AND (status = ANY (ARRAY['in_progress'::text, 'completed'::text]))))",
-  'delivery_items|del_items_delete|DELETE|(is_admin() OR is_sales_rep())|',
-  'delivery_items|del_items_insert|INSERT||(is_admin() OR is_sales_rep())',
-  'delivery_items|del_items_update|UPDATE|is_admin()|is_admin()',
+  'deliveries|del_delete|DELETE|{authenticated}|PERMISSIVE|is_admin()|',
+  'deliveries|del_insert|INSERT|{authenticated}|PERMISSIVE||(is_admin() OR is_sales_rep())',
+  "deliveries|del_update|UPDATE|{authenticated}|PERMISSIVE|(is_admin() OR is_sales_rep() OR ((assigned_driver = ( SELECT auth.uid() AS uid)) AND (status = ANY (ARRAY['in_progress'::text, 'completed'::text]))))|(is_admin() OR is_sales_rep() OR ((assigned_driver = ( SELECT auth.uid() AS uid)) AND (status = ANY (ARRAY['in_progress'::text, 'completed'::text]))))",
+  'delivery_items|del_items_delete|DELETE|{authenticated}|PERMISSIVE|(is_admin() OR is_sales_rep())|',
+  'delivery_items|del_items_insert|INSERT|{authenticated}|PERMISSIVE||(is_admin() OR is_sales_rep())',
+  'delivery_items|del_items_update|UPDATE|{authenticated}|PERMISSIVE|is_admin()|is_admin()',
 ];
 const lit = (s) => `E'${s.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n')}'`;
 const restoreOld = `
@@ -85,7 +85,7 @@ try {
   for (const [name, qual] of Object.entries(NEW)) {
     assert.equal(scalar(`SELECT qual = ${lit(qual)} FROM pg_policies WHERE schemaname = 'public' AND policyname = '${name}' AND cmd = 'SELECT' AND roles = '{authenticated}'::name[] AND permissive = 'PERMISSIVE';`), 't', `${name}: new rule text`);
   }
-  const others = scalar(`SELECT string_agg(concat_ws('|', tablename, policyname, cmd, COALESCE(qual, ''), COALESCE(with_check, '')), E'\\x1e' ORDER BY tablename, policyname)
+  const others = scalar(`SELECT string_agg(concat_ws('|', tablename, policyname, cmd, roles::text, permissive, COALESCE(qual, ''), COALESCE(with_check, '')), E'\\x1e' ORDER BY tablename, policyname)
     FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('deliveries', 'delivery_items') AND policyname NOT IN ('del_select', 'del_items_select');`);
   assert.deepEqual(others.split('\x1e'), OTHERS, 'the other deliveries and delivery_items rules must be unchanged');
   assert.equal(scalar("SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('deliveries', 'delivery_items');"), '8');
@@ -94,13 +94,15 @@ try {
   // 2. Every role reads exactly the same rows under the new rules as under the old ones.
   const users = { admin: USERS.admin, rep: USERS.rep, driver: USERS.driver, applicator: USERS.applicator, deactivated_rep: OFF_REP };
   const seen = {};
+  const full = {};
   for (const [role, uid] of Object.entries(users)) {
     const now = probe(uid, SEEN);
     const before = probe(uid, `${restoreOld} ${SEEN}`);
     assert.equal(now, before, `${role}: reads different rows under the new rules (${now}) than the old (${before})`);
+    full[role] = now;
     seen[role] = now.split('|').filter((_, i) => i % 2 === 0).join('/');
   }
-  assert.equal(seen.rep, seen.admin, 'a sales rep reads what an admin reads');
+  assert.equal(full.rep, full.admin, 'a sales rep reads exactly the rows an admin reads');
   assert.notEqual(seen.driver, seen.admin, 'a driver reads only their own');
   assert.equal(seen.deactivated_rep.split('/')[0], scalar(`SELECT count(*) FROM public.deliveries WHERE assigned_driver = '${OFF_REP}';`), 'a deactivated rep reads only deliveries assigned to them');
   console.log(`[read-rules] same rows before and after for every role (deliveries/items): ${JSON.stringify(seen)}`);

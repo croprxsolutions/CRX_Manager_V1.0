@@ -13,7 +13,9 @@
  *   - the summary (cards and 7-day strip) equals direct counts;
  *   - a driver sees only their own deliveries, a sales rep sees what an admin sees, an applicator none;
  *   - editing a row or adding an older one leaves the first pages unchanged;
- *   - bad arguments are refused, anon cannot execute it, and a second apply is refused.
+ *   - bad arguments are refused, anon cannot execute it, and a second apply is refused;
+ *   - at 60,000 deliveries (rolled back) a rep's first page, a page by id and an export page stay under 8 s
+ *     and under 3x a rep's plain read of the same deliveries.
  * It also runs the live smoke chain in the scratch database.
  *
  * Run: node scripts/smoke/prove-deliveries-page-real-schema.mjs   (needs Docker; never touches live)
@@ -23,7 +25,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { buildContainer, removeContainer, seedUsers, scalar, attempt, asUser, refuse, claims, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
+import { buildContainer, removeContainer, seedUsers, scalar, attempt, asUser, refuse, claims, signIn, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
 const CANDIDATE = '20261119130000_deliveries_list_page.sql';
 const reuse = process.env.DELIVERIES_PAGE_PROOF_REUSE === '1';
@@ -327,6 +329,44 @@ try {
   const again = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/dp-candidate.sql'], { allowFailure: true });
   assert.notEqual(again.status, 0, 'a second apply must be refused');
   assert.match(again.stderr, /DELIVERIES_PAGE_ALREADY_EXISTS/);
+  console.log('[deliveries-page] second apply refused');
+
+  // 10. Speed at 60,000 deliveries (Sol + Taha, 2026-11-06: a rep's first page took ~9 s on live hardware when
+  // every page counted items for every match). Seeded in one rolled-back transaction. Each call is compared with a
+  // rep's plain read of the same deliveries (the same row level security cost), so the check holds on any PC:
+  // before the fix a rep's first page was ~4x that read, after it ~1.6x.
+  const ms = (label, stmt) => `f0 := clock_timestamp(); ${asUser(stmt)} t := concat_ws(',', t, '${label}=' || round(extract(epoch FROM clock_timestamp() - f0::timestamptz) * 1000));`;
+  const page = (o) => `r := public.get_deliveries_page(${args(o)});`;
+  const timed = probe(USERS.rep, `
+    SET LOCAL session_replication_role = replica;
+    INSERT INTO public.customers (id, farm_name) SELECT ('7c7a0000-0000-4000-9000-' || lpad(to_hex(g), 12, '0'))::uuid, '[DPV] Farm ' || g FROM generate_series(1, 400) g;
+    INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, scheduled_date, status, assigned_driver, priority, completed_at)
+    SELECT 'DPV-' || lpad(g::text, 6, '0'), gen_random_uuid(), ('7c7a0000-0000-4000-9000-' || lpad(to_hex(1 + g % 400), 12, '0'))::uuid,
+           '${USERS.admin}', date '${TODAY}' - (g % 1500) + 30,
+           (ARRAY['scheduled','scheduled','in_progress','completed','completed','completed','completed','cancelled','voided'])[1 + g % 9],
+           (ARRAY['${USERS.driver}'::uuid, NULL, '${USERS.admin}'::uuid])[1 + g % 3], (ARRAY['low','normal','high','urgent',NULL])[1 + g % 5],
+           CASE WHEN g % 9 BETWEEN 3 AND 6 THEN timestamptz '${TODAY} 12:00+00' - ((g % 1500) || ' days')::interval END
+    FROM generate_series(1, 60000) g;
+    INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity)
+    SELECT d.id, gen_random_uuid(), gen_random_uuid(), 1 FROM public.deliveries d, generate_series(1, 4) k
+     WHERE d.delivery_number LIKE 'DPV-%' AND k <= 1 + right(d.delivery_number, 1)::int % 4;
+    SET LOCAL session_replication_role = origin;
+    ANALYZE public.deliveries; ANALYZE public.delivery_items; ANALYZE public.customers;
+    ${ms('warm', 'n := (SELECT count(*) FROM public.deliveries);')}
+    ${ms('base', 'n := (SELECT count(*) FROM public.deliveries);')}
+    ${ms('rep_first', page({ limit: 50 }))}
+    ${ms('rep_by_id', page({ limit: 500, after_id: NIL }))}
+    ${ms('rep_export', page({ limit: 500, offset: 30000 }))}
+    ${ms('rep_items_sort', page({ limit: 50, sort_key: 'item_count' }))}
+    ${signIn(USERS.admin)}
+    ${ms('admin_first', page({ limit: 50 }))}
+    v := t;`);
+  const times = Object.fromEntries(timed.split(',').map((kv) => kv.split('=')).map(([k, n]) => [k, Number(n)]));
+  console.log(`[deliveries-page] 60,000 deliveries, ms: ${JSON.stringify(times)}`);
+  for (const k of ['rep_first', 'rep_by_id', 'rep_export', 'admin_first']) {
+    assert.ok(times[k] < 8000, `${k} took ${times[k]} ms at 60,000 deliveries (authenticated statement_timeout is 8 s)`);
+    assert.ok(times[k] < 3 * Math.max(times.base, 100), `${k} took ${times[k]} ms, over 3x a rep's plain read (${times.base} ms): the per-page cost regressed`);
+  }
   console.log('\nDELIVERIES_PAGE_PROOF_PASS');
 } finally {
   if (!reuse) removeContainer();

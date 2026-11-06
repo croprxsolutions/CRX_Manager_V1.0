@@ -66,7 +66,7 @@ BEGIN
     RAISE EXCEPTION 'DELIVERIES_PAGE_BAD_ARGS: p_offset must be 0 or more';
   END IF;
   -- p_after_id reads the matching rows in delivery id order, the p_limit after that id (the nil uuid
-  -- starts at the beginning). Ids never change, so a full read made this way skips or repeats no
+  -- starts at the beginning; delivery ids are gen_random_uuid() version-4 values, never all zeros). Ids never change, so a full read made this way skips or repeats no
   -- delivery that exists for the whole read, whatever is edited meanwhile; the caller then sorts the
   -- rows by sort_position.
   IF p_after_id IS NOT NULL AND p_offset <> 0 THEN
@@ -129,9 +129,12 @@ BEGIN
              OR lower(b.driver_name) LIKE v_pattern ESCAPE '\'
              OR lower(b.farm_group_name) LIKE v_pattern ESCAPE '\')
     ),
-    -- Item counts for the matching rows only (idx_del_items_delivery), never the whole items table.
+    -- Item counts for every matching row only when sorting by them (idx_del_items_delivery); otherwise
+    -- they are counted for the returned page alone, below. Row level security checks each item row it
+    -- reads, so counting every match on every page was most of the cost at volume.
     counted AS (
-      SELECT f.*, (SELECT count(*) FROM public.delivery_items di WHERE di.delivery_id = f.id) AS item_count
+      SELECT f.*, CASE WHEN p_sort_key = 'item_count'
+               THEN (SELECT count(*) FROM public.delivery_items di WHERE di.delivery_id = f.id) END AS item_count
       FROM filtered f
     ),
     ordered AS (
@@ -165,7 +168,8 @@ BEGIN
         SELECT jsonb_agg(to_jsonb(d) || jsonb_build_object(
                  'customer_name', o.customer_name,
                  'driver_name', o.driver_name,
-                 'item_count', o.item_count,
+                 'item_count', COALESCE(o.item_count,
+                   (SELECT count(*) FROM public.delivery_items di WHERE di.delivery_id = o.id)),
                  'farm_group_name', o.farm_group_name,
                  -- The row's place in the chosen order, so a caller reading by id can put the rows back in it.
                  'sort_position', o.ord) ORDER BY CASE WHEN p_after_id IS NULL THEN o.ord END, o.id)

@@ -6,7 +6,8 @@ export const RECEIPT_TERMS = ['due on receipt', 'due upon receipt', 'receipt', '
 /** Days from invoice date to due date: receipt aliases 0; "Net N" wins; else the first number; 1..365, else 30. */
 export function paymentTermsDays(terms: string | null | undefined): number {
   const t = terms ?? '';
-  if (RECEIPT_TERMS.includes(t.trim().toLowerCase())) return 0;
+  // Spaces only, like PostgreSQL btrim(): a tab-padded alias falls through to 30 days in both.
+  if (RECEIPT_TERMS.includes(t.replace(/^ +| +$/g, '').toLowerCase())) return 0;
   const m = /\bnet[\s_-]*(\d+)/i.exec(t) ?? /(\d+)/.exec(t);
   if (!m) return 30;
   const n = Number(m[1]);

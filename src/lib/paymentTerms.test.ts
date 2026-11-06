@@ -4,7 +4,7 @@ import { dueDateFromTerms, paymentTermsDays } from './paymentTerms';
 // The same table the real-schema proof runs against public.parse_payment_terms_days.
 const CASES: Array<[string | null, number]> = [
   ['Net 15', 15], ['Net 30', 30], ['net_30', 30], ['NET-45', 45], ['2/10 Net 30', 30], ['2% 10 net 30', 30], ['1/15 Net 60', 60],
-  ['Due on receipt', 0], ['  due upon receipt ', 0], ['receipt', 0], ['Immediately', 0], [null, 30], ['', 30], ['COD', 30],
+  ['Due on receipt', 0], ['  due upon receipt ', 0], ['receipt', 0], ['\tDue on receipt', 30], ['Immediately', 0], [null, 30], ['', 30], ['COD', 30],
   ['15 days', 15], ['Net 0', 30], ['Net 400', 30], ['Net 99999999999999999999', 30], ['Net 365', 365],
 ];
 

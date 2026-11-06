@@ -985,12 +985,18 @@ export default function FieldApplicationInvoice() {
   // KI-14: per-owner payment terms, keyed by customer like the discount draft.
   const termsFor = useCallback((custId: string | null | undefined): OwnerTerms =>
     (custId ? termsByCustomer[custId] : undefined) ?? OWNER_TERMS_DEFAULT, [termsByCustomer]);
-  // The owners whose terms the header shows: the billing shares; else the saved group's members; else
-  // the loaded invoice's own customer (a saved invoice with no share rows). Empty until fields are chosen.
+  // The owners whose terms the header shows: every billing share and every saved group member (a saved
+  // member's own share list names only its owner); else the loaded invoice's own customer. Empty until
+  // fields are chosen.
   const termsOwners = useMemo<Array<{ customer_id: string; customer_name: string }>>(() => {
-    if (shares.length > 0) return shares;
-    if (siblings.length > 0) return siblings;
-    return Object.keys(termsByCustomer).map((cid) => ({ customer_id: cid, customer_name: '' }));
+    if (shares.length === 0 && siblings.length === 0) {
+      return Object.keys(termsByCustomer).map((cid) => ({ customer_id: cid, customer_name: '' }));
+    }
+    const byId = new Map<string, { customer_id: string; customer_name: string }>();
+    for (const o of [...shares, ...siblings]) {
+      if (!byId.get(o.customer_id)?.customer_name) byId.set(o.customer_id, { customer_id: o.customer_id, customer_name: o.customer_name });
+    }
+    return [...byId.values()];
   }, [shares, siblings, termsByCustomer]);
   const setOwnerTerms = useCallback((custId: string, patch: Partial<OwnerTerms>) => {
     setTermsByCustomer((prev) => ({ ...prev, [custId]: { ...(prev[custId] ?? OWNER_TERMS_DEFAULT), ...patch } }));

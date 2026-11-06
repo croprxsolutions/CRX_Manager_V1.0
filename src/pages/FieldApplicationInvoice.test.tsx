@@ -1130,7 +1130,8 @@ describe('FieldApplicationInvoice — existing GROUP member invoice', () => {
         },
         field_app_locations: { data: [] },
         invoice_items: { data: [] },
-        invoice_shares: { data: [] },
+        // A saved member's own share list names only its owner; the other owner still gets a picker.
+        invoice_shares: { data: [{ customer_id: 'cust-1', customer_name: 'Farm 1', split_percentage: 100, acres: 10, amount_cents: 50000, is_primary: true }] },
       }),
     );
     mockUseParams.mockReturnValue({ id: 'inv-grp-1' });

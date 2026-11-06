@@ -130,7 +130,8 @@ function migrations() {
 
 // Set only once `docker run` succeeds, so a failed start never removes someone else's same-named container.
 let created = false;
-export function buildContainer() {
+/** `stopBefore`: a migration file name; it and every later file are left for the caller to apply. */
+export function buildContainer({ stopBefore } = {}) {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   created = true;
   ready();
@@ -149,16 +150,17 @@ export function buildContainer() {
   psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
   for (const name of ['20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) psql(`\\i /tmp/${name}`, { user: name.includes('overlay') ? 'supabase_admin' : 'postgres' });
   psql(LIVE_UID, { user: 'supabase_admin' });
-  replay();
+  replay({ stopBefore });
 }
 
 const LIVE_UID = `CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`;
 /** Replays every post-baseline migration not yet in the ledger (so a stopped build can resume). */
-export function replay() {
+export function replay({ stopBefore } = {}) {
   const done = new Set(docker([...psqlArgs(), '-A', '-t'], { input: 'SELECT name FROM supabase_migrations.schema_migrations;' }).stdout.split(/\r?\n/).filter(Boolean));
   let replayed = 0;
   for (const [i, file] of migrations().entries()) {
     const base = path.basename(file);
+    if (stopBefore && base >= stopBefore) break;
     if (PARKED.has(base) || done.has(path.basename(file, '.sql'))) continue;
     for (const only of LEDGER_ONLY) if (only < base) ledger(path.basename(only, '.sql'));
     if (LEDGER_ONLY.has(base)) continue;

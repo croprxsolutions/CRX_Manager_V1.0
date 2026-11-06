@@ -2059,6 +2059,8 @@ export interface Invoice {
   // Metadata
   invoice_date: string;
   due_date: string | null;
+  // KI-14: true when due_date was typed by hand; false when it follows payment_terms.
+  due_date_is_custom: boolean;
   purchase_order_ref: string | null;
   header_notes: string | null;
   footer_notes: string | null;

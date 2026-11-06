@@ -8302,7 +8302,8 @@
       "credit_applied_cents",
       "balance_cents",
       "send_disposition",
-      "field_app_billing_set_id"
+      "field_app_billing_set_id",
+      "due_date_is_custom"
     ],
     "job_applied_info": [
       "id",

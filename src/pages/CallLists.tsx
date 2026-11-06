@@ -63,6 +63,13 @@ type CallListRow =
 interface CallListPayload<Row> {
   success: boolean;
   rows: Row[];
+  total_count?: number;
+}
+
+interface CallListPage<Row> {
+  rows: Row[];
+  // Every matching customer, before the 200-row cut the database applies.
+  total: number;
 }
 
 const DEFAULT_NO_CONTACT_DAYS = 30;
@@ -192,12 +199,13 @@ function whyNowText(listKey: CallListKey, row: CallListRow): string {
   return 'Why now: This customer has no assigned sales representative.';
 }
 
-function rowsOf<Row>(payload: CallListPayload<Row>, rpcName: string): Row[] {
+function rowsOf<Row>(payload: CallListPayload<Row>, rpcName: string): CallListPage<Row> {
   if (!Array.isArray(payload.rows)) throw new Error(`${rpcName} returned an invalid row list`);
-  return payload.rows;
+  const total = isFiniteNumber(payload.total_count) && payload.total_count >= payload.rows.length ? payload.total_count : payload.rows.length;
+  return { rows: payload.rows, total };
 }
 
-async function getCallListPrepayProspects(minPriorSpendCents: number, repId: string | null): Promise<PrepayProspectRow[]> {
+async function getCallListPrepayProspects(minPriorSpendCents: number, repId: string | null): Promise<CallListPage<PrepayProspectRow>> {
   const { data, error } = await supabase.rpc('get_call_list_prepay_prospects', {
     p_min_prior_spend_cents: minPriorSpendCents,
     ...(repId ? { p_rep_id: repId } : {}),
@@ -206,7 +214,7 @@ async function getCallListPrepayProspects(minPriorSpendCents: number, repId: str
   return rowsOf(assertRpcResult<CallListPayload<PrepayProspectRow>>(data, 'get_call_list_prepay_prospects'), 'get_call_list_prepay_prospects');
 }
 
-async function getCallListNoRecentContact(days: number, repId: string | null): Promise<NoRecentContactRow[]> {
+async function getCallListNoRecentContact(days: number, repId: string | null): Promise<CallListPage<NoRecentContactRow>> {
   const { data, error } = await supabase.rpc('get_call_list_no_recent_contact', {
     p_days: days,
     ...(repId ? { p_rep_id: repId } : {}),
@@ -215,7 +223,7 @@ async function getCallListNoRecentContact(days: number, repId: string | null): P
   return rowsOf(assertRpcResult<CallListPayload<NoRecentContactRow>>(data, 'get_call_list_no_recent_contact'), 'get_call_list_no_recent_contact');
 }
 
-async function getCallListStaleQuotes(days: number, repId: string | null): Promise<StaleQuoteRow[]> {
+async function getCallListStaleQuotes(days: number, repId: string | null): Promise<CallListPage<StaleQuoteRow>> {
   const { data, error } = await supabase.rpc('get_call_list_stale_quotes', {
     p_days: days,
     ...(repId ? { p_rep_id: repId } : {}),
@@ -224,13 +232,13 @@ async function getCallListStaleQuotes(days: number, repId: string | null): Promi
   return rowsOf(assertRpcResult<CallListPayload<StaleQuoteRow>>(data, 'get_call_list_stale_quotes'), 'get_call_list_stale_quotes');
 }
 
-async function getCallListLapsedProducts(repId: string | null): Promise<LapsedProductRow[]> {
+async function getCallListLapsedProducts(repId: string | null): Promise<CallListPage<LapsedProductRow>> {
   const { data, error } = await supabase.rpc('get_call_list_lapsed_products', repId ? { p_rep_id: repId } : {});
   if (error) throw error;
   return rowsOf(assertRpcResult<CallListPayload<LapsedProductRow>>(data, 'get_call_list_lapsed_products'), 'get_call_list_lapsed_products');
 }
 
-async function getCallListUnassignedAccounts(): Promise<UnassignedAccountRow[]> {
+async function getCallListUnassignedAccounts(): Promise<CallListPage<UnassignedAccountRow>> {
   // p_rep_id is omitted (SQL default NULL) — admins must NOT send a value here; a non-NULL rep id silently returns no rows.
   const { data, error } = await supabase.rpc('get_call_list_unassigned_accounts', {});
   if (error) throw error;
@@ -349,6 +357,7 @@ export default function CallLists() {
   const [cropsByCustomer, setCropsByCustomer] = useState<Record<string, CropValue[]>>({});
   const [enrichmentLoading, setEnrichmentLoading] = useState(false);
   const [rows, setRows] = useState<CallListRow[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [logCustomer, setLogCustomer] = useState<CallListRow | null>(null);
@@ -447,21 +456,22 @@ export default function CallLists() {
     setLoadError(false);
     try {
       const repId = isAdmin && repFilter ? repFilter : null;
-      let nextRows: CallListRow[];
+      let page: CallListPage<CallListRow>;
       if (selectedList === 'prepay') {
-        nextRows = await getCallListPrepayProspects(applied.minPriorSpendCents, repId);
+        page = await getCallListPrepayProspects(applied.minPriorSpendCents, repId);
       } else if (selectedList === 'no-recent-contact') {
-        nextRows = await getCallListNoRecentContact(applied.noRecentDays, repId);
+        page = await getCallListNoRecentContact(applied.noRecentDays, repId);
       } else if (selectedList === 'stale-quotes') {
-        nextRows = await getCallListStaleQuotes(applied.staleQuoteDays, repId);
+        page = await getCallListStaleQuotes(applied.staleQuoteDays, repId);
       } else if (selectedList === 'lapsed-products') {
-        nextRows = await getCallListLapsedProducts(repId);
+        page = await getCallListLapsedProducts(repId);
       } else {
-        nextRows = await getCallListUnassignedAccounts();
+        page = await getCallListUnassignedAccounts();
       }
       if (seq !== requestSeq.current) return;
-      setRows(nextRows);
-      setEnrichmentLoading(nextRows.length > 0);
+      setRows(page.rows);
+      setTotalCount(page.total);
+      setEnrichmentLoading(page.rows.length > 0);
     } catch (error: unknown) {
       if (seq !== requestSeq.current) return;
       setRows([]);
@@ -719,7 +729,7 @@ export default function CallLists() {
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary" />
             <input aria-label="Search call list by farm name" value={search} maxLength={100} onChange={(event) => updateQuery({ search: event.target.value || null }, true)} placeholder="Search farm name" className="min-h-11 w-full rounded-lg border border-gray-300 bg-white pl-10 pr-3 text-sm text-nav-dark focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20" />
           </div>
-          {!loading && !requiredEnrichmentPending && !loadError && <p className="text-sm text-secondary">Showing {filteredRows.length} of {rows.length} customers</p>}
+          {!loading && !requiredEnrichmentPending && !loadError && <p className="text-sm text-secondary">Showing {filteredRows.length} of {rows.length} customers{rows.length > 0 && totalCount > rows.length ? ` (the first ${rows.length} of ${totalCount} matching; narrow the list to see the rest)` : ''}</p>}
         </div>
 
         <div className="mt-4">

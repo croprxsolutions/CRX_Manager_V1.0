@@ -293,13 +293,17 @@ same key and the server replayed the first result. The scanner is still only a w
 of the reset, not whether the key is scoped correctly.
 
 ### KI-12 — Quote "Convert to Order" can leave an accepted quote with no order
-**MED (latent) · CAUSE FIXED, LIVE 2026-10-27 (To-Do 1.3; PR #1105 merged as `f1503ba91`) · money/inventory/UI · Mason to decide about one real accepted quote with no order (Q-2026-2059)**
+**MED (latent) · CAUSE FIXED, LIVE 2026-10-27 (To-Do 1.3; PR #1105 merged as `f1503ba91`) · money/inventory/UI · Q-2026-2059 reopened to Sent 2026-11-05 (Mason)**
 QuoteBuilder used to save the quote as Accepted (releasing its inventory holds) before creating the order, so a
 failed second step left an accepted quote with no order. It now calls `convert_quote_to_order` on the sent or
 revised quote, which marks it accepted in the same transaction as the order; a failure leaves the quote as it was
 (proof: `scripts/smoke/smoke-convert-sent-quote-in-one-step.sql`). A direct `quotes.status` update by an owning
 rep could flip a quote to accepted without an order (the column is writable); that path is not in the app. Fix: `20261029090000` (PR #1200) refuses it at commit (`QUOTE_ACCEPTED_WITHOUT_ORDER`); it is in the live ledger (version `20261031103934`, re-read 2026-11-04), the live refusal was not re-tested.
-Q-2026-2059 (accepted, no order, no draws; seen 2026-10-25) predates the fix and is untouched.
+Q-2026-2059 (accepted, no order, no draws, never any holds; a test quote on Mason's own account) predated the fix.
+Mason chose 2026-11-05 to reopen it: un-accepted through the admin Un-accept button (`revert_quote_status`) on
+2026-11-05 at 10:31 PM Central (`quote_status_reverted` in `financial_audit_log` and `activity_feed`). Live re-read:
+status `sent`, 0 orders, 0 holds, 0 draws; no holds re-created (not a planned quote). Its expiry date (2026-08-01) has
+passed, so the nightly `auto_expire_quotes` will mark it Expired unless it is re-sent with a new date.
 **The December pre-booking flow had the same gap** (raised by Maksym, checked in the code 2026-10-26): a
 Planned Program quote reserves its stock with holds (`create_planned_holds`), and the trigger
 `release_holds_on_quote_status_change` (latest in `20260706030000`) frees every active hold when the status becomes
@@ -319,9 +323,28 @@ hold sub-cent values, adding the checks is Mason's call (LOW-MED); the old name-
 can make old splits refuse to save (LOW-MED).
 
 ### KI-14 — Transfer-created field invoices are always Net 30
-**MED · OPEN · money · unassigned**
-`20260914100500` lines ~2587 and 2820 stamp invoice date + 30 days regardless of the customer's terms. The post
-path was not traced.
+**MED · PARKED (Mason, 2026-11-05) · money · needs one database-plus-screen fix**
+- The transfer (`_transfer_job_to_invoice_intent_impl_20260908`) stamps due date = invoice date + 30 days whatever
+  the customer's terms say. Every posting route ends in `_post_invoice_impl_20260714`, which fills the due date only
+  when blank, so the +30 survives posting.
+- Not reachable today: on 2026-11-05 every live customer was Net 30 or blank, so +30 days is right for all of them,
+  and no saved invoice disagreed with its customer's terms. Fix this before any customer gets other terms.
+- A database-only fix is parked on branch `claude/ki14-transfer-due-date-terms` (candidate `20261112090000`, never
+  applied; real-schema proof `scripts/smoke/prove-transfer-invoice-due-date-real-schema.mjs`). Sol blocked four
+  versions, each for a gap outside the database:
+  1. A blank due date until posting: an unposted invoice can be emailed, and the server PDF prints a blank due date
+     as "On receipt".
+  2. Stamping the date from the customer's terms without copying them: the PDF falls back to the customer's later
+     terms beside the older date.
+  3. Copying the terms onto the invoice: the field-application split editor saves one set of terms (and a blank due
+     date) over every owner of a split.
+  4. Refusing a mixed-terms split save in the database: the screen saves the invoice date before the billing call,
+     so a refusal leaves stale due dates, and adding an owner (blank terms) is refused.
+- Every version was also flagged because `parse_payment_terms_days` reads the first number, so `2/10 Net 30` is due
+  in 2 days on every posting route.
+- The redo needs, as one planned piece (database PR first, then the screen): per-owner terms in the split editor, a
+  terms parser that reads "Net N", a PDF due-date fallback from terms, and the field-application screen not writing
+  Net 30 onto invoices with no terms of their own.
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**
@@ -484,9 +507,10 @@ Most lists now page through every row (PRs #959, #1017, #1048). The order, job a
 the database, and cycle-count locations read every row (PR #1048). The Customers and Jobs lists now read every row,
 the Jobs Applicators/Customers filters match their job-id lists on the rows read (no URL-size risk), and the order and job
 pickers match a customer name in the database instead of only the first 50 matching names (2026-11-05). Crop
-Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Still
-capped: Dispatch Board (500, waits on KI-28 work, issue #1497); the blend-ticket scanner Edge Function (needs a
-deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
+Programs was not capped: its programs are one settings record and its product picker searches (PR #944). Dispatch
+Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1538; rest waits on KI-28, issue
+#1497); Call Lists say how many customers match beyond their 200 (same PRs). Still capped: the blend-ticket scanner
+Edge Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
 Label Data Quality, Product Detail choice lists, bulk import name matching, and the Field Customer Assignment
 dropdown. Past a cap, a record cannot be chosen.
 
@@ -857,7 +881,7 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   for the same product (LOW).
 - `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (applied live 2026-11-03, ledger `20261103003731`) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
-- Transfer Net 30 (KI-14): the post path was not traced, so a later step might correct it (uncertain).
+- Transfer Net 30 (KI-14): traced 2026-11-05; posting keeps the +30. Parked; see KI-14.
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).

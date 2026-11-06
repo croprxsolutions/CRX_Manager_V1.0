@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for the PAR-2 review fixes (20261126100000, Taha's review of PR #1555). Builds the checked-in
+ * Real-schema proof for the PAR-2 review fixes (20261201110000, Taha's review of PR #1555). Builds the checked-in
  * schema baseline in a network-disabled PostgreSQL container, replays every migration before the candidate (PAR-1,
  * its stock-unit follow-up and PAR-2 included), seeds invented rows, installs the candidate and checks each of
  * Taha's examples as a named case (each prints "[case] ..."). Ends by re-issuing the old bodies (the header's
@@ -22,7 +22,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261126100000_product_parent_review_fixes.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261201110000_product_parent_review_fixes.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

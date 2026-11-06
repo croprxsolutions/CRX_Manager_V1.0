@@ -81,6 +81,8 @@
 --     IF NOT FOUND THEN
 --       SELECT b.* INTO v_legacy FROM public.product_brands b
 --        WHERE b.product_id = r.size_id AND lower(b.brand_name) = lower(r.brand_name);
+--       -- A same-name row on this size (e.g. a retired variant) is archived whole, then becomes this brand's row:
+--       -- v_legacy now holds it, so the step below overwrites it in place and never inserts a second same-name row.
 --       IF FOUND THEN
 --         INSERT INTO public.product_brand_rollback_archive (legacy_brand_id, legacy_row, parent_brand_id, replaced_by_parent_brand_id, reason)
 --         VALUES (v_legacy.id, to_jsonb(v_legacy), (SELECT s.parent_brand_id FROM public.product_parent_brand_sources s WHERE s.legacy_brand_id = v_legacy.id),
@@ -818,6 +820,9 @@ BEGIN
     IF v_tote IS NULL OR jsonb_typeof(v_tote) <> 'object' OR jsonb_typeof(v_tote->'shop_filled') IS DISTINCT FROM 'boolean' THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_TOTE_ANSWER_REQUIRED: say whether each tote of "%" is shop-filled', v_name;
     END IF;
+    -- Approval only records the answer (build sheet 5.3, DATA-12). Fill-time rules stay with fill_tote_from_bulk:
+    -- a tote stocked in a volume is refused there until its stock unit is corrected through the reviewed unit
+    -- process (build sheet section 6), so recording "shop-filled" here never fills anything by itself.
     IF (v_tote->>'shop_filled')::boolean THEN
       IF v_bulk IS NULL OR (v_tote->>'fill_source_product_id') IS DISTINCT FROM v_bulk::text THEN
         RAISE EXCEPTION 'PRODUCT_PARENT_FILL_SOURCE_INVALID: a shop-filled tote of "%" is filled from its own bulk size', v_name;
@@ -863,6 +868,10 @@ BEGIN
                                 ELSE 'Owner confirmed the same product' END,
     NULL, public._product_parent_values(v_parent), v_affected);
 
+  -- From here the parent list is the brand list (get_product_brands). Legacy rows stay untouched for the rollback.
+  -- The current screen still lists legacy rows, so no group is approved until the PAR-2 screens that read
+  -- get_product_brands are deployed (build sheet 5.2 and section 8, order 5); live had 0 legacy brand rows
+  -- and 0 grouped sizes on 2026-11-06, and brand entry is held until grouping (section 9).
   PERFORM public._move_group_brands(v_parent.id, v_ids, p_entry->'brands',
     (v_shape->'flags') ? 'brand_lists_differ', v_name);
 

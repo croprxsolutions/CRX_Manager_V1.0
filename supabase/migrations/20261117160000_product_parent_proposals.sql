@@ -38,17 +38,19 @@
 -- No existing row, grant or policy changes. No group is approved by this migration; live data steps are Mason's.
 --
 -- Rollback (a reviewed migration; the proof runs exactly this block, then re-issues upsert_product_brand from
--- 20261022086500_product_brands.sql). Legacy rows of retired brands are frozen, so they are already as they were;
--- every active parent brand is projected onto every member size's legacy list; a legacy row that would block it
--- (same name, mapped to a retired variant) is archived whole first, and renamed aside when the size keeps its own
--- mapped row (an active brand renamed after the move). The new tables stay as history.
+-- 20261022086500_product_brands.sql). Every active parent brand is projected onto every member size's legacy list;
+-- a legacy row that would block it (same name, mapped to a retired variant) is archived whole first, and renamed
+-- aside when the size keeps its own mapped row (an active brand renamed after the move). Any other mapped row on a
+-- grouped size (a retired brand, or a brand of a parent the size has since moved away from) is archived whole and
+-- marked not currently sourced, so the size shows as current exactly the brands it showed before the rollback.
+-- Ungrouped sizes are untouched. The new tables stay as history.
 -- ROLLBACK-SQL-BEGIN
 -- CREATE TABLE public.product_brand_rollback_archive (
 --   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 --   legacy_brand_id uuid NOT NULL REFERENCES public.product_brands(id) ON DELETE RESTRICT,
 --   legacy_row jsonb NOT NULL,
 --   parent_brand_id uuid REFERENCES public.product_parent_brands(id) ON DELETE RESTRICT,
---   replaced_by_parent_brand_id uuid NOT NULL REFERENCES public.product_parent_brands(id) ON DELETE RESTRICT,
+--   replaced_by_parent_brand_id uuid REFERENCES public.product_parent_brands(id) ON DELETE RESTRICT,
 --   reason text NOT NULL,
 --   archived_at timestamptz NOT NULL DEFAULT now()
 -- );
@@ -65,7 +67,9 @@
 --   v_legacy public.product_brands%ROWTYPE;
 --   v_block public.product_brands%ROWTYPE;
 --   v_archive_id bigint;
+--   v_claimed uuid;
 -- BEGIN
+--   CREATE TEMP TABLE rollback_claimed (id uuid PRIMARY KEY) ON COMMIT DROP;
 --   -- Mapped rows of active brands step aside first, so renamed or swapped names cannot collide mid-way.
 --   CREATE TEMP TABLE rollback_brand_names ON COMMIT DROP AS
 --     SELECT b.id, b.brand_name FROM public.product_brands b
@@ -113,13 +117,29 @@
 --         manufacturer = r.manufacturer, is_currently_sourced = r.is_currently_sourced, is_rup = r.is_rup,
 --         signal_word = r.signal_word, row_version = row_version + 1, updated_by = r.updated_by
 --       WHERE id = v_legacy.id;
+--       v_claimed := v_legacy.id;
 --     ELSE
 --       INSERT INTO public.product_brands (product_id, brand_name, epa_registration, manufacturer, is_currently_sourced,
 --         is_rup, signal_word, created_by, updated_by)
 --       VALUES (r.size_id, r.brand_name, r.epa_registration, r.manufacturer, r.is_currently_sourced, r.is_rup,
---         r.signal_word, r.created_by, r.updated_by);
+--         r.signal_word, r.created_by, r.updated_by)
+--       RETURNING id INTO v_claimed;
 --     END IF;
+--     INSERT INTO rollback_claimed VALUES (v_claimed) ON CONFLICT DO NOTHING;
 --     v_legacy := NULL;
+--   END LOOP;
+--   -- A mapped row on a grouped size that no active brand of its current parent claimed (a retired brand, or a
+--   -- brand of the parent it moved away from) was not a current brand of that size: archived whole, then not sourced.
+--   FOR v_block IN SELECT b.* FROM public.product_brands b
+--                   JOIN public.product_parent_brand_sources s ON s.legacy_brand_id = b.id
+--                  WHERE b.is_currently_sourced
+--                    AND EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = b.product_id)
+--                    AND NOT EXISTS (SELECT 1 FROM rollback_claimed c WHERE c.id = b.id)
+--                  ORDER BY b.id LOOP
+--     INSERT INTO public.product_brand_rollback_archive (legacy_brand_id, legacy_row, parent_brand_id, replaced_by_parent_brand_id, reason)
+--     VALUES (v_block.id, to_jsonb(v_block), (SELECT s.parent_brand_id FROM public.product_parent_brand_sources s WHERE s.legacy_brand_id = v_block.id),
+--             NULL, 'not a current brand of this size''s parent (retired, or the size moved); marked not sourced at rollback');
+--     UPDATE public.product_brands SET is_currently_sourced = false, row_version = row_version + 1 WHERE id = v_block.id;
 --   END LOOP;
 --   -- A stepped-aside row no active brand claimed gets its own name back (a collision aborts the whole rollback).
 --   UPDATE public.product_brands b SET brand_name = n.brand_name FROM rollback_brand_names n
@@ -362,7 +382,9 @@ CREATE TRIGGER product_parent_brand_events_no_truncate
 -- Off until the PAR-2 screens that read get_product_brands are deployed (build sheet 5.2, section 8 order 5), so
 -- no size's brands move to a list today's product screen cannot show or edit. The screens PR's migration turns it
 -- on by replacing this body with "SELECT true", after settling any brand rows a PAR-1 grouped size gained while
--- it was off (the check this file's preflight runs).
+-- it was off (the check this file's preflight runs). A tab still running the old bundle after that deploy reads
+-- product_brands directly and can show a size's pre-grouping list until it reloads; it cannot write it (the legacy
+-- writer refuses grouped sizes once open), so the screens PR, not this file, owns that reload prompt.
 CREATE FUNCTION public._product_parent_grouping_open() RETURNS boolean
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
   SELECT false;
@@ -527,6 +549,7 @@ DECLARE
   v_reason text;
   v_name text;
   v_taken text[] := ARRAY(SELECT lower(name) FROM public.product_parents WHERE is_active);
+  v_n integer;
   v_count integer := 0;
   v_held integer := 0;
   v_result jsonb;
@@ -607,6 +630,12 @@ BEGIN
     IF lower(v_name) = ANY(v_taken) THEN
       v_name := v_name || ' (' || COALESCE(v_g.form, 'no form') || ')';
     END IF;
+    -- Still taken (two groups share base, EPA and form): number it until it is free.
+    v_n := 2;
+    WHILE lower(v_name) = ANY(v_taken) LOOP
+      v_name := regexp_replace(v_name, ' #[0-9]+$', '') || ' #' || v_n;
+      v_n := v_n + 1;
+    END LOOP;
     v_taken := v_taken || lower(v_name);
 
     INSERT INTO public.product_parent_proposal_groups (proposal_id, suggested_name, product_form, generic_epa_registration,
@@ -940,6 +969,8 @@ BEGIN
   IF p_groups IS NULL OR jsonb_typeof(p_groups) <> 'array' OR jsonb_array_length(p_groups) = 0
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(p_groups) e
                  WHERE jsonb_typeof(e) <> 'object' OR jsonb_typeof(e->'group_id') IS DISTINCT FROM 'string'
+                    -- Canonical lower-case form only, so "each group once" compares the same ids the lookup casts.
+                    OR e->>'group_id' !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                     OR jsonb_typeof(e->'name') IS DISTINCT FROM 'string'
                     OR EXISTS (SELECT 1 FROM jsonb_object_keys(e) k
                                 WHERE k NOT IN ('group_id', 'group_fingerprint', 'name', 'choices', 'owner_confirmed',

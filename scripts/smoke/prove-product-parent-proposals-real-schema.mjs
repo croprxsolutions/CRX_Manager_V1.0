@@ -435,6 +435,18 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $f$ SELECT ${on}; $f$;`
   const gl = groupOf(G, L1);
   assert.deepEqual(ids(gl), [L1, L2].sort());
   assert.equal(gl.suggested_name, '[PROVER] Gen Liberty (EPA 264-829)', 'a taken parent name gets the EPA number');
+  // Both suffixed names taken too: the build numbers the name until it is free (made and read, then rolled back).
+  const mk = (name, n) => `SELECT public.create_product_with_parent(${J({ name, product_form: 'liquid', generic_epa_registration: '264-829', category: 'Herbicide', use_timings: ['post_emergence'] })},
+    ${J({ product_name: `${name} 1 gal`, sku: `GL-N${n}`, inventory_unit: 'Gal' })}, 'k-name-${n}');`;
+  const numbered = as(ADMIN, `${mk('[PROVER] Gen Liberty (EPA 264-829)', 1)}
+${mk('[PROVER] Gen Liberty (EPA 264-829) (liquid)', 2)}
+SELECT public.build_product_parent_proposal('k-name-build') IS NOT NULL AS built;
+SELECT 'NAME=' || g.suggested_name FROM public.product_parent_proposal_groups g
+ JOIN public.product_parent_proposals p ON p.id = g.proposal_id AND p.status = 'open'
+ WHERE g.members @> '[{"product_id": "${L1}"}]'::jsonb;
+DO $x$ BEGIN RAISE EXCEPTION 'PROVER_ROLLBACK'; END $x$;`);
+  assert.match(numbered.output, /PROVER_ROLLBACK/);
+  assert.match(numbered.output, /NAME=\[PROVER\] Gen Liberty \(EPA 264-829\) \(liquid\) #2\n/, numbered.output);
   assert.equal(gl.identity_basis, 'epa_number'); assert.equal(gl.status, 'proposed');
   assert.deepEqual(gl.conflicts, {});
   assert.deepEqual([...gl.flags].sort(), ['inactive_member', 'same_epa_different_name']);
@@ -491,6 +503,7 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $f$ SELECT ${on}; $f$;`
   refused(ADMIN, approve(P1, [{ ...glEntry, choices: { category: 'Herbicide' } }], 'k-badchoice'), /PRODUCT_PARENT_APPROVAL_INVALID/);
   refused(ADMIN, approve(P1, [{ ...glEntry, extra: 1 }], 'k-badkey'), /PRODUCT_PARENT_APPROVAL_INVALID/);
   refused(ADMIN, approve(P1, [glEntry, glEntry], 'k-dup'), /PRODUCT_PARENT_APPROVAL_INVALID/);
+  refused(ADMIN, approve(P1, [glEntry, { ...glEntry, group_id: glEntry.group_id.toUpperCase() }], 'k-dup-case'), /PRODUCT_PARENT_APPROVAL_INVALID/);
   refused(ADMIN, approve({ ...P1, proposal_version: 9 }, [glEntry], 'k-ver'), /PRODUCT_PARENT_PROPOSAL_STALE/);
   refused(REP, approve(P1, [glEntry], 'k-rep-approve'), /ADMIN_REQUIRED/);
   assert.equal(memberCount(), membersBefore);
@@ -578,9 +591,10 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $f$ SELECT ${on}; $f$;`
   for (let i = 0; i < 40 && scalar(inFlight) !== '1'; i += 1) wait(250);
   assert.equal(scalar(inFlight), '1', 'the background brand edit did not start');
   const nitroEntry = (g) => entry(g, { owner_confirmed: true, totes: { [N3]: { shop_filled: true, fill_source_product_id: N2 } }, brands: { 'nitrogen co': { keep: true } } });
+  // An uppercase group ID is refused up front (canonical form only), so it can never skip the member locks.
+  refused(ADMIN, approve(P1, [{ ...nitroEntry(nitro), group_id: nitro.id.toUpperCase() }], 'k-n-upper'), /PRODUCT_PARENT_APPROVAL_INVALID/);
   const t0 = Date.now();
-  // An uppercase group ID is the same group: it must take the same member locks.
-  refused(ADMIN, approve(P1, [{ ...nitroEntry(nitro), group_id: nitro.id.toUpperCase() }], 'k-n-race'), /PRODUCT_PARENT_GROUP_CHANGED/);
+  refused(ADMIN, approve(P1, [nitroEntry(nitro)], 'k-n-race'), /PRODUCT_PARENT_GROUP_CHANGED/);
   const waited = Date.now() - t0;
   const raced = await race;
   assert.equal(raced.status, 0, raced.output);
@@ -725,6 +739,9 @@ ROLLBACK;` });
   const LONG = `Brandy B${'x'.repeat(192)}`;
   asOwner(`UPDATE public.product_brands SET brand_name = '${LONG}' WHERE id IN ('${BB1}', '${BB2}');`);
   call(ADMIN, parentBrand(GL, LONG, { id: ba[0], version: Number(ba[1]), epa: '264-829' }, 'k-pb9'));
+  // A size moved to another parent (PAR-1 move_product_size; set directly here, its checks are PAR-1's) keeps its
+  // legacy row mapped to the old parent's brand: after rollback that row must not show as current.
+  asOwner(`UPDATE public.product_parent_members SET parent_id = '${GL}' WHERE product_id = '${R1}';`);
   stageText('rollback.sql', `${rollbackSql()}\n${originalBrandWriter()}\n`);
   const rolled = apply('rollback.sql');
   assert.equal(rolled.status, 0, rolled.output);
@@ -742,9 +759,14 @@ ROLLBACK;` });
   assert.equal(legacy(S2), 'Spready|700-7|Maker Four');
   assert.equal(scalar(`SELECT count(*) || ':' || min(legacy_row->>'epa_registration') FROM public.product_brand_rollback_archive WHERE legacy_brand_id = '${BS2}';`), '1:700-8');
   assert.equal(ok(REP, 'SELECT count(*) FROM public.product_brand_rollback_archive;'), '0');
+  assert.equal(scalar(`SELECT brand_name || ':' || is_currently_sourced FROM public.product_brands WHERE id = '${BR1}';`), 'Rhoda:false');
+  assert.equal(scalar(`SELECT count(*) FROM public.product_brand_rollback_archive WHERE legacy_brand_id = '${BR1}' AND reason LIKE '%size moved%' AND (legacy_row->>'is_currently_sourced')::boolean;`), '1');
+  assert.equal(scalar(`SELECT string_agg(brand_name, ',' ORDER BY brand_name) FROM public.product_brands WHERE product_id = '${R1}' AND is_currently_sourced;`),
+    scalar(`SELECT string_agg(brand_name, ',' ORDER BY brand_name) FROM public.product_parent_brands WHERE parent_id = '${GL}' AND status = 'active' AND is_currently_sourced;`));
+  for (const pid of [R2, R3, R4]) assert.equal(scalar(`SELECT count(*) FROM public.product_brands WHERE product_id = '${pid}' AND brand_name = 'Rhoda' AND is_currently_sourced;`), '1');
   const back = call(ADMIN, brandUpsert(L1, 'After Rollback', null, null, null, 'k-after-rollback'));
   assert.equal(back.brand_name, 'After Rollback');
-  console.log('[case] rollback: every active parent brand is back on each size, a blocking variant is archived whole (renamed aside when an active brand took its name), the original brand writer is re-issued and edits grouped sizes again');
+  console.log('[case] rollback: every active parent brand is back on each size, a blocking variant is archived whole (renamed aside when an active brand took its name), a size moved to another parent keeps only the new parent brands as current, the original brand writer is re-issued and edits grouped sizes again');
 
   console.log('PRODUCT_PARENT_PROPOSALS_PROOF_PASS');
 }

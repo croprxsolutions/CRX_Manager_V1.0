@@ -18,15 +18,18 @@
 --   - A Bill Split draft stays editable through save_invoice until it posts (a field split still can't be).
 --   - Reps read the card (order_shares_select): any rep can already write it and reps work any customer.
 --   - One row per customer on a card: UNIQUE (order_id, customer_id). Live had 0 rows on 2026-11-06.
+--   - A card totals at most exactly 100%, without the old 0.01 tolerance, and a row can't move to another
+--     order or line, which would take it out of a frozen sale without the check.
 --
 -- NOT CHANGED: a sale with no other payers bills exactly as before. Field/acre splits keep their own
 --   engine and win over a card on the same order. Posting, payments, the overbilling caps, save_invoice
 --   and the other invoice guards. No row is written.
 --
--- ROLLBACK (its own reviewed migration): re-emit the five changed functions from their previous bodies
+-- ROLLBACK (its own reviewed migration): re-emit the six changed functions from their previous bodies
 --   (_complete_delivery_authorized_impl 20261106230000, guard_invoice_terminal_order 20261021155000,
 --   _create_invoice_for_unbilled_delivery_impl_20260718 20260827041200,
---   _save_invoice_intent_impl_20260802 20260720175946, prevent_order_shares_edit_after_post 20260504100000), restore order_shares_select from 20260511050000,
+--   _save_invoice_intent_impl_20260802 20260720175946, prevent_order_shares_edit_after_post 20260504100000,
+--   _validate_order_shares_total 20260616121521), restore order_shares_select from 20260511050000,
 --   drop the new helpers and order_item_shares. Split invoices already drafted stay governed by their
 --   provenance rows; void them first if the sale should bill as one invoice.
 --
@@ -45,12 +48,15 @@ BEGIN
      OR (SELECT transaction_id FROM pg_temp.chem_sale_bill_split_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'CHEM_SALE_BILL_SPLIT_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
+  -- Held to commit, so no card can change between the checks below and the new guard.
+  LOCK TABLE public.order_shares IN ACCESS EXCLUSIVE MODE;
   -- Each re-emitted function, pinned to its current body, owner, mode, search_path and grants.
   FOR r IN SELECT * FROM (VALUES
     ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)', '6665c5841f047c9ca165c8a20c68f4f9', ARRAY['postgres=X/postgres']::aclitem[]),
     ('public.guard_invoice_terminal_order()', '3d76dae05876de46fd11233e7304af48', ARRAY['postgres=X/postgres']::aclitem[]),
     ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)', 'aeb4643d79eccb9e998cd8a5e3a9598e', ARRAY['postgres=X/postgres']::aclitem[]),
     ('public._save_invoice_intent_impl_20260802(jsonb,jsonb,text)', 'f7e0fe8f494fe160039df9aef46067df', ARRAY['postgres=X/postgres']::aclitem[]),
+    ('public._validate_order_shares_total()', '5afa7599d7d9b60b90f626a8781a17e3', ARRAY['postgres=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.prevent_order_shares_edit_after_post()', 'f21012312edbc966076a3318a3214abb', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
   ) AS v(sig, body_md5, acl)
   LOOP
@@ -71,6 +77,9 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM public.order_shares GROUP BY order_id, customer_id HAVING count(*) > 1) THEN
     RAISE EXCEPTION 'CHEM_SALE_BILL_SPLIT_PREFLIGHT: a card lists a customer twice; resolve it before applying';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.order_shares GROUP BY order_id HAVING sum(split_percentage) > 100) THEN
+    RAISE EXCEPTION 'CHEM_SALE_BILL_SPLIT_PREFLIGHT: a card totals over 100%%; resolve it before applying';
   END IF;
 END
 $preflight$;
@@ -158,9 +167,40 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
+  -- A row that moved would leave a frozen sale without the check on it.
+  IF TG_OP = 'UPDATE' AND NEW.order_id IS DISTINCT FROM OLD.order_id THEN
+    RAISE EXCEPTION 'ORDER_SHARES_ORDER_IMMUTABLE: a bill split row cannot move to another order'
+      USING ERRCODE = 'check_violation';
+  END IF;
   PERFORM public._refuse_bill_split_change(COALESCE(NEW.order_id, OLD.order_id));
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+-- A card totals at most exactly 100%: the 0.01 tolerance from 20260616121521 could bill a share 0.01% off.
+CREATE OR REPLACE FUNCTION public._validate_order_shares_total()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_total numeric;
+BEGIN
+  -- Serialize concurrent share writes for this order (race fix): lock the parent order row.
+  PERFORM 1 FROM orders WHERE id = NEW.order_id FOR UPDATE;
+  -- SECURITY DEFINER so the aggregate sees ALL shares for the order, RLS-independent.
+  SELECT COALESCE(SUM(split_percentage), 0) INTO v_total
+  FROM order_shares
+  WHERE order_id = NEW.order_id
+    AND id <> NEW.id;
+  v_total := v_total + NEW.split_percentage;
+  IF v_total > 100 THEN
+    RAISE EXCEPTION 'ORDER_SHARES_OVER_100: order % bill-split total would be % (max 100)',
+      NEW.order_id, v_total;
   END IF;
   RETURN NEW;
 END;
@@ -176,6 +216,11 @@ DECLARE
   v_item_id uuid := COALESCE(NEW.order_item_id, OLD.order_item_id);
   v_total numeric;
 BEGIN
+  -- A share that moved would leave a frozen sale without the check on it.
+  IF TG_OP = 'UPDATE' AND NEW.order_item_id IS DISTINCT FROM OLD.order_item_id THEN
+    RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_IMMUTABLE: a line share cannot move to another line'
+      USING ERRCODE = 'check_violation';
+  END IF;
   PERFORM public._refuse_bill_split_change((SELECT order_id FROM order_items WHERE id = v_item_id));
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
@@ -1333,6 +1378,7 @@ BEGIN
     ('public.guard_invoice_terminal_order()', '_order_bill_split_has_payer', ARRAY['postgres=X/postgres']::aclitem[]),
     ('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)', '_create_bill_split_delivery_invoices', ARRAY['postgres=X/postgres']::aclitem[]),
     ('public._save_invoice_intent_impl_20260802(jsonb,jsonb,text)', '_order_has_bill_split', ARRAY['postgres=X/postgres']::aclitem[]),
+    ('public._validate_order_shares_total()', 'v_total > 100 THEN', ARRAY['postgres=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.prevent_order_shares_edit_after_post()', '_refuse_bill_split_change', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
   ) AS v(sig, marker, acl)
   LOOP

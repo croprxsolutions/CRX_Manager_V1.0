@@ -1780,6 +1780,12 @@
       "violation_key": "preview_tote_fill(p_tote_product_id uuid, p_totes integer)#676b7097232f",
       "justification": "New in 20261117130000_tote_fill_from_bulk (BLK-1a, PR #1554, ledger 20261106065456), read live 2026-11-06 after the apply: SAFE. SECURITY DEFINER, owner postgres, search_path public, pg_temp; EXECUTE to authenticated only (anon refused; live smoke chain smoke-tote_fill_from_bulk.sql passed). _product_parent_require_admin() runs first, so a caller that is not an active admin is refused before any read or write. Flagged through the private helper _tote_fill_preview, which reads the two sizes' catalog current_cost to report whether the tote's cost equals the Bulk cost per gallon. The preview returns bulk_cost_cents, tote_cost_cents, estimate_before_cents, estimate_after_cents and cost_check to that admin only, the same catalog cost an admin already sees on the product screen; it writes nothing. No margin or price field. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
       "dated": "2026-11-06"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "move_product_size(p_product_id uuid, p_to_parent_id uuid, p_expected_from_version bigint, p_expected_to_version bigint, p_expected_size_fingerprint text, p_reason text, p_evidence text, p_expected_prices jsonb, p_idempotency_key text)#e2f4e1703d0b",
+      "justification": "Reviewed 2026-11-06 after 20261201110000_product_parent_review_fixes (PR #1586) first flagged it: its first statement is _product_parent_require_admin(), so only admins (who may see cost) run it; the new whole-row to_jsonb serializes a product_parent_brands row (no cost, price or margin column) into the brand event log, not into the return; the receipt returns ids, versions, counts and the moved size. Admin refusal of sales rep, driver, applicator and commission-recipient profiles proven live by the create_product_with_parent smoke chain the same day.",
+      "dated": "2026-11-06"
     }
   ]
 }

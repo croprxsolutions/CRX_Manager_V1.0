@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a Bill Split sale bills one invoice per payer, to the cent
 -- ----------------------------------------------------------------------------
--- Migration 20261114070000_chem_sale_bill_split_invoices (billing plan M2).
+-- Migration 20261114210000_chem_sale_bill_split_invoices (billing plan M2).
 --   A  Card 60/40 on line 1, line 2's own shares 100% to the main customer: a delivery drafts two
 --      invoices in one group, base-1 and base-2, CS- numbers, each line adds up exactly
 --   B  A three-way split: the leftover cents go to the main customer
@@ -15,6 +15,12 @@
 --   I  Under 100%: the rest stays with the main customer
 --   J  Create Invoice on a delivery with no invoice drafts per payer
 --   K  No card: one plain CS- invoice, as before
+--   L  A one-customer draft on the sale refuses a new payer (BILL_SPLIT_HAS_DRAFT) until it is gone
+--   M  A payer draft's product lines follow the split: quantity, price and removal are refused
+--      (BILL_SPLIT_LINES_LOCKED) and a charge still saves
+--   N  Cost: the payers' costs add up exactly to the line's cost, and a re-save keeps them
+--   O  A share too small for one unit of quantity gets no cents either
+--   P  A line share records when its percentage changed
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -191,6 +197,42 @@ BEGIN
     END IF;
   END;
 
+  -- M: the product lines follow the split. Sol's 60/40 re-saved as 50/50 starts by moving one payer down.
+  BEGIN
+    PERFORM save_invoice(v_header, (SELECT jsonb_agg(l || jsonb_build_object('quantity', (l->>'quantity')::numeric - 1,
+        'extended_cents', (l->>'extended_cents')::bigint - (l->>'unit_price_cents')::bigint)) FROM jsonb_array_elements(v_lines) l),
+      'smk-spl-m1-' || v_suffix);
+    v_fails := v_fails || ' (M) a payer draft moved off its share (quantity);';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_LINES_LOCKED:%' THEN v_fails := v_fails || ' (M) wrong refusal on quantity: ' || SQLERRM || ';'; END IF;
+  END;
+  BEGIN
+    PERFORM save_invoice(v_header, (SELECT jsonb_agg(l || jsonb_build_object('unit_price_cents', (l->>'unit_price_cents')::bigint - 1,
+        'extended_cents', (l->>'extended_cents')::bigint - (l->>'quantity')::numeric)) FROM jsonb_array_elements(v_lines) l),
+      'smk-spl-m2-' || v_suffix);
+    v_fails := v_fails || ' (M) a payer draft moved off its share (price);';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_LINES_LOCKED:%' THEN v_fails := v_fails || ' (M) wrong refusal on price: ' || SQLERRM || ';'; END IF;
+  END;
+  -- The screen sends quantity x price, which can differ from the payer's share: the draft keeps its own cents.
+  BEGIN
+    PERFORM save_invoice(v_header, (SELECT jsonb_agg(l || jsonb_build_object('extended_cents', (l->>'extended_cents')::bigint - 1)) FROM jsonb_array_elements(v_lines) l),
+      'smk-spl-m4-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (M) a save sending quantity x price cents was refused: ' || SQLERRM || ';';
+  END;
+  IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv) IS DISTINCT FROM v_cents THEN
+    v_fails := v_fails || ' (M) a save moved the draft off its cents;';
+  END IF;
+  BEGIN
+    PERFORM save_invoice(v_header, '[]'::jsonb, 'smk-spl-m3-' || v_suffix);
+    v_fails := v_fails || ' (M) a payer draft dropped its product line;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_LINES_LOCKED:%' AND SQLERRM NOT LIKE 'GENERATED_INVOICE_LINEAGE_LINE_REQUIRED:%' THEN
+      v_fails := v_fails || ' (M) wrong refusal on removal: ' || SQLERRM || ';';
+    END IF;
+  END;
+
   BEGIN
     PERFORM save_invoice(v_header, v_lines || jsonb_build_array(jsonb_build_object('description', 'Freight', 'quantity', 1,
       'unit_price_cents', 4500, 'extended_cents', 4500, 'cost_cents', 0, 'sort_order', 9, 'charge_type', 'freight')),
@@ -287,6 +329,74 @@ BEGIN
      OR (SELECT invoice_group_id FROM invoices WHERE id = v_inv2) IS NOT NULL
      OR (SELECT invoice_number FROM invoices WHERE id = v_inv2) !~ '^CS-[0-9]{4}-[0-9]+$' THEN
     v_fails := v_fails || ' (K) a sale with no card did not bill as one plain invoice;';
+  END IF;
+
+  -- L: a one-customer draft already on the sale. A payer added now would never be billed.
+  PERFORM pg_temp.smk_new_sale('l' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  INSERT INTO invoices (invoice_number, invoice_type, order_id, customer_id, status, invoice_date, total_amount_cents, total_cost_cents, created_by)
+    VALUES ('SMK-SPL-L' || v_suffix, 'chemical_sale', v_o, v_main, 'draft', CURRENT_DATE, 0, 0, v_admin) RETURNING id INTO v_inv2;
+  BEGIN
+    PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+    v_fails := v_fails || ' (L) a payer joined a sale with a one-customer draft;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_HAS_DRAFT:%' THEN v_fails := v_fails || ' (L) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+  BEGIN
+    INSERT INTO order_item_shares (order_item_id, customer_id, split_percentage) VALUES (v_l1, v_payer2, 40);
+    v_fails := v_fails || ' (L) a line share joined a sale with a one-customer draft;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_HAS_DRAFT:%' THEN v_fails := v_fails || ' (L) wrong refusal on a line share: ' || SQLERRM || ';'; END IF;
+  END;
+  UPDATE invoices SET status = 'cancelled' WHERE id = v_inv2;
+  BEGIN
+    PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (L) the card stayed shut once the draft was cancelled: ' || SQLERRM || ';';
+  END;
+
+  -- N: Sol's half-cent case: 10 units at $0.015 cost 15 cents; 50/50 rounds each payer's 7.5 up to 8.
+  PERFORM pg_temp.smk_new_sale('n' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+  UPDATE order_items SET cost_per_unit = 0.015 WHERE id = v_l1;
+  UPDATE order_items SET cost_per_unit = 0.015 WHERE id = v_l2;
+  PERFORM set_config('app.crx_below_cost_operation', '', true);
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 50);
+  PERFORM pg_temp.smk_done(v_d, 'n' || v_suffix);
+  IF (SELECT sum(total_cost_cents) FROM invoices WHERE delivery_id = v_d) IS DISTINCT FROM 30::bigint THEN
+    v_fails := v_fails || format(' (N) payer costs total %s, want 30;', (SELECT sum(total_cost_cents) FROM invoices WHERE delivery_id = v_d));
+  END IF;
+  v_inv := (SELECT id FROM invoices WHERE delivery_id = v_d AND customer_id = v_payer2);
+  v_cents := (SELECT total_cost_cents FROM invoices WHERE id = v_inv);
+  SELECT jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type, 'status', i.status,
+           'season', i.season, 'salesman_id', i.salesman_id, 'invoice_date', i.invoice_date, 'payment_terms', i.payment_terms,
+           'header_notes', i.header_notes, 'footer_notes', i.footer_notes)
+    INTO v_header FROM invoices i WHERE i.id = v_inv;
+  SELECT jsonb_agg(jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id,
+           'description', it.description, 'quantity', it.quantity, 'unit_price_cents', it.unit_price_cents,
+           'extended_cents', it.extended_cents, 'cost_cents', it.cost_cents, 'sort_order', it.sort_order,
+           'unit_size', it.unit_size, 'notes', it.notes, 'charge_type', it.charge_type, 'vendor', it.vendor) ORDER BY it.sort_order)
+    INTO v_lines FROM invoice_items it WHERE it.invoice_id = v_inv;
+  PERFORM save_invoice(v_header, v_lines || jsonb_build_array(jsonb_build_object('description', 'Freight', 'quantity', 1,
+    'unit_price_cents', 4500, 'extended_cents', 4500, 'cost_cents', 0, 'sort_order', 9, 'charge_type', 'freight')),
+    'smk-spl-n-' || v_suffix);
+  IF (SELECT total_cost_cents FROM invoices WHERE id = v_inv) IS DISTINCT FROM v_cents THEN
+    v_fails := v_fails || format(' (N) a re-save moved the payer cost %s to %s;', v_cents, (SELECT total_cost_cents FROM invoices WHERE id = v_inv));
+  END IF;
+
+  -- O and P: a 0.001% share of one $1,000 unit rounds to no quantity, so it gets no cents.
+  PERFORM pg_temp.smk_new_sale('o' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  INSERT INTO order_item_shares (order_item_id, customer_id, split_percentage, updated_at) VALUES (v_l1, v_payer2, 0.001, '2000-01-01');
+  IF EXISTS (SELECT 1 FROM _bill_split_line_shares(v_l1, 100000, 10000) x WHERE x.customer_id = v_payer2 AND (x.units <> 0 OR x.cents <> 0))
+     OR (SELECT sum(x.cents) FROM _bill_split_line_shares(v_l1, 100000, 10000) x) <> 100000
+     OR (SELECT sum(x.units) FROM _bill_split_line_shares(v_l1, 100000, 10000) x) <> 10000 THEN
+    v_fails := v_fails || ' (O) a share with no quantity got cents, or the line stopped adding up;';
+  END IF;
+  UPDATE order_item_shares SET split_percentage = 1 WHERE order_item_id = v_l1;
+  IF (SELECT updated_at FROM order_item_shares WHERE order_item_id = v_l1) < '2020-01-01' THEN
+    v_fails := v_fails || ' (P) changing a line share did not record when;';
   END IF;
 
   IF v_fails <> '' THEN

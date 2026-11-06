@@ -1403,6 +1403,7 @@ const MUTATING_RPCS_WITH_IDEMPOTENCY: string[] = [
   '_price_order_below_cost_impl_20260810',
   '_restore_quote_version_below_cost_impl_20260810',
   '_save_field_app_split_invoice_impl',
+  '_save_invoice_intent_impl_20260802',
   '_save_invoice_lineage_unaware_impl_20260827',
   '_save_purchase_order_ascii_identity_impl',
   'adjust_inventory',
@@ -1651,6 +1652,9 @@ const IDEMPOTENCY_BODY_EXEMPT: Record<
   string,
   'verified-live' | 'natural' | 'gap' | 'non-mutating' | 'table-unique' | 'receipt-unique' | 'delegated'
 > = {
+  // Delegates its key to _save_invoice_governed_split_guard_impl_20260720, which owns the replay. Its only own
+  // write puts a Bill Split draft's total_cost_cents back to the value it read, so a replay changes nothing.
+  _save_invoice_intent_impl_20260802: 'delegated',
   // KI-93 (owner decision 2026-11-04): migration 20261107050000 makes these three ticket-to-order
   // functions always raise BLEND_TICKET_ORDERS_DISABLED before touching any row, so they mutate
   // nothing and have no replay to cache. The parameter stays for the unchanged signature.

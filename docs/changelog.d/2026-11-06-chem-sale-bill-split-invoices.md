@@ -1,6 +1,6 @@
 ## 2026-11-06 — The Bill Split card bills: one invoice per payer on a chemical sale (billing plan M2)
 
-- New migration `20261114070000_chem_sale_bill_split_invoices.sql` (not applied; record in
+- New migration `20261114210000_chem_sale_bill_split_invoices.sql` (not applied; record in
   `docs/reference/migrations.d/`). Until now the Bill Split card saved percentages nothing read.
   When a delivery on a sale with other payers completes, it now drafts one invoice per payer:
   one sale number with a suffix (CS-2026-0412-1, -2), in one split group that posts together.
@@ -16,3 +16,5 @@
 - A sale with no other payers bills exactly as before. Field/acre splits keep their own engine.
 - Proof: billing scenarios B05, B06, B07 and B08 pass on the local test copy (all four failed
   before); smoke chain `smoke-chem-sale-bill-split-invoices.sql` passes.
+
+A Bill Split draft's product lines now follow the split: changing them means voiding the group, while charges can still be added. A one-customer draft on a sale has to go before a payer can be added. The payers' costs add up exactly to each line's cost.

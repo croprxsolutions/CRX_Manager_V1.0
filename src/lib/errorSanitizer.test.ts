@@ -252,6 +252,12 @@ describe('sanitizeError', () => {
     )).toBe("Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again");
     expect(sanitizeError("BILL_SPLIT_FROZEN: delivery DEL-1 is complete, so this sale's bill split can't change. Void the delivery to change it."))
       .toContain('its bill split is locked');
+    expect(sanitizeError('BILL_SPLIT_HAS_DRAFT: draft invoice CS-1 bills this sale to one customer.')).toBe(
+      "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"
+    );
+    expect(sanitizeError('BILL_SPLIT_LINES_LOCKED: follow the split')).toBe(
+      "Nothing was saved. A Bill Split invoice's product lines follow the split. Void the group to change them; charges can still be added"
+    );
     expect(sanitizeError('ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice'))
       .toContain('billed per payer');
     expect(sanitizeError("ORDER_ITEM_SHARES_OVER_100: a line's shares can't total more than 100%"))

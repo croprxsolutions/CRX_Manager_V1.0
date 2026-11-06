@@ -134,6 +134,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // per field owner. The page offers that path once it sees the order's field allocations.
   [/^BILL_SPLIT_FROZEN\b/,
    "Nothing was changed. A delivery on this sale is complete, so its bill split is locked. Void the delivery to change the split"],
+  [/^BILL_SPLIT_HAS_DRAFT\b/,
+   "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"],
+  [/^BILL_SPLIT_LINES_LOCKED\b/,
+   "Nothing was saved. A Bill Split invoice's product lines follow the split. Void the group to change them; charges can still be added"],
   [/^ORDER_HAS_BILL_SPLIT\b/,
    "Nothing was billed. This sale has a bill split, so it is billed per payer. Refresh the page, then choose Create Invoice on the delivery"],
   [/^ORDER_ITEM_SHARES_OVER_100\b/,

@@ -17,7 +17,8 @@
 --     custom); otherwise it stays;
 --   * a non-custom due_date is always invoice_date + parse_payment_terms_days(payment_terms), so an invoice
 --     date edit, a terms edit, or an unpost then edit re-derive it. Posting keeps it (posting fills only a
---     blank date). Posted, paid, voided and cancelled rows are never touched.
+--     blank date). Posted, paid, voided and cancelled rows are never touched while in those statuses; an
+--     invoice unposted later keeps a due date that differs from its terms' stamp as typed.
 -- parse_payment_terms_days now reads 'Net N' first: '2/10 Net 30' -> 30. Every other value parses as before.
 -- The transfer inserts due_date NULL (the trigger derives each owner's date); the rest of its body is
 -- byte-identical to live.
@@ -32,7 +33,8 @@
 -- from 20261104190000_job_invoice_lines_keep_job_unit.sql (md5 a72cf3a5cff53d4024ad52b832985724), and the
 -- 10-argument billing wrapper/impl from 20261102180000_bind_money_replay_receipts_batch4a.sql and
 -- 20260625150000_invoice_header_footer_discount.sql (after dropping the 11-argument ones); re-create
--- invoices_postable without the column; the column can stay (unused) or be dropped.
+-- invoices_postable without the column only after the app stops selecting it (revert due_date_is_custom from
+-- INVOICE_COLUMNS in src/lib/costFields.ts and redeploy first); the column can stay (unused) or be dropped.
 -- caller-analysis: _transfer_job_to_invoice_intent_impl_20260908 :: REVOKE/GRANT keep its ACL exactly as live (postgres only); its one caller is the postgres-owned SECURITY DEFINER wrapper transfer_job_to_invoice, which the owner EXECUTE grant still covers
 -- caller-analysis: _update_field_app_invoice_billing_replay_impl_20261015 :: dropped and re-created with one more trailing argument; ACL re-stated owner-only (postgres); its one caller is the re-created wrapper update_field_app_invoice_billing below
 -- caller-analysis: update_field_app_invoice_billing :: dropped and re-created with trailing p_terms_by_invoice jsonb DEFAULT NULL; ACL re-stated exactly as live (authenticated, service_role); callers use named arguments, so an old app call without the new argument still resolves to the one remaining signature
@@ -47,7 +49,14 @@ DECLARE
   v_impl oid := to_regprocedure('public._update_field_app_invoice_billing_replay_impl_20261015(uuid[],text,text,text,date,text,text,jsonb,uuid,text)');
   v_wrapper oid := to_regprocedure('public.update_field_app_invoice_billing(uuid[],text,text,text,date,text,text,jsonb,uuid,text)');
   v_parser oid := to_regprocedure('public.parse_payment_terms_days(text)');
+  v_version oid := to_regprocedure('public.invoice_postable_version(public.invoices_postable)');
 BEGIN
+  IF v_version IS NULL OR NOT EXISTS (
+       SELECT 1 FROM pg_proc p
+        WHERE p.oid = v_version AND md5(p.prosrc) = 'f353b5c3078efb42544ea7b76c7b16e6'
+          AND p.proacl = ARRAY['postgres=X/postgres', 'authenticated=X/postgres', 'service_role=X/postgres']::aclitem[]) THEN
+    RAISE EXCEPTION 'KI14_SOURCE_DRIFT: invoice_postable_version is not the reviewed live version';
+  END IF;
   IF v_transfer IS NULL OR NOT EXISTS (
        SELECT 1 FROM pg_proc p
         WHERE p.oid = v_transfer AND p.prosecdef AND md5(p.prosrc) = 'a72cf3a5cff53d4024ad52b832985724'
@@ -237,6 +246,12 @@ BEGIN
 
   IF TG_OP = 'INSERT' THEN
     NEW.due_date_is_custom := NEW.due_date IS NOT NULL;
+  ELSIF OLD.status NOT IN ('draft', 'unposted') THEN
+    -- Re-entering an editable status (unpost): a row posted before this change never had the flag set,
+    -- so a date that differs from its terms' stamp is kept as typed rather than silently moved.
+    NEW.due_date_is_custom := OLD.due_date_is_custom
+      OR (NEW.due_date IS NOT NULL
+          AND NEW.due_date IS DISTINCT FROM NEW.invoice_date + public.parse_payment_terms_days(NEW.payment_terms));
   ELSIF NEW.due_date_is_custom IS DISTINCT FROM OLD.due_date_is_custom THEN
     NULL;                            -- the writer set the flag explicitly (the billing save)
   ELSIF NEW.due_date IS DISTINCT FROM OLD.due_date THEN
@@ -262,13 +277,15 @@ CREATE TRIGGER zzz_field_invoice_due_date_follows_terms
   EXECUTE FUNCTION public._field_invoice_due_date_follows_terms();
 
 -- 4. Existing editable field invoices: mark a date that is not its terms' stamp as typed, then let the trigger
---    fill blank terms and re-derive the rest. Live 2026-11-05: one row, derived.
+--    fill blank terms and re-derive the rest. A blank-terms row still carrying the old transfer's +30 stamp is
+--    derived (that stamp is the KI-14 defect, not a typed date). Live 2026-11-05: one row, derived.
 UPDATE public.invoices i
    SET due_date_is_custom = (
          i.due_date IS NOT NULL
          AND i.due_date <> i.invoice_date + public.parse_payment_terms_days(
                COALESCE(NULLIF(btrim(i.payment_terms), ''),
-                        (SELECT NULLIF(btrim(c.payment_terms), '') FROM customers c WHERE c.id = i.customer_id))))
+                        (SELECT NULLIF(btrim(c.payment_terms), '') FROM customers c WHERE c.id = i.customer_id)))
+         AND NOT (NULLIF(btrim(i.payment_terms), '') IS NULL AND i.due_date = i.invoice_date + 30))
  WHERE i.invoice_type = 'field_application'
    AND i.status IN ('draft', 'unposted');
 
@@ -1214,11 +1231,13 @@ BEGIN
     RAISE EXCEPTION 'KI14_POSTFLIGHT: the transfer body, owner, settings or ACL did not land as reviewed';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = v_impl AND p.prosecdef
+                   AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
                    AND pg_get_userbyid(p.proowner) = 'postgres'
                    AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN
     RAISE EXCEPTION 'KI14_POSTFLIGHT: the private billing save did not land owner-only';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = v_wrapper AND p.prosecdef
+                   AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
                    AND pg_get_userbyid(p.proowner) = 'postgres'
                    AND p.proacl = ARRAY['postgres=X/postgres', 'authenticated=X/postgres', 'service_role=X/postgres']::aclitem[]) THEN
     RAISE EXCEPTION 'KI14_POSTFLIGHT: the billing save wrapper ACL is not authenticated + service_role';
@@ -1227,8 +1246,14 @@ BEGIN
        WHERE n.nspname = 'public' AND p.proname IN ('update_field_app_invoice_billing', '_update_field_app_invoice_billing_replay_impl_20261015')) <> 2 THEN
     RAISE EXCEPTION 'KI14_POSTFLIGHT: the billing save has more than one overload';
   END IF;
-  IF has_function_privilege('authenticated', 'public._field_invoice_due_date_follows_terms()', 'EXECUTE') THEN
-    RAISE EXCEPTION 'KI14_POSTFLIGHT: the trigger function is executable by authenticated';
+  IF has_function_privilege('authenticated', 'public._field_invoice_due_date_follows_terms()', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._field_invoice_due_date_follows_terms()', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._field_invoice_due_date_follows_terms()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'KI14_POSTFLIGHT: the trigger function is executable by an app role';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.invoices'::regclass
+                   AND tgname = 'zzz_field_invoice_due_date_follows_terms' AND tgenabled = 'O') THEN
+    RAISE EXCEPTION 'KI14_POSTFLIGHT: the due-date trigger is missing or disabled';
   END IF;
   IF public.parse_payment_terms_days('2/10 Net 30') <> 30 OR public.parse_payment_terms_days('net_30') <> 30
      OR public.parse_payment_terms_days(NULL) <> 30 OR public.parse_payment_terms_days('Due on receipt') <> 0

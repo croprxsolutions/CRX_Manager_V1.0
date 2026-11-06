@@ -11570,7 +11570,7 @@ export type Database = {
           discount_date: string | null
           discount_earned_cents: number | null
           due_date: string | null
-          due_date_is_custom: boolean
+          due_date_is_custom: boolean | null
           end_humidity_pct: number | null
           end_temp_f: number | null
           end_weather_source: string | null

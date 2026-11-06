@@ -9,8 +9,8 @@
  *           committed so the candidate's one-pass touch of editable field invoices has rows to fix.
  *   APPLY   the candidate applies; bodies keep owner/settings/ACL; one billing-save overload; the trigger
  *           function is not callable by app roles; the flag is readable through invoices_postable.
- *   BACKFILL a +30 stamp that equals its terms stays derived and gains its terms; a +30 stamp on a Net 15
- *           customer is kept as a typed date (never silently moved).
+ *   BACKFILL the old transfer's +30 stamp on blank terms is derived and gains its owner's terms (Net 15 -> +15);
+ *           a date that differs from that stamp is kept as typed.
  *   AFTER   each owner (split included) is due on its own terms, with its terms on the invoice; posting
  *           keeps both; every other invoice and line column matches BEFORE.
  *   RULES   customer re-term after transfer moves nothing; unpost + re-term + repost re-derives; an
@@ -35,9 +35,9 @@ const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDA
 const ADMIN = USERS.admin;
 const [C15, C30, CRCPT, CBLANK, C210] = ['c1', 'c2', 'c3', 'c4', 'c5'].map(id);
 const PROD = id('d1');
-const JOBS = { J15: 'e1', J30: 'e2', JRCPT: 'e3', JSPLIT: 'e4', JBLANK: 'e5', J210: 'e6', JPRE30: 'e7', JPRE15: 'e8', JPREBLANK: 'e9' };
+const JOBS = { J15: 'e1', J30: 'e2', JRCPT: 'e3', JSPLIT: 'e4', JBLANK: 'e5', J210: 'e6', JPRE30: 'e7', JPRE15: 'e8', JPREBLANK: 'e9', JPOST15: 'e10', JPOST30: 'e11', JPRETYPED: 'e12' };
 const J = Object.fromEntries(Object.entries(JOBS).map(([k, v]) => [k, id(v)]));
-const JOB_CUSTOMER = { J15: C15, J30: C30, JRCPT: CRCPT, JSPLIT: C15, JBLANK: CBLANK, J210: C210, JPRE30: C30, JPRE15: C15, JPREBLANK: CBLANK };
+const JOB_CUSTOMER = { J15: C15, J30: C30, JRCPT: CRCPT, JSPLIT: C15, JBLANK: CBLANK, J210: C210, JPRE30: C30, JPRE15: C15, JPREBLANK: CBLANK, JPOST15: C15, JPOST30: C30, JPRETYPED: C15 };
 const AFTER_JOBS = ['J15', 'J30', 'JRCPT', 'JSPLIT', 'JBLANK', 'J210'];
 
 function applyCandidate() {
@@ -67,7 +67,7 @@ function seed() {
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary) VALUES
       ('${id('f3')}', '${C15}', 60, true), ('${id('f3')}', '${C30}', 40, false);
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
-  assert.equal(scalar(`SELECT count(*) FROM public.jobs WHERE id IN ('${Object.values(J).join("','")}');`), '9');
+  assert.equal(scalar(`SELECT count(*) FROM public.jobs WHERE id IN ('${Object.values(J).join("','")}');`), String(Object.keys(J).length));
 }
 
 // SQL fragments for attempt() bodies (they run as postgres; app calls run as authenticated).
@@ -128,6 +128,9 @@ try {
   // Committed editable invoices for the one-pass touch.
   for (const k of ['JPRE30', 'JPRE15', 'JPREBLANK']) assert.match(attempt(ADMIN, transfer(k), { commit: true }), /^ok\|/);
   assert.equal(ok(`${summary('JPRE15', false)}`, 'pre'), '<blank>=+30');
+  assert.match(attempt(ADMIN, `${transfer('JPRETYPED')} UPDATE public.invoices SET due_date = due_date + 5 WHERE job_id = '${J.JPRETYPED}';`, { commit: true }), /^ok|/);
+  // Committed posted invoices from before the change: a +30 on a Net 15 owner, and one that matches Net 30.
+  for (const k of ['JPOST15', 'JPOST30']) assert.match(attempt(ADMIN, `${transfer(k)} ${post(k)}`, { commit: true }), /^ok|/);
 
   // APPLY.
   const applied = applyCandidate();
@@ -143,7 +146,7 @@ try {
   assert.equal(scalar("SELECT has_function_privilege('anon', 'public.update_field_app_invoice_billing(uuid[],text,text,text,date,text,text,jsonb,uuid,text,jsonb)', 'EXECUTE');"), 'f');
   assert.equal(scalar("SELECT has_column_privilege('authenticated', 'public.invoices', 'due_date_is_custom', 'SELECT');"), 't');
   assert.equal(scalar("SELECT has_column_privilege('authenticated', 'public.invoices', 'due_date_is_custom', 'UPDATE');"), 'f');
-  assert.equal(ok(`SET LOCAL ROLE authenticated; SELECT count(*)::text INTO v FROM public.invoices_postable WHERE due_date_is_custom IS NOT NULL; RESET ROLE;`, 'view'), '3');
+  assert.equal(ok(`SET LOCAL ROLE authenticated; SELECT count(*)::text INTO v FROM public.invoices_postable WHERE due_date_is_custom IS NOT NULL; RESET ROLE;`, 'view'), '6');
   console.log('[prover] APPLY: owners, settings and ACLs as reviewed; one billing-save overload; flag readable through invoices_postable');
 
   // Parser table (the screens' TypeScript copy checks the same cases).
@@ -158,8 +161,9 @@ try {
   // BACKFILL.
   assert.equal(ok(summary('JPRE30'), 'backfill 30'), 'Net 30=+30');
   assert.equal(ok(summary('JPREBLANK'), 'backfill blank'), 'Net 30=+30');
-  assert.equal(ok(summary('JPRE15'), 'backfill 15'), 'Net 15=+30*');
-  console.log('[prover] BACKFILL: stamps that match their terms stay derived and gain their terms; a +30 on a Net 15 customer is kept as a typed date');
+  assert.equal(ok(summary('JPRE15'), 'backfill 15'), 'Net 15=+15');
+  assert.equal(ok(summary('JPRETYPED'), 'backfill typed'), 'Net 15=+35*');
+  console.log('[prover] BACKFILL: the old +30 stamp follows each owner terms (Net 15 -> +15); a typed date is kept as typed');
 
   // AFTER: each owner on its own terms, set at transfer and kept by posting.
   const EXPECT = { J15: 'Net 15=+15', J30: 'Net 30=+30', JRCPT: 'Due on receipt=+0', JSPLIT: 'Net 15=+15, Net 30=+30', JBLANK: 'Net 30=+30', J210: '2/10 Net 30=+30' };
@@ -185,7 +189,7 @@ try {
     ${billing('J15', termsMap('J15', [['Net 15', 'f1::date']]))}
     ${billing('J15', termsMap('J15', [['Net 30', 'f1::date']]))}
     UPDATE public.invoices SET invoice_date = invoice_date - 1 WHERE job_id = '${J.J15}';
-    SELECT ${'due_date = f1::date'}::text || '|' || payment_terms || '|' || due_date_is_custom INTO v FROM public.invoices WHERE job_id = '${J.J15}';`, 'custom'),
+    SELECT (due_date = f1::date)::text || '|' || payment_terms || '|' || due_date_is_custom INTO v FROM public.invoices WHERE job_id = '${J.J15}';`, 'custom'),
   'true|Net 30|true', 'CUSTOM: a typed date moved');
   // save_invoice-style writes (no flag): a new date is typed; NULL follows the terms.
   assert.equal(ok(`${transfer('J15')} UPDATE public.invoices SET due_date = due_date + 3 WHERE job_id = '${J.J15}'; ${summary('J15')}`, 'legacy date'), 'Net 15=+18*');
@@ -195,7 +199,13 @@ try {
   // A posted row is never re-derived by the trigger.
   assert.equal(ok(`${transfer('J15')} ${post('J15')} UPDATE public.customers SET payment_terms = 'Net 30' WHERE id = '${C15}';
     UPDATE public.invoices SET internal_notes = 'x' WHERE job_id = '${J.J15}'; ${summary('J15')}`, 'posted'), 'Net 15=+15 posted');
-  console.log('[prover] RULES: customer re-term moves nothing; unpost+re-term+repost re-derives; date edit re-derives; typed dates survive; legacy writes infer the flag; posted untouched');
+  // Unposting an invoice posted before the change keeps a date that differs from its terms as typed.
+  const unpost = (k) => `SELECT id INTO u FROM public.invoices WHERE job_id = '${J[k]}';
+    SET LOCAL ROLE authenticated; PERFORM public.unpost_invoice(u, '${ADMIN}', 'up-' || gen_random_uuid()); RESET ROLE;`;
+  assert.equal(ok(`${unpost('JPOST15')} ${summary('JPOST15')}`, 'unpost old 15'), 'Net 15=+30*', 'UNPOST-OLD: a pre-change typed date moved');
+  assert.equal(ok(`${unpost('JPOST15')} UPDATE public.invoices SET internal_notes = 'x' WHERE job_id = '${J.JPOST15}'; ${summary('JPOST15')}`, 'unpost old 15 edit'), 'Net 15=+30*');
+  assert.equal(ok(`${unpost('JPOST30')} ${summary('JPOST30')}`, 'unpost old 30'), 'Net 30=+30', 'UNPOST-OLD: a matching stamp became typed');
+  console.log('[prover] RULES: customer re-term moves nothing; unpost+re-term+repost re-derives; date edit re-derives; typed dates survive; legacy writes infer the flag; posted untouched; unposting a pre-change invoice keeps its off-terms date');
 
   // BILLING: per-owner terms on the split.
   assert.equal(ok(`${transfer('JSPLIT')} ${billing('JSPLIT', termsMap('JSPLIT', [['Net 30', null], ['Due on receipt', null]]))} ${summary('JSPLIT')}`, 'split per-owner'),

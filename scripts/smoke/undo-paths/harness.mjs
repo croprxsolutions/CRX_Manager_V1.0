@@ -164,6 +164,11 @@ export function replay() {
     if (LEDGER_ONLY.has(base)) continue;
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
     if (base === FORMS_SEED_EACH) restoreLiveBodies();
+    // Its preflight needs live's count units; the schema baseline carries no unit rows (factors as in prove-tote-fill-real-schema.mjs).
+    if (base === '20261117130000_tote_fill_from_bulk.sql') {
+      psql(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Gal', 128, 'liquid'), ('Qt', 32, 'liquid'), ('qt', 32, 'liquid'),
+        ('Pt', 16, 'liquid'), ('oz', 1, 'liquid'), ('Lb', 16, 'dry'), ('Ea', 1, 'both'), ('Unit', 1, 'both') ON CONFLICT DO NOTHING;`, { user: 'supabase_admin' });
+    }
     const name = `m-${i}.sql`; stageText(name, lf(file));
     const r = docker([...psqlArgs(), '-1', '-f', `/tmp/${name}`], { allowFailure: true });
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.stdout}\n${r.stderr}`);

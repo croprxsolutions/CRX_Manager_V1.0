@@ -22,6 +22,8 @@ const BUSINESS_TABLES = [
   "prepay_applications", "credit_memo_applications", "inventory_transactions",
   "inventory", "inventory_holds",
   "fields", "job_applied_records", "allocation_sets", "write_offs",
+  // Sol 2026-11-06: written only by the tote fill and reversal functions.
+  "tote_fills",
 ];
 const FINANCIAL_TABLES = [
   "invoices", "orders", "payments", "commissions", "commission_payments", "financial_audit_log",

@@ -33,6 +33,10 @@ import {
 
 const TIERS = [1, 2, 3] as const;
 const money = (value: number | null | undefined) => (value == null ? 'none' : formatExactUSD(value));
+const INVALID_AMOUNT = 'Invalid amount';
+/** True when a parent-rate preview has a per-acre price the screen cannot show exactly. */
+const hasUnshownPrice = (previews: ParentRatePreview[]) => previews.some((preview) => preview.sizes.some((size) => TIERS.some((t) => (
+  money(size.prices[`tier${t}_price_per_acre`]) === INVALID_AMOUNT || money(size.before_prices[`tier${t}_price_per_acre`]) === INVALID_AMOUNT))));
 const RATE_PROBLEM: Record<string, string> = {
   stale: 'changed by someone else since you downloaded it',
   invalid_rate: 'rate must be blank or a number of 0 or more, up to 6 decimals',
@@ -58,6 +62,9 @@ function ParentRatesTabPreview({ rows, previews, saved, busy, blocked, onConfirm
       <h3 className="font-semibold text-nav-dark">Parent Rates tab: {rows.length} {rows.length === 1 ? 'parent' : 'parents'} to change</h3>
       {locked && (
         <p className="text-red-700">Rates are locked. An admin can correct one parent at a time from its product page, with a reason.</p>
+      )}
+      {previews && hasUnshownPrice(previews) && (
+        <p className="text-red-700">A per-acre price here is too large to show exactly. Fix that rate in the file and upload it again.</p>
       )}
       {previews?.map((preview, index) => (preview.parent_version !== rows[index].expected.parent_version ? (
         <p key={preview.parent_id} className="text-red-700">{rows[index].parent_name}: changed by someone else since you downloaded it</p>
@@ -189,7 +196,7 @@ function tabStates(
     rateProblems,
     setupBlocked: !setup || setup.changes.length === 0 || setup.stale.length > 0 || setup.invalid.length > 0,
     ratesBlocked: rateChanges.length === 0 || rateProblems.length > 0 || Boolean(rates?.preview?.rates_locked),
-    parentRatesBlocked: !parentRates?.previews || parentRates.previews.some((preview, index) => (
+    parentRatesBlocked: !parentRates?.previews || hasUnshownPrice(parentRates.previews) || parentRates.previews.some((preview, index) => (
       preview.rates_locked || preview.parent_version !== parentRates.rows[index].expected.parent_version)),
   };
 }

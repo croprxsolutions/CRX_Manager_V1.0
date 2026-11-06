@@ -92,6 +92,14 @@ describe('ProductSetupWorkbookModal parent rates', () => {
     expect(screen.getByRole('button', { name: 'Confirm Parent Rates tab' })).toBeDisabled();
   });
 
+  it('blocks the save when a preview price is too large to show exactly', async () => {
+    const size = { ...preview.sizes[0], prices: { ...preview.sizes[0].prices, tier1_price_per_acre: JSON.parse('70368744177664.01') as number } };
+    H.previewParentRates.mockResolvedValue({ ...preview, sizes: [size] });
+    await upload(await setupMembershipHash([SIZE], [parent]));
+    expect(await screen.findByText(/too large to show exactly/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm Parent Rates tab' })).toBeDisabled();
+  });
+
   it('refuses the whole upload when products were grouped or moved since the download', async () => {
     await upload(await setupMembershipHash([SIZE], []));
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error',

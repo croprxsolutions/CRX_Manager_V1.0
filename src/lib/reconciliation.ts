@@ -169,60 +169,41 @@ export interface InventoryTransactionRow {
   quantity: number; // signed: positive = add, negative = subtract (for adjustments)
 }
 
+// How each type moves quantity_available. Types that only move quantity_prebooked
+// (booked, prebooked, released, prebook_reconciliation) and unknown types count 0.
+const LEDGER_DIRECTION: Partial<Record<InventoryTransactionRow['transaction_type'], 'add' | 'subtract' | 'signed'>> = {
+  received: 'add',
+  returned: 'add',
+  cancelled_delivery_reversal: 'add',
+  void_delivery_reversal: 'add',
+  delivered: 'subtract',
+  job_applied: 'subtract',
+  // Signed: positive = add, negative = subtract.
+  adjusted: 'signed',
+  transferred: 'signed',
+  // tote_fill_out is the Bulk row (negative on a fill, positive on its undo);
+  // tote_fill_in is the tote row (positive on a fill, negative on its undo).
+  tote_fill_out: 'signed',
+  tote_fill_in: 'signed',
+};
+
+function ledgerDelta(tx: InventoryTransactionRow): number {
+  const direction = LEDGER_DIRECTION[tx.transaction_type];
+  if (direction === 'add') return Math.abs(tx.quantity);
+  if (direction === 'subtract') return -Math.abs(tx.quantity);
+  return direction === 'signed' ? tx.quantity : 0;
+}
+
 export function checkInventoryLedger(
   inventory: InventoryRow[],
   transactions: InventoryTransactionRow[],
 ): Discrepancy[] {
   // Build expected quantity_available from transactions.
-  //
-  // Only transactions that affect quantity_available are counted.
-  // Transactions that affect quantity_prebooked (booked, prebooked,
-  // released) are excluded — they don't change the available count.
   const expectedByProduct = new Map<string, number>();
 
   for (const tx of transactions) {
     if (tx.id && PREBOOK_ONLY_ADJUSTMENT_TX_IDS.has(tx.id)) continue;
-    const current = expectedByProduct.get(tx.product_id) ?? 0;
-    let delta: number;
-
-    switch (tx.transaction_type) {
-      // ── Add to quantity_available ──
-      case 'received':
-      case 'returned':
-      case 'cancelled_delivery_reversal':
-      case 'void_delivery_reversal':
-        delta = Math.abs(tx.quantity);
-        break;
-
-      // ── Subtract from quantity_available ──
-      case 'delivered':
-      case 'job_applied':
-        delta = -Math.abs(tx.quantity);
-        break;
-
-      // ── Signed: positive = add, negative = subtract ──
-      // tote_fill_out is the Bulk row (negative on a fill, positive on its undo);
-      // tote_fill_in is the tote row (positive on a fill, negative on its undo).
-      case 'adjusted':
-      case 'transferred':
-      case 'tote_fill_out':
-      case 'tote_fill_in':
-        delta = tx.quantity;
-        break;
-
-      // ── Affect quantity_prebooked, NOT quantity_available ──
-      case 'booked':
-      case 'prebooked':
-      case 'released':
-      case 'prebook_reconciliation':
-        delta = 0;
-        break;
-
-      default:
-        delta = 0;
-    }
-
-    expectedByProduct.set(tx.product_id, current + delta);
+    expectedByProduct.set(tx.product_id, (expectedByProduct.get(tx.product_id) ?? 0) + ledgerDelta(tx));
   }
 
   const issues: Discrepancy[] = [];

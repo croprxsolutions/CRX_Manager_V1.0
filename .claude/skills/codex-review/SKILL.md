@@ -189,6 +189,10 @@ records, changelog entries, plans), say so and name both heads. Rules are not pl
 `AGENTS.md`, `CLAUDE.md`, anything under `.claude/` or `.agents/`, `docs/reference/` and
 `docs/workflows/` always need the round again. Why: on PR #1494 Luna came back clean on five fix
 commits while Sol found new bugs in how the pieces worked together each time.
+A commit that only fixes MED/LOW findings, or only refutes findings, needs no whole-branch rerun:
+list those fixes in the final report and name both heads (Mason, 2026-11-06, after one 5-line hint
+took four extra Luna rounds on #1572). A commit that fixes a BLOCKER or HIGH, or adds anything
+beyond the findings, still needs the round again.
 When the whole-branch Luna round cannot run, a whole-branch Sol review counts instead: the
 branch is too large and the script falls back to per-commit commands (those do not count), or
 the guard-change round cap has stopped Luna. On a Sol-list change that is the Step 3B review;

@@ -1,6 +1,6 @@
 ## 2026-11-06 — The Bill Split card bills: one invoice per payer on a chemical sale (billing plan M2)
 
-- New migration `20261117140000_chem_sale_bill_split_invoices.sql` (not applied; record in
+- New migration `20261118130000_chem_sale_bill_split_invoices.sql` (not applied; record in
   `docs/reference/migrations.d/`). Until now the Bill Split card saved percentages nothing read.
   When a delivery on a sale with other payers completes, it now drafts one invoice per payer:
   one sale number with a suffix (CS-2026-0412-1, -2), in one split group that posts together.
@@ -17,7 +17,7 @@
 - Proof: billing scenarios B05, B06, B07 and B08 pass on the local test copy (all four failed
   before); smoke chain `smoke-chem-sale-bill-split-invoices.sql` passes.
 
-A Bill Split draft's product lines now follow the split: changing them means voiding the group, while charges can still be added. A one-customer draft on a sale has to go before a payer can be added. The payers' drafts delete together, not one at a time. Each payer's invoice cost is the cost of its own lines, as on every invoice. If drafting fails at completion the delivery still completes, an activity record is written and the result says so. A price-later (rush) sale drafts nothing until it is priced; Create Invoice on the delivery drafts per payer after.
+A Bill Split draft's product lines now follow the split: changing them means voiding the group, while charges can still be added. A one-customer draft on a sale has to go before a payer can be added. The payers' drafts delete together, not one at a time. A line with its own shares can't move to another sale. Each payer's invoice cost is the cost of its own lines, as on every invoice. If drafting fails at completion the delivery still completes, an activity record is written and the result says so. A price-later (rush) sale drafts nothing until it is priced; Create Invoice on the delivery drafts per payer after.
 
 A posted split group now unposts together: `unpost_invoice` refuses one member (`GROUP_UNPOST_REQUIRED`), for field-split groups too, and the screens already use the group call. A payer's line bills in the order line's unit, so every payer can return it. One line too small to show and worth no cents no longer stops the rest of a delivery billing. The card can't be truncated by a signed-in user.
 

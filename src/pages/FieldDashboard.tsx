@@ -32,6 +32,7 @@ import { Sentry } from '../lib/sentry';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { computeBounds } from '../hooks/useFitBounds';
 import { formatLocalDate } from '../lib/dateUtils';
+import { computeSeason } from '../utils/season';
 import CRXMap from '../components/map/CRXMap';
 import FieldBoundaryLayer from '../components/map/FieldBoundaryLayer';
 import type {
@@ -599,16 +600,9 @@ interface CropForm {
   notes: string;
 }
 
-// Season runs Oct 1 → Sep 30 and is labelled by its END year (matches the DB
-// compute_season: months >= October belong to next year's season).
-function currentSeasonYear(): number {
-  const now = new Date();
-  return now.getMonth() + 1 >= 10 ? now.getFullYear() + 1 : now.getFullYear();
-}
-
 function blankCropForm(): CropForm {
   return {
-    season: currentSeasonYear(),
+    season: computeSeason(),
     crop_type: '',
     variety: '',
     planting_date: '',
@@ -640,7 +634,7 @@ function CropHistoryTab({
   const [editingSeason, setEditingSeason] = useState<number | null>(null);
   const [form, setForm] = useState<CropForm>(blankCropForm);
 
-  const cur = currentSeasonYear();
+  const cur = computeSeason();
   const existingSeasons = new Set(history.map((h) => h.season));
   const seasonOptions = Array.from({ length: 8 }, (_, i) => cur + 1 - i).map((s) => ({
     value: String(s),

@@ -46,8 +46,7 @@ Highest-priority open items, in order: KI-01 (an applicator keeps field access a
 part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
 migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
-key alone), KI-18 (UTC/browser-clock season can
-suppress the pre-harvest safety warning).
+key alone).
 
 ---
 
@@ -359,7 +358,7 @@ when tier prices differ and asks staff to pick (PRs #982, #995, #1020). Automati
 tiers is not built; the linkage field is not used for money today.
 
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock
-**MED (safety path) / LOW · OPEN · money/UI · unassigned (fix the JobDetail one first)**
+**MED / LOW · OPEN · money/UI · unassigned (the pre-harvest warning part is fixed, see the archive)**
 - Quote, order and rebate-claim numbers take their year from UTC (`generate_quote_number`, `generate_order_number`,
   `create_rebate_claim`); on 31 Dec 6 pm–midnight Chicago they get next year's number. Blend-ticket numbers
   (`generate_ticket_number`) follow the same rule. Cosmetic. LOW.
@@ -367,11 +366,13 @@ tiers is not built; the linkage field is not used for money today.
   (`20261020210000:1050,1227`). Fixed by `20261103120000` (applied live 2026-11-03, ledger `20261103003731`), which makes `current_season()` read the
   Chicago date; the same migration moves the `invoices.invoice_date` default to the Chicago date, so the two
   defaults agree. LOW.
-- Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
-  interval warning in `src/pages/JobDetail.tsx:1449`: a wrong season at the 1 October boundary can silently
-  suppress the warning. MED (safety).
+- Client season reads: FIXED 2026-11-05 (branch `claude/ki18-season-central-1f821d`). `computeSeason()` now uses
+  the America/Chicago date, matching `current_season()`; details and proof are in the archive. Left open: other
+  screens still default some dates and "this month"/"last 30 days" filters from the browser clock (only the season
+  part was changed).
 - Two AR-aging views bucket a 30-day-old invoice differently; invoice dates have no future-date limit; three
   filters cut the day at UTC midnight. UNVERIFIED (PR #991 fixed the AR strip; the rest not re-checked). MED.
+  Checked 2026-11-05: none of these live in the season helpers, so they were left out of the season fix.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**

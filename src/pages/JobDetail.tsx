@@ -46,7 +46,7 @@ import { fetchCurrentWeather, parseCentroid } from '../lib/weatherCapture';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import SectionCard from '../components/ui/SectionCard';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
-import { localToday, parseLocalDate } from '../lib/dateUtils';
+import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
 import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
@@ -441,7 +441,7 @@ export default function JobDetail() {
         : "This job's customer is still loading. Try again in a moment.");
     return null;
   };
-  const [jobDate, setJobDate] = useState(localToday());
+  const [jobDate, setJobDate] = useState(todayInBusinessTz);
   const [scheduledTime, setScheduledTime] = useState('');
   const [applicatorId, setApplicatorId] = useState('');
   // Scheduling fields (Locations tab)
@@ -1454,7 +1454,7 @@ export default function JobDetail() {
     let cancelled = false;
     const fieldIds = jobFieldKey ? jobFieldKey.split(',') : [];
     if (fieldIds.length === 0) { setJobEarliestHarvestDate(null); return; }
-    const season = computeSeason(jobDate ? new Date(jobDate + 'T00:00:00') : new Date());
+    const season = computeSeason(jobDate || undefined);
     (async () => {
       const { data, error } = await supabase
         .from('field_crop_history')

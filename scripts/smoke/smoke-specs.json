@@ -7,6 +7,20 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "get_orders_keyset_page": {
+      "chain": "smoke-goal4-orders-keyset-page.sql",
+      "area": ["regression"],
+      "description": "REQUIRES 20261125100000. Goal 4 Orders list bookmark paging, read only: as the oldest active admin under the authenticated role, following next_cursor in pages of 7 through the current season lists each order once in (order_date DESC, id) order with total_count and total_price_cents equal to the table, get_orders_page (now its wrapper) returns the same first page, a bookmark from another sort is refused; an active driver, when one exists, sees no order.",
+      "covers": ["get_orders_keyset_page", "get_orders_page"]
+    },
+    "ops_replay_binding_batch4e": {
+      "chain": "smoke-ops-replay-binding-batch4e.sql",
+      "container_only": true,
+      "container_prover": "prove-ops-replay-binding-batch4e-real-schema.mjs",
+      "description": "CONTAINER ONLY. After batch 4c and the app key PR, proves the 15 operations functions require a key (except the three PR #1518 began keying, whose keyless call runs the unchanged body with no receipt), preserve pre-replay checks, and bind any written receipt to its actor and full request. Uses invented records and rolls back.",
+      "covers": ["confirm_job_notification_sent", "record_job_pre_notifications", "record_job_post_notifications", "log_failed_notification", "apply_remaining_prepayments", "batch_apply_all_prepayments", "assign_job_applicator", "dispatch_job_locations", "undispatch_job_locations", "start_job", "create_job_from_quote_section", "update_field_app_applied_info", "create_quote_from_template", "rollover_quote_to_season", "save_quote_template"],
+      "area": ["idempotency", "security", "regression"]
+    },
     "get_orders_page": {
       "chain": "smoke-goal4-orders-page.sql",
       "area": ["regression"],
@@ -69,6 +83,30 @@
       "area": [
         "pricing",
         "security"
+      ]
+    },
+    "build_product_parent_proposal": {
+      "chain": "smoke-product_parent_proposals.sql",
+      "container_prover": "prove-product-parent-proposals-real-schema.mjs",
+      "description": "REQUIRES 20261123120000. Product parent proposals (PAR-2): anon cannot execute the six public PAR-2 functions; on three invented two-size products an admin builds a proposal (a same-key retry answers the same) that proposes each as one EPA-number group, approves the first (a same-key retry answers the same) so both sizes join one new parent, refuses a hold without a reason, holds the second and rejects the third with reasons; the old per-size brand writer refuses a grouped size PRODUCT_BRANDS_BELONG_TO_PARENT; a parent brand is added, read through a size by get_product_brands, and retired with a reason (created and retired events logged); an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED.",
+      "covers": [
+        "build_product_parent_proposal",
+        "approve_product_parent_groups",
+        "hold_product_parent_group",
+        "reject_product_parent_group",
+        "upsert_parent_brand",
+        "get_product_brands",
+        "upsert_product_brand",
+        "product_parent_proposals",
+        "product_parent_proposal_groups",
+        "product_parent_brands",
+        "product_parent_brand_events",
+        "product_parent_brand_sources"
+      ],
+      "area": [
+        "pricing",
+        "security",
+        "idempotency"
       ]
     },
     "fill_tote_from_bulk": {

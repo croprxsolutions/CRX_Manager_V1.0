@@ -6791,6 +6791,7 @@ export type Database = {
           total_price: number
           total_units_needed: number
           unit_size: string | null
+          vendor: string | null
         }
         Insert: {
           acres?: number | null
@@ -6817,6 +6818,7 @@ export type Database = {
           total_price?: number
           total_units_needed?: number
           unit_size?: string | null
+          vendor?: string | null
         }
         Update: {
           acres?: number | null
@@ -6843,6 +6845,7 @@ export type Database = {
           total_price?: number
           total_units_needed?: number
           unit_size?: string | null
+          vendor?: string | null
         }
         Relationships: [
           {

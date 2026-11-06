@@ -6,7 +6,7 @@
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**KI-18 verified: 2026-11-06 (America/Chicago)** for KI-18 only: read-only live function definitions show `generate_quote_number`, `generate_order_number` and the rebate-claim body take the Chicago year; `generate_ticket_number` still uses `current_date`; `financial_dashboard_summary` still ages invoices from `NOW()` with "current" up to 30 days, while `get_ar_aging` uses 0–29 days by the Chicago date. KI-18 stands for those parts. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
+**KI-18 verified: 2026-11-06 (America/Chicago)** for KI-18 only: read-only live function definitions show `generate_quote_number`, `generate_order_number` and the rebate-claim body take the Chicago year; `generate_ticket_number` and `financial_dashboard_summary` were then moved to the Chicago date by `20261121090000` (applied live 2026-11-06). KI-18 stands for the parts listed in its entry. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
 Every "applied live" statement not re-read since is the older record's claim, marked as such.
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything
@@ -383,10 +383,12 @@ can make old splits refuse to save (LOW-MED).
 - Customer statements (`get_detailed_statement_data`) age by <=30 / 31-60 / 61-90 / 91-120 / >120 days; the AR Aging
   page uses 0-29 / 30-59 / 60-89 / 90-119 / 120+, so a 30-day-old invoice is "current" on the statement and 30-59 on
   AR Aging. Which ranges both use is Mason's decision (recommended: the AR Aging ones). MED.
-- The live database clock is UTC, and many functions still take "today" from `CURRENT_DATE` or `now()`, so from
-  6-7 pm Central they act on tomorrow: overdue marking, AR reminders, license expiry, RUP record dates, quote expiry,
-  holds, dispatch windows, default invoice and bill dates, `get_customer_summary`, and `operational_dashboard_summary`
-  (season, today, and days left in the period). A Sol scan on 2026-11-06 listed about 30; not yet checked one by one. MED.
+- The live database clock is UTC, so from 6-7 pm Central `CURRENT_DATE` is tomorrow. Batch 1
+  (`20261128100000`, local candidate) moves the 34 functions that make money, compliance or stock decisions to the
+  Chicago date (overdue marking, period checks, commission dates, quote expiry, AR reminders, license and RUP dates,
+  holds, default bill, payment and delivery dates). Still on the UTC date: boards and reports (batch 2:
+  `get_customer_summary`, `operational_dashboard_summary`, dispatch and team boards, receiving and forecast) and
+  statement and AR aging (batch 3). MED.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**

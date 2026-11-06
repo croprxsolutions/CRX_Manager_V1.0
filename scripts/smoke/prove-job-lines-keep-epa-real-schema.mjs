@@ -57,17 +57,27 @@ function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U',
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
 // A second session held open in the background, for the lock-order cases.
 function session(sql) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('docker', psqlArgs(), { cwd: ROOT });
+  let markReady;
+  const ready = new Promise((resolve) => { markReady = resolve; });
+  const done = new Promise((resolve, reject) => {
+    const child = spawn('docker', [...psqlArgs(), '-A', '-t'], { cwd: ROOT });
     let out = '';
-    child.stdout.on('data', (d) => { out += d; });
+    child.stdout.on('data', (d) => { out += d; if (out.includes('JK_READY')) markReady(); });
     child.stderr.on('data', (d) => { out += d; });
     child.on('error', reject);
     child.on('close', (code) => (code === 0 ? resolve(out) : reject(new Error(`background session failed:\n${out}`))));
     child.stdin.end(sql);
   });
+  done.catch(() => markReady());
+  return { ready, done };
 }
-const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+// Runs fn and asserts it waited for the background transaction (which sleeps 4 s after JK_READY).
+function waited(fn, what) {
+  const t = Date.now();
+  const r = fn();
+  assert.ok(Date.now() - t >= 2000, `${what} did not wait for the transaction in flight`);
+  return r;
+}
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
 function stageText(name, text) {
@@ -257,9 +267,10 @@ const J = (v) => `'${JSON.stringify(v).replaceAll("'", "''")}'::jsonb`;
 // A customer-supplied line at zero: passes every money and unit refusal, so only the EPA behaviour is tested.
 const chem = (pid, sort, extra = {}) => ({ product_id: pid, quantity: 0, unit: 'Gal', rate_per_acre: null, rate_unit: null,
   cost_per_unit_cents: 0, price_per_unit_cents: 0, customer_supplied: true, sort_order: sort, ...extra });
-const save = (uid, job, chems, key = null) => ok(uid, `SELECT public.save_job(${job ? `'${job}'` : 'NULL'},
+const saveSql = (job, chems, key = null) => `SELECT public.save_job(${job ? `'${job}'` : 'NULL'},
   jsonb_build_object('customer_id', '${CUST}', 'job_date', current_date::text),
-  ${J([{ field_id: FIELD, acres_to_treat: 10, sort_order: 0 }])}, ${J(chems)}, auth.uid(), ${key ? `'${key}'` : 'NULL'})->>'job_id';`);
+  ${J([{ field_id: FIELD, acres_to_treat: 10, sort_order: 0 }])}, ${J(chems)}, auth.uid(), ${key ? `'${key}'` : 'NULL'})->>'job_id';`;
+const save = (uid, job, chems, key = null) => ok(uid, saveSql(job, chems, key));
 const lines = (job) => scalar(`SELECT COALESCE(string_agg(sort_order || ':' || COALESCE(epa_registration, '<null>'), ',' ORDER BY sort_order), '<none>')
   FROM public.job_chemicals WHERE job_id = '${job}';`);
 const lineIds = (job) => scalar(`SELECT string_agg(id::text, ',' ORDER BY sort_order) FROM public.job_chemicals WHERE job_id = '${job}';`).split(',');
@@ -394,20 +405,40 @@ async function main() {
   assert.equal(lines(raceJob), `0:${OLD}`);
   const spraying = session(`BEGIN;
     INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceJob}', current_date, 10);
-    SELECT pg_sleep(4); COMMIT;`);
-  await sleep(1500);
-  setProductEpa(PA, NEW);
-  await spraying;
+    SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
+  await spraying.ready;
+  waited(() => setProductEpa(PA, NEW), 'the EPA edit');
+  await spraying.done;
   assert.equal(lines(raceJob), `0:${OLD}`, 'a spray recorded while the edit waited keeps its number');
   // An EPA edit in flight when a save starts: the save waits, and every line takes the new number.
   const lineJob = save(ADMIN, null, [chem(PB, 0)]);
   const editing = session(`BEGIN; UPDATE public.products SET epa_registration = '100-1072' WHERE id = '${PB}';
-    SELECT pg_sleep(4); COMMIT;`);
-  await sleep(1500);
-  save(ADMIN, lineJob, [chem(PB, 0), chem(PB, 1)]);
-  await editing;
+    SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
+  await editing.ready;
+  waited(() => save(ADMIN, lineJob, [chem(PB, 0), chem(PB, 1)]), 'the save');
+  await editing.done;
   assert.equal(lines(lineJob), '0:100-1072,1:100-1072', 'lines written while an edit was in flight take the new number');
-  console.log('[prover] an EPA edit and a spray or save on the same job run one after the other (no stale number either way)');
+  // A first line of a product on a NEW job, not committed yet when an EPA edit starts: the edit waits
+  // for it (the line holds its product FOR SHARE) and then reaches it.
+  const creating = session(txIn(ADMIN, `${saveSql(null, [chem(PA, 0)])}\nSELECT 'JK_READY';\nSELECT pg_sleep(4);`));
+  await creating.ready;
+  waited(() => setProductEpa(PA, '524-477'), 'the EPA edit');
+  const newJob = (await creating.done).split(/\r?\n/).find((l) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(l.trim()))?.trim();
+  assert.ok(newJob, 'the background save returned a job id');
+  assert.equal(lines(newJob), '0:524-477', 'a new line still uncommitted when an edit started takes the edited number');
+  // The same through a direct line write (any path other than save_job): the line itself holds its product.
+  const DJOB = '00000000-0000-4000-8000-0000000000d1';
+  const writing = session(`BEGIN;
+    INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, created_by)
+      VALUES ('${DJOB}', 'JK-DIRECT', '${CUST}', 'scheduled', current_date, '${ADMIN}');
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
+      VALUES ('${DJOB}', '${PA}', 0, 'Gal', 0, true, 0);
+    SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
+  await writing.ready;
+  waited(() => setProductEpa(PA, '524-478'), 'the EPA edit');
+  await writing.done;
+  assert.equal(lines(DJOB), '0:524-478', 'a directly written line still uncommitted when an edit started takes the edited number');
+  console.log('[prover] an EPA edit and a spray, save or new line on the same product run one after the other (no stale number either way)');
 
   console.log('JOB_LINES_KEEP_EPA_PROOF_PASS');
 }

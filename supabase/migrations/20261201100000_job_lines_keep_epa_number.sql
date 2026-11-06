@@ -38,17 +38,20 @@
 --   in step 3, are UPDATEs of job_chemicals, so the statement trigger trg_sync_job_holds_upd rebuilds
 --   those jobs' holds from their unchanged lines, as any job save does. Step 4 updates only when a
 --   kept number differs from the product's (after a product EPA edit). (b) Lock order is always
---   the job, then its lines: a product EPA edit locks the open jobs using that product (FOR UPDATE,
---   in id order) before updating their lines; a line write first takes its job FOR KEY SHARE; a
---   spray record's foreign key takes the same KEY SHARE. So an EPA edit and a spray, save or line
---   write on the same job run one after the other: whichever commits first is seen by the other.
---   (c) save_job now locks the job row first (FOR UPDATE, the lock the save already takes later), so
+--   the product, then the job, then its lines. A product EPA edit holds its product row, then locks
+--   the open jobs using it (FOR UPDATE, in id order) before updating their lines. A line write reads
+--   its product FOR SHARE, so an edit in flight finishes first and an edit starting later waits for
+--   the line (a first line on a new job included); save_job takes those product locks, in id order,
+--   before its job lock. A spray record's foreign key takes the job FOR KEY SHARE. So an EPA edit and
+--   a spray, save or line write run one after the other: whichever commits first is seen by the other.
+--   (c) save_job now locks the job row before the impl does (FOR UPDATE, the lock the save already takes later), so
 --   the lines it reads are the ones it replaces; only an active admin or sales rep gets that far.
 --   (d) A product EPA edit made with no signed-in user (a SQL fix, a service job) rebuilds open jobs'
 --   holds with the job's creator as actor; if an open job using that product has no creator, the edit
 --   is refused whole (nothing changes) and must be made by a signed-in admin.
--- RARE WAIT: an EPA edit waits for in-flight saves of the open jobs using that product, and the
---   reverse; lock_timeout or a deadlock with some other multi-job writer rolls one back whole (retry).
+-- RARE WAIT: an EPA edit waits for in-flight saves and line writes using that product, and the
+--   reverse; other product edits (price, name) wait for those too. lock_timeout, or a deadlock with a
+--   writer that locks a job before writing its lines outside save_job, rolls one back whole (retry).
 --
 -- ROLLBACK (its own reviewed migration): re-emit save_job from its previous body (20261019230000),
 --   drop the two triggers, the five functions and the column.
@@ -121,9 +124,7 @@ $function$;
 ALTER FUNCTION public._job_line_epa_follows_product(uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._job_line_epa_follows_product(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
--- A written line takes its product's number. It first takes its job FOR KEY SHARE: a line written
--- while a product EPA edit holds that job waits for the edit and then reads the new number; an edit
--- that starts after the line waits for the line's transaction, so its update (step 3) sees the line.
+-- A written line takes its product's number, read with the product row locked FOR SHARE (see (b)).
 CREATE FUNCTION public._job_chemical_epa() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 BEGIN
@@ -132,10 +133,11 @@ BEGIN
     NEW.epa_registration := OLD.epa_registration;
     RETURN NEW;
   END IF;
-  PERFORM 1 FROM public.jobs WHERE id = NEW.job_id FOR KEY SHARE;
-  -- A new statement: it sees an EPA edit that committed while the line waited above.
-  NEW.epa_registration := (SELECT NULLIF(btrim(p.epa_registration), '') FROM public.products p
-                            WHERE p.id = NEW.product_id);
+  -- FOR SHARE on the product: an EPA edit in flight finishes first and this reads its number, and an
+  -- edit that starts later waits until this line commits, so it sees the line (even on a new job).
+  -- trg_guard_seed_each_job_chemical_units (20261104150000) takes the same lock; this one does not rely on it.
+  SELECT NULLIF(btrim(p.epa_registration), '') INTO NEW.epa_registration
+    FROM public.products p WHERE p.id = NEW.product_id FOR SHARE;
   RETURN NEW;
 END;
 $function$;
@@ -277,6 +279,11 @@ BEGIN
   -- Only staff reach the job lock; anyone else is refused by the impl's own role check.
   IF EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true
                 AND role IN ('admin', 'sales_rep')) THEN
+    -- Products before the job: the order an EPA edit takes them (its product row, then the jobs).
+    PERFORM 1 FROM public.products p
+     WHERE p.id::text IN (SELECT lower(e->>'product_id') FROM jsonb_array_elements(
+             CASE WHEN jsonb_typeof(p_chemicals) = 'array' THEN p_chemicals ELSE '[]'::jsonb END) e)
+     ORDER BY p.id FOR SHARE;
     v_kept := public._job_line_epa_kept(p_job_id, p_chemicals);
   END IF;
   -- Cost is admin-only (Mason, 2026-10-15): a non-admin's chemical cost comes from the server.

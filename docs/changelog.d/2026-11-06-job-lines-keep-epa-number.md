@@ -12,8 +12,9 @@
 - No printout reads the new number yet, so every printout still shows the product's number. A
   follow-up PR moves the sent proof, applicator sheet, chemical application report and WPS notice to
   it together.
-- An EPA edit, a spray record and a job save on the same job now take turns (the job is locked
-  first), so a spray recorded during an edit keeps its number and the two never deadlock.
+- An EPA edit takes turns with a spray record, a job save or a new line using that product (the
+  product is locked first, then the job). So a spray recorded during an edit keeps its number, and a
+  line being added during an edit (even on a brand-new job) ends up with the edited number.
 - Needed before a product's EPA number can be corrected (parked work on `claude/sweet-bun-f7920f`,
   which drops its own copy of this column and builds on this file).
 - Proof: `node scripts/smoke/prove-job-lines-keep-epa-real-schema.mjs` (disposable real-schema database).

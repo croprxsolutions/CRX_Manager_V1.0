@@ -32,10 +32,14 @@
 --      calls the same refusal, so it shows it too.
 --    * a parent left with no sizes is made inactive as before, and now its active brands are retired, each with
 --      a 'retired' brand event. The receipt adds from_parent_brands_retired.
+-- 5. One parent per product (new trigger guard_product_parent_epa_duplicate on product_parents): any write that
+--    leaves two active parents with one EPA number and one base name is refused PRODUCT_PARENT_EPA_HAS_PARENT,
+--    under a lock per EPA number, so two admins working at once cannot both make one.
 -- Same signatures, owners and grants for every re-issued function (CREATE OR REPLACE keeps them; the postflight
--- checks). No table, row, grant or policy changes. The switch stays off.
+-- checks). No table, row, grant or policy changes beyond the new trigger. The switch stays off.
 --
--- Rollback: re-issue _product_parent_base_name, build_product_parent_proposal and approve_product_parent_groups from
+-- Rollback: DROP TRIGGER guard_product_parent_epa_duplicate ON public.product_parents and DROP FUNCTION
+-- public.guard_product_parent_epa_duplicate(); re-issue _product_parent_base_name, build_product_parent_proposal and approve_product_parent_groups from
 -- 20261123120000_product_parent_proposals.sql, and _product_size_move_refusal and move_product_size from
 -- 20261110150000_product_parent_stock_units.sql. Brands retired by an emptying move stay retired (retired is final;
 -- their events record it).
@@ -500,6 +504,39 @@ END;
 $function$;
 
 -- ---------------------------------------------------------------------------------------------
+-- 5. One parent per product, whoever writes it
+-- ---------------------------------------------------------------------------------------------
+-- The approval check above reads before it writes, so two admins (an approval and a hand-made parent, or two
+-- approvals) could each see no parent and both make one. This trigger closes that on the table itself: every
+-- write that makes a parent active, or changes an active parent's name or EPA number, first takes a lock held per
+-- EPA number until commit, then refuses when another active parent has that EPA number and the same base name.
+-- The second writer waits for the first to commit and then sees its row (each statement reads afresh).
+CREATE FUNCTION public.guard_product_parent_epa_duplicate() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_other text;
+BEGIN
+  IF NEW.is_active AND NEW.generic_epa_registration IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock(hashtext('crx.product_parent_epa:' || NEW.generic_epa_registration));
+    SELECT pp.name INTO v_other FROM public.product_parents pp
+     WHERE pp.is_active AND pp.id <> NEW.id AND pp.generic_epa_registration = NEW.generic_epa_registration
+       AND lower(public._product_parent_base_name(pp.name)) = lower(public._product_parent_base_name(NEW.name))
+     ORDER BY pp.name LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_HAS_PARENT: parent "%" already has EPA number % and this name; build a new proposal',
+        v_other, NEW.generic_epa_registration USING ERRCODE = '23505';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public.guard_product_parent_epa_duplicate() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_product_parent_epa_duplicate() FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+CREATE TRIGGER guard_product_parent_epa_duplicate
+  BEFORE INSERT OR UPDATE OF name, generic_epa_registration, is_active ON public.product_parents
+  FOR EACH ROW EXECUTE FUNCTION public.guard_product_parent_epa_duplicate();
+
+-- ---------------------------------------------------------------------------------------------
 -- Postflight
 -- ---------------------------------------------------------------------------------------------
 
@@ -521,7 +558,12 @@ BEGIN
       RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_FUNCTION: %', v_sig;
     END IF;
   END LOOP;
-  FOREACH v_sig IN ARRAY ARRAY['public._product_parent_base_name(text)', 'public._product_size_move_refusal(uuid,uuid)'] LOOP
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.product_parents'::regclass
+                   AND tgname = 'guard_product_parent_epa_duplicate' AND tgenabled = 'O') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_PRODUCT_PARENT_REVIEW_FIXES_TRIGGER: the one-parent-per-product trigger is missing';
+  END IF;
+  FOREACH v_sig IN ARRAY ARRAY['public._product_parent_base_name(text)', 'public._product_size_move_refusal(uuid,uuid)',
+                               'public.guard_product_parent_epa_duplicate()'] LOOP
     IF (SELECT array_agg(DISTINCT grantee::regrole::text ORDER BY grantee::regrole::text)
           FROM pg_proc p, aclexplode(p.proacl) WHERE p.oid = v_sig::regprocedure AND privilege_type = 'EXECUTE')
        IS DISTINCT FROM ARRAY['postgres']

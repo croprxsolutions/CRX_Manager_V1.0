@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -293,6 +293,7 @@ function rollbackSql() {
   const par2 = '20261123120000_product_parent_proposals.sql';
   const units = '20261110150000_product_parent_stock_units.sql';
   return [
+    'DROP TRIGGER guard_product_parent_epa_duplicate ON public.product_parents; DROP FUNCTION public.guard_product_parent_epa_duplicate();',
     take(par2, 'CREATE FUNCTION public._product_parent_base_name('),
     take(par2, 'CREATE FUNCTION public.build_product_parent_proposal('),
     take(par2, 'CREATE FUNCTION public.approve_product_parent_groups('),
@@ -402,6 +403,39 @@ async function main() {
   assert.equal(scalar(`SELECT count(*) FROM public.product_parent_members WHERE parent_id = '${kappaDone.groups[0].parent_id}';`), '2');
   console.log('[case] approval: a group whose EPA number and name match a parent made after the build is refused PRODUCT_PARENT_EPA_HAS_PARENT; without that parent it is approved');
 
+  // [case] one parent per product, whoever writes it (Luna round 1: the approval check alone could race)
+  assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'guard_product_parent_epa_duplicate' AND tgenabled = 'O';`), '1');
+  // A hand-made parent with Kappa's EPA number and base name is refused on the real create path.
+  refused(ADMIN, `SELECT public.create_product_with_parent(${J({ name: '[PROVER] Kappa Bulk', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' })},
+    ${J({ product_name: '[PROVER] Kappa Bulk 30 gal', sku: 'KA-B', inventory_unit: 'Gal' })}, 'k-kappa-bulk');`,
+  /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Kappa" already has EPA number 400-1 and this name/);
+  // Same EPA number under another name is still allowed (the build sheet's same-EPA-different-name rule).
+  create({ name: '[PROVER] Kappa Max', product_form: 'liquid', generic_epa_registration: '400-1', category: 'Herbicide' },
+    { product_name: '[PROVER] Kappa Max 1 gal', sku: 'KA-M', inventory_unit: 'Gal' }, 'k-kappa-max');
+  // Two writers at once: A inserts "Omega" and holds its transaction open; B, started while A is open, inserts
+  // "Omega 1 gal" with the same EPA number. B must wait for A's commit and then be refused, leaving one parent.
+  const parentRow = (name) => `INSERT INTO public.product_parents (name, product_form, generic_epa_registration, created_by, updated_by)
+    VALUES (${lit(name)}, 'liquid', '500-1', '${ADMIN}', '${ADMIN}');`;
+  const writerA = new Promise((resolve) => {
+    const child = spawn('docker', psqlArgs(), { cwd: ROOT });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { out += d; });
+    child.on('close', (code) => resolve({ code, out }));
+    child.stdin.end(`BEGIN;\n${parentRow('[PROVER] Omega')}\nSELECT pg_sleep(4);\nCOMMIT;\n`);
+  });
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(scalar(`SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();`), '1', 'writer A is not holding its transaction open');
+  const startedB = Date.now();
+  const b = psql(`BEGIN;\n${parentRow('[PROVER] Omega 1 gal')}\nCOMMIT;\n`, { allowFailure: true });
+  const waitedB = Date.now() - startedB;
+  const a = await writerA;
+  assert.equal(a.code, 0, a.out);
+  assert.notEqual(b.status, 0, 'the second writer made a duplicate parent');
+  assert.match(`${b.stdout}\n${b.stderr}`, /PRODUCT_PARENT_EPA_HAS_PARENT: parent "\[PROVER\] Omega" already has EPA number 500-1/);
+  assert.ok(waitedB >= 1000, `the second writer did not wait for the first (${waitedB} ms)`);
+  assert.equal(scalar(`SELECT count(*) FROM public.product_parents WHERE is_active AND generic_epa_registration = '500-1';`), '1');
+  console.log(`[case] one parent per product: a hand-made duplicate is refused PRODUCT_PARENT_EPA_HAS_PARENT, another name with the same EPA number is allowed, and of two writers at once the second waits (${waitedB} ms) and is refused`);
+
   // [case] rejection carried (Taha finding 4)
   const xeno = groupOf(G, X1);
   assert.deepEqual(ids(xeno), [X1, X2].sort());
@@ -483,12 +517,14 @@ async function main() {
   stageText('rollback.sql', rollbackSql());
   const rolled = apply('rollback.sql');
   assert.equal(rolled.status, 0, rolled.output);
+  assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'guard_product_parent_epa_duplicate';`), '0', 'the rollback left the trigger');
+  assert.equal(scalar(`SELECT to_regprocedure('public.guard_product_parent_epa_duplicate()') IS NULL;`), 't');
   for (const [sig, want] of Object.entries(PINS)) assert.equal(bodyMd5(sig), want, `${sig}: the rollback did not restore the live body`);
   for (const s of Object.keys(PINS)) assert.equal(aclOf(s), aclBefore[s], `${s}: the rollback changed grants, settings, owner or security`);
   // The candidate's preflight accepts the rolled-back database again.
   const reinstalled = apply('cand.sql');
   assert.equal(reinstalled.status, 0, reinstalled.output);
-  console.log('[case] rollback: re-issuing the five old bodies restores exactly the bodies the preflight pins (and their grants); the candidate installs again on top');
+  console.log('[case] rollback: dropping the new trigger and re-issuing the five old bodies restores exactly the bodies the preflight pins (and their grants); the candidate installs again on top');
 
   console.log('PRODUCT_PARENT_REVIEW_FIXES_PROOF_PASS');
 }

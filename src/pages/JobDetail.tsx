@@ -46,7 +46,7 @@ import { fetchCurrentWeather, parseCentroid } from '../lib/weatherCapture';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import SectionCard from '../components/ui/SectionCard';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
-import { localToday, parseLocalDate } from '../lib/dateUtils';
+import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
 import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
@@ -441,7 +441,7 @@ export default function JobDetail() {
         : "This job's customer is still loading. Try again in a moment.");
     return null;
   };
-  const [jobDate, setJobDate] = useState(localToday());
+  const [jobDate, setJobDate] = useState(todayInBusinessTz);
   const [scheduledTime, setScheduledTime] = useState('');
   const [applicatorId, setApplicatorId] = useState('');
   // Scheduling fields (Locations tab)
@@ -695,14 +695,16 @@ export default function JobDetail() {
           await sendEmail(payload);
           // Flip THIS row failed -> sent now that the email actually went out, and
           // store the EXACT per-recipient text that was emailed so the audit row
-          // matches what the (co-billed) customer received. No idempotency key
-          // needed: the RPC is naturally idempotent (re-confirming a 'sent' row is a
-          // no-op) and scoped to a single stable notification_id.
+          // matches what the (co-billed) customer received. The RPC is naturally
+          // idempotent per notification_id; a fresh key per call is sent only because the
+          // server is moving to require one (KI-10), and a fresh key never replays.
           const confirmRes = await supabase.rpc('confirm_job_notification_sent', {
             p_notification_id: r.notification_id,
             p_subject: rendered.subject,
             p_message: rendered.body,
             p_performed_by: profile?.id ?? undefined,
+            // eslint-disable-next-line local-rules/idempotency-key-from-hook -- fresh per call is intended: repeat-safe call that sent no key before (KI-10)
+            p_idempotency_key: crypto.randomUUID(),
           });
           if (confirmRes.error) throw confirmRes.error;
           assertRpcResult(confirmRes.data, 'confirm_job_notification_sent');
@@ -869,12 +871,14 @@ export default function JobDetail() {
           await sendEmail(payload);
           // Flip THIS row failed -> sent now that the email actually went out, and
           // store the EXACT per-recipient text emailed. confirm_job_notification_sent
-          // is REUSED from #40 (notification_type-agnostic).
+          // is REUSED from #40 (notification_type-agnostic). Fresh key per call: see above.
           const confirmRes = await supabase.rpc('confirm_job_notification_sent', {
             p_notification_id: r.notification_id,
             p_subject: rendered.subject,
             p_message: rendered.body,
             p_performed_by: profile?.id ?? undefined,
+            // eslint-disable-next-line local-rules/idempotency-key-from-hook -- fresh per call is intended: repeat-safe call that sent no key before (KI-10)
+            p_idempotency_key: crypto.randomUUID(),
           });
           if (confirmRes.error) throw confirmRes.error;
           assertRpcResult(confirmRes.data, 'confirm_job_notification_sent');
@@ -1450,7 +1454,7 @@ export default function JobDetail() {
     let cancelled = false;
     const fieldIds = jobFieldKey ? jobFieldKey.split(',') : [];
     if (fieldIds.length === 0) { setJobEarliestHarvestDate(null); return; }
-    const season = computeSeason(jobDate ? new Date(jobDate + 'T00:00:00') : new Date());
+    const season = computeSeason(jobDate || undefined);
     (async () => {
       const { data, error } = await supabase
         .from('field_crop_history')

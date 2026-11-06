@@ -44,7 +44,7 @@ export function openOrInSeasonFilter(
 /**
  * True only when the invoice is filed in the current season. A missing season counts
  * as NOT current (unknown), so a bulk action limited to this season leaves it out.
- * The current season comes from the browser clock (computeSeason).
+ * The current season is today in America/Chicago (computeSeason).
  */
 export function isCurrentSeason(
   season: number | null | undefined,

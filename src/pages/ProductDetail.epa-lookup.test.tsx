@@ -87,6 +87,7 @@ function lookupResult(overrides: Partial<EpaLookupResult> = {}): EpaLookupResult
 
 // The Vendors section has its own tests; these page tests do not mock its reads.
 vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
+vi.mock('../components/products/ProductWeightCard', () => ({ default: () => null }));
 vi.mock('../lib/db', async () => {
   const { hasRpcCode, RpcErrorCodes } = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   function chainable(resolveWith: unknown) {

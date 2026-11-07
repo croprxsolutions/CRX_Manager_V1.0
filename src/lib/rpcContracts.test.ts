@@ -2818,6 +2818,8 @@ function registryMigrationHighWater(): string {
 // 20261202110000 and 20261204120000 were added on 2026-11-07: both applied live and the registry
 // refresh after #1584 moved the boundary past them (20261202110000 holds the newest
 // _insert_parent_size body). Clear them on the same type-regeneration rule.
+// 20261204100000 and 20261204110000 (KI-18, PR #1579) joined them the same day: applied live, and
+// their files reached main just after that refresh had already moved the boundary past them.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2854,6 +2856,8 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261123120000',
   '20261120100000',
   '20261202110000',
+  '20261204100000',
+  '20261204110000',
   '20261204120000',
 ]);
 

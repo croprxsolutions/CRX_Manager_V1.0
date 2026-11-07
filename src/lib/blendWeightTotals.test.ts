@@ -151,3 +151,13 @@ describe('invariant: a legacy tank overfill is never dropped by the weights chec
       expect(overfill(validateBlendMath(header(total, unit), products, weights(lines)))).toBe(true);
     });
 });
+
+describe('plain oz total with weights', () => {
+  it('keeps the mapped result and adds no legacy overfill for a dry line (oz may be a weight)', () => {
+    const oz: WeightUnitFactors = { factors: { ...units.factors, oz: { kind: 'volume', factor: 0.0078125 } }, ambiguous: [] };
+    const products = [{ product_name: 'TEST A', quantity: 1, unit: 'Lb', rate_per_acre: null, rate_per_acre_unit: null,
+      product_form: 'dry', product_rate_unit: null, product_inventory_unit: null }];
+    const result = validateBlendMath(header(10, 'oz'), products, { headerUnits: oz, lines: [line({ quantity: 1 })] });
+    expect(result.some((w) => w.message.includes("A tank can't hold more product"))).toBe(false);
+  });
+});

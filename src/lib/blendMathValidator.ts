@@ -387,7 +387,8 @@ export function validateBlendMath(
   if (weights) {
     weightTotals = weightTotalWarnings({ total: totalVolume, rawUnit: ticketData.total_volume_unit, legacyUnit: headerUnit,
       weights, legacyWeightUnits: WEIGHT_ONLY_UNITS, legacyVolumeUnits: VOLUME_ONLY_UNITS });
-    if (weightTotals && !(VOLUME_ONLY_UNITS.has(headerUnit) || headerUnit === 'oz')) return [...warnings, ...weightTotals];
+    // Plain oz is left out: it may be a dry weight, where the legacy overfill would guess without a density.
+    if (weightTotals && !VOLUME_ONLY_UNITS.has(headerUnit)) return [...warnings, ...weightTotals];
   }
 
   // (2) and (3) both need each product measured in the ticket's own unit.

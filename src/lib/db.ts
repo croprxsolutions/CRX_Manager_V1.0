@@ -150,6 +150,11 @@ export const RpcErrorCodes = {
   PRODUCT_PARENT_STALE: 'PRODUCT_PARENT_STALE',
   PRODUCT_PARENT_SIZE_STALE: 'PRODUCT_PARENT_SIZE_STALE',
   PRODUCT_PARENT_RATES_STALE: 'PRODUCT_PARENT_RATES_STALE',
+  // Product weights (migration 20261207100000): a weight screen older than the subject, a lower-trust value
+  // that needs Correct weight, and a draft entered for a pack or formulation that has since changed.
+  PRODUCT_WEIGHT_STALE: 'PRODUCT_WEIGHT_STALE',
+  PRODUCT_WEIGHT_LOWER_TRUST: 'PRODUCT_WEIGHT_LOWER_TRUST',
+  PRODUCT_WEIGHT_BASIS_CHANGED: 'PRODUCT_WEIGHT_BASIS_CHANGED',
   // Parent brands (migration 20261123120000): grouping still off, and a grouped size's brands kept on its parent.
   PRODUCT_PARENT_GROUPING_NOT_OPEN: 'PRODUCT_PARENT_GROUPING_NOT_OPEN',
   PRODUCT_BRANDS_BELONG_TO_PARENT: 'PRODUCT_BRANDS_BELONG_TO_PARENT',

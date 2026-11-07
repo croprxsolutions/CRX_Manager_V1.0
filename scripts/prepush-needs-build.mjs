@@ -3,7 +3,7 @@
 // Reads git's pre-push ref lines on stdin and prints "build" or "skip". Any doubt
 // prints "build", so a broken diff never skips the check. With --map it asks the same
 // about the workflow map generator's inputs and prints "check" or "skip"; --pins asks it about migration
-// SQL and records. With --edge-tests it lists the vitest
+// SQL and records; --registry asks it about the schema registry and migration records. With --edge-tests it lists the vitest
 // files that read a changed Edge Function folder's source. CI builds every PR either way
 // (2026-11-03 retro: three scripts/docs pushes spent ~13 minutes rebuilding the app).
 import { execFileSync } from 'node:child_process';
@@ -28,6 +28,13 @@ export function needsMapCheck(paths) {
 export function needsPinCheck(paths) {
   return paths.some((file) => /^supabase\/migrations\/[^/]+\.sql$/.test(file)
     || /^docs\/reference\/(?:migrations\.d\/[^/]+\.md|migration-history\.md)$/.test(file));
+}
+
+// A registry refresh or a record flipped to APPLIED LIVE moves which migrations the contract tests
+// discover; skipping that test cost a CI round three times (#1051, #1562, #1606; 2026-11-07 retro).
+export function needsRegistryCheck(paths) {
+  return paths.some((file) => file === '.claude/schema-registry.json'
+    || /^docs\/reference\/migrations\.d\/[^/]+\.md$/.test(file));
 }
 
 // Edge Function folders touched by the push (_shared counts as a folder too).
@@ -80,8 +87,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && pro
     }
   } catch { /* nothing to run */ }
 } else if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const check = process.argv.includes('--map') || process.argv.includes('--pins');
-  const needs = process.argv.includes('--map') ? needsMapCheck : process.argv.includes('--pins') ? needsPinCheck : needsAppBuild;
+  const mode = ['--map', '--pins', '--registry'].find((flag) => process.argv.includes(flag));
+  const check = Boolean(mode);
+  const needs = { '--map': needsMapCheck, '--pins': needsPinCheck, '--registry': needsRegistryCheck }[mode] ?? needsAppBuild;
   let verdict = check ? 'check' : 'build';
   try {
     const refs = readFileSync(0, 'utf8');

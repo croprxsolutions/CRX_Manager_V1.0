@@ -76,15 +76,19 @@ export async function saveProductBrand(input: ProductBrandInput, idempotencyKey:
     p_signal_word: input.signalWord,
     p_idempotency_key: idempotencyKey,
   };
-  // upsert_parent_brand takes no size id, so re-read which list this size uses right before saving: a size
-  // moved to another parent since the screen loaded must not edit its old parent's brands.
-  // shortcut: a move landing in the milliseconds between this read and the save is not caught; close it in SQL if moves get frequent.
+  // A size moved to another parent since the screen loaded must not edit its old parent's brands.
+  // upsert_parent_brand refuses that in SQL (p_product_id must still be a member); this early re-read
+  // also catches a size that left or joined a parent, which would otherwise hit the wrong RPC.
   const current = await getProductBrands(input.productId);
   if (current.parentId !== (input.parentId ?? null)) {
     throw new Error(`${RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED}: this size's brand list moved since it loaded`);
   }
   if (input.parentId) {
-    const { data, error } = await supabaseUntyped.rpc('upsert_parent_brand', { p_parent_id: input.parentId, ...fields });
+    const { data, error } = await supabaseUntyped.rpc('upsert_parent_brand', {
+      p_parent_id: input.parentId,
+      p_product_id: input.productId,
+      ...fields,
+    });
     if (error) throw error;
     return { ...assertRpcResult<ProductBrand>(data, 'upsert_parent_brand'), product_id: input.productId };
   }

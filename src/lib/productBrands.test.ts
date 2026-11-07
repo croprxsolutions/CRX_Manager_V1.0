@@ -187,8 +187,10 @@ describe('saveProductBrand on a parent', () => {
       productId: 'p1', parentId: 'par1', brandName: 'Slam', epaRegistration: '', manufacturer: '',
       isCurrentlySourced: true, isRup: null, signalWord: null,
     }, 'k');
-    expect(mockRpc).toHaveBeenCalledWith('upsert_parent_brand', expect.objectContaining({ p_parent_id: 'par1', p_brand_name: 'Slam', p_idempotency_key: 'k' }));
-    expect(mockRpc.mock.calls[1][1]).not.toHaveProperty('p_product_id');
+    // p_product_id lets the database refuse a size that moved off par1 after the re-read above.
+    expect(mockRpc).toHaveBeenCalledWith('upsert_parent_brand', expect.objectContaining({
+      p_parent_id: 'par1', p_product_id: 'p1', p_brand_name: 'Slam', p_idempotency_key: 'k',
+    }));
     expect(saved).toMatchObject({ id: 'pb1', product_id: 'p1' });
   });
 

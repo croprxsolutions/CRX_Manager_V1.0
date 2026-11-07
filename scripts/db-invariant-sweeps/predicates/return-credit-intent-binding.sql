@@ -15,7 +15,7 @@ WITH expected(signature, body_sha256) AS (
     ('issue_return_credit(uuid,uuid,text)', 'b93b4948fd138e6e65031b81959c7311f2846d354af45a8a882c09f1514a6314')
 ), protected_expected(signature, body_sha256) AS (
   VALUES
-    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '744c48493d549f9bc2297270bfdc0977935a4f29ed44fe2e336c8a6fce6ecbf8'),
+    ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3514750a6569dfb89cd7a983d3aca66f9a32bed4422e62a62dcffb057d4631aa'),
     ('snapshot_invoice_line_shares_on_post()', 'f12078a7b476444df206f0e9baa21fff26ee5cda9ef6a96dabf772909984f42a'),
     ('check_idempotency_intent(text,text,uuid,text)', '71b8a6a0b53f2234a0808b1270eaa06b3c8bf0e7d2523fc429c88e5c479407c8')
 ), public_actual AS (

@@ -181,6 +181,11 @@ const KNOWN_UNGUARDED: Record<string, string> = {
   // The compensating controls are the wrapper's own NULL-safe gate (pinned by
   // src/lib/createInventoryHoldIntentBinding.test.ts) and the migration's
   // postflight, which asserts the impl is executable by postgres only.
+  // KI-18 batch 1 (20261204100000) re-emits this impl (only its "today" changes), so the scanner sees the
+  // fail-open gate described above again. The impl is postgres-only EXECUTE and is reached only through the
+  // public create_inventory_hold wrapper, whose own gate is NULL-safe (createInventoryHoldIntentBinding.test.ts).
+  '_create_inventory_hold_intent_impl_20260905|v_role':
+    'reached only via the NULL-safe create_inventory_hold wrapper; direct EXECUTE is postgres-only',
 };
 
 /**

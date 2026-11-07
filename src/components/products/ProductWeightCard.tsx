@@ -36,6 +36,27 @@ function eventValue(event: ProductWeightEvent): string | null {
   return row?.value == null ? null : String(row.value);
 }
 
+function introText(subject: WeightSubject, entry: ProductWeightEntry): string {
+  return subject.kind === 'density'
+    ? `Weight per gallon for every size of ${subject.parent_name ?? 'this parent'}. Your entry is saved as approved by you.`
+    : `Net pounds in one ${entry.inventory_unit ?? 'unit'} of ${entry.product_name ?? 'this size'}. Your entry is saved as approved by you.`;
+}
+
+function CorrectionFields({ approvedSource, source, reason, evidence, setReason, setEvidence }: {
+  approvedSource: string | undefined; source: ProductWeightSource; reason: string; evidence: string;
+  setReason: (value: string) => void; setEvidence: (value: string) => void;
+}) {
+  return (
+    <>
+      <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" role="status">
+        The approved weight is from {sourceText(approvedSource)}, which is trusted more than {sourceText(source)}. A correction needs a reason and evidence.
+      </p>
+      <ReasonField id="weight-reason" label="Reason" value={reason} onChange={setReason} />
+      <ReasonField id="weight-evidence" label="Evidence (what shows it)" value={evidence} onChange={setEvidence} />
+    </>
+  );
+}
+
 function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClose, onSaved, onStale }: {
   subject: WeightSubject;
   entry: ProductWeightEntry;
@@ -95,12 +116,8 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClos
       )}
     >
       <fieldset disabled={saving} className="space-y-3">
-        <p className="text-sm text-secondary">
-          {density
-            ? `Weight per gallon for every size of ${subject.parent_name ?? 'this parent'}. Your entry is saved as approved by you.`
-            : `Net pounds in one ${entry.inventory_unit ?? 'unit'} of ${entry.product_name ?? 'this size'}. Your entry is saved as approved by you.`}
-        </p>
-        <Input id="weight-value" label={density ? 'Weight' : `Net weight (lb per ${entry.inventory_unit ?? 'unit'})`} inputMode="decimal"
+        <p className="text-sm text-secondary">{introText(subject, entry)}</p>
+        <Input id="weight-value" label={density ? 'Weight' : `Net weight (lb per ${entry.inventory_unit || 'unit'})`} inputMode="decimal"
           value={value} onChange={(event) => setValue(event.target.value)}
           error={value.trim() !== '' && stored === null ? 'Enter a number, like 8.34' : undefined} />
         {density && (
@@ -114,13 +131,8 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClos
           options={WEIGHT_SOURCES.map((item) => ({ value: item.value, label: item.label }))} />
         <Input id="weight-note" label="Note" maxLength={1000} value={note} onChange={(event) => setNote(event.target.value)} />
         {correction && (
-          <>
-            <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" role="status">
-              The approved weight is from {sourceText(approvedSource)}, which is trusted more than {sourceText(source)}. A correction needs a reason and evidence.
-            </p>
-            <ReasonField id="weight-reason" label="Reason" value={reason} onChange={setReason} />
-            <ReasonField id="weight-evidence" label="Evidence (what shows it)" value={evidence} onChange={setEvidence} />
-          </>
+          <CorrectionFields approvedSource={approvedSource} source={source} reason={reason} evidence={evidence}
+            setReason={setReason} setEvidence={setEvidence} />
         )}
       </fieldset>
     </Modal>
@@ -188,6 +200,119 @@ function WeightHistory({ subject, stockUnit, reloadToken }: { subject: WeightSub
   );
 }
 
+function weightSummary(entry: ProductWeightEntry, name: string): string {
+  const weight = entry.weight;
+  if (!weight) return '';
+  if (weight.kind === 'density' || weight.kind === 'net_weight') {
+    const density = weight.kind === 'density';
+    return `${density ? 'Weight per gallon' : `Net weight per ${weight.per_unit ?? 'unit'}`}: `
+      + `${weight.lb_per_unit} ${density ? 'lb/gal' : 'lb'}, from ${sourceText(weight.source)}, `
+      + `approved by ${weight.reviewed_by_name || 'an admin'} on ${when(weight.reviewed_at)}`;
+  }
+  if (weight.kind === 'unit_weight') return `Weight comes from its stock unit (${weight.per_unit})`;
+  return noWeightMessage(name, weight.none_reason, entry.inventory_unit);
+}
+
+function WeightActions({ hasApproved, busy, onOpen }: { hasApproved: boolean; busy: boolean; onOpen: (mode: 'enter' | 'correct') => void }) {
+  const blocked = busy ? 'Save or discard your other changes first' : undefined;
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button size="sm" variant="secondary" showChevron={false} disabled={busy} title={blocked} onClick={() => onOpen('enter')}>
+        {hasApproved ? 'Enter new weight' : 'Enter weight'}
+      </Button>
+      {hasApproved && (
+        <Button size="sm" variant="secondary" showChevron={false} disabled={busy} title={blocked} onClick={() => onOpen('correct')}>
+          Correct weight
+        </Button>
+      )}
+    </div>
+  );
+}
+
+type OpenState = null | { mode: 'enter' | 'correct' } | { mode: 'approve'; draft: WeightDraft };
+
+function WeightBody({ entry, name, isAdmin, busy, reloadToken, setOpen }: {
+  entry: ProductWeightEntry; name: string; isAdmin: boolean; busy: boolean; reloadToken: number; setOpen: (open: OpenState) => void;
+}) {
+  const subject = entry.subject ?? null;
+  const draft = entry.draft ?? null;
+  return (
+    <>
+      <p className="text-sm text-nav-dark" data-testid="product-weight-summary">{weightSummary(entry, name)}</p>
+      {subject?.kind === 'density' && <p className="text-xs text-secondary">Shared by every size of this parent.</p>}
+      {subject && draft && (
+        <DraftRow draft={draft} subject={subject} entry={entry} isAdmin={isAdmin} busy={busy}
+          onApprove={() => setOpen({ mode: 'approve', draft })} onSetWeight={() => setOpen({ mode: 'enter' })} />
+      )}
+      {subject && isAdmin && (
+        <WeightActions hasApproved={entry.weight?.kind === subject.kind} busy={busy} onOpen={(mode) => setOpen({ mode })} />
+      )}
+      {subject && <WeightHistory subject={subject} stockUnit={entry.inventory_unit} reloadToken={reloadToken} />}
+    </>
+  );
+}
+
+function ApproveDraftModal({ draft, subject, entry, name, profileId, onClose, onDone }: {
+  draft: WeightDraft | null; subject: WeightSubject | null; entry: ProductWeightEntry | null; name: string; profileId: string;
+  onClose: () => void; onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const [approving, setApproving] = useState(false);
+  const approveKey = useIdempotencyKey('approve_weights', profileId, JSON.stringify([subject?.subject_id, subject?.version, draft?.id ?? null]));
+  const approve = async () => {
+    if (!subject || !draft) return;
+    setApproving(true);
+    try {
+      await approveWeightDraft(subject, draft.id, approveKey.getKey());
+      approveKey.resetKey();
+      toast('success', 'Draft weight approved');
+      onDone();
+    } catch (error) {
+      toast('error', sanitizeError(error));
+      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) || hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED)) onDone();
+    } finally {
+      setApproving(false);
+    }
+  };
+  const target = subject?.kind === 'density' ? `every size of ${subject.parent_name ?? 'this parent'}` : name;
+  return (
+    <ConfirmModal
+      open={draft !== null}
+      onClose={onClose}
+      onConfirm={() => void approve()}
+      title="Approve draft weight?"
+      message={draft && subject
+        ? `Approve ${draft.value} ${unitLabel(subject, entry?.inventory_unit)} from ${sourceText(draft.source)} for ${target}. Approve only after Mason has reviewed it.`
+        : ''}
+      confirmLabel="Approve"
+      loading={approving}
+    />
+  );
+}
+
+function LoadedWeight({ entry, isAdmin, profileId, busy, reloadToken, reload }: {
+  entry: ProductWeightEntry; isAdmin: boolean; profileId: string; busy: boolean; reloadToken: number; reload: () => void;
+}) {
+  const [open, setOpen] = useState<OpenState>(null);
+  const subject = entry.subject ?? null;
+  const name = entry.product_name ?? 'This product';
+  const saved = () => { setOpen(null); reload(); };
+  return (
+    <>
+      <CardHeader title="Weight" accent={subject?.kind === 'density' ? `Parent ${subject.parent_name ?? ''}`.trim() : undefined} />
+      <div className="space-y-3" data-testid="product-weight-card">
+        <WeightBody entry={entry} name={name} isAdmin={isAdmin} busy={busy} reloadToken={reloadToken} setOpen={setOpen} />
+      </div>
+      {subject && open && open.mode !== 'approve' && (
+        <EnterWeightModal subject={subject} entry={entry} profileId={profileId} startAsCorrection={open.mode === 'correct'}
+          onClose={() => setOpen(null)} onSaved={saved} onStale={saved} />
+      )}
+      <ApproveDraftModal draft={open?.mode === 'approve' ? open.draft : null} subject={subject} entry={entry} name={name}
+        profileId={profileId} onClose={() => setOpen(null)} onDone={saved} />
+    </>
+  );
+}
+
 /**
  * DM-2 weight on the product page: weight per gallon on a liquid's parent, net weight per pack on a dry
  * size stocked in a count unit, or where the weight comes from. Seed and each products have no weight row.
@@ -201,11 +326,8 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
   /** Changes when the product or its parent is saved, so a pack or parent change re-reads the weight. */
   reloadKey: string;
 }) {
-  const { toast } = useToast();
   const [state, setState] = useState<{ status: 'loading' } | { status: 'failed' } | { status: 'loaded'; entry: ProductWeightEntry }>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
-  const [open, setOpen] = useState<null | { mode: 'enter' | 'correct' } | { mode: 'approve'; draft: WeightDraft }>(null);
-  const [approving, setApproving] = useState(false);
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
   useEffect(() => {
@@ -222,87 +344,21 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
     return () => { cancelled = true; };
   }, [productId, reloadKey, attempt]);
 
-  const entry = state.status === 'loaded' ? state.entry : null;
-  const subject = entry?.subject ?? null;
-  const approveKey = useIdempotencyKey('approve_weights', profileId,
-    JSON.stringify([subject?.subject_id, subject?.version, open?.mode === 'approve' ? open.draft.id : null]));
-
-  if (state.status === 'loaded' && (entry?.product_form === 'seed' || entry?.product_form === 'each')) return null;
-
-  const blocked = busy ? 'Save or discard your other changes first' : undefined;
-  const name = entry?.product_name ?? 'This product';
-  const weight = entry?.weight;
-  const saved = () => { setOpen(null); reload(); };
-  const approve = async (draft: WeightDraft) => {
-    if (!subject) return;
-    setApproving(true);
-    try {
-      await approveWeightDraft(subject, draft.id, approveKey.getKey());
-      approveKey.resetKey();
-      toast('success', 'Draft weight approved');
-      saved();
-    } catch (error) {
-      toast('error', sanitizeError(error));
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_STALE) || hasRpcCode(error, RpcErrorCodes.PRODUCT_WEIGHT_BASIS_CHANGED)) saved();
-    } finally {
-      setApproving(false);
-    }
-  };
-
-  let summary: string;
-  if (!weight) summary = '';
-  else if (weight.kind === 'density' || weight.kind === 'net_weight') {
-    summary = `${weight.kind === 'density' ? 'Weight per gallon' : `Net weight per ${weight.per_unit ?? 'unit'}`}: `
-      + `${weight.lb_per_unit} ${weight.kind === 'density' ? 'lb/gal' : 'lb'}, from ${sourceText(weight.source)}, `
-      + `approved by ${weight.reviewed_by_name || 'an admin'} on ${when(weight.reviewed_at)}`;
-  } else if (weight.kind === 'unit_weight') summary = `Weight comes from its stock unit (${weight.per_unit})`;
-  else summary = noWeightMessage(name, weight.none_reason, entry?.inventory_unit);
-
+  if (state.status === 'loaded' && (state.entry.product_form === 'seed' || state.entry.product_form === 'each')) return null;
   return (
     <Card>
-      <CardHeader title="Weight" accent={subject?.kind === 'density' ? `Parent ${subject.parent_name ?? ''}`.trim() : undefined} />
-      <div className="space-y-3" data-testid="product-weight-card">
-        {state.status === 'loading' && <p className="text-sm text-secondary" role="status">Loading weight…</p>}
-        {state.status === 'failed' && <LoadFailedState title="Weight could not be loaded" onRetry={reload} />}
-        {entry && (
-          <>
-            <p className="text-sm text-nav-dark" data-testid="product-weight-summary">{summary}</p>
-            {subject?.kind === 'density' && <p className="text-xs text-secondary">Shared by every size of this parent.</p>}
-            {subject && entry.draft && (
-              <DraftRow draft={entry.draft} subject={subject} entry={entry} isAdmin={isAdmin} busy={busy || approving}
-                onApprove={() => setOpen({ mode: 'approve', draft: entry.draft! })} onSetWeight={() => setOpen({ mode: 'enter' })} />
-            )}
-            {subject && isAdmin && (
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="secondary" showChevron={false} disabled={busy} title={blocked} onClick={() => setOpen({ mode: 'enter' })}>
-                  {weight?.kind === subject.kind ? 'Enter new weight' : 'Enter weight'}
-                </Button>
-                {weight?.kind === subject.kind && (
-                  <Button size="sm" variant="secondary" showChevron={false} disabled={busy} title={blocked} onClick={() => setOpen({ mode: 'correct' })}>
-                    Correct weight
-                  </Button>
-                )}
-              </div>
-            )}
-            {subject && <WeightHistory subject={subject} stockUnit={entry.inventory_unit} reloadToken={attempt} />}
-          </>
-        )}
-      </div>
-      {entry && subject && open && open.mode !== 'approve' && (
-        <EnterWeightModal subject={subject} entry={entry} profileId={profileId} startAsCorrection={open.mode === 'correct'}
-          onClose={() => setOpen(null)} onSaved={saved} onStale={saved} />
+      {state.status === 'loaded' ? (
+        <LoadedWeight entry={state.entry} isAdmin={isAdmin} profileId={profileId} busy={busy} reloadToken={attempt} reload={reload} />
+      ) : (
+        <>
+          <CardHeader title="Weight" />
+          <div className="space-y-3" data-testid="product-weight-card">
+            {state.status === 'loading'
+              ? <p className="text-sm text-secondary" role="status">Loading weight…</p>
+              : <LoadFailedState title="Weight could not be loaded" onRetry={reload} />}
+          </div>
+        </>
       )}
-      <ConfirmModal
-        open={open?.mode === 'approve'}
-        onClose={() => setOpen(null)}
-        onConfirm={() => { if (open?.mode === 'approve') void approve(open.draft); }}
-        title="Approve draft weight?"
-        message={open?.mode === 'approve' && subject
-          ? `Approve ${open.draft.value} ${unitLabel(subject, entry?.inventory_unit)} from ${sourceText(open.draft.source)} for ${subject.kind === 'density' ? `every size of ${subject.parent_name ?? 'this parent'}` : name}. Approve only after Mason has reviewed it.`
-          : ''}
-        confirmLabel="Approve"
-        loading={approving}
-      />
     </Card>
   );
 }

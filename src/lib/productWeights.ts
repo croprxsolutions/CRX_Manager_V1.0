@@ -59,7 +59,7 @@ export interface ProductWeightsResult {
   products: Record<string, ProductWeightEntry>;
 }
 
-export const MAX_WEIGHED_PRODUCTS = 500;
+const MAX_WEIGHED_PRODUCTS = 500;
 
 /**
  * Current weights for up to 500 distinct products in ONE call, so every weight and the unit map come from
@@ -80,7 +80,7 @@ export function draftMatchesBasis(draft: WeightDraft, current: Record<string, un
   return [...keys].every((key) => JSON.stringify(draft.basis?.[key] ?? null) === JSON.stringify(current[key] ?? null));
 }
 
-export const WATER_LB_PER_GAL = '8.345404';
+const WATER_LB_PER_GAL = '8.345404';
 const DECIMAL = /^\d+(\.\d+)?$/;
 
 function toScaled(text: string): { n: bigint; scale: number } {

@@ -58,6 +58,7 @@ const PurchaseOrders = lazy(() => import('./pages/PurchaseOrders'));
 const NewPurchaseOrder = lazy(() => import('./pages/NewPurchaseOrder'));
 const PurchaseOrderDetail = lazy(() => import('./pages/PurchaseOrderDetail'));
 const BrandVsGeneric = lazy(() => import('./pages/BrandVsGeneric'));
+const GroupProducts = lazy(() => import('./pages/GroupProducts'));
 const Reports = lazy(() => import('./pages/Reports'));
 const CropPrograms = lazy(() => import('./pages/CropPrograms'));
 const TeamBoard = lazy(() => import('./pages/TeamBoard'));
@@ -296,6 +297,10 @@ export const APP_PAGES = [
   {
     key: 'brand-vs-generic', label: 'Brand vs Generic', category: 'Inventory & Buying', roles: ['admin', 'sales_rep'],
     routes: [{ path: 'brand-vs-generic', element: <BrandVsGeneric /> }],
+  },
+  {
+    key: 'group-products', label: 'Group Products', category: 'Inventory & Buying', roles: ['admin'],
+    routes: [{ path: 'group-products', element: <GroupProducts /> }],
   },
   {
     key: 'purchase-orders', label: 'Purchase Orders', category: 'Inventory & Buying', roles: ['admin', 'sales_rep'],

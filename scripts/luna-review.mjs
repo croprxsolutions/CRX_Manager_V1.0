@@ -118,6 +118,8 @@ Hunt these failure classes first, then anything else:
    another operation's cached row); RPCs that declare p_idempotency_key but ignore it.
 4. Migration drift — CHECK-constraint regressions (a new list must be a SUPERSET of the old),
    function-overload collisions, missing SET search_path = public, pg_temp, missing updated_at.
+   Valid, never a finding: has_function_privilege('public', <function>, 'EXECUTE') — PUBLIC is
+   an accepted role name there (also in has_table_privilege / has_schema_privilege).
 5. Lifecycle violations in the quote / order / delivery / invoice / return state machines.
 6. Screens that save, upload or import — for each request, say which request owns the screen
    now: a stale or late reply overwriting newer state, a control still usable while a request

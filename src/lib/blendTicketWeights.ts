@@ -152,5 +152,6 @@ export async function weightsChangedWhileSaving(ticketId: string, lines: readonl
   const saved = await fetchBlendTicketWeights(ticketId);
   const after = resolveTicketLines(lines, { saved, current: null });
   const lb = (line: ResolvedLine | undefined) => (line?.mapped.weightLb && 'lb' in line.mapped.weightLb ? line.mapped.weightLb.lb : null);
-  return after.flatMap((line, index) => (lines[index].product_id && lb(line) !== lb(preview[index]) ? [line.mapped.product_name] : []));
+  // A line the screen never previewed (still loading, or its read failed) is not reported as changed.
+  return after.flatMap((line, index) => (lines[index].product_id && preview[index] && lb(line) !== lb(preview[index]) ? [line.mapped.product_name] : []));
 }

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { headerEdited, matchesPageRead, resolveTicketLines, totalWeightText, type BlendTicketWeights, type TicketSnapshot } from './blendTicketWeights';
+import { describe, expect, it, vi } from 'vitest';
+import * as db from './db';
+import { headerEdited, matchesPageRead, resolveTicketLines, totalWeightText, weightsChangedWhileSaving, type BlendTicketWeights, type TicketSnapshot } from './blendTicketWeights';
 import type { ProductWeightsResult } from './productWeights';
 import type { WeightUnitFactors } from '../types';
 
@@ -58,5 +59,16 @@ describe('matchesPageRead and headerEdited', () => {
   it('treats 100 and 100.0 as the same header, and a new unit as an edit', () => {
     expect(headerEdited(saved, 100.0, 'Lb')).toBe(false);
     expect(headerEdited(saved, 100, 'lb')).toBe(true);
+  });
+});
+
+describe('weightsChangedWhileSaving', () => {
+  it('names a line whose saved weight differs from its preview, and never a line that was not previewed', async () => {
+    const rpc = vi.spyOn(db.supabaseUntyped, 'rpc').mockResolvedValue({ data: saved, error: null } as never);
+    const lines = [line({})];
+    const preview = resolveTicketLines(lines, { saved: null, current });
+    expect(await weightsChangedWhileSaving('t1', lines, preview)).toEqual(['TEST P']);
+    expect(await weightsChangedWhileSaving('t1', lines, [])).toEqual([]);
+    rpc.mockRestore();
   });
 });

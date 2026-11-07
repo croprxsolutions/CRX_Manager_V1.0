@@ -636,7 +636,25 @@ ${raced.stderr}`, /PRODUCT_EPA_HISTORY_ID/);
   assert.notEqual(racedJob.status, 0, 'a job ID reused while its history commits is refused');
   assert.match(`${racedJob.stdout}
 ${racedJob.stderr}`, /JOB_EPA_HISTORY_ID/);
-  console.log('[prover] an ID reused while another transaction writes its history and deletes the row is still refused');
+  // The reverse order: a spray in flight on a job with product R; deleting R waits for it (the freeze holds
+  // KEY SHARE on R), so a later reuse of R's ID sees the committed history and is refused.
+  const racer2 = '7a7a7a7a-0000-4000-8000-00000000003d';
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, category, epa_registration, current_cost, tier1_price, is_active)
+    VALUES ('${racer2}', '[PROVER] Racer 2', 'Z4', 'liquid', 'Gal', 'Herbicide', '902-1', 10.00, 15.00, true);`, { user: 'supabase_admin' });
+  const racer2Job = save(ADMIN, null, [chem(racer2, 0)]);
+  bg = session(`BEGIN;
+    INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${racer2Job}', current_date, 1);
+    SELECT 'JK_READY'; ${HOLD_UNTIL_WAITER} COMMIT;`);
+  await bg.ready;
+  await waited(bg, () => psql(`DELETE FROM public.job_chemicals WHERE job_id = '${racer2Job}';
+    DELETE FROM public.products WHERE id = '${racer2}';`), 'the product delete');
+  assert.equal(locks(racer2Job), '<deleted>=902-1');
+  const reused2 = reuseProduct(racer2);
+  assert.notEqual(reused2.status, 0, 'a product deleted while its history was being written cannot be reused');
+  assert.match(`${reused2.stdout}
+${reused2.stderr}`, /PRODUCT_EPA_HISTORY_ID/);
+  console.log('[prover] an ID reused while another transaction writes its history and deletes the row is still refused, in either order');
 
   console.log('JOB_LINES_KEEP_EPA_PROOF_PASS');
 }

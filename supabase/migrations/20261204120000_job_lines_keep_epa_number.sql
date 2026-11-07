@@ -57,8 +57,11 @@
 --   locks the job FOR UPDATE before deleting and re-writing lines, and the quote path writes lines only
 --   on the job it just created; nothing updates job lines in place, and app roles cannot write them
 --   (item 5). So two writers never hold one job's lines or lock rows while waiting for each other.
---   No product row is locked (lock rows carry no product foreign key), and the one products trigger fires
---   only on insert or an ID change: a product EPA edit never waits on anything added here.
+--   A freeze takes FOR KEY SHARE on the products of its job's lines (what a line's own foreign key already
+--   takes), so a product cannot be deleted or change its ID while its history is being written. A plain
+--   EPA update does not conflict; an edit path that locks the product FOR UPDATE waits for a spray save
+--   in flight, exactly as it already waits for a job save. The one products trigger fires only on insert
+--   or an ID change.
 --
 -- NAMED LIMITS: "sprayed" means a spray record is saved (or the job is finished): a correction made
 --   between the physical spray and the record being entered reaches the job. Products removed from a
@@ -198,6 +201,13 @@ BEGIN
   PERFORM 1 FROM public.jobs WHERE id = p_job_id FOR NO KEY UPDATE;
   INSERT INTO public.job_epa_sprayed (job_id) VALUES (p_job_id) ON CONFLICT (job_id) DO NOTHING;
   SELECT not_recorded INTO v_unknown FROM public.job_epa_sprayed WHERE job_id = p_job_id;
+  -- KEY SHARE, as a job line's own foreign key takes: no product being locked here can be deleted or change
+  -- its ID until this commits, so the ID guard always sees this history. A non-key edit (an EPA number) does
+  -- not conflict; an edit path that locks the product FOR UPDATE waits for this save, as it already does for
+  -- a job save's lines.
+  PERFORM 1 FROM public.products p
+   WHERE p.id IN (SELECT jc.product_id FROM public.job_chemicals jc WHERE jc.job_id = p_job_id)
+   ORDER BY p.id FOR KEY SHARE;
   INSERT INTO public.job_product_epa (job_id, product_id, epa_registration, not_recorded)
   SELECT DISTINCT jc.job_id, jc.product_id, CASE WHEN v_unknown THEN NULL ELSE public._epa_norm(p.epa_registration) END,
          v_unknown

@@ -15,6 +15,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-07):** reversing a write-off or a credit application checks only the accounting month of the Chicago (Central) day the write-off or application was made, the day its apply already checked. A row made at 9 pm Central on Oct 31 is October's: a closed October refuses its reversal, a closed November does not.
 **Why:** KI-18 batch 1 checked both the UTC and the Chicago day, so a row made 6/7-11:59 pm Central on a month's last day could not be reversed once either month closed. Live had 0 write-offs and 0 credit applications when this was decided, so no existing row changes month.
 **What this forbids/implies:** don't re-add the UTC-day check to `reverse_credit_memo_application`, `_unapply_return_credit_guard_impl_20260826`, `_void_invoice_split_provenance_impl_20260719` or `_reverse_write_off_replay_impl_20261015` (`20261206110000`).
+## 2026-11-07 — Sol: a test file is not money code by its name alone
+
+**Decision (Mason, in session, 2026-11-07):** a changed test or spec (`__tests__/`, `*.test.*`, `*.spec.*`) no longer needs Sol just because its name carries a money word (`MONEY_PATH_WORDS`). Money code, migrations, Edge Functions and every listed path in `docs/reference/sol-required-paths.md` (tests under those paths included) still need Sol.
+**Why:** on PR #1579 a one-line fix to `src/__tests__/return-credit-remediation-guards.test.ts` (matched by "credit") forced a full Sol of the whole PR after the live apply; that run reopened an unrelated, already-accepted area and cost two more rounds. A test cannot change what ships; the code it tests already needs Sol.
+**Enforcement:** `.claude/hooks/sol-risk-lib.mjs` (`solRiskPathProblem`), proven by `.claude/hooks/sol-risk-lib.test.mjs` (fails before the change, passes after).
 
 ## 2026-11-05 — Anyone may quote at a tier other than the customer's; the check stays on the screen (KI-105, To-Do 1.6)
 

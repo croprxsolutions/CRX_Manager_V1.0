@@ -3202,10 +3202,6 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   check_remainder_reminders: 'maintenance reminder sweep uses persisted sent markers to deduplicate',
   check_unpriced_orders: 'cron reminder sweep uses persisted reminder and escalation sent markers',
   mark_overdue_invoices: 'service-role maintenance updates only invoices currently eligible as overdue',
-  // 20261204100000 (KI-18 batch 1) re-emits this trigger to take the season from the Chicago date. Prune once
-  // the registry high-water passes 20261204100000.
-  snapshot_field_crop_history:
-    'trigger-only crop-change recorder (RETURNS trigger, Postgres refuses direct calls); one row per field and season via ON CONFLICT (field_id, season), so a repeat converges',
   recompute_job_applied_acres: 'trigger-only derived-total recomputation; direct client EXECUTE is revoked',
   // The forward-only label and stale-recipient candidates are NOT APPLIED and
   // re-emit both recorder helpers. Canonical local-candidate identities retain

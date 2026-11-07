@@ -690,6 +690,39 @@ for (const command of [
   r = runHook({ tool_name: "Bash", tool_input: { command } });
   ok(r.stdout.includes('"permissionDecision":"deny"'), `bash-safety.mjs still denies a search chained to a dangerous command: ${command}`);
 }
+// Here-document text that only becomes a file or a note is not a command
+// (2026-11-07, Mason: two harmless notes were refused). Every route that RUNS
+// the text keeps the full-text check.
+const denied = (command, tool_name = "Bash") =>
+  runHook({ tool_name, tool_input: { command } }).stdout.includes('"permissionDecision":"deny"');
+for (const command of [
+  "python - <<'EOF'\nfrom pathlib import Path\np = Path(r\"C:/Users/mason/.claude/projects/x/memory/note.md\")\np.write_text(\"Never run git reset --hard on a shared worktree.\\n\")\nEOF",
+  "cat >> /c/Users/mason/notes/handover.md <<'EOF'\nLesson: git reset --hard destroyed work; never use --no-verify.\nEOF",
+  "cat <<'EOF' | tee -a /c/Users/mason/notes/a.md\ngit push --force is never used here.\nEOF",
+]) ok(!denied(command), `bash-safety allows here-document text: ${command.split("\n")[0]}`);
+for (const [command, label] of [
+  ["git reset --hard", "plain hard reset"],
+  ["git -C x reset --hard HEAD~1", "hard reset with -C"],
+  ['bash -c "git reset --hard"', "bash -c"],
+  ["bash <<'EOF'\ngit reset --hard\nEOF", "here-document fed to bash"],
+  ["sh <<'EOF'\ngit reset --hard\nEOF", "here-document fed to sh"],
+  ["cat <<'EOF' | bash\ngit reset --hard\nEOF", "cat piped into bash"],
+  ["cat <<'EOF' \\\n| bash\ngit reset --hard\nEOF", "line continuation into bash"],
+  ["cat > x.sh <<'EOF'\ngit reset --hard\nEOF\nbash x.sh", "written script run later"],
+  ["cat > x.sh <<'EOF'\ngit reset --hard\nEOF\n./x.sh", "written script run by path"],
+  ["cat(){ bash; }; cat <<'EOF'\ngit reset --hard\nEOF", "a function named cat"],
+  ["cat <<EOF\n$(git reset --hard)\nEOF", "substitution in an unquoted body"],
+  ["echo hi # <<EOF\ngit reset --hard\nEOF", "a heredoc opener inside a comment"],
+  ["cat <<'EOF'\ngit reset --hard\n", "a here-document that never ends"],
+  ["cat <<'EOF' | xargs git\nreset --hard\nEOF\ngit reset --hard", "xargs, then a real reset"],
+  ["python - <<'EOF'\nimport os; os.system('git reset --hard')\nEOF", "python launching a process"],
+  ["cat > x.py <<'EOF'\nimport subprocess; subprocess.run('git reset --hard', shell=True)\nEOF\npython x.py", "written python run later"],
+  ["cat > notes.md <<'EOF'\ntext\nEOF\ngit reset --hard", "a real reset after the here-document"],
+  ["cat > .env <<'EOF'\nSECRET=x\nEOF", "a here-document written to .env"],
+]) ok(denied(command), `bash-safety still denies: ${label}`);
+// PowerShell has no here-documents; its text is judged as before.
+ok(denied("cat >> notes.md <<'EOF'\ngit reset --hard\nEOF", "PowerShell"), "PowerShell keeps the full-text check");
+
 // A computed script path is no longer refused by the LIVE hook either
 // (2026-10-02, Mason): the retired producer was the only reason for the rule.
 for (const command of ['F=x; node</dev/null "$F"', 'node > "out file" "$F"', 'for f in scripts/*.mjs; do node "$f" --check; done']) {

@@ -498,6 +498,31 @@ missing from `SQL_BUILTIN_FNS` while its siblings (`pg_get_functiondef`, `pg_get
 that is cross-tool permission laundering. Ask Mason for the scoped `REAL-DATA-OK` the guard's own
 message names, or fix the guard deliberately.
 
+### Here-document notes are text (2026-11-07)
+
+Mason approved this after two harmless notes were refused on 2026-11-07: a `python - <<'EOF'` that
+wrote "git reset --hard" into a memory note (`bash-safety.mjs`), and a `cat >> <notes file> <<'EOF'`
+whose text named a `.claude/worktrees/…` path (`review-proof-guard.mjs`). For a **Bash** command,
+both guards now judge the command with its here-document bodies left out (`commandWithoutTextHeredocs`
+in `codex-push-lib.mjs`, which reuses the `pipelineStages` lexer), but only when every command in it,
+substitutions included, is a bare `cat` or `tee`. `bash-safety.mjs` also counts a language runtime
+(`python -`, `node -`, …) reading its program from the here-document, unless the text anywhere can
+launch a process (`subprocess`, `os.system`, `child_process`, `exec`, `spawn`, `eval`, a backtick,
+`$( )`, a pipe and similar). The review proof guard does not, because a runtime can write a proof
+file without launching anything.
+
+Everything else is judged on the full text exactly as before, and the tests pin each route: a
+here-document fed to `bash`/`sh` or piped into one (also across a line continuation), a written file
+run later (`bash x.sh`, `./x.sh`, `python x.py` with a process launch), a function named `cat`, an
+unquoted body with `$( )`, a `<<` inside a comment, a here-document that never ends, `xargs`, a
+`while read` loop, a later `$(cat file)`, `git reset --hard` or `rm`/`mv` of the review state
+outside a here-document, and inside `bash -c "…"`. The redirect target stays visible, so
+`cat > .env <<'EOF'` and `cat > <proof file> <<'EOF'` are still refused. PowerShell and cmd have no
+here-documents and are unchanged. Kept over-refusal: a commit message written as
+`git commit -m "$(cat <<'EOF' … EOF)"` is still read in full; use `git commit -F <file>`. Known
+residual, unchanged from before: a file written in one call and run by a later call is invisible to
+any command-text guard (the Write tool already allowed this).
+
 ### Guard false-alarm narrowing (2026-11-03)
 
 A coaching review counted guard refusals from 11/1 to 11/3; four rules mostly refused harmless

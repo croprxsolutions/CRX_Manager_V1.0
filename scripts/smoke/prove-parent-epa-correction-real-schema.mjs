@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261208110000_parent_epa_correction: invoice lines are never written
+ * Real-schema proof for 20261206113000_parent_epa_correction: invoice lines are never written
  * without an EPA number, the readers are unchanged (they move to the copies with the screens PR),
  * and the parent EPA correction (switched off by the file, switched on here for the test) writes the
  * parent and every size, so jobs not sprayed yet show the new number while sprayed and finished jobs
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261208110000_parent_epa_correction.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261206113000_parent_epa_correction.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

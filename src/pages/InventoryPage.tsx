@@ -1427,7 +1427,7 @@ export default function InventoryPage() {
             header: 'Actions',
             render: (row: InventoryRow) => (
               <div className="flex gap-1">
-                {fillableToteIds.has(row.product_id) && (
+                {isAdmin && fillableToteIds.has(row.product_id) && (
                   <button
                     onClick={(e) => { e.stopPropagation(); setFillTote({ productId: row.product_id, name: row.product_name }); }}
                     className="p-1.5 rounded hover:bg-gray-100 text-secondary"
@@ -1721,7 +1721,7 @@ export default function InventoryPage() {
             onReceive={openReceiveModal}
             onAdjust={openAdjustModal}
             onDelete={handleDelete}
-            fillableToteIds={fillableToteIds}
+            fillableToteIds={isAdmin ? fillableToteIds : undefined}
             onFillTote={(row) => setFillTote({ productId: row.product_id, name: row.product_name })}
           />
         </div>
@@ -2317,7 +2317,7 @@ export default function InventoryPage() {
         })()}
       </Modal>
 
-      {fillTote && profile && (
+      {fillTote && profile && isAdmin && (
         <ToteFillModal
           toteProductId={fillTote.productId}
           toteName={fillTote.name}

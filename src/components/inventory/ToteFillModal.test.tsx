@@ -50,6 +50,8 @@ describe('fill a tote from bulk', () => {
     fireEvent.change(screen.getByLabelText('Totes to fill'), { target: { value: '2' } });
     expect(screen.queryByTestId('tote-fill-preview')).toBeNull();
     expect(screen.getByRole('button', { name: 'Fill Tote' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Totes to fill'), { target: { value: '1' } });
+    expect(screen.queryByTestId('tote-fill-preview')).toBeNull();
     fireEvent.change(screen.getByLabelText('Totes to fill'), { target: { value: '0' } });
     expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled();
   });

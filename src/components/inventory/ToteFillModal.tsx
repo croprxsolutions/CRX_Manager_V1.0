@@ -36,7 +36,7 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
 
   const toteCount = /^\d{1,4}$/.test(totes.trim()) ? Number(totes.trim()) : NaN;
   const totesValid = Number.isInteger(toteCount) && toteCount >= 1;
-  const shown = preview && preview.totes === toteCount ? preview : null;
+  const shown = preview?.totes === toteCount ? preview : null;
 
   const loadPreview = async () => {
     setBusy(true);
@@ -86,7 +86,7 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
             step={1}
             value={totes}
             disabled={busy}
-            onChange={(e) => setTotes(e.target.value)}
+            onChange={(e) => { setTotes(e.target.value); setPreview(null); }}
             error={totes.trim() !== '' && !totesValid ? 'Whole totes only, 1 or more' : undefined}
           />
           <Button variant="secondary" onClick={loadPreview} loading={busy && !shown} disabled={!totesValid || busy}>

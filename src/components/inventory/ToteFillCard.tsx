@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PaintBucket, Undo2 } from 'lucide-react';
 import Button from '../ui/Button';
 import Card, { CardHeader } from '../ui/Card';
@@ -32,12 +32,17 @@ export default function ToteFillCard({ toteProductId, toteName, profileId, onSto
   const [undoing, setUndoing] = useState(false);
   const { getKeyFor, resetKeyFor } = useIdempotencyKey('reverse_tote_fill', profileId);
 
+  const latestLoad = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++latestLoad.current; // only the newest load may set the list
     setLoadState('loading');
     try {
-      setFills(await listToteFills(toteProductId));
+      const rows = await listToteFills(toteProductId);
+      if (mine !== latestLoad.current) return;
+      setFills(rows);
       setLoadState('loaded');
     } catch (error) {
+      if (mine !== latestLoad.current) return;
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'tote-fill-card' } });
       setLoadState('failed');
     }

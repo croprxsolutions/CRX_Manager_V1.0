@@ -741,7 +741,8 @@ export default function QuoteBuilder() {
   // "use today's price" choice the database already stored, so it is applied once, not again.
   // Lines "Use Tier N" moved to today's price (KI-105). Picking another tier from the menu undoes it,
   // so a sent price is never replaced by a choice the operator walked back (Sol, #1605).
-  const useTierKeysRef = useRef(new Set<string>());
+  // Each line's state before "Use Tier N", put back exactly when the tier menu undoes it (Codex, #1605).
+  const useTierUndoRef = useRef(new Map<string, { useToday: boolean; applied?: boolean }>());
   const savedLineIdsRef = useRef(new Map<string, {
     id: string;
     productId: string;
@@ -1617,7 +1618,7 @@ export default function QuoteBuilder() {
       // A tier tick or "Use Tier N" belongs to one visit to a quote (Luna, #1605).
       if (keepTierChoiceForRef.current !== id) setTierChoice('');
       keepTierChoiceForRef.current = null;
-      useTierKeysRef.current = new Set();
+      useTierUndoRef.current = new Map();
       fetchQuote(id);
     } else if (!newQuoteNumberRequestedRef.current) {
       newQuoteNumberRequestedRef.current = true;
@@ -1834,21 +1835,29 @@ export default function QuoteBuilder() {
       return;
     }
     setTier(t);
-    const undo = useTierKeysRef.current;
-    useTierKeysRef.current = new Set();
+    const undo = useTierUndoRef.current;
+    useTierUndoRef.current = new Map();
     if (!toAssigned || !priceLocked) {
+      undo.forEach((before, key) => {
+        const saved = savedLineIdsRef.current.get(key);
+        if (saved) saved.todayApplied = before.applied;
+      });
       setSections((prev) => prev.map((sec) => ({
         ...sec,
-        items: sec.items.map((item) => recalcItem(undo.has(item._key) ? { ...item, use_todays_price: false } : item, t)),
+        items: sec.items.map((item) => {
+          const before = undo.get(item._key);
+          return recalcItem(before ? { ...item, use_todays_price: before.useToday } : item, t);
+        }),
       })));
       return;
     }
     const repriced = (item: LocalItem) => !!item.product_id && item.price_override == null;
     // A new choice: send it again even where an earlier one was saved.
     const keys = new Set(sections.flatMap((sec) => sec.items.filter(repriced).map((item) => item._key)));
-    // A line the operator had already moved to today's price stays moved if they pick another tier.
-    useTierKeysRef.current = new Set(sections.flatMap((sec) => sec.items
-      .filter((item) => keys.has(item._key) && (undo.has(item._key) || !item.use_todays_price)).map((item) => item._key)));
+    // Pressing "Use Tier N" twice keeps the state from before the first press.
+    useTierUndoRef.current = new Map(sections.flatMap((sec) => sec.items.filter((item) => keys.has(item._key)))
+      .map((item) => [item._key, undo.get(item._key)
+        ?? { useToday: !!item.use_todays_price, applied: savedLineIdsRef.current.get(item._key)?.todayApplied }]));
     savedLineIdsRef.current.forEach((saved, key) => { if (keys.has(key)) saved.todayApplied = false; });
     setSections((prev) => prev.map((sec) => ({
       ...sec,
@@ -1865,7 +1874,7 @@ export default function QuoteBuilder() {
     }
     // A new choice: send it again even where an earlier one was saved.
     savedLineIdsRef.current.forEach((saved) => { saved.todayApplied = false; });
-    useTierKeysRef.current = new Set();
+    useTierUndoRef.current = new Map();
     setSections((prev) =>
       prev.map((sec) => ({
         ...sec,
@@ -2644,6 +2653,8 @@ export default function QuoteBuilder() {
         }
         savedLineIdsRef.current = savedLineIds;
         setSavedLineIdByKey(new Map(savedLineIds));
+        // The save is the new baseline: a later tier change no longer undoes "Use Tier N".
+        useTierUndoRef.current = new Map();
         // The save recorded any changed price; read the record the database will check.
         await refreshPriceChanges(result.quote_id);
         if (editingSessionChanged()) return null;
@@ -5415,7 +5426,7 @@ export default function QuoteBuilder() {
                                         // A new choice: send it again even if an earlier one was saved.
                                         const saved = savedLineIdsRef.current.get(item._key);
                                         if (saved) saved.todayApplied = false;
-                                        useTierKeysRef.current.delete(item._key);
+                                        useTierUndoRef.current.delete(item._key);
                                         updateItem(sec._key, item._key, {
                                           price_override: null,
                                           use_todays_price: true,

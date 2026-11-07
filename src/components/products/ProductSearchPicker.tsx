@@ -6,19 +6,23 @@ import RecordSearchPicker from '../ui/RecordSearchPicker';
 import { ProductOptionDetails } from './ProductOptionPresentation';
 import type { ProductSearchResult } from '../../types';
 
+// search_product_parents returns at most 50 parents; 200 ids keep the request URL short.
+const PARENT_SEARCH_CAP = 50;
+const SIZE_ID_CAP = 200;
+
 /**
- * Ids of the sizes whose parent's name or nickname contains the text (PAR-1). A failed parent search is
+ * Ids of the active sizes whose parent's name or nickname contains the text (PAR-1), and whether a cap
+ * left some out (the picker then asks for more text instead of hiding them). A failed parent search is
  * reported and leaves only the name and SKU match, so the picker still works.
  */
-async function parentSizeIds(text: string): Promise<string[]> {
+async function parentSizeIds(text: string): Promise<{ ids: string[]; truncated: boolean }> {
   try {
     const parents = await searchProductParents(text);
-    // shortcut: 200 ids keep the request URL short; text matching that many sizes already fills the 20-row
-    // page, so the picker shows "Keep typing to narrow the list". Page by parent if a parent ever has 200+ sizes.
-    return parents.flatMap((parent) => parent.sizes.map((size) => size.product_id)).slice(0, 200);
+    const ids = parents.flatMap((parent) => parent.sizes.filter((size) => size.is_active).map((size) => size.product_id));
+    return { ids: ids.slice(0, SIZE_ID_CAP), truncated: parents.length >= PARENT_SEARCH_CAP || ids.length > SIZE_ID_CAP };
   } catch (error) {
     Sentry.captureException(error, { extra: { context: 'product_search_picker_parents' } });
-    return [];
+    return { ids: [], truncated: false };
   }
 }
 
@@ -61,9 +65,9 @@ export default function ProductSearchPicker<T extends ProductSearchResult = Prod
       onSelect={onSelect}
       search={async (pattern, limit) => {
         // One query, so a size found by its own name and by its parent comes back once.
-        const ids = await parentSizeIds(textFromIlikePattern(pattern));
+        const { ids, truncated } = await parentSizeIds(textFromIlikePattern(pattern));
         const byParent = ids.length > 0 ? `,id.in.(${ids.join(',')})` : '';
-        return supabase
+        const result = await supabase
           .from('products')
           .select(PRODUCT_SEARCH_SELECT)
           .eq('is_active', true)
@@ -71,6 +75,7 @@ export default function ProductSearchPicker<T extends ProductSearchResult = Prod
           .order('product_name')
           .order('id')
           .limit(limit);
+        return { data: result.data, error: result.error, truncated };
       }}
       getLabel={(product) => product.product_name}
       renderDetails={(product) => <ProductOptionDetails product={product} />}

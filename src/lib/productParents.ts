@@ -227,17 +227,24 @@ export const correctParentIdentity = async (input: {
   return assertRpcResult<ParentWriteResult>(data, 'correct_product_parent_identity');
 }
 
+const OPEN_WORK_BATCH = 500;
+
 /**
  * Open quotes, orders, jobs and templates that use these sizes, from the read-only active-change review
  * (admin). A rate change reprices none of them; the list tells the admin which a rep may want to revise.
  */
 export async function loadOpenWork(productIds: string[]): Promise<OpenWorkEntry[]> {
-  if (productIds.length === 0) return [];
-  // shortcut: the review RPC refuses more than 500 ids; a parent's sizes are a handful of packages. Batch if that changes.
-  const { data, error } = await supabaseUntyped.rpc('preview_product_active_change', { p_product_ids: productIds.slice(0, 500), p_active: false });
-  if (error) throw error;
-  const review = assertRpcResult<{ blockers: OpenWorkEntry[]; warnings: OpenWorkEntry[] }>(data, 'preview_product_active_change');
-  return [...(review.blockers ?? []), ...(review.warnings ?? [])].filter((entry) => entry.kind !== 'stock');
+  const entries: OpenWorkEntry[] = [];
+  // The review RPC refuses more than 500 ids, so every size is checked in batches; none is skipped.
+  for (let start = 0; start < productIds.length; start += OPEN_WORK_BATCH) {
+    const { data, error } = await supabaseUntyped.rpc('preview_product_active_change', {
+      p_product_ids: productIds.slice(start, start + OPEN_WORK_BATCH), p_active: false,
+    });
+    if (error) throw error;
+    const review = assertRpcResult<{ blockers: OpenWorkEntry[]; warnings: OpenWorkEntry[] }>(data, 'preview_product_active_change');
+    entries.push(...(review.blockers ?? []), ...(review.warnings ?? []));
+  }
+  return entries.filter((entry) => entry.kind !== 'stock');
 }
 
 // The fields a new size may carry (apply_product_setup's insert mode); category, timings and rates

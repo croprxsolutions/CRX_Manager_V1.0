@@ -356,6 +356,14 @@ BEGIN
   IF EXISTS (SELECT 1 FROM invoices WHERE invoice_group_id = v_group AND status <> 'posted') THEN
     v_fails := v_fails || ' (G) a payer invoice did not post;';
   END IF;
+  -- A lost-response retry of the earlier save replays its answer after the group posts (Sol, 6 Nov).
+  BEGIN
+    IF save_invoice(v_header, v_lines, 'smk-spl-resave-' || v_suffix) IS DISTINCT FROM v_inv THEN
+      v_fails := v_fails || ' (G) a save retry after posting returned another invoice;';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (G) a save retry after posting was refused: ' || SQLERRM || ';';
+  END;
   IF NOT _return_customer_is_split_payer((SELECT order_id FROM invoices WHERE id = v_inv), v_payer2) THEN
     v_fails := v_fails || ' (G) the second payer is not a split payer for returns;';
   END IF;

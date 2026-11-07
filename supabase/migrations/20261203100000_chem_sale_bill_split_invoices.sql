@@ -1632,6 +1632,19 @@ DECLARE
   v_lines_before jsonb;
   v_saved_id uuid;
 BEGIN
+  -- A retry replays its saved answer before the draft checks below, so a save whose response was lost still
+  -- answers after the group posts (Sol, 6 Nov). save_invoice has already matched the key's actor and request.
+  IF p_idempotency_key IS NOT NULL THEN
+    SELECT NULLIF(k.result->>'invoice_id', '')::uuid
+      INTO v_saved_id
+      FROM public.idempotency_keys k
+     WHERE k.idempotency_key = p_idempotency_key
+       AND k.operation = 'save_invoice'
+       AND k.request_fingerprint IS NOT NULL;
+    IF v_saved_id IS NOT NULL THEN
+      RETURN v_saved_id;
+    END IF;
+  END IF;
   IF v_invoice_id IS NOT NULL THEN
     PERFORM 1
       FROM public.invoices i

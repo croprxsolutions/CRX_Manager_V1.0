@@ -173,7 +173,7 @@ async function fetchBillSplitOrderIds(
  */
 /** complete_delivery returns bill_split_failed when a Bill Split sale's payer invoices could not be drafted. */
 export const BILL_SPLIT_FAILED_MESSAGE =
-  'Delivery completed, but its Bill Split invoices could not be drafted (admins were notified). Fix the shares or prices, then use Create Invoice on this delivery.';
+  'Delivery completed, but its Bill Split invoices could not be drafted (admins were notified). Fix the shares, prices, or delivered amounts (Fix Delivery; amounts must be in hundredths), then use Create Invoice on this delivery.';
 
 export function billSplitFailed(result: unknown): boolean {
   return (result as { bill_split_failed?: boolean } | null)?.bill_split_failed === true;

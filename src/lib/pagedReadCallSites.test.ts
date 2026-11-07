@@ -13,6 +13,14 @@ const PAGES_DIR = join(__dirname, '..', 'pages');
 // Files not checked yet, each with its reason.
 const EXEMPT: Record<string, string> = {};
 
+// Paged reads that cannot select with `{ count: 'exact' }`, each with its reason.
+// They keep fetchAllRows' other guard: a read of more than one page is returned
+// only once a second whole read matches it row for row.
+const COUNT_EXEMPT: Record<string, string> = {
+  'src/lib/ordersPage.ts': 'pages through the orders-page function, which returns its own total_count; that count is passed to fetchAllRows',
+  'src/components/receiving/ReceivingLogPanel.tsx': 'get_receiving_log pages with p_limit/p_offset and returns no count; adding one needs a database change',
+};
+
 const CALL_PATTERN = /\bfetchAllRows(?:ForIds)?\s*(?:<[^()]*?>)?\s*\(/g;
 
 type CallSite = { file: string; line: number; callback: string };
@@ -20,7 +28,17 @@ type CallSite = { file: string; line: number; callback: string };
 // Shared readers outside src/pages and src/components that page with
 // fetchAllRows (paths under src). The integrity checks recompute ledgers from
 // reconciliation's reads, so a short read is a false result.
-const SHARED_FILES = ['lib/reconciliation.ts', 'lib/customerStatement.ts', 'lib/toteFill.ts'];
+const SHARED_FILES = [
+  'lib/customerStatement.ts',
+  'lib/fieldsGeojsonCache.ts',
+  'lib/marginFloors.ts',
+  'lib/ordersPage.ts',
+  'lib/paymentDuplicate.ts',
+  'lib/productParentProposals.ts',
+  'lib/reconciliation.ts',
+  'lib/sellPriceHistory.ts',
+  'lib/toteFill.ts',
+];
 
 // Components (under src/components) that page with fetchAllRows: Goal 4 part 2's
 // money, check, compliance and lookup panels. A file listed here must still exist.
@@ -32,6 +50,7 @@ const COMPONENT_FILES = [
   'field-invoices/FieldInvoicesListPanel.tsx',
   'field-invoices/FieldInvoicesPostedPanel.tsx',
   'field-invoices/FieldInvoicesUnpostedPanel.tsx',
+  'field-invoices/UnbilledApplicationsPanel.tsx',
   'fields/BulkFieldImport.tsx',
   'integrity/IntegrityCleanupPanel.tsx',
   'inventory/TransactionLedgerModal.tsx',
@@ -42,6 +61,8 @@ const COMPONENT_FILES = [
   'purchase-orders/BulkPOImport.tsx',
   'quotes/BulkQuoteImport.tsx',
   'receiving/QuickReceivePanel.tsx',
+  'receiving/ReceivingHubPanel.tsx',
+  'receiving/ReceivingLogPanel.tsx',
   'reports/LogbookReport.tsx',
 ];
 const COMPONENTS_DIR = join(__dirname, '..', 'components');
@@ -57,9 +78,11 @@ function findCallSites(): CallSite[] {
     // Comments are blanked (same length, newlines kept, so lines still match)
     // so a comment mentioning the count cannot satisfy the check. Blanking only
     // removes text, so a misread string can only make a site fail, never pass.
+    // One pass, so whichever comment opens first wins: a `/*` inside a `//`
+    // comment must not blank everything up to the next `*/` (it once hid
+    // UnbilledApplicationsPanel's reads; the "every file is scanned" test caught it).
     const source = readFileSync(path, 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-      .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
+      .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (m) => m.replace(/[^\n]/g, ' '));
     const starts = [...source.matchAll(CALL_PATTERN)].map((m) => m.index ?? 0);
     starts.forEach((start, i) => {
       const nextCall = i + 1 < starts.length ? starts[i + 1] : source.length;
@@ -91,7 +114,7 @@ describe('paged list reads request the exact row count', () => {
 
   it("every fetchAllRows / fetchAllRowsForIds call selects with { count: 'exact' }", () => {
     const offenders = sites
-      .filter((site) => !site.callback.includes("count: 'exact'"))
+      .filter((site) => !(site.file in COUNT_EXEMPT) && !site.callback.includes("count: 'exact'"))
       .map((site) => `${site.file}:${site.line}`);
     expect(offenders, `paged reads without { count: 'exact' }:\n${offenders.join('\n')}`).toEqual([]);
   });
@@ -100,7 +123,32 @@ describe('paged list reads request the exact row count', () => {
     const files = new Set(readdirSync(PAGES_DIR));
     for (const file of Object.keys(EXEMPT)) expect(files.has(file), file).toBe(true);
   });
+
+  it('every count exemption still has a read without the count (drop it once fixed)', () => {
+    for (const file of Object.keys(COUNT_EXEMPT)) {
+      expect(sites.some((site) => site.file === file && !site.callback.includes("count: 'exact'")), file).toBe(true);
+    }
+  });
+
+  it('every file under src that pages with fetchAllRows is scanned', () => {
+    const scanned = new Set(sites.map((site) => site.file));
+    const missing = sourceFiles(join(__dirname, '..'), 'src')
+      .filter(({ file }) => !/\.test\.tsx?$/.test(file) && file !== 'src/lib/pagedRead.ts' && !(file.replace('src/pages/', '') in EXEMPT))
+      .filter(({ path }) => new RegExp(CALL_PATTERN.source).test(readFileSync(path, 'utf8')))
+      .map(({ file }) => file)
+      .filter((file) => !scanned.has(file));
+    expect(missing, 'add these to SHARED_FILES or COMPONENT_FILES').toEqual([]);
+  });
 });
+
+function sourceFiles(dir: string, rel: string): { file: string; path: string }[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    const file = `${rel}/${entry.name}`;
+    if (entry.isDirectory()) return sourceFiles(path, file);
+    return /\.tsx?$/.test(entry.name) ? [{ file, path }] : [];
+  });
+}
 
 // A paged read that sorts by or selects a column its table does not have is
 // refused by the server (42703), and the screen shows nothing. Component tests
@@ -119,8 +167,11 @@ const COLUMN_CHECK_EXEMPT: Record<string, { sites: number; reason: string }> = {
   'src/components/customers/CustomerContacts.tsx': { sites: 2, reason: 'the table comes from the contactsTable() / interactionsTable() helpers' },
   'src/components/field-invoices/FieldInvoicesUnpostedPanel.tsx': { sites: 1, reason: 'reads the invoices_postable view through the INVOICES_POSTABLE constant; views are not in the registry' },
   'src/components/invoices/FinanceChargePreviewModal.tsx': { sites: 1, reason: RPC },
+  'src/components/receiving/ReceivingLogPanel.tsx': { sites: 1, reason: RPC },
   'src/components/reports/LogbookReport.tsx': { sites: 4, reason: RPC },
   'src/lib/customerStatement.ts': { sites: 1, reason: RPC },
+  'src/lib/fieldsGeojsonCache.ts': { sites: 1, reason: RPC },
+  'src/lib/ordersPage.ts': { sites: 1, reason: 'reads through fetchOrdersPage(), an RPC' },
   'src/pages/ARaging.tsx': { sites: 1, reason: RPC },
   'src/pages/AccountsPayable.tsx': { sites: 1, reason: RPC },
   'src/pages/AccountsReceivable.tsx': { sites: 1, reason: RPC },

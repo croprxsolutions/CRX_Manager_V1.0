@@ -370,8 +370,8 @@ BEGIN
     v_fails := v_fails || ' (G) the second payer is not a split payer for returns;';
   END IF;
 
-  -- B: shares unevenly three ways. Each other payer's line multiplies (quantity x price, Mason 2026-11-06);
-  -- the main customer takes the rest of each line.
+  -- B: shares unevenly three ways. Each other payer pays exactly their percentage of the line, rounded down
+  -- to the cent, on 3.33 of the 10 units (Mason, 2026-11-06: exact cents); the main customer takes the rest.
   PERFORM pg_temp.smk_new_sale('b' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_main, 33.3334);
@@ -385,7 +385,7 @@ BEGIN
           < (SELECT total_amount_cents FROM invoices WHERE delivery_id = v_d AND customer_id = v_payer2)
      OR EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
                  WHERE i.delivery_id = v_d AND i.customer_id = v_payer2
-                   AND (ii.extended_cents <> round(ii.quantity * ii.unit_price_cents)
+                   AND (ii.extended_cents <> floor((SELECT total_price * 100 FROM order_items WHERE id = ii.order_item_id) * 33.3333 / 100)
                         OR ii.quantity <> 3.33)) THEN
     v_fails := v_fails || ' (B) three-way shares are wrong;';
   END IF;
@@ -1091,14 +1091,15 @@ BEGIN
         IS DISTINCT FROM (SELECT ROUND(oi.total_price * 100)::bigint FROM order_items oi WHERE oi.id = v_l1) THEN
     v_fails := v_fails || ' (AL) a line past its planned quantity did not split its capped total by percentage;';
   END IF;
-  -- Just past plan, a payer's percentage of the line can beat quantity times price: the payer never pays more than that.
+  -- Just past plan the payer still pays exactly their percentage of the line's cents, rounded down (Mason, 2026-11-06:
+  -- exact cents), even where that tops their quantity times price.
   PERFORM pg_temp.smk_new_sale('ovq' || v_suffix, false);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_payer2, 33.33);
   v_cents := (SELECT ROUND(oi.price_per_unit * 100)::bigint FROM order_items oi WHERE oi.id = v_l1);
   IF (SELECT s.cents FROM _bill_split_line_shares(v_l1, v_cents, 10100) s WHERE s.customer_id = v_payer2)
-     IS DISTINCT FROM ROUND(v_cents * 0.33)::bigint THEN
-    v_fails := v_fails || ' (AL) a payer just past plan paid more than quantity times price;';
+     IS DISTINCT FROM floor(v_cents * 33.33 / 100)::bigint THEN
+    v_fails := v_fails || ' (AL) a payer just past plan did not pay exactly their percentage;';
   END IF;
 
   IF v_fails <> '' THEN

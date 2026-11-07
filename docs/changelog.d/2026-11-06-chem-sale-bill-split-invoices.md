@@ -4,10 +4,9 @@
   `docs/reference/migrations.d/`). Until now the Bill Split card saved percentages nothing read.
   When a delivery on a sale with other payers completes, it now drafts one invoice per payer:
   one sale number with a suffix (CS-2026-0412-1, -2), in one split group that posts together.
-- Each line shares its delivered quantity. Every other payer gets their share of the quantity rounded
-  down to hundredths and pays that quantity times the price, so their line multiplies; the main customer
-  gets the rest, so each line adds up exact to the cent (10 units at $10 three ways: two payers pay
-  3.33 x $10 = $33.30, the main customer $33.40). A card under 100% leaves the rest with the main customer.
+- Each line shares its delivered cents and quantity. Every other payer gets their share rounded
+  down and the main customer gets the rest, so each line adds up exactly ($100.00 three ways is
+  33.34 / 33.33 / 33.33). A card under 100% leaves the rest with the main customer.
 - New table `order_item_shares`: a line's own shares override the card for that line, such as a
   farmer paying 100% of one product and the landlord 0%. No screen for it yet.
 - The card and the line shares lock at the first completed delivery, and voiding it reopens them. A row can't move to another sale, and a card can't total over exactly 100%.
@@ -36,6 +35,5 @@ An invoice keeps the type it was created with; a draft can still switch between 
 The Delivery and Integrity screens offer Create Invoice on a Bill Split sale left to bill after a field split was removed, and the sale keeps its billing flag until every delivery is billed.
 A payer share under 0.01 of a unit that is worth cents now refuses the split, so every billed quantity can be returned (Mason, 2026-11-06, option B). Payer invoices from Create Invoice take the delivery date, and invoices are locked briefly while the change is applied.
 A Bill Split bills only delivered quantities in whole hundredths (2.12, not 2.125), so every payer, the main customer too, can return a share in full (Mason, 2026-11-06, an independent Opus review agreed). A finer delivery still completes, the office is told, and Fix Delivery corrects it before Create Invoice.
-Each other payer's line now multiplies: quantity times unit price is what they are charged, and the main customer takes the few cents left over (Mason, 2026-11-06, B). If the other payers' quantities would ever cost more than the line, the split is refused (BILL_SPLIT_ROUNDING). A save retried after a lost response still answers once the group posts.
 An unposted Bill Split invoice can be corrected like a draft: header edits and charges save, its product lines stay locked, and the group posts again.
-A line delivered past its planned quantity splits its capped total by percentage, so a payer doesn't pay full rate for the main customer's free units.
+Each other payer pays exactly their percentage of each line again, rounded down to the cent, on their quantity in whole hundredths; the main customer takes the rest, at most a cent per line (Mason, 2026-11-06, restoring exact cents over quantity times price). A line delivered past its planned quantity splits its capped total by percentage the same way. A save retried after a lost response still answers once the group posts.

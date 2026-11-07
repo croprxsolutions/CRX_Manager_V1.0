@@ -34,7 +34,8 @@
 --      refused with "Reload the job", so a stale screen never silently swaps in the product's number;
 --      a replay of a stored save (same idempotency key) goes through. The screen sends an "id" key on
 --      every line (null for a new one); a save of a sprayed or finished job with a line lacking that
---      key (an older cached build, which could not keep the numbers) is refused with "Reload the app".
+--      key (an older cached build, which could not keep the numbers), or with an id that is not a
+--      line id at all, is refused with "Reload the app".
 --   5. No printout reads the new column yet: every printout keeps reading the product's number, so
 --      they all agree. A follow-up change moves the sent proof, applicator sheet, chemical
 --      application report and WPS notice onto the line's number together.
@@ -247,8 +248,12 @@ BEGIN
   IF NOT p_replay AND NOT public._job_line_epa_follows_product(p_job_id) THEN
     -- The job screen sends an "id" key on every line (null for a new line); an older cached build
     -- sends none, so it could not keep a sprayed job's numbers. Refuse it until the app reloads.
+    -- A non-null id that is not a line id at all is no screen's: refuse it the same way.
     IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_chemicals) e
-                WHERE jsonb_typeof(e.value) = 'object' AND NOT (e.value ? 'id')) THEN
+                WHERE jsonb_typeof(e.value) = 'object'
+                  AND (NOT (e.value ? 'id')
+                       OR (jsonb_typeof(e.value->'id') <> 'null'
+                           AND (jsonb_typeof(e.value->'id') <> 'string' OR NOT ((e.value->>'id') ~ v_uuid))))) THEN
       RAISE EXCEPTION 'This screen is out of date. Reload the app, then save this job again.'
         USING ERRCODE = '40001';
     END IF;

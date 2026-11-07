@@ -372,6 +372,9 @@ async function main() {
   const { id: _noId, ...oldScreenLine } = chem(PA, 0);
   refused(ADMIN, saveSql(sprayed, [oldScreenLine]), /screen is out of date/);
   assert.equal(lines(sprayed), before, 'a refused old-screen save changes nothing');
+  refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: 'not-a-line-id' })]), /screen is out of date/);
+  refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: 7 })]), /screen is out of date/);
+  assert.equal(lines(sprayed), before, 'a malformed line id changes nothing');
   ids = lineIds(JOTHER);
   refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: ids[0] })]), /saved somewhere else since you opened it/);
   const staleTab = lineIds(sprayed);

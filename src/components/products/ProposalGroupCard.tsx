@@ -241,7 +241,7 @@ export default function ProposalGroupCard(props: ProposalGroupCardProps) {
             className="mt-1"
             aria-label={`Select ${group.suggested_name} for batch approval`}
             checked={selected}
-            disabled={!ready}
+            disabled={!ready || props.busy}
             title={ready ? undefined : 'Open the group and answer its questions first'}
             onChange={(e) => onSelectedChange(e.target.checked)}
           />

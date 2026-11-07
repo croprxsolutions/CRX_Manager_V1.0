@@ -52,8 +52,8 @@ export default function GroupApprovalReviewModal({ review, error, saving, onClos
     >
       <div className="space-y-4 text-sm">
         <p className="text-gray-700">
-          Each group becomes one parent product. Every size keeps its ID, stock, prices and history; only the values
-          below are copied onto the sizes.
+          Each group becomes one parent product. Every size keeps its ID, stock and history; only the values below
+          are copied onto the sizes, and a per-acre price changes only where listed.
         </p>
         {review.entries.map((entry) => {
           const group = review.groups.find((g) => g.id === entry.group_id);

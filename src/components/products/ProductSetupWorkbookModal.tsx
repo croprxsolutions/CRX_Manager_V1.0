@@ -371,6 +371,8 @@ export default function ProductSetupWorkbookModal({ open, profileId, onClose, on
       toast('success', `Saved rates for ${saved.changed_count} ${saved.changed_count === 1 ? 'parent' : 'parents'}`);
     } catch (error) {
       toast('error', sanitizeError(error));
+      // A refused save is usually a stale preview: drop it so the next try previews the current sizes.
+      setParentRatesState({ rows: parentRates.rows, previews: null });
     } finally {
       setBusy(false);
     }

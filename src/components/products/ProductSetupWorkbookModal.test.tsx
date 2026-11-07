@@ -85,6 +85,19 @@ describe('ProductSetupWorkbookModal parent rates', () => {
     expect(await screen.findByText('Saved rates for 1 parent.')).toBeInTheDocument();
   });
 
+  it('drops the old preview after a refused save, so the next try previews the current sizes', async () => {
+    H.setParentRates.mockRejectedValueOnce(new Error('PRODUCT_PARENT_STALE: a size changed since the preview'));
+    await upload(await setupMembershipHash([SIZE], [parent]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Parent Rates tab' }));
+    await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'PRODUCT_PARENT_STALE: a size changed since the preview'));
+    expect(screen.getByRole('button', { name: 'Confirm Parent Rates tab' })).toBeDisabled();
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview parent rates again' }));
+    await waitFor(() => expect(H.previewParentRates).toHaveBeenCalledTimes(2));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Parent Rates tab' }));
+    await waitFor(() => expect(H.setParentRates).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Saved rates for 1 parent.')).toBeInTheDocument();
+  });
+
   it('blocks the save when the parent changed since the download', async () => {
     H.previewParentRates.mockResolvedValue({ ...preview, parent_version: 8 });
     await upload(await setupMembershipHash([SIZE], [parent]));

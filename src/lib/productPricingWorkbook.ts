@@ -1,9 +1,17 @@
 import type { Cell, CellValue, Worksheet } from 'exceljs';
 import type {
+  PricingPreviewResult,
   PricingWorkbookExport,
   PricingWorkbookExportRow,
   PricingWorksheetPreviewRow,
 } from './productPricing';
+
+/** Grouped size id -> its parent's name (PAR-1). Use timing is set on the parent for these sizes. */
+export type GroupedParentNames = ReadonlyMap<string, string>;
+
+export interface PricingWorkbookOptions {
+  groupedParents?: GroupedParentNames;
+}
 
 export const PRICING_WORKBOOK_SHEET = 'Pricing Update';
 export const PRICING_WORKBOOK_MANIFEST_SHEET = '_crx_manifest';
@@ -526,6 +534,7 @@ function stylePricingWorksheet(worksheet: Worksheet, rowCount: number): void {
 
 export async function generateProductPricingWorkbook(
   pricingExport: PricingWorkbookExport,
+  options: PricingWorkbookOptions = {},
 ): Promise<Blob> {
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
@@ -543,7 +552,14 @@ export async function generateProductPricingWorkbook(
   const useTimingColumn = PRICING_WORKBOOK_HEADERS.indexOf('use_timing') + 1;
   for (let row = 2; row <= pricingExport.rows.length + 1; row += 1) {
     const cell = worksheet.getCell(row, useTimingColumn);
-    cell.note = 'For several use timings, separate labels with a semicolon (;). Use the exact labels; a misspelled label cancels the whole upload at apply.';
+    const parentName = options.groupedParents?.get(pricingExport.rows[row - 2].product_id);
+    if (parentName) {
+      cell.note = `Set on parent ${parentName}; change it on the product page's Parent panel`;
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: READ_ONLY_FILL } };
+      cell.protection = { locked: true };
+    } else {
+      cell.note = 'For several use timings, separate labels with a semicolon (;). Use the exact labels; a misspelled label cancels the whole upload at apply.';
+    }
   }
   // This is a usability guard only. The preview RPC revalidates every protected
   // value against its retained server manifest; Excel protection is not security.
@@ -752,4 +768,22 @@ export async function parseProductPricingWorkbook(
     rowCount,
     rows,
   };
+}
+
+/**
+ * A grouped size's use timing belongs to its parent (PAR-1); the database refuses a direct change too.
+ * Returns the refusal naming each grouped product and its parent, or null when none was edited.
+ */
+export function groupedUseTimingRefusal(
+  preview: PricingPreviewResult,
+  groupedParents: GroupedParentNames,
+): string | null {
+  const named = preview.rows.flatMap((row) => {
+    const parentName = row.product_id ? groupedParents.get(row.product_id) : undefined;
+    if (!parentName || row.effect?.product_info_changes?.use_timing === undefined) return [];
+    return [`${row.effect.product_name ?? row.product_id} (parent "${parentName}")`];
+  });
+  if (named.length === 0) return null;
+  return `Nothing was saved. Use Timing is set on the parent: ${named.slice(0, 20).join(', ')}`
+    + `${named.length > 20 ? ` and ${named.length - 20} more` : ''}. Change it on the product page's Parent panel, then download a new workbook.`;
 }

@@ -182,16 +182,21 @@ const HISTORY_PAGE = 25;
 function WeightHistory({ subject, stockUnit, reloadToken }: { subject: WeightSubject; stockUnit: string | null | undefined; reloadToken: number }) {
   const [rows, setRows] = useState<ProductWeightEvent[] | null | 'failed'>(null);
   const [limit, setLimit] = useState(HISTORY_PAGE);
+  const [olderFailed, setOlderFailed] = useState(false);
+  const [reload, setReload] = useState(0);
   // A new product starts empty at the first page; "Show older" keeps the list open while it loads more.
   useEffect(() => { setRows(null); setLimit(HISTORY_PAGE); }, [subject.kind, subject.subject_id]);
   useEffect(() => {
     let cancelled = false;
+    setOlderFailed(false);
     fetchWeightEvents(subject, limit).then((data) => { if (!cancelled) setRows(data); }).catch((error: unknown) => {
       Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), { extra: { context: 'product_weight_events' } });
-      if (!cancelled) setRows('failed');
+      // A failed "Show older" keeps the rows already shown; only a failed first page replaces them.
+      if (!cancelled) setRows((shown) => (Array.isArray(shown) && limit > HISTORY_PAGE ? shown : 'failed'));
+      if (!cancelled) setOlderFailed(limit > HISTORY_PAGE);
     });
     return () => { cancelled = true; };
-  }, [subject.kind, subject.subject_id, reloadToken, limit]); // eslint-disable-line react-hooks/exhaustive-deps -- the subject's identity, not its object
+  }, [subject.kind, subject.subject_id, reloadToken, limit, reload]); // eslint-disable-line react-hooks/exhaustive-deps -- the subject's identity, not its object
   if (rows === 'failed') return <p className="text-sm text-secondary">Weight history could not be loaded.</p>;
   if (rows === null || rows.length === 0) return null;
   return (
@@ -213,8 +218,10 @@ function WeightHistory({ subject, stockUnit, reloadToken }: { subject: WeightSub
           );
         })}
       </ul>
-      {rows.length >= limit && (
-        <Button size="sm" variant="secondary" showChevron={false} onClick={() => setLimit(limit + HISTORY_PAGE)}>Show older</Button>
+      {olderFailed && <p className="text-secondary">Older history could not be loaded.</p>}
+      {(rows.length >= limit || olderFailed) && (
+        <Button size="sm" variant="secondary" showChevron={false} onClick={() => (olderFailed ? setReload((count) => count + 1) : setLimit(limit + HISTORY_PAGE))}>
+          {olderFailed ? 'Try again' : 'Show older'}</Button>
       )}
     </details>
   );

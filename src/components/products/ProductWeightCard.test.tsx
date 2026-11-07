@@ -113,6 +113,19 @@ describe('ProductWeightCard', () => {
     await waitFor(() => expect(mocks.fetchWeightEvents).toHaveBeenLastCalledWith(densitySubject, 50));
   });
 
+  it('keeps the shown history when Show older fails, and offers to try again', async () => {
+    const event = (id: number) => ({ id, event_type: 'approved', value_id: null, before_value: null, after_value: null, reason: null, evidence: null,
+      actor_kind: 'user', changed_by_name: 'Pat Admin', changed_at: '2026-11-07T15:00:00Z' });
+    mocks.fetchWeightEvents.mockResolvedValueOnce(Array.from({ length: 25 }, (_, index) => event(index))).mockRejectedValueOnce(new Error('offline'));
+    show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation, weight: { kind: 'none', none_reason: 'no_approved_weight' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Show older' }));
+    expect(await screen.findByText('Older history could not be loaded.')).toBeInTheDocument();
+    expect(screen.getAllByText('Pat Admin')).toHaveLength(25);
+    mocks.fetchWeightEvents.mockResolvedValueOnce(Array.from({ length: 30 }, (_, index) => event(index)));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getAllByText('Pat Admin')).toHaveLength(30));
+  });
+
   it('turns a lower-trust entry into a correction that needs a reason and evidence', async () => {
     show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation,
       weight: { kind: 'density', lb_per_unit: 9.5972, per_unit: 'Gal', source: 'sds', reviewed_by_name: 'Pat', reviewed_at: 't' } });

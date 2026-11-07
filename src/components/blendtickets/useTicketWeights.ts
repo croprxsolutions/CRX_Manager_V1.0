@@ -58,7 +58,9 @@ export function useTicketWeights({ ticketId, pageRead, lines, headerTotal, heade
   const productKey = useMemo(() => [...new Set(lines.map((line) => line.product_id).filter(Boolean))].sort().join(','), [lines]);
   const current = useTaggedRead<ProductWeightsResult>(productKey, true,
     () => fetchProductWeights(productKey ? productKey.split(',') : []), 'blend_ticket_current_weights');
-  const savedRead = useTaggedRead<BlendTicketWeights>(pageRead, Boolean(ticketId && pageRead),
+  // Tagged by ticket as well as page read, so another ticket's weights never show while this one loads.
+  const savedTag = useMemo(() => ({ ticketId, pageRead }), [ticketId, pageRead]);
+  const savedRead = useTaggedRead<BlendTicketWeights>(savedTag, Boolean(ticketId && pageRead),
     () => fetchBlendTicketWeights(ticketId as string), 'blend_ticket_saved_weights');
 
   return useMemo(() => {

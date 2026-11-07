@@ -22,6 +22,23 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Why:** on PR 1524 the App had stopped reviewing after `c5d7113e8`, yet each Sol round still waited 15 minutes for it; and about 6 rounds went into one rounding mechanism before Mason was asked the trade-off, because no one could see the count.
 **What this forbids/implies:** the wait stays when the App reviewed any of the last 3 pushes or the PR has fewer than 3. From round 3 the wrapper points at the AGENTS.md stop rule (same mechanism a 3rd time: stop and ask Mason the trade-off). A pre-commit control-character check was proposed in the same retro and NOT approved.
 
+## 2026-11-06 — Sprayed jobs lock each product's EPA number (lock per product)
+
+**Decision (Mason, 2026-11-06: "Yes, lock per product"):** once a job is sprayed (spray record saved) or finished, every product already on that job keeps the EPA number the job recorded for it, however its line is edited, deleted or re-added; only a product never on the job takes the product's current number (and then keeps it). On a conflict the older number wins. The lock survives a spray record being deleted and re-entered. Migration 20261204120000, PR #1584.
+**Why:** keeping numbers by job-line identity failed three Sol rounds on the same mechanism (save_job deletes and re-writes every line, so a line's identity does not survive a save). Locking by job and product has no such gap.
+**What this forbids/implies:** kept numbers live in `job_product_epa` (insert-only); a job's unlocked products read `products.epa_registration`. Printouts move to the kept numbers in a follow-up PR. A correction made between the physical spray and its record being entered reaches the job.
+
+## 2026-11-06 — A moved spray record makes its new job "Not recorded"
+
+**Decision (Mason, 2026-11-06: "Mark Not recorded"):** when a spray record is moved to a job that was not yet sprayed or finished, that job's products are kept as "Not recorded", never at the product's current number. A job already sprayed keeps its own numbers. Migration 20261204120000, PR #1584.
+**Why:** Sol found a new HIGH in three rounds in a row, each about a lock filled in when the true history is unknown; a moved record proves nothing about which numbers its new job used. The choice was block (refuse the move) vs loss (allow it, record no number); Mason chose loss, so nothing ever prints an invented number.
+**What this forbids/implies:** a job or product ID that has kept numbers can never be reused (both refused with `JOB_EPA_HISTORY_ID` / `PRODUCT_EPA_HISTORY_ID`).
+
+## 2026-11-06 — Signed-in users cannot write job chemical lines directly
+
+**Decision:** Mason approved removing `authenticated` and `anon` INSERT, UPDATE, DELETE and TRUNCATE on `job_chemicals` (Mason, 2026-11-06: "Yes, remove it"; migration 20261204120000, PR #1584). Reads are unchanged.
+**Why:** job lines are the input to a sprayed job's kept EPA numbers; the app never wrote the table directly (every write goes through save_job and the other definer-rights job functions), so direct writes were only a way around the server's checks.
+**What this forbids/implies:** job lines are written only by server functions; a screen or script that needs a new kind of line write gets an RPC, not a direct grant. Re-granting direct writes is a permission change that needs Mason.
 ## 2026-11-06 — Duplicate ingredients are replaced, never linked (DM-1)
 
 **Decision (Mason, 2026-11-06: "Yes, use replace"):** when two active-ingredient entries turn out to be the same chemical, an admin swaps the duplicate out on each product through the normal reviewed chemistry correction, then retires the unused entry. No merge, alias or "merged into" link exists.

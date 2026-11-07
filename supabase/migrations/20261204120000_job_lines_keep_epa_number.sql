@@ -22,7 +22,8 @@
 --   2. job_product_epa: one row per (job, product) of a sprayed or finished job, with the EPA number
 --      the job keeps for it (NULL is a kept value too). Rows are only ever inserted ON CONFLICT DO
 --      NOTHING, so the first number written (the older one) wins and is never replaced. Neither table
---      has a foreign key, on purpose: deleting a product or a job never erases a kept number.
+--      has a foreign key, on purpose: deleting a product or a job never erases a kept number; a guard on
+--      jobs refuses a new job taking, or a job changing to or from, an ID that has history.
 --      from_backfill true means "Not recorded" (NULL number): every product of a job sprayed or
 --      finished before this file, including one added to it later (it may have been on the job then
 --      and removed; no history exists). Never the product's current number, which cannot prove what
@@ -67,7 +68,7 @@
 --   load_recipe_into_job (no app access) deletes and re-writes lines before locking its job:
 --   two concurrent runs on one line-less job could deadlock; Postgres rolls one back whole.
 --
--- ROLLBACK (its own reviewed migration): drop the three triggers and four functions below and keep both
+-- ROLLBACK (its own reviewed migration): drop the four triggers and five functions below and keep both
 --   tables as history. While rolled back nothing is recorded: a new spray, a product added to a marked
 --   job, and a product edited or removed meanwhile are lost to the record (roll forward then records them
 --   as "Not recorded", like section 4). Re-granting direct writes on job_chemicals (the INSERT and UPDATE
@@ -92,7 +93,8 @@ BEGIN
   END IF;
   IF to_regclass('public.job_epa_sprayed') IS NOT NULL OR to_regclass('public.job_product_epa') IS NOT NULL
      OR to_regprocedure('public._epa_norm(text)') IS NOT NULL
-     OR to_regprocedure('public._job_epa_freeze(uuid)') IS NOT NULL THEN
+     OR to_regprocedure('public._job_epa_freeze(uuid)') IS NOT NULL
+     OR to_regprocedure('public._trg_job_epa_id_guard()') IS NOT NULL THEN
     RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_PREFLIGHT: a table or function this file creates already exists';
   END IF;
 END
@@ -249,6 +251,27 @@ REVOKE ALL ON FUNCTION public._trg_job_line_epa_lock() FROM PUBLIC, anon, authen
 CREATE TRIGGER trg_job_line_epa_lock AFTER INSERT OR UPDATE OF job_id, product_id ON public.job_chemicals
 FOR EACH ROW EXECUTE FUNCTION public._trg_job_line_epa_lock();
 
+-- History outlives a deleted job (no foreign key), so a job ID that has EPA history can never be taken by
+-- a new job, and no job with history changes its ID: either would attach one job's kept numbers to another.
+CREATE FUNCTION public._trg_job_epa_id_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.id IS NOT DISTINCT FROM OLD.id THEN
+    RETURN NEW;
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.job_epa_sprayed WHERE job_id = NEW.id)
+     OR (TG_OP = 'UPDATE' AND EXISTS (SELECT 1 FROM public.job_epa_sprayed WHERE job_id = OLD.id)) THEN
+    RAISE EXCEPTION 'JOB_EPA_HISTORY_ID: this job ID carries kept EPA numbers; use a new job ID' USING ERRCODE = '23505';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public._trg_job_epa_id_guard() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._trg_job_epa_id_guard() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER trg_job_epa_id_guard BEFORE INSERT OR UPDATE OF id ON public.jobs
+FOR EACH ROW EXECUTE FUNCTION public._trg_job_epa_id_guard();
+
 -- ---------------------------------------------------------------------------------------------
 -- 4. Jobs already sprayed or finished
 -- ---------------------------------------------------------------------------------------------
@@ -300,7 +323,8 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role', 'public']) r(role),
                     unnest(ARRAY['public._job_epa_freeze(uuid)',
-                                 'public._trg_job_epa_freeze()', 'public._trg_job_line_epa_lock()']) f(sig)
+                                 'public._trg_job_epa_freeze()', 'public._trg_job_line_epa_lock()',
+                                 'public._trg_job_epa_id_guard()']) f(sig)
               WHERE has_function_privilege(r.role, f.sig, 'EXECUTE'))
      OR has_function_privilege('anon', 'public._epa_norm(text)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public._epa_norm(text)', 'EXECUTE') THEN

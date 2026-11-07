@@ -468,7 +468,20 @@ async function main() {
   assert.equal(locks(born), 'F=600-2', 'deleting a job never erases its kept numbers');
   assert.equal(marked(born), '1');
   assert.equal(ok(ADMIN, `SELECT count(*) FROM public.job_product_epa WHERE job_id = '${born}';`), '0', 'a deleted job shows to no one in the app');
-  console.log('[prover] kept numbers stay visible with every line removed, and survive deleting the job');
+  // A deleted job's ID can never be taken by a new job (its history would attach to it), by an admin
+  // through the API or below it; and a job with history never changes its ID.
+  refused(ADMIN, `INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, created_by)
+    VALUES ('${born}', 'JK-REUSE', '${CUST}', 'scheduled', current_date, auth.uid());`, /JOB_EPA_HISTORY_ID/);
+  let reuse = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, created_by)
+    VALUES ('${born}', 'JK-REUSE', '${CUST}', 'scheduled', current_date, '${ADMIN}');` });
+  assert.notEqual(reuse.status, 0);
+  assert.match(`${reuse.stdout}
+${reuse.stderr}`, /JOB_EPA_HISTORY_ID/);
+  reuse = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `UPDATE public.jobs SET id = gen_random_uuid() WHERE id = '${JSPRAYED}';` });
+  assert.notEqual(reuse.status, 0);
+  assert.match(`${reuse.stdout}
+${reuse.stderr}`, /JOB_EPA_HISTORY_ID/);
+  console.log('[prover] kept numbers stay visible with every line removed, survive deleting the job, and its ID can never be reused');
 
   // A blank or missing number is kept as blank; spaces count as blank.
   legacyEpa(PG, "'   '");

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToteFillRow } from '../../lib/toteFill';
 
 const { mockList, mockReverse, mockToast } = vi.hoisted(() => ({ mockList: vi.fn(), mockReverse: vi.fn(), mockToast: vi.fn() }));
-vi.mock('../../lib/toteFill', () => ({ listToteFills: mockList, reverseToteFill: mockReverse, fillToteFromBulk: vi.fn(), previewToteFill: vi.fn() }));
+vi.mock('../../lib/toteFill', () => ({ listToteFills: mockList, reverseToteFill: mockReverse, fillToteFromBulk: vi.fn(), previewToteFill: vi.fn(), TOTE_FILL_LOCATION: 'Main Warehouse' }));
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import ToteFillCard from './ToteFillCard';

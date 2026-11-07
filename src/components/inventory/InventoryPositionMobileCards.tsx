@@ -1,5 +1,6 @@
 import { ArrowDownToLine, FileText, PaintBucket, Pencil, Trash2 } from 'lucide-react';
 import Badge from '../ui/Badge';
+import { TOTE_FILL_LOCATION } from '../../lib/toteFill';
 
 export type MobileInventoryPosition = {
   id: string;
@@ -108,7 +109,7 @@ export default function InventoryPositionMobileCards({
 
               {isAdmin && (
                 <div className="flex items-center gap-1">
-                  {onFillTote && fillableToteIds?.has(row.product_id) && (
+                  {onFillTote && fillableToteIds?.has(row.product_id) && row.location === TOTE_FILL_LOCATION && (
                     <button
                       type="button"
                       onClick={() => onFillTote(row)}

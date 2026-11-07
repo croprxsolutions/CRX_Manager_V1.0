@@ -8,7 +8,7 @@ import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
 import { isDefinitiveRpcRejection } from '../../lib/idempotency';
 import { formatCents } from '../../lib/money';
-import { fillToteFromBulk, previewToteFill, type ToteFillPreview } from '../../lib/toteFill';
+import { fillToteFromBulk, previewToteFill, TOTE_FILL_LOCATION, type ToteFillPreview } from '../../lib/toteFill';
 
 const qty = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 4 });
 
@@ -44,7 +44,7 @@ function PreviewDetails({ shown }: { shown: ToteFillPreview }) {
         </tbody>
       </table>
       <p className="text-sm text-secondary">
-        Takes {qty(shown.bulk_quantity)} {shown.bulk_unit} of Bulk ({qty(shown.gallons)} gal) for {shown.totes} × {qty(shown.tote_size)} {shown.tote_size_unit} tote{shown.totes === 1 ? '' : 's'}.
+        Takes {qty(shown.bulk_quantity)} {shown.bulk_unit} of Bulk ({qty(shown.gallons)} gal) for {shown.totes} × {qty(shown.tote_size)} {shown.tote_size_unit} tote{shown.totes === 1 ? '' : 's'}, at {TOTE_FILL_LOCATION}.
       </p>
       {shown.shortfall > 0 && (
         <div className="flex gap-2 rounded border-l-4 border-amber-500 bg-amber-50 p-3 text-sm text-amber-800" role="alert">

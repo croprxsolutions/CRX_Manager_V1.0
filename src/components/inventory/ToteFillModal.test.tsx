@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToteFillPreview } from '../../lib/toteFill';
 
 const { mockFill, mockPreview, mockToast } = vi.hoisted(() => ({ mockFill: vi.fn(), mockPreview: vi.fn(), mockToast: vi.fn() }));
-vi.mock('../../lib/toteFill', () => ({ fillToteFromBulk: mockFill, previewToteFill: mockPreview }));
+vi.mock('../../lib/toteFill', () => ({ fillToteFromBulk: mockFill, previewToteFill: mockPreview, TOTE_FILL_LOCATION: 'Main Warehouse' }));
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import ToteFillModal from './ToteFillModal';

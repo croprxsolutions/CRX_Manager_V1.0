@@ -70,6 +70,9 @@ export async function reverseToteFill(fillId: string, reason: string, key: strin
   assertRpcResult(data, 'reverse_tote_fill');
 }
 
+/** The only location a tote fill reads and changes (fill_tote_from_bulk, 20261117130000). */
+export const TOTE_FILL_LOCATION = 'Main Warehouse';
+
 /** Tote sizes that have a Bulk fill source. The database still refuses any that may not be filled now. */
 export async function listFillableToteIds(): Promise<Set<string>> {
   // product_id is this table's primary key (it has no id column).

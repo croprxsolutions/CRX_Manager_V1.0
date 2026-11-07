@@ -32,7 +32,7 @@ import TransactionLedgerModal from '../components/inventory/TransactionLedgerMod
 import BatchAdjustModal from '../components/inventory/BatchAdjustModal';
 import InventoryPositionMobileCards from '../components/inventory/InventoryPositionMobileCards';
 import ToteFillModal from '../components/inventory/ToteFillModal';
-import { listFillableToteIds } from '../lib/toteFill';
+import { listFillableToteIds, TOTE_FILL_LOCATION } from '../lib/toteFill';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import ReasonModal from '../components/ui/ReasonModal';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
@@ -1430,7 +1430,7 @@ export default function InventoryPage() {
             header: 'Actions',
             render: (row: InventoryRow) => (
               <div className="flex gap-1">
-                {isAdmin && fillableToteIds.has(row.product_id) && (
+                {isAdmin && fillableToteIds.has(row.product_id) && row.location === TOTE_FILL_LOCATION && (
                   <button
                     onClick={(e) => { e.stopPropagation(); setFillTote({ productId: row.product_id, name: row.product_name }); }}
                     className="p-1.5 rounded hover:bg-gray-100 text-secondary"

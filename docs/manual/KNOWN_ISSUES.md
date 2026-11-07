@@ -611,15 +611,15 @@ void (`ORDER_VOIDED_DELIVERY_LOCKED`); nothing moves. Live 2026-11-04: 0 voided 
 voided orders. Proof: as KI-101.
 
 ### KI-105 — A quote's price tier is not checked against the customer's assigned tier
-**LOW today, MUST before the first regular rep · PARKED 2026-11-05 · quotes/pricing · To-Do 1.6**
-Quote Builder lets any tier be picked, so a quote can be priced at a tier other than the customer's assigned one
-with no warning. A screen check (a note with "Use Tier N" and a "Quote at Tier M anyway" tick box that Save
-needs) is built on branch `claude/quote-tier-credit-status` and parked unmerged (Mason, 2026-11-05: screen only,
-then parked until the database rule exists). Only office staff and admins quote today. Before the first regular
-rep gets an account: the database must refuse a different tier from reps (admins may override). When it resumes,
-also fix Sol's two MED findings on that branch: (1) the customer's assigned tier is read once, so an admin
-changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
-quote changes the tier label without repricing its locked lines.
+**LOW · FIXED 2026-11-07 (PR #KI105PR, screens only, no migration) · quotes/pricing · To-Do 1.6**
+Quote Builder used to let any tier be picked with no warning. Now, when a quote's tier differs from the
+customer's assigned tier, the screen shows a note with "Use Tier N" and a "Quote at Tier M anyway" tick box, and
+Save is refused until one is chosen, for every role. Anyone may override the tier, so the database does not
+refuse a different tier (Mason, 2026-11-05; `DECISION_LOG.md`). Save re-reads the customer's assigned tier, so an
+admin changing it while a quote is open is caught; a tick applies to one quote, customer and pair of tiers.
+"Use Tier N" on a sent quote moves each line without a negotiated price to today's Tier N price (a higher price
+still needs "Grower agreed"); changing the tier menu on a sent quote still keeps its sent prices, as before.
+The tick is not stored: re-saving a quote kept at another tier needs it again after the page is reopened.
 
 ## Database and release process
 

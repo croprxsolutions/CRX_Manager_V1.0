@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-05 — Anyone may quote at a tier other than the customer's; the check stays on the screen (KI-105, To-Do 1.6)
+
+**Decision:** anyone, reps included, may override a customer's assigned price tier on a quote. Quote Builder warns and needs "Use Tier N" or the "Quote at Tier M anyway" tick before Save, for every role; the database never refuses a different tier (Mason, 2026-11-05). Supersedes the 2026-11-05 entry that parked the screen check until a rep-only database rule existed.
+**Why:** the tier is a pricing judgment the person quoting may need to make; the screen check makes it deliberate.
+**What this forbids/implies:** don't build a database refusal of a different tier for reps, and don't describe the screen check as a money invariant.
+
 ## 2026-11-06 — Sol skips the wait for an idle Codex App, and counts its rounds
 
 **Decision (Mason, PR 1524 retro: "do item 1 and 2"):** the Sol pre-flight no longer waits up to 15 minutes for the Codex GitHub App when the App reviewed none of the PR's last 3 pushes, and every full Sol run prints "Sol round N on PR #n".

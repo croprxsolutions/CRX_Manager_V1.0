@@ -29,7 +29,12 @@ import Card, { CardHeader } from '../components/ui/Card';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
-import { QuoteCreditStatus } from '../components/quotes/QuoteCustomerChecks';
+import { QuoteCreditStatus, TierMismatchNote, readAssignedTier } from '../components/quotes/QuoteCustomerChecks';
+
+// Ties a "quote at this tier anyway" tick to one quote, customer and pair of tiers, so opening another
+// quote, or the customer's assigned tier changing, never inherits it.
+const tierChoiceKey = (quoteId: string | null | undefined, customerId: string, tier: number, assignedTier: number) =>
+  `${quoteId ?? 'new'}:${customerId}:${tier}:${assignedTier}`;
 import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult } from '../components/customers/CustomerSearchPicker';
 import FieldSearchPicker, { FIELD_SEARCH_SELECT, type FieldSearchResult } from '../components/fields/FieldSearchPicker';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
@@ -485,6 +490,8 @@ export default function QuoteBuilder() {
   // Whether a customer was picked since the open quote loaded (picking one and back still counts).
   const customerPickedSinceLoadRef = useRef(false);
   const [tier, setTier] = useState(1);
+  // A tier other than the customer's assigned one is saved only once chosen on purpose (KI-105).
+  const [tierChoice, setTierChoice] = useState('');
   // The expiry date the rep picked; null = season end (Mason 2026-10-26/27). The database
   // applies it at each send (20261029100000).
   const [chosenExpiryDate, setChosenExpiryDate] = useState<string | null>(null);
@@ -1610,6 +1617,9 @@ export default function QuoteBuilder() {
   }, [id, fetchQuote, fetchReferenceData, isEditing]);
 
   const selectedCustomer = customerRow && customerRow.id === customerId ? customerRow : undefined;
+  const assignedTier = selectedCustomer?.assigned_tier ?? null;
+  const tierMismatch = assignedTier != null && tier !== assignedTier;
+  const tierChosen = tierMismatch && tierChoice === tierChoiceKey(id, customerId, tier, assignedTier);
 
   // Saved sections name their field by id only; read those fields by id (no active filter: it is
   // the saved record) for their names. One that fails to load or no longer exists blocks saving
@@ -1624,6 +1634,31 @@ export default function QuoteBuilder() {
   // Repricing lines before products and unit conversions load would convert every unit at a
   // factor of 1, so a tier change waits for them. With no lines there is nothing to reprice.
   const repriceBlocked = !referenceDataReady && sections.some((sec) => sec.items.length > 0);
+
+  // `toAssigned` is "Use Tier N" from the tier note: on a sent quote it also moves each line without a
+  // negotiated price to today's Tier N price (as "Use today" does), so the label never changes while the
+  // lines keep another tier's locked price (Sol, KI-105). The tier menu itself keeps sent prices.
+  const applyTier = (t: number, toAssigned = false) => {
+    if (repriceBlocked) {
+      toast('error', 'Products are still loading. Try again in a moment.');
+      return;
+    }
+    setTier(t);
+    if (!toAssigned || !priceLocked) {
+      recalcAllForTier(t);
+      return;
+    }
+    const repriced = (item: LocalItem) => !!item.product_id && item.price_override == null;
+    // A new choice: send it again even where an earlier one was saved.
+    sections.forEach((sec) => sec.items.forEach((item) => {
+      const saved = repriced(item) ? savedLineIdsRef.current.get(item._key) : undefined;
+      if (saved) saved.todayApplied = false;
+    }));
+    setSections((prev) => prev.map((sec) => ({
+      ...sec,
+      items: sec.items.map((item) => recalcItem(repriced(item) ? { ...item, use_todays_price: true } : item, t)),
+    })));
+  };
 
   const handleCustomerChange = (cust: QuoteCustomer | null): boolean => {
     if (!cust) {
@@ -2260,6 +2295,26 @@ export default function QuoteBuilder() {
         toast('error', 'A booked price went up. Tick "Grower agreed" under that price once the grower has agreed, then save.');
         return null;
       }
+    }
+
+    // KI-105: a tier other than the customer's assigned one needs "Use Tier N" or the tick. The assigned
+    // tier is re-read here, since an admin may have changed it while this quote was open (Sol).
+    let currentAssignedTier: number;
+    try {
+      currentAssignedTier = await readAssignedTier(customerId);
+    } catch (err) {
+      Sentry.captureException(err, { tags: { action: 'quote_tier_check' } });
+      toast('error', "The customer's price tier could not be checked. Try again in a moment.");
+      return null;
+    }
+    if (currentAssignedTier !== selectedCustomer.assigned_tier) {
+      setCustomerRow({ ...selectedCustomer, assigned_tier: currentAssignedTier });
+    }
+    if (tier !== currentAssignedTier && tierChoice !== tierChoiceKey(id, customerId, tier, currentAssignedTier)) {
+      toast('error', customerView
+        ? 'Turn off Customer View and confirm the price tier before saving.'
+        : `This customer is assigned Tier ${currentAssignedTier}. Use Tier ${currentAssignedTier}, or tick "Quote at Tier ${tier} anyway", before saving.`);
+      return null;
     }
 
     // Minted before the payload so the frozen clock can be bound to it. `getKey`
@@ -4909,21 +4964,22 @@ export default function QuoteBuilder() {
             </label>
             <select
               value={tier}
-              onChange={(e) => {
-                if (repriceBlocked) {
-                  toast('error', 'Products are still loading. Try again in a moment.');
-                  return;
-                }
-                const t = parseInt(e.target.value);
-                setTier(t);
-                recalcAllForTier(t);
-              }}
+              onChange={(e) => applyTier(parseInt(e.target.value))}
               className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >
               <option value={1}>Tier 1</option>
               <option value={2}>Tier 2</option>
               <option value={3}>Tier 3</option>
             </select>
+            {!customerView && tierMismatch && (
+              <TierMismatchNote
+                tier={tier}
+                assignedTier={assignedTier}
+                acknowledged={tierChosen}
+                onUseAssigned={() => applyTier(assignedTier, true)}
+                onAcknowledge={(checked) => setTierChoice(checked ? tierChoiceKey(id, customerId, tier, assignedTier) : '')}
+              />
+            )}
           </div>
           <div>
             <label htmlFor="quote-expires" className="block text-sm font-medium text-secondary mb-1">

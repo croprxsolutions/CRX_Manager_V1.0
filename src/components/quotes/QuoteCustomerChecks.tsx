@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import Button from '../ui/Button';
 import { creditExposure, describeCreditStatus } from '../../lib/creditLimitGuard';
 import { Sentry } from '../../lib/sentry';
+import { supabase } from '../../lib/db';
 
 /**
  * The customer's credit status under the quote's customer picker (To-Do 1.8): open balance against
@@ -48,3 +50,39 @@ export function QuoteCreditStatus({ customerId }: { customerId: string }) {
   );
 }
 
+
+interface TierMismatchNoteProps {
+  tier: number;
+  assignedTier: number;
+  acknowledged: boolean;
+  onUseAssigned: () => void;
+  onAcknowledge: (checked: boolean) => void;
+}
+
+/**
+ * Shown when the quote's price tier differs from the customer's assigned tier (To-Do 1.6, KI-105). Saving
+ * needs either switching back or ticking the box, so a different tier is always a deliberate choice.
+ * Anyone may override (Mason, 2026-11-05); the check is on the screen only.
+ */
+export function TierMismatchNote({ tier, assignedTier, acknowledged, onUseAssigned, onAcknowledge }: TierMismatchNoteProps) {
+  return (
+    <div role="alert" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+      <p className="font-medium">This customer is assigned Tier {assignedTier}; this quote uses Tier {tier}.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <Button type="button" size="sm" variant="secondary" onClick={onUseAssigned}>Use Tier {assignedTier}</Button>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={acknowledged} onChange={(e) => onAcknowledge(e.target.checked)} />
+          Quote at Tier {tier} anyway
+        </label>
+      </div>
+    </div>
+  );
+}
+
+/** The customer's assigned tier as stored now; Save re-reads it, since an admin may change it while a quote is open. */
+export async function readAssignedTier(customerId: string): Promise<number> {
+  const { data, error } = await supabase.from('customers').select('assigned_tier').eq('id', customerId).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('Customer not found');
+  return data.assigned_tier;
+}

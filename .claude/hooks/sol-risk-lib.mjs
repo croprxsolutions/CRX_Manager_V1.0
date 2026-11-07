@@ -59,6 +59,8 @@ export const SOL_RISK_MAX_FILES = 250;
 const STATUSES = Object.freeze(["added", "modified", "removed", "renamed", "copied"]);
 const SHA_RE = /^[0-9a-f]{40}$/i;
 
+const isTestPath = (lower) => /(?:^|\/)__tests__\//.test(lower) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(lower);
+
 // null when `name` needs no Sol, otherwise why it does.
 export function solRiskPathProblem(name) {
   if (typeof name !== "string" || !name) return "a changed file has no readable name";
@@ -67,7 +69,8 @@ export function solRiskPathProblem(name) {
     const rule = entry.toLowerCase();
     if (rule.endsWith("/") ? lower.startsWith(rule) : lower === rule) return `${show(name)} is in a path that always needs Sol (${entry})`;
   }
-  if (isMoneyPath(name)) return `${show(name)} is money or inventory code`;
+  // A test or spec is not money code by its name alone (Mason 2026-11-07); listed paths above still cover their tests.
+  if (isMoneyPath(name) && !isTestPath(lower)) return `${show(name)} is money or inventory code`;
   return null;
 }
 

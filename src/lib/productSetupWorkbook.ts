@@ -50,7 +50,7 @@ const SETUP_HEADERS = [
   'container_unit', 'parent_name', ...SETUP_EDITABLE_FIELDS,
 ] as const;
 /** Set on a grouped size's parent, so locked on its Setup row. */
-const PARENT_OWNED_SETUP_FIELDS: readonly SetupField[] = ['category', 'use_timings'];
+const PARENT_OWNED_SETUP_FIELDS: readonly SetupField[] = ['category', 'use_timings', 'epa_registration'];
 const RATES_HEADERS = [
   'product_id', 'row_state', 'product_name', 'sku', 'product_form', 'inventory_unit', 'unit_size',
   'current_tier1_price_per_acre', 'current_tier2_price_per_acre', 'current_tier3_price_per_acre',
@@ -306,7 +306,7 @@ export async function generateSetupWorkbook(
     setup.addRow(SETUP_HEADERS.map((field) => (field === 'parent_name' ? grouped.get(product.product_id) ?? '' : setupCell(product, field, options))));
   }
   await styleSheet(setup, SETUP_HEADERS, exported.rows.length, (name) => (SETUP_EDITABLE_FIELDS as readonly string[]).includes(name));
-  setup.getCell(1, SETUP_HEADERS.indexOf('parent_name') + 1).note = 'For reference: a grouped size takes its category, use timings and rates from this parent.';
+  setup.getCell(1, SETUP_HEADERS.indexOf('parent_name') + 1).note = 'For reference: a grouped size takes its category, use timings, EPA number and rates from this parent.';
   exported.rows.forEach((product, index) => {
     const parentName = grouped.get(product.product_id);
     if (!parentName) return;
@@ -527,6 +527,8 @@ function setupEditRefusal(
 ): string | null {
   // A parent edit since the download also moves the fingerprint; that row is shown as stale instead.
   if (parentName && PARENT_OWNED_SETUP_FIELDS.includes(field) && fingerprintMatches) {
+    // The database refuses a grouped size's EPA change, and the Parent panel does not edit it either.
+    if (field === 'epa_registration') return `${field} is set on parent "${parentName}" and cannot be changed from the workbook`;
     return `${field} is set on parent "${parentName}"; change it on the product page's Parent panel`;
   }
   // Only listed names: an old alias would be rewritten by the database and move the use timings.

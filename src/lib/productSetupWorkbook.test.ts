@@ -224,6 +224,20 @@ describe('setup workbook', () => {
         problem: 'category is set on parent "Atrazine 4L"; change it on the product page\'s Parent panel; use_timings is set on parent "Atrazine 4L"; change it on the product page\'s Parent panel' }]);
     });
 
+    it('locks a grouped row\'s EPA number and refuses an edit to it, so one cell cannot roll back the whole Setup save', async () => {
+      let locked: unknown;
+      const parsed = await roundTrip(exp, (wb) => {
+        locked = cell(wb, 'Setup', 3, 'epa_registration').protection?.locked !== false;
+        cell(wb, 'Setup', 3, 'epa_registration').value = '100-21';
+        cell(wb, 'Setup', 2, 'epa_registration').value = '100-21'; // ungrouped: allowed
+      }, [parent()]);
+      expect(locked).toBe(true);
+      const preview = buildSetupPreview(parsed.setupRows, exp, OPTIONS, CATEGORIES, groupedParentNames([parent()]));
+      expect(preview.changes.map((c) => c.product_name)).toEqual(['Atrazine 4L']);
+      expect(preview.invalid).toEqual([{ product_id: SIZE_B, product_name: 'Atrazine 4L 2.5 gal',
+        problem: 'epa_registration is set on parent "Atrazine 4L" and cannot be changed from the workbook' }]);
+    });
+
     it('reads an edited parent rate back with its downloaded version', async () => {
       const parsed = await roundTrip(exp, (wb) => { cell(wb, 'Parent Rates', 2, 'rate_per_acre').value = '14.5'; }, [parent()]);
       expect(editedParentRateRows(parsed.parentRateRows)).toEqual([{

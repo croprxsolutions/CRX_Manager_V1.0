@@ -384,7 +384,7 @@ can make old splits refuse to save (LOW-MED).
   page uses 0-29 / 30-59 / 60-89 / 90-119 / 120+, so a 30-day-old invoice is "current" on the statement and 30-59 on
   AR Aging. Which ranges both use is Mason's decision (recommended: the AR Aging ones). MED.
 - The live database clock is UTC, so from 6-7 pm Central `CURRENT_DATE` is tomorrow. PR #1579
-  (`20261204100000` and `20261128110000`, local candidates) moves 30 money, compliance and stock functions (period
+  (`20261204100000` and `20261204110000`, local candidates) moves 30 money, compliance and stock functions (period
   checks, commission dates, default quote expiry, AR reminders, license and RUP dates, hold and stock checks, default
   bill, payment and delivery dates) and 13 boards and reports to the Chicago date. The overnight overdue, quote-expiry
   and morning-notice jobs need no change (they run midnight to 6 am Central). Still on the UTC date: `_sync_job_holds`

@@ -8,6 +8,7 @@ import { useToast } from '../ui/Toast';
 import ToteFillModal from './ToteFillModal';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { sanitizeError } from '../../lib/db';
+import { isDefinitiveRpcRejection } from '../../lib/idempotency';
 import { Sentry } from '../../lib/sentry';
 import { listToteFills, reverseToteFill, type ToteFillRow } from '../../lib/toteFill';
 
@@ -66,6 +67,8 @@ export default function ToteFillCard({ toteProductId, toteName, profileId, onSto
       changed();
     } catch (error) {
       toast('error', sanitizeError(error));
+      // The undo may have saved before its answer was lost: reload so the counts and Undo are current.
+      if (!isDefinitiveRpcRejection(error)) { setUndoFill(null); changed(); }
     } finally {
       setUndoing(false);
     }

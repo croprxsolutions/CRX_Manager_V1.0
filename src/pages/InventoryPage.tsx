@@ -274,9 +274,12 @@ export default function InventoryPage() {
     let cancelled = false;
     listFillableToteIds()
       .then((ids) => { if (!cancelled) setFillableToteIds(ids); })
-      .catch((error: unknown) => Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory-fillable-totes' } }));
+      .catch((error: unknown) => {
+        Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory-fillable-totes' } });
+        if (!cancelled) toast('warning', 'Tote Fill buttons could not be loaded. Reload to try again, or fill from the tote product page.');
+      });
     return () => { cancelled = true; };
-  }, [isAdmin]);
+  }, [isAdmin, toast]);
 
   const handleExportCSV = () => {
     exportToCSV(filtered as unknown as Record<string, unknown>[], [

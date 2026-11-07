@@ -100,7 +100,10 @@ describe('weights unavailable or still loading', () => {
       .toEqual([{ level: 'unchecked', message: 'Total not checked: TEST B has a negative amount' }]);
   });
 
-  it('shows no total warning while weights load, and leaves the other checks alone', () => {
-    expect(validateBlendMath(header(100, 'Lb'), [lbLine], { loading: true })).toEqual([]);
+  it('runs the existing checks unchanged while weights load, so a tank overfill still warns', () => {
+    const gal = { ...lbLine, quantity: 200, unit: 'Gal', product_form: 'liquid' };
+    const legacy = validateBlendMath(header(100, 'Gal'), [gal]);
+    expect(legacy.length).toBeGreaterThan(0);
+    expect(validateBlendMath(header(100, 'Gal'), [gal], { loading: true })).toEqual(legacy);
   });
 });

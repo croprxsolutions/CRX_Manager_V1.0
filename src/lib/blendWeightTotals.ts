@@ -125,7 +125,8 @@ interface TotalInput {
 
 /** The ticket total warnings for a DM-2 screen, or null to run the legacy total checks unchanged. */
 export function weightTotalWarnings({ total, rawUnit, legacyUnit, weights, legacyWeightUnits, legacyVolumeUnits }: TotalInput): Warning[] | null {
-  if ('loading' in weights) return [];
+  // While weights load, today's checks run unchanged, so a tank overfill warning is never hidden.
+  if ('loading' in weights) return null;
   const header = (rawUnit ?? '').trim();
   const raw = rawAmountWarnings(total, weights.lines);
   if (header === '') return raw.length > 0 ? raw : null;

@@ -72,6 +72,9 @@ BEGIN
             AND tgenabled = 'O' AND NOT tgisinternal) <> 3 THEN
     RAISE EXCEPTION 'PARENT_EPA_CORRECTION_PREFLIGHT: apply 20261204120000_job_lines_keep_epa_number first';
   END IF;
+  IF to_regprocedure('public._epa_norm(text)') IS NULL THEN
+    RAISE EXCEPTION 'PARENT_EPA_CORRECTION_PREFLIGHT: apply 20261204120000_job_lines_keep_epa_number first';
+  END IF;
   IF to_regprocedure('public._product_parent_epa_correction_enabled()') IS NOT NULL
      OR to_regprocedure('public._fill_invoice_line_epa()') IS NOT NULL THEN
     RAISE EXCEPTION 'PARENT_EPA_CORRECTION_PREFLIGHT: this file was already applied';
@@ -97,11 +100,13 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function
 BEGIN
   IF NEW.product_id IS NULL THEN RETURN NEW; END IF;
   IF TG_OP = 'UPDATE' AND NEW.product_id IS DISTINCT FROM OLD.product_id THEN
-    -- Moved to another product: keep a number the writer sent with it, else the new product's.
-    IF NEW.epa_registration IS DISTINCT FROM OLD.epa_registration AND NULLIF(btrim(NEW.epa_registration), '') IS NOT NULL THEN
+    -- Moved to another product: keep a number the writer sent with it, else the new product's. A writer
+    -- re-sending the old line's own number cannot be told from sending nothing; it gets the new product's
+    -- number, which is the label that product carries (accepted, Sol 2026-11-07).
+    IF NEW.epa_registration IS DISTINCT FROM OLD.epa_registration AND public._epa_norm(NEW.epa_registration) IS NOT NULL THEN
       RETURN NEW;
     END IF;
-  ELSIF NULLIF(btrim(NEW.epa_registration), '') IS NOT NULL THEN
+  ELSIF public._epa_norm(NEW.epa_registration) IS NOT NULL THEN
     RETURN NEW;
   ELSIF TG_OP = 'UPDATE' AND NOT EXISTS (SELECT 1 FROM public.invoices i
                                           WHERE i.id = NEW.invoice_id AND i.status IN ('draft', 'unposted')) THEN
@@ -110,7 +115,7 @@ BEGIN
     RETURN NEW;
   END IF;
   -- A line with no number, or a line moved to another product: the product's number.
-  NEW.epa_registration := (SELECT NULLIF(btrim(p.epa_registration), '') FROM public.products p
+  NEW.epa_registration := (SELECT public._epa_norm(p.epa_registration) FROM public.products p
                             WHERE p.id = NEW.product_id FOR SHARE);
   RETURN NEW;
 END;
@@ -160,7 +165,7 @@ BEGIN
       FROM public.invoice_items ii
       JOIN public.invoices i ON i.id = ii.invoice_id
       JOIN public.product_parent_members m ON m.product_id = ii.product_id
-     WHERE m.parent_id = p_parent.id AND i.deleted_at IS NULL AND NULLIF(btrim(ii.epa_registration), '') IS NULL;
+     WHERE m.parent_id = p_parent.id AND i.deleted_at IS NULL AND public._epa_norm(ii.epa_registration) IS NULL;
     IF v_unsaved IS NOT NULL THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice % has a line for this product with no saved EPA number, so it would change too. Open and save a draft invoice to give it one; a posted one must be unposted, saved and posted again', v_unsaved;
     END IF;

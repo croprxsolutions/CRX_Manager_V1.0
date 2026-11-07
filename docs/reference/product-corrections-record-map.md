@@ -34,7 +34,7 @@ Mason (2026-11-06): "yes i want to be able to fix epa issues". An admin corrects
 
 It is refused while any invoice line for one of the sizes (on an invoice not deleted) has no EPA number of its own, because that line would show the new number; the refusal names the invoices. A draft is fixed by opening and saving it; a posted one by unposting, saving and posting it again.
 
-**Switched off** (`_product_parent_epa_correction_enabled()` returns false) until the screens that print a job's EPA number (the sent proof, Job Detail's applicator sheet, chemical application report and WPS notice) read the job's kept number; the migration that ships with those screens turns it on. Until then every printout shows the product's current number, as before.
+**Switched off** (`_product_parent_epa_correction_enabled()` returns false) until the screens that print a job's EPA number (the sent proof, Job Detail's applicator sheet, chemical application report and WPS notice) read the job's kept number and the customer year-end summary reads and groups by the invoice line's copy (it reads the product's number today); the migration that ships with those readers turns it on. Until then every printout shows the product's current number, as before.
 
 ## Follow-ups for the owner
 

@@ -319,12 +319,12 @@ async function main() {
   refused(ADMIN, 'SELECT public._product_parent_epa_correction_enabled();', /permission denied/);
   console.log('[prover] no one signed in can call the switch');
 
-  // Invoice lines: a blank one gets the product's number; a given one is kept.
+  // Invoice lines: a blank one (spaces, tabs and line breaks count as blank) gets the product's number; a given one is kept.
   psql(`INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents) VALUES
       ('${IDRAFT}', '${S2}', '[PROVER] blank given', 1, 1500, 1500, 1000);
     INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, epa_registration) VALUES
       ('${IDRAFT}', '${OTHER}', '[PROVER] number given', 1, 1500, 1500, 1000, '7-7'),
-      ('${IDRAFT}', '${OTHER}', '[PROVER] spaces given', 1, 1500, 1500, 1000, '  ');`);
+      ('${IDRAFT}', '${OTHER}', '[PROVER] spaces given', 1, 1500, 1500, 1000, E' \\t\\n');`);
   assert.equal(invoiceEpas(), `PE-INV-DRAFT:${OLD},PE-INV-DRAFT:7-7,PE-INV-DRAFT:${OTHER_EPA},PE-INV-POSTED:${OLD}`);
   const blankLine = `invoice_id = '${IDRAFT}' AND description = '[PROVER] blank given'`;
   const draftLineEpa = () => scalar(`SELECT epa_registration FROM public.invoice_items WHERE ${blankLine};`);
@@ -377,7 +377,7 @@ async function main() {
   asOwner(`INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, created_by, posted_by, posted_at, total_amount_cents, season) VALUES
       ('${IBLANK}', 'PE-INV-BLANK', '${CUST}', 'field_application', 'posted', '${ADMIN}', '${ADMIN}', now(), 1500, 2026);
     INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, epa_registration) VALUES
-      ('${IBLANK}', '${S2}', '[PROVER] old blank line', 1, 1500, 1500, 1000, '');`);
+      ('${IBLANK}', '${S2}', '[PROVER] old blank line', 1, 1500, 1500, 1000, E'\\t');`);
   r = as(ADMIN, correctSql({ generic_epa_registration: NEW }, 'k-blocked'));
   assert.notEqual(r.status, 0);
   assert.match(r.output, /PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice PE-INV-BLANK \(posted\)/);

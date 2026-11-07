@@ -45,8 +45,10 @@ const LEDGER_ONLY = new Set([
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 // Every function the candidate replaces (regprocedure text). Each changes only its UTC "today".
+// Left out (Mason 2026-11-06, Sol advice): the three overnight jobs run while the UTC and Chicago dates agree;
+// _sync_job_holds' evening hold expiry is a follow-up, fixed with its actor and key hardening.
+export const UNCHANGED = ['mark_overdue_invoices()', 'auto_expire_quotes()', 'run_morning_notification_checks()', '_sync_job_holds(uuid,uuid)'];
 export const TARGETS = [
-  'mark_overdue_invoices()',
   '_reverse_credit_memo_application(uuid,uuid,text,text)',
   '_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)',
   'apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)',
@@ -56,13 +58,11 @@ export const TARGETS = [
   '_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)',
   '_void_payment_replay_impl_20261015(uuid,text,uuid,text)',
   '_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)',
-  'auto_expire_quotes()',
   '_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)',
   'get_ar_reminder_candidates()',
   '_enforce_applicator_license()',
   '_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)',
   'generate_rup_sales_records(uuid,text)',
-  '_sync_job_holds(uuid,uuid)',
   'get_dispatch_stock_status(uuid[])',
   'get_job_inventory_shortfalls(integer)',
   '_get_inventory_position_cost_impl_20261019()',
@@ -75,7 +75,6 @@ export const TARGETS = [
   '_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)',
   '_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)',
   'snapshot_field_crop_history()',
-  'run_morning_notification_checks()',
   'create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)',
   'record_vendor_payment(uuid,bigint,date,text,text,text,text)',
   'create_order_from_blend_ticket(uuid,text,date,text,uuid,text)',
@@ -370,11 +369,9 @@ const today = () => scalar(`SELECT ${CHI};`);
 // run each job in a rolled-back transaction and report what it decided.
 function decisions(ids) {
   const inZone = (sql) => scalar(`SET TimeZone = '${ids.zone}'; SET request.jwt.claim.sub = '${ADMIN}'; BEGIN; ${sql} ROLLBACK;`);
-  const overdue = inZone(`SELECT public.mark_overdue_invoices(); SELECT status FROM public.invoices WHERE id = '${ids.boundary}';`);
-  const expired = inZone(`SELECT public.auto_expire_quotes(); SELECT status FROM public.quotes WHERE id = '${ids.quote}';`);
   const remind = JSON.parse(inZone(`SELECT coalesce((SELECT jsonb_object_agg(x->>'invoice_id', (x->>'days_past_due')::int)
       FROM jsonb_array_elements(public.get_ar_reminder_candidates()) c, jsonb_array_elements(c->'invoices') x), '{}')::text;`));
-  return { overdue, expired, late31: remind[ids.late31] ?? null, late30: remind[ids.late30] ?? null };
+  return { late31: remind[ids.late31] ?? null, late30: remind[ids.late30] ?? null };
 }
 
 // The Chicago date at fixed instants: 5:59/6:00 pm CST, 6:59/7:00 pm CDT, midnight Central, month,
@@ -410,8 +407,6 @@ function main() {
   const ids = seed(zone, early);
   // What the Chicago date says: overdue only once the due date is before Chicago today, and so on.
   const want = {
-    overdue: early < T ? 'overdue' : 'posted',
-    expired: early < T ? 'expired' : 'sent',
     late31: 31, late30: null,
   };
   console.log(`[prover] Chicago date ${T}; session zone ${zone} gives CURRENT_DATE ${D} (as UTC does after 6 pm Central)`);
@@ -419,8 +414,8 @@ function main() {
   const preDefs = Object.fromEntries(TARGETS.map((sig) => [sig, definition(sig)]));
   const preAcl = Object.fromEntries(TARGETS.map((sig) => [sig, acl(sig)]));
   const before = decisions(ids);
-  assert.notEqual(before.overdue, want.overdue, `BEFORE overdue marking already follows Chicago: ${JSON.stringify(before)}`);
-  assert.notEqual(before.expired, want.expired, `BEFORE quote expiry already follows Chicago: ${JSON.stringify(before)}`);
+  assert.notDeepEqual(before, want, `BEFORE AR reminder days already follow Chicago: ${JSON.stringify(before)}`);
+  const preUnchanged = Object.fromEntries(UNCHANGED.map((sig) => [sig, definition(sig)]));
   console.log(`[prover] BEFORE (UTC-style date): ${JSON.stringify(before)}; Chicago answer ${JSON.stringify(want)}`);
 
   stageText('candidate.sql', lf(CANDIDATE));
@@ -435,6 +430,7 @@ function main() {
     assert.notEqual(post, preDefs[sig], `${sig}: nothing changed`);
     assert.equal(acl(sig), preAcl[sig], `${sig}: grants, owner or SECURITY DEFINER changed`);
   }
+  for (const sig of UNCHANGED) assert.equal(definition(sig), preUnchanged[sig], `${sig}: must be left unchanged`);
   console.log(`[prover] all ${TARGETS.length} definitions equal their pre-image with only CURRENT_DATE swapped; grants unchanged`);
 
   const after = decisions(ids);

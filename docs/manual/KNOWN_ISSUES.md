@@ -383,12 +383,13 @@ can make old splits refuse to save (LOW-MED).
 - Customer statements (`get_detailed_statement_data`) age by <=30 / 31-60 / 61-90 / 91-120 / >120 days; the AR Aging
   page uses 0-29 / 30-59 / 60-89 / 90-119 / 120+, so a 30-day-old invoice is "current" on the statement and 30-59 on
   AR Aging. Which ranges both use is Mason's decision (recommended: the AR Aging ones). MED.
-- The live database clock is UTC, so from 6-7 pm Central `CURRENT_DATE` is tomorrow. Batch 1
-  (`20261128100000`, local candidate) moves the 34 functions that make money, compliance or stock decisions to the
-  Chicago date (overdue marking, period checks, commission dates, quote expiry, AR reminders, license and RUP dates,
-  holds, default bill, payment and delivery dates). Still on the UTC date: boards and reports (batch 2:
-  `get_customer_summary`, `operational_dashboard_summary`, dispatch and team boards, receiving and forecast) and
-  statement and AR aging (batch 3). MED.
+- The live database clock is UTC, so from 6-7 pm Central `CURRENT_DATE` is tomorrow. PR #1579
+  (`20261128100000` and `20261128110000`, local candidates) moves 30 money, compliance and stock functions (period
+  checks, commission dates, default quote expiry, AR reminders, license and RUP dates, hold and stock checks, default
+  bill, payment and delivery dates) and 13 boards and reports to the Chicago date. The overnight overdue, quote-expiry
+  and morning-notice jobs need no change (they run midnight to 6 am Central). Still on the UTC date: `_sync_job_holds`
+  counts a hold that expires today as expired from 6-7 pm Central (follow-up, with its hardening), and statement and AR
+  aging (batch 3). MED.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**

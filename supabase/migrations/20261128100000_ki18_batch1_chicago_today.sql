@@ -3,7 +3,7 @@
 -- until midnight Central. Each function below is its live definition (2026-11-06, md5 checked) with
 -- only CURRENT_DATE replaced by (now() AT TIME ZONE 'America/Chicago')::date, the expression the
 -- invoice_date and order_date defaults already use. The database timezone stays UTC.
---   * overdue marking and overdue restore: mark_overdue_invoices, _reverse_credit_memo_application,
+--   * overdue restore: _reverse_credit_memo_application,
 --     _reverse_write_off_replay_impl_20261015
 --   * accounting-period checks: apply_credit_memo_to_invoice, _apply_prepay_to_invoice_replay_impl_20261015,
 --     _apply_write_off_replay_impl_20261015, and the payment-date fallbacks in
@@ -12,20 +12,20 @@
 --   * commission dates: _create_commission_payment_intent_impl_20260809 (default payment date; the
 --     business-date trigger refused the UTC date in the evening), _save_field_app_split_invoice_impl
 --     (the commission date passed to _insert_commissions_for_job)
---   * quotes: auto_expire_quotes, the 15-day default expiry in _save_quote_below_cost_impl_20260810,
---     run_morning_notification_checks (expiring-quote days left)
+--   * quotes: the 15-day default expiry in _save_quote_below_cost_impl_20260810
 --   * AR reminders: get_ar_reminder_candidates counts Chicago calendar days past due
 --     (Chicago date - due date) instead of whole 24-hour periods since UTC midnight
 --   * applicator licenses and RUP: _enforce_applicator_license, _dispatch_job_locations_replay_impl_20261015,
---     generate_rup_sales_records (license expiry; the RUP record's sale date is now the invoice date and its
---     season follows that same date, Mason's decision of 2026-11-06, so a backdated invoice records its own day;
---     the applicator license must be unexpired on both the invoice date and today)
+--     generate_rup_sales_records (the RUP record's sale date is the earlier of the invoice date and the
+--     posting day, and its season follows that date, Mason's decisions of 2026-11-06; the applicator license
+--     must be unexpired on both the invoice date and today and issued by the sale date, and a license with no
+--     issue date on file is a warning)
 --   * reversals of a credit application or write-off (reverse_credit_memo_application,
 --     _unapply_return_credit_guard_impl_20260826, _void_invoice_split_provenance_impl_20260719,
 --     _reverse_write_off_replay_impl_20261015) refuse when the row's UTC or Chicago date is in a closed month:
 --     rows made before this file were checked on the UTC date, rows made after on the Chicago date
 --     (_fix_delivery_plan already checks both)
---   * holds and stock: _sync_job_holds, get_dispatch_stock_status, get_job_inventory_shortfalls,
+--   * holds and stock: get_dispatch_stock_status, get_job_inventory_shortfalls,
 --     _get_inventory_position_cost_impl_20261019 (also its season start), _create_inventory_hold_intent_impl_20260905
 --   * other business dates: _transition_rebate_claim_replay_impl_20261015, _create_rush_order_below_cost_impl_20260810,
 --     _create_followup_delivery_replay_impl_20261015, _create_job_from_quote_section_replay_impl_20261015,
@@ -45,25 +45,16 @@
 -- (a lock name, not a business date); internal impls whose date default is never used (their wrapper
 -- always passes the date); boards and reports (batch 2); statement and AR aging (batch 3).
 -- Rollback: a forward migration re-emitting the pre-images (their md5s are in the preflight).
---
--- idempotency-body-check: exempt
--- Reviewer checks 4 and 5 (idempotency key, actor binding) do not apply to the four functions below; each
--- is in the charter's exempt class, and this file changes only dates inside them (no signature, caller or
--- grant change), so adding a key or actor rule here would be out of scope for KI-18.
--- These are live bodies re-emitted with only their dates changed; no signature, caller or grant changes.
--- mark_overdue_invoices, auto_expire_quotes and run_morning_notification_checks are not client RPCs: they
--- take no arguments, no client role (anon, authenticated) can execute them (postgres and service_role only;
--- pinned in the preflight), the pg_cron scheduler is their only caller, and a rerun finds nothing left to change.
--- _sync_job_holds(p_job_id, p_actor) is an internal helper (postgres and service_role only); its callers
--- are the _trg_sync_job_holds and _trg_release_job_holds_on_lifecycle triggers, which pass auth.uid(), and
--- reserve_job_inventory, which passes its own bound actor, so p_actor is never caller-chosen.
+-- Left out (Mason 2026-11-06, on Sol's advice): mark_overdue_invoices, auto_expire_quotes and
+-- run_morning_notification_checks run only from pg_cron at 06:00, 06:05 and 11:20 UTC (midnight to 6 am
+-- Central), when the UTC and Chicago dates already agree, so they need no change. _sync_job_holds (evening
+-- expiry of a hold that ends today) is a follow-up, done together with its actor and key hardening.
 DO $preflight$
 DECLARE
   v_row record;
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_application_id uuid, p_actor uuid, p_actor_role text, p_reason text', 'p_application_id uuid, p_actor uuid, p_actor_role text, p_reason text'),
     ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', '4154cbe9a13aff741d9c8ab72a508acc', true, '{postgres=X/postgres}', 'p_write_off_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_write_off_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_credit_memo_id uuid, p_target_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_credit_memo_id uuid, p_target_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
@@ -73,13 +64,11 @@ BEGIN
     ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true, '{postgres=X/postgres}', 'p_payment_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_payment_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true, '{postgres=X/postgres}', 'p_allocation_set_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_allocation_set_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true, '{postgres=X/postgres}', 'p_commission_ids uuid[], p_payment_method text, p_reference text, p_payment_date date, p_notes text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_commission_ids uuid[], p_payment_method text, p_reference text, p_payment_date date, p_notes text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
-    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true, '{postgres=X/postgres}', 'p_quote_id uuid, p_quote_payload jsonb, p_sections jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'p_quote_id uuid, p_quote_payload jsonb, p_sections jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false'),
     ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '0cb155a27c654dd390a875c3ff3aa507', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text'),
-    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_job_id uuid, p_actor uuid', 'p_job_id uuid, p_actor uuid'),
     ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_job_ids uuid[]', 'p_job_ids uuid[]'),
     ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_days_ahead integer DEFAULT 7', 'p_days_ahead integer DEFAULT 7'),
     ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true, '{postgres=X/postgres}', '', ''),
@@ -92,7 +81,6 @@ BEGIN
     ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true, '{postgres=X/postgres}', 'p_field_id uuid, p_season integer, p_crop_type text, p_variety text DEFAULT NULL::text, p_planting_date date DEFAULT NULL::date, p_harvest_date date DEFAULT NULL::date, p_yield_per_acre numeric DEFAULT NULL::numeric, p_yield_unit text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_field_id uuid, p_season integer, p_crop_type text, p_variety text DEFAULT NULL::text, p_planting_date date DEFAULT NULL::date, p_harvest_date date DEFAULT NULL::date, p_yield_per_acre numeric DEFAULT NULL::numeric, p_yield_unit text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text, p_request_hash text', 'p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text, p_request_hash text'),
     ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
-    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''''::text, p_bill_date date DEFAULT CURRENT_DATE, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text, p_confirm_po_overage boolean DEFAULT false, p_po_overage_reason text DEFAULT NULL::text', 'p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''''::text, p_bill_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text, p_confirm_po_overage boolean DEFAULT false, p_po_overage_reason text DEFAULT NULL::text'),
     ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_vendor_bill_id uuid, p_amount_cents bigint, p_payment_date date DEFAULT CURRENT_DATE, p_payment_method text DEFAULT NULL::text, p_reference_number text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text', 'p_vendor_bill_id uuid, p_amount_cents bigint, p_payment_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_payment_method text DEFAULT NULL::text, p_reference_number text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text'),
     ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_blend_ticket_id uuid, p_order_number text, p_order_date date DEFAULT CURRENT_DATE, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT auth.uid(), p_idempotency_key text DEFAULT NULL::text', 'p_blend_ticket_id uuid, p_order_number text, p_order_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT auth.uid(), p_idempotency_key text DEFAULT NULL::text'),
@@ -130,31 +118,6 @@ BEGIN
   END IF;
 END;
 $preflight$;
-
-CREATE OR REPLACE FUNCTION public.mark_overdue_invoices()
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE v_invoice record; v_count integer := 0;
-BEGIN
-  -- CREDIT-APPLY: never dun a credit memo (it is 'posted' with a negative balance) or an
-  -- invoice already settled to <= 0 by any lever (payments, prepay, write-off, applied credit).
-  FOR v_invoice IN SELECT id, invoice_number, customer_id, due_date FROM invoices
-    WHERE status = 'posted' AND due_date < (now() AT TIME ZONE 'America/Chicago')::date AND deleted_at IS NULL
-      AND invoice_type <> 'credit_memo' AND balance_cents > 0 FOR UPDATE
-  LOOP
-    UPDATE invoices SET status = 'overdue', updated_at = now() WHERE id = v_invoice.id;
-    INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, actor_role, new_values, description)
-    VALUES ('invoice_marked_overdue', 'invoice', v_invoice.id, '22c1fc50-4d2a-4baa-8ff8-341c0c7edd4f', 'system',
-      jsonb_build_object('invoice_number', v_invoice.invoice_number, 'customer_id', v_invoice.customer_id, 'due_date', v_invoice.due_date, 'marked_at', now()),
-      'Invoice ' || v_invoice.invoice_number || ' auto-marked overdue (due ' || v_invoice.due_date || ')');
-    v_count := v_count + 1;
-  END LOOP;
-  RETURN jsonb_build_object('invoices_marked_overdue', v_count, 'run_at', now());
-END;
-$function$;
 
 CREATE OR REPLACE FUNCTION public._reverse_credit_memo_application(p_application_id uuid, p_actor uuid, p_actor_role text, p_reason text)
  RETURNS void
@@ -1283,126 +1246,6 @@ BEGIN
   END IF;
 
   RETURN v_payment_id;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public.auto_expire_quotes()
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_quote record;
-  v_expired_count integer := 0;
-  v_holds_released integer := 0;
-  v_hold_count integer;
-  v_actor uuid;
-BEGIN
-  FOR v_quote IN
-    SELECT q.* FROM public.quotes q
-    WHERE q.expires_at < (now() AT TIME ZONE 'America/Chicago')::date
-      AND q.status IN ('sent', 'revised')
-      AND q.deleted_at IS NULL
-      -- A5 (2026-06-10): a quote with partial draw-downs is an open season
-      -- booking — being past its quote-expiry date is normal business, not an
-      -- expired quote. Never auto-expire it (the undrawn balance would be
-      -- destroyed: 'expired' is terminal and releases the booking's holds).
-      AND NOT EXISTS (
-        SELECT 1 FROM public.quote_product_draws d
-        WHERE d.quote_id = q.id AND d.quantity_drawn > 0
-      )
-      -- #5 (2026-06-13, owner gate G-AE = Option 1): Planned Programs are
-      -- deliberate season commitments that reserve inventory on purpose — never
-      -- silently auto-expire them (that would release the booking's holds out
-      -- from under the forecast). Staff close planned quotes by hand if needed.
-      AND q.is_planned = false
-    FOR UPDATE SKIP LOCKED
-  LOOP
-    -- M1 (2026-06-10): release holds BEFORE the status flip so the AFTER
-    -- UPDATE trigger finds 0 active holds and its FK-fragile log insert does
-    -- not run. End state identical.
-    UPDATE public.inventory_holds SET is_active = false, updated_at = now()
-      WHERE source_id = v_quote.id AND is_active = true;
-    GET DIAGNOSTICS v_hold_count = ROW_COUNT;
-    v_holds_released := v_holds_released + v_hold_count;
-
-    UPDATE public.quotes SET status = 'expired', updated_at = now() WHERE id = v_quote.id;
-    v_expired_count := v_expired_count + 1;
-
-    INSERT INTO public.notifications (
-      user_id, title, message, notification_type, related_entity_type, related_entity_id
-    )
-    SELECT
-      v_quote.created_by,
-      'Quote expired',
-      'Quote ' || v_quote.quote_number || ' expired',
-      'quote_expired',
-      'quote',
-      v_quote.id
-    FROM public.profiles p
-    WHERE v_quote.created_by IS NOT NULL
-      AND p.id = v_quote.created_by
-      AND p.is_active = true;
-  END LOOP;
-
-  -- SEASON END (20261029100000, Mason 2026-10-26): a part-drawn booking stays open past its date
-  -- (A5 above), so its rep gets one alert per expiry date to re-check it with the grower. A
-  -- re-send sets a new date, which can alert again once it passes.
-  INSERT INTO public.notifications (
-    user_id, title, message, notification_type, related_entity_type, related_entity_id
-  )
-  SELECT
-    q.created_by,
-    'Booking past its date',
-    'Booking ' || q.quote_number || ' passed its expiry date (' || to_char(q.expires_at, 'Mon DD, YYYY')
-      || ') with product still to draw. Re-check it with the grower.',
-    'booking_past_expiry',
-    'quote',
-    q.id
-  FROM public.quotes q
-  JOIN public.profiles p ON p.id = q.created_by AND p.is_active = true
-  WHERE q.expires_at < (now() AT TIME ZONE 'America/Chicago')::date
-    AND q.status IN ('sent', 'revised')
-    AND q.deleted_at IS NULL
-    AND q.is_planned = false
-    AND EXISTS (
-      SELECT 1 FROM public.quote_product_draws d
-      WHERE d.quote_id = q.id AND d.quantity_drawn > 0
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM public.notifications n
-      WHERE n.related_entity_id = q.id
-        AND n.notification_type = 'booking_past_expiry'
-        AND n.created_at >= q.expires_at
-    );
-
-  IF v_expired_count > 0 THEN
-    v_actor := (
-      SELECT id
-      FROM public.profiles
-      WHERE role = 'admin' AND is_active = true
-      ORDER BY created_at
-      LIMIT 1
-    );
-
-    -- Best-effort summary row using a real active admin actor when one exists;
-    -- logging must never cancel the expiry work it summarizes.
-    IF v_actor IS NOT NULL THEN
-      BEGIN
-        INSERT INTO public.activity_feed (event_type, description, performed_by)
-        VALUES (
-          'quotes_auto_expired',
-          'Auto-expired ' || v_expired_count || ' quotes, deactivated ' || v_holds_released || ' inventory hold(s)',
-          v_actor
-        );
-      EXCEPTION WHEN OTHERS THEN
-        NULL;
-      END;
-    END IF;
-  END IF;
-
-  RETURN jsonb_build_object('expired_count', v_expired_count, 'holds_released', v_holds_released);
 END;
 $function$;
 
@@ -2608,115 +2451,6 @@ BEGIN
   END IF;
 
   RETURN v_count;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION public._sync_job_holds(p_job_id uuid, p_actor uuid)
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_job jobs%ROWTYPE;
-  v_actor uuid;
-  v_item RECORD;
-  v_active boolean;
-  v_free numeric;
-  v_shortfalls jsonb := '[]'::jsonb;
-BEGIN
-  v_actor := COALESCE(p_actor, auth.uid());
-
-  -- Lock the job first (lock order: job -> quote -> inventory).
-  SELECT * INTO v_job FROM jobs WHERE id = p_job_id FOR UPDATE;
-  IF NOT FOUND THEN RETURN jsonb_build_object('shortfalls', v_shortfalls); END IF;
-
-  v_active := (v_job.deleted_at IS NULL AND v_job.status IN ('scheduled', 'in_progress'));
-
-  IF v_job.quote_id IS NOT NULL THEN
-    -- Quote-linked: coordinate ALL sibling jobs on the quote together. This
-    -- reserves/releases THIS job, reallocates siblings on cancel/delete (#2),
-    -- allocates the order coverage once across siblings (#3), and resyncs the
-    -- parent quote's crop_program holds.
-    PERFORM _sync_quote_job_reservations(v_job.quote_id, v_actor);
-  ELSE
-    -- Quote-less job: independent, no booking to draw from. Rebuild its holds
-    -- (full demand per product, no draws). Release when terminal/deleted.
-    DELETE FROM inventory_holds WHERE source_id = p_job_id AND hold_type = 'job';
-    DELETE FROM job_product_draws WHERE job_id = p_job_id;
-    IF v_active THEN
-      FOR v_item IN
-        SELECT jc.product_id,
-               -- D2 (U11 follow-up): normalize FIRST — 'pt/ac'-style units NULL out of the converter; mirrors complete_job.
-               SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)) AS job_demand
-        FROM job_chemicals jc
-        JOIN products p ON p.id = jc.product_id
-        -- U4<<< customer-supplied lines demand nothing from our shed. (#102)
-        WHERE jc.job_id = p_job_id AND jc.product_id IS NOT NULL AND jc.customer_supplied = false
-        -- >>>U4
-        GROUP BY jc.product_id
-        HAVING SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)) > 0
-      LOOP
-        PERFORM 1 FROM inventory
-        WHERE product_id = v_item.product_id AND location = 'Main Warehouse'
-        FOR UPDATE;
-        -- status-enum-check: exempt (writes the 'job' hold_type added by A1 20260702170000)
-        INSERT INTO inventory_holds (
-          product_id, customer_id, quantity, hold_type, source_id,
-          notes, created_by, expires_at, is_active
-        ) VALUES (
-          v_item.product_id, v_job.customer_id, v_item.job_demand, 'job', p_job_id,
-          'Job reservation for ' || COALESCE(v_job.job_number, p_job_id::text),
-          COALESCE(v_actor, v_job.created_by), NULL, true
-        );
-      END LOOP;
-    END IF;
-  END IF;
-
-  -- WARN (never block, §6.1): shortfalls for THIS job's products, only while the
-  -- job is active. free = available - prebooked - active non-expired holds, read
-  -- AFTER the (re)sync above so it reflects the final hold state. A released job
-  -- returns empty shortfalls (matches the old RELEASE branch).
-  IF v_active THEN
-    FOR v_item IN
-      SELECT jc.product_id,
-             SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)) AS job_demand
-      FROM job_chemicals jc
-      JOIN products p ON p.id = jc.product_id
-      -- U4<<< customer-supplied lines demand nothing — never a shortfall. (#102)
-      WHERE jc.job_id = p_job_id AND jc.product_id IS NOT NULL AND jc.customer_supplied = false
-      -- >>>U4
-      GROUP BY jc.product_id
-      HAVING SUM(COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity)) > 0
-    LOOP
-      SELECT inv.quantity_available - inv.quantity_prebooked
-             - COALESCE((
-                 SELECT SUM(h.quantity) FROM inventory_holds h
-                 WHERE h.product_id = v_item.product_id AND h.is_active = true
-                   AND (h.expires_at IS NULL OR h.expires_at >= (now() AT TIME ZONE 'America/Chicago')::date)
-               ), 0)
-        INTO v_free
-      FROM inventory inv
-      WHERE inv.product_id = v_item.product_id AND inv.location = 'Main Warehouse';
-
-      IF v_free IS NULL THEN
-        -- No Main Warehouse inventory row => the whole demand is short (Codex P2).
-        v_shortfalls := v_shortfalls || jsonb_build_object(
-          'product_id', v_item.product_id,
-          'product_name', (SELECT product_name FROM products WHERE id = v_item.product_id),
-          'short', v_item.job_demand
-        );
-      ELSIF v_free < 0 THEN
-        v_shortfalls := v_shortfalls || jsonb_build_object(
-          'product_id', v_item.product_id,
-          'product_name', (SELECT product_name FROM products WHERE id = v_item.product_id),
-          'short', -v_free
-        );
-      END IF;
-    END LOOP;
-  END IF;
-
-  RETURN jsonb_build_object('shortfalls', v_shortfalls);
 END;
 $function$;
 
@@ -5201,101 +4935,6 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.run_morning_notification_checks()
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-BEGIN
-  -- Port of checkLowStockNotifications: one alert per active admin and product,
-  -- with the same low_stock type and a rolling 24-hour per-recipient dedup.
-  WITH low_stock_products AS (
-    SELECT DISTINCT ON (p.id)
-      p.id AS product_id,
-      p.product_name,
-      COALESCE(inv.quantity_available, 0) AS quantity_available,
-      COALESCE(inv.reorder_point, 0) AS reorder_point
-    FROM public.products p
-    JOIN public.inventory inv ON inv.product_id = p.id
-    WHERE p.is_active = true
-      AND (
-        (inv.reorder_point > 0 AND inv.quantity_available <= inv.reorder_point)
-        OR inv.quantity_available < 0
-      )
-    ORDER BY p.id, COALESCE(inv.quantity_available, 0) ASC
-  )
-  INSERT INTO public.notifications (
-    user_id, title, message, notification_type, related_entity_type, related_entity_id
-  )
-  SELECT
-    admin.id,
-    'Low Stock Alert',
-    lsp.product_name || ' is low — ' || lsp.quantity_available
-      || ' units available (reorder point: ' || lsp.reorder_point || ')',
-    'low_stock',
-    'product',
-    lsp.product_id
-  FROM low_stock_products lsp
-  CROSS JOIN public.profiles admin
-  WHERE admin.role = 'admin'
-    AND admin.is_active = true
-    AND NOT EXISTS (
-      SELECT 1
-      FROM public.notifications n
-      WHERE n.related_entity_type = 'product'
-        AND n.related_entity_id = lsp.product_id
-        AND n.notification_type = 'low_stock'
-        AND n.user_id = admin.id
-        AND n.created_at >= now() - interval '24 hours'
-    );
-
-  -- Port of checkExpiringQuoteNotifications: sent/revised ad-hoc quotes only,
-  -- with a same-day-inclusive date window, the same quote_expiring type, and a
-  -- rolling 24-hour per-recipient dedup.
-  WITH expiring_quotes AS (
-    SELECT
-      q.id AS quote_id,
-      q.quote_number,
-      q.created_by,
-      q.expires_at,
-      c.farm_name,
-      (q.expires_at::date - (now() AT TIME ZONE 'America/Chicago')::date) AS days_left
-    FROM public.quotes q
-    JOIN public.customers c ON c.id = q.customer_id
-    WHERE q.status IN ('sent', 'revised')
-      AND q.is_planned = false
-      AND q.deleted_at IS NULL
-      AND q.expires_at::date BETWEEN (now() AT TIME ZONE 'America/Chicago')::date AND (now() AT TIME ZONE 'America/Chicago')::date + 7
-  )
-  INSERT INTO public.notifications (
-    user_id, title, message, notification_type, related_entity_type, related_entity_id
-  )
-  SELECT
-    eq.created_by,
-    'Quote Expiring Soon',
-    'Quote ' || eq.quote_number || ' for ' || eq.farm_name
-      || ' expires in ' || eq.days_left || ' day'
-      || CASE WHEN eq.days_left <> 1 THEN 's' ELSE '' END,
-    'quote_expiring',
-    'quote',
-    eq.quote_id
-  FROM expiring_quotes eq
-  JOIN public.profiles creator ON creator.id = eq.created_by AND creator.is_active = true
-  WHERE NOT EXISTS (
-    SELECT 1
-    FROM public.notifications n
-    WHERE n.related_entity_type = 'quote'
-      AND n.related_entity_id = eq.quote_id
-      AND n.notification_type = 'quote_expiring'
-      AND n.user_id = eq.created_by
-      AND n.created_at >= now() - interval '24 hours'
-  );
-
-  RETURN;
-END;
-$function$;
-
 CREATE OR REPLACE FUNCTION public.create_vendor_bill(p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''::text, p_bill_date date DEFAULT (now() AT TIME ZONE 'America/Chicago')::date, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text, p_confirm_po_overage boolean DEFAULT false, p_po_overage_reason text DEFAULT NULL::text)
  RETURNS uuid
  LANGUAGE plpgsql
@@ -6108,7 +5747,6 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('mark_overdue_invoices()', 'bc9ca9328ac851013a6324a288c69c1c', '90f844beb2be2e026f7b6ff2a57a4777', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_reverse_credit_memo_application(uuid,uuid,text,text)', '3c1b4076e5b2dc3629465f6193236750', '2a47d227e949966990f3f7881951694e', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_application_id uuid, p_actor uuid, p_actor_role text, p_reason text', 'p_application_id uuid, p_actor uuid, p_actor_role text, p_reason text'),
     ('_reverse_write_off_replay_impl_20261015(uuid,text,uuid,text)', '70ef11ccad193eb6ef5ee88dcba6f8cd', '4154cbe9a13aff741d9c8ab72a508acc', true, '{postgres=X/postgres}', 'p_write_off_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_write_off_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('apply_credit_memo_to_invoice(uuid,uuid,bigint,uuid,text)', 'bcc242c8715aaed81b9455fbc905237f', '9814b487791dc8425fe7d10c1a278394', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_credit_memo_id uuid, p_target_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_credit_memo_id uuid, p_target_invoice_id uuid, p_amount_cents bigint, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
@@ -6118,13 +5756,11 @@ BEGIN
     ('_void_commission_payment_intent_impl_20260809(uuid,text,uuid,text)', '985fb1a42ab3b4d911c68898c14ce637', '73290904f17b81e50143b7a292d19973', true, '{postgres=X/postgres}', 'p_payment_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_payment_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('_void_payment_replay_impl_20261015(uuid,text,uuid,text)', '70fd746c15f4a6629680a724f3588967', '249d13c9887436709119b442a8928ad3', true, '{postgres=X/postgres}', 'p_allocation_set_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_allocation_set_id uuid, p_reason text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('_create_commission_payment_intent_impl_20260809(uuid[],text,text,date,text,uuid,text)', '3610d803ee9594251ec948f9d4e99ace', 'c03052dc6ce3ba6b1002d5d73aa33d6b', true, '{postgres=X/postgres}', 'p_commission_ids uuid[], p_payment_method text, p_reference text, p_payment_date date, p_notes text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_commission_ids uuid[], p_payment_method text, p_reference text, p_payment_date date, p_notes text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
-    ('auto_expire_quotes()', 'd3c9808de0aa40256834f29b95473a88', '36519f9b028d062383950d388312977f', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)', 'ca0da8106b112033e085db0c8d228ed4', '393f4fe11538d55bb849d1224901b0f7', true, '{postgres=X/postgres}', 'p_quote_id uuid, p_quote_payload jsonb, p_sections jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text', 'p_quote_id uuid, p_quote_payload jsonb, p_sections jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false'),
     ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '0cb155a27c654dd390a875c3ff3aa507', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text'),
-    ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_job_id uuid, p_actor uuid', 'p_job_id uuid, p_actor uuid'),
     ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_job_ids uuid[]', 'p_job_ids uuid[]'),
     ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_days_ahead integer DEFAULT 7', 'p_days_ahead integer DEFAULT 7'),
     ('_get_inventory_position_cost_impl_20261019()', '6043fa5c13f508bf4c123ccad5d0cb12', '6a74347a299879a3ed5a82f4d5288a4b', true, '{postgres=X/postgres}', '', ''),
@@ -6137,7 +5773,6 @@ BEGIN
     ('_save_field_crop_history_replay_impl_20261015(uuid,integer,text,text,date,date,numeric,text,text,uuid,text)', '4395eea60420c930dcc3895c6f2757f6', '602b045178da933f4b21f87493c0c4f2', true, '{postgres=X/postgres}', 'p_field_id uuid, p_season integer, p_crop_type text, p_variety text DEFAULT NULL::text, p_planting_date date DEFAULT NULL::date, p_harvest_date date DEFAULT NULL::date, p_yield_per_acre numeric DEFAULT NULL::numeric, p_yield_unit text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text', 'p_field_id uuid, p_season integer, p_crop_type text, p_variety text DEFAULT NULL::text, p_planting_date date DEFAULT NULL::date, p_harvest_date date DEFAULT NULL::date, p_yield_per_acre numeric DEFAULT NULL::numeric, p_yield_unit text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('_save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3df177130debed37484a2cfc7b84b73a', 'a69f21d8e9f32fc6fecb38ac3a54801c', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text, p_request_hash text', 'p_billing_set_id uuid, p_source_job_id uuid, p_invoice jsonb, p_fields jsonb, p_lines jsonb, p_performed_by uuid, p_application_service_id uuid, p_idempotency_key text, p_request_hash text'),
     ('snapshot_field_crop_history()', '09805ba67e9c29346f0ba75bf9450608', '16443deabc430d2565657b54004b126f', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
-    ('run_morning_notification_checks()', '399e578b0d31ee697bec1746a81104a5', '34eae475d6263dbe71911749c4019b2f', true, '{postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text)', '9f17ea87da9f2323336938e68e7ce72c', '9f17ea87da9f2323336938e68e7ce72c', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''''::text, p_bill_date date DEFAULT CURRENT_DATE, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text, p_confirm_po_overage boolean DEFAULT false, p_po_overage_reason text DEFAULT NULL::text', 'p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''''::text, p_bill_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text, p_confirm_po_overage boolean DEFAULT false, p_po_overage_reason text DEFAULT NULL::text'),
     ('record_vendor_payment(uuid,bigint,date,text,text,text,text)', '612835148d3ebf0da1127657ce7b1b1a', '612835148d3ebf0da1127657ce7b1b1a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_vendor_bill_id uuid, p_amount_cents bigint, p_payment_date date DEFAULT CURRENT_DATE, p_payment_method text DEFAULT NULL::text, p_reference_number text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text', 'p_vendor_bill_id uuid, p_amount_cents bigint, p_payment_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_payment_method text DEFAULT NULL::text, p_reference_number text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text'),
     ('create_order_from_blend_ticket(uuid,text,date,text,uuid,text)', '651a48e7395a003c213038493c0bbd0a', '651a48e7395a003c213038493c0bbd0a', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_blend_ticket_id uuid, p_order_number text, p_order_date date DEFAULT CURRENT_DATE, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT auth.uid(), p_idempotency_key text DEFAULT NULL::text', 'p_blend_ticket_id uuid, p_order_number text, p_order_date date DEFAULT ((now() AT TIME ZONE ''America/Chicago''::text))::date, p_notes text DEFAULT NULL::text, p_performed_by uuid DEFAULT auth.uid(), p_idempotency_key text DEFAULT NULL::text'),

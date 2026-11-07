@@ -2815,6 +2815,9 @@ function registryMigrationHighWater(): string {
 // 20261104130000, 20261104140000 and 20261104150000 were added on 2026-11-03 for the same reason:
 // all three applied live that day and the registry refresh after WP-PM-9 moved the boundary to
 // 20261104150000.
+// 20261202110000 and 20261204120000 were added on 2026-11-07: both applied live and the registry
+// refresh after #1584 moved the boundary past them (20261202110000 holds the newest
+// _insert_parent_size body). Clear them on the same type-regeneration rule.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2850,6 +2853,8 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261115160000',
   '20261123120000',
   '20261120100000',
+  '20261202110000',
+  '20261204120000',
 ]);
 
 /**

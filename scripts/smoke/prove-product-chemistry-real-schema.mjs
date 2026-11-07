@@ -783,6 +783,13 @@ async function main() {
   for (const bad of ["'NaN'", "'Infinity'", '1.5', '0']) {
     refused(OWNER, `INSERT INTO public.active_ingredients (name, canonical_ingredient_id, canonical_fraction, fraction_basis, created_by, updated_by) VALUES ('t', '${glyAcid}', ${bad}, 'acid_equivalent', '${ADMIN}', '${ADMIN}');`, /violates check constraint/);
   }
+  // Luna round 1: wrongly typed input is refused by name, never dropped; an edit obeys D-AA-3; at most 10 decimals.
+  refused(ADMIN, createI({ name: 'Typed canon', canonical_ingredient_id: 42 }), /CHEMISTRY_CHANGE_INVALID: canonical_ingredient_id must be an ID/);
+  refused(ADMIN, setC(PDUP1, [ing('Note test', 1, { source_note: 5 })]), /CHEMISTRY_SOURCE_INVALID: the source note must be text/);
+  const editConflict = prevI(mystery, { canonical_ingredient_id: glyAcid });
+  assert.match(String(editConflict.refusal), /INGREDIENT_PARENT_CONFLICT: mystery active already exists with a different acid/i, 'an edit naming an acid while a same-name row names none is refused (D-AA-3)');
+  refused(OWNER, `INSERT INTO public.active_ingredients (name, canonical_ingredient_id, canonical_fraction, fraction_basis, created_by, updated_by) VALUES ('t', '${glyAcid}', 0.12345678901, 'acid_equivalent', '${ADMIN}', '${ADMIN}');`, /violates check constraint/);
+  assert.equal(owner('SELECT count(*) FROM public.active_ingredients;'), String(Number(nIng) + 1), 'the new refusals wrote nothing');
   console.log('[prover] identity: one CAS under two names is one ingredient (never renamed); two name-only entries stay two and are listed; conflicting acid or fraction refused with zero writes; CAS taken, rename, bad CAS, non-acid parent and orphan fraction refused');
 
   // Swap carries mode of action; swap onto a parent that already has the target is refused; consolidate.
@@ -964,6 +971,11 @@ async function main() {
   assert.equal(meso.reused, true);
   assert.equal(owner(`SELECT count(*) FROM public.active_ingredients WHERE cas = '104206-82-8';`), '1');
   console.log('[prover] concurrency: two first writes give one success and CHEMISTRY_STALE (no duplicate key); two first entries of one CAS give one ingredient');
+
+  // ---- cost-exposure-review keys for the DM-1 functions (the sweep allowlist needs one reviewed entry each).
+  const sweep = docker([...psqlArgs(), '-A', '-t'], { input: lf(path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'cost-exposure-review.sql')) })
+    .stdout.split(String.fromCharCode(10)).map((l) => l.trim()).filter((l) => /chemistry|active_ingredient|active_cost|cost_reference/.test(l));
+  console.log(`[prover] cost-exposure-review flags these DM-1 functions: ${JSON.stringify(sweep)}`);
 
   // ---- Rollback block: drop the public functions; the freeze, constraints and append-only triggers stay.
   const counts = snapshot();

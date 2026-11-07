@@ -2078,10 +2078,64 @@ export interface ProductParentFertilizerAnalysis {
 }
 
 /** One cost-per-lb figure: exact whole cents as a string, or a named refusal (never a number guessed). */
-export interface ActiveCostFigure {
-  basis: ChemistryStrengthBasis | FertilizerBasis;
-  cents: string | null;
-  reason: string | null;
+// A figure carries exactly one of cents (exact whole cents as a string) or reason; the other key is absent.
+export type ActiveCostFigure =
+  | { basis: ChemistryStrengthBasis | FertilizerBasis; cents: string }
+  | { basis: ChemistryStrengthBasis | FertilizerBasis; reason: string };
+
+// Payload shapes returned by the chemistry RPCs (not the table rows).
+export interface ActiveIngredientSummary {
+  id: string;
+  name: string;
+  cas: string | null;
+  canonical_ingredient_id: string | null;
+  canonical_name: string | null;
+  canonical_fraction: number | null;
+  fraction_basis: 'acid_equivalent' | null;
+  is_parent_form: boolean;
+  provisional: boolean;
+  status: ChemistryRowStatus;
+  retire_reason: string | null;
+  row_version: number;
+}
+
+export interface ParentChemistryIngredientRow {
+  row_id: string;
+  ingredient_id: string;
+  name: string;
+  cas: string | null;
+  provisional: boolean;
+  is_parent_form: boolean;
+  canonical_ingredient_id: string | null;
+  canonical_name: string | null;
+  canonical_fraction: number | null;
+  strength_value: number | null;
+  strength_unknown: boolean;
+  strength_unit: ChemistryStrengthUnit;
+  strength_basis: ChemistryStrengthBasis;
+  source: ChemistrySource;
+  source_note: string | null;
+  row_version: number;
+}
+
+export interface ParentChemistryModeRow {
+  row_id: string;
+  ingredient_id: string;
+  name: string;
+  scheme: ModeOfActionScheme;
+  group_code: string;
+  row_version: number;
+}
+
+export interface ParentChemistryFertilizerRow {
+  row_id: string;
+  nutrient: FertilizerNutrient;
+  basis: FertilizerBasis;
+  percent: number | null;
+  percent_unknown: boolean;
+  source: ChemistrySource;
+  source_note: string | null;
+  row_version: number;
 }
 
 export type BlendTicketStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'needs_review';

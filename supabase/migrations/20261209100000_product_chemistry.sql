@@ -18,7 +18,8 @@
 --   * product_parent_cost_reference: the size a parent's cost figures come from when it has no active
 --     bulk size. Admins only.
 -- Changed: ingredient_map (the Brand vs Generic list, 0 rows) is frozen by a row trigger and a TRUNCATE
---   trigger. Its grants and policies are unchanged. The read-only Brand vs Generic page shipped first.
+--   trigger. Its grants and policies are unchanged. Apply only after the read-only
+--   Brand vs Generic page (PR #1622) is live, or that page refuses its saves.
 -- Functions (SECURITY DEFINER, search_path public, pg_temp; writers admin-only with a retry key):
 --   set_parent_chemistry (add rows and fill unknown values only), preview_parent_chemistry_correction,
 --   correct_parent_chemistry (change, retire, swap, consolidate; reason and evidence),
@@ -28,7 +29,8 @@
 --   (admins). The EPA gate (D-Z) refuses typed chemistry on any parent with a usable EPA number.
 -- DM-2 interface: _approved_parent_lb_per_gal is created here as a NULL-returning stub only when it does
 --   not exist; when it exists (DM-2 applied first), its contract is checked and it is left alone.
--- No existing row is changed; no grant, revoke or policy on an existing table.
+-- No existing row is changed; no grant, revoke or policy on an existing table. New foreign keys add the
+--   usual RESTRICT checks on products and product_parents (nothing deletes those rows today).
 --
 -- Rollback (no existing row changes, so nothing is restored):
 --   1. Revert the chemistry screen PR first if it is live, so no screen calls a dropped function.
@@ -185,7 +187,8 @@ CREATE TABLE public.active_ingredients (
   cas text CHECK (cas IS NULL OR public._ingredient_cas_valid(cas)),
   canonical_ingredient_id uuid REFERENCES public.active_ingredients(id) ON DELETE RESTRICT,
   -- 'NaN' > 0 is true in PostgreSQL but 'NaN' <= 1 is false, so these refuse NaN and infinity.
-  canonical_fraction numeric CHECK (canonical_fraction IS NULL OR (canonical_fraction > 0 AND canonical_fraction <= 1)),
+  canonical_fraction numeric CHECK (canonical_fraction IS NULL OR (canonical_fraction > 0 AND canonical_fraction <= 1
+    AND scale(canonical_fraction) <= 10)),
   fraction_basis text CHECK (fraction_basis IS NULL OR fraction_basis = 'acid_equivalent'),
   is_parent_form boolean NOT NULL DEFAULT false,
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired')),
@@ -248,7 +251,7 @@ CREATE TABLE public.product_parent_ingredients (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT product_parent_ingredients_unknown CHECK ((strength_value IS NULL) = strength_unknown),
   CONSTRAINT product_parent_ingredients_strength CHECK (strength_value IS NULL OR (strength_value > 0
-    AND strength_value <= CASE strength_unit WHEN 'pct_ww' THEN 100 ELSE 20 END))
+    AND strength_value <= CASE strength_unit WHEN 'pct_ww' THEN 100 ELSE 20 END AND scale(strength_value) <= 10))
 );
 ALTER TABLE public.product_parent_ingredients OWNER TO postgres;
 CREATE UNIQUE INDEX product_parent_ingredients_one_active ON public.product_parent_ingredients (parent_id, ingredient_id)
@@ -290,7 +293,7 @@ CREATE TABLE public.product_parent_fertilizer_analysis (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT product_parent_fertilizer_oxide_p_k CHECK (basis = 'elemental' OR nutrient IN ('P', 'K')),
   CONSTRAINT product_parent_fertilizer_unknown CHECK ((percent IS NULL) = percent_unknown),
-  CONSTRAINT product_parent_fertilizer_percent CHECK (percent IS NULL OR (percent > 0 AND percent <= 100))
+  CONSTRAINT product_parent_fertilizer_percent CHECK (percent IS NULL OR (percent > 0 AND percent <= 100 AND scale(percent) <= 10))
 );
 ALTER TABLE public.product_parent_fertilizer_analysis OWNER TO postgres;
 CREATE UNIQUE INDEX product_parent_fertilizer_one_active ON public.product_parent_fertilizer_analysis (parent_id, nutrient)
@@ -638,7 +641,8 @@ DECLARE
   v_name text;
   v_name_key text;
   v_cas text;
-  v_has_canon boolean := COALESCE(jsonb_typeof(p_entry->'canonical_ingredient_id') = 'string', false);
+  -- Any non-null value counts as stated, so _chemistry_uuid refuses a non-string by name.
+  v_has_canon boolean := COALESCE(jsonb_typeof(p_entry->'canonical_ingredient_id'), 'null') <> 'null';
   v_has_fraction boolean := jsonb_typeof(p_entry->'canonical_fraction') IS NOT NULL AND jsonb_typeof(p_entry->'canonical_fraction') IS DISTINCT FROM 'null';
   v_has_basis boolean := jsonb_typeof(p_entry->'fraction_basis') IS NOT NULL AND jsonb_typeof(p_entry->'fraction_basis') IS DISTINCT FROM 'null';
   v_has_pf boolean := jsonb_typeof(p_entry->'is_parent_form') IS NOT NULL AND jsonb_typeof(p_entry->'is_parent_form') IS DISTINCT FROM 'null';
@@ -871,6 +875,9 @@ BEGIN
   ELSIF v_source IS NULL OR v_source NOT IN ('label', 'sds', 'supplier', 'other') THEN
     RAISE EXCEPTION 'CHEMISTRY_SOURCE_INVALID: the source is label, sds, supplier or other';
   END IF;
+  IF COALESCE(jsonb_typeof(p_entry->'source_note'), 'null') NOT IN ('null', 'string') THEN
+    RAISE EXCEPTION 'CHEMISTRY_SOURCE_INVALID: the source note must be text';
+  END IF;
   IF jsonb_typeof(p_entry->'source_note') = 'string' AND btrim(p_entry->>'source_note') <> '' THEN
     v_note := btrim(p_entry->>'source_note');
     IF length(v_note) > 1000 THEN RAISE EXCEPTION 'CHEMISTRY_SOURCE_INVALID: keep the source note to 1000 characters'; END IF;
@@ -909,6 +916,9 @@ BEGIN
     v_source := 'epa_lookup';
   ELSIF v_source IS NULL OR v_source NOT IN ('label', 'sds', 'supplier', 'other') THEN
     RAISE EXCEPTION 'CHEMISTRY_SOURCE_INVALID: the source is label, sds, supplier or other';
+  END IF;
+  IF COALESCE(jsonb_typeof(p_entry->'source_note'), 'null') NOT IN ('null', 'string') THEN
+    RAISE EXCEPTION 'CHEMISTRY_SOURCE_INVALID: the source note must be text';
   END IF;
   IF jsonb_typeof(p_entry->'source_note') = 'string' AND btrim(p_entry->>'source_note') <> '' THEN
     v_note := btrim(p_entry->>'source_note');
@@ -1755,6 +1765,7 @@ DECLARE
   v_reason text;
   v_evidence text;
   v_names text;
+  v_conflict text;
   v_gate text;
   v_parent uuid;
   v_before jsonb := '{}'::jsonb;
@@ -1832,6 +1843,16 @@ BEGIN
      AND NOT EXISTS (SELECT 1 FROM public.active_ingredients c WHERE c.id = v_new.canonical_ingredient_id
                         AND c.id <> p_ingredient_id AND c.status = 'active' AND c.is_parent_form) THEN
     RAISE EXCEPTION 'INGREDIENT_CANONICAL_INVALID: the acid named must be another active ingredient marked as the acid';
+  END IF;
+  -- D-AA-3, as _resolve_active_ingredient: a same-name ingredient that claims a different acid refuses the edit.
+  IF v_new.canonical_ingredient_id IS DISTINCT FROM v_old.canonical_ingredient_id AND v_new.canonical_ingredient_id IS NOT NULL THEN
+    SELECT string_agg(a.name, ', ' ORDER BY a.name) INTO v_conflict
+      FROM public.active_ingredients a
+     WHERE a.status = 'active' AND a.id <> p_ingredient_id AND a.name_key = v_old.name_key
+       AND a.canonical_ingredient_id IS DISTINCT FROM v_new.canonical_ingredient_id;
+    IF v_conflict IS NOT NULL THEN
+      RAISE EXCEPTION 'INGREDIENT_PARENT_CONFLICT: % already exists with a different acid; correct that ingredient first', v_conflict;
+    END IF;
   END IF;
 
   IF v_new.cas IS DISTINCT FROM v_old.cas THEN v_changed := v_changed || 'cas'::text; END IF;
@@ -2187,3 +2208,63 @@ $function$;
 ALTER FUNCTION public.set_parent_cost_reference(uuid, uuid, integer, text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.set_parent_cost_reference(uuid, uuid, integer, text) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 GRANT EXECUTE ON FUNCTION public.set_parent_cost_reference(uuid, uuid, integer, text) TO authenticated;
+
+-- Postflight: every DM-1 function is owned by postgres with a pinned search_path; only the public RPCs are
+-- executable, and only by authenticated; every new table has RLS on and exactly one SELECT policy.
+DO $postflight$
+DECLARE
+  c_public CONSTANT text[] := ARRAY['correct_parent_chemistry', 'get_active_ingredient_worklist', 'get_parent_active_costs',
+    'get_parent_chemistry', 'preview_active_ingredient_change', 'preview_parent_chemistry_correction',
+    'reactivate_active_ingredient', 'retire_active_ingredient', 'save_active_ingredient', 'search_active_ingredients',
+    'set_parent_chemistry', 'set_parent_cost_reference'];
+  c_private CONSTANT text[] := ARRAY['_active_ingredient_event', '_active_ingredient_values', '_apply_parent_chemistry',
+    '_cents_half_up', '_check_parent_chemistry', '_chemistry_convert', '_chemistry_form_mass', '_chemistry_nutrient',
+    '_chemistry_preview_fingerprint', '_chemistry_strength', '_chemistry_uuid', '_edit_active_ingredient',
+    '_ingredient_cas_valid', '_ingredient_usage_fingerprint', '_ingredient_usage_parents', '_ingredient_users',
+    '_lock_ingredient_parents', '_lock_parent_chemistry', '_oxide_factor', '_parent_active_cost_rows',
+    '_parent_chemistry_epa_refusal', '_parent_chemistry_values', '_resolve_active_ingredient', '_size_cost_per_base',
+    '_unit_factor_oz', 'refuse_chemistry_event_mutation', 'refuse_ingredient_map_write'];
+  c_tables CONSTANT text[] := ARRAY['active_ingredients', 'active_ingredient_events', 'product_chemistry_events',
+    'product_parent_ingredients', 'product_parent_modes_of_action', 'product_parent_fertilizer_analysis',
+    'product_parent_chemistry_state', 'product_parent_cost_reference'];
+  r record;
+  v_table text;
+  v_count integer;
+BEGIN
+  SELECT count(*) INTO v_count FROM pg_proc p
+   WHERE p.pronamespace = 'public'::regnamespace AND p.proname = ANY (c_public || c_private);
+  IF v_count <> cardinality(c_public) + cardinality(c_private) THEN
+    RAISE EXCEPTION 'DM-1 postflight: expected % functions, found %', cardinality(c_public) + cardinality(c_private), v_count;
+  END IF;
+  FOR r IN SELECT p.oid, p.proname, p.proowner, p.proconfig FROM pg_proc p
+            WHERE p.pronamespace = 'public'::regnamespace AND p.proname = ANY (c_public || c_private) LOOP
+    IF r.proowner <> 'postgres'::regrole THEN RAISE EXCEPTION 'DM-1 postflight: % is not owned by postgres', r.proname; END IF;
+    IF r.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp'] THEN
+      RAISE EXCEPTION 'DM-1 postflight: % search_path is %', r.proname, r.proconfig;
+    END IF;
+    IF has_function_privilege('anon', r.oid, 'EXECUTE') OR has_function_privilege('service_role', r.oid, 'EXECUTE')
+       OR (SELECT proacl FROM pg_proc WHERE oid = r.oid) IS NULL
+       OR EXISTS (SELECT 1 FROM aclexplode((SELECT proacl FROM pg_proc WHERE oid = r.oid)) a WHERE a.grantee = 0) THEN
+      RAISE EXCEPTION 'DM-1 postflight: % is executable by PUBLIC, anon or service_role', r.proname;
+    END IF;
+    IF has_function_privilege('authenticated', r.oid, 'EXECUTE') <> (r.proname = ANY (c_public)) THEN
+      RAISE EXCEPTION 'DM-1 postflight: % has the wrong authenticated EXECUTE', r.proname;
+    END IF;
+  END LOOP;
+  FOREACH v_table IN ARRAY c_tables LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.oid = to_regclass('public.' || v_table)
+                     AND c.relrowsecurity AND c.relowner = 'postgres'::regrole) THEN
+      RAISE EXCEPTION 'DM-1 postflight: % lacks RLS or is not owned by postgres', v_table;
+    END IF;
+    SELECT count(*) INTO v_count FROM pg_policy pol WHERE pol.polrelid = to_regclass('public.' || v_table);
+    IF v_count <> 1 OR EXISTS (SELECT 1 FROM pg_policy pol WHERE pol.polrelid = to_regclass('public.' || v_table)
+                                  AND pol.polcmd <> 'r') THEN
+      RAISE EXCEPTION 'DM-1 postflight: % must have exactly one SELECT policy', v_table;
+    END IF;
+    IF has_table_privilege('authenticated', 'public.' || v_table, 'INSERT, UPDATE, DELETE, TRUNCATE')
+       OR has_table_privilege('anon', 'public.' || v_table, 'SELECT') THEN
+      RAISE EXCEPTION 'DM-1 postflight: % has a write grant or an anon read', v_table;
+    END IF;
+  END LOOP;
+END;
+$postflight$;

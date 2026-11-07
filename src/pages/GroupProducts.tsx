@@ -147,7 +147,7 @@ function FilterBar(p: FilterBarProps) {
       <label className="text-sm text-gray-700">
         Status
         <select aria-label="Status" className="ml-2 rounded-md border border-gray-300 px-2 py-1" value={p.statusFilter}
-          onChange={(e) => p.onStatus(e.target.value as StatusFilter)}>
+          disabled={p.busy} onChange={(e) => p.onStatus(e.target.value as StatusFilter)}>
           {STATUS_FILTERS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
       </label>

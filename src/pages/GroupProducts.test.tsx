@@ -100,6 +100,17 @@ describe('GroupProducts', () => {
     expect(M.buildProposal).toHaveBeenCalledWith(expect.any(String));
   });
 
+  it('locks the status filter while a build runs, so the build reply cannot overwrite a newer choice', async () => {
+    let finish: (v: unknown) => void = () => {};
+    M.buildProposal.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    render(<GroupProducts />);
+    await screen.findByText('Rho');
+    fireEvent.click(screen.getByRole('button', { name: 'Build a new proposal' }));
+    expect(screen.getByLabelText('Status')).toBeDisabled();
+    finish({ proposal_id: 'prop-1', proposal_version: 3, group_count: 2, held_count: 0, rejected_count: 0, duplicate_parents: [] });
+    await waitFor(() => expect(screen.getByLabelText('Status')).not.toBeDisabled());
+  });
+
   it('approves a group as shown, with the previewed per-acre prices of the size whose rate changes', async () => {
     M.previewProductRateCorrection.mockResolvedValue({
       before: { tier1_price_per_acre: 5, tier2_price_per_acre: 4.5, tier3_price_per_acre: 4 },

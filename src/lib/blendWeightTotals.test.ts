@@ -161,3 +161,13 @@ describe('plain oz total with weights', () => {
     expect(result.some((w) => w.message.includes("A tank can't hold more product"))).toBe(false);
   });
 });
+
+describe('per-acre total unit with weights', () => {
+  it('adds no legacy overfill when the total unit is a rate (Gal/ac)', () => {
+    const products = [{ product_name: 'TEST A', quantity: 30, unit: 'Gal', rate_per_acre: null, rate_per_acre_unit: null,
+      product_form: 'liquid', product_rate_unit: null, product_inventory_unit: null }];
+    const result = validateBlendMath({ ...header(20, 'Gal/ac'), total_acres: 10 }, products,
+      { headerUnits: units, lines: [line({ form: 'liquid', unit: 'Gal', quantity: 30 })] });
+    expect(result.some((w) => w.message.includes("A tank can't hold more product"))).toBe(false);
+  });
+});

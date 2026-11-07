@@ -5,3 +5,4 @@
   one another (same EPA number, form and name), by the same rule Build uses. The Group products screen
   can then show that warning whenever it opens, not only right after Build. Grouping stays off.
 - Proof: `node scripts/smoke/prove-product-duplicate-parents-read-real-schema.mjs` (disposable real-schema database).
+- Applied live 2026-11-07 (ledger `20261107175628`); checked live: an admin gets the list, a sales rep is refused.

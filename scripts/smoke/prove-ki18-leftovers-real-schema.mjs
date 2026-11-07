@@ -413,8 +413,7 @@ function main() {
   assert.deepEqual(actorAfter, { forged: 'refused', own: true, system: true, nullActor: true }, `AFTER actor checks ${JSON.stringify(actorAfter)}`);
   setClosed('2026-11-01');
   const novAfter = reversals(ids);
-  assert.equal(novAfter.writeOff, 'ok', `AFTER, November closed: write-off ${novAfter.writeOff}`);
-  assert.notEqual(novAfter.application, 'closed', 'AFTER, November closed: the credit application is still refused by the period gate');
+  assert.deepEqual(novAfter, { writeOff: 'ok', application: 'ok' }, `AFTER, November closed: ${JSON.stringify(novAfter)}`);
   setClosed('2026-10-01');
   const octAfter = reversals(ids);
   assert.deepEqual(octAfter, { writeOff: 'closed', application: 'closed' }, `AFTER, October closed: ${JSON.stringify(octAfter)}`);

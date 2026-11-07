@@ -521,6 +521,9 @@ BEGIN
   PERFORM pg_temp.smk_new_sale('o' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   INSERT INTO order_item_shares (order_item_id, customer_id, split_percentage, updated_at) VALUES (v_l1, v_payer2, 0.001, '2000-01-01');
+  IF (SELECT updated_at FROM order_item_shares WHERE order_item_id = v_l1) < '2020-01-01' THEN
+    v_fails := v_fails || ' (AA) a new line share kept a client-sent updated_at;';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM _bill_split_line_shares(v_l1, 100000, 10000) x WHERE x.customer_id = v_payer2 AND x.units = 0 AND x.cents = 1)
      OR (SELECT sum(x.cents) FROM _bill_split_line_shares(v_l1, 100000, 10000) x) <> 100000
      OR (SELECT sum(x.units) FROM _bill_split_line_shares(v_l1, 100000, 10000) x) <> 10000 THEN

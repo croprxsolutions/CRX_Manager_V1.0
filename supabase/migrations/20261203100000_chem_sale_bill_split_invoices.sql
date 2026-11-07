@@ -274,9 +274,7 @@ BEGIN
     RAISE EXCEPTION 'BILL_SPLIT_CUSTOMER_INACTIVE: an inactive customer can''t be added to a bill split'
       USING ERRCODE = 'check_violation';
   END IF;
-  IF TG_OP = 'UPDATE' THEN
-    NEW.updated_at := now();
-  END IF;
+  NEW.updated_at := now();
   RETURN NEW;
 END;
 $function$;
@@ -359,9 +357,7 @@ BEGIN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_OVER_100: a line''s shares can''t total more than 100%%'
       USING ERRCODE = 'check_violation';
   END IF;
-  IF TG_OP = 'UPDATE' THEN
-    NEW.updated_at := now();
-  END IF;
+  NEW.updated_at := now();
   RETURN NEW;
 END;
 $function$;

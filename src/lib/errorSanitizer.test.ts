@@ -267,6 +267,12 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_HAS_DRAFT: draft invoice CS-1 bills this sale to one customer.')).toBe(
       "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"
     );
+    expect(sanitizeError('ORDER_ITEM_SHARES_BUSY: a delivery on this sale is being completed; try again')).toBe(
+      'Nothing was changed. A delivery on this sale is being completed. Try again in a moment',
+    );
+    expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVED: the line moved to another order; try again')).toBe(
+      'Nothing was changed. This line moved to another order. Refresh the page and try again',
+    );
     expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split')).toBe(
       'Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order',
     );

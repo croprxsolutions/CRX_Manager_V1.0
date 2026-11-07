@@ -716,6 +716,8 @@ for (const [command, label] of [
   ["cat <<'EOF'\ngit reset --hard\n", "a here-document that never ends"],
   ["cat <<'EOF' | xargs git\nreset --hard\nEOF\ngit reset --hard", "xargs, then a real reset"],
   ["python - <<'EOF'\nimport os; os.system('git reset --hard')\nEOF", "python launching a process"],
+  ["python - <<'EOF'\nimport os; getattr(os, 'sys'+'tem')('git reset --hard')\nEOF", "python launching through getattr"],
+  ["python - <<'EOF'\nglobals()['__builtins__'].__dict__['ev'+'al']('1'); x = 'git reset --hard'\nEOF", "python reaching builtins dynamically"],
   ["cat > x.py <<'EOF'\nimport subprocess; subprocess.run('git reset --hard', shell=True)\nEOF\npython x.py", "written python run later"],
   ["cat > notes.md <<'EOF'\ntext\nEOF\ngit reset --hard", "a real reset after the here-document"],
   ["cat > .env <<'EOF'\nSECRET=x\nEOF", "a here-document written to .env"],

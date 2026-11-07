@@ -3232,7 +3232,9 @@ export function commandFedToInterpreter(command) {
 // dropped for five such routes (agent-guardrails.md); each is pinned in the
 // bash-safety and review-proof-guard tests.
 const HEREDOC_TEXT_PROGRAMS = new Set(["cat", "tee"]);
-const PROCESS_LAUNCH_RE = /\b(?:subprocess|child_process|system|popen|exec\w*|spawn\w*|fork|eval|shell_exec|passthru|proc_open|pty|ctypes|__import__|importlib|getattr|Deno|Bun)\b|[`|]|\$\(|\bqx\b/i;
+// Matched anywhere, even inside a longer name, and dynamic lookups count too:
+// a text guard cannot out-read obfuscation, so anything unusual keeps the body.
+const PROCESS_LAUNCH_RE = /subprocess|child_process|system|popen|exec|spawn|fork|eval|startfile|shell|passthru|proc_open|pty|ctypes|__import__|importlib|getattr|globals|vars\s*\(|__dict__|__builtins__|compile|marshal|pickle|\bos\s*\.\s*(?!path\b)|deno|bun\b|[`|]|\$\(|\bqx\b/i;
 export function commandWithoutTextHeredocs(command, { runtimes = false } = {}) {
   const text = String(command ?? "");
   if (!text.includes("<<")) return text;

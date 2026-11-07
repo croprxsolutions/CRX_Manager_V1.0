@@ -1,4 +1,4 @@
-## 2026-11-06 — Parent EPA correction built, switched off; invoice lines always keep an EPA number (database)
+## 2026-11-06 — Parent EPA correction built, switched off; new invoice lines keep the product's EPA number (database)
 
 - New migration `20261207113000_parent_epa_correction.sql` (record in `docs/reference/migrations.d/`).
   Applies after `20261204120000_job_lines_keep_epa_number` (sprayed and finished jobs keep their number).

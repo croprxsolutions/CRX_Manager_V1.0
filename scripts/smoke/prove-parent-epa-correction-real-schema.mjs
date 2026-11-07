@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261207113000_parent_epa_correction: invoice lines are never written
- * without an EPA number, the readers are unchanged (they move to the copies with the screens PR),
+ * Real-schema proof for 20261207113000_parent_epa_correction: new invoice lines get the
+ * product's EPA number (none when it has none), the readers are unchanged (they move to the copies with the screens PR),
  * and the parent EPA correction (switched off by the file, switched on here for the test) writes the
  * parent and every size, so jobs not sprayed yet show the new number while sprayed and finished jobs
  * keep the number 20261204120000 locked for them; it refuses
- * while an invoice line has no copy, and leaves sprayed and finished jobs and invoices as they were.
+ * while an invoice line has no copy and its size's number would change, and leaves sprayed and finished jobs and invoices as they were.
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays every
  * migration before the candidate, seeds invented rows and checks each case.

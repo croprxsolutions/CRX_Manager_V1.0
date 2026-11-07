@@ -354,10 +354,14 @@ async function main() {
     [', label_adjuvants', `'1-1', '${ADMIN}', '${ADMIN}', '[{"kind":"required","adjuvant_type":" "}]'`, /label_adjuvants_check/],
     [', label_adjuvants', `'1-1', '${ADMIN}', '${ADMIN}', '[{"kind":"required","adjuvant_type":"NIS","extra":1}]'`, /label_adjuvants_check/],
     [', rei_hours', `'1-1', '${ADMIN}', '${ADMIN}', -1`, /rei_hours_check/],
+    [', max_label_rate, max_label_rate_unit', `'1-1', '${ADMIN}', '${ADMIN}', 'NaN', 'pt/A'`, /max_label_rate_check/],
+    [', max_label_rate, max_label_rate_unit', `'1-1', '${ADMIN}', '${ADMIN}', 'Infinity', 'pt/A'`, /max_label_rate_check/],
+    [', max_label_rate', `'1-1', '${ADMIN}', '${ADMIN}', 2.5`, /epa_registrations_rate_unit_pair/],
+    [', max_label_rate_unit', `'1-1', '${ADMIN}', '${ADMIN}', 'pt/A'`, /epa_registrations_rate_unit_pair/],
   ]) ownerRefused(REG(cols, vals), why);
   psql(`BEGIN; ${REG(', registration_status, cancelled_on, label_adjuvants', `'1-1', '${ADMIN}', '${ADMIN}', 'cancelled', current_date, '[]'`)} ROLLBACK;`);
   assert.equal(scalar("SELECT rup_status || '|' || registration_status || '|' || registration_version || '|' || (label_adjuvants IS NULL) FROM public.epa_registrations WHERE epa_registration = '100-1070';"), 'no|unknown|1|false');
-  console.log('[prover] case 4: bad numbers, a cancelled status without a date (and the reverse), a fourth RUP value, a non-https link and malformed adjuvants are refused; [] is reviewed-none');
+  console.log('[prover] case 4: bad numbers, a cancelled status without a date (and the reverse), a fourth RUP value, a non-https link, malformed adjuvants, a non-finite rate and a rate without its unit (or the reverse) are refused; [] is reviewed-none');
 
   // 5. The read RPC: active users only, normalized lookup, all when NULL.
   assert.deepEqual(JSON.parse(ok(REP, "SELECT public.get_epa_registrations(ARRAY[' 100-1070 ', '9-9']);")).map((x) => x.epa_registration), ['100-1070']);

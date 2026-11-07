@@ -117,7 +117,8 @@ CREATE TABLE public.epa_registrations (
   rup_status text NOT NULL DEFAULT 'unknown' CHECK (rup_status IN ('yes', 'no', 'unknown')),
   rei_hours integer CHECK (rei_hours IS NULL OR rei_hours >= 0),
   phi_days integer CHECK (phi_days IS NULL OR phi_days >= 0),
-  max_label_rate numeric CHECK (max_label_rate IS NULL OR max_label_rate >= 0),
+  -- NaN sorts above every number in PostgreSQL, so >= 0 alone would admit it and Infinity.
+  max_label_rate numeric CHECK (max_label_rate IS NULL OR (max_label_rate >= 0 AND max_label_rate < 'Infinity'::numeric)),
   max_label_rate_unit text CHECK (max_label_rate_unit IS NULL OR (btrim(max_label_rate_unit) <> '' AND length(max_label_rate_unit) <= 40)),
   label_adjuvants jsonb DEFAULT NULL CHECK (public._epa_label_adjuvants_valid(label_adjuvants)),
   registration_version bigint NOT NULL DEFAULT 1 CHECK (registration_version >= 1),
@@ -126,7 +127,9 @@ CREATE TABLE public.epa_registrations (
   -- Set by every writer (no updated_at trigger), with registration_version, in the same statement.
   updated_by uuid NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CHECK ((registration_status = 'cancelled') = (cancelled_on IS NOT NULL))
+  CHECK ((registration_status = 'cancelled') = (cancelled_on IS NOT NULL)),
+  -- A label rate means nothing without its unit, and a unit nothing without its rate.
+  CONSTRAINT epa_registrations_rate_unit_pair CHECK ((max_label_rate IS NULL) = (max_label_rate_unit IS NULL))
 );
 ALTER TABLE public.epa_registrations OWNER TO postgres;
 COMMENT ON TABLE public.epa_registrations IS

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261206113000_parent_epa_correction: invoice lines are never written
+ * Real-schema proof for 20261207113000_parent_epa_correction: invoice lines are never written
  * without an EPA number, the readers are unchanged (they move to the copies with the screens PR),
  * and the parent EPA correction (switched off by the file, switched on here for the test) writes the
  * parent and every size, so jobs not sprayed yet show the new number while sprayed and finished jobs
@@ -26,12 +26,11 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261206113000_parent_epa_correction.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261207113000_parent_epa_correction.sql');
 const FOLLOW_UPS = [];
-// Later files that only READ what this proof covers and redefine none of it. 20261207100000 reads
-// job_chemicals; its product_parents EPA trigger was proven with this file replayed after it
-// (PARENT_EPA_CORRECTION_PROOF_PASS at stamp 20261208110000, 2026-11-07).
-const LATER_READ_ONLY = new Set(['20261207100000_product_weights.sql']);
+// Later files that only READ what this proof covers and redefine none of it (none since the
+// restamp to 20261207113000 put 20261207100000 product weights before this file).
+const LATER_READ_ONLY = new Set();
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -387,6 +386,10 @@ async function main() {
   assert.match(r.output, /PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice PE-INV-BLANK \(posted\)/);
   // A blank line for a size with no number showed none: it does not block (a missing number stays correctable).
   asFixture(`UPDATE public.products SET epa_registration = NULL WHERE id = '${S2}';`);
+  assert.equal(scalar(`SELECT public._product_parent_identity_after(p, '{"generic_epa_registration": "${NEW}"}')->>'generic_epa_registration'
+    FROM public.product_parents p WHERE id = '${PARENT}';`), NEW);
+  // Nor does one whose size already carries the corrected number: the line keeps showing it (Luna 2026-11-07).
+  asFixture(`UPDATE public.products SET epa_registration = '${NEW}' WHERE id = '${S2}';`);
   assert.equal(scalar(`SELECT public._product_parent_identity_after(p, '{"generic_epa_registration": "${NEW}"}')->>'generic_epa_registration'
     FROM public.product_parents p WHERE id = '${PARENT}';`), NEW);
   asFixture(`UPDATE public.products SET epa_registration = '${OLD}' WHERE id = '${S2}';`);

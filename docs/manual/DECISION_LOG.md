@@ -14,7 +14,8 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, in session, 2026-11-07: "Yes, allow it"):** a parent EPA correction is not blocked by an old invoice line with no EPA copy when that line's size had no number either. Such a line showed none; after the correction, a reader that falls back to the size (the customer year-end summary) shows the added number. Printed invoices and statements print only the line's own copy, so they do not change. A blank line for a size that HAS a number still blocks, because it would show a different number.
 **Why:** Sol (round 3, PR #1611) found that a parent with no number could otherwise never be given one; Luna objected that the old line would change from blank to a number. Showing the product's real label beats a product that can never be fixed.
-**Enforcement:** `_product_parent_identity_after` in `supabase/migrations/20261206113000_parent_epa_correction.sql`, proven by `scripts/smoke/prove-parent-epa-correction-real-schema.mjs`.
+**Enforcement:** `_product_parent_identity_after` in `supabase/migrations/20261207113000_parent_epa_correction.sql`, proven by `scripts/smoke/prove-parent-epa-correction-real-schema.mjs`.
+
 ## 2026-11-07 — Weight per gallon is capped at 20 lb/gal (DM-2 and DM-1 match)
 
 **Decision (Mason, in session, 2026-11-07):** "there is no liquid that heavy, most is 8lb-12lb is normal range of product weights, set them both to 20lbs". DM-2's density limit drops from 25 to 20 lb/gal, matching DM-1's 20 lb/gal strength limit.

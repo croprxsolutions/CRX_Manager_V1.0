@@ -4,7 +4,7 @@
 --  the same pattern as 20261108120000_product_parents.sql.)
 --
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261206113000_parent_epa_correction.md.
+-- docs/reference/migrations.d/20261207113000_parent_epa_correction.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (Mason, 2026-11-06: "yes i want to be able to fix epa issues"): a parent's EPA number can be
@@ -28,7 +28,7 @@
 --     (under the parent copy pass) take the new number in one transaction with one logged event; jobs
 --     not sprayed yet show it because they read the product's number. Sprayed and finished jobs (their
 --     job_product_epa rows), invoices and restricted-use records keep the number they were made with. It is
---     refused while any invoice line for one of the sizes that has a number has no EPA copy of its own
+--     refused while any invoice line for a size whose number would change has no EPA copy of its own
 --     (that line would follow the change); the message names the invoices. And it stays refused while
 --     _product_parent_epa_correction_enabled() is false, which this file creates as false.
 --
@@ -139,7 +139,7 @@ REVOKE ALL ON FUNCTION public._product_parent_epa_correction_enabled() FROM PUBL
 
 -- Checks p_changes; returns the parent's identity after the change. An EPA number change is
 -- refused while switched off, when it is not a valid EPA number, and while any invoice line for a
--- size that has a number has no EPA copy of its own (that line would show the new number instead).
+-- size whose number would change has no EPA copy of its own (that line would show the new number).
 -- A line for a size with no number showed none, so giving it the corrected one changes no number
 -- it showed; a reader falling back to the size then shows the added one (Mason, 2026-11-07: "Yes,
 -- allow it"; DECISION_LOG).
@@ -171,7 +171,8 @@ BEGIN
       JOIN public.product_parent_members m ON m.product_id = ii.product_id
       JOIN public.products p ON p.id = ii.product_id
      WHERE m.parent_id = p_parent.id AND i.deleted_at IS NULL AND public._epa_norm(ii.epa_registration) IS NULL
-       AND public._epa_norm(p.epa_registration) IS NOT NULL;
+       AND public._epa_norm(p.epa_registration) IS NOT NULL
+       AND public._epa_norm(p.epa_registration) IS DISTINCT FROM v_epa;
     IF v_unsaved IS NOT NULL THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice % has a line for this product with no saved EPA number, so it would change too. Open and save a draft invoice to give it one; a posted one must be unposted, saved and posted again', v_unsaved;
     END IF;

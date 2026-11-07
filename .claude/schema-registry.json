@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-06",
+    "generated_at": "2026-11-07",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261106161512",
+    "migrations_high_water": "20261107131813",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -533,6 +533,18 @@
       "20261121090000_ki18_chicago_ticket_year_dashboard_aging_invoice_date_limit",
       "20261123110000_bind_ops_replay_receipts_batch4e",
       "20261123120000_product_parent_proposals",
+      "20261123130000_revoke_truncate_trigger_maintain",
+      "20261125100000_orders_list_keyset_page",
+      "20261129100000_deliveries_read_rules_check_role_once",
+      "20261130100000_deliveries_list_page",
+      "20261201110000_product_parent_review_fixes",
+      "20261202100000_deliveries_list_keyset_page",
+      "20261202110000_product_size_notes_in_one_step",
+      "20261202130000_product_grouping_open_read",
+      "20261203110000_parent_brand_save_checks_size",
+      "20261204100000_ki18_batch1_chicago_today",
+      "20261204110000_ki18_batch2_chicago_boards",
+      "20261204120000_job_lines_keep_epa_number",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1512,9 +1524,11 @@
     "job_attachments",
     "job_chemicals",
     "job_dispatch_preservation",
+    "job_epa_sprayed",
     "job_field_shares",
     "job_fields",
     "job_notifications",
+    "job_product_epa",
     "job_tag_assignments",
     "note_activity_log",
     "note_tags",
@@ -3547,6 +3561,12 @@
       "table": "cycle_counts",
       "constraint": "cycle_counts_item_revision_nonnegative_chk",
       "def": "CHECK ((item_revision >= 0))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "deliveries",
+      "constraint": "deliveries_id_not_nil",
+      "def": "CHECK ((id <> '00000000-0000-0000-0000-000000000000'::uuid))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6042,6 +6062,15 @@
         "preserved_at"
       ]
     },
+    "job_epa_sprayed": {
+      "no_default": [
+        "job_id"
+      ],
+      "with_default": [
+        "recorded_at",
+        "not_recorded"
+      ]
+    },
     "job_field_shares": {
       "no_default": [
         "job_id",
@@ -6114,6 +6143,16 @@
         "quantity_drawn",
         "created_at",
         "updated_at"
+      ]
+    },
+    "job_product_epa": {
+      "no_default": [
+        "job_id",
+        "product_id"
+      ],
+      "with_default": [
+        "recorded_at",
+        "not_recorded"
       ]
     },
     "job_tag_assignments": {
@@ -8687,6 +8726,11 @@
       "dispatched_at",
       "preserved_at"
     ],
+    "job_epa_sprayed": [
+      "job_id",
+      "recorded_at",
+      "not_recorded"
+    ],
     "job_field_shares": [
       "id",
       "job_id",
@@ -8757,6 +8801,13 @@
       "quantity_drawn",
       "created_at",
       "updated_at"
+    ],
+    "job_product_epa": [
+      "job_id",
+      "product_id",
+      "epa_registration",
+      "recorded_at",
+      "not_recorded"
     ],
     "job_tag_assignments": [
       "job_id",

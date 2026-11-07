@@ -23,7 +23,7 @@
 --   * statement date range defaults (bodies unchanged): get_customer_statement,
 --     _get_customer_statement_scoped_impl
 -- Signatures, return types, volatility, SECURITY DEFINER and search_path are unchanged (each statement is
--- the live pg_get_functiondef text); CREATE OR REPLACE keeps owners and grants. The preflight and
+-- the function's current live definition, reviewed here, with only its dates changed); CREATE OR REPLACE keeps owners and grants. The preflight and
 -- postflight pin each function's body md5, search_path, SECURITY DEFINER, owner and exact live EXECUTE grants.
 -- No row is read or written. Re-runnable: the preflight accepts the pre-image or this file's body.
 -- Not changed here: rolling windows that subtract an interval from now() (they do not depend on the

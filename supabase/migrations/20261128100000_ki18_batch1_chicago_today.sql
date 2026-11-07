@@ -35,8 +35,8 @@
 --     create_order_from_blend_ticket, create_quick_delivery
 --   * column defaults: payments.payment_date, commission_payments.payment_date,
 --     ar_reminder_tracking.sent_date, deliveries.scheduled_date
--- Signatures, return types, SECURITY DEFINER and search_path are unchanged (each statement is the live
--- pg_get_functiondef text); CREATE OR REPLACE keeps owners and grants. The preflight and postflight pin
+-- Signatures, return types, SECURITY DEFINER and search_path are unchanged (each statement is the function's
+-- current live definition, reviewed here, with only its dates changed); CREATE OR REPLACE keeps owners and grants. The preflight and postflight pin
 -- each function's body md5, argument list (with defaults), search_path, SECURITY DEFINER, owner and exact
 -- live EXECUTE grants.
 -- No row is written; the preflight refuses if any RUP sales record's sale date is not the earlier of its invoice
@@ -47,9 +47,13 @@
 -- Rollback: a forward migration re-emitting the pre-images (their md5s are in the preflight).
 --
 -- idempotency-body-check: exempt
+-- Reviewer checks 4 and 5 (idempotency key, actor binding) do not apply to the four functions below; each
+-- is in the charter's exempt class, and this file changes only dates inside them (no signature, caller or
+-- grant change), so adding a key or actor rule here would be out of scope for KI-18.
 -- These are live bodies re-emitted with only their dates changed; no signature, caller or grant changes.
--- mark_overdue_invoices, auto_expire_quotes and run_morning_notification_checks take no arguments, are
--- executable only by postgres and service_role (scheduled jobs), and a rerun finds nothing left to change.
+-- mark_overdue_invoices, auto_expire_quotes and run_morning_notification_checks are not client RPCs: they
+-- take no arguments, no client role (anon, authenticated) can execute them (postgres and service_role only;
+-- pinned in the preflight), the pg_cron scheduler is their only caller, and a rerun finds nothing left to change.
 -- _sync_job_holds(p_job_id, p_actor) is an internal helper (postgres and service_role only); its callers
 -- are the _trg_sync_job_holds and _trg_release_job_holds_on_lifecycle triggers, which pass auth.uid(), and
 -- reserve_job_inventory, which passes its own bound actor, so p_actor is never caller-chosen.

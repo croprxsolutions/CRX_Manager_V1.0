@@ -493,6 +493,9 @@ export default function QuoteBuilder() {
   const [tier, setTier] = useState(1);
   // A tier other than the customer's assigned one is saved only once chosen on purpose (KI-105).
   const [tierChoice, setTierChoice] = useState('');
+  // What the tier check (KI-105) depends on, as on screen now; Save compares it after its re-read.
+  const tierInputsRef = useRef('');
+  useEffect(() => { tierInputsRef.current = `${customerId}|${tier}|${tierChoice}`; }, [customerId, tier, tierChoice]);
   // The expiry date the rep picked; null = season end (Mason 2026-10-26/27). The database
   // applies it at each send (20261029100000).
   const [chosenExpiryDate, setChosenExpiryDate] = useState<string | null>(null);
@@ -2320,6 +2323,11 @@ export default function QuoteBuilder() {
       return null;
     });
     if (routeQuoteIdRef.current !== routeAtTierRead || quoteLoadSerialRef.current !== loadAtTierRead) return null;
+    // The tier, customer or tick changed during the read: this save would send the old ones (Luna, #1605).
+    if (tierInputsRef.current !== `${customerId}|${tier}|${tierChoice}`) {
+      toast('error', 'The price tier or customer changed while saving. Save again.');
+      return null;
+    }
     if (currentAssignedTier === null) {
       toast('error', "The customer's price tier could not be checked. Try again in a moment.");
       return null;

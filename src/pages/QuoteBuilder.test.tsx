@@ -3716,6 +3716,19 @@ describe('QuoteBuilder', () => {
       expect(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' })).not.toBeChecked();
     });
 
+    it('abandons a save whose tier changed while the assigned tier was being read (Luna, #1605)', async () => {
+      renderDraftAtTier(1);
+      await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      let answer: (tier: number) => void = () => {};
+      mockReadAssignedTier.mockImplementationOnce(() => new Promise<number>((resolve) => { answer = resolve; }));
+      save();
+      await waitFor(() => expect(mockReadAssignedTier).toHaveBeenCalled());
+      fireEvent.change(screen.getByDisplayValue('Tier 1'), { target: { value: '2' } });
+      answer(1);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'The price tier or customer changed while saving. Save again.'));
+      expect(saveCalls()).toHaveLength(0);
+    });
+
     it('refuses Save when the assigned tier cannot be read', async () => {
       renderDraftAtTier(1);
       await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());

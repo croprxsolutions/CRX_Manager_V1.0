@@ -389,10 +389,10 @@ can make old splits refuse to save (LOW-MED).
   `20261107053254`) moves 13 boards and reports to the Chicago date; the database clock is UTC, so from 6-7 pm Central
   `CURRENT_DATE` was tomorrow. The overnight overdue, quote-expiry and morning-notice jobs need no change (they run
   midnight to 6 am Central).
-- Still open: statement and AR aging (batch 3, the ranges above). MED. Fixed in `20261206110000` (written, not
-  applied yet): `_sync_job_holds` counts a hold that expires today until the Chicago day ends, and refuses a
+- Still open: statement and AR aging (batch 3, the ranges above). MED. Fixed in `20261206110000` (applied live
+  2026-11-07): `_sync_job_holds` counts a hold that expires today until the Chicago day ends, and refuses a
   signed-in caller passing another user as the actor.
-- Sol notes on the live batches (2026-11-07), fixed in `20261206110000` (not applied yet): reversing a write-off or
+- Sol notes on the live batches (2026-11-07), fixed in `20261206110000` (applied live 2026-11-07): reversing a write-off or
   credit application checks only the month of the Chicago day it was made (Mason, 2026-11-07; batch 1 checked the
   UTC and Chicago days, so an evening row on a month's last day could not be reversed once the next month closed);
   the stale-quote call list uses the Chicago calendar-day age it shows, not whole 24-hour periods.

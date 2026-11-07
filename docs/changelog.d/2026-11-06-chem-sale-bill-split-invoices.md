@@ -9,7 +9,7 @@
   33.34 / 33.33 / 33.33). A card under 100% leaves the rest with the main customer.
 - New table `order_item_shares`: a line's own shares override the card for that line, such as a
   farmer paying 100% of one product and the landlord 0%. No screen for it yet.
-- The card and the line shares lock at the first completed delivery, and voiding it reopens them. A row can't move to another sale, and a card can't total over exactly 100%.
+- The card and the line shares lock at the first billed delivery, and voiding its invoices or the delivery reopens them. A row can't move to another sale, and a card can't total over exactly 100%.
 - A payer's draft stays editable until it posts, so a freight charge can go on one payer's invoice.
 - Create Invoice on a delivery drafts per payer too. A sale with other payers refuses one invoice
   to one customer. Reps can now read the card, which any rep could already write.

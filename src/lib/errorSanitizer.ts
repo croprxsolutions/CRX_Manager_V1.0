@@ -131,7 +131,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^ORDER_INVOICE_TERMINAL\b/i,
    'This order invoice is already final and cannot be changed'],
   [/^BILL_SPLIT_FROZEN\b/,
-   "Nothing was changed. A delivery on this sale is complete and invoiced, so its bill split is locked. Void that delivery's invoices to change the split"],
+   "Nothing was changed. A delivery on this sale is complete and invoiced, so its bill split is locked. Void that delivery's invoices to change the split. Unpost a posted group first, so the sale keeps its commission"],
   [/^BILL_SPLIT_HAS_DRAFT\b/,
    "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"],
   [/^BILL_SPLIT_LINES_LOCKED\b/,

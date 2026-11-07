@@ -230,7 +230,7 @@ BEGIN
    LIMIT 1;
   IF v_blocking IS NOT NULL THEN
     RAISE EXCEPTION
-      'BILL_SPLIT_FROZEN: delivery % is complete and billed, so this sale''s bill split can''t change. Void its invoices or the delivery to change it.',
+      'BILL_SPLIT_FROZEN: delivery % is complete and billed, so this sale''s bill split can''t change. Void its invoices or the delivery to change it. Unpost a posted group first, so the sale keeps its commission.',
       v_blocking
       USING ERRCODE = 'check_violation';
   END IF;
@@ -690,7 +690,7 @@ BEGIN
   -- between chemical sale and misc charge, as the invoice editor offers. Otherwise a credit memo
   -- retyped as a sale would bill one customer past the Bill Split checks, which run on insert.
   IF TG_OP = 'UPDATE' AND NEW.invoice_type IS DISTINCT FROM OLD.invoice_type
-     AND NOT (OLD.invoice_type IN ('chemical_sale', 'misc_charge') AND NEW.invoice_type IN ('chemical_sale', 'misc_charge')) THEN
+     AND NOT (OLD.status = 'draft' AND OLD.invoice_type IN ('chemical_sale', 'misc_charge') AND NEW.invoice_type IN ('chemical_sale', 'misc_charge')) THEN
     RAISE EXCEPTION 'INVOICE_TYPE_IMMUTABLE: an invoice keeps its type; void it and create the right one'
       USING ERRCODE = 'check_violation';
   END IF;

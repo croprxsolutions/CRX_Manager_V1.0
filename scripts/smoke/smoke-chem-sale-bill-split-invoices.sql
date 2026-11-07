@@ -46,6 +46,7 @@
 --   AG A payer's invoice takes its season from its date, as a plain delivery invoice does
 --   AH An inactive customer can't become a payer, on the card or on a line
 --   AI A line with its own shares can't move to another sale (ORDER_ITEM_SHARES_LINE_MOVE)
+--   AM A posted invoice keeps its type; only a draft switches between chemical sale and misc charge
 --   AL A line delivered past its planned quantity splits its capped total by percentage
 --   AJ A payer's share under 0.01 of quantity worth cents refuses the split (option B); the delivery completes,
 --      the office is told, Create Invoice refuses too, and the card stays open so the office can fix it
@@ -1104,6 +1105,19 @@ BEGIN
      IS DISTINCT FROM floor(v_cents * 33.33 / 100)::bigint THEN
     v_fails := v_fails || ' (AL) a payer just past plan did not pay exactly their percentage;';
   END IF;
+
+  -- AM: only a draft switches between chemical sale and misc charge; a posted invoice keeps its type.
+  PERFORM pg_temp.smk_new_sale('typ' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  PERFORM pg_temp.smk_done(v_d, 'typ' || v_suffix);
+  SELECT id INTO v_inv FROM invoices WHERE delivery_id = v_d;
+  PERFORM post_invoice(v_inv, _invoice_post_version(v_inv), 'smk-spl-typ-post-' || v_suffix);
+  BEGIN
+    UPDATE invoices SET invoice_type = 'misc_charge' WHERE id = v_inv;
+    v_fails := v_fails || ' (AM) a posted invoice changed type;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'INVOICE_TYPE_IMMUTABLE%' THEN v_fails := v_fails || ' (AM) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL chem sale bill split:%', v_fails;

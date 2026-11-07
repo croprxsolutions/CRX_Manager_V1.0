@@ -21,6 +21,7 @@ import ProductMarginFloorCard from '../components/products/ProductMarginFloorCar
 import ProductStockCard from '../components/products/ProductStockCard';
 import ProductRateCorrectionModal from '../components/products/ProductRateCorrectionModal';
 import ProductParentPanel from '../components/products/ProductParentPanel';
+import ProductWeightCard from '../components/products/ProductWeightCard';
 import ToteFillCard from '../components/inventory/ToteFillCard';
 import {
   addProductSize, createProductWithParent, getParentOfProduct, newSizeFields, SIZE_ROLE_LABELS,
@@ -1345,6 +1346,18 @@ export default function ProductDetail() {
                 void fetchProduct();
                 setPriceHistoryReloadToken((current) => current + 1);
               }}
+            />
+          )}
+          {/* DM-2: weight per gallon (on the parent) or per pack; re-read when the product or its parent is saved. */}
+          {!isNew && persistedProduct && persistedProduct.id === id && profile && (
+            <ProductWeightCard
+              productId={id!}
+              isAdmin={isAdmin}
+              profileId={profile.id}
+              busy={isDirty || pricingReloadRequired || saving}
+              reloadKey={JSON.stringify([persistedProduct.updated_at, persistedProduct.product_form, persistedProduct.inventory_unit,
+                persistedProduct.container_size, persistedProduct.container_unit, persistedProduct.container_type, persistedProduct.unit_size,
+                parent?.id ?? null, parent?.parent_version ?? null])}
             />
           )}
           {!isNew && parentLoadFailed && (

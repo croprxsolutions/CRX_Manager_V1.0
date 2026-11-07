@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261202120000_parent_epa_correction: invoice lines are never written
+ * Real-schema proof for 20261205100000_parent_epa_correction: invoice lines are never written
  * without an EPA number, the readers are unchanged (they move to the copies with the screens PR),
  * and the parent EPA correction (switched off by the file, switched on here for the test) writes the
- * parent, every size and, through 20261202115000's products trigger, open jobs only; it refuses
+ * parent and every size, so jobs not sprayed yet show the new number while sprayed and finished jobs
+ * keep the number 20261204120000 locked for them; it refuses
  * while an invoice line has no copy, and leaves sprayed and finished jobs and invoices as they were.
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays every
@@ -25,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261202120000_parent_epa_correction.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261205100000_parent_epa_correction.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -41,7 +42,7 @@ const LEDGER_ONLY = new Set([
   '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(job_chemicals|_product_parent_identity_after|correct_product_parent_identity|_copy_parent_to_size|_product_parent_epa_correction_enabled|_fill_invoice_line_epa|_job_chemical_epa|_product_epa_to_unsprayed_job_lines|_job_line_epa_follows_product)/i;
+const TOUCHED = /(job_chemicals|_product_parent_identity_after|correct_product_parent_identity|_copy_parent_to_size|_product_parent_epa_correction_enabled|_fill_invoice_line_epa|job_product_epa|job_epa_sprayed|_job_epa_freeze|_epa_norm)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -250,8 +251,11 @@ const J = (v) => `'${JSON.stringify(v).replaceAll("'", "''")}'::jsonb`;
 const version = () => scalar(`SELECT parent_version FROM public.product_parents WHERE id = '${PARENT}';`);
 const correctSql = (changes, key, ver = version()) =>
   `SELECT public.correct_product_parent_identity('${PARENT}', ${ver}, ${J(changes)}, 'typo on the label entry', 'EPA label PDF, page 1', '${key}');`;
-const lineEpa = (job, pid) => scalar(`SELECT COALESCE(string_agg(COALESCE(epa_registration, '<null>'), ',' ORDER BY sort_order), '<none>')
-  FROM public.job_chemicals WHERE job_id = '${job}' AND product_id = '${pid}';`);
+// The number a job shows for a product (20261204120000 item 4): the job's kept number, else the product's.
+const lineEpa = (job, pid) => scalar(`SELECT CASE WHEN k.job_id IS NOT NULL THEN COALESCE(k.epa_registration, '<null>')
+    ELSE COALESCE(public._epa_norm(p.epa_registration), '<null>') END
+  FROM public.products p LEFT JOIN public.job_product_epa k ON k.job_id = '${job}' AND k.product_id = p.id
+  WHERE p.id = '${pid}';`);
 const productEpa = (pid) => scalar(`SELECT COALESCE(epa_registration, '<null>') FROM public.products WHERE id = '${pid}';`);
 const invoiceEpas = () => scalar(`SELECT string_agg(i.invoice_number || ':' || COALESCE(ii.epa_registration, '<null>'), ',' ORDER BY i.invoice_number, ii.description)
   FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id;`);
@@ -261,7 +265,7 @@ function seed() {
     ('${ADMIN}', 'pe-admin@example.invalid', '{"full_name":"[PROVER] Admin","role":"admin"}'::jsonb),
     ('${REP}', 'pe-rep@example.invalid', '{"full_name":"[PROVER] Rep","role":"sales_rep"}'::jsonb);`);
   const p = (pid, name, epa) => `('${pid}', '[PROVER] ${name}', '${name}', 'liquid', 'Gal', 'Herbicide', '${epa}', 10.00, 15.00, true)`;
-  const line = (job, pid, n) => `('${job}', '${pid}', 5, 'gal', 1500, ${n}, '${pid === OTHER ? OTHER_EPA : OLD}')`;
+  const line = (job, pid, n) => `('${job}', '${pid}', 5, 'gal', 1500, ${n})`;
   asOwner(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
     INSERT INTO public.product_categories (name, sort_order) VALUES ('Herbicide', 60) ON CONFLICT DO NOTHING;
@@ -282,14 +286,16 @@ function seed() {
       ('${JDEL}', 'PE-DEL', '${CUST}', 'scheduled', current_date, '${ADMIN}', now()),
       ('${JSPRAY}', 'PE-SPRAYED', '${CUST}', 'in_progress', current_date, '${ADMIN}', NULL);
     INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${JSPRAY}', current_date, 40);
-    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order, epa_registration) VALUES
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES
       ${[JOPEN, JPROG, JDONE, JINV, JDEL, JSPRAY].flatMap((j) => [line(j, S1, 1), line(j, OTHER, 2)]).join(', ')};
     INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, created_by, posted_by, posted_at, total_amount_cents, season) VALUES
       ('${IPOST}', 'PE-INV-POSTED', '${CUST}', 'field_application', 'posted', '${ADMIN}', '${ADMIN}', now(), 3000, 2026),
       ('${IDRAFT}', 'PE-INV-DRAFT', '${CUST}', 'field_application', 'draft', '${ADMIN}', NULL, NULL, 0, 2026);
     INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, epa_registration) VALUES
       ('${IPOST}', '${S1}', '[PROVER] a gly line', 2, 1500, 3000, 1000, '${OLD}');`);
-  console.log('[prover] seeded an admin, a rep, a parent with two sizes, an unrelated product, six jobs (one with a spray recorded) and a posted invoice');
+  psql(`SELECT public._job_epa_freeze(j) FROM unnest(ARRAY['${JSPRAY}', '${JDONE}', '${JINV}']::uuid[]) j;`);
+  assert.equal(scalar('SELECT count(*) FROM public.job_product_epa WHERE NOT not_recorded;'), '6');
+  console.log('[prover] seeded an admin, a rep, a parent with two sizes, an unrelated product, six jobs (sprayed, completed and invoiced ones with their numbers kept) and a posted invoice');
 }
 
 async function main() {
@@ -392,23 +398,23 @@ async function main() {
   assert.equal(productEpa(OTHER), OTHER_EPA);
   assert.deepEqual(receipt.sizes.map((s) => [s.product_id, s.before.epa_registration ?? null, s.after.epa_registration ?? null]).sort(),
     [[S1, OLD, NEW], [S2, OLD, NEW]].sort());
-  // Open jobs (scheduled, in progress) take the new number.
+  // Open jobs (scheduled, in progress) show the new number; the deleted one is not counted.
   assert.equal(receipt.open_job_lines, 2);
   assert.equal(lineEpa(JOPEN, S1), NEW);
   assert.equal(lineEpa(JPROG, S1), NEW);
-  // Sprayed, finished, invoiced and deleted jobs keep the number they had; other products are untouched.
+  // Sprayed, finished and invoiced jobs keep the number they had; other products are untouched.
   assert.equal(lineEpa(JSPRAY, S1), OLD);
   assert.equal(lineEpa(JDONE, S1), OLD);
   assert.equal(lineEpa(JINV, S1), OLD);
-  assert.equal(lineEpa(JDEL, S1), OLD);
-  for (const j of [JOPEN, JPROG, JDONE, JINV, JDEL, JSPRAY]) assert.match(lineEpa(j, OTHER), new RegExp(`^${OTHER_EPA}(,${OTHER_EPA})*$`));
+  assert.equal(scalar(`SELECT count(*) FROM public.job_product_epa WHERE product_id = '${S1}' AND epa_registration = '${OLD}';`), '3');
+  for (const j of [JOPEN, JPROG, JDONE, JINV, JSPRAY]) assert.equal(lineEpa(j, OTHER), OTHER_EPA);
   assert.equal(invoiceEpas(), before.invoices, 'an invoice line changed');
   assert.equal(scalar('SELECT count(*) FROM public.product_parent_events;'), String(Number(before.events) + 1));
   assert.equal(scalar(`SELECT event_type || ':' || jsonb_array_length(affected) || ':' || (after_values->>'generic_epa_registration')
     FROM public.product_parent_events WHERE id = ${receipt.event_id};`), `identity_corrected:2:${NEW}`);
-  console.log('[prover] the correction wrote the parent, both sizes and two lines of unsprayed jobs in one logged event; sprayed, finished, invoiced and deleted jobs and every invoice line kept their number');
+  console.log('[prover] the correction wrote the parent, both sizes and jobs not sprayed yet show the new number, in one logged event; sprayed, finished and invoiced jobs and every invoice line kept their number');
 
-  // A sprayed job saved again from the job screen (each line sent back by its id, 20261202115000) keeps
+  // A sprayed job saved again from the job screen (save_job deletes and re-writes its lines) keeps
   // the number it was sprayed under, after the correction.
   const sent = scalar(`SELECT string_agg(id::text || '/' || product_id::text || '/' || sort_order, ',' ORDER BY sort_order)
     FROM public.job_chemicals WHERE job_id = '${JSPRAY}';`).split(',').map((x) => x.split('/'));
@@ -427,16 +433,16 @@ async function main() {
   refused(ADMIN, correctSql({ generic_epa_registration: '524-477' }, 'k-stale', ver), /STALE|version/i);
   console.log('[prover] a retried correction returns the same receipt and writes nothing; a reused key or a stale version is refused');
 
-  // A product outside any parent, its EPA number edited directly: unsprayed jobs follow, the rest keep theirs.
+  // A product outside any parent, its EPA number edited directly: jobs not sprayed yet follow, the rest keep theirs.
   psql(`UPDATE public.products SET epa_registration = '300-3' WHERE id = '${OTHER}';`);
-  for (const j of [JOPEN, JPROG]) assert.match(lineEpa(j, OTHER), /^300-3(,300-3)*$/);
-  for (const j of [JDONE, JSPRAY, JINV, JDEL]) assert.match(lineEpa(j, OTHER), new RegExp(`^${OTHER_EPA}(,${OTHER_EPA})*$`));
+  for (const j of [JOPEN, JPROG]) assert.equal(lineEpa(j, OTHER), '300-3');
+  for (const j of [JDONE, JSPRAY, JINV]) assert.equal(lineEpa(j, OTHER), OTHER_EPA);
   psql(`UPDATE public.products SET epa_registration = '${OTHER_EPA}' WHERE id = '${OTHER}';`);
-  for (const j of [JOPEN, JPROG]) assert.match(lineEpa(j, OTHER), new RegExp(`^${OTHER_EPA}(,${OTHER_EPA})*$`));
+  for (const j of [JOPEN, JPROG]) assert.equal(lineEpa(j, OTHER), OTHER_EPA);
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_sync_job_holds_upd';"), 'O');
-  console.log("[prover] a product's EPA number edited directly reaches its unsprayed jobs' lines only; the holds trigger is on");
+  console.log("[prover] a product's EPA number edited directly reaches jobs not sprayed yet only; the holds trigger is on");
 
-  // A line added after the correction takes the new number.
+  // A line added to an open job after the correction shows the new number.
   psql(`INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, sort_order) VALUES ('${JPROG}', '${S2}', 1, 'gal', 1500, 4);`);
   assert.equal(lineEpa(JPROG, S2), NEW);
 

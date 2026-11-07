@@ -4,18 +4,18 @@
 --  the same pattern as 20261108120000_product_parents.sql.)
 --
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261202120000_parent_epa_correction.md.
+-- docs/reference/migrations.d/20261205100000_parent_epa_correction.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (Mason, 2026-11-06: "yes i want to be able to fix epa issues"): a parent's EPA number can be
 --   corrected only once every old record that shows an EPA number keeps its own copy (build sheet
 --   docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md, PAR-1 identity correction; DECISION_LOG
---   2026-10-30). The reader trace is in docs/reference/product-corrections-record-map.md. Spray-job
---   lines got their copy in 20261202115000_job_lines_keep_epa_number (which also makes a product EPA
---   edit reach only jobs not sprayed yet, keeps a sprayed job's numbers through save_job, refuses
---   moving a sprayed line to another job, and locks product, then job, then lines). This file adds the
---   invoice-line copy rule and the correction itself; the switch stays OFF here. A later migration
---   (with the screens that read job_chemicals.epa_registration) turns it on.
+--   2026-10-30). The reader trace is in docs/reference/product-corrections-record-map.md. Sprayed
+--   and finished jobs got their kept numbers in 20261204120000_job_lines_keep_epa_number
+--   (job_product_epa, locked per job and product when a spray is saved or the job is finished); a job
+--   not sprayed yet shows the product's current number. This file adds the invoice-line copy rule and
+--   the correction itself; the switch stays OFF here. A later migration (with the printouts that read
+--   job_product_epa) turns it on.
 --
 -- WHAT:
 --   - invoice_items: a line written with no EPA number, saved with none on a draft or unposted invoice,
@@ -25,9 +25,9 @@
 --   - No reader changes here (Mason, 2026-11-06, simpler plan): every printout, the sent proof and the
 --     year-end summary still show what they show today.
 --   - The parent identity correction can change the generic EPA number: the parent, every size
---     (under the parent copy pass) and, through 20261202115000's products trigger, the lines of jobs
---     not sprayed yet take the new number, in one transaction with one logged event. Sprayed and
---     finished jobs, invoices and restricted-use records keep the number they were made with. It is
+--     (under the parent copy pass) take the new number in one transaction with one logged event; jobs
+--     not sprayed yet show it because they read the product's number. Sprayed and finished jobs (their
+--     job_product_epa rows), invoices and restricted-use records keep the number they were made with. It is
 --     refused while any invoice line for one of the sizes has no EPA copy of its own (that line would
 --     follow the change); the message names the invoices. And it stays refused while
 --     _product_parent_epa_correction_enabled() is false, which this file creates as false.
@@ -37,16 +37,17 @@
 --   when posted. The job and invoice writers, prices, costs and inventory. _insert_parent_size (its
 --   notes change went live in 20261202110000).
 --
--- LOCK ORDER: the correction locks the parent and its sizes (_lock_product_parent), then each size's
---   EPA write runs 20261202115000's products trigger, which locks the open jobs (id order) and then
---   their lines: product, then job, then lines, the order every other writer uses. The invoice trigger
---   reads the product FOR SHARE, as the job-line trigger does.
+-- LOCKS: the correction locks the parent and its sizes (_lock_product_parent) and writes only
+--   product_parents and products; it locks no job or job line. A spray saved at the same time locks its
+--   job and then takes FOR KEY SHARE on the products, which a non-key EPA update does not conflict with:
+--   whichever commits first decides the number the job keeps (the old one if the spray was saved first),
+--   and the two never wait on each other. The invoice trigger reads the product FOR SHARE.
 --
 -- ROLLBACK (its own reviewed migration): re-emit _product_parent_identity_after and
 --   correct_product_parent_identity from their previous live bodies, drop trg_fill_invoice_line_epa
 --   and _fill_invoice_line_epa, and drop _product_parent_epa_correction_enabled.
 --
--- ORDERING: apply after 20261202115000_job_lines_keep_epa_number and every older pending migration.
+-- ORDERING: apply after 20261204120000_job_lines_keep_epa_number and every older pending migration.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -62,14 +63,14 @@ BEGIN
   IF (SELECT transaction_id FROM pg_temp.parent_epa_correction_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'PARENT_EPA_CORRECTION_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
-  -- The job half must be live first: the job-line copy and the trigger that carries a product's EPA
-  -- edit to jobs not sprayed yet.
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                  WHERE table_schema = 'public' AND table_name = 'job_chemicals' AND column_name = 'epa_registration')
-     OR to_regprocedure('public._job_line_epa_follows_product(uuid)') IS NULL
-     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
-                     AND tgname = 'trg_product_epa_to_unsprayed_job_lines' AND tgenabled = 'O') THEN
-    RAISE EXCEPTION 'PARENT_EPA_CORRECTION_PREFLIGHT: apply 20261202115000_job_lines_keep_epa_number first';
+  -- The job half must be live first: sprayed and finished jobs keep their numbers, so a correction
+  -- reaches only jobs not sprayed yet.
+  IF to_regclass('public.job_product_epa') IS NULL
+     OR to_regprocedure('public._job_epa_freeze(uuid)') IS NULL
+     OR (SELECT count(*) FROM pg_trigger
+          WHERE tgname IN ('trg_job_epa_freeze_on_spray', 'trg_job_epa_freeze_on_finish', 'trg_job_line_epa_lock')
+            AND tgenabled = 'O' AND NOT tgisinternal) <> 3 THEN
+    RAISE EXCEPTION 'PARENT_EPA_CORRECTION_PREFLIGHT: apply 20261204120000_job_lines_keep_epa_number first';
   END IF;
   IF to_regprocedure('public._product_parent_epa_correction_enabled()') IS NOT NULL
      OR to_regprocedure('public._fill_invoice_line_epa()') IS NOT NULL THEN
@@ -211,12 +212,15 @@ BEGIN
   WHERE id = p_parent_id RETURNING * INTO v_parent;
   v_event := public._next_product_parent_event_id();
   IF v_parent.generic_epa_registration IS DISTINCT FROM v_before.generic_epa_registration THEN
-    -- Lines of jobs not sprayed yet print the corrected number (written by the products trigger as each
-    -- size takes it). Sprayed or finished jobs keep theirs.
+    -- Lines of jobs not sprayed yet show the corrected number (they read the product's); a product a
+    -- sprayed or finished job kept (job_product_epa) keeps its number.
     SELECT count(*) INTO v_open_lines FROM public.job_chemicals jc
-     WHERE jc.product_id = ANY(v_sizes)
-       AND jc.epa_registration IS DISTINCT FROM v_parent.generic_epa_registration
-       AND public._job_line_epa_follows_product(jc.job_id);
+      JOIN public.products p ON p.id = jc.product_id
+      JOIN public.jobs j ON j.id = jc.job_id
+     WHERE jc.product_id = ANY(v_sizes) AND j.deleted_at IS NULL
+       AND public._epa_norm(p.epa_registration) IS DISTINCT FROM public._epa_norm(v_parent.generic_epa_registration)
+       AND NOT EXISTS (SELECT 1 FROM public.job_product_epa k
+                        WHERE k.job_id = jc.job_id AND k.product_id = jc.product_id);
     -- Every size takes the number under the copy pass (the guard refuses it on one size alone).
     FOREACH v_size IN ARRAY v_sizes LOOP
       v_affected := v_affected || public._copy_parent_to_size(p_parent_id, v_size, v_event, false, false, true);

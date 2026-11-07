@@ -316,6 +316,7 @@ AS $function$
 DECLARE
   v_item_id uuid := COALESCE(NEW.order_item_id, OLD.order_item_id);
   v_order_id uuid := (SELECT order_id FROM order_items WHERE id = COALESCE(NEW.order_item_id, OLD.order_item_id));
+  v_line_held boolean;
   v_total numeric;
 BEGIN
   -- A share that moved would leave a frozen sale without the check on it.
@@ -323,14 +324,22 @@ BEGIN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_IMMUTABLE: a line share cannot move to another line'
       USING ERRCODE = 'check_violation';
   END IF;
-  -- The sale is locked before its line, as Create Invoice and completion lock them, so the two can't deadlock.
-  -- FOR SHARE then holds the line on its sale until commit (trg_order_items_bill_split_move).
+  -- The sale is locked before its line, as Create Invoice locks them. Completion updates its lines before
+  -- the sale, so the line is taken NOWAIT: a share write that meets a completing delivery gives up and asks
+  -- for a retry instead of deadlocking it. FOR SHARE then holds the line on its sale until commit
+  -- (trg_order_items_bill_split_move).
   -- A line being deleted takes its shares with it; trg_order_items_bill_split_move checked its sale.
   IF v_order_id IS NULL AND TG_OP = 'DELETE' THEN
     RETURN OLD;
   END IF;
   PERFORM 1 FROM orders WHERE id = v_order_id FOR UPDATE;
-  IF NOT EXISTS (SELECT 1 FROM order_items WHERE id = v_item_id AND order_id = v_order_id FOR SHARE) THEN
+  BEGIN
+    v_line_held := EXISTS (SELECT 1 FROM order_items WHERE id = v_item_id AND order_id = v_order_id FOR SHARE NOWAIT);
+  EXCEPTION WHEN lock_not_available THEN
+    RAISE EXCEPTION 'ORDER_ITEM_SHARES_BUSY: a delivery on this sale is being completed; try again'
+      USING ERRCODE = 'serialization_failure';
+  END;
+  IF NOT v_line_held THEN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_MOVED: the line moved to another order; try again'
       USING ERRCODE = 'serialization_failure';
   END IF;

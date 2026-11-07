@@ -242,10 +242,10 @@ function refused(uid, sql, pattern) {
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
     ('${ADMIN}', 'gr-admin@example.invalid', '{"full_name":"[PROVER] Admin","role":"admin"}'::jsonb),
-    ('${STAFF}', 'gr-staff@example.invalid', '{"full_name":"[PROVER] Staff","role":"salesperson"}'::jsonb);`);
+    ('${STAFF}', 'gr-staff@example.invalid', '{"full_name":"[PROVER] Staff","role":"sales_rep"}'::jsonb);`);
   asOwner(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
-    UPDATE public.profiles SET role = 'salesperson', is_active = true WHERE id = '${STAFF}';`);
-  console.log('[prover] seeded an admin and a salesperson');
+    UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${STAFF}';`);
+  console.log('[prover] seeded an admin and a sales rep');
 }
 
 async function main() {
@@ -259,14 +259,14 @@ async function main() {
   const fn = "'public.get_product_grouping_open()'";
   assert.equal(scalar(`SELECT p.prosecdef::text || '|' || p.proowner::regrole::text || '|' || array_to_string(p.proconfig, ',') FROM pg_proc p WHERE p.oid = ${fn}::regprocedure;`),
     'true|postgres|search_path=public, pg_temp');
-  assert.equal(scalar(`SELECT concat_ws('|', has_function_privilege('authenticated', ${fn}, 'EXECUTE'), has_function_privilege('anon', ${fn}, 'EXECUTE'), has_function_privilege('service_role', ${fn}, 'EXECUTE'));`), 'true|false|false');
+  assert.equal(scalar(`SELECT concat_ws('|', has_function_privilege('authenticated', ${fn}, 'EXECUTE'), has_function_privilege('anon', ${fn}, 'EXECUTE'), has_function_privilege('service_role', ${fn}, 'EXECUTE'));`), 't|f|f');
   assert.equal(scalar("SELECT array_to_string(proacl, ',') FROM pg_proc WHERE oid = 'public._product_parent_grouping_open()'::regprocedure;"), 'postgres=X/postgres');
   console.log('[prover] the file applies; SECURITY DEFINER, owner postgres, search_path pinned; EXECUTE for authenticated only; the switch stays private');
 
   assert.equal(ok(ADMIN, 'SELECT public.get_product_grouping_open();'), 'f');
   refused(STAFF, 'SELECT public.get_product_grouping_open();', /ADMIN_REQUIRED/);
   refused(null, 'SELECT public.get_product_grouping_open();', /permission denied/);
-  console.log('[prover] an admin reads the switch (off); a salesperson is refused; an anonymous caller cannot call it');
+  console.log('[prover] an admin reads the switch (off); a sales rep is refused; an anonymous caller cannot call it');
 
   // The read follows the switch: with the switch's body replaced by true (in this disposable database only), it says so.
   psql('CREATE OR REPLACE FUNCTION public._product_parent_grouping_open() RETURNS boolean LANGUAGE sql STABLE SET search_path = public, pg_temp AS $f$ SELECT true; $f$;');

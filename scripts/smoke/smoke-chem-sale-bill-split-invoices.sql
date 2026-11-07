@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a Bill Split sale bills one invoice per payer, to the cent
 -- ----------------------------------------------------------------------------
--- Migration 20261130110000_chem_sale_bill_split_invoices (billing plan M2).
+-- Migration 20261203100000_chem_sale_bill_split_invoices (billing plan M2).
 --   A  Card 60/40 on line 1, line 2's own shares 100% to the main customer: a delivery drafts two
 --      invoices in one group, base-1 and base-2, CS- numbers, each line adds up exactly
 --   B  A three-way split: the leftover cents go to the main customer

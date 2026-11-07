@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { newJobLoaderLines } from './newJobLoaderPrint';
+import { describe, expect, it, vi } from 'vitest';
+import { newJobLoaderLines, newJobLoaderPrint } from './newJobLoaderPrint';
+import * as productWeights from './productWeights';
+import { buildLoaderWorksheetPdfPlan, loaderPdfMixBody, type LoaderWorksheetPdfData } from './loaderWorksheetPdf';
 import { computeLoaderWorksheet } from './loaderWorksheet';
 import { loaderLoadWeights } from './loaderWeights';
 import type { WeightUnitFactors } from '../types';
@@ -29,5 +31,21 @@ describe('newJobLoaderLines', () => {
   it('skips a row with neither product nor quantity, keeping the others\' original row ids', () => {
     const { products } = weigh([row('', ''), row('p1', '2')]);
     expect(products.map((product) => product.source_line_id)).toEqual(['row-1']);
+  });
+});
+
+describe('newJobLoaderPrint when weights cannot be read', () => {
+  it('still prints a bad amount\'s reason (never 0) and leaves the weights off', async () => {
+    vi.spyOn(productWeights, 'fetchProductWeights').mockRejectedValueOnce(new Error('offline'));
+    const { products, weights } = await newJobLoaderPrint([row('p1', '-2'), row('p1', '2')]);
+    const data: LoaderWorksheetPdfData = {
+      job_number: 'NEW', customers: [], scheduled_date: '2026-11-07', scheduled_time: null, applicator_name: null, vehicle_name: 'Manual',
+      total_acres: 10, carrier_rate_gpa: 10, tank_capacity: 100, capacity_unit: 'gal', products, loader_comment: null, weights,
+    };
+    const { body, caption } = loaderPdfMixBody(data, buildLoaderWorksheetPdfPlan(data));
+    expect(body[0].slice(1)).toEqual(['TEST Liquid has a negative amount', '—']);
+    expect(body[1].slice(1)).toEqual(['2', '2']);
+    expect(body.some((cells) => cells[0] === 'Product weight')).toBe(false);
+    expect(caption).toBe('Product weights not shown: they could not be read. Reprint to include them.');
   });
 });

@@ -150,8 +150,11 @@ export function buildLoaderWorksheetPdfPlan(data: LoaderWorksheetPdfData): {
 export function loaderPdfMixBody(data: LoaderWorksheetPdfData, plan: ReturnType<typeof buildLoaderWorksheetPdfPlan>):
   { body: string[][]; caption: string | null } {
   const ws = plan.worksheet;
-  const w = data.weights && !data.weights.unavailable
+  // With weights unavailable but the source lines known (a new job), a bad amount still prints its reason, never 0;
+  // only the weights are left off.
+  const weighed = data.weights && (!data.weights.unavailable || data.weights.sourceLines.length > 0)
     ? loaderLoadWeights(ws, data.weights.byProductId, data.weights.currentUnits, data.weights.sourceLines) : null;
+  const w = data.weights?.unavailable ? null : weighed;
   const loadIndex = (column: LoaderWorksheetPdfLoadColumn) => ws.loads.indexOf(column.load);
   const markCurrent = data.weights?.saved === true;
   const body: string[][] = data.products.map((p, pi) => {
@@ -163,7 +166,7 @@ export function loaderPdfMixBody(data: LoaderWorksheetPdfData, plan: ReturnType<
         row.push('—');
         return;
       }
-      const cell = w?.loads[loadIndex(column)]?.cells[pi];
+      const cell = weighed?.loads[loadIndex(column)]?.cells[pi];
       const each = column.loads.length > 1 ? ' each' : '';
       const done = column.done ? '✓ ' : '';
       if (!cell) {
@@ -171,6 +174,10 @@ export function loaderPdfMixBody(data: LoaderWorksheetPdfData, plan: ReturnType<
         return;
       }
       if (cell.amountCell !== fmtNum(amount)) refused = true;
+      if (!w) {
+        row.push(refused ? cell.amountCell : `${done}${cell.amountCell}${each}`);
+        return;
+      }
       const mark = markCurrent && cell.mark === 'current' ? ' (current)' : '';
       row.push(refused ? cell.amountCell : `${done}${cell.amountCell}${each}
 ${cell.weightText}${mark}`);

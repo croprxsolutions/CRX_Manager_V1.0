@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as db from './db';
 import { buildLoaderWorksheetPdfPlan, loaderPdfMixBody, type LoaderWorksheetPdfData } from './loaderWorksheetPdf';
-import { loaderJobInputs, type LoaderGetterJob } from './loaderWeightsFetch';
+import { fetchLoaderJobWeights, loaderJobInputs, type LoaderGetterJob } from './loaderWeightsFetch';
+import { computeLoaderWorksheet } from './loaderWorksheet';
+import { selectedLoaderWeights } from '../components/jobs/loaderPanelWeights';
 import type { JobLoaderWorksheet, JobLoaderWorksheetWeight, WeightUnitFactors } from '../types';
 
 const units: WeightUnitFactors = { factors: { lb: { kind: 'weight', factor: 1 }, gal: { kind: 'volume', factor: 1 } }, ambiguous: [] };
@@ -65,5 +68,39 @@ describe('loader worksheet weights from the getter', () => {
     const { body, caption } = loaderPdfMixBody(data, buildLoaderWorksheetPdfPlan(data));
     expect(body).toEqual([['TEST Liquid (Gal)', '10', '10', '20']]);
     expect(caption).toMatch(/could not be read/);
+  });
+});
+
+describe('selectedLoaderWeights (job page)', () => {
+  const shownPlan = (quantity: number) => computeLoaderWorksheet({ total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100,
+    products: [{ product_name: 'TEST Liquid', total_quantity: quantity, unit: 'Gal', product_id: 'p1', product_form: 'liquid', source_line_id: 'A-l1' }] });
+  const read = { status: 'ready' as const, entry: job('A', 8), units };
+  const selected = { ...worksheet, id: 'A-w' } as JobLoaderWorksheet;
+
+  it('shows the weights when the fresh read matches the plan on screen', () => {
+    const result = selectedLoaderWeights(read, selected, shownPlan(20));
+    expect('weights' in result && result.weights.loads[0].totalText).toBe('Product weight: 80.00 lb');
+  });
+
+  it('withholds them when a product amount changed but the tank volumes did not', () => {
+    expect(selectedLoaderWeights(read, selected, shownPlan(10))).toEqual({
+      reason: 'Product weights not shown: the job or worksheet changed since this page loaded. Reload to see them.' });
+  });
+});
+
+describe('fetchLoaderJobWeights', () => {
+  it('keeps each job with the unit map of the read that returned it', async () => {
+    const ids = Array.from({ length: 201 }, (_, index) => `job-${index}`);
+    const chunkUnits = [units, { factors: { gal: { kind: 'volume', factor: 1 } }, ambiguous: [] }];
+    let call = 0;
+    const rpc = vi.spyOn(db.supabaseUntyped, 'rpc').mockImplementation(((_name: string, args: { p_job_ids: string[] }) => {
+      const unit_factors = chunkUnits[call++];
+      return Promise.resolve({ data: { read_at: 't', unit_factors, jobs: args.p_job_ids.map((job_id) => ({ job_id, found: true })) }, error: null });
+    }) as never);
+    const { unitsByJob } = await fetchLoaderJobWeights(ids);
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(unitsByJob.get('job-0')).toBe(chunkUnits[0]);
+    expect(unitsByJob.get('job-200')).toBe(chunkUnits[1]);
+    rpc.mockRestore();
   });
 });

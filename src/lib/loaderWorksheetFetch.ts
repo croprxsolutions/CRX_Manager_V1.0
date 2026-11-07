@@ -170,7 +170,7 @@ function mapGetterJobToPdfData(r: LoaderJobRow, entry: LoaderGetterJob, weights:
     load_balance_mode: selected?.load_balance_mode,
     per_load_acres: selected?.per_load_acres,
     loads_done: selected?.loads_done,
-    weights: { byProductId: inputs.weights, currentUnits: weights.units, sourceLines: inputs.sourceLines, saved: !!selected },
+    weights: { byProductId: inputs.weights, currentUnits: weights.unitsByJob.get(entry.job_id) ?? { factors: {}, ambiguous: [] }, sourceLines: inputs.sourceLines, saved: !!selected },
   };
 }
 

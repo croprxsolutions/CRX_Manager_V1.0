@@ -33,23 +33,26 @@ export interface LoaderGetterJob {
 
 interface GetterResult { read_at: string; unit_factors: WeightUnitFactors; jobs: LoaderGetterJob[] | null }
 
-export interface LoaderJobWeights { units: WeightUnitFactors; jobs: Map<string, LoaderGetterJob> }
+/** Each job's answer and the unit map of the same read (a bulk read spans several reads, one per chunk). */
+export interface LoaderJobWeights { jobs: Map<string, LoaderGetterJob>; unitsByJob: Map<string, WeightUnitFactors> }
 
 const CHUNK = 200;
 
 /** The getter's answer for each job, read in chunks of 200 (its limit). */
 export async function fetchLoaderJobWeights(jobIds: readonly string[]): Promise<LoaderJobWeights> {
   const jobs = new Map<string, LoaderGetterJob>();
-  let units: WeightUnitFactors = { factors: {}, ambiguous: [] };
+  const unitsByJob = new Map<string, WeightUnitFactors>();
   for (let start = 0; start < jobIds.length; start += CHUNK) {
     const { data, error } = await supabaseUntyped.rpc('get_loader_worksheet_weights',
       { p_worksheet_ids: null, p_job_ids: jobIds.slice(start, start + CHUNK) });
     if (error) throw error;
     const result = assertRpcResult<GetterResult>(data, 'get_loader_worksheet_weights');
-    units = result.unit_factors;
-    for (const job of result.jobs ?? []) jobs.set(job.job_id, job);
+    for (const job of result.jobs ?? []) {
+      jobs.set(job.job_id, job);
+      unitsByJob.set(job.job_id, result.unit_factors);
+    }
   }
-  return { units, jobs };
+  return { jobs, unitsByJob };
 }
 
 export interface LoaderJobInputs {

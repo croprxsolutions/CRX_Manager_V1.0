@@ -2818,6 +2818,8 @@ function registryMigrationHighWater(): string {
 // 20261202110000 and 20261204120000 were added on 2026-11-07: both applied live and the registry
 // refresh after #1584 moved the boundary past them (20261202110000 holds the newest
 // _insert_parent_size body). Clear them on the same type-regeneration rule.
+// 20261204100000 and 20261204110000 (KI-18, PR #1579) joined them the same day: applied live, and
+// their files reached main just after that refresh had already moved the boundary past them.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2854,7 +2856,10 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261123120000',
   '20261120100000',
   '20261202110000',
+  '20261204100000',
+  '20261204110000',
   '20261204120000',
+  '20261207100000',
 ]);
 
 /**
@@ -3079,6 +3084,13 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
   'fill_tote_from_bulk',
   'reverse_tote_fill',
+  // 20261207100000 (DM-2, local candidate): admin-only weight writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'approve_weights',
+  'correct_parent_density',
+  'correct_size_net_weight',
+  'set_parent_density',
+  'set_size_net_weight',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3160,6 +3172,32 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _parent_brand_event: 'internal PAR-2 helper (20261123120000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
   write_product_change_history:
     'trigger-only history writer re-issued by 20261108120000 (PAR-1); it runs inside the calling product write and is never an RPC',
+  // 20261207100000 (DM-2, local candidate): private helpers and trigger functions. Prune once applied
+  // and the registry high-water moves past it.
+  _write_parent_density: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',
+  _write_size_net_weight: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',
+  _product_weight_event: 'internal DM-2 helper (20261207100000): appends one event inside the calling keyed writer or trigger; every API-role EXECUTE is revoked',
+  _save_parent_density_draft:
+    'private DM-2 draft helper (20261207100000) for the DM-1b import: no app role can EXECUTE it; DM-1b wraps it in its own admin-checked, keyed RPC, and a stale version is refused (PRODUCT_WEIGHT_STALE)',
+  _save_size_net_weight_draft:
+    'private DM-2 draft helper (20261207100000) for the DM-1b import: no app role can EXECUTE it; DM-1b wraps it in its own admin-checked, keyed RPC, and a stale version is refused (PRODUCT_WEIGHT_STALE)',
+  capture_blend_ticket_product_weight:
+    'AFTER row trigger on blend_ticket_products (DM-2): inserts the first weight per (ticket, product) ON CONFLICT DO NOTHING, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  capture_blend_ticket_weight_basis:
+    'AFTER row trigger on blend_tickets (DM-2): stores the unit map when the header total or unit changes, so a replayed save with the same header writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  delete_blend_ticket_weights:
+    'AFTER DELETE row trigger on blend_tickets (DM-2): deletes that ticket\'s snapshot rows, so a replayed delete matches no row; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  capture_loader_worksheet_weights:
+    'AFTER row trigger on job_loader_worksheets (DM-2): stores a weight per product only when none valid is held, so a replayed save writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  return_net_weight_to_draft:
+    'AFTER UPDATE row trigger on products pack columns (DM-2): fires only when a watched value really changes, so a replayed edit with the same values does nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  return_density_to_draft:
+    'AFTER UPDATE row trigger on product_parents identity columns (DM-2): fires only when a watched value really changes, so a replayed edit does nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  bump_member_generation:
+    'AFTER row trigger on product_parent_members (DM-2): fires only on a real membership change, so a replayed edit with the same parent does nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // 20261204100000 (KI-18 batch 1) re-issued it with a Chicago date. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  snapshot_field_crop_history:
+    'BEFORE UPDATE trigger on fields (re-issued by 20261204100000, KI-18): when the crop changes it upserts the old crop into field_crop_history ON CONFLICT (field_id, season), so a replay writes nothing new; Postgres refuses direct calls of a trigger function',
   // Pruned on the 2026-08-11 merge of origin/main, per the standing rule below that a
   // dead exemption silently pre-suppresses any future RPC reusing the name:
   //   _guard_job_commission_split_immutable remains parked with Wave A under

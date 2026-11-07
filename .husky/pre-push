@@ -10,6 +10,12 @@ echo ""
 # git passes the pushed refs on stdin once; keep them for both checks below.
 PUSH_REFS="$(cat)"
 
+# Only Taha pushes to Taha's branches (Mason, 2026-11-07; ship.md › Taha's PRs).
+if ! printf '%s
+' "$PUSH_REFS" | node scripts/check-taha-branch-push.mjs; then
+  exit 1
+fi
+
 echo "Checking Phase 3C private-artifact containment..."
 # Read the real pre-push ref updates from stdin and inspect every outgoing
 # commit, including a packet that was committed and later deleted at tip.
@@ -61,6 +67,32 @@ if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --pins
     fi
     rm -rf "$PIN_DIR"
   done
+fi
+
+# A schema registry refresh or an APPLIED LIVE record flip changes which migrations the contract
+# tests discover; it failed CI three times despite a written rule (PR #1606, 2026-11-07 retro).
+if [ "$(printf '%s
+' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --registry)" = "check" ]; then
+  echo ""
+  echo "Running the contract tests the schema registry feeds..."
+  # Vitest reads the checkout, so each pushed tip must match it on every input these tests read.
+  CONTRACT_INPUTS="src supabase/migrations docs/reference .claude/schema-registry.json"
+  CONTRACT_SHAS="$(printf '%s\n' "$PUSH_REFS" | awk 'NF >= 2 && $2 !~ /^0+$/ { print $2 }')"
+  for CONTRACT_SHA in ${CONTRACT_SHAS:-HEAD}; do
+    # shellcheck disable=SC2086
+    if ! git diff --quiet "$CONTRACT_SHA" -- $CONTRACT_INPUTS || [ -n "$(git ls-files --others --exclude-standard -- $CONTRACT_INPUTS)" ]; then
+      echo ""
+      echo "❌ CHECKOUT DIFFERS FROM THE PUSHED COMMIT $CONTRACT_SHA — push blocked."
+      echo "The contract tests read this folder. Commit or set aside local changes to $CONTRACT_INPUTS, or push from that branch's checkout."
+      exit 1
+    fi
+  done
+  if ! npx vitest run src/lib/rpcContracts.test.ts src/lib/costFields.test.ts 2>&1; then
+    echo ""
+    echo "❌ CONTRACT TESTS FAILED — push blocked."
+    echo "A refresh that passes an applied migration: add its stamp to MIGRATIONS_AWAITING_TYPE_REGENERATION in src/lib/rpcContracts.test.ts."
+    exit 1
+  fi
 fi
 
 # Tests that read an Edge Function's source break when it changes (PR #1515 found out in CI).

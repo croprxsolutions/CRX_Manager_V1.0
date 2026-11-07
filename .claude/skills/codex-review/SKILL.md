@@ -225,9 +225,11 @@ mints no proof.
 
 **Only after Step 3A is clean, and only for a change that touches a file on
 `docs/reference/sol-required-paths.md`** (the merge gates read the PR's real file list; everything
-else lands on green checks). Run it LAST: after the head is frozen and checks are green (and after any CodeRabbit
-fix push, if a requested review arrived), immediately before the migration apply (if any) and
-the merge. The proof binds to that HEAD and to the base it reviewed, so a later commit voids it; on an
+else lands on green checks). Run it once, on the committed head, before the PR opens (Mason,
+2026-10-29): the wrapper notes "no pull request has this commit as its head yet" and reviews it. If a
+PR already exists (a fix after a finding, or a PR opened first), run it after the head is frozen and
+checks are green (and after any CodeRabbit fix push, if a requested review arrived), before the
+migration apply (if any) and the merge. The proof binds to that HEAD and to the base it reviewed, so a later commit voids it; on an
 unchanged head it stays valid for 24 hours (Mason, 2026-10-23), so a PR waiting in the merge queue keeps
 its review. A base that only moved forward afterwards does not void it at the merge gates: the PR may
 merge behind main (Mason, 2026-10-26). A live migration apply still needs the head's Sol
@@ -239,8 +241,8 @@ pushed after a PR was marked ready (2026-10-14 to 10-23). So the wrapper first r
 and refuses, spending no Sol tokens, unless the head contains the base the review pins (`origin/main`,
 or, when a peer worktree's fetch moved that shared ref past the branch, the one commit where the
 branch left main; a branch adding a migration or with several split points keeps `origin/main`, so it
-must `git merge origin/main` again, push, and wait); an open
-non-draft PR has this exact commit as its head;
+must `git merge origin/main` again, push, and wait); and, only once a PR exists: that PR is
+open and non-draft with this exact commit as its head;
 the Codex App's summary comment shows a completed review of this commit (or it was pushed 15 minutes
 ago with none, or the App reviewed none of the PR's last 3 pushes, so it has stopped and Sol does not wait (Mason, 2026-11-06), or the commit only merges main cleanly with no shared files: then the App's finished review of
 the pre-merge head is enough (once the App starts on the merge, Sol waits for it to finish, or an hour with no update), and its threads on the pre-merge head must be

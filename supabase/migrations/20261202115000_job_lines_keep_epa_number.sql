@@ -129,8 +129,20 @@ COMMENT ON COLUMN public.job_chemicals.epa_registration IS
 GRANT SELECT (epa_registration) ON public.job_chemicals TO authenticated;
 GRANT REFERENCES (epa_registration) ON public.job_chemicals TO authenticated;
 GRANT SELECT (epa_registration) ON public.job_chemicals TO anon;
--- Item 6: no direct writes by app roles (table-level REVOKE also removes the column-level grants).
+-- Item 6: no direct writes by app roles. PostgreSQL's table-level REVOKE also removes column-level
+-- grants of the same privilege; the column REVOKE after it names every column anyway, so no reader
+-- has to rely on that (20261022101000 granted INSERT and UPDATE column lists).
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.job_chemicals FROM authenticated, anon;
+DO $revoke_cols$
+DECLARE
+  v_cols text;
+BEGIN
+  SELECT string_agg(quote_ident(attname), ', ' ORDER BY attnum) INTO v_cols
+    FROM pg_attribute
+   WHERE attrelid = 'public.job_chemicals'::regclass AND attnum > 0 AND NOT attisdropped;
+  EXECUTE format('REVOKE INSERT (%1$s), UPDATE (%1$s) ON public.job_chemicals FROM authenticated, anon', v_cols);
+END
+$revoke_cols$;
 
 -- Whether a job's lines still follow their products' EPA numbers: a live job, scheduled or in
 -- progress, with no spray recorded. Any other job's lines keep the number they carry.

@@ -34,8 +34,10 @@ export async function pageWithList<T>(page: PromiseLike<PageResult<T>>): Promise
 /**
  * Read every row of a query, page by page. One request is silently cut off at
  * the PostgREST row cap, so a list or a ledger recompute over a single read
- * hides rows without saying so. Each page must be ordered on a unique column
- * (add `.order('id')` as the last sort key); the loop advances by the rows
+ * hides rows without saying so. Each page must be ordered on a unique column:
+ * make the last sort key the table's unique key, usually `id` but check the
+ * table first (`product_parent_members` has no `id`; its key is `product_id`,
+ * see `.claude/schema-registry.json`). The loop advances by the rows
  * actually returned, so a server cap below the requested page size still reads
  * everything. Any failed page returns the error, never a partial list.
  *
@@ -65,7 +67,8 @@ export async function pageWithList<T>(page: PromiseLike<PageResult<T>>): Promise
  * confirming. A wrong count or a mismatch repeats the read, up to
  * MAX_READ_ATTEMPTS, before failing with LIST_CHANGED_WHILE_LOADING rather
  * than returning a list that is wrong.
- * `src/lib/pagedReadCallSites.test.ts` requires the count on every list read.
+ * `src/lib/pagedReadCallSites.test.ts` requires the count on every list read,
+ * and checks each selected and sorted column exists on the table it reads.
  */
 export async function fetchAllRows<T>(
   fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,

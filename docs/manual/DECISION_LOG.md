@@ -10,6 +10,41 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-07 — A product with no EPA number can be given one; old blank invoice lines may then show it
+
+**Decision (Mason, in session, 2026-11-07: "Yes, allow it"):** a parent EPA correction is not blocked by an old invoice line with no EPA copy when that line's size had no number either. Such a line showed none; after the correction, a reader that falls back to the size (the customer year-end summary) shows the added number. Printed invoices and statements print only the line's own copy, so they do not change. A blank line for a size that HAS a number still blocks, because it would show a different number.
+**Why:** Sol (round 3, PR #1611) found that a parent with no number could otherwise never be given one; Luna objected that the old line would change from blank to a number. Showing the product's real label beats a product that can never be fixed.
+**Enforcement:** `_product_parent_identity_after` in `supabase/migrations/20261207113000_parent_epa_correction.sql`, proven by `scripts/smoke/prove-parent-epa-correction-real-schema.mjs`.
+
+## 2026-11-07 — A reversal belongs to the Central day its row was made (KI-18)
+
+**Decision (Mason, in chat, 2026-11-07):** reversing a write-off or a credit application checks only the accounting month of the Chicago (Central) day the write-off or application was made, the day its apply already checked. A row made at 9 pm Central on Oct 31 is October's: a closed October refuses its reversal, a closed November does not.
+**Why:** KI-18 batch 1 checked both the UTC and the Chicago day, so a row made 6/7-11:59 pm Central on a month's last day could not be reversed once either month closed. Live had 0 write-offs and 0 credit applications when this was decided, so no existing row changes month.
+**What this forbids/implies:** don't re-add the UTC-day check to `reverse_credit_memo_application`, `_unapply_return_credit_guard_impl_20260826`, `_void_invoice_split_provenance_impl_20260719` or `_reverse_write_off_replay_impl_20261015` (`20261206110000`).
+
+## 2026-11-07 — Weight per gallon is capped at 20 lb/gal (DM-2 and DM-1 match)
+
+**Decision (Mason, in session, 2026-11-07):** "there is no liquid that heavy, most is 8lb-12lb is normal range of product weights, set them both to 20lbs". DM-2's density limit drops from 25 to 20 lb/gal, matching DM-1's 20 lb/gal strength limit.
+**Why:** the cap is a typo guard; real products run about 8 to 12 lb/gal, and the two sheets disagreed (flagged on PR #1617).
+**Enforcement:** `supabase/migrations/20261207100000_product_weights.sql` (table CHECK and `set_parent_density` range check, changed before its live apply), proven by `scripts/smoke/prove-product-weights-real-schema.mjs`.
+
+## 2026-11-07 — Sol: a test file is not money code by its name alone
+
+**Decision (Mason, in session, 2026-11-07):** a changed test or spec (`__tests__/`, `*.test.*`, `*.spec.*`) no longer needs Sol just because its name carries a money word (`MONEY_PATH_WORDS`). Money code, migrations, Edge Functions and every listed path in `docs/reference/sol-required-paths.md` (tests under those paths included) still need Sol.
+**Why:** on PR #1579 a one-line fix to `src/__tests__/return-credit-remediation-guards.test.ts` (matched by "credit") forced a full Sol of the whole PR after the live apply; that run reopened an unrelated, already-accepted area and cost two more rounds. A test cannot change what ships; the code it tests already needs Sol.
+**Enforcement:** `.claude/hooks/sol-risk-lib.mjs` (`solRiskPathProblem`), proven by `.claude/hooks/sol-risk-lib.test.mjs` (fails before the change, passes after).
+
+## 2026-11-05 — Anyone may quote at a tier other than the customer's; the check stays on the screen (KI-105, To-Do 1.6)
+
+**Decision:** anyone, reps included, may override a customer's assigned price tier on a quote. Quote Builder warns and needs "Use Tier N" or the "Quote at Tier M anyway" tick before Save, for every role; the database never refuses a different tier (Mason, 2026-11-05). Supersedes the 2026-11-05 entry that parked the screen check until a rep-only database rule existed.
+**Why:** the tier is a pricing judgment the person quoting may need to make; the screen check makes it deliberate.
+**What this forbids/implies:** don't build a database refusal of a different tier for reps, and don't describe the screen check as a money invariant.
+## 2026-11-07 — Statements use the AR Aging day ranges; aging takes "today" from the Chicago date
+
+**Decision (Mason, 2026-11-07: "AR Aging ranges"; KI-18 batch 3):** customer statements bucket overdue amounts with the AR Aging page's ranges, 0-29 / 30-59 / 60-89 / 90-119 / 120+ days past due, replacing <=30 / 31-60 / 61-90 / 91-120 / >120. Every statement and aging path counts days from the Chicago date: screens pass `todayInBusinessTz()` (or `localToday()`, the same date), and `get_ar_aging`'s fallback date, the last one on the UTC `CURRENT_DATE`, moves to the Chicago date (`20261208100000`).
+**Why:** a customer's statement and the AR Aging page disagreed about the same invoice at each range edge (30 days past due was "Current" on one and "30-59" on the other). The live database clock is UTC, so from 6 pm CST / 7 pm CDT `CURRENT_DATE` is tomorrow and an invoice moves into the next bucket a day early.
+**What this forbids/implies:** every aging view (AR Aging page, customer page, Financial Dashboard strip, statements) uses one set of ranges; a new one uses them too. A new aging, statement or report function takes its "as of" date from the caller with no default, or defaults to `(now() AT TIME ZONE 'America/Chicago')::date`, never `CURRENT_DATE`.
+
 ## 2026-11-06 — Hands off Taha's PRs; he lands his own; we hold ours 4 hours
 
 **Decision (Mason, Slack #crx-work, evening of 2026-11-06 Central, confirming a 2026-11-03 agreement):** (1) Mason's agents never push to a branch or PR Taha owns; they comment findings and Taha fixes them the same day, and an urgent fix is agreed with him first. Billing-rule changes go to Mason and Taha as a decision before any code. (2) Taha's six items, the billing plan included, are his through 2026-12-15 (exact list pending from Taha). (3) From billing-plan M4 on, Taha merges his own PRs; his clean Sol run on the final commit counts for the Sol rule, and he must use at least one non-Anthropic adversarial reviewer. Mason does not review his work or run agents monitoring his PRs. Billing-rule decisions stay with Mason. (4) Mason's agents hold their own Sol-list PRs, before any migration apply and the merge, until Taha submits a review or 4 hours pass after opening.

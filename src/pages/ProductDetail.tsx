@@ -21,6 +21,7 @@ import ProductMarginFloorCard from '../components/products/ProductMarginFloorCar
 import ProductStockCard from '../components/products/ProductStockCard';
 import ProductRateCorrectionModal from '../components/products/ProductRateCorrectionModal';
 import ProductParentPanel from '../components/products/ProductParentPanel';
+import ToteFillCard from '../components/inventory/ToteFillCard';
 import {
   addProductSize, createProductWithParent, getParentOfProduct, newSizeFields, SIZE_ROLE_LABELS,
   type ProductParent, type ProductSizeRole,
@@ -272,6 +273,10 @@ export default function ProductDetail() {
   // none, they stay read-only.
   const parentOwned = isNew ? Boolean(addSizeTo) : parent !== null;
   const shownParent = isNew ? addSizeTo ?? null : parent ?? null;
+  // BLK-1a: a fixed tote with a Bulk fill source can be filled from that Bulk; the database rechecks everything else.
+  const fillableTote = !isNew && Boolean(parent?.sizes.some((size) =>
+    size.product_id === id && size.size_role === 'fixed_tote' && size.fill_source_product_id));
+  const [stockReload, setStockReload] = useState(0);
   const [newParent, setNewParent] = useState({ name: '', nickname: '', formulation_type: '', safener: '' });
   const [sizeRole, setSizeRole] = useState<ProductSizeRole>('package');
   useEffect(() => {
@@ -2098,8 +2103,19 @@ export default function ProductDetail() {
         {!isNew && id && (
           <div className="space-y-4 max-md:space-y-0">
             <PhoneSection title="Stock & Reorder" {...sectionProps('stock')}>
-              <ProductStockCard key={id} productId={id} isActive={product.is_active !== false} />
+              <ProductStockCard key={`${id}-${stockReload}`} productId={id} isActive={product.is_active !== false} />
             </PhoneSection>
+            {isAdmin && profile && fillableTote && (
+              <PhoneSection title="Tote Fill" {...sectionProps('tote-fill')}>
+                <ToteFillCard
+                  key={id}
+                  toteProductId={id}
+                  toteName={persistedProduct?.product_name ?? ''}
+                  profileId={profile.id}
+                  onStockChanged={() => setStockReload((n) => n + 1)}
+                />
+              </PhoneSection>
+            )}
             {isAdmin && (
               <PhoneSection title="Cost Basis" {...sectionProps('basis')}>
               <Card>

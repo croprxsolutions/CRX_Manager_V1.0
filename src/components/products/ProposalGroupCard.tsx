@@ -43,6 +43,8 @@ interface ProposalGroupCardProps {
   /** Grouping is switched off: approval would be refused, so it is not offered. */
   approveOff: boolean;
   busy: boolean;
+  /** Names of the other groups in this proposal with the same EPA number. */
+  sameEpaNames?: string[];
 }
 
 function MembersTable({ group }: { group: ProposalGroup }) {
@@ -265,7 +267,12 @@ export default function ProposalGroupCard(props: ProposalGroupCardProps) {
                 {group.flags.map((f) => <Badge key={f} variant="warning" size="sm">{FLAG_LABELS[f] ?? f}</Badge>)}
               </span>
             )}
-            {group.reason && <span className="block text-sm text-gray-800">Reason: {group.reason}</span>}
+            {group.flags.includes('same_epa_different_name') && (props.sameEpaNames?.length ?? 0) > 0 && (
+              <span className="block text-xs text-amber-800">
+                Also EPA {group.generic_epa_registration}: {props.sameEpaNames?.join(', ')}
+              </span>
+            )}
+            {group.reason &&<span className="block text-sm text-gray-800">Reason: {group.reason}</span>}
           </span>
         </button>
       </div>

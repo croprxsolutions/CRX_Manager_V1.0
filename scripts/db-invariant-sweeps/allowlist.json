@@ -1261,9 +1261,9 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "generate_batch_statements(p_as_of_date date, p_performed_by uuid, p_mode text, p_idempotency_key text)#fbfac6de6a4e",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
-      "dated": "2026-11-02"
+      "violation_key": "generate_batch_statements(p_as_of_date date, p_performed_by uuid, p_mode text, p_idempotency_key text)#52048810b486",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-07 after 20261208100000 (KI-18 batch 3) changed only get_detailed_statement_data's five aging-bucket comparisons to the AR Aging ranges; no cost field, gate or grant changed.",
+      "dated": "2026-11-07"
     },
     {
       "predicate": "cost-exposure-review",
@@ -1321,9 +1321,9 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_detailed_statement_data(p_customer_id uuid, p_as_of_date date, p_mode text)#b5944d47a482",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
-      "dated": "2026-11-02"
+      "violation_key": "get_detailed_statement_data(p_customer_id uuid, p_as_of_date date, p_mode text)#39062dcb5566",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-07 after 20261208100000 (KI-18 batch 3) changed only get_detailed_statement_data's five aging-bucket comparisons to the AR Aging ranges; no cost field, gate or grant changed.",
+      "dated": "2026-11-07"
     },
     {
       "predicate": "cost-exposure-review",
@@ -1774,6 +1774,18 @@
       "violation_key": "move_product_size(p_product_id uuid, p_to_parent_id uuid, p_expected_from_version bigint, p_expected_to_version bigint, p_expected_size_fingerprint text, p_reason text, p_evidence text, p_expected_prices jsonb, p_idempotency_key text)#e2f4e1703d0b",
       "justification": "Reviewed 2026-11-06 after 20261201110000_product_parent_review_fixes (PR #1586) first flagged it: its first statement is _product_parent_require_admin(), so only admins (who may see cost) run it; the new whole-row to_jsonb serializes a product_parent_brands row (no cost, price or margin column) into the brand event log, not into the return; the receipt returns ids, versions, counts and the moved size. Admin refusal of sales rep, driver, applicator and commission-recipient profiles proven live by the create_product_with_parent smoke chain the same day.",
       "dated": "2026-11-06"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_blend_ticket_weights(p_blend_ticket_id uuid)#333ae9e21557",
+      "justification": "New in 20261207100000_product_weights (DM-2, PR #1620, ledger 20261107180143), read live 2026-11-07 after the apply: SAFE. SECURITY INVOKER (prosecdef false), STABLE, search_path public, pg_temp; EXECUTE to authenticated only. It runs with the caller's own table and column privileges and RLS, so it cannot return anything the caller could not already select. It reads blend_tickets (whole row minus raw_ocr_text), blend_ticket_weight_basis and blend_ticket_product_weights, none of which has a cost or margin column (live information_schema read 2026-11-07), and names blend_ticket_products columns one by one, leaving out the admin-only unit_cost_cents. The weight map comes from get_product_weights, which returns weights and unit factors only. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-07"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_loader_worksheet_weights(p_worksheet_ids uuid[], p_job_ids uuid[])#d32e81b918b7",
+      "justification": "New in 20261207100000_product_weights (DM-2, PR #1620, ledger 20261107180143), read live 2026-11-07 after the apply: SAFE. SECURITY INVOKER (prosecdef false), STABLE, search_path public, pg_temp; EXECUTE to authenticated only. It runs with the caller's own table and column privileges and RLS, so it cannot return anything the caller could not already select. It reads job_loader_worksheets (whole row; no cost or margin column, live information_schema read 2026-11-07), vehicles.vehicle_name, job_fields.acres_to_treat, job_chemicals quantity and unit, products name and form, and job_loader_worksheet_weights; the current weights come from get_product_weights, which returns weights and unit factors only. No cost, price or margin field is returned. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-07"
     }
   ]
 }

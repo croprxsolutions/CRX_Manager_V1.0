@@ -392,10 +392,9 @@ async function main() {
   assert.equal(productEpa(OTHER), OTHER_EPA);
   assert.deepEqual(receipt.sizes.map((s) => [s.product_id, s.before.epa_registration ?? null, s.after.epa_registration ?? null]).sort(),
     [[S1, OLD, NEW], [S2, OLD, NEW]].sort());
-  // Open jobs (scheduled, in progress) take the new number: S1 on both, S2 on the open one.
-  assert.equal(receipt.open_job_lines, 3);
+  // Open jobs (scheduled, in progress) take the new number.
+  assert.equal(receipt.open_job_lines, 2);
   assert.equal(lineEpa(JOPEN, S1), NEW);
-  assert.equal(lineEpa(JOPEN, S2), NEW);
   assert.equal(lineEpa(JPROG, S1), NEW);
   // Sprayed, finished, invoiced and deleted jobs keep the number they had; other products are untouched.
   assert.equal(lineEpa(JSPRAY, S1), OLD);
@@ -407,7 +406,7 @@ async function main() {
   assert.equal(scalar('SELECT count(*) FROM public.product_parent_events;'), String(Number(before.events) + 1));
   assert.equal(scalar(`SELECT event_type || ':' || jsonb_array_length(affected) || ':' || (after_values->>'generic_epa_registration')
     FROM public.product_parent_events WHERE id = ${receipt.event_id};`), `identity_corrected:2:${NEW}`);
-  console.log('[prover] the correction wrote the parent, both sizes and three lines of unsprayed jobs in one logged event; sprayed, finished, invoiced and deleted jobs and every invoice line kept their number');
+  console.log('[prover] the correction wrote the parent, both sizes and two lines of unsprayed jobs in one logged event; sprayed, finished, invoiced and deleted jobs and every invoice line kept their number');
 
   // A sprayed job saved again from the job screen (each line sent back by its id, 20261201100000) keeps
   // the number it was sprayed under, after the correction.

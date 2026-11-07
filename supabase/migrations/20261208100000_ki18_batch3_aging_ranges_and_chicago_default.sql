@@ -43,6 +43,12 @@ BEGIN
       RAISE EXCEPTION 'PREFLIGHT_FAIL: % body, settings, SECURITY DEFINER, owner or grants drifted; re-review the current definition', v_row.sig;
     END IF;
   END LOOP;
+  -- Argument defaults are outside the body md5: get_ar_aging's date default must be the UTC one this replaces,
+  -- or (re-run) the Chicago date, never something else this file would silently overwrite.
+  IF pg_get_function_arguments('public.get_ar_aging(date)'::regprocedure) !~
+     '^p_as_of_date date DEFAULT (CURRENT_DATE|\(\(now\(\) AT TIME ZONE ''America/Chicago''::text\)\)::date)$' THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: get_ar_aging date default drifted; re-review the current definition';
+  END IF;
 END;
 $preflight$;
 

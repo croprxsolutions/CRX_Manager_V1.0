@@ -152,6 +152,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was billed. A payer's share of a product is under 0.01 of a unit. Change the bill split so each payer gets at least 0.01"],
   [/^BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS\b/,
    "Nothing was billed. A Bill Split sale bills delivered amounts in whole hundredths (like 1.23). Correct the delivered amount with Fix Delivery, then choose Create Invoice"],
+  [/^BILL_SPLIT_ROUNDING\b/,
+   "Nothing was billed. The other payers' shares of a product cost more than the delivered line. Change the bill split, then choose Create Invoice"],
   [/^PRICING_INCOMPLETE: price the order before its Bill Split\b/,
    "Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery"],
   [/^SPLIT_INVOICE_PROVENANCE_IMMUTABLE\b/,

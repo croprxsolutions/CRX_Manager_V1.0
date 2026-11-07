@@ -10,8 +10,9 @@
 --     down and the main customer (the sale's customer) gets the rest, so each line bills exactly. If
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
 --     the rest with the main customer. Another payer's quantity rounds down to whole hundredths, as a return
---     holds it, so a payer can return a share in full. Each payer's cents are exactly its percentage rounded
---     down. A share under 0.01 of a unit that is worth cents refuses the split (BILL_SPLIT_QUANTITY_TOO_SMALL),
+--     holds it, so a payer can return a share in full. Each other payer pays that quantity times the unit
+--     price, rounded to the cent, so their line multiplies (Mason, 2026-11-06, B); the main customer's cents
+--     are the rest, and a split that would leave them below zero refuses (BILL_SPLIT_ROUNDING). A share under 0.01 of a unit that is worth cents refuses the split (BILL_SPLIT_QUANTITY_TOO_SMALL),
 --     so every billed quantity can be returned; the office adjusts the shares (Mason, 2026-11-06, option B).
 --   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
 --     invoice and in the month-end report (Mason, 2026-11-05, Option 1). Summed across payers it can top
@@ -440,10 +441,12 @@ $function$;
 
 -- One line's shares of p_cents and p_units (ten-thousandths): the line's own shares, else the card; any
 -- share left over belongs to the main customer. The taker (the main customer, else the largest share)
--- gets the rest after everyone else rounds down, so each line adds up exactly. Each payer's cents are
--- exactly their percentage, rounded down. Other payers' quantity is whole hundredths (100 of p_units),
--- because return_items.quantity holds two decimals, so a share under 0.01 comes back as 0 units with its
--- cents, and the invoice writer refuses it (Mason, 2026-11-06, option B). The taker comes first.
+-- gets the rest after everyone else rounds down, so each line adds up exactly. Other payers' quantity is
+-- their percentage rounded down to whole hundredths (100 of p_units), because return_items.quantity holds
+-- two decimals, and their cents are that quantity times the invoice's unit price, so each payer's line
+-- multiplies (Mason, 2026-11-06, B). A share under 0.01 that is worth cents comes back as 0 units with
+-- its percentage's cents, and the invoice writer refuses it (Mason, 2026-11-06, option B). The taker
+-- comes first.
 CREATE FUNCTION public._bill_split_line_shares(p_order_item_id uuid, p_cents bigint, p_units bigint)
 RETURNS TABLE (customer_id uuid, cents bigint, units bigint)
 LANGUAGE sql
@@ -452,7 +455,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
   WITH line AS (
-    SELECT oi.id, oi.order_id, o.customer_id AS main
+    SELECT oi.id, oi.order_id, o.customer_id AS main, ROUND(COALESCE(oi.price_per_unit, 0) * 100)::bigint AS price_cents
       FROM order_items oi JOIN orders o ON o.id = oi.order_id
      WHERE oi.id = p_order_item_id
   ), own AS (
@@ -472,12 +475,15 @@ AS $function$
     SELECT p.customer_id,
            floor(p_cents * p.pct / 100)::bigint AS floor_cents,
            floor(p_units * p.pct / 10000)::bigint * 100 AS floor_units,
+           ROUND(floor(p_units * p.pct / 10000) * line.price_cents / 100)::bigint AS share_cents,
            row_number() OVER (ORDER BY p.customer_id = line.main DESC, p.pct DESC, p.customer_id) AS rn
       FROM payers p, line
   )
   SELECT r.customer_id,
-         CASE WHEN r.rn = 1 THEN p_cents - (SELECT COALESCE(sum(floor_cents), 0) FROM ranked WHERE rn > 1)
-              ELSE r.floor_cents END::bigint,
+         CASE WHEN r.rn = 1 THEN p_cents - (SELECT COALESCE(sum(CASE WHEN floor_units = 0 THEN floor_cents ELSE share_cents END), 0)
+                                          FROM ranked WHERE rn > 1)
+              WHEN r.floor_units = 0 THEN r.floor_cents
+              ELSE r.share_cents END::bigint,
          CASE WHEN r.rn = 1 THEN p_units - (SELECT COALESCE(sum(floor_units), 0) FROM ranked WHERE rn > 1)
               ELSE r.floor_units END::bigint
     FROM ranked r
@@ -544,6 +550,12 @@ BEGIN
        ORDER BY c.n
     LOOP
       CONTINUE WHEN v_share.cents = 0 AND v_share.units = 0;
+      -- Payers pay their quantity times the price; the rest is the main customer's, never below zero.
+      IF v_share.cents < 0 THEN
+        RAISE EXCEPTION 'BILL_SPLIT_ROUNDING: on delivery % the other payers'' quantities of % cost more than the line; change the shares',
+          v_delivery.delivery_number, COALESCE(v_item.oi_product_name, v_item.p_name)
+          USING ERRCODE = 'check_violation';
+      END IF;
       -- A share worth cents on no returnable quantity refuses, so every billed quantity can be returned
       -- (Mason, 2026-11-06, option B); the office adjusts the shares.
       IF v_share.units = 0 THEN

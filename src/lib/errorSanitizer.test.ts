@@ -279,6 +279,9 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS: delivery D-1 delivered 1.2345')).toBe(
       "Nothing was billed. A Bill Split sale bills delivered amounts in whole hundredths (like 1.23). Correct the delivered amount with Fix Delivery, then choose Create Invoice"
     );
+    expect(sanitizeError("BILL_SPLIT_ROUNDING: on delivery D-1 the other payers' quantities of X cost more than the line; change the shares")).toBe(
+      "Nothing was billed. The other payers' shares of a product cost more than the delivered line. Change the bill split, then choose Create Invoice"
+    );
     expect(sanitizeError('PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted')).toBe(
       'Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery'
     );

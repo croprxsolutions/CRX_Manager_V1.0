@@ -368,7 +368,8 @@ BEGIN
     v_fails := v_fails || ' (G) the second payer is not a split payer for returns;';
   END IF;
 
-  -- B: shares unevenly three ways. The main customer takes the rest of each line.
+  -- B: shares unevenly three ways. Each other payer's line multiplies (quantity x price, Mason 2026-11-06);
+  -- the main customer takes the rest of each line.
   PERFORM pg_temp.smk_new_sale('b' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_main, 33.3334);
@@ -382,7 +383,8 @@ BEGIN
           < (SELECT total_amount_cents FROM invoices WHERE delivery_id = v_d AND customer_id = v_payer2)
      OR EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
                  WHERE i.delivery_id = v_d AND i.customer_id = v_payer2
-                   AND ii.extended_cents <> floor((SELECT total_price * 100 FROM order_items WHERE id = ii.order_item_id) * 33.3333 / 100)) THEN
+                   AND (ii.extended_cents <> round(ii.quantity * ii.unit_price_cents)
+                        OR ii.quantity <> 3.33)) THEN
     v_fails := v_fails || ' (B) three-way shares are wrong;';
   END IF;
 

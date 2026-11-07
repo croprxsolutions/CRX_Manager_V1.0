@@ -1251,4 +1251,36 @@ for (const tool_name of ["Bash", "PowerShell", "mcp__x__apply_patch", "Apply_Pat
   );
 }
 
+// Here-document text written by cat/tee into a note names no target
+// (2026-11-07, Mason: a hand-over note naming a worktree path was refused).
+for (const command of [
+  "cat >> /c/Users/mason/AppData/Local/notes/handover.md <<'EOF'\nDo not rm -rf .claude/worktrees/peaceful-franklin-16bbb4 until its PR lands.\nEOF",
+  "tee -a /c/Users/mason/notes/a.md <<'EOF'\nmv .claude/session-state aside? Never.\nEOF",
+]) assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `here-document note: ${command.split("\n")[0]}`);
+for (const [command, label] of [
+  ["rm -rf .claude/session-state", "plain rm"],
+  ["mv .claude/session-state /tmp/x", "plain mv"],
+  ["rm -rf .claude/worktrees/wt-a", "rm of a worktree"],
+  ['bash -c "rm -rf .claude/session-state"', "bash -c"],
+  ["bash <<'EOF'\nrm -rf .claude/session-state\nEOF", "here-document fed to bash"],
+  ["cat <<'EOF' | sh\nmv .claude/session-state /tmp/x\nEOF", "cat piped into sh"],
+  ["cat > x.sh <<'EOF'\nrm -rf .claude/session-state\nEOF\nbash x.sh", "written script run later"],
+  ["cat <<'EOF' | while read d; do rm -rf \"$d\"; done\n.claude/session-state\nEOF", "body read as a path by a loop"],
+  ["cat <<'EOF' | xargs rm -rf\n.claude/session-state\nEOF", "body read as a path by xargs"],
+  ["cat > list <<'EOF'\n.claude/session-state\nEOF\nrm -rf $(cat list)", "body read back by a substitution"],
+  ["python - <<'EOF'\nopen('.claude/session-state/claude-review-push.json','w').write('{}')\nEOF", "python forging a proof"],
+  ["cat > .claude/session-state/claude-review-push.json <<'EOF'\n{}\nEOF", "cat writing a proof"],
+  ["cat(){ bash; }; cat <<'EOF'\nrm -rf .claude/session-state\nEOF", "a function named cat"],
+  // A substitution can build the write target from a here-document (Codex App, PR #1632).
+  ["cat > \"$(cat <<'X'\n.claude/session-state/claude-review-push.json\nX\n)\" <<'E'\n{}\nE", "a proof path built by $( ) from a here-document"],
+  ["cat <<\"A\\\\B\"\nnote\nA\\B\nrm -rf .claude/session-state\nA\\\\B", "a delimiter Bash ends earlier than the lexer"],
+  ["cat >> n.md <<'EOF' \nnote\nEOF \nrm -rf .claude/session-state\nEOF", "a non-breaking space after the delimiter"],
+  ["cat >> n.md <<'EOF'\nnote\nEOF\nrm -rf .claude/session-state\nEOF", "a command between two closing lines"],
+  ["tee .claude/session-state/claude-review-push.json <<'EOF'\n{}\nEOF", "tee writing a proof"],
+  ["tee `cat <<'X'\n.claude/session-state/claude-review-push.json\nX\n` <<'E'\n{}\nE", "a proof path built by backticks from a here-document"],
+]) {
+  const result = run({ tool_name: "Bash", tool_input: { command } });
+  assert.match(result.stdout, /"permissionDecision":"deny"/, `still denied: ${label}`);
+}
+
 console.log("OK - review proof guard checks passed.");

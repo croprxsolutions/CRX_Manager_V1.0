@@ -16,6 +16,8 @@ export interface FieldCustomerAssignmentProps {
   onApplyToAll: (customerId: string) => void;
 }
 
+const CUSTOMER_PICKER_LIMIT = 20;
+
 /** A searchable customer picker — filters only while open so a big customer list stays cheap. */
 function CustomerSelect({
   customers,
@@ -34,9 +36,16 @@ function CustomerSelect({
 }) {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
-  const filtered = open
-    ? customers.filter((c) => c.farm_name.toLowerCase().includes(search.toLowerCase())).slice(0, 20)
+  const q = search.trim().toLowerCase();
+  // Exact name first, then names starting with the search, so a full name always reaches the
+  // top 20 even when many longer names contain it (Goal 4: past the cap a customer was unreachable).
+  const rank = (name: string) => (name === q ? 0 : name.startsWith(q) ? 1 : 2);
+  const matches = open
+    ? customers
+        .filter((c) => c.farm_name.toLowerCase().includes(q))
+        .sort((a, b) => rank(a.farm_name.toLowerCase()) - rank(b.farm_name.toLowerCase()))
     : [];
+  const filtered = matches.slice(0, CUSTOMER_PICKER_LIMIT);
 
   return (
     <div className="relative">
@@ -80,6 +89,11 @@ function CustomerSelect({
                 {c.farm_name}
               </button>
             ))
+          )}
+          {matches.length > CUSTOMER_PICKER_LIMIT && (
+            <div role="status" className="px-3 py-2 text-xs text-secondary border-t border-gray-100">
+              Showing {CUSTOMER_PICKER_LIMIT} of {matches.length} matches. Keep typing to narrow the list.
+            </div>
           )}
         </div>
       )}

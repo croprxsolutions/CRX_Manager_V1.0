@@ -3194,6 +3194,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER UPDATE row trigger on product_parents identity columns (DM-2): fires only when a watched value really changes, so a replayed edit does nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   bump_member_generation:
     'AFTER row trigger on product_parent_members (DM-2): fires only on a real membership change, so a replayed edit with the same parent does nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // 20261204100000 (KI-18 batch 1) re-issued it with a Chicago date. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  snapshot_field_crop_history:
+    'BEFORE UPDATE trigger on fields (re-issued by 20261204100000, KI-18): when the crop changes it upserts the old crop into field_crop_history ON CONFLICT (field_id, season), so a replay writes nothing new; Postgres refuses direct calls of a trigger function',
   // Pruned on the 2026-08-11 merge of origin/main, per the standing rule below that a
   // dead exemption silently pre-suppresses any future RPC reusing the name:
   //   _guard_job_commission_split_immutable remains parked with Wave A under
@@ -3236,10 +3239,6 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   check_remainder_reminders: 'maintenance reminder sweep uses persisted sent markers to deduplicate',
   check_unpriced_orders: 'cron reminder sweep uses persisted reminder and escalation sent markers',
   mark_overdue_invoices: 'service-role maintenance updates only invoices currently eligible as overdue',
-  // 20261204100000 (KI-18 batch 1) re-emits this trigger; it stays listed while that stamp is in
-  // MIGRATIONS_AWAITING_TYPE_REGENERATION (#1614 re-added the stamp but dropped this entry; main fails without it).
-  snapshot_field_crop_history:
-    'trigger-only crop-change recorder (RETURNS trigger, Postgres refuses direct calls); one row per field and season via ON CONFLICT (field_id, season), so a repeat converges',
   recompute_job_applied_acres: 'trigger-only derived-total recomputation; direct client EXECUTE is revoked',
   // The forward-only label and stale-recipient candidates are NOT APPLIED and
   // re-emit both recorder helpers. Canonical local-candidate identities retain

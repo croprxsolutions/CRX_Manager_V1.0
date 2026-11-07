@@ -19,18 +19,27 @@ import { Link, Outlet, RouterProvider, createMemoryRouter } from 'react-router';
 vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
 vi.mock('react-router-dom', async () => vi.importActual('react-router'));
 
-const { mockFrom, mockToast, mockInsert } = vi.hoisted(() => ({ mockFrom: vi.fn(), mockToast: vi.fn(), mockInsert: vi.fn() }));
+const { mockFrom, mockToast, mockInsert, mockCreate } = vi.hoisted(() => ({ mockFrom: vi.fn(), mockToast: vi.fn(), mockInsert: vi.fn(), mockCreate: vi.fn() }));
 
 vi.mock('../lib/db', async () => {
-  const { assertRpcResult } = await vi.importActual<typeof import('../lib/db')>('../lib/db');
+  const { assertRpcResult, hasRpcCode, RpcErrorCodes } = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   return {
     supabase: { from: mockFrom, rpc: vi.fn(), functions: { invoke: vi.fn() } },
     supabaseUntyped: { from: mockFrom, rpc: vi.fn() },
     checkMutationResult: vi.fn(),
     assertRpcResult,
     sanitizeError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    hasRpcCode,
+    RpcErrorCodes,
   };
 });
+// PAR-1: a new product is created through the parent RPC, not a products insert.
+vi.mock('../lib/productParents', async (orig) => ({
+  ...(await orig<typeof import('../lib/productParents')>()),
+  getParentOfProduct: vi.fn().mockResolvedValue(null),
+  createProductWithParent: mockCreate,
+  addProductSize: vi.fn(),
+}));
 vi.mock('../lib/costFields', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/costFields')>()),
   withAdminCost: async (_table: string, row: unknown) => row,
@@ -43,7 +52,7 @@ vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }
 vi.mock('../lib/sentry', () => ({ Sentry: { captureMessage: vi.fn(), captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn(), getKeyFor: () => 'key', resetKeyFor: vi.fn() }),
 }));
 vi.mock('../components/products/ProductPriceHistory', () => ({ default: () => null }));
 vi.mock('../components/products/ProductBrandsSection', () => ({ default: () => null }));
@@ -84,11 +93,13 @@ describe('ProductDetail — leaving a new product', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFrom.mockImplementation(() => chain([{ id: 'product-1' }]));
+    mockCreate.mockResolvedValue({ parent_id: 'parent-1', parent_version: 1, product_id: 'product-1', event_id: 1 });
   });
 
   it('a successful create opens the new product for pricing with no Unsaved Changes prompt', async () => {
     const router = renderNewProduct();
     fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
     await screen.findByText('New product page');
@@ -99,9 +110,10 @@ describe('ProductDetail — leaving a new product', () => {
   });
 
   it('falls back to the list when the new id does not come back', async () => {
-    mockFrom.mockImplementation(() => chain([]));
+    mockCreate.mockResolvedValue({ parent_id: 'parent-1', parent_version: 1, event_id: 1 });
     const router = renderNewProduct();
     fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
     await screen.findByText('Products list page');
@@ -109,31 +121,32 @@ describe('ProductDetail — leaving a new product', () => {
     expect(mockToast).toHaveBeenCalledWith('success', 'Product created');
   });
 
-  it('Duplicate starts from the copied fields only and saves nothing else of the source', async () => {
+  it('New product starts from the copied fields only and saves nothing else of the source', async () => {
     renderNewProduct({ duplicateFrom: {
       id: 'source-1', product_name: 'Atrazine 4L', category: 'Herbicide', vendor: 'Acme Ag',
       manufacturer: 'Maker Co', product_form: 'liquid', inventory_unit: 'Gal',
     } });
-    expect(await screen.findByText('Copy of Atrazine 4L. Nothing is saved until you create it.')).toBeInTheDocument();
+    expect(await screen.findByText('New product started from Atrazine 4L. Nothing is saved until you create it.')).toBeInTheDocument();
     expect(screen.getByLabelText(/Product Name/)).toHaveValue('Atrazine 4L (copy)');
     expect(screen.getByLabelText('SKU')).toHaveValue('');
     expect(screen.getByLabelText('EPA Registration')).toHaveValue('');
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
     await screen.findByText('New product page');
-    const [[[row]]] = mockInsert.mock.calls as [[[Record<string, unknown>]]];
+    const [parentFields, row] = mockCreate.mock.calls[0] as [Record<string, unknown>, Record<string, unknown>];
+    expect(parentFields).toEqual(expect.objectContaining({ name: 'Atrazine 4L (copy)', category: 'Herbicide', product_form: 'liquid' }));
     expect(row).toEqual(expect.objectContaining({
       product_name: 'Atrazine 4L (copy)', vendor: 'Acme Ag', manufacturer: 'Maker Co',
-      product_form: 'liquid', inventory_unit: 'Gal',
+      product_form: 'liquid', inventory_unit: 'Gal', size_role: 'package',
       sku: null, epa_registration: null, is_rup: false, signal_word: null, rei_hours: null, phi_days: null,
-      container_size: undefined, container_unit: null, unit_size: '',
+      container_unit: null, unit_size: null,
     }));
-    for (const field of ['id', 'tier1_price', 'tier2_price', 'tier3_price', 'current_cost']) expect(row).not.toHaveProperty(field);
+    for (const field of ['id', 'tier1_price', 'tier2_price', 'tier3_price', 'current_cost', 'category', 'use_timings', 'rate_per_acre']) expect(row).not.toHaveProperty(field);
   });
 
-  it('a Duplicate left unsaved still prompts', async () => {
+  it('a New product left unsaved still prompts', async () => {
     renderNewProduct({ duplicateFrom: { id: 'source-1', product_name: 'Atrazine 4L', category: null, vendor: null, manufacturer: null, product_form: null, inventory_unit: null } });
-    await screen.findByText('Copy of Atrazine 4L. Nothing is saved until you create it.');
+    await screen.findByText('New product started from Atrazine 4L. Nothing is saved until you create it.');
     fireEvent.click(screen.getByRole('link', { name: 'Elsewhere' }));
     expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
   });
@@ -141,21 +154,25 @@ describe('ProductDetail — leaving a new product', () => {
   it('locks the form while a new product saves', async () => {
     let finish: (value: unknown) => void = () => {};
     const pending = new Promise((resolve) => { finish = resolve; });
-    const reads = mockFrom.getMockImplementation()!;
-    mockFrom.mockImplementation((table: string) => {
-      const query = reads(table) as Record<string, unknown>;
-      query.insert = () => ({ select: () => pending });
-      return query;
-    });
+    mockCreate.mockReturnValue(pending);
     renderNewProduct();
     const name = await screen.findByLabelText(/Product Name/);
     fireEvent.change(name, { target: { value: 'New Chem' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
     expect(name).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
     await waitFor(() => expect(name).toBeDisabled());
-    finish({ data: [{ id: 'product-1' }], error: null });
+    finish({ parent_id: 'parent-1', parent_version: 1, product_id: 'product-1', event_id: 1 });
     await screen.findByText('New product page');
+  });
+
+  it('refuses a new product with no form before requesting a save', async () => {
+    renderNewProduct();
+    fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Choose a product form (liquid, dry, seed or each) before saving.');
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 
   it('leaving with an unsaved name still prompts', async () => {
@@ -183,7 +200,7 @@ describe('ProductDetail — leaving a new product', () => {
     fireEvent.change(screen.getByLabelText(label === 'Product Name' ? /Product Name/ : label), { target: { value } });
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
     expect(mockToast).toHaveBeenCalledWith('error', message);
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 
   it('offers active categories including Seed without free typing and keeps a first form choice', async () => {
@@ -205,10 +222,12 @@ describe('ProductDetail — leaving a new product', () => {
     fireEvent.change(form, { target: { value: 'dry' } });
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
     await screen.findByText('New product page');
-    expect(mockInsert).toHaveBeenCalledWith([expect.objectContaining({
-      product_name: 'Seed Chem', sku: 'SKU-1', category: 'Seed', epa_registration: null,
-      product_form: 'dry',
-    })]);
+    const [parentFields, size] = mockCreate.mock.calls[0] as [Record<string, unknown>, Record<string, unknown>];
+    expect(parentFields).toEqual(expect.objectContaining({ name: 'Seed Chem', category: 'Seed', product_form: 'dry' }));
+    expect(size).toEqual(expect.objectContaining({
+      product_name: 'Seed Chem', sku: 'SKU-1', epa_registration: null, product_form: 'dry',
+    }));
+    expect(size).not.toHaveProperty('category');
   });
 
   it('clears only incompatible units when choosing a form for the first time', async () => {

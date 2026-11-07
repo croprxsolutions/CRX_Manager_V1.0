@@ -88,6 +88,12 @@
 > (`owner-approve-migration.mjs`) never carries:** a parked migration needs his `I approve` for the new stamp. Every other
 > apply check (ordering, landing gate, checks, CI) is unchanged.
 >
+> **Ordering pre-check at proof minting (Mason, 2026-11-06).** `node scripts/write-apply-proofs.mjs <name>` runs the
+> ordering guard's rule (`migration-ordering-lib.mjs`, same `intentional-replay` marker) before any reviewer run and
+> refuses a stamp older than one already applied, printing the apply gate's restamp advice. With a token it reads the
+> live ledger; without one it judges this checkout's `applied-migrations.json` and, with no snapshot, says it skipped.
+> The apply gate remains the authority (PR #1586 spent a full review on a stamp the apply then refused).
+>
 > **Post-apply carry (Mason, 2026-11-04).** The records committed after a live migration apply no longer void the Sol
 > review. `node scripts/write-codex-push-proof.mjs --carry-post-apply` mints a carried proof (`carry.mode`
 > `post_apply`, same `base_sha` as the source) only when HEAD is ONE ordinary commit on top of a

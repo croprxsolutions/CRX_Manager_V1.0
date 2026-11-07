@@ -274,6 +274,10 @@ vi.mock('../lib/sentry', () => ({
   Sentry: { captureMessage: mockSentryCaptureMessage, captureException: mockSentryCaptureException },
 }));
 
+vi.mock('../lib/productParents', () => {
+  const empty = { parents: [], byProduct: new Map(), index: new Map() };
+  return { useProductParents: () => empty, searchProductParents: async () => [] };
+});
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({ notifyLargeOrder: mockNotifyLargeOrder, notifyCreditLimitExceeded: vi.fn() }));
 vi.mock('../lib/metrics', () => ({ trackBusinessEvent: mockTrackBusinessEvent }));

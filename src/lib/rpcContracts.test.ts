@@ -2818,6 +2818,8 @@ function registryMigrationHighWater(): string {
 // 20261202110000 and 20261204120000 were added on 2026-11-07: both applied live and the registry
 // refresh after #1584 moved the boundary past them (20261202110000 holds the newest
 // _insert_parent_size body). Clear them on the same type-regeneration rule.
+// 20261204100000 and 20261204110000 (KI-18, PR #1579) joined them the same day: applied live, and
+// their files reached main just after that refresh had already moved the boundary past them.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2854,6 +2856,8 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261123120000',
   '20261120100000',
   '20261202110000',
+  '20261204100000',
+  '20261204110000',
   '20261204120000',
 ]);
 
@@ -3232,8 +3236,6 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   check_remainder_reminders: 'maintenance reminder sweep uses persisted sent markers to deduplicate',
   check_unpriced_orders: 'cron reminder sweep uses persisted reminder and escalation sent markers',
   mark_overdue_invoices: 'service-role maintenance updates only invoices currently eligible as overdue',
-  // Pruned 2026-11-07: snapshot_field_crop_history (20261204100000, KI-18 batch 1) left the inventory once the
-  // registry refresh in #1606 moved the high-water past it.
   recompute_job_applied_acres: 'trigger-only derived-total recomputation; direct client EXECUTE is revoked',
   // The forward-only label and stale-recipient candidates are NOT APPLIED and
   // re-emit both recorder helpers. Canonical local-candidate identities retain

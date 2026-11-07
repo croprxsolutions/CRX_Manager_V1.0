@@ -696,7 +696,7 @@ for (const command of [
 const denied = (command, tool_name = "Bash") =>
   runHook({ tool_name, tool_input: { command } }).stdout.includes('"permissionDecision":"deny"');
 for (const command of [
-  "python - <<'EOF'\nfrom pathlib import Path\np = Path(r\"C:/Users/mason/.claude/projects/x/memory/note.md\")\np.write_text(\"Never run git reset --hard on a shared worktree.\\n\")\nEOF",
+  "cat >> /c/Users/mason/.claude/projects/x/memory/note.md <<'EOF'\nNever run git reset --hard on a shared worktree.\nEOF",
   "cat >> /c/Users/mason/notes/handover.md <<'EOF'\nLesson: git reset --hard destroyed work; never use --no-verify.\nEOF",
   "cat <<'EOF' | tee -a /c/Users/mason/notes/a.md\ngit push --force is never used here.\nEOF",
 ]) ok(!denied(command), `bash-safety allows here-document text: ${command.split("\n")[0]}`);
@@ -716,8 +716,10 @@ for (const [command, label] of [
   ["cat <<'EOF'\ngit reset --hard\n", "a here-document that never ends"],
   ["cat <<'EOF' | xargs git\nreset --hard\nEOF\ngit reset --hard", "xargs, then a real reset"],
   ["python - <<'EOF'\nimport os; os.system('git reset --hard')\nEOF", "python launching a process"],
-  ["python - <<'EOF'\nimport os; getattr(os, 'sys'+'tem')('git reset --hard')\nEOF", "python launching through getattr"],
-  ["python - <<'EOF'\nglobals()['__builtins__'].__dict__['ev'+'al']('1'); x = 'git reset --hard'\nEOF", "python reaching builtins dynamically"],
+  ["node - <<'EOF'\nconst c = require(['child','process'].join('_')); c[['ex','ecSync'].join('')]('git reset --hard');\nEOF", "node building the launch call from pieces (Luna round 2)"],
+  // A runtime's here-document stays judged in full, even when it only writes a
+  // note: no word list can tell writing from launching (Luna rounds 1-2).
+  ["python - <<'EOF'\nfrom pathlib import Path\nPath('note.md').write_text('Never run git reset --hard.')\nEOF", "python writing a note (runtimes are not narrowed)"],
   ["cat > x.py <<'EOF'\nimport subprocess; subprocess.run('git reset --hard', shell=True)\nEOF\npython x.py", "written python run later"],
   ["cat > notes.md <<'EOF'\ntext\nEOF\ngit reset --hard", "a real reset after the here-document"],
   ["cat > .env <<'EOF'\nSECRET=x\nEOF", "a here-document written to .env"],

@@ -3222,29 +3222,23 @@ export function commandFedToInterpreter(command) {
 // A Bash command with its here-document bodies left out, when every command in
 // it (substitutions included) is a bare `cat` or `tee`, which only copy text
 // into a file or onto the screen (2026-11-07, Mason: notes that mentioned
-// `git reset --hard` or a worktree path were refused). With `runtimes`, a
-// language runtime reading its program from the here-document counts too,
-// unless the text anywhere can launch a process; bash-safety asks for that,
-// since a runtime can only reach its commands by launching one. Anything else
-// returns the command unchanged: a shell, `xargs`, a loop, a function or path
-// named `cat`, a substitution, or a here-document pipelineStages cannot read
-// (never closed, or an unquoted body with `$( )`). The earlier attempt was
-// dropped for five such routes (agent-guardrails.md); each is pinned in the
-// bash-safety and review-proof-guard tests.
+// `git reset --hard` or a worktree path were refused). Anything else returns
+// the command unchanged: a shell, a language runtime, `xargs`, a loop, a
+// function or path named `cat`, a substitution, or a here-document
+// pipelineStages cannot read (never closed, or an unquoted body with `$( )`).
+// Runtimes (`python - <<EOF`) were tried and dropped: Luna showed twice that no
+// word list tells a script that only writes text from one that launches a
+// process. The earlier attempt was dropped for five routes
+// (agent-guardrails.md); each is pinned in the bash-safety and
+// review-proof-guard tests.
 const HEREDOC_TEXT_PROGRAMS = new Set(["cat", "tee"]);
-// Matched anywhere, even inside a longer name, and dynamic lookups count too:
-// a text guard cannot out-read obfuscation, so anything unusual keeps the body.
-const PROCESS_LAUNCH_RE = /subprocess|child_process|system|popen|exec|spawn|fork|eval|startfile|shell|passthru|proc_open|pty|ctypes|__import__|importlib|getattr|globals|vars\s*\(|__dict__|__builtins__|compile|marshal|pickle|\bos\s*\.\s*(?!path\b)|deno|bun\b|[`|]|\$\(|\bqx\b/i;
-export function commandWithoutTextHeredocs(command, { runtimes = false } = {}) {
+export function commandWithoutTextHeredocs(command) {
   const text = String(command ?? "");
   if (!text.includes("<<")) return text;
   const stages = pipelineStages(text, "posix");
-  const programs = stages.map((stage) => (stage.unreadable ? "" : splitShellWordsRaw(stage.text)[0] ?? ""));
-  const runtimeSeen = runtimes && programs.some((program) => STDIN_PROGRAM_RUNTIMES.has(program));
-  const textOnly = programs.length > 0 && programs.every((program) =>
-    HEREDOC_TEXT_PROGRAMS.has(program) || (runtimes && STDIN_PROGRAM_RUNTIMES.has(program)));
-  // A runtime's process-launch check reads the whole text, bodies included.
-  if (!textOnly || (runtimeSeen && PROCESS_LAUNCH_RE.test(text))) return text;
+  const textOnly = stages.length > 0 && stages.every((stage) =>
+    !stage.unreadable && HEREDOC_TEXT_PROGRAMS.has(splitShellWordsRaw(stage.text)[0] ?? ""));
+  if (!textOnly) return text;
   return stages.map((stage) => stage.text).join("\n");
 }
 

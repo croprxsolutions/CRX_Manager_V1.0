@@ -505,15 +505,16 @@ wrote "git reset --hard" into a memory note (`bash-safety.mjs`), and a `cat >> <
 whose text named a `.claude/worktrees/…` path (`review-proof-guard.mjs`). For a **Bash** command,
 both guards now judge the command with its here-document bodies left out (`commandWithoutTextHeredocs`
 in `codex-push-lib.mjs`, which reuses the `pipelineStages` lexer), but only when every command in it,
-substitutions included, is a bare `cat` or `tee`. `bash-safety.mjs` also counts a language runtime
-(`python -`, `node -`, …) reading its program from the here-document, unless the text anywhere can
-launch a process (`subprocess`, `os.system`, `child_process`, `exec`, `spawn`, `eval`, a backtick,
-`$( )`, a pipe and similar). The review proof guard does not, because a runtime can write a proof
-file without launching anything.
+substitutions included, is a bare `cat` or `tee`. A language runtime fed a here-document
+(`python - <<'EOF'`) is still judged on its full text, so the first false alarm's exact shape stays
+refused: write notes with `cat >> <file> <<'EOF'` or the Write tool. Letting runtimes through unless
+their text could launch a process was tried in this change and dropped, because Luna showed twice
+(`os.startfile`, then `child_process` assembled from string pieces) that no word list can tell a
+script that writes text from one that runs a command.
 
 Everything else is judged on the full text exactly as before, and the tests pin each route: a
 here-document fed to `bash`/`sh` or piped into one (also across a line continuation), a written file
-run later (`bash x.sh`, `./x.sh`, `python x.py` with a process launch), a function named `cat`, an
+run later (`bash x.sh`, `./x.sh`, `python x.py`), any `python -`/`node -` here-document, a function named `cat`, an
 unquoted body with `$( )`, a `<<` inside a comment, a here-document that never ends, `xargs`, a
 `while read` loop, a later `$(cat file)`, `git reset --hard` or `rm`/`mv` of the review state
 outside a here-document, and inside `bash -c "…"`. The redirect target stays visible, so

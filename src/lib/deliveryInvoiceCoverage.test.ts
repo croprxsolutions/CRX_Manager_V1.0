@@ -163,7 +163,7 @@ describe('activeInvoiceCoversDelivery', () => {
 
     // The Orders list computes invoiced % in get_orders_page, with the same active-invoice rule.
     const orders = readFileSync(resolve(root, 'src/pages/Orders.tsx'), 'utf8');
-    expect(orders).toContain('fetchOrdersPage(query, ORDERS_PAGE_SIZE');
+    expect(orders).toContain('fetchOrdersPage(query, ORDERS_PAGE_SIZE, 0, after)');
     const ordersPageSql = readFileSync(resolve(root, 'supabase/migrations/20261116120000_orders_list_page.sql'), 'utf8');
     expect(ordersPageSql).toContain("i.status NOT IN ('voided', 'cancelled')");
     expect(ordersPageSql).toContain('i.deleted_at IS NULL');

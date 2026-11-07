@@ -15,10 +15,11 @@ const EXEMPT: Record<string, string> = {};
 
 // Paged reads that cannot select with `{ count: 'exact' }`, each with its reason.
 // They keep fetchAllRows' other guard: a read of more than one page is returned
-// only once a second whole read matches it row for row.
-const COUNT_EXEMPT: Record<string, string> = {
-  'src/lib/ordersPage.ts': 'pages through the orders-page function, which returns its own total_count; that count is passed to fetchAllRows',
-  'src/components/receiving/ReceivingLogPanel.tsx': 'get_receiving_log pages with p_limit/p_offset and returns no count; adding one needs a database change',
+// only once a second whole read matches it row for row. The number of such reads
+// per file must match exactly, so a new read without the count still fails.
+const COUNT_EXEMPT: Record<string, { sites: number; reason: string }> = {
+  'src/lib/ordersPage.ts': { sites: 1, reason: 'pages through the orders-page function, which returns its own total_count; that count is passed to fetchAllRows' },
+  'src/components/receiving/ReceivingLogPanel.tsx': { sites: 1, reason: 'get_receiving_log pages with p_limit/p_offset and returns no count; adding one needs a database change' },
 };
 
 const CALL_PATTERN = /\bfetchAllRows(?:ForIds)?\s*(?:<[^()]*?>)?\s*\(/g;
@@ -78,11 +79,7 @@ function findCallSites(): CallSite[] {
     // Comments are blanked (same length, newlines kept, so lines still match)
     // so a comment mentioning the count cannot satisfy the check. Blanking only
     // removes text, so a misread string can only make a site fail, never pass.
-    // One pass, so whichever comment opens first wins: a `/*` inside a `//`
-    // comment must not blank everything up to the next `*/` (it once hid
-    // UnbilledApplicationsPanel's reads; the "every file is scanned" test caught it).
-    const source = readFileSync(path, 'utf8')
-      .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (m) => m.replace(/[^\n]/g, ' '));
+    const source = blankComments(readFileSync(path, 'utf8'));
     const starts = [...source.matchAll(CALL_PATTERN)].map((m) => m.index ?? 0);
     starts.forEach((start, i) => {
       const nextCall = i + 1 < starts.length ? starts[i + 1] : source.length;
@@ -113,10 +110,13 @@ describe('paged list reads request the exact row count', () => {
   });
 
   it("every fetchAllRows / fetchAllRowsForIds call selects with { count: 'exact' }", () => {
-    const offenders = sites
-      .filter((site) => !(site.file in COUNT_EXEMPT) && !site.callback.includes("count: 'exact'"))
-      .map((site) => `${site.file}:${site.line}`);
-    expect(offenders, `paged reads without { count: 'exact' }:\n${offenders.join('\n')}`).toEqual([]);
+    const withoutCount = sites.filter((site) => !site.callback.includes("count: 'exact'"));
+    const perFile: Record<string, number> = {};
+    for (const site of withoutCount) perFile[site.file] = (perFile[site.file] ?? 0) + 1;
+    const listed = Object.fromEntries(Object.entries(COUNT_EXEMPT).map(([file, { sites: n }]) => [file, n]));
+    // Exact match: an unlisted read fails, and so does an entry that outlives its read.
+    const lines = withoutCount.map((site) => `${site.file}:${site.line}`).join('\n');
+    expect(perFile, `paged reads without { count: 'exact' } (COUNT_EXEMPT lists the allowed ones):\n${lines}`).toEqual(listed);
   });
 
   it('every exempt file still exists (drop the entry once the file is covered)', () => {
@@ -124,22 +124,24 @@ describe('paged list reads request the exact row count', () => {
     for (const file of Object.keys(EXEMPT)) expect(files.has(file), file).toBe(true);
   });
 
-  it('every count exemption still has a read without the count (drop it once fixed)', () => {
-    for (const file of Object.keys(COUNT_EXEMPT)) {
-      expect(sites.some((site) => site.file === file && !site.callback.includes("count: 'exact'")), file).toBe(true);
-    }
-  });
-
   it('every file under src that pages with fetchAllRows is scanned', () => {
     const scanned = new Set(sites.map((site) => site.file));
     const missing = sourceFiles(join(__dirname, '..'), 'src')
       .filter(({ file }) => !/\.test\.tsx?$/.test(file) && file !== 'src/lib/pagedRead.ts' && !(file.replace('src/pages/', '') in EXEMPT))
-      .filter(({ path }) => new RegExp(CALL_PATTERN.source).test(readFileSync(path, 'utf8')))
+      .filter(({ path }) => new RegExp(CALL_PATTERN.source).test(blankComments(readFileSync(path, 'utf8'))))
       .map(({ file }) => file)
       .filter((file) => !scanned.has(file));
     expect(missing, 'add these to SHARED_FILES or COMPONENT_FILES').toEqual([]);
   });
 });
+
+// Comments blanked to spaces (newlines kept, so line numbers still match). One
+// pass, so whichever comment opens first wins: a `/*` inside a `//` comment must
+// not blank everything up to the next `*/` (it once hid
+// UnbilledApplicationsPanel's reads; the "every file is scanned" test caught it).
+function blankComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (m) => m.replace(/[^\n]/g, ' '));
+}
 
 function sourceFiles(dir: string, rel: string): { file: string; path: string }[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

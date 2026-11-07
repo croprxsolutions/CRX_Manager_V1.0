@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-07 — Sol: a test file is not money code by its name alone
+
+**Decision (Mason, in session, 2026-11-07):** a changed test or spec (`__tests__/`, `*.test.*`, `*.spec.*`) no longer needs Sol just because its name carries a money word (`MONEY_PATH_WORDS`). Money code, migrations, Edge Functions and every listed path in `docs/reference/sol-required-paths.md` (tests under those paths included) still need Sol.
+**Why:** on PR #1579 a one-line fix to `src/__tests__/return-credit-remediation-guards.test.ts` (matched by "credit") forced a full Sol of the whole PR after the live apply; that run reopened an unrelated, already-accepted area and cost two more rounds. A test cannot change what ships; the code it tests already needs Sol.
+**Enforcement:** `.claude/hooks/sol-risk-lib.mjs` (`solRiskPathProblem`), proven by `.claude/hooks/sol-risk-lib.test.mjs` (fails before the change, passes after).
+
 ## 2026-11-06 — Hands off Taha's PRs; he lands his own; we hold ours 4 hours
 
 **Decision (Mason, Slack #crx-work, evening of 2026-11-06 Central, confirming a 2026-11-03 agreement):** (1) Mason's agents never push to a branch or PR Taha owns; they comment findings and Taha fixes them the same day, and an urgent fix is agreed with him first. Billing-rule changes go to Mason and Taha as a decision before any code. (2) Taha's six items, the billing plan included, are his through 2026-12-15 (exact list pending from Taha). (3) From billing-plan M4 on, Taha merges his own PRs; his clean Sol run on the final commit counts for the Sol rule, and he must use at least one non-Anthropic adversarial reviewer. Mason does not review his work or run agents monitoring his PRs. Billing-rule decisions stay with Mason. (4) Mason's agents hold their own Sol-list PRs, before any migration apply and the merge, until Taha submits a review or 4 hours pass after opening.

@@ -57,6 +57,17 @@ function CorrectionFields({ approvedSource, source, reason, evidence, setReason,
   );
 }
 
+// The database refuses values above these (OUT_OF_RANGE), so Save is held back instead of failing.
+const MAX_DENSITY_LB_PER_GAL = 20;
+const MAX_NET_WEIGHT_LB = 4000;
+/** The limit a stored preview is over, or null. */
+function overLimit(stored: string | null, density: boolean): number | null {
+  const max = density ? MAX_DENSITY_LB_PER_GAL : MAX_NET_WEIGHT_LB;
+  return stored !== null && Number(stored) > max ? max : null;
+}
+
+const storedOk = (stored: string | null, tooHeavy: number | null) => stored !== null && Number(stored) > 0 && tooHeavy === null;
+
 function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClose, onSaved, onStale }: {
   subject: WeightSubject;
   entry: ProductWeightEntry;
@@ -79,7 +90,8 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClos
   const [saving, setSaving] = useState(false);
   const correction = forceCorrection || isLowerTrust(source, approvedSource);
   const stored = storedWeightPreview(value, density ? unit : 'lb');
-  const ready = stored !== null && Number(stored) > 0 && !saving && (!correction || (reason.trim() !== '' && evidence.trim() !== ''));
+  const tooHeavy = overLimit(stored, density);
+  const ready = !saving && storedOk(stored, tooHeavy) && (!correction || (reason.trim() !== '' && evidence.trim() !== ''));
   const fingerprint = JSON.stringify([subject, value.trim(), unit, source, note.trim(), correction, reason.trim(), evidence.trim()]);
   const { getKey, resetKey } = useIdempotencyKey(correction ? 'correct_weight' : 'set_weight', profileId, fingerprint);
 
@@ -125,7 +137,8 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClos
             options={[{ value: 'lb_per_gal', label: 'lb per gallon' }, { value: 'specific_gravity', label: 'Specific gravity' }]} />
         )}
         {stored !== null && (
-          <p className="text-sm text-nav-dark" role="status">Saves as {stored} {unitLabel(subject, entry.inventory_unit)}</p>
+          <p className="text-sm text-nav-dark" role="status">Saves as {stored} {unitLabel(subject, entry.inventory_unit)}
+            {tooHeavy !== null && ` (more than ${tooHeavy} ${unitLabel(subject, entry.inventory_unit)}; check the number)`}</p>
         )}
         <Select id="weight-source" label="Source" value={source} onChange={(event) => setSource(event.target.value as ProductWeightSource)}
           options={WEIGHT_SOURCES.map((item) => ({ value: item.value, label: item.label }))} />
@@ -164,17 +177,21 @@ function DraftRow({ draft, subject, entry, isAdmin, busy, onApprove, onSetWeight
   );
 }
 
+const HISTORY_PAGE = 25;
+
 function WeightHistory({ subject, stockUnit, reloadToken }: { subject: WeightSubject; stockUnit: string | null | undefined; reloadToken: number }) {
   const [rows, setRows] = useState<ProductWeightEvent[] | null | 'failed'>(null);
+  const [limit, setLimit] = useState(HISTORY_PAGE);
+  // A new product starts empty at the first page; "Show older" keeps the list open while it loads more.
+  useEffect(() => { setRows(null); setLimit(HISTORY_PAGE); }, [subject.kind, subject.subject_id]);
   useEffect(() => {
     let cancelled = false;
-    setRows(null);
-    fetchWeightEvents(subject).then((data) => { if (!cancelled) setRows(data); }).catch((error: unknown) => {
+    fetchWeightEvents(subject, limit).then((data) => { if (!cancelled) setRows(data); }).catch((error: unknown) => {
       Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), { extra: { context: 'product_weight_events' } });
       if (!cancelled) setRows('failed');
     });
     return () => { cancelled = true; };
-  }, [subject.kind, subject.subject_id, reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps -- the subject's identity, not its object
+  }, [subject.kind, subject.subject_id, reloadToken, limit]); // eslint-disable-line react-hooks/exhaustive-deps -- the subject's identity, not its object
   if (rows === 'failed') return <p className="text-sm text-secondary">Weight history could not be loaded.</p>;
   if (rows === null || rows.length === 0) return null;
   return (
@@ -196,6 +213,9 @@ function WeightHistory({ subject, stockUnit, reloadToken }: { subject: WeightSub
           );
         })}
       </ul>
+      {rows.length >= limit && (
+        <Button size="sm" variant="secondary" showChevron={false} onClick={() => setLimit(limit + HISTORY_PAGE)}>Show older</Button>
+      )}
     </details>
   );
 }

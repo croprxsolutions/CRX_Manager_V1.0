@@ -94,6 +94,25 @@ describe('ProductWeightCard', () => {
     await waitFor(() => expect(mocks.fetchProductWeights).toHaveBeenCalledTimes(2));
   });
 
+  it('holds Save back for a weight the database would refuse as out of range', async () => {
+    show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation, weight: { kind: 'none', none_reason: 'no_approved_weight' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Enter weight' }));
+    fireEvent.change(screen.getByLabelText('Weight'), { target: { value: '21' } });
+    expect(screen.getByRole('status')).toHaveTextContent('more than 20 lb/gal; check the number');
+    expect(screen.getByRole('button', { name: 'Save weight' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Weight'), { target: { value: '20' } });
+    expect(screen.getByRole('button', { name: 'Save weight' })).toBeEnabled();
+  });
+
+  it('loads 25 more history rows on Show older', async () => {
+    const event = (id: number) => ({ id, event_type: 'approved', value_id: null, before_value: null, after_value: null, reason: null, evidence: null,
+      actor_kind: 'user', changed_by_name: 'Pat Admin', changed_at: '2026-11-07T15:00:00Z' });
+    mocks.fetchWeightEvents.mockResolvedValue(Array.from({ length: 25 }, (_, index) => event(index)));
+    show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation, weight: { kind: 'none', none_reason: 'no_approved_weight' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Show older' }));
+    await waitFor(() => expect(mocks.fetchWeightEvents).toHaveBeenLastCalledWith(densitySubject, 50));
+  });
+
   it('turns a lower-trust entry into a correction that needs a reason and evidence', async () => {
     show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation,
       weight: { kind: 'density', lb_per_unit: 9.5972, per_unit: 'Gal', source: 'sds', reviewed_by_name: 'Pat', reviewed_at: 't' } });

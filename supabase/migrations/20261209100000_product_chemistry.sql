@@ -452,8 +452,8 @@ BEGIN
   IF p_current_cost = 0 THEN RETURN jsonb_build_object('reason', 'COST_MISSING'); END IF;
   IF p_current_cost <> round(p_current_cost, 2) THEN RETURN jsonb_build_object('reason', 'COST_NOT_CENTS'); END IF;
   IF v_unit IS NULL OR v_unit = '' THEN RETURN jsonb_build_object('reason', 'UNIT_UNKNOWN'); END IF;
-  -- The gram factor in unit_conversions is truncated; metric needs exact factors first (sheet section 4).
-  IF v_unit IN ('g', 'mg') THEN RETURN jsonb_build_object('reason', 'UNIT_NOT_SUPPORTED'); END IF;
+  -- Metric factors in unit_conversions are truncated (g 0.03527396); metric needs exact factors first (sheet section 4).
+  IF v_unit IN ('g', 'mg', 'kg', 'l', 'ml', 'liter', 'litre') THEN RETURN jsonb_build_object('reason', 'UNIT_NOT_SUPPORTED'); END IF;
   IF v_unit IN ('ea', 'each', 'unit')
      OR EXISTS (SELECT 1 FROM public.unit_conversions u WHERE lower(u.unit) = v_unit AND u.unit_type = 'both') THEN
     RETURN jsonb_build_object('reason', 'UNIT_IS_COUNT');

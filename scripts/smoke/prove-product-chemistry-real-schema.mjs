@@ -265,7 +265,7 @@ const GBULK = id('101'), GQT = id('102'), GOZ = id('103'), PREG = id('104'), PCT
   UEA = id('115'), UZZ = id('116'), UNULL = id('117'), UZERO = id('118'), AEG = id('119'), BIGG = id('120'),
   E2G = id('121'), E4G = id('122'), INACTG = id('123'), REFBULK = id('124'), REFA = id('125'), REFB = id('126'),
   DUP1G = id('127'), DUP2G = id('128'), STALEG = id('129'), STALEJOIN = id('130'), SWITCHG = id('131'), DM4G = id('132'),
-  E1G = id('133'), E3G = id('134'), E5G = id('135');
+  E1G = id('133'), E3G = id('134'), E5G = id('135'), UKG = id('136');
 
 const OWNER = 'owner';
 function txIn(uid, sql) {
@@ -365,14 +365,14 @@ function seedBeforeCandidate() {
     INSERT INTO public.product_categories (name, sort_order) VALUES ('Herbicide', 60) ON CONFLICT DO NOTHING;
     INSERT INTO public.unit_conversions (unit, factor_oz, unit_type)
     SELECT v.u, v.f, v.t FROM (VALUES ('Gal', 128::numeric, 'liquid'), ('Qt', 32, 'liquid'), ('Oz', 1, 'liquid'),
-      ('Lb', 16, 'dry'), ('Dry oz', 1, 'dry'), ('g', 0.03527396, 'dry'), ('MG', 0.00003527396, 'dry')) v(u, f, t)
+      ('Lb', 16, 'dry'), ('Dry oz', 1, 'dry'), ('g', 0.03527396, 'dry'), ('MG', 0.00003527396, 'dry'), ('kg', 35.27396, 'dry')) v(u, f, t)
      WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions c WHERE lower(c.unit) = lower(v.u) AND c.unit_type = v.t);
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, category, current_cost, tier1_price, is_active, epa_registration) VALUES
       ${prod(GBULK, 'GBULK', 'liquid', 'Gal', 20.00)}, ${prod(GQT, 'GQT', 'liquid', 'Qt', 6.00)}, ${prod(GOZ, 'GOZ', 'liquid', 'Oz', 0.50)},
       ${prod(PREG, 'PREG', 'liquid', 'Gal', 45.00)}, ${prod(PCTG, 'PCTG', 'liquid', 'Gal', 30.00)},
       ${prod(DLB, 'DLB', 'dry', 'Lb', 8.00)}, ${prod(DOZ, 'DOZ', 'dry', 'Dry oz', 0.75)}, ${prod(HALFLB, 'HALFLB', 'dry', 'Lb', 0.05)},
       ${prod(FERTG, 'FERTG', 'liquid', 'Gal', 11.00)}, ${prod(FDLB, 'FDLB', 'dry', 'Lb', 100.00)}, ${prod(METG, 'METG', 'liquid', 'Gal', 40.00)},
-      ${prod(SEEDEA, 'SEEDEA', 'seed', 'Ea', 300.00)}, ${prod(UG, 'UG', 'dry', 'g', 1.00)}, ${prod(UMG, 'UMG', 'dry', 'MG', 1.00)},
+      ${prod(SEEDEA, 'SEEDEA', 'seed', 'Ea', 300.00)}, ${prod(UG, 'UG', 'dry', 'g', 1.00)}, ${prod(UMG, 'UMG', 'dry', 'MG', 1.00)}, ${prod(UKG, 'UKG', 'dry', 'kg', 1.00)},
       ${prod(UEA, 'UEA', 'dry', 'Ea', 5.00)}, ${prod(UZZ, 'UZZ', 'dry', 'Zz', 5.00)}, ${prod(UNULL, 'UNULL', 'dry', 'Lb', null)},
       ${prod(UZERO, 'UZERO', 'dry', 'Lb', 0)}, ${prod(AEG, 'AEG', 'liquid', 'Gal', 30.00)}, ${prod(BIGG, 'BIGG', 'liquid', 'Gal', 200.00)},
       ${prod(E1G, 'E1G', 'liquid', 'Gal', 10.00)}, ${prod(E2G, 'E2G', 'liquid', 'Gal', 10.00, true, '100-55')},
@@ -394,7 +394,7 @@ function seedBeforeCandidate() {
     INSERT INTO public.product_parent_members (product_id, parent_id, size_role, added_by) VALUES
       ${member(GBULK, PGLY, 'bulk')}, ${member(GQT, PGLY)}, ${member(GOZ, PGLY)}, ${member(PREG, PPRE, 'bulk')}, ${member(PCTG, PPCT, 'bulk')},
       ${member(DLB, PDRY)}, ${member(DOZ, PDRY)}, ${member(HALFLB, PHALF, 'bulk')}, ${member(FERTG, PFERT, 'bulk')}, ${member(FDLB, PFDRY, 'bulk')},
-      ${member(METG, PMET, 'bulk')}, ${member(SEEDEA, PSEED)}, ${member(UG, PUNIT)}, ${member(UMG, PUNIT)}, ${member(UEA, PUNIT)},
+      ${member(METG, PMET, 'bulk')}, ${member(SEEDEA, PSEED)}, ${member(UG, PUNIT)}, ${member(UMG, PUNIT)}, ${member(UKG, PUNIT)}, ${member(UEA, PUNIT)},
       ${member(UZZ, PUNIT)}, ${member(UNULL, PUNIT)}, ${member(UZERO, PUNIT)}, ${member(AEG, PAE, 'bulk')}, ${member(BIGG, PBIG, 'bulk')},
       ${member(E1G, PEPA1)}, ${member(E2G, PEPA2)}, ${member(E3G, PEPA3)}, ${member(E4G, PEPA4)}, ${member(E5G, PEPA5)},
       ${member(INACTG, PINACT)}, ${member(REFBULK, PREF, 'bulk')}, ${member(REFA, PREF)}, ${member(REFB, PREF)},
@@ -650,8 +650,8 @@ async function main() {
   ok(ADMIN, setC(PUNIT, [pct('Unit active', 50)]));
   c = costs(PUNIT);
   const reasonOf = (sid) => sizeFigs(c, sid)[0].figure.reason;
-  assert.deepEqual([UG, UMG, UEA, UZZ, UNULL, UZERO].map(reasonOf),
-    ['UNIT_NOT_SUPPORTED', 'UNIT_NOT_SUPPORTED', 'UNIT_IS_COUNT', 'UNIT_UNKNOWN', 'COST_MISSING', 'COST_MISSING']);
+  assert.deepEqual([UG, UMG, UKG, UEA, UZZ, UNULL, UZERO].map(reasonOf),
+    ['UNIT_NOT_SUPPORTED', 'UNIT_NOT_SUPPORTED', 'UNIT_NOT_SUPPORTED', 'UNIT_IS_COUNT', 'UNIT_UNKNOWN', 'COST_MISSING', 'COST_MISSING']);
   assert.equal(c.reference.reason, 'REFERENCE_UNSET');
   assert.equal(c.parent_figures, null);
   ok(ADMIN, setC(PSEED, [pct('Seed treatment', 1)]));
@@ -668,7 +668,7 @@ async function main() {
   assert.equal(cpb(0, 'Gal', 'liquid').reason, 'COST_MISSING');
   assert.equal(cpb(1, 'Unit', 'dry').reason, 'UNIT_IS_COUNT');
   assert.equal(cpb(6, 'qt', 'liquid').cents, '2400');
-  console.log('[prover] refusals by name: g and MG (UNIT_NOT_SUPPORTED), Ea, unknown unit, missing and zero cost, seed parent, lb/gal on dry, zero strength, unknown strength, unset reference, bad prices');
+  console.log('[prover] refusals by name: g, MG and kg (UNIT_NOT_SUPPORTED), Ea, unknown unit, missing and zero cost, seed parent, lb/gal on dry, zero strength, unknown strength, unset reference, bad prices');
 
   // ---- Mutation: removing the salt's fraction makes the ae figure a refusal, never the ai number.
   const salt = ingId('Glyphosate IPA salt');

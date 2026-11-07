@@ -39,4 +39,25 @@ describe('InventoryPositionMobileCards', () => {
     expect(screen.getByText('Shortfall 25')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
+
+  it('offers Fill only on the Main Warehouse row, the one location a tote fill changes', () => {
+    const elsewhere = { ...row, id: 'inventory-2', location: 'North Shed' };
+    render(
+      <InventoryPositionMobileCards
+        rows={[row, elsewhere]}
+        inactiveProductIds={new Set()}
+        isAdmin
+        selectedIds={new Set()}
+        onToggleSelect={vi.fn()}
+        onViewHistory={vi.fn()}
+        onReceive={vi.fn()}
+        onAdjust={vi.fn()}
+        onDelete={vi.fn()}
+        fillableToteIds={new Set([row.product_id])}
+        onFillTote={vi.fn()}
+      />
+    );
+
+    expect(screen.getAllByRole('button', { name: 'Fill Atrazine 4L from Bulk' })).toHaveLength(1);
+  });
 });

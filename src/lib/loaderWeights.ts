@@ -43,7 +43,7 @@ export interface LoaderWeights {
   anyCurrent: boolean;
 }
 
-const PLAIN_DECIMAL = /^-?\d+(\.\d+)?$/;
+const PLAIN_DECIMAL = /^-?(\d+\.?\d*|\.\d+)$/;
 
 /** A source line's amount as a number, or the reason it cannot be printed or weighed. */
 export function sourceAmount(name: string, raw: unknown): { value: number } | { reason: string } {
@@ -113,14 +113,16 @@ export function loaderLoadWeights(ws: LoaderWorksheet, weightsByProductId: Recor
       const refusal = refusals[index];
       if (refusal) return { amountCell: refusal.cell, weight: { refused: true, reason: refusal.reason }, weightText: refusal.cell, mark: null };
       const picked = pick(product, weightsByProductId, currentUnits);
+      // Weigh the amount exactly as printed (fmtNum shows 4 decimals), so the two never disagree.
+      const printed = Math.round(product.amount * 10000) / 10000;
       if (picked.mark === 'current') anyCurrent = true;
       const weight: LineWeight = picked.basis
-        ? lineWeightLb({ name: product.product_name, quantity: product.amount, unit: product.unit, form: picked.form, weight: picked.basis }, picked.units)
+        ? lineWeightLb({ name: product.product_name, quantity: printed, unit: product.unit, form: picked.form, weight: picked.basis }, picked.units)
         : { refused: true, reason: `${product.product_name}: weights unavailable` };
-      return { amountCell: fmtNum(product.amount), weight, weightText: 'lb' in weight ? formatLb(weight.lb) : weight.reason, mark: picked.mark };
+      return { amountCell: fmtNum(printed), weight, weightText: 'lb' in weight ? formatLb(weight.lb) : weight.reason, mark: picked.mark };
     });
     // An amount refusal is counted even on a load that printed 0, so its total is withheld (never `0 lb`).
-    const sum = sumWeights(cells.map((cell, index) => ({ quantity: refusals[index] ? null : load.products[index].amount, weight: cell.weight })));
+    const sum = sumWeights(cells.map((cell, index) => ({ quantity: refusals[index] ? null : Math.round(load.products[index].amount * 10000) / 10000, weight: cell.weight })));
     const totalText = 'lb' in sum ? `Product weight: ${formatLb(sum.lb)}` : `Product weight not shown: ${sum.reasons.join('; ')}`;
     return { cells, totalText };
   });

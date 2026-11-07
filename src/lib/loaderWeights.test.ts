@@ -108,6 +108,18 @@ describe('loaderLoadWeights', () => {
     expect(loaderWeightCaption(true, result.anyCurrent)).toBe('Weights saved with this worksheet, except lines marked current');
   });
 
+  it('accepts plain decimals written as .5 or 1.', () => {
+    expect(sourceAmount('TEST Liquid', '.5')).toEqual({ value: 0.5 });
+    expect(sourceAmount('TEST Liquid', '1.')).toEqual({ value: 1 });
+    expect(sourceAmount('TEST Liquid', '.')).toEqual({ reason: "TEST Liquid's amount is not a number" });
+  });
+
+  it('weighs the last load residual as printed (4 decimals), not its unrounded value', () => {
+    const { result } = weigh([{ id: 'l1', product_id: 'p1', quantity: 100.00004, unit: 'Gal' }], { p1: { current: density(10) } });
+    const last = result.loads[2].cells[0];
+    expect(lbOf(last)).toBeCloseTo(Number(last.amountCell.replace(/,/g, '')) * 10, 10);
+  });
+
   it('says so when a current weight could not be read', () => {
     const { result } = weigh([{ id: 'l1', product_id: 'p1', quantity: 3, unit: 'Gal' }], {});
     expect(result.loads[0].cells[0].weightText).toBe('TEST Liquid: weights unavailable');

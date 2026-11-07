@@ -10,6 +10,12 @@ echo ""
 # git passes the pushed refs on stdin once; keep them for both checks below.
 PUSH_REFS="$(cat)"
 
+# Only Taha pushes to Taha's branches (Mason, 2026-11-07; ship.md › Taha's PRs).
+if ! printf '%s
+' "$PUSH_REFS" | node scripts/check-taha-branch-push.mjs; then
+  exit 1
+fi
+
 echo "Checking Phase 3C private-artifact containment..."
 # Read the real pre-push ref updates from stdin and inspect every outgoing
 # commit, including a packet that was committed and later deleted at tip.

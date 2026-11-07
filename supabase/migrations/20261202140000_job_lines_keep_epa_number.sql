@@ -21,18 +21,19 @@
 --      deleting a spray record does not reopen the job. Internal: only the owner can read or write it.
 --   2. job_product_epa: one row per (job, product) of a sprayed or finished job, with the EPA number
 --      the job keeps for it (NULL is a kept value too). Rows are only ever inserted ON CONFLICT DO
---      NOTHING, so the first number written (the older one) wins and is never replaced. product_id has
---      no foreign key on purpose: deleting a product never deletes a job's kept number. from_backfill
---      marks rows this file wrote for jobs sprayed or finished before it: their number is NULL with
---      from_backfill true, read as "Not recorded", never the product's current number, which cannot
---      prove what was sprayed (REG-1 build sheet section 7). Signed-in users may read the rows of jobs whose lines they can
---      see (EPA numbers are public regulatory data); nobody but the owner can write them.
+--      NOTHING, so the first number written (the older one) wins and is never replaced. Neither table
+--      has a foreign key, on purpose: deleting a product or a job never erases a kept number.
+--      from_backfill true means "Not recorded" (NULL number): every product of a job sprayed or
+--      finished before this file, including one added to it later (it may have been on the job then
+--      and removed; no history exists). Never the product's current number, which cannot prove what
+--      was sprayed (REG-1 build sheet section 7). Signed-in users may read the rows of jobs they can
+--      see (jobs' own policies; EPA numbers are public regulatory data); only the owner can write them.
 --   3. When a job is first sprayed or finished, every product on its lines is locked at the product's
 --      number at that moment. A product added later to a sprayed job is locked at its number when added.
 --      save_job's delete-and-rewrite of lines changes nothing: locks are keyed by product, not line.
 --   4. The number a job shows for a product: the lock row's number when one exists, else
---      _epa_norm(product's current number); signed-in users may call _epa_norm for that read. Products not locked read the product's number, exactly as every printout does
---      today, so no copy has to follow product edits.
+--      _epa_norm(product's current number); signed-in users may call _epa_norm for that read. Products not locked read
+--      the product's number, exactly as every printout does today, so no copy has to follow product edits.
 --   5. PERMISSION (Mason, 2026-11-06: "Yes, remove it"): signed-in users (and anon) can no longer
 --      INSERT, UPDATE, DELETE or TRUNCATE job_chemicals directly. The app never writes it directly:
 --      save_job, create_job_from_quote_section and the quote functions write it with definer rights and
@@ -118,7 +119,7 @@ $revoke_cols$;
 -- 2. The two tables
 -- ---------------------------------------------------------------------------------------------
 CREATE TABLE public.job_epa_sprayed (
-  job_id        uuid PRIMARY KEY REFERENCES public.jobs(id) ON DELETE CASCADE,
+  job_id        uuid PRIMARY KEY,  -- no foreign key: deleting a job never erases its EPA history
   recorded_at   timestamptz NOT NULL DEFAULT clock_timestamp(),  -- when recorded, not when sprayed
   from_backfill boolean NOT NULL DEFAULT false
 );
@@ -129,7 +130,7 @@ CREATE POLICY job_epa_sprayed_no_app_access ON public.job_epa_sprayed
   FOR ALL TO authenticated USING (false) WITH CHECK (false);
 
 CREATE TABLE public.job_product_epa (
-  job_id           uuid NOT NULL REFERENCES public.jobs(id) ON DELETE CASCADE,
+  job_id           uuid NOT NULL,  -- no foreign key: deleting a job never erases its EPA history
   product_id       uuid NOT NULL,  -- no foreign key: a product delete never erases a kept number
   epa_registration text,
   recorded_at      timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -140,10 +141,11 @@ CREATE INDEX job_product_epa_product_id_idx ON public.job_product_epa (product_i
 COMMENT ON TABLE public.job_product_epa IS
   'EPA number a sprayed or finished job keeps for each product it had (NULL kept too). Insert-only, first number wins; a job''s other products read products.epa_registration (20261202140000).';
 ALTER TABLE public.job_product_epa ENABLE ROW LEVEL SECURITY;
--- Readable where the caller can see a line of that job (job_chemicals' own policies decide that).
+-- Readable where the caller can see the job (jobs' own policies decide that, the same roles that see its
+-- lines), so removing every line hides nothing. Rows of a deleted job stay, readable by the owner only.
 CREATE POLICY job_product_epa_select ON public.job_product_epa
   FOR SELECT TO authenticated
-  USING (EXISTS (SELECT 1 FROM public.job_chemicals jc WHERE jc.job_id = job_product_epa.job_id));
+  USING (EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = job_product_epa.job_id));
 -- New tables in public inherit default grants (live: anon, authenticated, service_role, metabase_ro).
 -- Strip every grant but the owner's, then let signed-in users read the kept numbers only.
 DO $strip_grants$
@@ -174,9 +176,12 @@ ALTER FUNCTION public._epa_norm(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._epa_norm(text) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public._epa_norm(text) TO authenticated;
 
--- Mark a job sprayed and lock every product on its lines at the product's current number.
+-- Mark a job sprayed and lock every product on its lines at the product's current number; on a job
+-- sprayed or finished before this file, as "Not recorded" (NULL, from_backfill): see section 4.
 CREATE FUNCTION public._job_epa_freeze(p_job_id uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_unknown boolean;
 BEGIN
   IF p_job_id IS NULL THEN
     RETURN;
@@ -184,8 +189,10 @@ BEGIN
   -- Serializes with line writes (they take this row FOR SHARE); see LOCKS in the header.
   PERFORM 1 FROM public.jobs WHERE id = p_job_id FOR NO KEY UPDATE;
   INSERT INTO public.job_epa_sprayed (job_id) VALUES (p_job_id) ON CONFLICT (job_id) DO NOTHING;
-  INSERT INTO public.job_product_epa (job_id, product_id, epa_registration)
-  SELECT DISTINCT jc.job_id, jc.product_id, public._epa_norm(p.epa_registration)
+  SELECT from_backfill INTO v_unknown FROM public.job_epa_sprayed WHERE job_id = p_job_id;
+  INSERT INTO public.job_product_epa (job_id, product_id, epa_registration, from_backfill)
+  SELECT DISTINCT jc.job_id, jc.product_id, CASE WHEN v_unknown THEN NULL ELSE public._epa_norm(p.epa_registration) END,
+         v_unknown
     FROM public.job_chemicals jc JOIN public.products p ON p.id = jc.product_id
    WHERE jc.job_id = p_job_id
   ON CONFLICT (job_id, product_id) DO NOTHING;
@@ -217,15 +224,19 @@ CREATE TRIGGER trg_job_epa_freeze_on_finish AFTER INSERT OR UPDATE OF status ON 
 FOR EACH ROW WHEN (NEW.status IN ('completed', 'invoiced')) EXECUTE FUNCTION public._trg_job_epa_freeze();
 
 -- A line written on a sprayed or finished job locks its product, if not locked yet, at the product's
--- current number. A product already locked keeps its number.
+-- current number. A product already locked keeps its number. On a job sprayed or finished before this
+-- file the product may have been on it then and removed (no history), so it is "Not recorded" instead.
 CREATE FUNCTION public._trg_job_line_epa_lock() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_unknown boolean;
 BEGIN
   -- Conflicts with a freeze's FOR NO KEY UPDATE: whichever commits first, the other then sees it.
   PERFORM 1 FROM public.jobs WHERE id = NEW.job_id FOR SHARE;
-  IF EXISTS (SELECT 1 FROM public.job_epa_sprayed WHERE job_id = NEW.job_id) THEN
-    INSERT INTO public.job_product_epa (job_id, product_id, epa_registration)
-    SELECT NEW.job_id, p.id, public._epa_norm(p.epa_registration)
+  SELECT from_backfill INTO v_unknown FROM public.job_epa_sprayed WHERE job_id = NEW.job_id;
+  IF FOUND THEN
+    INSERT INTO public.job_product_epa (job_id, product_id, epa_registration, from_backfill)
+    SELECT NEW.job_id, p.id, CASE WHEN v_unknown THEN NULL ELSE public._epa_norm(p.epa_registration) END, v_unknown
       FROM public.products p WHERE p.id = NEW.product_id
     ON CONFLICT (job_id, product_id) DO NOTHING;
   END IF;

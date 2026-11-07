@@ -451,6 +451,25 @@ async function main() {
   assert.equal(locks(born), 'F=600-2');
   console.log('[prover] completed, invoiced, a moved spray record, and a job created completed each lock the job');
 
+  // A job finished before the file: a product added later may have been on it then (no history), so it is
+  // "Not recorded" too, never its current number. A new spray record on it changes nothing either.
+  psql(line(JOLD, PC, 2));
+  spray(JOLD);
+  assert.equal(locks(JOLD), 'A=<null>,B=<null>,C=<null>');
+  assert.equal(backfilled(JOLD), 'true');
+  console.log('[prover] a product added later to a job finished before the file is Not recorded too');
+
+  // Visibility follows the job, not its current lines: with every line removed staff still read the
+  // kept numbers. Deleting the job keeps them (owner-only once the job is gone).
+  psql(`DELETE FROM public.job_chemicals WHERE job_id = '${born}';`);
+  assert.equal(ok(ADMIN, `SELECT count(*) FROM public.job_product_epa WHERE job_id = '${born}';`), '1', 'kept numbers stay visible with no lines');
+  assert.equal(ok(STRANGER, `SELECT count(*) FROM public.job_product_epa WHERE job_id = '${born}';`), '0');
+  psql(`DELETE FROM public.jobs WHERE id = '${born}';`);
+  assert.equal(locks(born), 'F=600-2', 'deleting a job never erases its kept numbers');
+  assert.equal(marked(born), '1');
+  assert.equal(ok(ADMIN, `SELECT count(*) FROM public.job_product_epa WHERE job_id = '${born}';`), '0', 'a deleted job shows to no one in the app');
+  console.log('[prover] kept numbers stay visible with every line removed, and survive deleting the job');
+
   // A blank or missing number is kept as blank; spaces count as blank.
   legacyEpa(PG, "'   '");
   const blank = save(ADMIN, null, [chem(PG, 0)]);

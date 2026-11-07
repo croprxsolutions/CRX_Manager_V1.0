@@ -24,7 +24,8 @@ import {
   capacityForLoaderVesselSelection,
 } from '../../lib/loaderVesselOptions';
 import type { JobLoaderWorksheet, Vehicle } from '../../types';
-import { LoaderLoadWeightsCell, selectedLoaderWeights, useLoaderJobWeights } from './loaderPanelWeights';
+import { selectedLoaderWeights, useLoaderJobWeights } from './loaderPanelWeights';
+import { LoaderLoadWeightsCell } from './LoaderLoadWeightsCell';
 
 const MANUAL_VESSEL_VALUE = '__manual_vessel__';
 

@@ -2297,10 +2297,14 @@ export default function QuoteBuilder() {
 
     // KI-105: a tier other than the customer's assigned one needs "Use Tier N" or the tick. The assigned
     // tier is re-read here, since an admin may have changed it while this quote was open (Sol).
+    // The operator may open another quote during the read; this save then belongs to neither (Codex, #1605).
+    const routeAtTierRead = routeQuoteIdRef.current;
+    const loadAtTierRead = quoteLoadSerialRef.current;
     const currentAssignedTier = await readAssignedTier(customerId).catch((err: unknown) => {
       Sentry.captureException(err, { tags: { action: 'quote_tier_check' } });
       return null;
     });
+    if (routeQuoteIdRef.current !== routeAtTierRead || quoteLoadSerialRef.current !== loadAtTierRead) return null;
     if (currentAssignedTier === null) {
       toast('error', "The customer's price tier could not be checked. Try again in a moment.");
       return null;

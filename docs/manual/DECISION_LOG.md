@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-07 — A reversal belongs to the Central day its row was made (KI-18)
+
+**Decision (Mason, in chat, 2026-11-07):** reversing a write-off or a credit application checks only the accounting month of the Chicago (Central) day the write-off or application was made, the day its apply already checked. A row made at 9 pm Central on Oct 31 is October's: a closed October refuses its reversal, a closed November does not.
+**Why:** KI-18 batch 1 checked both the UTC and the Chicago day, so a row made 6/7-11:59 pm Central on a month's last day could not be reversed once either month closed. Live had 0 write-offs and 0 credit applications when this was decided, so no existing row changes month.
+**What this forbids/implies:** don't re-add the UTC-day check to `reverse_credit_memo_application`, `_unapply_return_credit_guard_impl_20260826`, `_void_invoice_split_provenance_impl_20260719` or `_reverse_write_off_replay_impl_20261015` (`20261206110000`).
+
 ## 2026-11-05 — Anyone may quote at a tier other than the customer's; the check stays on the screen (KI-105, To-Do 1.6)
 
 **Decision:** anyone, reps included, may override a customer's assigned price tier on a quote. Quote Builder warns and needs "Use Tier N" or the "Quote at Tier M anyway" tick before Save, for every role; the database never refuses a different tier (Mason, 2026-11-05). Supersedes the 2026-11-05 entry that parked the screen check until a rep-only database rule existed.

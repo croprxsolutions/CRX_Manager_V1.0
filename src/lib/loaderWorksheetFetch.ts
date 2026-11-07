@@ -24,6 +24,7 @@ import { supabase, supabaseUntyped } from './db';
 import { resolveBilledCustomers } from './billedCustomersResolver';
 import { isGallonCapacityUnit } from './loaderWorksheet';
 import type { LoaderWorksheetPdfData } from './loaderWorksheetPdf';
+import { fetchLoaderJobWeights, loaderJobInputs, type LoaderGetterJob, type LoaderJobWeights } from './loaderWeightsFetch';
 import type { ApplicatorSheetCustomer } from './applicatorSheetData';
 import type { JobLoaderWorksheet } from '../types';
 
@@ -123,18 +124,65 @@ export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<Loader
     customersByJob.set(r.id, customers);
   }
 
+  // DM-2: the load plan, amounts and weights come from one getter read. If it fails, the reads above still print
+  // the sheet, with the weights withheld and the reason printed.
+  let weights: LoaderJobWeights | null = null;
+  try {
+    weights = await fetchLoaderJobWeights(rows.map((r) => r.id));
+  } catch (_error) {
+    weights = null;
+  }
+
   const byId = new Map(rows.map((r) => [r.id, r]));
   // Preserve the caller's order; skip any id that didn't come back.
   return jobIds
     .map((jid) => byId.get(jid))
     .filter((r): r is LoaderJobRow => !!r)
-    .map((r) => mapRowToPdfData(
-      r,
-      nameById,
-      customersByJob.get(r.id) ?? [],
-      selectedWorksheetByJob.get(r.id),
-      worksheetVehicleNameById,
-    ));
+    .map((r) => {
+      const base = { applicator_name: r.applicator_id ? (nameById.get(r.applicator_id) ?? null) : null, customers: customersByJob.get(r.id) ?? [] };
+      const job = weights?.jobs.get(r.id);
+      if (weights && job?.found && job.job) return { ...mapGetterJobToPdfData(r, job, weights), ...base };
+      const fallback = mapRowToPdfData(r, nameById, base.customers, selectedWorksheetByJob.get(r.id), worksheetVehicleNameById);
+      return { ...fallback, weights: { byProductId: {}, currentUnits: { factors: {}, ambiguous: [] }, sourceLines: [], saved: false,
+        unavailable: 'Product weights not shown: they could not be read. Reprint to include them.' } };
+    });
+}
+
+/** One job's page built from the getter's one read: settings, vehicle, acres, lines and weights together. */
+function mapGetterJobToPdfData(r: LoaderJobRow, entry: LoaderGetterJob, weights: LoaderJobWeights): LoaderWorksheetPdfData {
+  const job = entry.job!;
+  const selected = entry.worksheet?.worksheet;
+  const legacy = legacyCapacity(job.loader_tank_capacity, job.vehicle);
+  const inputs = loaderJobInputs(entry);
+  return {
+    job_number: job.job_number,
+    customers: [],
+    scheduled_date: r.job_date,
+    scheduled_time: r.scheduled_time,
+    applicator_name: null,
+    vehicle_name: entry.worksheet ? entry.worksheet.vehicle_name : job.vehicle?.vehicle_name ?? null,
+    total_acres: Number(entry.acres ?? 0),
+    carrier_rate_gpa: selected ? selected.carrier_rate_gpa : job.carrier_rate_gpa,
+    tank_capacity: selected ? selected.capacity_gal : legacy.capacity,
+    capacity_unit: selected ? 'gal' : legacy.unit,
+    products: inputs.products,
+    loader_comment: selected ? selected.comment : job.loader_comment,
+    load_balance_mode: selected?.load_balance_mode,
+    per_load_acres: selected?.per_load_acres,
+    loads_done: selected?.loads_done,
+    weights: { byProductId: inputs.weights, currentUnits: weights.units, sourceLines: inputs.sourceLines, saved: !!selected },
+  };
+}
+
+/**
+ * Effective capacity: the per-job override (in gallons) wins over the assigned vehicle's. The vehicle capacity is
+ * only usable as a GALLON tank size when its unit measures gallons: a dry spreader rated in lbs/tons can't seed
+ * gallon loads, so without a gallon override the worksheet shows its "enter capacity" guard (Codex).
+ */
+function legacyCapacity(override: number | null, vehicle: LoaderJobRow['vehicle']): { capacity: number | null; unit: string } {
+  const own = override != null && override > 0 ? override : null;
+  const vehicleCap = isGallonCapacityUnit(vehicle?.capacity_unit) ? (vehicle?.capacity_gallons ?? null) : null;
+  return { capacity: own ?? vehicleCap, unit: own != null ? 'gal' : (vehicle?.capacity_unit || 'gal') };
 }
 
 /** Map one fetched job row to the shared LoaderWorksheetPdfData. */
@@ -147,15 +195,7 @@ function mapRowToPdfData(
 ): LoaderWorksheetPdfData {
   const totalAcres = (r.job_fields || []).reduce((s, f) => s + (f.acres_to_treat || 0), 0);
 
-  // Effective capacity: the per-job override (in gallons) wins over the assigned
-  // vehicle's. The vehicle capacity is only usable as a GALLON tank size when its
-  // unit measures gallons — a dry spreader rated in lbs/tons can't seed gallon
-  // loads, so without a gallon override the worksheet shows its "enter capacity"
-  // guard rather than dividing gallons of spray by pounds (Codex).
-  const override = r.loader_tank_capacity != null && r.loader_tank_capacity > 0 ? r.loader_tank_capacity : null;
-  const vehicleCap = isGallonCapacityUnit(r.vehicle?.capacity_unit) ? (r.vehicle?.capacity_gallons ?? null) : null;
-  const effectiveCapacity = override ?? vehicleCap;
-  const capacityUnit = override != null ? 'gal' : (r.vehicle?.capacity_unit || 'gal');
+  const { capacity: effectiveCapacity, unit: capacityUnit } = legacyCapacity(r.loader_tank_capacity, r.vehicle);
 
   return {
     job_number: r.job_number,

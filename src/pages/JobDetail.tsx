@@ -34,6 +34,7 @@ import { generateChemicalApplicationReportPdf } from '../lib/chemicalApplication
 import { resolveBilledCustomers } from '../lib/billedCustomersResolver';
 import { generateLoaderWorksheetPdf } from '../lib/loaderWorksheetPdf';
 import { fetchLoaderWorksheetData } from '../lib/loaderWorksheetFetch';
+import { newJobLoaderPrint } from '../lib/newJobLoaderPrint';
 import { computeLoaderWorksheet, isGallonCapacityUnit } from '../lib/loaderWorksheet';
 import { stampJobPrinted } from '../lib/printStamp';
 import {
@@ -1279,6 +1280,7 @@ export default function JobDetail() {
           custMap.set(`${name}|${c?.account_number ?? ''}`, { customer_name: name, account_number: c?.account_number ?? null });
         }
         loaderCustomers = [...custMap.values()];
+        const loaderPrint = await newJobLoaderPrint(chemRows);
         await generateLoaderWorksheetPdf({
           job_number: jobNumber || 'draft',
           customers: loaderCustomers,
@@ -1291,13 +1293,8 @@ export default function JobDetail() {
           carrier_rate_gpa: !Number.isNaN(parsedCarrierRate) && parsedCarrierRate > 0 ? parsedCarrierRate : null,
           tank_capacity: effectiveCapacity,
           capacity_unit: (tankCapacity.trim() !== '' && effectiveCapacity === overrideCapacity) ? 'gal' : (assignedVehicleCapacityUnit || 'gal'),
-          products: chemRows
-            .filter((c) => c.product_id)
-            .map((c) => ({
-              product_name: c.product_name || 'Product',
-              total_quantity: c.quantity.trim() === '' ? null : parseFloat(c.quantity),
-              unit: c.unit || null,
-            })),
+          products: loaderPrint.products,
+          weights: loaderPrint.weights,
           loader_comment: loaderComment || null,
         });
       }

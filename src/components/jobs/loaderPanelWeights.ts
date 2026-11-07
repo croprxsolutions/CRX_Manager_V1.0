@@ -38,13 +38,16 @@ export function loaderPanelProducts(rows: readonly { product_id?: string | null;
   }));
 }
 
-const sameSettings =(a: JobLoaderWorksheet, b: JobLoaderWorksheet) => a.capacity_gal === b.capacity_gal
+const sameSettings = (a: JobLoaderWorksheet, b: JobLoaderWorksheet) => a.capacity_gal === b.capacity_gal
   && a.carrier_rate_gpa === b.carrier_rate_gpa && a.load_balance_mode === b.load_balance_mode
   && (a.per_load_acres ?? []).join('|') === (b.per_load_acres ?? []).join('|');
 
-/** Every load's volume and each product's printed amount, so a weight is shown only for the exact plan on screen. */
+/**
+ * Every load's volume and each product's printed amount, so a weight is shown only for the exact plan on screen.
+ * Products are sorted: the job page and the getter list a job's chemicals in different orders.
+ */
 const planKey = (ws: LoaderWorksheet) => ws.loads.map((load) =>
-  `${load.volume}:${load.products.map((product) => `${product.product_id ?? ''}:${product.product_name}=${product.amount} ${product.unit ?? ''}`).join(',')}`).join('|');
+  `${load.volume}:${load.products.map((product) => `${product.product_id ?? ''}:${product.product_name}=${product.amount} ${product.unit ?? ''}`).sort().join(',')}`).join('|');
 
 export interface SelectedLoaderWeights { ws: LoaderWorksheet; weights: LoaderWeights; caption: string }
 

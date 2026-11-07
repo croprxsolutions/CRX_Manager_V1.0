@@ -89,6 +89,14 @@ describe('selectedLoaderWeights (job page)', () => {
     expect('weights' in result && result.weights.loads[0].totalText).toBe('Product weight: 80.00 lb');
   });
 
+  it('matches when the job page lists the same chemicals in a different order than the getter', () => {
+    const two = job('B', 8);
+    two.lines = [...two.lines!, { id: 'B-l2', product_id: 'p2', quantity: 10, unit: 'Gal', product_name: 'TEST Second', product_form: 'liquid' }];
+    const rows = [{ product_id: 'p2', product_name: 'TEST Second', quantity: '10', unit: 'Gal' }, { product_id: 'p1', product_name: 'TEST Liquid', quantity: '20', unit: 'Gal' }];
+    const shown = computeLoaderWorksheet({ total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100, products: loaderPanelProducts(rows) });
+    expect('weights' in selectedLoaderWeights({ status: 'ready', entry: two, units }, { ...worksheet, id: 'B-w' } as JobLoaderWorksheet, shown)).toBe(true);
+  });
+
   it('withholds them when a product amount changed but the tank volumes did not', () => {
     expect(selectedLoaderWeights(read, selected, shownPlan(10))).toEqual({
       reason: 'Product weights not shown: the job or worksheet changed since this page loaded. Reload to see them.' });

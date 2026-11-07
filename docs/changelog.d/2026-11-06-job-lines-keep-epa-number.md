@@ -19,7 +19,10 @@
   product is locked first, then the job). So a spray recorded during an edit keeps its number, and a
   line being added during an edit (even on a brand-new job) ends up with the edited number.
 - An EPA-number change alone no longer rebuilds a job's inventory holds (nothing about the amounts
-  changed). A line on a sprayed or finished job can only be changed through the job screen's save.
+  changed).
+- Permission change (Mason, 2026-11-07): signed-in users can no longer add, change or delete job
+  chemical lines directly through the database API; the app never did, and every job screen, recipe
+  and quote path still writes them through its server function. Reading lines is unchanged.
 - Needed before a product's EPA number can be corrected (parked work on `claude/sweet-bun-f7920f`,
   which drops its own copy of this column and builds on this file).
 - Proof: `node scripts/smoke/prove-job-lines-keep-epa-real-schema.mjs` (disposable real-schema database).

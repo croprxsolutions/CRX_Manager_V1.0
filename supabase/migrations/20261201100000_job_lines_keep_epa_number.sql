@@ -36,6 +36,11 @@
 --      every line (null for a new one); a save of a sprayed or finished job with a line lacking that
 --      key (an older cached build, which could not keep the numbers), or with an id that is not a
 --      line id at all, is refused with "Reload the app".
+--   6. PERMISSION (Mason, 2026-11-07: "Yes, remove it"): signed-in users (and anon) can no longer
+--      INSERT, UPDATE, DELETE or TRUNCATE job_chemicals directly. The app never writes it directly:
+--      save_job, create_job_from_quote_section, load_recipe_into_job and the quote functions write it
+--      with definer rights and are unaffected. Without direct writes a sprayed line cannot be deleted
+--      and re-added, or changed in place, to pick up a product's newer EPA number. Reads are unchanged.
 --   5. No printout reads the new column yet: every printout keeps reading the product's number, so
 --      they all agree. A follow-up change moves the sent proof, applicator sheet, chemical
 --      application report and WPS notice onto the line's number together.
@@ -62,7 +67,9 @@
 --   writer that locks a job before writing its lines outside save_job, rolls one back whole (retry).
 --
 -- ROLLBACK (its own reviewed migration): re-emit save_job from its previous body (20261019230000) and
---   _trg_sync_job_holds from 20260702174000, drop the two triggers, the five functions and the column.
+--   _trg_sync_job_holds from 20260702174000, drop the two triggers, the five functions and the column,
+--   and re-grant authenticated DELETE and TRUNCATE on job_chemicals and the INSERT and UPDATE column
+--   lists of 20261022101000 (a permission change: needs Mason's approval).
 --
 -- ORDERING: apply after every older pending migration. The parked 20261127100000 must drop its own
 --   copy of steps 1-3 and restamp after this file.
@@ -122,6 +129,8 @@ COMMENT ON COLUMN public.job_chemicals.epa_registration IS
 GRANT SELECT (epa_registration) ON public.job_chemicals TO authenticated;
 GRANT REFERENCES (epa_registration) ON public.job_chemicals TO authenticated;
 GRANT SELECT (epa_registration) ON public.job_chemicals TO anon;
+-- Item 6: no direct writes by app roles (table-level REVOKE also removes the column-level grants).
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.job_chemicals FROM authenticated, anon;
 
 -- Whether a job's lines still follow their products' EPA numbers: a live job, scheduled or in
 -- progress, with no spray recorded. Any other job's lines keep the number they carry.
@@ -164,8 +173,9 @@ BEGIN
     NEW.epa_registration := OLD.epa_registration;
     RETURN NEW;
   END IF;
-  -- A line of a sprayed or finished job keeps its number: changing its product or job in place (only a
-  -- direct write does; save_job deletes and re-writes) would give it some product's current number.
+  -- A line of a sprayed or finished job keeps its number: changing its product or job in place would
+  -- give it some product's current number. App roles cannot write lines directly (item 6) and no
+  -- server function updates these columns; this guards a future one or a SQL fix.
   IF TG_OP = 'UPDATE' AND (NOT public._job_line_epa_follows_product(OLD.job_id)
                            OR NOT public._job_line_epa_follows_product(NEW.job_id)) THEN
     RAISE EXCEPTION 'A line on a sprayed or finished job cannot change product or move to another job. Edit the job and save it instead.'
@@ -354,8 +364,11 @@ BEGIN
     -- receipt is seen and this call replays it (the impl checks the replay's actor and payload).
     PERFORM 1 FROM public.jobs WHERE id = p_job_id FOR UPDATE;
     v_kept := public._job_line_epa_kept(p_job_id, p_chemicals,
+      -- An expired receipt is not a replay: check_idempotency deletes it (expires_at < now()) and the
+      -- save runs again, so it gets the stale-line checks too.
       p_idempotency_key IS NOT NULL AND EXISTS (SELECT 1 FROM public.idempotency_keys
-                                                WHERE idempotency_key = p_idempotency_key AND operation = 'save_job'));
+                                                WHERE idempotency_key = p_idempotency_key AND operation = 'save_job'
+                                                  AND NOT (expires_at < now())));
   END IF;
   -- Cost is admin-only (Mason, 2026-10-15): a non-admin's chemical cost comes from the server.
   -- The impl keeps every check it had (actor, role, units, totals, idempotency).
@@ -382,6 +395,14 @@ BEGIN
   IF EXISTS (SELECT 1 FROM unnest(ARRAY['authenticated', 'anon']) r(role), unnest(ARRAY['INSERT', 'UPDATE']) v(priv)
               WHERE has_column_privilege(r.role, 'public.job_chemicals', 'epa_registration', v.priv)) THEN
     RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_POSTFLIGHT: an app role can write job_chemicals.epa_registration';
+  END IF;
+  IF EXISTS (SELECT 1 FROM unnest(ARRAY['authenticated', 'anon']) r(role), unnest(ARRAY['INSERT', 'UPDATE']) v(priv)
+              WHERE has_any_column_privilege(r.role, 'public.job_chemicals', v.priv))
+     OR EXISTS (SELECT 1 FROM unnest(ARRAY['authenticated', 'anon']) r(role), unnest(ARRAY['DELETE', 'TRUNCATE']) v(priv)
+                 WHERE has_table_privilege(r.role, 'public.job_chemicals', v.priv))
+     OR NOT has_column_privilege('authenticated', 'public.job_chemicals', 'product_id', 'SELECT')
+     OR NOT has_column_privilege('authenticated', 'public.job_chemicals', 'epa_registration', 'SELECT') THEN
+    RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_POSTFLIGHT: an app role can still write job_chemicals directly, or lost its read grants';
   END IF;
   IF NOT has_function_privilege('authenticated', 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'EXECUTE')

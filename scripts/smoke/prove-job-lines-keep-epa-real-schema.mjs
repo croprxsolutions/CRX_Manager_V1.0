@@ -359,6 +359,11 @@ async function main() {
   assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
   save(ADMIN, sprayed, keyed, 'jk-replay-1');
   assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
+  // An expired receipt is not a replay: the same request retried after it expires is a new save, and
+  // its line ids are gone, so it is refused instead of giving the lines the product's current number.
+  psql(`UPDATE public.idempotency_keys SET expires_at = now() - interval '1 hour' WHERE idempotency_key = 'jk-replay-1';`, { user: 'supabase_admin' });
+  refused(ADMIN, saveSql(sprayed, keyed, 'jk-replay-1'), /Reload the job/);
+  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`, 'an expired-key retry changes nothing');
   console.log("[prover] re-saving a sprayed or finished job keeps each returned line's number (admin, rep, reordered, replayed)");
 
   // Anything that is not the same line of the same job takes the product's current number.
@@ -411,20 +416,37 @@ async function main() {
   ids = lineIds(none);
   save(ADMIN, none, [chem(PB, 1, { id: ids[0] }), chem(PB, '+1')]);
   assert.equal(lines(none), `1:${B_EPA},1:${B_EPA}`, "an ambiguous position takes the product's number");
-  // A direct write (outside save_job) cannot change a sprayed or finished line's product or job: A to B
-  // and back to A would otherwise leave product A with A's CURRENT number.
+  // Signed-in users cannot write job lines directly at all (only through save_job and the other job
+  // functions), so a sprayed line cannot be deleted and re-added, or changed in place, to pick up a
+  // product's newer number. Reads still work.
   ids = lineIds(sprayed);
   setProductEpa(PA, OLD);
   const sprayedBefore = lines(sprayed);
-  refused(ADMIN, `UPDATE public.job_chemicals SET product_id = '${PB}' WHERE id = '${ids[0]}';`, /cannot change product or move to another job/);
-  refused(ADMIN, `UPDATE public.job_chemicals SET job_id = '${open}', sort_order = 7 WHERE id = '${ids[0]}';`, /cannot change product or move to another job/);
-  const openIds = lineIds(open);
-  refused(ADMIN, `UPDATE public.job_chemicals SET job_id = '${JOLD}', sort_order = 7 WHERE id = '${openIds[0]}';`, /cannot change product or move to another job/);
+  for (const uid of [ADMIN, REP]) {
+    refused(uid, `DELETE FROM public.job_chemicals WHERE id = '${ids[0]}';`, /permission denied/);
+    refused(uid, `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
+      VALUES ('${sprayed}', '${PA}', 0, 'Gal', 0, true, 5);`, /permission denied/);
+    refused(uid, `UPDATE public.job_chemicals SET product_id = '${PB}' WHERE id = '${ids[0]}';`, /permission denied/);
+    refused(uid, `UPDATE public.job_chemicals SET quantity = 1 WHERE id = '${ids[0]}';`, /permission denied/);
+    refused(uid, `TRUNCATE public.job_chemicals;`, /permission denied/);
+    assert.equal(ok(uid, `SELECT count(*) FROM public.job_chemicals WHERE id = '${ids[0]}';`), '1', 'reads still work');
+  }
   assert.equal(lines(sprayed), sprayedBefore, 'a refused direct write changes nothing');
-  // On a job not sprayed yet a direct product change is allowed and takes the new product's number.
-  ok(ADMIN, `UPDATE public.job_chemicals SET product_id = '${PA}' WHERE id = '${openIds[1]}';`);
+  // Below the app roles (a server function or SQL fix): changing a sprayed or finished line's product or
+  // job in place is refused; on a job not sprayed yet it is allowed and takes the new product's number.
+  const suRefused = (sql) => {
+    const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: sql });
+    assert.notEqual(r.status, 0, `expected a refusal:\n${sql}`);
+    assert.match(`${r.stdout}\n${r.stderr}`, /cannot change product or move to another job/);
+  };
+  suRefused(`UPDATE public.job_chemicals SET product_id = '${PB}' WHERE id = '${ids[0]}';`);
+  suRefused(`UPDATE public.job_chemicals SET job_id = '${open}', sort_order = 7 WHERE id = '${ids[0]}';`);
+  const openIds = lineIds(open);
+  suRefused(`UPDATE public.job_chemicals SET job_id = '${JOLD}', sort_order = 7 WHERE id = '${openIds[0]}';`);
+  assert.equal(lines(sprayed), sprayedBefore, 'a refused write changes nothing');
+  psql(`UPDATE public.job_chemicals SET product_id = '${PA}' WHERE id = '${openIds[1]}';`);
   assert.equal(scalar(`SELECT epa_registration FROM public.job_chemicals WHERE id = '${openIds[1]}';`), OLD);
-  console.log("[prover] stale or other jobs' line ids on a sprayed job are refused; new lines, changed products, duplicates and unsprayed jobs take the product's number; a blank stays blank on a finished job; ambiguous positions take the product's number; a direct product or job change on a sprayed or finished line is refused");
+  console.log("[prover] stale or other jobs' line ids on a sprayed job are refused; new lines, changed products, duplicates and unsprayed jobs take the product's number; a blank stays blank on a finished job; ambiguous positions take the product's number; signed-in users cannot write lines directly; a server-side product or job change on a sprayed or finished line is refused");
 
   // A product EPA edit changes no demand, so it leaves inventory holds alone: same hold ids on an open
   // job, and an edit with no signed-in user succeeds even where an open job has no creator.

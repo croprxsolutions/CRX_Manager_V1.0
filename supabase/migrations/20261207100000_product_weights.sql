@@ -583,6 +583,10 @@ GRANT EXECUTE ON FUNCTION public.get_blend_ticket_weights(uuid) TO authenticated
 
 -- A worksheet row is used only while nothing it depended on has changed since capture (sheet 3.4b).
 -- SECURITY INVOKER: reads the worksheet and job lines under the caller's own policies.
+-- unit_weight and none rows need no generation: guard_product_setup_fields (20261102102000) refuses
+-- changing a set product_form, inventory_unit or container_unit; filling a blank unit bumps the pack
+-- generation; a blank form gives a none row, kept for its unit map (accepted limit, sheet 7, 2026-11-07).
+-- A removed then re-added product keeps its first capture by design (sheet 3.4b, with its own test).
 CREATE FUNCTION public.worksheet_weight_is_valid(r public.job_loader_worksheet_weights) RETURNS boolean
 LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $function$
   SELECT EXISTS (SELECT 1 FROM public.job_loader_worksheets w WHERE w.id = r.worksheet_id AND w.job_id = r.job_id)

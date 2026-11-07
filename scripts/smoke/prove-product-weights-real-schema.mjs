@@ -891,7 +891,14 @@ async function main() {
   // Deleting the worksheet removes its rows.
   ok(REP, `DELETE FROM public.job_loader_worksheets WHERE id = '${WA}' RETURNING id;`);
   assert.equal(owner(`SELECT count(*) FROM public.job_loader_worksheet_weights WHERE worksheet_id = '${WA}';`), '0');
-  console.log('[prover] worksheets: four rows captured (one none); load-done keeps them; a later approval shows current and is not locked in; an added product is captured; readers are admin, rep, the job\'s applicator and dispatchee only; pack, identity and member changes invalidate (never revived), a ticket keeps its weight; a job move recaptures; a pre-DM-2 worksheet captures on first update; delete cascades');
+  // worksheet_weight_is_valid trusts guard_product_setup_fields: a set form or unit cannot change.
+  for (const sql of [`UPDATE public.products SET product_form = 'dry' WHERE id = '${L1}';`,
+    `UPDATE public.products SET inventory_unit = 'Qt' WHERE id = '${L1}';`,
+    `UPDATE public.products SET container_unit = 'oz' WHERE id = '${DEA}';`]) {
+    const r = psql(sql, { allowFailure: true });
+    assert.notEqual(r.status, 0, sql); assert.match(`${r.stdout}${r.stderr}`, /change on a saved product/);
+  }
+  console.log('[prover] worksheets: four rows captured (one none); load-done keeps them; a later approval shows current and is not locked in; an added product is captured; readers are admin, rep, the job\'s applicator and dispatchee only; pack, identity and member changes invalidate (never revived), a ticket keeps its weight; a job move recaptures; a pre-DM-2 worksheet captures on first update; delete cascades; a set form, stock unit or container unit cannot change');
 
   // ---- Moves: a size moved to a parent with a different density reads the new value; an old ticket keeps the old one.
   const TM = createTicket([{ product_id: LMOVE, product_name: 'LMOVE', quantity: 1, unit: 'Gal' }]);

@@ -4,7 +4,7 @@
 --  the same pattern as 20261108120000_product_parents.sql.)
 --
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261205100000_parent_epa_correction.md.
+-- docs/reference/migrations.d/20261206113000_parent_epa_correction.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (Mason, 2026-11-06: "yes i want to be able to fix epa issues"): a parent's EPA number can be
@@ -138,7 +138,9 @@ REVOKE ALL ON FUNCTION public._product_parent_epa_correction_enabled() FROM PUBL
 
 -- Checks p_changes; returns the parent's identity after the change. An EPA number change is
 -- refused while switched off, when it is not a valid EPA number, and while any invoice line for a
--- size has no EPA copy of its own (that line would show the new number).
+-- size that has a number has no EPA copy of its own (that line would show the new number instead).
+-- A line for a size with no number showed none, so giving it the corrected one changes no number
+-- it showed (Sol 2026-11-07: a missing number must stay correctable).
 CREATE OR REPLACE FUNCTION public._product_parent_identity_after(p_parent public.product_parents, p_changes jsonb) RETURNS jsonb
 LANGUAGE plpgsql STABLE SET search_path = public, pg_temp AS $function$
 DECLARE
@@ -165,7 +167,9 @@ BEGIN
       FROM public.invoice_items ii
       JOIN public.invoices i ON i.id = ii.invoice_id
       JOIN public.product_parent_members m ON m.product_id = ii.product_id
-     WHERE m.parent_id = p_parent.id AND i.deleted_at IS NULL AND public._epa_norm(ii.epa_registration) IS NULL;
+      JOIN public.products p ON p.id = ii.product_id
+     WHERE m.parent_id = p_parent.id AND i.deleted_at IS NULL AND public._epa_norm(ii.epa_registration) IS NULL
+       AND public._epa_norm(p.epa_registration) IS NOT NULL;
     IF v_unsaved IS NOT NULL THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice % has a line for this product with no saved EPA number, so it would change too. Open and save a draft invoice to give it one; a posted one must be unposted, saved and posted again', v_unsaved;
     END IF;

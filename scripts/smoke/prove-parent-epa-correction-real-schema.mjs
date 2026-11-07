@@ -385,6 +385,12 @@ async function main() {
   r = as(ADMIN, correctSql({ generic_epa_registration: NEW }, 'k-blocked'));
   assert.notEqual(r.status, 0);
   assert.match(r.output, /PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice PE-INV-BLANK \(posted\)/);
+  // A blank line for a size with no number showed none: it does not block (a missing number stays correctable).
+  asFixture(`UPDATE public.products SET epa_registration = NULL WHERE id = '${S2}';`);
+  assert.equal(scalar(`SELECT public._product_parent_identity_after(p, '{"generic_epa_registration": "${NEW}"}')->>'generic_epa_registration'
+    FROM public.product_parents p WHERE id = '${PARENT}';`), NEW);
+  asFixture(`UPDATE public.products SET epa_registration = '${OLD}' WHERE id = '${S2}';`);
+  assert.equal(productEpa(S2), OLD);
   // A deleted invoice does not block, nor does a blank line for a product outside this parent.
   asOwner(`UPDATE public.invoices SET deleted_at = now() WHERE id = '${IBLANK}';
     INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents) VALUES

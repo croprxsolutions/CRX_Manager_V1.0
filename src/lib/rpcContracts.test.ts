@@ -3164,6 +3164,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _parent_brand_event: 'internal PAR-2 helper (20261123120000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
   write_product_change_history:
     'trigger-only history writer re-issued by 20261108120000 (PAR-1); it runs inside the calling product write and is never an RPC',
+  // 20261204100000 (KI-18 batch 1) re-issued it with a Chicago date. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  snapshot_field_crop_history:
+    'BEFORE UPDATE trigger on fields (re-issued by 20261204100000, KI-18): when the crop changes it upserts the old crop into field_crop_history ON CONFLICT (field_id, season), so a replay writes nothing new; Postgres refuses direct calls of a trigger function',
   // Pruned on the 2026-08-11 merge of origin/main, per the standing rule below that a
   // dead exemption silently pre-suppresses any future RPC reusing the name:
   //   _guard_job_commission_split_immutable remains parked with Wave A under

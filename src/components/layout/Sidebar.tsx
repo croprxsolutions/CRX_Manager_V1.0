@@ -139,8 +139,8 @@ const officeNavigation: NavEntry[] = [
         { path: '/inventory', label: 'Inventory', icon: <Warehouse className="w-4 h-4" /> },
         {
           path: '/products', label: 'Products & Pricing', icon: <Package className="w-4 h-4" />,
-          // Supplier Pricing + Brand vs Generic live as tabs on the Products workspace
-          activePaths: ['/products', '/supplier-pricing', '/brand-vs-generic'],
+          // Supplier Pricing, Brand vs Generic and Group Products live as tabs on the Products workspace
+          activePaths: ['/products', '/supplier-pricing', '/brand-vs-generic', '/group-products'],
         },
         { path: '/purchase-orders', label: 'Purchase Orders', icon: <ShoppingCart className="w-4 h-4" /> },
         { path: '/receiving', label: 'Receiving', icon: <PackageCheck className="w-4 h-4" /> },

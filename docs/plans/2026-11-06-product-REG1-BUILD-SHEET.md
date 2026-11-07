@@ -1,6 +1,6 @@
 # Product Master Stage 2: REG-1 build sheet (registration per EPA number) and 7.7 (EPA-number correction on)
 
-**Status:** plan only; nothing built. Written 2026-11-06 against `main` and the live database (read-only). This sheet replaces the REG-1 outline in `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md` §7.3 and the 7.7 outline in §7.7 for building; where they differ, this sheet wins (section 2 lists each difference). Section numbers like "§4" without a file name point to the Stage 2 sheet.
+**Status:** plan only; nothing built. Mason answered every open question on 2026-11-06 (section 11.1). Written 2026-11-06 against `main` and the live database (read-only). This sheet replaces the REG-1 outline in `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md` §7.3 and the 7.7 outline in §7.7 for building; where they differ, this sheet wins (section 2 lists each difference). Section numbers like "§4" without a file name point to the Stage 2 sheet.
 
 **Re-planned 2026-11-06** (Mason: hold the EPA-number tools until restricted-use posting reads what was sold, then re-plan the posting and rollout parts). The earlier four-PR rollout left live windows between the seed and the guards, and posting read each product's current state; reviewers kept finding new HIGHs there (17 Luna rounds, 6 Sol rounds; section 12). The re-plan (designed with Astra, then checked against the code and live data) ships **one database PR** that holds every database change, **one Mason-approved seed** that switches registrations on in a single transaction, then **one screens PR**. Guards exist before any registration does, so registrations and sizes can never disagree on live, and posting reads facts captured on each invoice line when it was saved.
 
@@ -260,6 +260,8 @@ Each guard first checks whether the seed has committed (a `seeded` event exists,
 
 ## 7. 7.7 · EPA-number correction on (parent), parked
 
+**Update 2026-11-06 (PR #1584, migration `20261204120000`):** the job-line half below is replaced. Mason chose "lock per product" for PR #1584: there is no `job_chemicals.epa_registration` column; a sprayed or finished job's numbers live in `job_product_epa` (one insert-only row per job and product, first number wins), with marker table `job_epa_sprayed`; a job reads the lock row when one exists, else the product's current number through `_epa_norm`. A re-save that drops and re-adds a product keeps its number (no `JOB_LINE_HISTORY_KEPT` refusal), and a product first added to a sprayed job locks at its current number. Jobs sprayed or finished before that migration are kept as "Not recorded" (NULL, `not_recorded`), as this section requires. 7.7's correction must reach unsprayed jobs through the product only and leave `job_product_epa` untouched.
+
 Stays parked until REG-DB, the seed and the screens PR are live. **Starting point:** the parked branch `claude/sweet-bun-f7920f` (local only, not pushed; its session was `local_72ea5177`). Its migration `20261127100000_job_line_epa_snapshot.sql`:
 - adds `job_chemicals.epa_registration`, filled by trigger, read-only to clients; at its apply, lines on jobs **not yet sprayed** are filled from their product (they follow the product anyway), and lines on sprayed or finished jobs are **left blank**, shown as "Not recorded" in job history, never filled from the product's current number (it may have changed since the spray); **its fill of blank invoice-line copies from each product's current number must be removed** before it lands, because a current number cannot prove what an old sale was (REG-DB's seed captures not-yet-posted lines from Mason's picks; posted lines are never posted again);
 - re-issues `_product_parent_identity_after` and `correct_product_parent_identity` so an EPA change reaches the parent, its sizes (under the copy pass) and job lines of jobs not yet sprayed;
@@ -330,6 +332,25 @@ Migration stamps in this project run ahead of the calendar; the stamps above are
 8. **Short freeze:** between the seed and the screens PR, the old screens cannot change a registered product's label facts or EPA number (they get a clear "edit it on the registration" message). During the freeze old screens also show a Not reviewed product's restricted-use box unticked, exactly as they show it today. **Recommendation: accept it**, and run the seed only when the screens PR is ready to follow within a day or two.
 
 ---
+
+### 11.1 Mason's answers (2026-11-06, in the REG-1 build session)
+
+| Item | Answer | What it changes in this sheet |
+|---|---|---|
+| Q1 | **No** ("there is not a lot of restricted use pesticides so just make it no; I will update before selling") | The seed's `p_rup_default` is `no`: every number with no row ticked becomes `rup_status = 'no'`; the 2 ticked rows stay `yes`. Later captures for numberless products use `no`. `unknown` still exists for registrations created empty (section 5 step 4) and for new numbers entered as Not reviewed. |
+| Q2 | List them, record by hand (recommended) | As written in 4.C: Compliance shows "Restricted-use sales to record"; no automatic recording tool in REG-1. |
+| Q3 | Admins only (recommended) | As written: every registration RPC starts with `_product_parent_require_admin()`. |
+| Q4 | Land #1584, then the rest after REG-1 (recommended) | The job-line half of 7.7 is PR #1584 (`20261202115000_job_lines_keep_epa_number.sql`); the parent-correction switch-on stays parked with its session until REG-1 is live. |
+| Q6 | Use the product's number (recommended) | No typed number. A new line on a sprayed job takes the product's current number, as #1584 builds it. Section 7's "needs its EPA number named explicitly" is dropped. |
+| Q7 | Yes, remove them (recommended) | Section 10 step 1 as written. Mason still types his approval in the session that applies REG-DB, right before the apply. |
+| Q8 | Accept a short freeze (recommended) | Seed runs only when the screens PR is ready to follow within a day or two. |
+| (a) | Size's number for now (recommended) | New invoice lines take the size's number; selling under a brand's own number is a known limit until the Stage 3 delivery brand pick. |
+| (b) | Database fills the values (recommended) | `accepted` with no values sent takes them from the private `label_draft_targets.proposed_values` snapshot; sent values that differ from it are still refused (`LABEL_DRAFT_CHANGED`). |
+| (c) | Fix (recommended) | `preview_epa_registration_seed(p_rup_default text)` shows RUP results under that default, and the default is part of the fingerprint the seed checks. |
+| (d) | Fix (recommended) | `set_epa_registration` and `assign_epa_registration` take `p_label_draft_id uuid DEFAULT NULL` (before `p_idempotency_key`). |
+| (e) | Fix (recommended) | `label_draft_targets` gets `updated_at timestamptz NOT NULL DEFAULT now()`, set on every re-base. |
+
+**Build order found on 2026-11-06 (overlap check):** REG-DB also waits for Taha's #1524 (`20261203100000_chem_sale_bill_split_invoices.sql`: re-issues `save_invoice`'s intent impl, posting-group functions and new invoice-line inserts for Bill Split) and for #1584 (adds `job_chemicals.epa_registration` and an `AFTER UPDATE OF epa_registration` product trigger that already moves only unsprayed job lines, which replaces 4.A's "refused on a sprayed job until the job-line copy exists" rule). #1553 and #1581 are merged; #1579 is still open. REG-DB's stamps must sort after `20261204110000` (#1579) and after any peer claim at build time.
 
 ## 12. Review record
 

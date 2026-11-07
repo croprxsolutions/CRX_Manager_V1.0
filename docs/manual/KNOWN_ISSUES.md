@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-07 for the live ledger only (KI-18 batch 2 applied, ledger `20261107053254`); other evidence retains its stated dates.
+**Last verified:** 2026-11-07 for the live ledger only (latest live row `20261107053254`, `20261204110000_ki18_batch2_chicago_boards`); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -611,19 +611,15 @@ void (`ORDER_VOIDED_DELIVERY_LOCKED`); nothing moves. Live 2026-11-04: 0 voided 
 voided orders. Proof: as KI-101.
 
 ### KI-105 — A quote's price tier is not checked against the customer's assigned tier
-**LOW · FIXED 2026-11-07 (PR #1605, screens only, no migration) · quotes/pricing · To-Do 1.6**
-Quote Builder used to let any tier be picked with no warning. Now, when a quote's tier differs from the
-customer's assigned tier, the screen shows a note with "Use Tier N" and a "Quote at Tier M anyway" tick box, and
-Save is refused until one is chosen, for every role. Anyone may override the tier, so the database does not
-refuse a different tier (Mason, 2026-11-05; `DECISION_LOG.md`). Save re-reads the customer's assigned tier, so an
-admin changing it while a quote is open is caught; a tick applies to one quote, customer and pair of tiers.
-"Use Tier N" on a sent quote moves each line without a negotiated price to today's Tier N price (a higher price
-still needs "Grower agreed"); changing the tier menu on a sent quote still keeps its sent prices, as before.
-The tick is not stored: re-saving a quote kept at another tier needs it again after the page is reopened.
-Picking a tier from the menu after "Use Tier N" undoes it, so the sent prices come back. Known limits, accepted
-with the screen-only rule: an admin change landing between Save's re-read and the save is not caught; and on
-another rep's sent booking "Use Tier N" changes the tier, which the database refuses (prices only), so that rep
-uses the tick or asks the booking's rep.
+**LOW today, MUST before the first regular rep · PARKED 2026-11-05 · quotes/pricing · To-Do 1.6**
+Quote Builder lets any tier be picked, so a quote can be priced at a tier other than the customer's assigned one
+with no warning. A screen check (a note with "Use Tier N" and a "Quote at Tier M anyway" tick box that Save
+needs) is built on branch `claude/quote-tier-credit-status` and parked unmerged (Mason, 2026-11-05: screen only,
+then parked until the database rule exists). Only office staff and admins quote today. Before the first regular
+rep gets an account: the database must refuse a different tier from reps (admins may override). When it resumes,
+also fix Sol's two MED findings on that branch: (1) the customer's assigned tier is read once, so an admin
+changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
+quote changes the tier label without repricing its locked lines.
 
 ## Database and release process
 

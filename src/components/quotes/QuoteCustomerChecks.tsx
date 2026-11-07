@@ -3,7 +3,6 @@ import { AlertTriangle } from 'lucide-react';
 import Button from '../ui/Button';
 import { creditExposure, describeCreditStatus } from '../../lib/creditLimitGuard';
 import { Sentry } from '../../lib/sentry';
-import { supabase } from '../../lib/db';
 
 /**
  * The customer's credit status under the quote's customer picker (To-Do 1.8): open balance against
@@ -77,12 +76,4 @@ export function TierMismatchNote({ tier, assignedTier, acknowledged, onUseAssign
       </div>
     </div>
   );
-}
-
-/** The customer's assigned tier as stored now; Save re-reads it, since an admin may change it while a quote is open. */
-export async function readAssignedTier(customerId: string): Promise<number> {
-  const { data, error } = await supabase.from('customers').select('assigned_tier').eq('id', customerId).maybeSingle();
-  if (error) throw error;
-  if (!data) throw new Error('Customer not found');
-  return data.assigned_tier;
 }

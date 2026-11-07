@@ -207,8 +207,8 @@ const mockReadAssignedTier = vi.hoisted(() => vi.fn(async (_customerId: string) 
 vi.mock('../components/quotes/QuoteCustomerChecks', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../components/quotes/QuoteCustomerChecks')>()),
   QuoteCreditStatus: () => null,
-  readAssignedTier: mockReadAssignedTier,
 }));
+vi.mock('../lib/customerTier', () => ({ readAssignedTier: mockReadAssignedTier }));
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: authState.role, full_name: 'Test Admin' }, role: authState.role }),

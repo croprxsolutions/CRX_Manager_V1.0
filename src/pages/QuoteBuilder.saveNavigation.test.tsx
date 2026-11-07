@@ -65,8 +65,8 @@ vi.mock('../lib/rupCompliance', () => ({
 vi.mock('../components/quotes/QuoteCustomerChecks', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../components/quotes/QuoteCustomerChecks')>()),
   QuoteCreditStatus: () => null,
-  readAssignedTier: async () => 1,
 }));
+vi.mock('../lib/customerTier', () => ({ readAssignedTier: async () => 1 }));
 vi.mock('../components/ui/CommissionSplitEditor', () => ({ default: () => null }));
 
 import QuoteBuilder from './QuoteBuilder';

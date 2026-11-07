@@ -29,7 +29,8 @@ import Card, { CardHeader } from '../components/ui/Card';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
-import { QuoteCreditStatus, TierMismatchNote, readAssignedTier } from '../components/quotes/QuoteCustomerChecks';
+import { QuoteCreditStatus, TierMismatchNote } from '../components/quotes/QuoteCustomerChecks';
+import { readAssignedTier } from '../lib/customerTier';
 
 // Ties a "quote at this tier anyway" tick to one quote, customer and pair of tiers, so opening another
 // quote, or the customer's assigned tier changing, never inherits it.

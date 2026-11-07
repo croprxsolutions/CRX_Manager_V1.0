@@ -18,6 +18,58 @@ const COST_NOTE: Record<ToteFillPreview['cost_check'], string> = {
   missing: 'A catalog cost is missing on the Bulk or the tote, so there is no estimate.',
 };
 
+/** What the fill would record: counts before and after, any shortfall, and the catalog estimate. */
+function PreviewDetails({ shown }: { shown: ToteFillPreview }) {
+  return (
+    <div className="space-y-3" data-testid="tote-fill-preview">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="text-secondary">
+            <th className="font-medium" />
+            <th className="font-medium">Before</th>
+            <th className="font-medium">After</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Bulk ({shown.bulk_unit})</td>
+            <td>{qty(shown.bulk_before)}</td>
+            <td className="font-medium text-nav-dark">{qty(shown.bulk_after)}</td>
+          </tr>
+          <tr>
+            <td>Totes ({shown.tote_unit})</td>
+            <td>{qty(shown.tote_before)}</td>
+            <td className="font-medium text-nav-dark">{qty(shown.tote_after)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="text-sm text-secondary">
+        Takes {qty(shown.bulk_quantity)} {shown.bulk_unit} of Bulk ({qty(shown.gallons)} gal) for {shown.totes} × {qty(shown.tote_size)} {shown.tote_size_unit} tote{shown.totes === 1 ? '' : 's'}.
+      </p>
+      {shown.shortfall > 0 && (
+        <div className="flex gap-2 rounded border-l-4 border-amber-500 bg-amber-50 p-3 text-sm text-amber-800" role="alert">
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+          <span>
+            Bulk is short {qty(shown.shortfall)} {shown.bulk_unit}. The fill still records, Bulk goes below zero,
+            and the stock is flagged for the next count.
+          </span>
+        </div>
+      )}
+      <div className="rounded border border-gray-200 p-3 text-sm">
+        <p className="font-medium text-nav-dark">Catalog estimate (not purchase cost)</p>
+        {shown.estimate_before_cents != null && shown.estimate_after_cents != null && (
+          <p>
+            Value of Bulk and totes on hand: {formatCents(shown.estimate_before_cents)} before,{' '}
+            {formatCents(shown.estimate_after_cents)} after.
+          </p>
+        )}
+        <p className="text-secondary">{COST_NOTE[shown.cost_check]}</p>
+        <p className="text-secondary">Purchase cost is not tracked yet; no cost is changed.</p>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Fill whole totes from the tote's Bulk (admins only). The admin previews first; the fill sends that
  * preview back and the database refuses it if stock, units, source or catalog cost changed since.
@@ -107,54 +159,7 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
           </Button>
         </div>
 
-        {shown && (
-          <div className="space-y-3" data-testid="tote-fill-preview">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="text-secondary">
-                  <th className="font-medium" />
-                  <th className="font-medium">Before</th>
-                  <th className="font-medium">After</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Bulk ({shown.bulk_unit})</td>
-                  <td>{qty(shown.bulk_before)}</td>
-                  <td className="font-medium text-nav-dark">{qty(shown.bulk_after)}</td>
-                </tr>
-                <tr>
-                  <td>Totes ({shown.tote_unit})</td>
-                  <td>{qty(shown.tote_before)}</td>
-                  <td className="font-medium text-nav-dark">{qty(shown.tote_after)}</td>
-                </tr>
-              </tbody>
-            </table>
-            <p className="text-sm text-secondary">
-              Takes {qty(shown.bulk_quantity)} {shown.bulk_unit} of Bulk ({qty(shown.gallons)} gal) for {shown.totes} × {qty(shown.tote_size)} {shown.tote_size_unit} tote{shown.totes === 1 ? '' : 's'}.
-            </p>
-            {shown.shortfall > 0 && (
-              <div className="flex gap-2 rounded border-l-4 border-amber-500 bg-amber-50 p-3 text-sm text-amber-800" role="alert">
-                <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
-                <span>
-                  Bulk is short {qty(shown.shortfall)} {shown.bulk_unit}. The fill still records, Bulk goes below zero,
-                  and the stock is flagged for the next count.
-                </span>
-              </div>
-            )}
-            <div className="rounded border border-gray-200 p-3 text-sm">
-              <p className="font-medium text-nav-dark">Catalog estimate (not purchase cost)</p>
-              {shown.estimate_before_cents != null && shown.estimate_after_cents != null && (
-                <p>
-                  Value of Bulk and totes on hand: {formatCents(shown.estimate_before_cents)} before,{' '}
-                  {formatCents(shown.estimate_after_cents)} after.
-                </p>
-              )}
-              <p className="text-secondary">{COST_NOTE[shown.cost_check]}</p>
-              <p className="text-secondary">Purchase cost is not tracked yet; no cost is changed.</p>
-            </div>
-          </div>
-        )}
+        {shown && <PreviewDetails shown={shown} />}
 
         <div className="flex justify-end gap-2">
           <Button variant="secondary" showChevron={false} onClick={close} disabled={busy}>Cancel</Button>

@@ -3,6 +3,8 @@ import Modal from '../ui/Modal';
 import {
   CONFLICT_LABELS,
   SIZE_ROLE_LABELS,
+  brandVariantText,
+  brandVariants,
   conflictValueText,
   type ConflictField,
   type ApprovalEntry,
@@ -22,6 +24,26 @@ function perAcre(prices: ProductRatePerAcre): string {
   return [prices.tier1_price_per_acre, prices.tier2_price_per_acre, prices.tier3_price_per_acre]
     .map((v) => (v == null ? '—' : `$${v}`))
     .join(' / ');
+}
+
+/** Which brands the shared parent list keeps, and which version of each, exactly as the approval sends them. */
+function BrandDecisions({ group, entry }: { group: ProposalGroup; entry: ApprovalEntry }) {
+  if (!entry.brands) return null;
+  const variants = brandVariants(group);
+  return (
+    <ul className="list-disc pl-5 text-gray-800">
+      {Object.entries(entry.brands).map(([name, pick]) => {
+        const list = variants.get(name) ?? [];
+        const kept = list.find((b) => b.brand_id === pick.source_brand_id);
+        const label = list[0]?.brand_name ?? name;
+        return (
+          <li key={name}>
+            Brand {label}: {pick.keep ? <>keep{kept ? ` (${brandVariantText(kept)})` : ''}</> : 'drop from the shared list'}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 interface GroupApprovalReviewModalProps {
@@ -66,6 +88,7 @@ export default function GroupApprovalReviewModal({ review, error, saving, onClos
                   {CONFLICT_LABELS[field]}: <span className="font-medium">{conflictValueText(field, entry.choices[field])}</span>
                 </p>
               ))}
+              <BrandDecisions group={group} entry={entry} />
               <ul className="list-disc pl-5 text-gray-800">
                 {group.members.map((m) => (
                   <li key={m.product_id}>

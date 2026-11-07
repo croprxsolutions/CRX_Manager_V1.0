@@ -103,9 +103,17 @@ describe('approvalEntry', () => {
     });
   });
 
-  it('ignores the rate unit of seed and each sizes, which keep their stock unit', () => {
-    const g = group({ product_form: 'seed', members: [member('a', { product_form: 'seed', rate_unit: 'bag' })] });
-    expect(membersWithRateChange(g, { rate_per_acre: '1', rate_unit: null, suggested_rate: null })).toEqual([]);
+  it('compares a seed or each size’s rate unit with its stock unit, as approval does', () => {
+    const g = group({ product_form: 'seed', members: [
+      member('a', { product_form: 'seed', rate_unit: 'bag', inventory_unit: 'bag' }),
+      member('b', { product_form: 'seed', rate_unit: 'bag', inventory_unit: 'each' }),
+    ] });
+    expect(membersWithRateChange(g, { rate_per_acre: '1', rate_unit: null, suggested_rate: null }).map((m) => m.product_id)).toEqual(['b']);
+  });
+
+  it('treats 1.50 and 1.5, and a blank and a missing suggested rate, as the same, as SQL does', () => {
+    const g = group({ members: [member('a', { rate_per_acre: '1.50', suggested_rate: ' ' })] });
+    expect(membersWithRateChange(g, { rate_per_acre: '1.5', rate_unit: 'qt', suggested_rate: null })).toEqual([]);
   });
 
   it('sends a brand pick per name when the sizes list brands', () => {

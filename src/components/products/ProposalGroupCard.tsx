@@ -9,6 +9,7 @@ import {
   SIZE_ROLE_LABELS,
   approvalProblems,
   brandVariants,
+  brandVariantText,
   conflictValueText,
   parentIsFertilizer,
   rateText,
@@ -176,7 +177,7 @@ function BrandPicks({ group, draft, onDraftChange }: { group: ProposalGroup; dra
                 <option value="">Choose which version…</option>
                 {list.map((b) => (
                   <option key={b.brand_id} value={b.brand_id}>
-                    EPA {b.epa_registration ?? 'none'} · {b.manufacturer ?? 'no manufacturer'}
+                    {brandVariantText(b)}
                   </option>
                 ))}
               </select>

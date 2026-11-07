@@ -224,6 +224,17 @@ export function conflictValueText(field: ConflictField, value: unknown): string 
   return value === null || value === '' ? 'none' : String(value);
 }
 
+/** Every fact that can differ between two versions of a brand, so the admin can tell them apart. */
+export function brandVariantText(b: ProposalMemberBrand): string {
+  return [
+    `EPA ${b.epa_registration ?? 'none'}`,
+    b.manufacturer ?? 'no manufacturer',
+    b.is_rup === null ? 'RUP not set' : b.is_rup ? 'Restricted use' : 'Not restricted use',
+    b.signal_word ?? 'no signal word',
+    b.is_currently_sourced ? 'sourced' : 'not sourced',
+  ].join(' · ');
+}
+
 /** Distinct brand variants per lower-case name across the sizes (one entry per distinct set of facts). */
 export function brandVariants(group: ProposalGroup): Map<string, ProposalMemberBrand[]> {
   const byName = new Map<string, ProposalMemberBrand[]>();
@@ -273,11 +284,24 @@ function isCountForm(form: string | null): boolean {
   return form === 'seed' || form === 'each';
 }
 
-/** Sizes whose rate changes when the parent's rates are copied onto them (the same test the approval runs). */
+const blankToNull = (v: string | null) => (v ?? '').trim() || null;
+
+/** The rate unit a size ends up with: a seed or each size keeps its stock unit (as _copy_parent_to_size does). */
+function resultingRateUnit(member: ProposalMember, rates: RateValues): string | null {
+  return isCountForm(member.product_form) ? blankToNull(member.inventory_unit) : blankToNull(rates.rate_unit);
+}
+
+/** Sizes whose rate changes when the parent's rates are copied onto them: the same test approval runs. */
 export function membersWithRateChange(group: ProposalGroup, rates: RateValues): ProposalMember[] {
-  return group.members.filter((m) => m.rate_per_acre !== rates.rate_per_acre
-    || m.suggested_rate !== rates.suggested_rate
-    || (!isCountForm(m.product_form) && m.rate_unit !== rates.rate_unit));
+  return group.members.filter((m) => {
+    // numeric compare, as SQL does: "1.50" and "1.5" are the same rate (both have at most 4 decimals).
+    const rateDiffers = m.rate_per_acre === null || rates.rate_per_acre === null
+      ? m.rate_per_acre !== rates.rate_per_acre
+      : Number(m.rate_per_acre) !== Number(rates.rate_per_acre);
+    return rateDiffers
+      || blankToNull(m.suggested_rate) !== blankToNull(rates.suggested_rate)
+      || blankToNull(m.rate_unit) !== resultingRateUnit(m, rates);
+  });
 }
 
 /** What still needs an answer before this group can be approved; empty when it is ready. */
@@ -366,7 +390,7 @@ export async function previewGroupPrices(group: ProposalGroup, rates: RateValues
     const preview = await previewProductRateCorrection({
       productId: member.product_id,
       ratePerAcre: rates.rate_per_acre === null ? null : Number(rates.rate_per_acre),
-      rateUnit: rates.rate_unit ?? '',
+      rateUnit: resultingRateUnit(member, rates) ?? '',
     });
     changes.push({ productId: member.product_id, productName: member.product_name, before: preview.before, after: preview.after });
   }

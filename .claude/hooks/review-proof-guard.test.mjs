@@ -1273,6 +1273,7 @@ for (const [command, label] of [
   ["cat(){ bash; }; cat <<'EOF'\nrm -rf .claude/session-state\nEOF", "a function named cat"],
   // A substitution can build the write target from a here-document (Codex App, PR #1632).
   ["cat > \"$(cat <<'X'\n.claude/session-state/claude-review-push.json\nX\n)\" <<'E'\n{}\nE", "a proof path built by $( ) from a here-document"],
+  ["cat <<\"A\\\\B\"\nnote\nA\\B\nrm -rf .claude/session-state\nA\\\\B", "a delimiter Bash ends earlier than the lexer"],
   ["tee `cat <<'X'\n.claude/session-state/claude-review-push.json\nX\n` <<'E'\n{}\nE", "a proof path built by backticks from a here-document"],
 ]) {
   const result = run({ tool_name: "Bash", tool_input: { command } });

@@ -3245,7 +3245,12 @@ export function commandWithoutTextHeredocs(command) {
   // per-line check misses): Codex App, PR #1632. So only quoted-delimiter
   // here-documents in a command with no substitution at all lose their text.
   if (/\$\(|`|[<>]\(/.test(withoutBodies)) return text;
-  if (/<<(?!<)-?[ \t]*(?!['"])/.test(withoutBodies)) return text;
+  // Only a plain quoted word (`<<'EOF'`, `<<"EOF"`): an escape inside the quotes
+  // can make the lexer end the body on a different line than Bash, hiding the
+  // commands after Bash's real end (Codex App, PR #1632 round 2).
+  const operators = withoutBodies.match(/<<(?!<)/g)?.length ?? 0;
+  const plain = withoutBodies.match(/<<-?[ \t]*(['"])[A-Za-z0-9_]+\1(?=[\s;|&<>)]|$)/g)?.length ?? 0;
+  if (operators !== plain) return text;
   return withoutBodies;
 }
 

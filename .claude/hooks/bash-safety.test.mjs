@@ -714,7 +714,11 @@ for (const [command, label] of [
   ["cat <<EOF\n$(git reset --hard)\nEOF", "substitution in an unquoted body"],
   // Bash joins `\`+newline in an unquoted body before expanding (Codex App, PR #1632).
   ["cat <<EOF\n$\\\n(git push --force origin main)\nEOF", "a substitution split across a line join"],
-  ["cat <<EOF\ngit reset --hard\nEOF", "an unquoted body (only quoted delimiters are narrowed)"],  ["echo hi # <<EOF\ngit reset --hard\nEOF", "a heredoc opener inside a comment"],
+  ["cat <<EOF\ngit reset --hard\nEOF", "an unquoted body (only quoted delimiters are narrowed)"],
+  // An escape in a quoted delimiter can make the lexer and Bash end the body on different lines (Codex App round 2).
+  // Bash ends `<<"A\\B"` at `A\B`; the lexer waited for `A\\B`.
+  ["cat <<\"A\\\\B\"\nnote\nA\\B\ngit push --force origin main\nA\\\\B", "a delimiter with a backslash escape"],
+  ["cat <<\"A\\$B\"\nnote\nA$B\ngit reset --hard\nA\\$B", "a delimiter with an escaped dollar"],  ["echo hi # <<EOF\ngit reset --hard\nEOF", "a heredoc opener inside a comment"],
   ["cat <<'EOF'\ngit reset --hard\n", "a here-document that never ends"],
   ["cat <<'EOF' | xargs git\nreset --hard\nEOF\ngit reset --hard", "xargs, then a real reset"],
   ["python - <<'EOF'\nimport os; os.system('git reset --hard')\nEOF", "python launching a process"],

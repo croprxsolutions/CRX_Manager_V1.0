@@ -505,8 +505,9 @@ wrote "git reset --hard" into a memory note (`bash-safety.mjs`), and a `cat >> <
 whose text named a `.claude/worktrees/…` path (`review-proof-guard.mjs`). For a **Bash** command,
 both guards now judge the command with its here-document bodies left out (`commandWithoutTextHeredocs`
 in `codex-push-lib.mjs`, which reuses the `pipelineStages` lexer), but only when every command in it
-is a bare `cat` or `tee`, every here-document delimiter is quoted (`<<'EOF'` or `<<"EOF"`, so Bash
-expands nothing in the body), and the command has no `$( )`, backtick or `<( )`/`>( )` at all (the
+is a bare `cat` or `tee`, every here-document delimiter is one plain quoted word (`<<'EOF'` or
+`<<"EOF"`, letters, digits and `_` only: Bash expands nothing in the body, and an escape such as
+`<<"A\\B"` made the lexer and Bash end the body on different lines), and the command has no `$( )`, backtick or `<( )`/`>( )` at all (the
 Codex App showed on PR #1632 that a substitution can build a write target from a here-document, and
 that an unquoted body expands across a `\`+newline join the lexer's per-line check misses). A language runtime fed a here-document
 (`python - <<'EOF'`) is still judged on its full text, so the first false alarm's exact shape stays

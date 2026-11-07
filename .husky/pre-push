@@ -43,6 +43,26 @@ if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --map)
   done
 fi
 
+# A record's SQL sha256 pin taken from a Windows CRLF copy failed 4 CI checks (PR #1579, 2026-11-06 retro).
+if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --pins)" = "check" ]; then
+  echo ""
+  echo "Checking migration records' SQL sha256 pins..."
+  # Each pushed commit's own files, as for the map check above.
+  PIN_SHAS="$(printf '%s\n' "$PUSH_REFS" | awk 'NF >= 2 && $2 !~ /^0+$/ { print $2 }')"
+  for PIN_SHA in ${PIN_SHAS:-HEAD}; do
+    PIN_DIR="$(mktemp -d)"
+    if ! { git archive "$PIN_SHA" supabase/migrations docs/reference/migrations.d docs/reference/migration-history.md \
+        | tar -x -C "$PIN_DIR" && node scripts/check-doc-drift.mjs --pins-only "$PIN_DIR" 2>&1; }; then
+      rm -rf "$PIN_DIR"
+      echo ""
+      echo "❌ MIGRATION SQL SHA256 PIN WRONG — push blocked."
+      echo "Pin the LF hash git stores: git show HEAD:supabase/migrations/<file>.sql | sha256sum"
+      exit 1
+    fi
+    rm -rf "$PIN_DIR"
+  done
+fi
+
 # Tests that read an Edge Function's source break when it changes (PR #1515 found out in CI).
 EDGE_TESTS="$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --edge-tests)"
 if [ -n "$EDGE_TESTS" ]; then

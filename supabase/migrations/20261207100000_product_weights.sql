@@ -129,8 +129,8 @@ $preflight$;
 CREATE TABLE public.product_parent_density_values (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   parent_id uuid NOT NULL REFERENCES public.product_parents(id) ON DELETE RESTRICT,
-  -- Typo guard, not physics: farm chemicals run about 7 to 13 lb/gal.
-  lb_per_gal numeric(10,4) NOT NULL CHECK (lb_per_gal > 0 AND lb_per_gal <= 25),
+  -- Typo guard, not physics: farm chemicals run about 8 to 12 lb/gal; 20 is the cap (Mason, 2026-11-07).
+  lb_per_gal numeric(10,4) NOT NULL CHECK (lb_per_gal > 0 AND lb_per_gal <= 20),
   entered_value numeric NOT NULL,
   entered_unit text NOT NULL CHECK (entered_unit IN ('lb_per_gal', 'specific_gravity')),
   source text NOT NULL CHECK (source IN ('measured', 'sds', 'label', 'supplier')),
@@ -772,8 +772,8 @@ BEGIN
   END IF;
   -- Rounded first (half-up, 4 decimals), then range-checked, so a value that rounds to 0 is refused by name.
   v_lb := round(CASE p_unit WHEN 'specific_gravity' THEN p_value * 8.345404 ELSE p_value END, 4);
-  IF v_lb <= 0 OR v_lb > 25 THEN
-    RAISE EXCEPTION 'PRODUCT_WEIGHT_OUT_OF_RANGE: weight per gallon must be above 0 and at most 25 lb/gal (this is % lb/gal)', v_lb;
+  IF v_lb <= 0 OR v_lb > 20 THEN
+    RAISE EXCEPTION 'PRODUCT_WEIGHT_OUT_OF_RANGE: weight per gallon must be above 0 and at most 20 lb/gal (this is % lb/gal)', v_lb;
   END IF;
   v_note := public._product_parent_reason(p_note, 'note', false);
   IF p_mode = 'correct' THEN

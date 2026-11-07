@@ -125,6 +125,22 @@
         "idempotency"
       ]
     },
+    "set_parent_density": {
+      "chain": "smoke-product_weights.sql",
+      "container_prover": "prove-product-weights-real-schema.mjs",
+      "description": "REQUIRES 20261207100000. Product weights (DM-2): anon cannot execute the public weight functions and a signed-in user cannot call the private density draft helper; on invented liquid parents an admin sets a measured 9.5 lb/gal and the size reads it, a same-key retry replays, 20.00005 is refused PRODUCT_WEIGHT_OUT_OF_RANGE and exactly 20 saves, an older version is refused PRODUCT_WEIGHT_STALE, a label draft is unread until approve_weights approves it; an active sales rep is refused ADMIN_REQUIRED.",
+      "covers": [
+        "set_parent_density",
+        "approve_weights",
+        "get_product_weights",
+        "_save_parent_density_draft",
+        "_product_weight"
+      ],
+      "area": [
+        "inventory",
+        "security"
+      ]
+    },
     "fill_tote_from_bulk": {
       "chain": "smoke-tote_fill_from_bulk.sql",
       "container_prover": "prove-tote-fill-real-schema.mjs",

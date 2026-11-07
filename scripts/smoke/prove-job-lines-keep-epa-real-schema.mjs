@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261202140000_job_lines_keep_epa_number: once a job is sprayed or finished,
+ * Real-schema proof for 20261204120000_job_lines_keep_epa_number: once a job is sprayed or finished,
  * every product on it keeps the EPA number the job recorded (job_product_epa), through re-saves,
  * remove + re-add, duplicate positions, and a spray record deleted and re-entered; a job not sprayed
  * yet keeps reading the product's current number; app roles cannot write job lines or the locks.
@@ -24,7 +24,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261202140000_job_lines_keep_epa_number.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261204120000_job_lines_keep_epa_number.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

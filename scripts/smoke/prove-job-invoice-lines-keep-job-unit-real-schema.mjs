@@ -58,7 +58,7 @@ const REVIEWED_LATER = new Set([
   // Revokes direct app writes on job_chemicals and adds an AFTER trigger that records a sprayed job's
   // product EPA numbers in a separate table; transfer_job_to_invoice, the line units and convert_to_gl_lb
   // are unchanged.
-  '20261202140000_job_lines_keep_epa_number.sql',
+  '20261204120000_job_lines_keep_epa_number.sql',
 ]);
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.

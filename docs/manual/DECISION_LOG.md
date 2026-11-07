@@ -18,13 +18,13 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 ## 2026-11-06 — Sprayed jobs lock each product's EPA number (lock per product)
 
-**Decision (Mason, 2026-11-06: "Yes, lock per product"):** once a job is sprayed (spray record saved) or finished, every product already on that job keeps the EPA number the job recorded for it, however its line is edited, deleted or re-added; only a product never on the job takes the product's current number (and then keeps it). On a conflict the older number wins. The lock survives a spray record being deleted and re-entered. Migration 20261202140000, PR #1584.
+**Decision (Mason, 2026-11-06: "Yes, lock per product"):** once a job is sprayed (spray record saved) or finished, every product already on that job keeps the EPA number the job recorded for it, however its line is edited, deleted or re-added; only a product never on the job takes the product's current number (and then keeps it). On a conflict the older number wins. The lock survives a spray record being deleted and re-entered. Migration 20261204120000, PR #1584.
 **Why:** keeping numbers by job-line identity failed three Sol rounds on the same mechanism (save_job deletes and re-writes every line, so a line's identity does not survive a save). Locking by job and product has no such gap.
 **What this forbids/implies:** kept numbers live in `job_product_epa` (insert-only); a job's unlocked products read `products.epa_registration`. Printouts move to the kept numbers in a follow-up PR. A correction made between the physical spray and its record being entered reaches the job.
 
 ## 2026-11-06 — Signed-in users cannot write job chemical lines directly
 
-**Decision:** Mason approved removing `authenticated` and `anon` INSERT, UPDATE, DELETE and TRUNCATE on `job_chemicals` (Mason, 2026-11-06: "Yes, remove it"; migration 20261202140000, PR #1584). Reads are unchanged.
+**Decision:** Mason approved removing `authenticated` and `anon` INSERT, UPDATE, DELETE and TRUNCATE on `job_chemicals` (Mason, 2026-11-06: "Yes, remove it"; migration 20261204120000, PR #1584). Reads are unchanged.
 **Why:** job lines are the input to a sprayed job's kept EPA numbers; the app never wrote the table directly (every write goes through save_job and the other definer-rights job functions), so direct writes were only a way around the server's checks.
 **What this forbids/implies:** job lines are written only by server functions; a screen or script that needs a new kind of line write gets an RPC, not a direct grant. Re-granting direct writes is a permission change that needs Mason.
 ## 2026-11-06 — Duplicate ingredients are replaced, never linked (DM-1)

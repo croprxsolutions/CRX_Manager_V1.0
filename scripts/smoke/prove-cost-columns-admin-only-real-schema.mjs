@@ -90,7 +90,7 @@ const REVIEWED_LATER = new Set([
   // Revokes direct INSERT/UPDATE/DELETE/TRUNCATE on job_chemicals from app roles (no read grant
   // changes) and adds two job-EPA tables with their own grants; its postflight and
   // prove-job-lines-keep-epa-real-schema.mjs check that. No cost column's grant changes.
-  '20261202140000_job_lines_keep_epa_number.sql',
+  '20261204120000_job_lines_keep_epa_number.sql',
 ]);
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"

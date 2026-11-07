@@ -1,6 +1,6 @@
 ## 2026-11-06 — Sprayed jobs keep the EPA number of each product they used (database)
 
-- New migration `20261202140000_job_lines_keep_epa_number.sql` (record in `docs/reference/migrations.d/`).
+- New migration `20261204120000_job_lines_keep_epa_number.sql` (record in `docs/reference/migrations.d/`).
   Rule (Mason, 2026-11-06, "Yes, lock per product"): once a job is sprayed (a spray record is saved) or
   finished (completed or invoiced), every product on it keeps the EPA number the job recorded for it,
   however its line is edited, deleted or re-added. A product never on the job takes the product's

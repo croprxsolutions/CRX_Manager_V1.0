@@ -3100,7 +3100,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER DELETE row trigger on invoices, allocation_sets and payments: appends one audit snapshot per row a delete really erased, so a replayed delete matches no row and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   _refuse_financial_truncate:
     'BEFORE TRUNCATE statement trigger on invoices, allocation_sets and payments: only raises (the word TRUNCATE is in its message), writes nothing; every API-role EXECUTE is revoked',
-  // Sprayed jobs keep each product's EPA number (20261202140000).
+  // Sprayed jobs keep each product's EPA number (20261204120000).
   _job_epa_freeze:
     'internal helper called only by its trigger: marks a job sprayed and inserts one lock row per product on its lines ON CONFLICT DO NOTHING, so a replay inserts nothing; every API-role EXECUTE (incl. service_role) is revoked',
   _trg_job_epa_freeze:

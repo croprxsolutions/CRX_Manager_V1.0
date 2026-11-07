@@ -1,7 +1,7 @@
--- 20261202140000_job_lines_keep_epa_number.sql
+-- 20261204120000_job_lines_keep_epa_number.sql
 --
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261202140000_job_lines_keep_epa_number.md.
+-- docs/reference/migrations.d/20261204120000_job_lines_keep_epa_number.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY: a spray job's printouts look up the product's CURRENT EPA number. Once a product's EPA number
@@ -124,7 +124,7 @@ CREATE TABLE public.job_epa_sprayed (
   from_backfill boolean NOT NULL DEFAULT false
 );
 COMMENT ON TABLE public.job_epa_sprayed IS
-  'Jobs that were sprayed (a spray record saved) or finished; their products keep the EPA number in job_product_epa. Never removed by the app (20261202140000).';
+  'Jobs that were sprayed (a spray record saved) or finished; their products keep the EPA number in job_product_epa. Never removed by the app (20261204120000).';
 ALTER TABLE public.job_epa_sprayed ENABLE ROW LEVEL SECURITY;
 CREATE POLICY job_epa_sprayed_no_app_access ON public.job_epa_sprayed
   FOR ALL TO authenticated USING (false) WITH CHECK (false);
@@ -139,7 +139,7 @@ CREATE TABLE public.job_product_epa (
 );
 CREATE INDEX job_product_epa_product_id_idx ON public.job_product_epa (product_id);
 COMMENT ON TABLE public.job_product_epa IS
-  'EPA number a sprayed or finished job keeps for each product it had (NULL kept too). Insert-only, first number wins; a job''s other products read products.epa_registration (20261202140000).';
+  'EPA number a sprayed or finished job keeps for each product it had (NULL kept too). Insert-only, first number wins; a job''s other products read products.epa_registration (20261204120000).';
 ALTER TABLE public.job_product_epa ENABLE ROW LEVEL SECURITY;
 -- Readable where the caller can see the job (jobs' own policies decide that, the same roles that see its
 -- lines), so removing every line hides nothing. Rows of a deleted job stay, readable by the owner only.

@@ -124,7 +124,7 @@ describe('invariant: a legacy tank overfill is never dropped by the weights chec
   const current: WeightUnitFactors = { factors: { ...units.factors }, ambiguous: [] }; // knows no Pt
   const snapshot: WeightUnitFactors = { factors: { ...units.factors, pt: { kind: 'volume', factor: 0.125 } }, ambiguous: [] };
   type Row = [situation: string, lines: MappedLine[], weights: (lines: MappedLine[]) => WeightTotalOptions];
-  const mapped = (headerUnits: WeightUnitFactors) => (lines: MappedLine[]) => ({ headerUnits, lines });
+  const mapped = (headerUnits: WeightUnitFactors | null) => (lines: MappedLine[]) => ({ headerUnits, lines });
   const rows: Row[] = [
     ['loading', [liquid({})], () => ({ loading: true })],
     ['unavailable', [liquid({})], (lines) => ({ unavailable: true, lines })],
@@ -133,6 +133,8 @@ describe('invariant: a legacy tank overfill is never dropped by the weights chec
     ['dry Lb line beside an overfilling liquid line', [line({ product_name: 'TEST Dry' }), liquid({})], mapped(units)],
     ['formless line', [liquid({ form: null })], mapped(units)],
     ['line read through its saved snapshot map', [liquid({ quantity: 200, unit: 'Pt', rowUnits: snapshot })], mapped(current)],
+    ['saved ticket whose unit basis was never recorded', [liquid({})], mapped(null)],
+    ['saved line with no recorded weight (empty line map)', [liquid({ rowUnits: { factors: {}, ambiguous: [] } })], mapped(units)],
   ];
   // 30 Gal (or 200 Pt = 25 Gal) of product in a 20 Gal (80 Qt) tank.
   const headers: [total: number, unit: string][] = [[20, 'Gal'], [80, 'Qt']];

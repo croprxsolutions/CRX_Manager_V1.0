@@ -80,7 +80,8 @@ function pick(product: LoaderLoadProduct, weights: Record<string, LoaderProductW
     const entry = unitEntry(product.product_name, product.unit, saved.unit_factors);
     if ('kind' in entry && entry.kind === 'weight') return { basis: savedBasis(saved), units: saved.unit_factors, form: saved.product_form, mark: 'saved' };
   }
-  return { basis: current ?? null, units: currentUnits, form: product.product_form, mark: 'current' };
+  // A product with no readable current weight is not marked current: its cell says why there is no weight.
+  return { basis: current ?? null, units: currentUnits, form: product.product_form, mark: current ? 'current' : null };
 }
 
 interface Refusal { cell: string; reason: string }

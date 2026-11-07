@@ -123,5 +123,7 @@ describe('loaderLoadWeights', () => {
   it('says so when a current weight could not be read', () => {
     const { result } = weigh([{ id: 'l1', product_id: 'p1', quantity: 3, unit: 'Gal' }], {});
     expect(result.loads[0].cells[0].weightText).toBe('TEST Liquid: weights unavailable');
+    expect(result.loads[0].cells[0].mark).toBeNull();
+    expect(result.anyCurrent).toBe(false);
   });
 });

@@ -179,7 +179,11 @@ ${cell.weightText}${mark}`);
     row.push(refused ? '—' : fmtNum(Math.round(rowTotal * 10000) / 10000));
     return row;
   });
-  if (w) body.push(['Product weight', ...plan.columns.map((column) => w.loads[loadIndex(column)]?.totalText.replace(/^Product weight: /, '') ?? '—'), '']);
+  if (w) body.push(['Product weight', ...plan.columns.map((column) => {
+    const total = w.loads[loadIndex(column)]?.totalText;
+    if (!total) return '—';
+    return total.startsWith('Product weight: ') ? `${total.slice('Product weight: '.length)}${column.loads.length > 1 ? ' each' : ''}` : total;
+  }), '']);
   const caption = !data.weights ? null : data.weights.unavailable ?? loaderWeightCaption(data.weights.saved, w?.anyCurrent ?? false);
   return { body, caption };
 }

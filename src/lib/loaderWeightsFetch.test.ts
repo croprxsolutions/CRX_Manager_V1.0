@@ -16,13 +16,14 @@ const job = (id: string, lb: number, quantity: unknown = 20): LoaderGetterJob =>
   worksheet: { id: `${id}-w`, worksheet, vehicle_name: 'Manual', saved: { p1: saved(lb) } },
 });
 
-function page(entry: LoaderGetterJob, savedPlan = true): ReturnType<typeof loaderPdfMixBody> {
+function page(entry: LoaderGetterJob, savedPlan = true, condensed = false): ReturnType<typeof loaderPdfMixBody> {
   const inputs = loaderJobInputs(entry);
   const data: LoaderWorksheetPdfData = {
     job_number: entry.job_id, customers: [], scheduled_date: '2026-11-07', scheduled_time: null, applicator_name: null, vehicle_name: 'Manual',
     total_acres: entry.acres ?? 0, carrier_rate_gpa: 10, tank_capacity: 100, capacity_unit: 'gal', products: inputs.products, loader_comment: null,
     weights: { byProductId: inputs.weights, currentUnits: units, sourceLines: inputs.sourceLines, saved: savedPlan },
   };
+  if (condensed) data.display_mode = 'condensed';
   return loaderPdfMixBody(data, buildLoaderWorksheetPdfPlan(data));
 }
 
@@ -35,6 +36,10 @@ describe('loader worksheet weights from the getter', () => {
     expect(b.body[0][1]).toBe('10\n100.00 lb');
     expect(a.body[a.body.length - 1]).toEqual(['Product weight', '80.00 lb', '80.00 lb', '']);
     expect(a.caption).toBe('Weights saved with this worksheet');
+    // Condensed: the two equal loads share one column, and its weights say "each".
+    const c = page(job('C', 8), true, true);
+    expect(c.body[0][1]).toBe('10 each\n80.00 lb');
+    expect(c.body[c.body.length - 1]).toEqual(['Product weight', '80.00 lb each', '']);
   });
 
   it('prints a bad job amount\'s reason in every amount cell and withholds the load weights, never 0', () => {

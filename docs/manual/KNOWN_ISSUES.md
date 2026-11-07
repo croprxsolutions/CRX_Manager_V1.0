@@ -6,7 +6,7 @@
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**KI-18 verified: 2026-11-06 (America/Chicago)** for KI-18 only: read-only live function definitions show `generate_quote_number`, `generate_order_number` and the rebate-claim body take the Chicago year; `generate_ticket_number` still uses `current_date`; `financial_dashboard_summary` still ages invoices from `NOW()` with "current" up to 30 days, while `get_ar_aging` uses 0–29 days by the Chicago date. KI-18 stands for those parts. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
+**KI-18 verified: 2026-11-06 (America/Chicago)** for KI-18 only: read-only live function definitions show `generate_quote_number`, `generate_order_number` and the rebate-claim body take the Chicago year; `generate_ticket_number` and `financial_dashboard_summary` were then moved to the Chicago date by `20261121090000` (applied live 2026-11-06). KI-18 stands for the parts listed in its entry. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
 Every "applied live" statement not re-read since is the older record's claim, marked as such.
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything
@@ -37,7 +37,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Status | Count |
 |---|---|
 | Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 55 |
-| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104) | 16 |
+| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 15 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
@@ -375,7 +375,7 @@ can make old splits refuse to save (LOW-MED).
   changes rounding on every quote line, so it needs its own money PR. LOW.
 
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock
-**MED · OPEN · money/UI · unassigned (fixed parts: seasons, screens, blend-ticket year, dashboard aging and the invoice date limit; see below)**
+**MED · OPEN · money/UI · unassigned (fixed: seasons, screens, blend-ticket year, dashboard aging, the invoice date limit and the database "today" (PR #1579); open: statement and AR aging, evening hold expiry)**
 - Fixed 2026-11-06 by `20261121090000` (applied live, ledger `20261106152929`, PR #1560): blend-ticket numbers take
   the Chicago year; the Financial Dashboard's AR-aging strip uses the AR Aging page's ranges on the Chicago date; the
   database refuses an invoice date more than 365 days after the Chicago date. Earlier fixes: `20261103120000`
@@ -383,10 +383,17 @@ can make old splits refuse to save (LOW-MED).
 - Customer statements (`get_detailed_statement_data`) age by <=30 / 31-60 / 61-90 / 91-120 / >120 days; the AR Aging
   page uses 0-29 / 30-59 / 60-89 / 90-119 / 120+, so a 30-day-old invoice is "current" on the statement and 30-59 on
   AR Aging. Which ranges both use is Mason's decision (recommended: the AR Aging ones). MED.
-- The live database clock is UTC, and many functions still take "today" from `CURRENT_DATE` or `now()`, so from
-  6-7 pm Central they act on tomorrow: overdue marking, AR reminders, license expiry, RUP record dates, quote expiry,
-  holds, dispatch windows, default invoice and bill dates, `get_customer_summary`, and `operational_dashboard_summary`
-  (season, today, and days left in the period). A Sol scan on 2026-11-06 listed about 30; not yet checked one by one. MED.
+- Fixed 2026-11-06 by PR #1579: `20261204100000` (applied live, ledger `20261107041703`) moves 33 money,
+  compliance and stock functions (period checks, commission dates, default quote expiry, AR reminders, license and RUP
+  dates, hold and stock checks, default bill, payment and delivery dates) and `20261204110000` (applied live, ledger
+  `20261107053254`) moves 13 boards and reports to the Chicago date; the database clock is UTC, so from 6-7 pm Central
+  `CURRENT_DATE` was tomorrow. The overnight overdue, quote-expiry and morning-notice jobs need no change (they run
+  midnight to 6 am Central).
+- Still open: statement and AR aging (batch 3, the ranges above), and `_sync_job_holds` counts a hold that expires
+  today as expired from 6-7 pm Central (follow-up, with its hardening). MED.
+- Sol notes on the live batches (2026-11-07, deferred): reversing a write-off or credit application now checks both its
+  UTC and Chicago dates, so one made 7-11:59 pm Central on a month's last day cannot be reversed once that month is
+  closed; and the stale-quote call list compares whole 24-hour periods, so a quote reaches its N-day list hours late. LOW-MED.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**
@@ -816,6 +823,7 @@ Delete with a grep of every reference first; keep one copy of each helper.
 | KI-79 | A saved quote line forgets whether its acres were typed or filled in from the section's field (`save_quote` stores the acres, not the source; Quote Builder's `acres_source` lives only in the browser). Totals stay correct. After reopening, switching a section's field leaves those lines' acres as they were and shows "This section's saved lines keep their acres. Check them against the new field." Options weighed 2026-10-23: (1) keep as is, no cost; (2) store a typed/field flag on `quote_items`: a migration plus changes to `save_quote` (a money RPC) and every quote-copy path (duplicate, versions, rollover, template), which fall back to today's warning if they drop it; (3) save each line's field link and have the server recompute acres: a large `save_quote` rewrite, highest risk | Mason chose option 1, keep as is (2026-10-23, #1060 follow-up); revisit if reps report wrong acres after switching fields |
 | KI-80 | A job line priced from a product's tier price is not re-checked when that tier price is later removed or the customer's tier changes; it is re-checked (`job_chemicals_price_required`, #1060) only when the line is next edited | Mason declined the re-check (2026-10-23, #1060 follow-up): rare case |
 | KI-104 | Invoice email: the invoice page's Email button does not recognise a send made before 2026-11-05 under the old clock-based retry key, so it can send an unchanged invoice once more. The bulk Email on the Invoices list also checks the email log (a key that starts with the server-written `invoice:invoice:<id>:` prefix, to the same address, since the invoice last changed), so it skips those. A bulk skip does not see a bill-to correction made without changing the invoice; the invoice page's Email sends it. From then on the shared record key (invoice, its last change, the address and bill-to) stops repeats exactly | Mason, option A, 2026-11-05, narrowed by option A2 (To-Do 9.6): the email service change that would catch every old send was not approved |
+| KI-106 | RUP sales register: an active admin can still add a row to `rup_sales_records` directly (the `rup_sales_insert` policy, older than KI-18). Such a row gets only the posted-invoice check; the sale-date, season and license checks run only in `generate_rup_sales_records`, which is the only path the app uses | ACCEPTED (Mason 2026-11-07): the register is low-importance; no extra guard wanted (Sol finding on PR #1579) |
 
 ---
 

@@ -39,7 +39,8 @@ const LEDGER_ONLY = new Set([
   '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(_product_parent_identity_name|_product_parent_base_name|_product_parent_require_admin|get_duplicate_product_parents|build_product_parent_proposal)/i;
+// Only a (re)definition counts: 20261207100000_product_weights merely calls _product_parent_require_admin().
+const TOUCHED = /(CREATE\s+(OR\s+REPLACE\s+)?FUNCTION|ALTER\s+FUNCTION|DROP\s+FUNCTION)\s+(IF\s+EXISTS\s+)?(public\.)?"?(_product_parent_identity_name|_product_parent_base_name|_product_parent_require_admin|get_duplicate_product_parents|build_product_parent_proposal)\b/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'

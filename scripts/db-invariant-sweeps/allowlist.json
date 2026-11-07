@@ -1795,13 +1795,13 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "preview_active_ingredient_change(p_ingredient_id uuid, p_fields jsonb)#53d6e74ca459",
+      "violation_key": "preview_active_ingredient_change(p_ingredient_id uuid, p_fields jsonb)#dd43470070f7",
       "justification": "New in 20261209100000_product_chemistry (DM-1), read 2026-11-07 on the disposable real-schema proof database (scripts/smoke/prove-product-chemistry-real-schema.mjs prints this key); re-read live after the apply and re-key if the chain differs. NO-COST. Admin only (_product_parent_require_admin first). Flagged because its helper _edit_active_ingredient names the products table (to lock sizes) and calls to_jsonb on arrays (changed field names, parent IDs), not on a row. It returns ingredient values, a usage fingerprint and affected parent and form names; no cost, price or margin field. Audit reference: docs/audits/2026-11-02-cost-margin-definer-function-audit.md. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
       "dated": "2026-11-07"
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "save_active_ingredient(p_ingredient_id uuid, p_expected_row_version integer, p_expected_usage_fingerprint text, p_fields jsonb, p_reason text, p_evidence text, p_idempotency_key text)#73d31dca5fe4",
+      "violation_key": "save_active_ingredient(p_ingredient_id uuid, p_expected_row_version integer, p_expected_usage_fingerprint text, p_fields jsonb, p_reason text, p_evidence text, p_idempotency_key text)#4aa4f7f9adda",
       "justification": "New in 20261209100000_product_chemistry (DM-1), read 2026-11-07 on the disposable real-schema proof database (scripts/smoke/prove-product-chemistry-real-schema.mjs prints this key); re-read live after the apply and re-key if the chain differs. NO-COST. Admin only (_product_parent_require_admin first). Same chain as preview_active_ingredient_change: _edit_active_ingredient locks products rows and serializes text and uuid arrays, never a product row. It returns the ingredient's values, changed field names and affected parents; no cost, price or margin field. Audit reference: docs/audits/2026-11-02-cost-margin-definer-function-audit.md. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
       "dated": "2026-11-07"
     },

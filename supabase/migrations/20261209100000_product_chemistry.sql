@@ -1953,13 +1953,17 @@ DECLARE
   v_result jsonb;
   v_refusal text;
 BEGIN
+  -- Lock first (as the writer does), so "before", the fingerprint and the rehearsal all read one state.
+  v_parents := public._ingredient_usage_parents(p_ingredient_id);
+  PERFORM public._lock_ingredient_parents(v_parents);
+  PERFORM pg_advisory_xact_lock(hashtext('crx.active_ingredients'));
   SELECT * INTO v_row FROM public.active_ingredients WHERE id = p_ingredient_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'INGREDIENT_NOT_FOUND'; END IF;
+  IF public._ingredient_usage_parents(p_ingredient_id) IS DISTINCT FROM v_parents THEN
+    RAISE EXCEPTION 'INGREDIENT_USAGE_CHANGED: the products using % changed while previewing; preview again', v_row.name;
+  END IF;
   v_fingerprint := public._ingredient_usage_fingerprint(p_ingredient_id, p_fields);
-  v_parents := public._ingredient_usage_parents(p_ingredient_id);
   BEGIN
-    PERFORM public._lock_ingredient_parents(v_parents);
-    PERFORM pg_advisory_xact_lock(hashtext('crx.active_ingredients'));
     v_result := public._edit_active_ingredient(p_ingredient_id, p_fields, NULL, NULL, true);
     RAISE EXCEPTION 'CRX_PREVIEW_ROLLBACK' USING ERRCODE = 'P0099';
   EXCEPTION
@@ -2008,6 +2012,12 @@ BEGIN
   IF p_ingredient_id IS NULL THEN
     IF p_fields IS NULL OR jsonb_typeof(p_fields) IS DISTINCT FROM 'object' OR p_fields ? 'ingredient_id' THEN
       RAISE EXCEPTION 'INGREDIENT_ENTRY_INVALID: describe the new ingredient';
+    END IF;
+    IF EXISTS (SELECT 1 FROM jsonb_object_keys(p_fields) k(key)
+                WHERE k.key NOT IN ('name', 'cas', 'canonical_ingredient_id', 'canonical_fraction', 'fraction_basis', 'is_parent_form')) THEN
+      RAISE EXCEPTION 'INGREDIENT_ENTRY_INVALID: % is not an ingredient field',
+        (SELECT string_agg(k.key, ', ' ORDER BY k.key) FROM jsonb_object_keys(p_fields) k(key)
+          WHERE k.key NOT IN ('name', 'cas', 'canonical_ingredient_id', 'canonical_fraction', 'fraction_basis', 'is_parent_form'));
     END IF;
     v_res := public._resolve_active_ingredient(p_fields);
     SELECT * INTO v_row FROM public.active_ingredients WHERE id = (v_res->>'ingredient_id')::uuid;

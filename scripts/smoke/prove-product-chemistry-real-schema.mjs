@@ -324,6 +324,7 @@ const saveI = (iid, fields, reason = null, evidence = null, o = {}) => {
 const createI = (fields, k = key()) => `SELECT public.save_active_ingredient(NULL, NULL, NULL, ${J(fields)}, NULL, NULL, ${q(k)});`;
 const ing = (name, value, extra = {}) => ({ kind: 'ingredient', name, strength_value: value, strength_unit: 'lb_per_gal',
   strength_basis: 'active_ingredient', source: 'label', ...extra });
+const DM1_FUNCTIONS = [...new Set([...lf(CANDIDATE).matchAll(/^CREATE FUNCTION public\.(\w+)\(/gm)].map((m) => m[1]))];
 const DM1_TABLES = ['active_ingredients', 'active_ingredient_events', 'product_parent_ingredients', 'product_parent_modes_of_action',
   'product_parent_fertilizer_analysis', 'product_parent_chemistry_state', 'product_chemistry_events', 'product_parent_cost_reference'];
 const dm1FunctionsMd5 = () => owner(`SELECT md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' ORDER BY p.oid::regprocedure::text))
@@ -451,20 +452,13 @@ async function main() {
   assert.equal(owner(`SELECT provolatile FROM pg_proc WHERE oid = 'public._approved_parent_lb_per_gal(uuid)'::regprocedure;`), 's', 'the refused apply rolled back');
   const imSample = owner(`SELECT string_agg(column_name, ',') FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ingredient_map' AND is_nullable = 'NO' AND column_default IS NULL;`);
   console.log(`[prover] ingredient_map required columns: ${imSample || '(none)'}`);
-  stageText('pre-map.sql', `INSERT INTO public.ingredient_map DEFAULT VALUES;\n\\i /tmp/cand.sql`);
+  const imFill = imSample ? imSample.split(',') : [];
+  const imSeed = imFill.length === 0 ? 'INSERT INTO public.ingredient_map DEFAULT VALUES;'
+    : `INSERT INTO public.ingredient_map (${imFill.join(',')}) VALUES (${imFill.map((c) => owner(`SELECT CASE data_type WHEN 'uuid' THEN 'gen_random_uuid()' WHEN 'numeric' THEN '1' WHEN 'integer' THEN '1'
+      WHEN 'boolean' THEN 'false' ELSE '''x''' END FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ingredient_map' AND column_name = '${c}';`)).join(',')});`;
+  stageText('pre-map.sql', `${imSeed}\n\\i /tmp/cand.sql`);
   r = apply('pre-map.sql');
-  assert.notEqual(r.status, 0);
-  if (!/PREFLIGHT_DM1_INGREDIENT_MAP_NOT_EMPTY/.test(r.output)) {
-    // A table with required columns refuses DEFAULT VALUES; seed one row by hand instead.
-    assert.match(r.output, /null value|violates/, r.output);
-    const fill = owner(`SELECT string_agg(column_name, ',') FROM information_schema.columns WHERE table_schema = 'public'
-      AND table_name = 'ingredient_map' AND is_nullable = 'NO' AND column_default IS NULL;`).split(',');
-    const vals = fill.map((c) => owner(`SELECT CASE data_type WHEN 'uuid' THEN 'gen_random_uuid()' WHEN 'numeric' THEN '1' WHEN 'integer' THEN '1'
-      WHEN 'boolean' THEN 'false' ELSE '''x''' END FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ingredient_map' AND column_name = '${c}';`));
-    stageText('pre-map.sql', `INSERT INTO public.ingredient_map (${fill.join(',')}) VALUES (${vals.join(',')});\n\\i /tmp/cand.sql`);
-    r = apply('pre-map.sql');
-    assert.match(r.output, /PREFLIGHT_DM1_INGREDIENT_MAP_NOT_EMPTY/, r.output);
-  }
+  assert.match(r.output, /PREFLIGHT_DM1_INGREDIENT_MAP_NOT_EMPTY/, r.output);
   assert.equal(owner('SELECT count(*) FROM public.ingredient_map;'), '0');
   assert.equal(owner("SELECT to_regclass('public.active_ingredients') IS NULL;"), 't', 'a refused apply leaves no object');
   console.log('[prover] preflight: a wrong-shaped or volatile DM-2 weight function, and a row in ingredient_map, each refuse the apply and leave nothing');
@@ -514,8 +508,9 @@ async function main() {
   }
   const fnRows = owner(`SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef
     AND (p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp'] OR pg_get_userbyid(p.proowner) <> 'postgres')
-    AND p.oid IN (SELECT objid FROM pg_depend WHERE false) ;`);
-  assert.equal(fnRows, '0');
+    AND p.proname = ANY(${q('{' + DM1_FUNCTIONS.join(',') + '}')}::text[]);`);
+  assert.equal(fnRows, '0', 'every DM-1 definer function is owned by postgres with the pinned search_path');
+  assert.ok(DM1_FUNCTIONS.length >= 39, 'the candidate function list was read');
   const PUBLIC_RPCS = ['set_parent_chemistry(uuid,bigint,jsonb,text)', 'preview_parent_chemistry_correction(uuid,jsonb)',
     'correct_parent_chemistry(uuid,bigint,text,jsonb,text,text,text)', 'preview_active_ingredient_change(uuid,jsonb)',
     'save_active_ingredient(uuid,integer,text,jsonb,text,text,text)', 'retire_active_ingredient(uuid,integer,text,text)',
@@ -549,7 +544,7 @@ async function main() {
   refused(OWNER, 'INSERT INTO public.ingredient_map DEFAULT VALUES;', /INGREDIENT_MAP_RETIRED/);
   // UPDATE/DELETE on an empty table fire no row trigger; seed a row with the trigger off, then try each.
   psql(`ALTER TABLE public.ingredient_map DISABLE TRIGGER ingredient_map_read_only;
-    ${imSample ? '' : 'INSERT INTO public.ingredient_map DEFAULT VALUES;'}
+    ${imSeed}
     ALTER TABLE public.ingredient_map ENABLE TRIGGER ingredient_map_read_only;`);
   assert.equal(owner('SELECT count(*) FROM public.ingredient_map;'), '1');
   {
@@ -784,6 +779,7 @@ async function main() {
     refused(OWNER, `INSERT INTO public.active_ingredients (name, canonical_ingredient_id, canonical_fraction, fraction_basis, created_by, updated_by) VALUES ('t', '${glyAcid}', ${bad}, 'acid_equivalent', '${ADMIN}', '${ADMIN}');`, /violates check constraint/);
   }
   // Luna round 1: wrongly typed input is refused by name, never dropped; an edit obeys D-AA-3; at most 10 decimals.
+  refused(ADMIN, createI({ name: 'Acid typo', cas: '1071-83-6', is_parent_fom: true }), /INGREDIENT_ENTRY_INVALID: is_parent_fom is not an ingredient field/);
   refused(ADMIN, createI({ name: 'Typed canon', canonical_ingredient_id: 42 }), /CHEMISTRY_CHANGE_INVALID: canonical_ingredient_id must be an ID/);
   refused(ADMIN, setC(PDUP1, [ing('Note test', 1, { source_note: 5 })]), /CHEMISTRY_SOURCE_INVALID: the source note must be text/);
   const editConflict = prevI(mystery, { canonical_ingredient_id: glyAcid });

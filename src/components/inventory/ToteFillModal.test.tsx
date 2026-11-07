@@ -70,7 +70,7 @@ describe('fill a tote from bulk', () => {
   it('when stock changed since the preview, shows the new preview and records nothing until confirmed again', async () => {
     mockPreview.mockResolvedValueOnce(preview({ bulk_before: 300, bulk_after: 35 }))
       .mockResolvedValueOnce(preview({ bulk_before: 35, bulk_after: -230, shortfall: 230 }));
-    mockFill.mockRejectedValueOnce({ message: 'TOTE_FILL_PREVIEW_CHANGED: stock, units, source or catalog cost changed since the preview; preview again' });
+    mockFill.mockRejectedValueOnce({ code: 'P0001', message: 'TOTE_FILL_PREVIEW_CHANGED: stock, units, source or catalog cost changed since the preview; preview again' });
     const onFilled = vi.fn();
     open(onFilled);
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
@@ -80,6 +80,40 @@ describe('fill a tote from bulk', () => {
     expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Nothing was saved'));
     expect(onFilled).not.toHaveBeenCalled();
     expect(mockFill).toHaveBeenCalledTimes(1);
+  });
+
+  it('when the answer is lost, only resends the same preview with the same key, so it cannot fill twice', async () => {
+    const shown = preview();
+    mockPreview.mockResolvedValue(shown);
+    mockFill.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ fill_id: 'f1', bulk_unit: 'Gal', bulk_quantity: 265, bulk_after: 735, tote_after: 1, shortfall: 0, requires_review: false });
+    const onFilled = vi.fn();
+    open(onFilled);
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Fill Tote' }));
+    const retry = await screen.findByRole('button', { name: 'Try Again' });
+    expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('will not fill twice'));
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled();
+    expect(screen.getByLabelText('Totes to fill')).toBeDisabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(onFilled).toHaveBeenCalled());
+    expect(mockFill).toHaveBeenCalledTimes(2);
+    expect(mockFill.mock.calls[1]).toEqual(mockFill.mock.calls[0]);
+    expect(mockPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it('closing after a lost answer refreshes the counts', async () => {
+    mockPreview.mockResolvedValue(preview());
+    mockFill.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const onFilled = vi.fn();
+    const onClose = vi.fn();
+    open(onFilled, onClose);
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Fill Tote' }));
+    await screen.findByRole('button', { name: 'Try Again' });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onFilled).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('shows a refusal by name and keeps the dialog open', async () => {

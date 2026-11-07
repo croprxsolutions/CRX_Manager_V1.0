@@ -1,4 +1,5 @@
 import { assertRpcResult, supabaseUntyped } from './db';
+import { fetchAllRows } from './pagedRead';
 
 // BLK-1a (20261117130000_tote_fill_from_bulk): fill a fertilizer tote from its Bulk, quantities only.
 // The database checks the tote, its source, its units and the stock; these RPCs are not in the
@@ -71,22 +72,25 @@ export async function reverseToteFill(fillId: string, reason: string, key: strin
 
 /** Tote sizes that have a Bulk fill source. The database still refuses any that may not be filled now. */
 export async function listFillableToteIds(): Promise<Set<string>> {
-  const { data, error } = await supabaseUntyped
+  const { data, error } = await fetchAllRows<{ product_id: string }>((from, to) => supabaseUntyped
     .from('product_parent_members')
-    .select('product_id')
+    .select('id, product_id', { count: 'exact' })
     .eq('size_role', 'fixed_tote')
-    .not('fill_source_product_id', 'is', null);
+    .not('fill_source_product_id', 'is', null)
+    .order('id')
+    .range(from, to));
   if (error) throw error;
   return new Set(((data ?? []) as { product_id: string }[]).map((row) => row.product_id));
 }
 
 export async function listToteFills(toteProductId: string): Promise<ToteFillRow[]> {
-  const { data, error } = await supabaseUntyped
+  const { data, error } = await fetchAllRows<ToteFillRow>((from, to) => supabaseUntyped
     .from('tote_fills')
-    .select('id, totes, bulk_unit, bulk_quantity, shortfall_quantity, reverses_fill_id, reason, created_at')
+    .select('id, totes, bulk_unit, bulk_quantity, shortfall_quantity, reverses_fill_id, reason, created_at', { count: 'exact' })
     .eq('tote_product_id', toteProductId)
     .order('created_at', { ascending: false })
-    .limit(20);
+    .order('id')
+    .range(from, to));
   if (error) throw error;
   return (data ?? []) as ToteFillRow[];
 }

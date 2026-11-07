@@ -6,6 +6,7 @@ import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
+import { isDefinitiveRpcRejection } from '../../lib/idempotency';
 import { formatCents } from '../../lib/money';
 import { fillToteFromBulk, previewToteFill, type ToteFillPreview } from '../../lib/toteFill';
 
@@ -32,6 +33,9 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
   const [totes, setTotes] = useState('1');
   const [preview, setPreview] = useState<ToteFillPreview | null>(null);
   const [busy, setBusy] = useState(false);
+  // A fill whose answer was lost: it may have saved. Only the same preview and key may be resent,
+  // so the database returns the first result instead of filling twice.
+  const [unsure, setUnsure] = useState(false);
   const { getKey, resetKey } = useIdempotencyKey('fill_tote_from_bulk', profileId, JSON.stringify(preview));
 
   const toteCount = /^\d{1,4}$/.test(totes.trim()) ? Number(totes.trim()) : NaN;
@@ -62,6 +66,12 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
       onFilled();
       onClose();
     } catch (error) {
+      if (!isDefinitiveRpcRejection(error)) {
+        setUnsure(true);
+        toast('error', 'Could not tell whether the fill saved. Press Try Again: it will not fill twice.');
+        return;
+      }
+      setUnsure(false);
       toast('error', sanitizeError(error));
       if (hasRpcCode(error, RpcErrorCodes.TOTE_FILL_PREVIEW_CHANGED)) {
         // Show what would be recorded now; the admin confirms again only after seeing it.
@@ -74,8 +84,11 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
     }
   };
 
+  // Closing on an unknown outcome refreshes the counts, so a fill that did save shows up.
+  const close = () => { if (unsure) onFilled(); onClose(); };
+
   return (
-    <Modal open onClose={onClose} closeDisabled={busy} title="Fill Tote" accent="from Bulk">
+    <Modal open onClose={close} closeDisabled={busy} title="Fill Tote" accent="from Bulk">
       <div className="space-y-4">
         <p className="text-sm text-secondary">{toteName}</p>
         <div className="flex items-end gap-2">
@@ -85,11 +98,11 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
             min={1}
             step={1}
             value={totes}
-            disabled={busy}
+            disabled={busy || unsure}
             onChange={(e) => { setTotes(e.target.value); setPreview(null); }}
             error={totes.trim() !== '' && !totesValid ? 'Whole totes only, 1 or more' : undefined}
           />
-          <Button variant="secondary" onClick={loadPreview} loading={busy && !shown} disabled={!totesValid || busy}>
+          <Button variant="secondary" onClick={loadPreview} loading={busy && !shown} disabled={!totesValid || busy || unsure}>
             Preview
           </Button>
         </div>
@@ -144,9 +157,9 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
         )}
 
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" showChevron={false} onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="secondary" showChevron={false} onClick={close} disabled={busy}>Cancel</Button>
           <Button onClick={confirm} loading={busy && Boolean(shown)} disabled={!shown || busy}>
-            {shown && shown.shortfall > 0 ? 'Fill Anyway' : 'Fill Tote'}
+            {unsure ? 'Try Again' : shown && shown.shortfall > 0 ? 'Fill Anyway' : 'Fill Tote'}
           </Button>
         </div>
       </div>

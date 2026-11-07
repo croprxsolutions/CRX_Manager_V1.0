@@ -611,7 +611,7 @@ void (`ORDER_VOIDED_DELIVERY_LOCKED`); nothing moves. Live 2026-11-04: 0 voided 
 voided orders. Proof: as KI-101.
 
 ### KI-105 — A quote's price tier is not checked against the customer's assigned tier
-**LOW · FIXED 2026-11-07 (PR #KI105PR, screens only, no migration) · quotes/pricing · To-Do 1.6**
+**LOW · FIXED 2026-11-07 (PR #1605, screens only, no migration) · quotes/pricing · To-Do 1.6**
 Quote Builder used to let any tier be picked with no warning. Now, when a quote's tier differs from the
 customer's assigned tier, the screen shows a note with "Use Tier N" and a "Quote at Tier M anyway" tick box, and
 Save is refused until one is chosen, for every role. Anyone may override the tier, so the database does not

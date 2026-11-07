@@ -133,7 +133,7 @@ describe('Sidebar', () => {
 
   it('hides a workspace entry when every sibling page is denied', () => {
     mockProfile.mockReturnValue({ id: '1', role: 'sales_rep', full_name: 'Sales Rep' });
-    const denied = new Set(['products', 'supplier-pricing', 'brand-vs-generic']);
+    const denied = new Set(['products', 'supplier-pricing', 'brand-vs-generic', 'group-products']);
     vi.mocked(hasPageAccess).mockImplementation((_role, _denied, pageKey) => !denied.has(pageKey));
     renderSidebar(true);
 

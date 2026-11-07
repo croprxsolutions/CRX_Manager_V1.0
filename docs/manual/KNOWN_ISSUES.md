@@ -391,6 +391,9 @@ can make old splits refuse to save (LOW-MED).
   midnight to 6 am Central).
 - Still open: statement and AR aging (batch 3, the ranges above), and `_sync_job_holds` counts a hold that expires
   today as expired from 6-7 pm Central (follow-up, with its hardening). MED.
+- Sol notes on the live batches (2026-11-07, deferred): reversing a write-off or credit application now checks both its
+  UTC and Chicago dates, so one made 7-11:59 pm Central on a month's last day cannot be reversed once that month is
+  closed; and the stale-quote call list compares whole 24-hour periods, so a quote reaches its N-day list hours late. LOW-MED.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**

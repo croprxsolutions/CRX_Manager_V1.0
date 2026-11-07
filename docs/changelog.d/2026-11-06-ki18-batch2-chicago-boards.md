@@ -12,3 +12,4 @@
   screens that use them (Mason, 2026-11-06).
 - Statement and AR aging ranges follow in batch 3.
 - Proof: `scripts/smoke/prove-ki18-batch2-chicago-boards-real-schema.mjs`.
+- Applied live 2026-11-06 (ledger `20261107053254`).

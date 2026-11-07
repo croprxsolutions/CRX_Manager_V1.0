@@ -375,7 +375,7 @@ can make old splits refuse to save (LOW-MED).
   changes rounding on every quote line, so it needs its own money PR. LOW.
 
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock
-**MED · OPEN · money/UI · unassigned (fixed parts: seasons, screens, blend-ticket year, dashboard aging and the invoice date limit; see below)**
+**MED · OPEN · money/UI · unassigned (fixed: seasons, screens, blend-ticket year, dashboard aging, the invoice date limit and the database "today" (PR #1579); open: statement and AR aging, evening hold expiry)**
 - Fixed 2026-11-06 by `20261121090000` (applied live, ledger `20261106152929`, PR #1560): blend-ticket numbers take
   the Chicago year; the Financial Dashboard's AR-aging strip uses the AR Aging page's ranges on the Chicago date; the
   database refuses an invoice date more than 365 days after the Chicago date. Earlier fixes: `20261103120000`
@@ -383,13 +383,14 @@ can make old splits refuse to save (LOW-MED).
 - Customer statements (`get_detailed_statement_data`) age by <=30 / 31-60 / 61-90 / 91-120 / >120 days; the AR Aging
   page uses 0-29 / 30-59 / 60-89 / 90-119 / 120+, so a 30-day-old invoice is "current" on the statement and 30-59 on
   AR Aging. Which ranges both use is Mason's decision (recommended: the AR Aging ones). MED.
-- The live database clock is UTC, so from 6-7 pm Central `CURRENT_DATE` is tomorrow. PR #1579
-  (`20261204100000` and `20261204110000`, local candidates) moves 30 money, compliance and stock functions (period
-  checks, commission dates, default quote expiry, AR reminders, license and RUP dates, hold and stock checks, default
-  bill, payment and delivery dates) and 13 boards and reports to the Chicago date. The overnight overdue, quote-expiry
-  and morning-notice jobs need no change (they run midnight to 6 am Central). Still on the UTC date: `_sync_job_holds`
-  counts a hold that expires today as expired from 6-7 pm Central (follow-up, with its hardening), and statement and AR
-  aging (batch 3). MED.
+- Fixed 2026-11-06 by PR #1579: `20261204100000` (applied live, ledger `20261107041703`) moves 33 money,
+  compliance and stock functions (period checks, commission dates, default quote expiry, AR reminders, license and RUP
+  dates, hold and stock checks, default bill, payment and delivery dates) and `20261204110000` (applied live, ledger
+  `20261107053254`) moves 13 boards and reports to the Chicago date; the database clock is UTC, so from 6-7 pm Central
+  `CURRENT_DATE` was tomorrow. The overnight overdue, quote-expiry and morning-notice jobs need no change (they run
+  midnight to 6 am Central).
+- Still open: statement and AR aging (batch 3, the ranges above), and `_sync_job_holds` counts a hold that expires
+  today as expired from 6-7 pm Central (follow-up, with its hardening). MED.
 
 ### KI-19 — Accounting-month close: edits racing a close (fixed by `20261103220000`)
 **HIGH-risk lane, dormant · FIXED LIVE (2026-11-03, PR #1327) · money**

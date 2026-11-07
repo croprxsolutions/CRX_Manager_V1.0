@@ -12,3 +12,6 @@
 - Nothing else in those functions changes. Boards and reports (batch 2) ship in the same PR; statement and AR aging
   ranges in batch 3.
 - Proof: `scripts/smoke/prove-ki18-batch1-chicago-today-real-schema.mjs`.
+- Applied live 2026-11-06 (ledger `20261107041703`). The RUP smoke chain's test license now has an issue date, and
+  six actor-forgery allowlist pins plus the reversal-helper pin in `return-credit-intent-binding` follow the new
+  one-line date bodies.

@@ -63,6 +63,20 @@ if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --pins
   done
 fi
 
+# A schema registry refresh or an APPLIED LIVE record flip changes which migrations the contract
+# tests discover; it failed CI three times despite a written rule (PR #1606, 2026-11-07 retro).
+if [ "$(printf '%s
+' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --registry)" = "check" ]; then
+  echo ""
+  echo "Running the contract tests the schema registry feeds..."
+  if ! npx vitest run src/lib/rpcContracts.test.ts src/lib/costFields.test.ts 2>&1; then
+    echo ""
+    echo "❌ CONTRACT TESTS FAILED — push blocked."
+    echo "A refresh that passes an applied migration: add its stamp to MIGRATIONS_AWAITING_TYPE_REGENERATION in src/lib/rpcContracts.test.ts."
+    exit 1
+  fi
+fi
+
 # Tests that read an Edge Function's source break when it changes (PR #1515 found out in CI).
 EDGE_TESTS="$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --edge-tests)"
 if [ -n "$EDGE_TESTS" ]; then

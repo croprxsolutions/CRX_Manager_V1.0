@@ -463,9 +463,13 @@ function main() {
 
   for (const [at, label, utc, chicago] of BOUNDARIES) {
     const got = scalar(`SET TimeZone = 'UTC'; SELECT ('${at}'::timestamptz)::date::text || ' ' || ('${at}'::timestamptz AT TIME ZONE 'America/Chicago')::date::text
-      || ' ' || public.compute_season(('${at}'::timestamptz AT TIME ZONE 'America/Chicago')::date);`);
-    const [gotUtc, gotChicago, season] = got.split(' ');
+      || ' ' || public.compute_season(('${at}'::timestamptz AT TIME ZONE 'America/Chicago')::date)
+      || ' ' || (public.compute_season(('${at}'::timestamptz AT TIME ZONE 'America/Chicago')::date) <> public.compute_season(('${at}'::timestamptz)::date))::text;`);
+    const [gotUtc, gotChicago, season, seasonsDiffer] = got.split(' ');
     assert.equal(gotUtc, utc, `${label}: UTC date`); assert.equal(gotChicago, chicago, `${label}: Chicago date`);
+    // Seasons run Oct 1 - Sep 30, so the UTC and Chicago seasons differ exactly when Oct 1 falls between the two dates.
+    const seasonYear = (d) => Number(d.slice(0, 4)) + (d.slice(5) >= '10-01' ? 1 : 0);
+    assert.equal(seasonsDiffer === 'true', seasonYear(utc) !== seasonYear(chicago), `${label}: compute_season differs only across Oct 1`);
     console.log(`[prover] ${label.padEnd(48)} old CURRENT_DATE ${gotUtc}  new ${gotChicago}  season ${season}`);
   }
   assert.equal(scalar(`SELECT public.compute_season('2026-09-30'::date) <> public.compute_season('2026-10-01'::date);`), 't', 'season changes on Oct 1');

@@ -152,16 +152,20 @@ const VIEWS_NOT_IN_REGISTRY: Record<string, string> = {
 //   and must be listed in COLUMN_CHECK_EXEMPT;
 // - every `.order('<col>')`, except one with a `referencedTable` /
 //   `foreignTable` option (it sorts an embedded table);
-// - every plain column in the literal text of `.select(...)`, `col::cast` and
-//   `col->json` reduced to `col`.
+// - every plain column in the literal text of each `.select(...)`, with
+//   `label:col`, `col::cast` and `col->json` reduced to `col`.
 // Skipped in `.select`: `*`, embedded relations (anything with parentheses,
-// e.g. `customer:customers(farm_name)`, `...rel(col)`), aliases (`a:b`), and
-// interpolated or constant parts (`${PRODUCT_COLUMNS}`, `.select(COLS)`),
-// which are shared column lists rather than call-site text.
+// e.g. `customer:customers(farm_name)`, `...rel(col)`: the related table is
+// named by relation, not table), and interpolated or constant parts
+// (`${PRODUCT_COLUMNS}`, `.select(COLS)`), which are shared column lists
+// rather than call-site text. shortcut: those forms stay unchecked; resolve
+// the constants and relations if one of them ever breaks a read.
 function selectedColumns(callback: string): string[] {
-  const arg = callback.match(/\.select\(\s*(['"`])([\s\S]*?)\1/);
-  if (!arg) return [];
-  const text = arg[2].replace(/\$\{[^}]*\}/g, '');
+  return [...callback.matchAll(/\.select\(\s*(['"`])([\s\S]*?)\1/g)].flatMap((arg) => selectListColumns(arg[2]));
+}
+
+function selectListColumns(selectText: string): string[] {
+  const text = selectText.replace(/\$\{[^}]*\}/g, '');
   const parts: string[] = [];
   let depth = 0;
   let current = '';
@@ -176,8 +180,9 @@ function selectedColumns(callback: string): string[] {
   parts.push(current);
   return parts
     .map((part) => part.trim())
-    .filter((part) => part && part !== '*' && !part.includes('(') && !/(^|[^:]):(?!:)/.test(part))
-    .map((part) => part.split(/::|->/)[0].trim());
+    .filter((part) => part && part !== '*' && !part.includes('('))
+    // `label:col` renames col: check col (the text after the alias colon, not a `::` cast).
+    .map((part) => part.replace(/^[^:]*[^:]:(?!:)/, '').split(/::|->/)[0].trim());
 }
 
 type ColumnSite = CallSite & { table: string | null; columns: string[] };

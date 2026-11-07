@@ -180,6 +180,8 @@ Each guard first checks whether the seed has committed (a `seeded` event exists,
 
 ### 4.D Guards and insert paths
 
+**Before the seed, every re-issue below runs today's body unchanged** (no registration exists, `p_new_registration` is ignored, numbers are written as today), so creating a size or brand with a new number works exactly as now; the registration rules apply only once seeded.
+
 - The guards in 3.3 (inert until seeded) and `_epa_registrations_seeded()`.
 - Re-issues, each from its body on `main` at build time, all taking the exclusive shared lock first:
   - `upsert_product_brand`, `upsert_parent_brand`: lock the registration before the parent; facts from the registration; a number change on an existing brand refused (`EPA_REGISTRATION_ASSIGN`); a new brand number with no registration needs `p_new_registration`.
@@ -381,5 +383,6 @@ Migration stamps in this project run ahead of the calendar; the stamps above are
 | 2026-11-06 | gpt-6-luna xhigh, simpler-rule round 5 | 716567228 | 1 HIGH | fixed (instead of the round 4 refutation): an increase is refused when the registration version changed or the product had any assignment since the capture, so a change that was reversed is caught |
 | 2026-11-06 | gpt-6-luna xhigh, simpler-rule round 6 | 2af7fe422 | 1 HIGH, 2 MED | fixed: create and assign re-base the pending draft's target; numberless lines compare current facts on an increase; grouped numberless sizes point to the parent |
 | 2026-11-06 | gpt-6-luna xhigh, simpler-rule round 7 | ae309aae9 | 2 HIGH, 1 MED, 1 LOW | fixed: grouped records count only lines that need a record; a blocked numberless line is replaced; cancelled warning on invoice-line add. Refuted: invoice saves already keep retry keys (`InvoiceDetail.tsx:132-138`, `useIdempotencyKey`), which REG-1 does not change |
-| _pending_ | Luna, then Sol, on the simpler seed rule | | | |
+| 2026-11-06 | gpt-6-luna xhigh, simpler-rule round 8 | 05b331ea9 | 1 MED | fixed: part D re-issues run today's body until seeded. No BLOCKER or HIGH |
+| _pending_ | Sol (advisory) on the simpler seed rule | | | |
 

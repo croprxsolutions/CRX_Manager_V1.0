@@ -5,7 +5,8 @@ import type { ProductWeightKind, ProductWeightNoneReason, WeightUnitFactors } fr
 /** What a line's weight is computed from: a catalog weight, a ticket snapshot, or why there is none. */
 export interface WeightBasis {
   kind: ProductWeightKind;
-  none_reason?: ProductWeightNoneReason | 'unlinked' | 'not_recorded' | null;
+  /** none_at_save: a saved ticket line whose product had no parent or no approved weight when the ticket was saved. */
+  none_reason?: ProductWeightNoneReason | 'unlinked' | 'not_recorded' | 'none_at_save' | null;
   lb_per_unit?: number | null;
   /** density: Gal; net_weight and unit_weight: the size's stock unit. */
   per_unit?: string | null;
@@ -31,6 +32,7 @@ function noneReason(name: string, reason: WeightBasis['none_reason'] | undefined
     case 'not_recorded': return `${name}'s weight was not recorded for this ticket`;
     case 'no_parent': return `put ${name} in a parent to record its weight`;
     case 'no_approved_weight': return `${name} has no approved weight yet`;
+    case 'none_at_save': return `${name} had no approved weight when this ticket was saved`;
     case 'seed_or_each': return "weight isn't tracked for seed or each products";
     case 'unknown_form': return `${name} has no form set`;
     case 'unit_not_convertible': return `${name}'s stock unit is not a weight or count unit, so it has no weight`;

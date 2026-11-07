@@ -43,6 +43,12 @@ describe('resolveTicketLines', () => {
     expect(resolveTicketLines([line({ id: 'new', product_id: 'p3' })], { saved, current: null })[0].text).toBe('TEST P: weights unavailable');
   });
 
+  it('says a saved "no weight" line had none when saved, even after a weight is approved today', () => {
+    const none = { ...snap(8), weight_kind: 'none' as const, lb_per_unit: null, value_id: null, none_reason: 'no_approved_weight' as const };
+    const savedNone = { ...saved, lines: [{ ...saved.lines[0], weight: none }] };
+    expect(resolveTicketLines([line({})], { saved: savedNone, current })[0].text).toBe('TEST P had no approved weight when this ticket was saved');
+  });
+
   it('withholds the total with each reason', () => {
     const lines = resolveTicketLines([line({}), line({ id: 'x', product_id: null, product_name: 'TEST U' })], { saved, current });
     expect(totalWeightText(lines)).toBe('Total product weight not shown: TEST U is not linked to a product, so it has no weight');

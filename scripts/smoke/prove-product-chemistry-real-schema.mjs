@@ -576,7 +576,14 @@ async function main() {
     assert.equal(fig(costs(PPCT).parent_figures, 'Pct active').reason, reason, `weight ${lb}`);
   }
   density(PPCT, 10);
-  console.log('[prover] DM-2 live: a draft weight gives DENSITY_NOT_APPROVED; stand-in 10 lb/gal gives 1200 cents; 0, NaN, 21 and a missing row ID give DENSITY_INVALID');
+  // Actives heavier than the product (2.5 + 12 lb in a 10 lb gallon) refuse every figure, fertilizer included (Codex App).
+  ok(ADMIN, setC(PPCT, [ing('Heavy active', 12), { kind: 'fertilizer', nutrient: 'N', basis: 'elemental', percent: 10, source: 'label' }]));
+  const heavy = costs(PPCT).parent_figures;
+  assert.equal(heavy.length, 3, JSON.stringify(heavy));
+  for (const f of heavy) assert.equal(f.figure.reason, 'STRENGTH_EXCEEDS_DENSITY', JSON.stringify(f));
+  ok(ADMIN, corrC(PPCT, [{ kind: 'ingredient', action: 'retire', row_id: rowId(PPCT, ingId('Heavy active')) }]));
+  assert.equal(fig(costs(PPCT).parent_figures, 'N').cents !== undefined, true, 'with the heavy row gone the fertilizer figure computes');
+  console.log('[prover] DM-2 live: a draft weight gives DENSITY_NOT_APPROVED; stand-in 10 lb/gal gives 1200 cents; 0, NaN, 21 and a missing row ID give DENSITY_INVALID; actives heavier than the product refuse every figure, fertilizer included');
 
   // ---- Hand-checked cost cases.
   const glyAcid = js(ADMIN, createI({ name: 'Glyphosate', cas: '1071-83-6', is_parent_form: true })).ingredient.id;

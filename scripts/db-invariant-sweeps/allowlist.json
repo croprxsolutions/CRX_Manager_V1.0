@@ -1789,7 +1789,7 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_parent_active_costs(p_parent_id uuid)#7265ba3169fa",
+      "violation_key": "get_parent_active_costs(p_parent_id uuid)#cc87394d0c8e",
       "justification": "New in 20261209100000_product_chemistry (DM-1), read 2026-11-07 on the disposable real-schema proof database (scripts/smoke/prove-product-chemistry-real-schema.mjs prints this key); re-read live after the apply and re-key if the chain differs. ADMIN-ONLY BY DESIGN (Mason, CMP-1: cost per lb of active is admin only). SECURITY DEFINER; its first statement (DECLARE) is _product_parent_require_admin(), so a non-admin or inactive profile is refused before any read. It returns the parent's cost per lb of active in exact whole cents from products.current_cost (via _parent_active_cost_rows and _size_cost_per_base), and nothing else from a cost-bearing table. Audit reference: docs/audits/2026-11-02-cost-margin-definer-function-audit.md. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
       "dated": "2026-11-07"
     },

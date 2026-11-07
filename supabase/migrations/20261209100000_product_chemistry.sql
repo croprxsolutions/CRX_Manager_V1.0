@@ -1395,7 +1395,8 @@ BEGIN
         v_reason := 'STRENGTH_UNKNOWN';
       ELSIF v_r.unit = 'lb_per_gal' AND v_form <> 'liquid' THEN
         v_reason := 'STRENGTH_UNIT_MISMATCH';
-      ELSIF v_form = 'liquid' AND v_exceeds AND v_r.kind = 'ingredient' THEN
+      -- Every figure of the parent, fertilizer rows included, is refused when the actives outweigh the product (sheet section 4).
+      ELSIF v_form = 'liquid' AND v_exceeds THEN
         v_reason := 'STRENGTH_EXCEEDS_DENSITY';
       ELSIF v_form = 'liquid' AND v_r.unit = 'pct_ww' AND v_density_reason IS NOT NULL THEN
         v_reason := v_density_reason;

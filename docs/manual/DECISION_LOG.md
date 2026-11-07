@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-06 — Sol skips the wait for an idle Codex App, and counts its rounds
+
+**Decision (Mason, PR 1524 retro: "do item 1 and 2"):** the Sol pre-flight no longer waits up to 15 minutes for the Codex GitHub App when the App reviewed none of the PR's last 3 pushes, and every full Sol run prints "Sol round N on PR #n".
+**Why:** on PR 1524 the App had stopped reviewing after `c5d7113e8`, yet each Sol round still waited 15 minutes for it; and about 6 rounds went into one rounding mechanism before Mason was asked the trade-off, because no one could see the count.
+**What this forbids/implies:** the wait stays when the App reviewed any of the last 3 pushes or the PR has fewer than 3. From round 3 the wrapper points at the AGENTS.md stop rule (same mechanism a 3rd time: stop and ask Mason the trade-off). A pre-commit control-character check was proposed in the same retro and NOT approved.
+
 ## 2026-11-06 — Sprayed jobs lock each product's EPA number (lock per product)
 
 **Decision (Mason, 2026-11-06: "Yes, lock per product"):** once a job is sprayed (spray record saved) or finished, every product already on that job keeps the EPA number the job recorded for it, however its line is edited, deleted or re-added; only a product never on the job takes the product's current number (and then keeps it). On a conflict the older number wins. The lock survives a spray record being deleted and re-entered. Migration 20261202140000, PR #1584.

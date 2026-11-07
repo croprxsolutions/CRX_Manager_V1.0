@@ -275,13 +275,17 @@ const RUP_SWAPS = [
   ['CURRENT_DATE, v_item.product_name', `${RUP_SALE}, v_item.product_name`],
   ['SELECT al.license_number, al.license_type, al.expiry_date', 'SELECT al.license_number, al.license_type, al.expiry_date, al.issued_date'],
   // Prefer a license that covers the sale; fall back to the latest expiry only when none does (Codex App, PR 1579).
-  ['ORDER BY al.expiry_date DESC NULLS LAST', `ORDER BY ((al.issued_date IS NULL OR al.issued_date <= ${RUP_SALE})`
+  ['ORDER BY al.expiry_date DESC NULLS LAST', `ORDER BY ((al.issued_date IS NOT NULL AND al.issued_date <= ${RUP_SALE})`
     + ' AND al.expiry_date >= GREATEST(v_invoice.invoice_date, CURRENT_DATE)) DESC, al.expiry_date DESC NULLS LAST'],
   // The license must be unexpired on the invoice date and today, and issued by the sale date.
+  // Mason 2026-11-06: a license with no issue date on file warns ("issue date unknown").
   ['v_license.expiry_date < CURRENT_DATE', 'v_license.expiry_date < GREATEST(v_invoice.invoice_date, CURRENT_DATE)'],
   ["v_compliance_notes := 'Applicator license expired on ' || v_license.expiry_date::text;",
     "v_compliance_notes := 'Applicator license expired on ' || v_license.expiry_date::text;\n"
-    + `    ELSIF v_license.issued_date IS NOT NULL AND v_license.issued_date > ${RUP_SALE} THEN\n`
+    + '    ELSIF v_license.issued_date IS NULL THEN\n'
+    + "      v_compliance_status := 'warning';\n"
+    + "      v_compliance_notes := 'Applicator license issue date unknown';\n"
+    + `    ELSIF v_license.issued_date > ${RUP_SALE} THEN\n`
     + "      v_compliance_status := 'warning';\n"
     + "      v_compliance_notes := 'Applicator license issued on ' || v_license.issued_date::text || ', after the sale date';"],
 ];
@@ -461,7 +465,7 @@ function main() {
     invoice_date: plusDays(startDay, 30), due_date: plusDays(startDay, 60), total_amount_cents: 10000, paid_amount_cents: 0, prepay_applied_cents: 0,
   });
   seedRow('invoice_items', { invoice_id: futureInvoice, product_id: rupProduct, quantity: 1, unit_size: 'gal', unit_price_cents: 10000, extended_cents: 10000 });
-  const license = (expiry, issued = null, invoice = futureInvoice) => scalar(`SET TimeZone = '${zone}'; SET request.jwt.claim.sub = '${ADMIN}'; BEGIN;
+  const license = (expiry, issued = '2026-01-01', invoice = futureInvoice) => scalar(`SET TimeZone = '${zone}'; SET request.jwt.claim.sub = '${ADMIN}'; BEGIN;
     SET LOCAL session_replication_role = replica;
     INSERT INTO public.applicator_licenses (customer_id, license_number, license_type, holder_name, expiry_date, issued_date, is_active)
       VALUES ('${ids.customer}', 'PROVER-1', 'private', '[PROVER] holder', '${expiry}', ${issued ? `'${issued}'` : 'NULL'}, true);
@@ -474,6 +478,8 @@ function main() {
   // Sol (PR 1579): a license issued after the sale date does not cover it.
   assert.equal(license('2027-12-31', '2026-10-01', rupInvoice), 'warning 2026-09-30', 'a license issued after the sale date must warn');
   assert.equal(license('2027-12-31', '2026-09-01', rupInvoice), 'compliant 2026-09-30', 'a license issued before the sale date is compliant');
+  // Mason 2026-11-06: no issue date on file is a warning, never compliant.
+  assert.equal(license('2027-12-31', null, rupInvoice), 'warning 2026-09-30', 'a license with no issue date must warn');
   // Two licenses: one covering the Sep 30 sale, one issued after it with a later expiry; the covering one wins.
   const two = scalar(`SET TimeZone = '${zone}'; SET request.jwt.claim.sub = '${ADMIN}'; BEGIN;
     SET LOCAL session_replication_role = replica;

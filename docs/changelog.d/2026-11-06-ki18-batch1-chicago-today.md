@@ -6,7 +6,7 @@
   dates, quote expiry, AR reminder day counts, applicator-license expiry, inventory holds and
   stock checks, and default delivery, bill and payment dates. Four column defaults change the same way.
   A RUP sale record carries the earlier of the invoice date and the posting day; its license must be
-  valid on the invoice date and today and issued by the sale date. Undoing a credit application or
+  valid on the invoice date and today and issued by the sale date (no issue date on file is a warning). Undoing a credit application or
   write-off is refused when its UTC or Chicago date falls in a closed month (3 more functions).
 - Nothing else in those functions changes. Boards and reports follow in batch 2; statement and AR aging
   ranges in batch 3.

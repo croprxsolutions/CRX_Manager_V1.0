@@ -74,7 +74,7 @@ BEGIN
     ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false'),
-    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', 'ee43ce8cb84bb48b116b5f08a568df2b', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '0cb155a27c654dd390a875c3ff3aa507', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_job_id uuid, p_actor uuid', 'p_job_id uuid, p_actor uuid'),
     ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_job_ids uuid[]', 'p_job_ids uuid[]'),
     ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_days_ahead integer DEFAULT 7', 'p_days_ahead integer DEFAULT 7'),
@@ -2546,7 +2546,7 @@ BEGIN
     FROM applicator_licenses al
     WHERE al.customer_id = v_invoice.customer_id
       AND al.is_active = true
-    ORDER BY ((al.issued_date IS NULL OR al.issued_date <= LEAST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date)) AND al.expiry_date >= GREATEST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date)) DESC, al.expiry_date DESC NULLS LAST
+    ORDER BY ((al.issued_date IS NOT NULL AND al.issued_date <= LEAST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date)) AND al.expiry_date >= GREATEST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date)) DESC, al.expiry_date DESC NULLS LAST
     LIMIT 1;
 
     IF v_license IS NULL OR v_license.license_number IS NULL THEN
@@ -2555,7 +2555,10 @@ BEGIN
     ELSIF v_license.expiry_date IS NOT NULL AND v_license.expiry_date < GREATEST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date) THEN
       v_compliance_status := 'warning';
       v_compliance_notes := 'Applicator license expired on ' || v_license.expiry_date::text;
-    ELSIF v_license.issued_date IS NOT NULL AND v_license.issued_date > LEAST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date) THEN
+    ELSIF v_license.issued_date IS NULL THEN
+      v_compliance_status := 'warning';
+      v_compliance_notes := 'Applicator license issue date unknown';
+    ELSIF v_license.issued_date > LEAST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date) THEN
       v_compliance_status := 'warning';
       v_compliance_notes := 'Applicator license issued on ' || v_license.issued_date::text || ', after the sale date';
     ELSE
@@ -6116,7 +6119,7 @@ BEGIN
     ('get_ar_reminder_candidates()', 'be574e829d67e9e4f26cf8b3c0a6f681', 'b7cf51451ae4f61d1ccc037f95042c16', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_enforce_applicator_license()', 'ae368db8df03ea3eec8f83ac6de01648', 'b393c688aa54bfa5ee4c47ed65d690fd', false, '{=X/postgres,anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', '', ''),
     ('_dispatch_job_locations_replay_impl_20261015(jsonb,uuid,text,boolean)', 'b6cafd947beaf19678d491e1832f1908', '0cea17840a2d04c414fa0acf136da817', true, '{postgres=X/postgres}', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false', 'p_assignments jsonb, p_performed_by uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text, p_license_override boolean DEFAULT false'),
-    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', 'ee43ce8cb84bb48b116b5f08a568df2b', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text'),
+    ('generate_rup_sales_records(uuid,text)', 'b3c5e302402b8f54f34a547f2c9ad3d3', '0cb155a27c654dd390a875c3ff3aa507', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text', 'p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text'),
     ('_sync_job_holds(uuid,uuid)', '4745c68bde10a1a3f6086d81669fb5dd', '805509441e8490adff6985dfeb43e2cc', true, '{postgres=X/postgres,service_role=X/postgres}', 'p_job_id uuid, p_actor uuid', 'p_job_id uuid, p_actor uuid'),
     ('get_dispatch_stock_status(uuid[])', '1ac19ae58f8fde6c34c87962701573d4', '29f717f1d7b43b168ce2d5c2e48de179', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_job_ids uuid[]', 'p_job_ids uuid[]'),
     ('get_job_inventory_shortfalls(integer)', '3dc25a19781765ac939e03c72d980ef1', '453a2460174a68d097e680dca79dc1aa', true, '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', 'p_days_ahead integer DEFAULT 7', 'p_days_ahead integer DEFAULT 7'),

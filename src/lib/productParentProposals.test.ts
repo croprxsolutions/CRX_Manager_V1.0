@@ -36,6 +36,8 @@ describe('approval drafts', () => {
     const g = group();
     expect(approvalProblems(g, { ...initialDraft(g), name: 'x'.repeat(200) })).toEqual([]);
     expect(approvalProblems(g, { ...initialDraft(g), name: 'x'.repeat(201) })).toEqual(['Shorten the parent name to 200 characters or fewer.']);
+    // Counted as the database counts: one character each, not two UTF-16 units.
+    expect(approvalProblems(g, { ...initialDraft(g), name: '\u{1F33E}'.repeat(150) })).toEqual([]);
   });
 
   it('names the other groups that share the EPA number, and none for a group with no EPA number', () => {

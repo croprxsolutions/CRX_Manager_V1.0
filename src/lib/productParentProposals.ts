@@ -324,7 +324,7 @@ export function approvalProblems(group: ProposalGroup, draft: GroupDraft): strin
   const problems: string[] = [];
   if (!draft.name.trim()) problems.push('Name the parent.');
   // product_parents.name holds at most 200 characters; say so here rather than fail at save.
-  else if (draft.name.trim().length > 200) problems.push('Shorten the parent name to 200 characters or fewer.');
+  else if ([...draft.name.trim()].length > 200) problems.push('Shorten the parent name to 200 characters or fewer.');
   for (const field of Object.keys(group.conflicts) as ConflictField[]) {
     if (draft.picks[field] === undefined) problems.push(`Pick the ${field === 'use_timings' ? 'Use Timing' : field === 'rates' ? 'rate' : field}.`);
   }

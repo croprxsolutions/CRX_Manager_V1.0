@@ -154,6 +154,12 @@ missing or duplicate verdict, or an opaque change. A binary file, or a text file
 `.gitattributes` (this repo marks security-sensitive baseline SQL that way), carries no content, so
 the run stops and names it; those files need Sol or a person.
 
+**Code health first (Mason, 2026-11-06).** When the diff touches `src/`, the script first runs the
+code-health ratchet that pre-push runs (`scripts/check-code-health.mjs`, about 30 seconds). If it
+fails, the run stops with exit 2 and prints the violations, and no model is called: fix them, commit,
+and run Luna again. If the check cannot run at all (no `node_modules` or knip in the worktree), Luna
+goes ahead and the result says `Code health: NOT CHECKED`; pre-push and CI still run the real check.
+
 **Oversized diffs.** When Luna runs out of output (`max_output_tokens`, twice on a 960-line diff in
 PR #1248) the script says so and prints one `--commit` command per commit, oldest first. Run those
 and report that they do not cover how the commits interact and skip merge commits. Sol still reads
@@ -236,7 +242,7 @@ branch left main; a branch adding a migration or with several split points keeps
 must `git merge origin/main` again, push, and wait); an open
 non-draft PR has this exact commit as its head;
 the Codex App's summary comment shows a completed review of this commit (or it was pushed 15 minutes
-ago with none, or the commit only merges main cleanly with no shared files: then the App's finished review of
+ago with none, or the App reviewed none of the PR's last 3 pushes, so it has stopped and Sol does not wait (Mason, 2026-11-06), or the commit only merges main cleanly with no shared files: then the App's finished review of
 the pre-merge head is enough (once the App starts on the merge, Sol waits for it to finish, or an hour with no update), and its threads on the pre-merge head must be
 answered too; Mason, 2026-10-29); no Codex App thread on this commit and no CodeRabbit thread on the PR is unanswered;
 CodeRabbit is not reviewing it; and if CodeRabbit already reviewed a money or Mason-named PR, that
@@ -245,6 +251,10 @@ it). A money PR with no CodeRabbit review does not wait for one: CodeRabbit is o
 PR carries the `needs-coderabbit` label (`AGENTS.md`).
 An unreadable answer refuses; retry in a minute. `--dry-run` prints the decision; `--carry-forward`
 skips it. Merge main in before this point, not after Sol alongside fixes (ship.md Step 8 item 4).
+
+**Round count (Mason, 2026-11-06).** Each full run prints `Sol round N on PR #<n>`. When the same mechanism
+(a lock, timer, guard or rounding rule) comes back for a 3rd round, stop patching and ask Mason the business
+trade-off that would delete it (`AGENTS.md`, Operating Contract); the wrapper says so from round 3.
 
 **Main moved after a clean Sol pass? Usually nothing to do (Mason, 2026-10-26).** The merge gates accept
 a head behind main when the head contains the base its proof reviewed and main only moved forward, so

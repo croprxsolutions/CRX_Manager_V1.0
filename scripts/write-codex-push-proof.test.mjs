@@ -22,6 +22,10 @@ import {
   coderabbitReviewInProgress,
   coderabbitCheckRunInProgress,
   evaluateSolPreflight,
+  codexAppIdleOnRecentHeads,
+  recentPushedHeads,
+  countSolRounds,
+  solRoundLine,
   cleanMainMergeParent,
   readSolPreflightFacts,
   solReviewBase,
@@ -1779,6 +1783,33 @@ function collisionPromptSkipsWork(prompt) {
     nowMs: now,
   };
   const check = (changes) => evaluateSolPreflight({ ...quiet, ...changes });
+
+  // Idle Codex App (Mason, 2026-11-06): no 15-minute wait when it reviewed none of the last 3 pushes.
+  {
+    const [h1, h2, h3, h4] = ["1", "2", "3", "4"].map((c) => c.repeat(40));
+    assert.equal(codexAppIdleOnRecentHeads([h1, h2, h3], [h4]), true, "idle App: reviewed none of the last 3 pushes -> skip the wait");
+    assert.equal(codexAppIdleOnRecentHeads([h1, h2, h3], [h3.toUpperCase()]), false, "idle App: reviewed the 3rd-newest push -> keep the wait");
+    assert.equal(codexAppIdleOnRecentHeads([h1, h2], []), false, "idle App: fewer than 3 pushes -> keep the wait");
+    assert.equal(codexAppIdleOnRecentHeads(null, []), false, "idle App: unreadable pushes -> keep the wait");
+    const pushed = new Set([h1, h3, h4]);
+    assert.deepEqual(recentPushedHeads([h4, h3, h2, h1], h1, (sha) => pushed.has(sha)), [h1, h3, h4], "pushed heads: commits without check suites were not heads");
+    assert.throws(() => recentPushedHeads([h1, h2], h1, () => true), /does not end at this head/, "pushed heads: a list for another head is unreadable");
+    const fresh = { codexState: { sha: h4, status: "completed" }, headPushedMs: now - 60_000 };
+    const skipped = check({ ...fresh, recentHeads: [head, h2, h3], appReviewedShas: [h4] });
+    assert.equal(skipped.ok, true, "idle App: Sol runs 1 minute after the push");
+    assert.match(skipped.notes.join(" "), /reviewed none of #1069's last 3 pushes/, "idle App: says which case applied");
+    const waits = check({ ...fresh, recentHeads: [head, h2, h4], appReviewedShas: [] });
+    assert.equal(waits.ok, false, "idle App: the summary's reviewed commit among the last 3 keeps the wait");
+    assert.match(waits.notes.join(" "), /reviewed one of #1069's last 3 pushes/, "idle App: says the wait applies");
+    assert.match(check({ ...fresh, recentHeads: null }).notes.join(" "), /could not read #1069's recent pushes/, "idle App: unreadable pushes say so");
+    assert.equal(countSolRounds(`{"head_sha":"${h1}"}
+not json
+{"head_sha":"${h4}"}
+{"head_sha":"${h2}"}
+`, [h1, h2]), 2, "rounds: only this branch's heads count");
+    assert.equal(solRoundLine(2, 1524), "Sol round 2 on PR #1524.", "rounds: plain line");
+    assert.match(solRoundLine(3, null), /^Sol round 3 on this branch \(no PR yet\)\. .*ask Mason the business trade-off/, "rounds: round 3 points at the stop rule");
+  }
   assert.match(check({ headContainsBase: false }).problems.join(" "), /does not contain the latest main.*git merge origin\/main/, "preflight: a head missing origin/main refuses (#1075)");
   assert.equal(check({ headContainsBase: null }).ok, false, "preflight: an unreadable containment check refuses");
   assert.equal(check({ headContainsBase: undefined }).ok, false, "preflight: a missing containment fact refuses");

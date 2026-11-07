@@ -34,6 +34,7 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   lstatSync,
@@ -1120,7 +1121,8 @@ export function captureReviewOutput(root, result, runInfo = {}) {
 //   - an open, non-draft pull request has exactly this commit as its head;
 //   - the Codex App has finished reviewing this exact commit (its summary
 //     comment's machine-readable state names it), or 15 minutes have passed
-//     since the commit with no review (the App sometimes never reviews);
+//     since the commit with no review (the App sometimes never reviews), or the
+//     App reviewed none of the PR's last 3 pushes (it stopped; Mason, 2026-11-06);
 //   - no Codex App thread raised against this commit is open, and no CodeRabbit
 //     thread on the PR is open on current code;
 //   - CodeRabbit is not in the middle of reviewing this commit, and a money or
@@ -1237,6 +1239,38 @@ export function readyForReviewAt(events) {
   return latest;
 }
 
+// ── idle Codex App (Mason, 2026-11-06) ──────────────────────────────────────
+// The App sometimes stops reviewing a PR for good (PR 1524: nothing after
+// c5d7113e8), and every Sol round then waited the full 15 minutes for nothing.
+// If the App reviewed none of the PR's last 3 pushed heads (the head included),
+// Sol skips that wait. A PR with fewer than 3 pushes keeps it: a new PR's App
+// review is usually still on its way.
+export const SOL_APP_IDLE_HEADS = 3;
+
+// recentHeads: the PR's pushed heads, newest first (the current head first), or
+// null when unreadable (keeps the wait). reviewedShas: every commit the App reviewed.
+export function codexAppIdleOnRecentHeads(recentHeads, reviewedShas) {
+  if (!Array.isArray(recentHeads) || recentHeads.length < SOL_APP_IDLE_HEADS) return false;
+  const reviewed = new Set((reviewedShas || []).map((sha) => String(sha || "").toLowerCase()).filter(Boolean));
+  return !recentHeads.slice(0, SOL_APP_IDLE_HEADS).some((sha) => reviewed.has(String(sha).toLowerCase()));
+}
+
+// The PR's last pushed heads, newest first. A commit is a pushed head when GitHub
+// ran check suites on it (or the App reviewed it); commits inside a multi-commit push
+// have none. Looks at most `maxLook` commits back, so a long run of suite-less commits
+// stays cheap; finding fewer than 3 heads keeps the wait (the safe side).
+// prCommits: oldest first, as GitHub lists them. Throws on an unreadable read.
+export function recentPushedHeads(prCommits, headSha, isPushed, { want = SOL_APP_IDLE_HEADS, maxLook = 30 } = {}) {
+  const shas = (prCommits || []).map((sha) => String(sha || "").toLowerCase());
+  const head = String(headSha || "").toLowerCase();
+  if (shas[shas.length - 1] !== head) throw new Error("the PR's commit list does not end at this head");
+  const heads = [head];
+  for (let i = shas.length - 2; i >= 0 && heads.length < want && shas.length - 1 - i <= maxLook; i -= 1) {
+    if (isPushed(shas[i])) heads.push(shas[i]);
+  }
+  return heads;
+}
+
 // The decision, from facts already read. Every fact that could not be read is
 // null and refuses. Returns { ok, problems, notes }.
 export function evaluateSolPreflight({
@@ -1253,6 +1287,8 @@ export function evaluateSolPreflight({
   headContainsBase,
   cleanMergeOf = null,
   cleanMergeThreads = null,
+  recentHeads = null,
+  appReviewedShas = [],
   nowMs = Date.now(),
 } = {}) {
   const head = String(headSha || "").trim().toLowerCase();
@@ -1310,14 +1346,24 @@ export function evaluateSolPreflight({
       );
     }
   } else if (!reviewedHere) {
-    if (quietFor >= 0 && quietFor >= SOL_PREFLIGHT_QUIET_MS) {
-      notes.push(`the Codex GitHub App has not reviewed ${head.slice(0, 9)}, but 15 minutes have passed since it was pushed, so Sol may run.`);
+    const reviewedShas = [...(Array.isArray(appReviewedShas) ? appReviewedShas : []), codexState?.sha];
+    if (codexAppIdleOnRecentHeads(recentHeads, reviewedShas)) {
+      // Mason, 2026-11-06 (PR 1524 retro): an App that reviewed none of the last 3 pushes has stopped
+      // reviewing this PR; waiting 15 minutes per round for it bought nothing.
+      notes.push(`the Codex GitHub App reviewed none of ${which}'s last ${SOL_APP_IDLE_HEADS} pushes, so it has stopped reviewing this PR and Sol does not wait for it.`);
     } else {
-      const left = quietFor >= 0 ? Math.ceil((SOL_PREFLIGHT_QUIET_MS - quietFor) / 60000) : 15;
-      problems.push(
-        `the Codex GitHub App has not finished reviewing ${head.slice(0, 9)} yet. Wait for its review ` +
-        `(usually 2-5 minutes; Sol may run without it in ${left} minute${left === 1 ? "" : "s"}), answer what it finds, then run Sol.`,
-      );
+      notes.push(Array.isArray(recentHeads)
+        ? `the Codex GitHub App reviewed one of ${which}'s last ${SOL_APP_IDLE_HEADS} pushes (or the PR has fewer), so Sol waits for it on this push (up to 15 minutes).`
+        : `could not read ${which}'s recent pushes, so Sol keeps the usual wait for the Codex GitHub App (up to 15 minutes).`);
+      if (quietFor >= 0 && quietFor >= SOL_PREFLIGHT_QUIET_MS) {
+        notes.push(`the Codex GitHub App has not reviewed ${head.slice(0, 9)}, but 15 minutes have passed since it was pushed, so Sol may run.`);
+      } else {
+        const left = quietFor >= 0 ? Math.ceil((SOL_PREFLIGHT_QUIET_MS - quietFor) / 60000) : 15;
+        problems.push(
+          `the Codex GitHub App has not finished reviewing ${head.slice(0, 9)} yet. Wait for its review ` +
+          `(usually 2-5 minutes; Sol may run without it in ${left} minute${left === 1 ? "" : "s"}), answer what it finds, then run Sol.`,
+        );
+      }
     }
   }
   if (!codexThreads || codexThreads.status === "incomplete") {
@@ -1476,6 +1522,21 @@ export function readSolPreflightFacts(root, headSha, baseSha, gh = (args) => pre
     facts.codexState = codexAppReviewState(comments);
   } catch { facts.codexState = undefined; }
   try {
+    // Idle-App check: any failed read leaves recentHeads null, which keeps the 15-minute wait.
+    const reviews = JSON.parse(gh(["api", `repos/${owner}/${name}/pulls/${number}/reviews?per_page=100`, "--paginate", "--slurp"])).flat();
+    facts.appReviewedShas = reviews.filter((review) => isCodexBotLogin(review?.user?.login)).map((review) => review?.commit_id);
+    const commits = JSON.parse(gh(["api", `repos/${owner}/${name}/pulls/${number}/commits?per_page=100`, "--paginate", "--slurp"])).flat();
+    facts.prCommits = commits.map((commit) => String(commit?.sha || "").toLowerCase());
+    // The App reviews only pushed heads, so a commit it reviewed counts even without check suites (Luna MED).
+    const appReviewed = new Set([...facts.appReviewedShas, facts.codexState?.sha].map((sha) => String(sha || "").toLowerCase()));
+    facts.recentHeads = recentPushedHeads(facts.prCommits, headSha, (sha) => {
+      if (appReviewed.has(sha)) return true;
+      const total = JSON.parse(gh(["api", `repos/${owner}/${name}/commits/${sha}/check-suites?per_page=1`]))?.total_count;
+      if (!Number.isInteger(total)) throw new Error("unreadable check suites");
+      return total > 0;
+    });
+  } catch { facts.recentHeads = null; }
+  try {
     // Read CodeRabbit's completion BEFORE the threads, as the merge gate does: a
     // review finishing between the reads must not pair with a stale thread list.
     facts.coderabbitRequirement = readCodeRabbitRequirement(gh, { owner, name, number });
@@ -1568,6 +1629,59 @@ export function codeHealthBeforeSol(root, baseSha, headSha, {
   if (changed === "") return { ok: true, ran: false, output: "" };
   const result = spawn(process.execPath, ["scripts/check-code-health.mjs"], { cwd: root, encoding: "utf8" });
   return { ok: result.status === 0, ran: true, output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim() };
+}
+
+// ── Sol round count (Mason, 2026-11-06) ─────────────────────────────────────
+// PR 1524 spent about 6 Sol rounds on one rounding mechanism before anyone asked
+// Mason the trade-off, because no one could see the count. Every full Sol run
+// appends one line to a ledger in the main checkout's session-state (shared by
+// every worktree, like the CodeRabbit waivers). A run counts toward this branch
+// when its head is one of the branch's own commits (base..head), so it works
+// before the PR opens and in detached Sol worktrees. Runs before 2026-11-06 were
+// never recorded, so the count starts there.
+export const SOL_ROUNDS_FILE = "sol-rounds.jsonl";
+
+export function solRoundsLedgerPath(root) {
+  const [dir] = skipStateDirs([root]);
+  return path.join(dir || path.join(root, ".claude", "session-state"), SOL_ROUNDS_FILE);
+}
+
+// How many ledger lines name one of these commits. Unreadable lines are skipped.
+export function countSolRounds(ledgerText, branchCommits) {
+  const commits = new Set([...(branchCommits || [])].map((sha) => String(sha).toLowerCase()));
+  let count = 0;
+  for (const line of String(ledgerText || "").split(/\r?\n/)) {
+    try {
+      if (commits.has(String(JSON.parse(line)?.head_sha || "").toLowerCase())) count += 1;
+    } catch { /* not a ledger line */ }
+  }
+  return count;
+}
+
+export function solRoundLine(round, prNumber) {
+  const where = Number.isInteger(prNumber) ? `PR #${prNumber}` : "this branch (no PR yet)";
+  const line = `Sol round ${round} on ${where}.`;
+  return round >= 3
+    ? `${line} If the same mechanism (lock, timer, guard, rounding rule) keeps coming back, stop and ask Mason the business trade-off that would delete it (AGENTS.md, Operating Contract).`
+    : line;
+}
+
+function solRound(root, headSha, baseSha) {
+  const ledger = solRoundsLedgerPath(root);
+  let text = "";
+  try { text = readFileSync(ledger, "utf8"); } catch { /* no runs recorded yet */ }
+  const commits = runGit(["rev-list", `${baseSha}..${headSha}`], { cwd: root }).split(/\s+/).filter(Boolean);
+  return { ledger, round: countSolRounds(text, commits) + 1 };
+}
+
+function recordSolRound(ledger, headSha, prNumber) {
+  try {
+    mkdirSync(path.dirname(ledger), { recursive: true });
+    appendFileSync(ledger, `${JSON.stringify({ head_sha: headSha, pr: prNumber ?? null, at: new Date().toISOString() })}\n`, "utf8");
+  } catch (error) {
+    // A count that cannot be written never blocks the review itself.
+    process.stderr.write(`Could not record this Sol round in ${ledger}: ${error.message}\n`);
+  }
 }
 
 function preflightReport({ problems, notes }) {
@@ -2546,7 +2660,8 @@ function usage() {
     "proof that .claude/hooks/codex-push-guard.mjs requires for risky pushes to main.",
     "The base is fixed (not overridable) so a narrower diff cannot mint an unearned proof.",
     "Before a full review it checks the head is quiet (open non-draft PR, Codex GitHub App done with",
-    "this commit or 15 minutes passed, no open Codex App/CodeRabbit threads, CodeRabbit not",
+    "this commit or 15 minutes passed (no wait when it reviewed none of the PR's last 3 pushes),",
+    "no open Codex App/CodeRabbit threads, CodeRabbit not",
     "reviewing, a money PR's CodeRabbit review done) and refuses without spending Sol tokens if not.",
     "",
     `  --timeout <sec>  Max seconds for the Codex review (default ${DEFAULT_TIMEOUT_SEC}). A timeout writes no`,
@@ -2623,6 +2738,8 @@ export function run(argv = process.argv.slice(2)) {
       `[dry-run] Sol pre-flight for ${head.slice(0, 12)}: ${preflight.ok ? "would run" : "would REFUSE"}\n` +
       `${preflightReport(preflight)}\n`,
     );
+    const { round } = solRound(root, head, reviewBase);
+    process.stdout.write(`[dry-run] Would be: ${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
     return 0;
   }
 
@@ -2661,6 +2778,9 @@ export function run(argv = process.argv.slice(2)) {
     );
     return 1;
   }
+  const { ledger, round } = solRound(root, headBefore, baseBefore);
+  process.stdout.write(`${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
+  recordSolRound(ledger, headBefore, preflight.facts?.pr?.number);
   let reviewWorkspace;
   let result;
   let codexRun = { codexBin, fallbackUsed: false, primaryResult: null };

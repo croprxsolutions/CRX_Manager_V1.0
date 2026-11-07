@@ -728,6 +728,14 @@ async function main() {
   const pid = PSWITCH;
   ok(ADMIN, setC(pid, [{ kind: 'ingredient', name: 'Fill me', strength_value: null, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label' }]));
   const fillId = ingId('Fill me');
+  // Filling an unknown sets the value only: a different unit, basis or source is a correction (Sol round 1).
+  for (const diff of [{ strength_unit: 'pct_ww' }, { strength_basis: 'acid_equivalent' }, { source: 'other' }]) {
+    refused(ADMIN, setC(pid, [{ kind: 'ingredient', ingredient_id: fillId, strength_value: 2, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label', ...diff }]), /CHEMISTRY_CHANGE_NEEDS_CORRECTION/);
+  }
+  ok(ADMIN, setC(pid, [{ kind: 'fertilizer', nutrient: 'P', basis: 'elemental', percent: null, source: 'label' }]));
+  refused(ADMIN, setC(pid, [{ kind: 'fertilizer', nutrient: 'P', basis: 'oxide', percent: 10, source: 'label' }]), /CHEMISTRY_CHANGE_NEEDS_CORRECTION/);
+  refused(ADMIN, setC(pid, [{ kind: 'fertilizer', nutrient: 'P', basis: 'elemental', percent: 10, source: 'supplier' }]), /CHEMISTRY_CHANGE_NEEDS_CORRECTION/);
+  ok(ADMIN, setC(pid, [{ kind: 'fertilizer', nutrient: 'P', basis: 'elemental', percent: 10, source: 'label' }]));
   ok(ADMIN, setC(pid, [{ kind: 'ingredient', ingredient_id: fillId, strength_value: 2, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label' }]));
   refused(ADMIN, setC(pid, [{ kind: 'ingredient', ingredient_id: fillId, strength_value: 3, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label' }]), /CHEMISTRY_CHANGE_NEEDS_CORRECTION|CHEMISTRY_/);
   for (const action of ['change', 'retire']) {

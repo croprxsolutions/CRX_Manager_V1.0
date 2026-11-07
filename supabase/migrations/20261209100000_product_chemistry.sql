@@ -1081,9 +1081,16 @@ BEGIN
         IF p_mode = 'epa' AND v_row.source <> 'epa_lookup' THEN
           RAISE EXCEPTION 'CHEMISTRY_TYPED_ROW_KEPT: % was typed in; the EPA value goes to review', (SELECT name FROM public.active_ingredients WHERE id = v_ing);
         END IF;
+        -- A typed fill sets the value only: a different unit, basis, source or note is a correction (sheet section 3).
+        IF p_mode <> 'epa' AND (v_row.strength_unit IS DISTINCT FROM v_s->>'unit' OR v_row.strength_basis IS DISTINCT FROM v_s->>'basis'
+            OR v_row.source IS DISTINCT FROM v_s->>'source' OR v_row.source_note <> v_s->>'note') THEN
+          RAISE EXCEPTION 'CHEMISTRY_CHANGE_NEEDS_CORRECTION: filling the unknown strength of % keeps its unit, basis and source; change those with a correction',
+            (SELECT name FROM public.active_ingredients WHERE id = v_ing);
+        END IF;
         UPDATE public.product_parent_ingredients
            SET strength_value = (v_s->>'value')::numeric, strength_unknown = false, strength_unit = v_s->>'unit',
-               strength_basis = v_s->>'basis', source = v_s->>'source', source_note = v_s->>'note',
+               strength_basis = v_s->>'basis', source = v_s->>'source',
+               source_note = CASE WHEN p_mode = 'epa' THEN v_s->>'note' ELSE COALESCE(v_s->>'note', source_note) END,
                row_version = row_version + 1, updated_by = v_actor, updated_at = now()
          WHERE id = v_row.id;
         v_changed := true;
@@ -1219,9 +1226,13 @@ BEGIN
         IF p_mode = 'epa' AND v_fert.source <> 'epa_lookup' THEN
           RAISE EXCEPTION 'CHEMISTRY_TYPED_ROW_KEPT: % was typed in; the EPA value goes to review', v_nutrient;
         END IF;
+        IF p_mode <> 'epa' AND (v_fert.basis IS DISTINCT FROM v_s->>'basis' OR v_fert.source IS DISTINCT FROM v_s->>'source'
+            OR v_fert.source_note <> v_s->>'note') THEN
+          RAISE EXCEPTION 'CHEMISTRY_CHANGE_NEEDS_CORRECTION: filling the unknown % keeps its basis and source; change those with a correction', v_nutrient;
+        END IF;
         UPDATE public.product_parent_fertilizer_analysis
            SET basis = v_s->>'basis', percent = (v_s->>'percent')::numeric, percent_unknown = false, source = v_s->>'source',
-               source_note = v_s->>'note', row_version = row_version + 1, updated_by = v_actor, updated_at = now()
+               source_note = CASE WHEN p_mode = 'epa' THEN v_s->>'note' ELSE COALESCE(v_s->>'note', source_note) END, row_version = row_version + 1, updated_by = v_actor, updated_at = now()
          WHERE id = v_fert.id;
         v_changed := true;
       ELSIF p_mode = 'epa' AND v_fert.percent IS NOT DISTINCT FROM (v_s->>'percent')::numeric AND v_fert.basis = v_s->>'basis' THEN
@@ -1675,6 +1686,9 @@ BEGIN
   v_before := public._parent_chemistry_values(p_parent_id);
   BEGIN
     PERFORM public._lock_parent_chemistry(p_parent_id, v_version);
+    -- Re-read under the lock so the fingerprint and "before" match what the save will see (a size can join first).
+    v_fingerprint := public._chemistry_preview_fingerprint(p_parent_id, p_changes);
+    v_before := public._parent_chemistry_values(p_parent_id);
     v_result := public._apply_parent_chemistry(p_parent_id, p_changes, 'correct', NULL, NULL);
     RAISE EXCEPTION 'CRX_PREVIEW_ROLLBACK' USING ERRCODE = 'P0099';
   EXCEPTION

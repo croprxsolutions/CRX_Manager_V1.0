@@ -3219,39 +3219,26 @@ export function commandFedToInterpreter(command) {
   });
 }
 
-// A Bash command with its here-document bodies left out, when every command in
-// it (substitutions included) is a bare `cat` or `tee`, which only copy text
-// into a file or onto the screen (2026-11-07, Mason: notes that mentioned
-// `git reset --hard` or a worktree path were refused). Anything else returns
-// the command unchanged: a shell, a language runtime, `xargs`, a loop, a
-// function or path named `cat`, a substitution, or a here-document
-// pipelineStages cannot read (never closed, or an unquoted body with `$( )`).
-// Runtimes (`python - <<EOF`) were tried and dropped: Luna showed twice that no
-// word list tells a script that only writes text from one that launches a
-// process. The earlier attempt was dropped for five routes
-// (agent-guardrails.md); each is pinned in the bash-safety and
-// review-proof-guard tests.
-const HEREDOC_TEXT_PROGRAMS = new Set(["cat", "tee"]);
+// A note written in ONE strict shape loses its text, so the guards judge only
+// its first line (2026-11-07, Mason: notes that mentioned `git reset --hard` or
+// a worktree path were refused). The whole command must be
+//   cat >|>> FILE <<'WORD'   or   tee [-a] FILE <<'WORD'
+// then the note, then WORD as the last line, with no note line equal to WORD.
+// Bash then runs nothing but that cat/tee, and FILE stays visible to the
+// guards. Anything else returns unchanged. Mason chose this over a general
+// shell reader after the Codex App found three ways (substitutions, escaped
+// delimiters, a non-ASCII space after one) that the reader and Bash disagreed
+// on where a here-document ends (PR #1632). Language runtimes were dropped
+// earlier: no word list tells writing from launching (Luna rounds 1-2).
+const NOTE_HEAD = /^(?:cat >>? ?|tee (?:-a )?)[A-Za-z0-9_./~:@%+,=-]+ <<'([A-Za-z0-9_]+)'$/;
 export function commandWithoutTextHeredocs(command) {
   const text = String(command ?? "");
-  if (!text.includes("<<")) return text;
-  const stages = pipelineStages(text, "posix");
-  const textOnly = stages.length > 0 && stages.every((stage) =>
-    !stage.unreadable && HEREDOC_TEXT_PROGRAMS.has(splitShellWordsRaw(stage.text)[0] ?? ""));
-  if (!textOnly) return text;
-  const withoutBodies = stages.map((stage) => stage.text).join("\n");
-  // A substitution can build a write target from a here-document body, and an
-  // unquoted body expands (after Bash joins `\`+newline, which the lexer's
-  // per-line check misses): Codex App, PR #1632. So only quoted-delimiter
-  // here-documents in a command with no substitution at all lose their text.
-  if (/\$\(|`|[<>]\(/.test(withoutBodies)) return text;
-  // Only a plain quoted word (`<<'EOF'`, `<<"EOF"`): an escape inside the quotes
-  // can make the lexer end the body on a different line than Bash, hiding the
-  // commands after Bash's real end (Codex App, PR #1632 round 2).
-  const operators = withoutBodies.match(/<<(?!<)/g)?.length ?? 0;
-  const plain = withoutBodies.match(/<<-?[ \t]*(['"])[A-Za-z0-9_]+\1(?=[\s;|&<>)]|$)/g)?.length ?? 0;
-  if (operators !== plain) return text;
-  return withoutBodies;
+  if (/\r/.test(text)) return text;
+  const lines = text.replace(/\n$/, "").split("\n");
+  const word = lines.length >= 2 ? NOTE_HEAD.exec(lines[0])?.[1] : undefined;
+  if (!word || lines[lines.length - 1] !== word) return text;
+  if (lines.slice(1, -1).includes(word)) return text;
+  return lines[0];
 }
 
 // Words that run the program after them (possibly after their own options and

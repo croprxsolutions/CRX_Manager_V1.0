@@ -502,14 +502,17 @@ message names, or fix the guard deliberately.
 
 Mason approved this after two harmless notes were refused on 2026-11-07: a `python - <<'EOF'` that
 wrote "git reset --hard" into a memory note (`bash-safety.mjs`), and a `cat >> <notes file> <<'EOF'`
-whose text named a `.claude/worktrees/…` path (`review-proof-guard.mjs`). For a **Bash** command,
-both guards now judge the command with its here-document bodies left out (`commandWithoutTextHeredocs`
-in `codex-push-lib.mjs`, which reuses the `pipelineStages` lexer), but only when every command in it
-is a bare `cat` or `tee`, every here-document delimiter is one plain quoted word (`<<'EOF'` or
-`<<"EOF"`, letters, digits and `_` only: Bash expands nothing in the body, and an escape such as
-`<<"A\\B"` made the lexer and Bash end the body on different lines), and the command has no `$( )`, backtick or `<( )`/`>( )` at all (the
-Codex App showed on PR #1632 that a substitution can build a write target from a here-document, and
-that an unquoted body expands across a `\`+newline join the lexer's per-line check misses). A language runtime fed a here-document
+whose text named a `.claude/worktrees/…` path (`review-proof-guard.mjs`). For a **Bash** command in
+ONE strict shape, both guards judge only its first line (`commandWithoutTextHeredocs` in
+`codex-push-lib.mjs`). The whole command must be `cat > FILE <<'WORD'`, `cat >> FILE <<'WORD'`,
+`tee FILE <<'WORD'` or `tee -a FILE <<'WORD'` (FILE of plain characters: no spaces, quotes, `$` or
+backslashes; WORD of letters, digits and `_`), then the note, then `WORD` as the last line, with no
+note line equal to `WORD`. Bash then runs only that `cat`/`tee`, and FILE stays visible to the
+guards. Any other shape keeps its full text. Mason chose this one shape (2026-11-07) over the first
+design, which reused the general `pipelineStages` lexer: the Codex App found three ways in a row
+that the lexer and Bash disagreed on where a here-document ends (a substitution building the
+target, an escaped delimiter such as `<<"A\\B"`, and a non-breaking space after the delimiter),
+each hiding a real command as note text. A language runtime fed a here-document
 (`python - <<'EOF'`) is still judged on its full text, so the first false alarm's exact shape stays
 refused: write notes with `cat >> <file> <<'EOF'` or the Write tool. Letting runtimes through unless
 their text could launch a process was tried in this change and dropped, because Luna showed twice

@@ -1255,7 +1255,7 @@ for (const tool_name of ["Bash", "PowerShell", "mcp__x__apply_patch", "Apply_Pat
 // (2026-11-07, Mason: a hand-over note naming a worktree path was refused).
 for (const command of [
   "cat >> /c/Users/mason/AppData/Local/notes/handover.md <<'EOF'\nDo not rm -rf .claude/worktrees/peaceful-franklin-16bbb4 until its PR lands.\nEOF",
-  "cat <<'EOF' | tee -a /c/Users/mason/notes/a.md\nmv .claude/session-state aside? Never.\nEOF",
+  "tee -a /c/Users/mason/notes/a.md <<'EOF'\nmv .claude/session-state aside? Never.\nEOF",
 ]) assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `here-document note: ${command.split("\n")[0]}`);
 for (const [command, label] of [
   ["rm -rf .claude/session-state", "plain rm"],
@@ -1274,6 +1274,9 @@ for (const [command, label] of [
   // A substitution can build the write target from a here-document (Codex App, PR #1632).
   ["cat > \"$(cat <<'X'\n.claude/session-state/claude-review-push.json\nX\n)\" <<'E'\n{}\nE", "a proof path built by $( ) from a here-document"],
   ["cat <<\"A\\\\B\"\nnote\nA\\B\nrm -rf .claude/session-state\nA\\\\B", "a delimiter Bash ends earlier than the lexer"],
+  ["cat >> n.md <<'EOF' \nnote\nEOF \nrm -rf .claude/session-state\nEOF", "a non-breaking space after the delimiter"],
+  ["cat >> n.md <<'EOF'\nnote\nEOF\nrm -rf .claude/session-state\nEOF", "a command between two closing lines"],
+  ["tee .claude/session-state/claude-review-push.json <<'EOF'\n{}\nEOF", "tee writing a proof"],
   ["tee `cat <<'X'\n.claude/session-state/claude-review-push.json\nX\n` <<'E'\n{}\nE", "a proof path built by backticks from a here-document"],
 ]) {
   const result = run({ tool_name: "Bash", tool_input: { command } });

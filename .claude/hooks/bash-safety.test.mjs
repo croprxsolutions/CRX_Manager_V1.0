@@ -698,7 +698,8 @@ const denied = (command, tool_name = "Bash") =>
 for (const command of [
   "cat >> /c/Users/mason/.claude/projects/x/memory/note.md <<'EOF'\nNever run git reset --hard on a shared worktree.\nEOF",
   "cat >> /c/Users/mason/notes/handover.md <<'EOF'\nLesson: git reset --hard destroyed work; never use --no-verify.\nEOF",
-  "cat <<'EOF' | tee -a /c/Users/mason/notes/a.md\ngit push --force is never used here.\nEOF",
+  "tee -a /c/Users/mason/notes/a.md <<'EOF'\ngit push --force is never used here.\nEOF\n",
+  "cat > docs/notes/x.md <<'NOTE'\ngit reset --hard\nNOTE",
 ]) ok(!denied(command), `bash-safety allows here-document text: ${command.split("\n")[0]}`);
 for (const [command, label] of [
   ["git reset --hard", "plain hard reset"],
@@ -718,7 +719,12 @@ for (const [command, label] of [
   // An escape in a quoted delimiter can make the lexer and Bash end the body on different lines (Codex App round 2).
   // Bash ends `<<"A\\B"` at `A\B`; the lexer waited for `A\\B`.
   ["cat <<\"A\\\\B\"\nnote\nA\\B\ngit push --force origin main\nA\\\\B", "a delimiter with a backslash escape"],
-  ["cat <<\"A\\$B\"\nnote\nA$B\ngit reset --hard\nA\\$B", "a delimiter with an escaped dollar"],  ["echo hi # <<EOF\ngit reset --hard\nEOF", "a heredoc opener inside a comment"],
+  ["cat <<\"A\\$B\"\nnote\nA$B\ngit reset --hard\nA\\$B", "a delimiter with an escaped dollar"],
+  // Codex App round 3: a non-breaking space after the delimiter is part of Bash's word.
+  ["cat >> n.md <<'EOF' \nnote\nEOF \ngit push --force origin main\nEOF", "a non-breaking space after the delimiter"],
+  // The strict shape: Bash ends at the FIRST line equal to the word.
+  ["cat >> n.md <<'EOF'\nnote\nEOF\ngit reset --hard\nEOF", "a command between two closing lines"],
+  ["cat >> \"$HOME/n.md\" <<'EOF'\ngit reset --hard\nEOF", "a quoted or expanded file name"],  ["echo hi # <<EOF\ngit reset --hard\nEOF", "a heredoc opener inside a comment"],
   ["cat <<'EOF'\ngit reset --hard\n", "a here-document that never ends"],
   ["cat <<'EOF' | xargs git\nreset --hard\nEOF\ngit reset --hard", "xargs, then a real reset"],
   ["python - <<'EOF'\nimport os; os.system('git reset --hard')\nEOF", "python launching a process"],

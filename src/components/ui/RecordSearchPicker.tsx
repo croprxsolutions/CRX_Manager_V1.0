@@ -11,6 +11,7 @@ const RECORD_SEARCH_TIMEOUT_MS = 15_000;
 // One character is enough: a record named "A" must be reachable (Codex review, #1017).
 // A broad one-letter search still returns only the first 20, with the "keep typing" note.
 const MIN_QUERY_LENGTH = 1;
+const TOO_MANY_MESSAGE = 'Too many matches to list them all. Keep typing to narrow the list.';
 
 export interface RecordSearchPickerProps<T extends { id: string }> {
   /** Selected record id, or '' for none. */
@@ -26,8 +27,9 @@ export interface RecordSearchPickerProps<T extends { id: string }> {
    * Runs one database search. `pattern` is already quoted for `.or()` (see
    * `ilikeOrPattern`); the query must end with `.limit(limit)`. Exclusions
    * belong in the query, not after the limit, so 20 eligible records come back.
+   * `truncated: true` says the search had to leave matches out, so the list asks for more text.
    */
-  search: (pattern: string, limit: number) => PromiseLike<{ data: unknown; error: unknown }>;
+  search: (pattern: string, limit: number) => PromiseLike<{ data: unknown; error: unknown; truncated?: boolean }>;
   /**
    * Everything the search depends on besides the typed text (active-only,
    * customer, exclusions...). A change drops the shown results and searches
@@ -88,6 +90,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
   const [results, setResults] = useState<T[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchFailed, setSearchFailed] = useState(false);
+  const [truncated, setTruncated] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [retryCount, setRetryCount] = useState(0);
   // The conditions + text the shown results (or failure) belong to; until they match, the list says "Searching...".
@@ -127,13 +130,14 @@ export default function RecordSearchPicker<T extends { id: string }>({
       const timedOut = new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(`Record search timed out after ${RECORD_SEARCH_TIMEOUT_MS} ms`)), RECORD_SEARCH_TIMEOUT_MS);
       });
-      const { data, error } = await Promise.race([
+      const { data, error, truncated: cut } = await Promise.race([
         Promise.resolve(searchRef.current(ilikeOrPattern(q), RECORD_SEARCH_LIMIT)),
         timedOut,
       ]).finally(() => clearTimeout(timer));
       if (requestId !== requestRef.current) return;
       if (error) throw error;
       setResults((data || []) as T[]);
+      setTruncated(cut === true);
       setSearchFailed(false);
       setSearchedFor(searched);
       failureToastShownRef.current = false;
@@ -144,6 +148,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
       if (!failureToastShownRef.current) toast('error', `Failed to search ${capitalize(noun)}`);
       failureToastShownRef.current = true;
       setResults([]);
+      setTruncated(false);
       setSearchFailed(true);
       setSearchedFor(searched);
     } finally {
@@ -293,7 +298,9 @@ export default function RecordSearchPicker<T extends { id: string }>({
               </button>
             </div>
           ) : options.length === 0 ? (
-            <div role="status" aria-live="polite" className="px-3 py-2 text-sm text-secondary">{emptyMessage ?? `No matching ${noun}`}</div>
+            <div role="status" aria-live="polite" className="px-3 py-2 text-sm text-secondary">
+              {truncated ? TOO_MANY_MESSAGE : (emptyMessage ?? `No matching ${noun}`)}
+            </div>
           ) : (
             <>
               <div id={listId} role="listbox" aria-label={ariaLabel}>
@@ -314,9 +321,9 @@ export default function RecordSearchPicker<T extends { id: string }>({
                 </button>
               ))}
               </div>
-              {results.length === RECORD_SEARCH_LIMIT && (
+              {(results.length === RECORD_SEARCH_LIMIT || truncated) && (
                 <div role="status" className="px-3 py-2 text-xs text-secondary border-t border-gray-100">
-                  Showing the first {RECORD_SEARCH_LIMIT} matches. Keep typing to narrow the list.
+                  {truncated ? TOO_MANY_MESSAGE : `Showing the first ${RECORD_SEARCH_LIMIT} matches. Keep typing to narrow the list.`}
                 </div>
               )}
             </>

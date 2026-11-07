@@ -14,8 +14,10 @@ import {
   LUNA_MODEL,
   buildLunaExecArgs,
   classifyLunaRun,
+  codeHealthGate,
   exitCodeFor,
   main,
+  buildLunaPrompt,
   nextStepHint,
   scopeHint,
   parseArgs,
@@ -44,6 +46,12 @@ assert.equal(args[args.indexOf("-m") + 1], LUNA_MODEL);
 assert.ok(args.includes(`model_reasoning_effort="${LUNA_EFFORT}"`));
 for (const flag of ["--ignore-user-config", "--ephemeral"]) assert.ok(args.includes(flag));
 assert.equal(args[args.indexOf("--sandbox") + 1], "read-only");
+
+// Luna wrongly called has_function_privilege('public', ...) a BLOCKER on PR #1590 (2026-11-06); the prompt says it is valid,
+// above the diff markers so it stays an instruction.
+const prompt = buildLunaPrompt({ diff: "+x", canary });
+assert.ok(/has_function_privilege\('public'[^\n]*\n[^\n]*accepted role name/.test(prompt));
+assert.ok(prompt.indexOf("has_function_privilege('public'") < prompt.indexOf("===== CANDIDATE DIFF (canary:"));
 
 // A valid run reaches a verdict, and each verdict has its own exit code.
 assert.equal(classifyLunaRun(good).outcome, "clean");
@@ -129,7 +137,7 @@ assert.match(printed.join("\n"), /max_output_tokens/);
 
 // Guard-change round cap: the third Luna round on a branch whose diff touches a hook is a STOP,
 // exits as findings and never reaches Codex. Other branches run as often as asked.
-function lunaRoundsOn(file, counter, runs = ["luna", "luna", "luna"]) {
+function lunaRoundsOn(file, counter, runs = ["luna", "luna", "luna"], health = () => ({ state: "skipped" })) {
   const dir = tempDir("crx-luna-cap-");
   const git = (...gitArgs) => execFileSync(fixedGitExecutable(), ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.autocrlf=false", ...gitArgs], { cwd: dir, encoding: "utf8" });
   git("init", "-q");
@@ -161,7 +169,7 @@ function lunaRoundsOn(file, counter, runs = ["luna", "luna", "luna"]) {
           writeFileSync(spawnArgs[spawnArgs.indexOf("-o") + 1], `MED x\n${tailCanary}\nLUNA_REVIEW: FINDINGS 1\n`);
           return { status: 0, stdout: "", stderr: `${banner(spawnArgs[spawnArgs.indexOf("-m") + 1])}tokens used\n1\n` };
         },
-      }));
+      }, { codeHealth: health }));
     }
   } finally {
     process.chdir(realCwd);
@@ -191,6 +199,37 @@ for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   const damaged = lunaRoundsOn(".claude/hooks/x.mjs", counter);
   assert.equal(damaged.spawned, 0, counter);
   assert.deepEqual(damaged.exits, [EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN], counter);
+}
+
+// Code health runs before the model when src/ changed: its FAIL stops the round with no model
+// call and exit 2; a check that could not run is a warning in the result, never a block.
+{
+  const fail = { status: 1, stdout: "", stderr: "FAIL - new oversized, tangled, or unused code in src/:\n  complexity Orders — 1 found, baseline allows 0\n" };
+  let ran = 0;
+  const spawnFail = () => { ran += 1; return fail; };
+  assert.equal(codeHealthGate("diff --git a/docs/x.md b/docs/x.md\n", "root", spawnFail).state, "skipped");
+  assert.equal(ran, 0, "code health: no src/ change never runs the check");
+  const failed = codeHealthGate("diff --git a/src/pages/Orders.tsx b/src/pages/Orders.tsx\n", "root", spawnFail);
+  assert.deepEqual([failed.state, ran], ["failed", 1]);
+  assert.match(failed.output, /complexity Orders/);
+  assert.equal(codeHealthGate("diff --git a/x b/src/new.ts\n", "root", () => ({ ...fail, stdout: "diagnostic" })).state, "failed",
+    "code health: a stdout line with no newline must not hide the FAIL line");
+  assert.equal(codeHealthGate("diff --git a/x b/src/new.ts\n", "root", () => ({ status: 0, stdout: "PASS", stderr: "" })).state, "passed");
+  const noKnip = codeHealthGate("diff --git a/src/a.ts b/src/a.ts\n", "root", () => ({
+    status: 1, stdout: "", stderr: "file:///x.mjs:73\nError: Knip output was not a readable report: Unexpected end of JSON input\n",
+  }));
+  assert.deepEqual([noKnip.state, noKnip.reason], ["unavailable", "Error: Knip output was not a readable report: Unexpected end of JSON input"]);
+  assert.equal(codeHealthGate("diff --git a/src/a.ts b/src/a.ts\n", "root", () => ({ error: new Error("spawn ETIMEDOUT") })).state, "unavailable");
+
+  const blocked = lunaRoundsOn("src/a.ts", undefined, ["luna"], () => ({ state: "failed", output: fail.stderr.trim() }));
+  assert.deepEqual([blocked.spawned, blocked.exits], [0, [EXIT_DID_NOT_RUN]]);
+  assert.match(blocked.printed, /LUNA RESULT: DID NOT RUN[\s\S]*code-health check that pre-push runs[\s\S]*complexity Orders/);
+  const warned = lunaRoundsOn("src/a.ts", undefined, ["luna"], () => ({ state: "unavailable", reason: "no knip" }));
+  assert.deepEqual([warned.spawned, warned.exits], [1, [EXIT_FINDINGS]]);
+  assert.match(warned.printed, /LUNA RESULT: FINDINGS 1[\s\S]*Code health: NOT CHECKED, the check could not run \(no knip\)/);
+  const passed = lunaRoundsOn("src/a.ts", undefined, ["luna"], () => ({ state: "passed" }));
+  assert.equal(passed.spawned, 1);
+  assert.doesNotMatch(passed.printed, /Code health/);
 }
 
 // A merge stopped on a conflict is refused before Codex is called, in every scope.

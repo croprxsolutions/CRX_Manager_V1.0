@@ -1537,13 +1537,16 @@ function currentIndexEntries(root, execute) {
   return entries;
 }
 
-async function currentIndexCandidateViolations(root, execute, budget) {
+async function currentIndexCandidateViolations(root, execute, budget, onlyPaths = null) {
   const violations = [];
   const regular = [];
-  const entries = currentIndexEntries(root, execute);
-  const bareRoots = bareRepositoryRoots(entries.map(entry => entry.repoPath));
-  const bareRootList = [...bareRoots];
-  for (const bareRoot of bareRoots) {
+  const allEntries = currentIndexEntries(root, execute);
+  const entries = onlyPaths ? allEntries.filter(entry => onlyPaths.has(entry.repoPath)) : allEntries;
+  // Bare-repository roots come from the whole index so a commit that adds one
+  // member of an already-tracked bare repository is still refused.
+  const bareRoots = bareRepositoryRoots(allEntries.map(entry => entry.repoPath));
+  const bareRootList = [...bareRoots].filter(bareRoot => !onlyPaths || entries.some(entry => isBareRepositoryMember(entry.repoPath, bareRoot)));
+  for (const bareRoot of bareRootList) {
     violations.push({ repoPath: bareRoot, reason: 'bare Git repository' });
   }
   for (const entry of entries) {
@@ -2017,6 +2020,26 @@ export async function checkPrivateArtifactContainment({ root = REPO_ROOT, execut
   return { checked_path_count: visible.size, checked_commit_count: checkedCommits.length, checked_ignored_count: worktree.ignoredCount, worktree_scan_duration_ms: worktree.durationMs, scanned_candidate_count: budget.candidates, scanned_logical_bytes: budget.logicalBytes };
 }
 
+// Commit-time check (Mason, 2026-11-06): scan only what this commit adds or
+// changes. The full tracked/untracked/ignored and history scans still run in
+// direct mode, at pre-push, and in CI before anything reaches GitHub.
+export async function checkStagedPrivateArtifactContainment({ root = REPO_ROOT, execute = execFileSync, indexFile = null, budget = new ScanBudget() } = {}) {
+  const authoritativeExecute = executeWithAuthoritativeIndex(execute, root, indexFile);
+  const staged = new Set(uniqueValidatedGitPaths(gitPaths(['diff', '--cached', '--no-renames', '--name-only', '-z', '--diff-filter=ACMRT'], root, authoritativeExecute)));
+  if (staged.size > MAX_STRUCTURAL_SCAN_CANDIDATES) throw new Error('private Phase 3C containment candidate-count cap exceeded');
+  const index = await currentIndexCandidateViolations(root, authoritativeExecute, budget, staged);
+  const violations = [
+    ...findForbiddenPrivateArtifactPaths([...staged]),
+    ...index.violations,
+    ...stagedIndexContentViolations(root, authoritativeExecute, index.entries),
+  ];
+  if (violations.length) {
+    const summary = [...new Map(violations.map(item => [`${item.repoPath}\0${item.reason}`, item])).values()];
+    throw new Error(`private Phase 3C artifact containment failure: ${summary.map(item => `${item.repoPath} (${item.reason})`).join(', ')}`);
+  }
+  return { checked_path_count: staged.size, checked_commit_count: 0, scanned_candidate_count: budget.candidates, scanned_logical_bytes: budget.logicalBytes };
+}
+
 function advertisedRemoteHeadCommit(remoteName, remoteLocation, root, execute) {
   // A direct URL has no stable local remote identity. Keep the conservative
   // full-ancestry fallback for that case, and never pass URL-like hook metadata
@@ -2267,11 +2290,9 @@ async function main() {
     ? await checkGitHubEventPrivateArtifactContainment({ root: cli.root ?? REPO_ROOT })
     : cli.prePushRemote !== null
       ? await checkPrePushPrivateArtifactContainment({ remoteName: cli.prePushRemote, remoteLocation: cli.prePushLocation, stdin: readFileSync(0, 'utf8') })
-      : await checkPrivateArtifactContainment({
-        ranges: cli.ranges,
-        includeIgnored: !cli.preCommit,
-        indexFile: cli.preCommit && Object.hasOwn(process.env, 'GIT_INDEX_FILE') ? process.env.GIT_INDEX_FILE : null,
-      });
+      : cli.preCommit
+        ? await checkStagedPrivateArtifactContainment({ indexFile: Object.hasOwn(process.env, 'GIT_INDEX_FILE') ? process.env.GIT_INDEX_FILE : null })
+        : await checkPrivateArtifactContainment({ ranges: cli.ranges });
   if (cli.attestGitHubHandoff) console.log(githubEventHandoffAttestation(result.github_event_head));
   else console.log(`PHASE3_PRIVATE_ARTIFACT_CONTAINMENT_PASS checked_paths=${result.checked_path_count} checked_commits=${result.checked_commit_count} scanned_candidates=${result.scanned_candidate_count} scanned_logical_bytes=${result.scanned_logical_bytes}`);
 }

@@ -1081,9 +1081,9 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "upsert_parent_brand(p_parent_id uuid, p_brand_name text, p_epa_registration text, p_manufacturer text, p_is_currently_sourced boolean, p_is_rup boolean, p_signal_word text, p_brand_id uuid, p_expected_row_version integer, p_retire boolean, p_reason text, p_idempotency_key text)#9e3fe63afe47",
-      "justification": "New in 20261123120000_product_parent_proposals (PAR-2), read 2026-11-06 before the apply: SAFE. SECURITY DEFINER, owner postgres, search_path public, pg_temp; EXECUTE to authenticated only. Admin gate first (_product_parent_require_admin), then the receipt replay, then the grouping switch (_product_parent_grouping_open, private, false as shipped) and an inactive-parent refusal. Flagged only because it serializes its own product_parent_brands row (to_jsonb) while locking member products FOR NO KEY UPDATE; it reads no products column into the reply. Reply, events and errors carry brand name, EPA number, manufacturer, flags, version and reason only: no cost, price or margin. Post-apply key computed read-only on live from live helper hashes plus the migration body; the post-apply sweep confirms it.",
-      "dated": "2026-11-06"
+      "violation_key": "upsert_parent_brand(p_parent_id uuid, p_product_id uuid, p_brand_name text, p_epa_registration text, p_manufacturer text, p_is_currently_sourced boolean, p_is_rup boolean, p_signal_word text, p_brand_id uuid, p_expected_row_version integer, p_retire boolean, p_reason text, p_idempotency_key text)#6d49c1074ee0",
+      "justification": "New in 20261123120000_product_parent_proposals (PAR-2), read 2026-11-06 before the apply: SAFE. SECURITY DEFINER, owner postgres, search_path public, pg_temp; EXECUTE to authenticated only. Admin gate first (_product_parent_require_admin), then the receipt replay, then the grouping switch (_product_parent_grouping_open, private, false as shipped) and an inactive-parent refusal. Flagged only because it serializes its own product_parent_brands row (to_jsonb) while locking member products FOR NO KEY UPDATE; it reads no products column into the reply. Reply, events and errors carry brand name, EPA number, manufacturer, flags, version and reason only: no cost, price or margin. Post-apply key computed read-only on live from live helper hashes plus the migration body; the post-apply sweep confirms it. Re-keyed 2026-11-07 for migration 20261203110000 (PR #1598, applied live, ledger 20261107041459): the signature gains p_product_id and the body adds only a PRODUCT_ID_REQUIRED check, p_product_id in the retry fingerprint, and a product_parent_members membership check that refuses PRODUCT_BRANDS_PARENT_CHANGED; no cost, price or margin read and no new reply field; still SAFE. The live cost-exposure sweep reports exactly this key.",
+      "dated": "2026-11-07"
     },
     {
       "predicate": "cost-exposure-review",
@@ -1779,6 +1779,12 @@
       "predicate": "cost-exposure-review",
       "violation_key": "preview_tote_fill(p_tote_product_id uuid, p_totes integer)#676b7097232f",
       "justification": "New in 20261117130000_tote_fill_from_bulk (BLK-1a, PR #1554, ledger 20261106065456), read live 2026-11-06 after the apply: SAFE. SECURITY DEFINER, owner postgres, search_path public, pg_temp; EXECUTE to authenticated only (anon refused; live smoke chain smoke-tote_fill_from_bulk.sql passed). _product_parent_require_admin() runs first, so a caller that is not an active admin is refused before any read or write. Flagged through the private helper _tote_fill_preview, which reads the two sizes' catalog current_cost to report whether the tote's cost equals the Bulk cost per gallon. The preview returns bulk_cost_cents, tote_cost_cents, estimate_before_cents, estimate_after_cents and cost_check to that admin only, the same catalog cost an admin already sees on the product screen; it writes nothing. No margin or price field. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-06"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "move_product_size(p_product_id uuid, p_to_parent_id uuid, p_expected_from_version bigint, p_expected_to_version bigint, p_expected_size_fingerprint text, p_reason text, p_evidence text, p_expected_prices jsonb, p_idempotency_key text)#e2f4e1703d0b",
+      "justification": "Reviewed 2026-11-06 after 20261201110000_product_parent_review_fixes (PR #1586) first flagged it: its first statement is _product_parent_require_admin(), so only admins (who may see cost) run it; the new whole-row to_jsonb serializes a product_parent_brands row (no cost, price or margin column) into the brand event log, not into the return; the receipt returns ids, versions, counts and the moved size. Admin refusal of sales rep, driver, applicator and commission-recipient profiles proven live by the create_product_with_parent smoke chain the same day.",
       "dated": "2026-11-06"
     }
   ]

@@ -71,6 +71,21 @@ describe('FieldCustomerAssignment', () => {
     expect(screen.getByRole('textbox', { name: /customer for south 40/i })).toHaveValue('Alpha Farm');
   });
 
+  it('reaches a customer whose name is inside 25 longer names (past the 20 shown)', () => {
+    // 25 names containing "Smith" sort before the plain "Smith" customer alphabetically.
+    const many = [
+      ...Array.from({ length: 25 }, (_, i) => ({ id: `a${i}`, farm_name: `A${String(i).padStart(2, '0')} Smith Farm` })),
+      { id: 'target', farm_name: 'Smith' },
+    ] as Customer[];
+    render(<FieldCustomerAssignment {...baseProps} customers={many} />);
+    const applyInput = screen.getByRole('textbox', { name: /apply one customer to all fields/i });
+    fireEvent.focus(applyInput);
+    expect(screen.getByRole('status')).toHaveTextContent('Showing 20 of 26 matches');
+    fireEvent.change(applyInput, { target: { value: 'smith' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Smith' }));
+    expect(baseProps.onApplyToAll).toHaveBeenCalledWith('target');
+  });
+
   it('a per-field override shows over the fallback', () => {
     render(<FieldCustomerAssignment {...baseProps} fallbackCustomerId="c1" assignments={{ 2: 'c2' }} />);
     expect(screen.queryByText(/still need/i)).not.toBeInTheDocument();

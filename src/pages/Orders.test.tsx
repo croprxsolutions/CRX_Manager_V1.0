@@ -75,18 +75,29 @@ vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 import Orders from './Orders';
 
 const order = (i: number, status = 'confirmed') => ({
-  id: `order-${i}`, order_number: `ORD-${i}`, customer_id: 'customer-1', status,
+  id: `order-${String(i).padStart(5, '0')}`, order_number: `ORD-${i}`, customer_id: 'customer-1', status,
   order_date: '2026-10-01', total_price: 10, fulfillment_pct: 0, invoiced_pct: 0,
   customer: { farm_name: 'Test Farm', parent_customer_id: null }, customer_name: 'Test Farm',
   farm_group_name: null, active_delivery_count: 0, earliest_delivery_date: null, product_names: '',
 });
 
-/** get_orders_page over `all`: each call returns its p_offset/p_limit slice and the totals of every row. */
+type PageArgs = { p_limit: number; p_offset: number; p_after?: { id: string } };
+
+/** One reply of get_orders_keyset_page over `all`: the rows after the bookmark (or at the offset), every row's totals, and the next bookmark. */
+function pageOf(all: ReturnType<typeof order>[], args: PageArgs) {
+  const start = args.p_after ? all.findIndex((o) => o.id > args.p_after!.id) : args.p_offset;
+  const from = start < 0 ? all.length : start;
+  const rows = all.slice(from, from + args.p_limit);
+  const more = from + args.p_limit < all.length;
+  return {
+    rows, total_count: all.length, total_price_cents: all.length * 1000,
+    next_cursor: more ? { k: null, dir: 'asc', t: null, d: '2026-10-01', id: rows[rows.length - 1].id } : null,
+  };
+}
+
+/** get_orders_keyset_page over `all` (ids sort in list order). Reads `all` on every call, so a test may remove rows between pages. */
 function serveOrders(all: ReturnType<typeof order>[]) {
-  mockRpc.mockImplementation((_fn: string, args: { p_limit: number; p_offset: number }) => Promise.resolve({
-    data: { rows: all.slice(args.p_offset, args.p_offset + args.p_limit), total_count: all.length, total_price_cents: all.length * 1000 },
-    error: null,
-  }));
+  mockRpc.mockImplementation((_fn: string, args: PageArgs) => Promise.resolve({ data: pageOf(all, args), error: null }));
 }
 
 function renderPage() {
@@ -107,7 +118,7 @@ describe('Orders list pages through the database', () => {
 
     expect(await screen.findByText('50 rows shown')).toBeInTheDocument();
     expect(screen.getByText('Showing 1–50 of 5,200 orders · $52,000.00 total')).toBeInTheDocument();
-    expect(mockRpc).toHaveBeenCalledWith('get_orders_page', expect.objectContaining({
+    expect(mockRpc).toHaveBeenCalledWith('get_orders_keyset_page', expect.objectContaining({
       p_sort_dir: 'asc', p_limit: 50, p_offset: 0,
     }));
     // No filter chosen: those arguments are left out, so the database reads them as NULL.
@@ -117,9 +128,72 @@ describe('Orders list pages through the database', () => {
     }
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText('Showing 51–100 of 5,200 orders · $52,000.00 total')).toBeInTheDocument();
+    expect(await screen.findByText('Page 2 · 50 shown of 5,200 orders · $52,000.00 total')).toBeInTheDocument();
     expect(screen.getByText('ORD-50')).toBeInTheDocument();
-    expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({ p_limit: 50, p_offset: 50 }));
+    // Page two starts after page one's last row (its bookmark), not at a row count.
+    expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({
+      p_limit: 50, p_offset: 0, p_after: expect.objectContaining({ id: 'order-00049' }),
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous' }));
+    expect(await screen.findByText('Showing 1–50 of 5,200 orders · $52,000.00 total')).toBeInTheDocument();
+    expect(mockRpc.mock.calls[mockRpc.mock.calls.length - 1][1].p_after).toBeUndefined();
+  });
+
+  it('an order removed while page one is on screen does not make Next skip one', async () => {
+    const all = Array.from({ length: 120 }, (_, i) => order(i));
+    serveOrders(all);
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+
+    all.splice(3, 1); // someone else removes ORD-3
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText(/of 119 orders/);
+    // Counting rows would now start at ORD-51; the bookmark starts right after ORD-49.
+    expect(screen.getByText('ORD-50')).toBeInTheDocument();
+    expect(screen.getByText('Page 2 · 50 shown of 119 orders · $1,190.00 total')).toBeInTheDocument();
+  });
+
+  it('the last page has no Next, even when the count would allow one', async () => {
+    serveOrders(Array.from({ length: 60 }, (_, i) => order(i)));
+    renderPage();
+    await screen.findByText('Showing 1–50 of 60 orders · $600.00 total');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Page 2 · 10 shown of 60 orders · $600.00 total');
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+
+  it('a page whose orders were all removed steps back to the page before', async () => {
+    const all = Array.from({ length: 60 }, (_, i) => order(i));
+    serveOrders(all);
+    renderPage();
+    await screen.findByText('Showing 1–50 of 60 orders · $600.00 total');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Page 2 · 10 shown of 60 orders · $600.00 total');
+
+    all.splice(50, 10);
+    fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
+    expect(await screen.findByText('Showing 1–50 of 50 orders · $500.00 total')).toBeInTheDocument();
+  });
+
+  it('a bookmark the database refuses starts again at page one, with no error shown', async () => {
+    const all = Array.from({ length: 120 }, (_, i) => order(i));
+    serveOrders(all);
+    renderPage();
+    await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Page 2 · 50 shown of 120 orders · $1,200.00 total');
+
+    mockRpc.mockImplementation((_fn: string, args: PageArgs) => Promise.resolve(args.p_after
+      ? { data: null, error: { message: 'ORDERS_PAGE_STALE_CURSOR' } }
+      : { data: pageOf(all, args), error: null }));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
+    expect(await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total')).toBeInTheDocument();
+    // Fresh page-one rows arrived from a read with no bookmark, not just the label.
+    expect(await screen.findByText('ORD-0')).toBeInTheDocument();
+    expect(screen.queryByText('ORD-50')).not.toBeInTheDocument();
+    expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({ p_after: undefined }));
+    expect(mockToast).not.toHaveBeenCalledWith('error', 'Failed to load orders. Please try again.');
   });
 
   it('sends the filters to the database and starts again at page one', async () => {
@@ -127,12 +201,12 @@ describe('Orders list pages through the database', () => {
     renderPage();
     await screen.findByText('Showing 1–50 of 120 orders · $1,200.00 total');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('Showing 51–100 of 120 orders · $1,200.00 total');
+    await screen.findByText('Page 2 · 50 shown of 120 orders · $1,200.00 total');
 
     fireEvent.change(screen.getByLabelText('Filter by planned or committed'), { target: { value: 'committed' } });
     fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
 
-    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({
+    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({
       p_planned: false, p_needs_split_billing: true, p_offset: 0,
     })));
   });
@@ -145,7 +219,7 @@ describe('Orders list pages through the database', () => {
     mockRpc.mockImplementation(() => new Promise(() => {}));
     fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
 
-    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({ p_needs_split_billing: true })));
+    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({ p_needs_split_billing: true })));
     expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Select All 120/ })).not.toBeInTheDocument();
   });
@@ -195,13 +269,13 @@ describe('Orders list pages through the database', () => {
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
     expect(await screen.findByText('1 selected')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('Showing 51–100 of 120 orders · $1,200.00 total');
+    await screen.findByText('Page 2 · 50 shown of 120 orders · $1,200.00 total');
     expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));
     expect(await screen.findByText('120 selected')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: 'needs_split' } });
-    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_page', expect.objectContaining({ p_needs_split_billing: true })));
+    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('get_orders_keyset_page', expect.objectContaining({ p_needs_split_billing: true })));
     fireEvent.change(screen.getByLabelText('Filter by split billing status'), { target: { value: '' } });
     await screen.findByText(/of 120 orders · \$1,200\.00 total/);
     expect(screen.queryByText('120 selected')).not.toBeInTheDocument();
@@ -282,9 +356,9 @@ describe('Orders list pages through the database', () => {
 
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => { release = r; });
-    mockRpc.mockImplementation(async (_fn: string, args: { p_limit: number; p_offset: number }) => {
+    mockRpc.mockImplementation(async (_fn: string, args: PageArgs) => {
       if (args.p_limit === 1000) await gate;
-      return { data: { rows: all.slice(args.p_offset, args.p_offset + args.p_limit), total_count: all.length, total_price_cents: all.length * 1000 }, error: null };
+      return { data: pageOf(all, args), error: null };
     });
     fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));
     fireEvent.click(screen.getByRole('button', { name: 'Finish import' }));
@@ -315,9 +389,9 @@ describe('Orders list pages through the database', () => {
 
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => { release = r; });
-    mockRpc.mockImplementation(async (_fn: string, args: { p_limit: number; p_offset: number }) => {
+    mockRpc.mockImplementation(async (_fn: string, args: PageArgs) => {
       if (args.p_limit === 1000) await gate;
-      return { data: { rows: all.slice(args.p_offset, args.p_offset + args.p_limit), total_count: all.length, total_price_cents: all.length * 1000 }, error: null };
+      return { data: pageOf(all, args), error: null };
     });
     fireEvent.click(screen.getByRole('button', { name: 'Select All 120' }));
     fireEvent.click(screen.getByRole('button', { name: 'Deselect' }));
@@ -348,7 +422,7 @@ describe('Orders bulk-delete lifecycle guard', () => {
   }
 
   it('refuses an active selected order before opening confirmation', async () => {
-    const { mutation } = await selectOnlyOrder('confirmed', { data: [{ id: 'order-1' }], error: null });
+    const { mutation } = await selectOnlyOrder('confirmed', { data: [{ id: 'order-00001' }], error: null });
 
     expect(mockToast).toHaveBeenCalledWith(
       'error',
@@ -359,12 +433,12 @@ describe('Orders bulk-delete lifecycle guard', () => {
   });
 
   it('soft-deletes a terminal selected order after confirmation', async () => {
-    const { mutation } = await selectOnlyOrder('cancelled', { data: [{ id: 'order-1' }], error: null });
+    const { mutation } = await selectOnlyOrder('cancelled', { data: [{ id: 'order-00001' }], error: null });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm order delete' }));
 
     await waitFor(() => {
       expect(mutation.update).toHaveBeenCalledWith({ deleted_at: expect.any(String) });
-      expect(mutation.in).toHaveBeenCalledWith('id', ['order-1']);
+      expect(mutation.in).toHaveBeenCalledWith('id', ['order-00001']);
       expect(mockToast).toHaveBeenCalledWith('success', 'Deleted 1 order(s)');
     });
   });

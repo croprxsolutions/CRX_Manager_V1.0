@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Card, { CardHeader } from '../ui/Card';
 import { LoadFailedState } from '../ui/EmptyState';
-import { supabase } from '../../lib/db';
+import { supabase, supabaseUntyped } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { BUSINESS_TIMEZONE } from '../../lib/dateUtils';
@@ -23,10 +23,36 @@ const FIELD_LABELS: Record<string, string> = {
 type LoadState =
   | { status: 'loading' }
   | { status: 'failed'; productId: string }
-  | { status: 'loaded'; productId: string; rows: ProductChangeHistoryEntry[] };
+  | { status: 'loaded'; productId: string; rows: ProductChangeHistoryEntry[]; parentNames: ReadonlyMap<number, string> };
 
 const BOOLEAN_FIELDS = new Set(['is_active', 'is_rup', 'is_full_tote_only']);
 const NO_VALUE_FIELDS = new Set(['notes', 'internal_notes', 'quoting_notes', 'product_family_id']);
+
+/** Parent event id -> parent name for the parent copies shown. A failed read shows them without a name. */
+async function loadParentNames(rows: ProductChangeHistoryEntry[]): Promise<Map<number, string>> {
+  const ids = [...new Set(rows.flatMap((row) => (row.change_type === 'parent_copy' && row.parent_event_id != null ? [row.parent_event_id] : [])))];
+  if (ids.length === 0) return new Map();
+  try {
+    const { data, error } = await supabaseUntyped.from('product_parent_events')
+      .select('id, product_parents(name)')
+      .in('id', ids);
+    if (error) throw error;
+    // Many-to-one, so PostgREST sends one parent object; the untyped client types it as a list.
+    return new Map(((data ?? []) as unknown as Array<{ id: number; product_parents: { name: string } | null }>)
+      .flatMap((event) => (event.product_parents ? [[event.id, event.product_parents.name] as const] : [])));
+  } catch (error) {
+    Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), {
+      extra: { context: 'product_change_history_parent_names' },
+    });
+    return new Map();
+  }
+}
+
+function parentPrefix(row: ProductChangeHistoryEntry, names: ReadonlyMap<number, string>): string {
+  if (row.change_type !== 'parent_copy') return '';
+  const name = row.parent_event_id == null ? undefined : names.get(row.parent_event_id);
+  return name ? `Changed on parent ${name}: ` : 'Changed on parent: ';
+}
 
 function displayValue(field: string | null, value: string | null): string {
   if (BOOLEAN_FIELDS.has(field ?? '') && value !== null) return value === 'true' ? 'Yes' : 'No';
@@ -45,7 +71,7 @@ export default function ProductChangeHistory({ productId, reloadToken = 0 }: { p
     setLoaded({ status: 'loading' });
     void (async () => {
       const { data, error } = await supabase.from('product_change_history')
-        .select('id, product_id, change_type, field_name, old_value, new_value, changed_by, changed_by_name, changed_at')
+        .select('id, product_id, change_type, parent_event_id, field_name, old_value, new_value, changed_by, changed_by_name, changed_at')
         .eq('product_id', productId)
         .order('changed_at', { ascending: false })
         .order('id', { ascending: false })
@@ -57,7 +83,9 @@ export default function ProductChangeHistory({ productId, reloadToken = 0 }: { p
         });
         setLoaded({ status: 'failed', productId });
       } else {
-        setLoaded({ status: 'loaded', productId, rows: (data ?? []) as ProductChangeHistoryEntry[] });
+        const rows = (data ?? []) as ProductChangeHistoryEntry[];
+        const parentNames = await loadParentNames(rows);
+        if (!cancelled) setLoaded({ status: 'loaded', productId, rows, parentNames });
       }
     })().catch((error: unknown) => {
       if (cancelled) return;
@@ -86,9 +114,9 @@ export default function ProductChangeHistory({ productId, reloadToken = 0 }: { p
               {row.change_type === 'created' ? (
                 <p>Created</p>
               ) : NO_VALUE_FIELDS.has(row.field_name ?? '') ? (
-                <p>{FIELD_LABELS[row.field_name ?? ''] ?? row.field_name} changed</p>
+                <p>{parentPrefix(row, state.parentNames)}{FIELD_LABELS[row.field_name ?? ''] ?? row.field_name} changed</p>
               ) : (
-                <p><span className="font-medium">{FIELD_LABELS[row.field_name ?? ''] ?? row.field_name}</span>: {displayValue(row.field_name, row.old_value)} → {displayValue(row.field_name, row.new_value)}</p>
+                <p>{parentPrefix(row, state.parentNames)}<span className="font-medium">{FIELD_LABELS[row.field_name ?? ''] ?? row.field_name}</span>: {displayValue(row.field_name, row.old_value)} → {displayValue(row.field_name, row.new_value)}</p>
               )}
             </li>
           ))}

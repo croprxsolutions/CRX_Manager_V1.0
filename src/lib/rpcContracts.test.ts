@@ -3100,6 +3100,13 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER DELETE row trigger on invoices, allocation_sets and payments: appends one audit snapshot per row a delete really erased, so a replayed delete matches no row and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   _refuse_financial_truncate:
     'BEFORE TRUNCATE statement trigger on invoices, allocation_sets and payments: only raises (the word TRUNCATE is in its message), writes nothing; every API-role EXECUTE is revoked',
+  // Sprayed jobs keep each product's EPA number (20261204120000).
+  _job_epa_freeze:
+    'internal helper called only by its trigger: marks a job sprayed and inserts one lock row per product on its lines ON CONFLICT DO NOTHING, so a replay inserts nothing; every API-role EXECUTE (incl. service_role) is revoked',
+  _trg_job_epa_freeze:
+    'AFTER row trigger on job_applied_records (INSERT/UPDATE OF job_id) and jobs (INSERT/UPDATE OF status to completed or invoiced): calls _job_epa_freeze, insert-only ON CONFLICT DO NOTHING, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _trg_job_line_epa_lock:
+    'AFTER INSERT/UPDATE OF job_id, product_id row trigger on job_chemicals: on a sprayed or finished job inserts the product lock ON CONFLICT DO NOTHING, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // KI-25 receipt queue (20261113140000).
   _enqueue_delivery_receipt:
     'internal helper called only by complete_delivery after its required-key replay binding; one row per delivery (ON CONFLICT (delivery_id), reopening only a cancelled never-sent row); every API-role EXECUTE (incl. service_role) is revoked',

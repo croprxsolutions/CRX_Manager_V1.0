@@ -1091,6 +1091,15 @@ BEGIN
         IS DISTINCT FROM (SELECT ROUND(oi.total_price * 100)::bigint FROM order_items oi WHERE oi.id = v_l1) THEN
     v_fails := v_fails || ' (AL) a line past its planned quantity did not split its capped total by percentage;';
   END IF;
+  -- Just past plan, a payer's percentage of the line can beat quantity times price: the payer never pays more than that.
+  PERFORM pg_temp.smk_new_sale('ovq' || v_suffix, false);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 33.33);
+  v_cents := (SELECT ROUND(oi.price_per_unit * 100)::bigint FROM order_items oi WHERE oi.id = v_l1);
+  IF (SELECT s.cents FROM _bill_split_line_shares(v_l1, v_cents, 10100) s WHERE s.customer_id = v_payer2)
+     IS DISTINCT FROM ROUND(v_cents * 0.33)::bigint THEN
+    v_fails := v_fails || ' (AL) a payer just past plan paid more than quantity times price;';
+  END IF;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL chem sale bill split:%', v_fails;

@@ -445,7 +445,8 @@ $function$;
 -- their percentage rounded down to whole hundredths (100 of p_units), because return_items.quantity holds
 -- two decimals, and their cents are that quantity times the invoice's unit price, so each payer's line
 -- multiplies (Mason, 2026-11-06, B). A line delivered past its planned quantity bills at a capped total that
--- quantity times price can't reach, so its other payers take their percentage of those cents. A share under 0.01 that is worth cents comes back as 0 units with
+-- quantity times price can't reach, so its other payers take their percentage of those cents, never more than
+-- quantity times price. A share under 0.01 that is worth cents comes back as 0 units with
 -- its percentage's cents, and the invoice writer refuses it (Mason, 2026-11-06, option B). The taker
 -- comes first.
 CREATE FUNCTION public._bill_split_line_shares(p_order_item_id uuid, p_cents bigint, p_units bigint)
@@ -476,7 +477,8 @@ AS $function$
     SELECT p.customer_id,
            floor(p_cents * p.pct / 100)::bigint AS floor_cents,
            floor(p_units * p.pct / 10000)::bigint * 100 AS floor_units,
-           CASE WHEN abs(p_cents - ROUND(p_units * line.price_cents / 10000.0)) > 1 THEN floor(p_cents * p.pct / 100)::bigint
+           CASE WHEN abs(p_cents - ROUND(p_units * line.price_cents / 10000.0)) > 1
+                THEN LEAST(floor(p_cents * p.pct / 100), ROUND(floor(p_units * p.pct / 10000) * line.price_cents / 100))::bigint
                 ELSE ROUND(floor(p_units * p.pct / 10000) * line.price_cents / 100)::bigint END AS share_cents,
            row_number() OVER (ORDER BY p.customer_id = line.main DESC, p.pct DESC, p.customer_id) AS rn
       FROM payers p, line

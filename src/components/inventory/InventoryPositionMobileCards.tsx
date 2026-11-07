@@ -1,4 +1,4 @@
-import { ArrowDownToLine, FileText, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDownToLine, FileText, PaintBucket, Pencil, Trash2 } from 'lucide-react';
 import Badge from '../ui/Badge';
 
 export type MobileInventoryPosition = {
@@ -23,6 +23,9 @@ type Props = {
   onReceive: (id: string) => void;
   onAdjust: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Tote sizes with a Bulk fill source (BLK-1a); each gets a Fill button. */
+  fillableToteIds?: Set<string>;
+  onFillTote?: (row: MobileInventoryPosition) => void;
 };
 
 const formatQuantity = (value: number) =>
@@ -38,6 +41,8 @@ export default function InventoryPositionMobileCards({
   onReceive,
   onAdjust,
   onDelete,
+  fillableToteIds,
+  onFillTote,
 }: Props) {
   if (rows.length === 0) {
     return (
@@ -103,6 +108,16 @@ export default function InventoryPositionMobileCards({
 
               {isAdmin && (
                 <div className="flex items-center gap-1">
+                  {onFillTote && fillableToteIds?.has(row.product_id) && (
+                    <button
+                      type="button"
+                      onClick={() => onFillTote(row)}
+                      className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-secondary hover:bg-gray-100"
+                      aria-label={`Fill ${row.product_name} from Bulk`}
+                    >
+                      <PaintBucket className="h-4 w-4" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => onReceive(row.id)}

@@ -144,6 +144,8 @@ export const RpcErrorCodes = {
   PRODUCT_RATES_STALE: 'PRODUCT_RATES_STALE',
   PRODUCT_RATES_NOT_LOCKED: 'PRODUCT_RATES_NOT_LOCKED',
   PRODUCT_RATE_PREVIEW_CHANGED: 'PRODUCT_RATE_PREVIEW_CHANGED',
+  // Tote fill (migration 20261117130000): stock, units, source or catalog cost changed since the preview.
+  TOTE_FILL_PREVIEW_CHANGED: 'TOTE_FILL_PREVIEW_CHANGED',
   // Product parents (migration 20261108120000): the parent, a size or the sizes changed since loaded or previewed.
   PRODUCT_PARENT_STALE: 'PRODUCT_PARENT_STALE',
   PRODUCT_PARENT_SIZE_STALE: 'PRODUCT_PARENT_SIZE_STALE',

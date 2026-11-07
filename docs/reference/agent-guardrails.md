@@ -504,8 +504,11 @@ Mason approved this after two harmless notes were refused on 2026-11-07: a `pyth
 wrote "git reset --hard" into a memory note (`bash-safety.mjs`), and a `cat >> <notes file> <<'EOF'`
 whose text named a `.claude/worktrees/…` path (`review-proof-guard.mjs`). For a **Bash** command,
 both guards now judge the command with its here-document bodies left out (`commandWithoutTextHeredocs`
-in `codex-push-lib.mjs`, which reuses the `pipelineStages` lexer), but only when every command in it,
-substitutions included, is a bare `cat` or `tee`. A language runtime fed a here-document
+in `codex-push-lib.mjs`, which reuses the `pipelineStages` lexer), but only when every command in it
+is a bare `cat` or `tee`, every here-document delimiter is quoted (`<<'EOF'` or `<<"EOF"`, so Bash
+expands nothing in the body), and the command has no `$( )`, backtick or `<( )`/`>( )` at all (the
+Codex App showed on PR #1632 that a substitution can build a write target from a here-document, and
+that an unquoted body expands across a `\`+newline join the lexer's per-line check misses). A language runtime fed a here-document
 (`python - <<'EOF'`) is still judged on its full text, so the first false alarm's exact shape stays
 refused: write notes with `cat >> <file> <<'EOF'` or the Write tool. Letting runtimes through unless
 their text could launch a process was tried in this change and dropped, because Luna showed twice

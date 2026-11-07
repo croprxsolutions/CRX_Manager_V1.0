@@ -1271,6 +1271,9 @@ for (const [command, label] of [
   ["python - <<'EOF'\nopen('.claude/session-state/claude-review-push.json','w').write('{}')\nEOF", "python forging a proof"],
   ["cat > .claude/session-state/claude-review-push.json <<'EOF'\n{}\nEOF", "cat writing a proof"],
   ["cat(){ bash; }; cat <<'EOF'\nrm -rf .claude/session-state\nEOF", "a function named cat"],
+  // A substitution can build the write target from a here-document (Codex App, PR #1632).
+  ["cat > \"$(cat <<'X'\n.claude/session-state/claude-review-push.json\nX\n)\" <<'E'\n{}\nE", "a proof path built by $( ) from a here-document"],
+  ["tee `cat <<'X'\n.claude/session-state/claude-review-push.json\nX\n` <<'E'\n{}\nE", "a proof path built by backticks from a here-document"],
 ]) {
   const result = run({ tool_name: "Bash", tool_input: { command } });
   assert.match(result.stdout, /"permissionDecision":"deny"/, `still denied: ${label}`);

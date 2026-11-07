@@ -712,7 +712,9 @@ for (const [command, label] of [
   ["cat > x.sh <<'EOF'\ngit reset --hard\nEOF\n./x.sh", "written script run by path"],
   ["cat(){ bash; }; cat <<'EOF'\ngit reset --hard\nEOF", "a function named cat"],
   ["cat <<EOF\n$(git reset --hard)\nEOF", "substitution in an unquoted body"],
-  ["echo hi # <<EOF\ngit reset --hard\nEOF", "a heredoc opener inside a comment"],
+  // Bash joins `\`+newline in an unquoted body before expanding (Codex App, PR #1632).
+  ["cat <<EOF\n$\\\n(git push --force origin main)\nEOF", "a substitution split across a line join"],
+  ["cat <<EOF\ngit reset --hard\nEOF", "an unquoted body (only quoted delimiters are narrowed)"],  ["echo hi # <<EOF\ngit reset --hard\nEOF", "a heredoc opener inside a comment"],
   ["cat <<'EOF'\ngit reset --hard\n", "a here-document that never ends"],
   ["cat <<'EOF' | xargs git\nreset --hard\nEOF\ngit reset --hard", "xargs, then a real reset"],
   ["python - <<'EOF'\nimport os; os.system('git reset --hard')\nEOF", "python launching a process"],

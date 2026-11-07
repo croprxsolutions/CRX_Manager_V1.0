@@ -3239,7 +3239,14 @@ export function commandWithoutTextHeredocs(command) {
   const textOnly = stages.length > 0 && stages.every((stage) =>
     !stage.unreadable && HEREDOC_TEXT_PROGRAMS.has(splitShellWordsRaw(stage.text)[0] ?? ""));
   if (!textOnly) return text;
-  return stages.map((stage) => stage.text).join("\n");
+  const withoutBodies = stages.map((stage) => stage.text).join("\n");
+  // A substitution can build a write target from a here-document body, and an
+  // unquoted body expands (after Bash joins `\`+newline, which the lexer's
+  // per-line check misses): Codex App, PR #1632. So only quoted-delimiter
+  // here-documents in a command with no substitution at all lose their text.
+  if (/\$\(|`|[<>]\(/.test(withoutBodies)) return text;
+  if (/<<(?!<)-?[ \t]*(?!['"])/.test(withoutBodies)) return text;
+  return withoutBodies;
 }
 
 // Words that run the program after them (possibly after their own options and

@@ -1,7 +1,8 @@
 ## 2026-11-07 — Guards no longer read cat/tee here-document notes as commands
 
 - `bash-safety.mjs` and `review-proof-guard.mjs` judge a Bash command without its here-document
-  bodies when every command in it is a bare `cat`/`tee`. Writing a note that mentions
+  bodies when every command in it is a bare `cat`/`tee`, every here-document delimiter is quoted, and
+  the command has no substitution (`$( )`, backticks, `<( )`, `>( )`). Writing a note that mentions
   `git reset --hard` or a `.claude/worktrees/…` path that way is no longer refused (Mason, 2026-11-07).
 - Not narrowed: a here-document fed to a language runtime (`python - <<'EOF'`). Luna showed twice that
   a word list cannot tell such a script from one that launches a command, so it is judged on its full

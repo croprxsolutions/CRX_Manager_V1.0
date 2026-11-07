@@ -135,6 +135,8 @@ describe('invariant: a legacy tank overfill is never dropped by the weights chec
     ['line read through its saved snapshot map', [liquid({ quantity: 200, unit: 'Pt', rowUnits: snapshot })], mapped(current)],
     ['saved ticket whose unit basis was never recorded', [liquid({})], mapped(null)],
     ['saved line with no recorded weight (empty line map)', [liquid({ rowUnits: { factors: {}, ambiguous: [] } })], mapped(units)],
+    ['a weights mismatch that is not the overfill (map reads gal as a weight)', [liquid({})],
+      mapped({ factors: { ...units.factors, gal: { kind: 'weight', factor: 1 } }, ambiguous: [] })],
   ];
   // 30 Gal (or 200 Pt = 25 Gal) of product in a 20 Gal (80 Qt) tank.
   const headers: [total: number, unit: string][] = [[20, 'Gal'], [80, 'Qt']];
@@ -143,8 +145,9 @@ describe('invariant: a legacy tank overfill is never dropped by the weights chec
     '%s, %s header', (_situation, unit, total, lines, weights) => {
       const products = lines.map((l) => ({ product_name: l.product_name, quantity: l.quantity as number, unit: l.unit,
         rate_per_acre: null, rate_per_acre_unit: null, product_form: l.form, product_rate_unit: null, product_inventory_unit: null }));
-      const levels = (w: { level: string }[]) => w.map((x) => x.level);
-      expect(levels(validateBlendMath(header(total, unit), products))).toContain('mismatch'); // the legacy check flags it
-      expect(levels(validateBlendMath(header(total, unit), products, weights(lines)))).toContain('mismatch');
+      const overfill = (w: { level: string; message: string }[]) =>
+        w.some((x) => x.level === 'mismatch' && x.message.includes("A tank can't hold more product"));
+      expect(overfill(validateBlendMath(header(total, unit), products))).toBe(true); // the legacy check flags it
+      expect(overfill(validateBlendMath(header(total, unit), products, weights(lines)))).toBe(true);
     });
 });

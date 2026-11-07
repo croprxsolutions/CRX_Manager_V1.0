@@ -490,8 +490,9 @@ export function validateBlendMath(
   }
 
   if (weightTotals) {
-    // Keep only the legacy overfill (its notes are the weights check's job), and only when the weights check missed it.
-    const legacyOverfill = weightTotals.some((w) => w.level === 'mismatch')
+    // Keep only the legacy overfill (its notes are the weights check's job), unless the weights check already says overfill.
+    const isOverfill = (w: BlendMathWarning) => w.level === 'mismatch' && w.message.includes("A tank can't hold more product");
+    const legacyOverfill = weightTotals.some(isOverfill)
       ? [] : warnings.slice(beforeTotals).filter((w) => w.level === 'mismatch');
     return [...warnings.slice(0, beforeTotals), ...weightTotals, ...legacyOverfill];
   }

@@ -69,6 +69,18 @@ if [ "$(printf '%s
 ' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --registry)" = "check" ]; then
   echo ""
   echo "Running the contract tests the schema registry feeds..."
+  # Vitest reads the checkout, so each pushed tip must match it on every input these tests read.
+  CONTRACT_INPUTS="src supabase/migrations docs/reference .claude/schema-registry.json"
+  CONTRACT_SHAS="$(printf '%s\n' "$PUSH_REFS" | awk 'NF >= 2 && $2 !~ /^0+$/ { print $2 }')"
+  for CONTRACT_SHA in ${CONTRACT_SHAS:-HEAD}; do
+    # shellcheck disable=SC2086
+    if ! git diff --quiet "$CONTRACT_SHA" -- $CONTRACT_INPUTS || [ -n "$(git ls-files --others --exclude-standard -- $CONTRACT_INPUTS)" ]; then
+      echo ""
+      echo "❌ CHECKOUT DIFFERS FROM THE PUSHED COMMIT $CONTRACT_SHA — push blocked."
+      echo "The contract tests read this folder. Commit or set aside local changes to $CONTRACT_INPUTS, or push from that branch's checkout."
+      exit 1
+    fi
+  done
   if ! npx vitest run src/lib/rpcContracts.test.ts src/lib/costFields.test.ts 2>&1; then
     echo ""
     echo "❌ CONTRACT TESTS FAILED — push blocked."

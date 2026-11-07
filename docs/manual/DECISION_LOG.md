@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-07 — Hands off Taha's PRs; he lands his own; we hold ours 4 hours
+
+**Decision (Mason, Slack #crx-work, 2026-11-07, confirming a 2026-11-03 agreement):** (1) Mason's agents never push to a branch or PR Taha owns; they comment findings and Taha fixes them the same day, and an urgent fix is agreed with him first. Billing-rule changes go to Mason and Taha as a decision before any code. (2) Taha's six items, the billing plan included, are his through 2026-12-15 (exact list pending from Taha). (3) From billing-plan M4 on, Taha merges his own PRs; his clean Sol run on the final commit counts for the Sol rule, and he must use at least one non-Anthropic adversarial reviewer. Mason does not review his work or run agents monitoring his PRs. Billing-rule decisions stay with Mason. (4) Mason's agents hold their own Sol-list PRs until Taha reviews or 4 hours pass after opening.
+**Why:** on 2026-11-06 more than half of PR 1524's commits came from Mason's agents, including a billing-math change later reverted, so Taha's test results no longer matched what would ship and the same agents were writing and reviewing.
+**What this forbids/implies:** narrows the autonomous-landing rule (2026-09-26) for Sol-list PRs. Rules live in `AGENTS.md` and `.claude/commands/ship.md` › Taha's PRs. No guard enforces the push ban or the hold yet: these are prose rules until a guard is built.
+
 ## 2026-11-06 — Sol skips the wait for an idle Codex App, and counts its rounds
 
 **Decision (Mason, PR 1524 retro: "do item 1 and 2"):** the Sol pre-flight no longer waits up to 15 minutes for the Codex GitHub App when the App reviewed none of the PR's last 3 pushes, and every full Sol run prints "Sol round N on PR #n".

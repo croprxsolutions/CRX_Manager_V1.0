@@ -35,6 +35,7 @@
 --   X  Replaying complete_delivery and Create Invoice with their keys drafts nothing new
 --   Y  A rush sale waiting for prices drafts nothing at completion, can still be priced, then Create Invoice drafts it
 --   Z  One payer's posted invoice can't be unposted alone (GROUP_UNPOST_REQUIRED); the group call unposts every payer
+--      An unposted payer invoice takes header edits and charges; its product lines stay locked; the group re-posts
 --   AA A line bills in the order line's unit, so every payer can return it
 --   AB A delivered amount beyond whole hundredths (2.125) refuses the split; the office is told, Create Invoice refuses
 --   AK A tiny restricted-use line refuses too (not hundredths)
@@ -758,6 +759,38 @@ BEGIN
     IF EXISTS (SELECT 1 FROM invoices WHERE invoice_group_id = v_group AND status <> 'unposted') THEN
       v_fails := v_fails || ' (Z) the group call did not unpost every payer;';
     END IF;
+    -- An unposted payer invoice takes header edits and charges like a draft; its product lines stay locked.
+    SELECT jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type, 'status', i.status,
+             'season', i.season, 'salesman_id', i.salesman_id, 'invoice_date', i.invoice_date, 'payment_terms', i.payment_terms,
+             'header_notes', i.header_notes, 'footer_notes', i.footer_notes)
+      INTO v_header FROM invoices i WHERE i.id = v_inv;
+    SELECT jsonb_agg(jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id,
+             'description', it.description, 'quantity', it.quantity, 'unit_price_cents', it.unit_price_cents,
+             'extended_cents', it.extended_cents, 'cost_cents', it.cost_cents, 'sort_order', it.sort_order,
+             'unit_size', it.unit_size, 'notes', it.notes, 'charge_type', it.charge_type, 'vendor', it.vendor) ORDER BY it.sort_order)
+      INTO v_lines FROM invoice_items it WHERE it.invoice_id = v_inv;
+    v_cents := (SELECT total_amount_cents FROM invoices WHERE id = v_inv);
+    BEGIN
+      PERFORM save_invoice(v_header || jsonb_build_object('header_notes', 'corrected'),
+        v_lines || jsonb_build_array(jsonb_build_object('charge_type', 'freight', 'description', 'Freight', 'quantity', 1,
+          'unit_price_cents', 4500, 'extended_cents', 4500, 'sort_order', 99, 'unit_size', 'each')),
+        'smk-spl-z-edit-' || v_suffix);
+      IF (SELECT total_amount_cents FROM invoices WHERE id = v_inv) IS DISTINCT FROM v_cents + 4500 THEN
+        v_fails := v_fails || ' (Z) a charge on an unposted payer invoice did not bill;';
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_fails := v_fails || ' (Z) an unposted payer invoice refused an edit: ' || SQLERRM || ';';
+    END;
+    BEGIN
+      PERFORM save_invoice(v_header, (SELECT jsonb_agg(l || jsonb_build_object('quantity', (l->>'quantity')::numeric - 1,
+          'extended_cents', (((l->>'quantity')::numeric - 1) * (l->>'unit_price_cents')::bigint)::bigint))
+        FROM jsonb_array_elements(v_lines) l), 'smk-spl-z-lock-' || v_suffix);
+      v_fails := v_fails || ' (Z) an unposted payer invoice changed a product line;';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'BILL_SPLIT_LINES_LOCKED%' THEN v_fails := v_fails || ' (Z) wrong line refusal: ' || SQLERRM || ';'; END IF;
+    END;
+    SELECT jsonb_object_agg(id, _invoice_post_version(id)) INTO v_versions FROM invoices WHERE invoice_group_id = v_group;
+    PERFORM post_invoice_group(v_group, v_admin, v_versions, 'smk-spl-z-repost-' || v_suffix);
   END IF;
 
   -- AA: a line bills in the order line's unit, so every payer can return it: no unit on the line, and a

@@ -1663,13 +1663,13 @@ BEGIN
      WHERE i.id = v_invoice_id
      FOR UPDATE;
 
-    -- Billing plan M2: a Bill Split draft takes charges and header edits until it posts. The layer below
-    -- already refreshes its provenance under a mutation claim.
+    -- Billing plan M2: a Bill Split draft takes charges and header edits until it posts, and again once the
+    -- group is unposted. The layer below already refreshes its provenance under a mutation claim.
     SELECT public._bill_split_product_lines(i.id)
       INTO v_lines_before
       FROM public.invoices i
      WHERE i.id = v_invoice_id
-       AND i.status = 'draft'
+       AND i.status IN ('draft', 'unposted')
        AND i.delivery_id IS NOT NULL
        AND i.invoice_group_id IS NOT NULL
        AND public._order_has_bill_split(i.order_id);

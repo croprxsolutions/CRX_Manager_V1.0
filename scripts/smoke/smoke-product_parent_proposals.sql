@@ -45,7 +45,7 @@ BEGIN
     'public.approve_product_parent_groups(uuid,bigint,jsonb,text)',
     'public.hold_product_parent_group(uuid,bigint,text,text,text)',
     'public.reject_product_parent_group(uuid,bigint,text,text,text)',
-    'public.upsert_parent_brand(uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)',
+    'public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)',
     'public.get_product_brands(uuid)'] LOOP
     IF has_function_privilege('anon', v_sig, 'EXECUTE') THEN
       RAISE EXCEPTION 'SMOKE_FAIL: anon can execute %', v_sig;
@@ -88,7 +88,7 @@ BEGIN
     END;
     IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: an approval ran while grouping is closed'; END IF;
     BEGIN
-      PERFORM public.upsert_parent_brand(gen_random_uuid(), 'Smoke Closed ' || v_tag, NULL, NULL, true, false, NULL,
+      PERFORM public.upsert_parent_brand(gen_random_uuid(), gen_random_uuid(), 'Smoke Closed ' || v_tag, NULL, NULL, true, false, NULL,
         NULL, NULL, false, NULL, 'smoke:par2:closed-b:' || v_tag);
       v_refused := false;
     EXCEPTION WHEN OTHERS THEN
@@ -161,14 +161,14 @@ BEGIN
   END IF;
 
   -- Parent brand: add, read through a size, retire with a reason.
-  v_brand := public.upsert_parent_brand(v_parent, 'Smoke Brand ' || v_tag, '99991-7', 'Smoke Co', true, false, NULL,
+  v_brand := public.upsert_parent_brand(v_parent, v_ids[2], 'Smoke Brand ' || v_tag, '99991-7', 'Smoke Co', true, false, NULL,
     NULL, NULL, false, NULL, 'smoke-pp2-brand-' || v_tag);
   v_read := public.get_product_brands(v_ids[2]);
   IF v_read->>'source' <> 'parent' OR (v_read->>'parent_id')::uuid IS DISTINCT FROM v_parent
      OR jsonb_array_length(v_read->'brands') <> 1 OR v_read->'brands'->0->>'id' <> v_brand->>'id' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the size did not read its parent''s brand: %', v_read;
   END IF;
-  PERFORM public.upsert_parent_brand(v_parent, 'Smoke Brand ' || v_tag, '99991-7', 'Smoke Co', true, false, NULL,
+  PERFORM public.upsert_parent_brand(v_parent, v_ids[2], 'Smoke Brand ' || v_tag, '99991-7', 'Smoke Co', true, false, NULL,
     (v_brand->>'id')::uuid, (v_brand->>'row_version')::integer, true, 'smoke no longer carried', 'smoke-pp2-retire-' || v_tag);
   v_read := public.get_product_brands(v_ids[2]);
   EXECUTE 'RESET ROLE';

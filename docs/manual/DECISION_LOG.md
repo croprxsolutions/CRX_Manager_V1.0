@@ -10,12 +10,35 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-06 — Hands off Taha's PRs; he lands his own; we hold ours 4 hours
+
+**Decision (Mason, Slack #crx-work, evening of 2026-11-06 Central, confirming a 2026-11-03 agreement):** (1) Mason's agents never push to a branch or PR Taha owns; they comment findings and Taha fixes them the same day, and an urgent fix is agreed with him first. Billing-rule changes go to Mason and Taha as a decision before any code. (2) Taha's six items, the billing plan included, are his through 2026-12-15 (exact list pending from Taha). (3) From billing-plan M4 on, Taha merges his own PRs; his clean Sol run on the final commit counts for the Sol rule, and he must use at least one non-Anthropic adversarial reviewer. Mason does not review his work or run agents monitoring his PRs. Billing-rule decisions stay with Mason. (4) Mason's agents hold their own Sol-list PRs, before any migration apply and the merge, until Taha submits a review or 4 hours pass after opening.
+**Why:** on 2026-11-06 more than half of PR 1524's commits came from Mason's agents, including a billing-math change later reverted, so Taha's test results no longer matched what would ship and the same agents were writing and reviewing.
+**What this forbids/implies:** narrows the autonomous-landing rule (2026-09-26) for Sol-list PRs. Rules live in `AGENTS.md` and `.claude/commands/ship.md` › Taha's PRs. No guard enforces the push ban or the hold yet: these are prose rules until a guard is built. Mason added the same day that Claude warns him, without blocking, when his own money or billing work may overlap Taha's items; his field application invoice work is his own (`CLAUDE.md`).
+
 ## 2026-11-06 — Sol skips the wait for an idle Codex App, and counts its rounds
 
 **Decision (Mason, PR 1524 retro: "do item 1 and 2"):** the Sol pre-flight no longer waits up to 15 minutes for the Codex GitHub App when the App reviewed none of the PR's last 3 pushes, and every full Sol run prints "Sol round N on PR #n".
 **Why:** on PR 1524 the App had stopped reviewing after `c5d7113e8`, yet each Sol round still waited 15 minutes for it; and about 6 rounds went into one rounding mechanism before Mason was asked the trade-off, because no one could see the count.
 **What this forbids/implies:** the wait stays when the App reviewed any of the last 3 pushes or the PR has fewer than 3. From round 3 the wrapper points at the AGENTS.md stop rule (same mechanism a 3rd time: stop and ask Mason the trade-off). A pre-commit control-character check was proposed in the same retro and NOT approved.
 
+## 2026-11-06 — Sprayed jobs lock each product's EPA number (lock per product)
+
+**Decision (Mason, 2026-11-06: "Yes, lock per product"):** once a job is sprayed (spray record saved) or finished, every product already on that job keeps the EPA number the job recorded for it, however its line is edited, deleted or re-added; only a product never on the job takes the product's current number (and then keeps it). On a conflict the older number wins. The lock survives a spray record being deleted and re-entered. Migration 20261204120000, PR #1584.
+**Why:** keeping numbers by job-line identity failed three Sol rounds on the same mechanism (save_job deletes and re-writes every line, so a line's identity does not survive a save). Locking by job and product has no such gap.
+**What this forbids/implies:** kept numbers live in `job_product_epa` (insert-only); a job's unlocked products read `products.epa_registration`. Printouts move to the kept numbers in a follow-up PR. A correction made between the physical spray and its record being entered reaches the job.
+
+## 2026-11-06 — A moved spray record makes its new job "Not recorded"
+
+**Decision (Mason, 2026-11-06: "Mark Not recorded"):** when a spray record is moved to a job that was not yet sprayed or finished, that job's products are kept as "Not recorded", never at the product's current number. A job already sprayed keeps its own numbers. Migration 20261204120000, PR #1584.
+**Why:** Sol found a new HIGH in three rounds in a row, each about a lock filled in when the true history is unknown; a moved record proves nothing about which numbers its new job used. The choice was block (refuse the move) vs loss (allow it, record no number); Mason chose loss, so nothing ever prints an invented number.
+**What this forbids/implies:** a job or product ID that has kept numbers can never be reused (both refused with `JOB_EPA_HISTORY_ID` / `PRODUCT_EPA_HISTORY_ID`).
+
+## 2026-11-06 — Signed-in users cannot write job chemical lines directly
+
+**Decision:** Mason approved removing `authenticated` and `anon` INSERT, UPDATE, DELETE and TRUNCATE on `job_chemicals` (Mason, 2026-11-06: "Yes, remove it"; migration 20261204120000, PR #1584). Reads are unchanged.
+**Why:** job lines are the input to a sprayed job's kept EPA numbers; the app never wrote the table directly (every write goes through save_job and the other definer-rights job functions), so direct writes were only a way around the server's checks.
+**What this forbids/implies:** job lines are written only by server functions; a screen or script that needs a new kind of line write gets an RPC, not a direct grant. Re-granting direct writes is a permission change that needs Mason.
 ## 2026-11-06 — Duplicate ingredients are replaced, never linked (DM-1)
 
 **Decision (Mason, 2026-11-06: "Yes, use replace"):** when two active-ingredient entries turn out to be the same chemical, an admin swaps the duplicate out on each product through the normal reviewed chemistry correction, then retires the unused entry. No merge, alias or "merged into" link exists.

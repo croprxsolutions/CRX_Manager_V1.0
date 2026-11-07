@@ -1,0 +1,3 @@
+## 2026-11-06 — Taha working rules written into the agent contract
+
+Mason's 2026-11-06 (evening, Central) agreements with Taha are now in `AGENTS.md`, `CLAUDE.md`, `.claude/commands/ship.md` › Taha's PRs and `docs/manual/DECISION_LOG.md`: agents never push to Taha's branches (comment only), Taha's six items are his through 2026-12-15, Taha lands his own PRs from billing-plan M4 on with his own Sol run, our Sol-list PRs wait for his review or 4 hours before any migration apply and the merge, and Claude warns Mason (never blocks) when his own money work may overlap Taha's. Prose only; no guard changed.

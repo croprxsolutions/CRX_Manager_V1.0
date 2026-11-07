@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261107131813",
+    "migrations_high_water": "20261107180143",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -545,6 +545,9 @@
       "20261204100000_ki18_batch1_chicago_today",
       "20261204110000_ki18_batch2_chicago_boards",
       "20261204120000_job_lines_keep_epa_number",
+      "20261206110000_ki18_leftovers_hold_expiry_reversal_month_stale_quotes",
+      "20261206120000_product_duplicate_parents_read",
+      "20261207100000_product_weights",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1486,8 +1489,10 @@
     "blend_recipe_items",
     "blend_ticket_fields",
     "blend_ticket_images",
+    "blend_ticket_product_weights",
     "blend_ticket_products",
     "blend_ticket_to_order_items",
+    "blend_ticket_weight_basis",
     "commission_earned_state_ledger",
     "commission_history_cutover",
     "commission_payment_items",
@@ -1527,6 +1532,7 @@
     "job_epa_sprayed",
     "job_field_shares",
     "job_fields",
+    "job_loader_worksheet_weights",
     "job_notifications",
     "job_product_epa",
     "job_tag_assignments",
@@ -1555,11 +1561,16 @@
     "product_parent_brand_events",
     "product_parent_brand_sources",
     "product_parent_copy_passes",
+    "product_parent_density_state",
+    "product_parent_density_values",
     "product_parent_events",
     "product_rate_correction_passes",
     "product_rate_events",
     "product_rate_lock",
+    "product_size_net_weight_state",
+    "product_size_net_weight_values",
     "product_use_timing_options",
+    "product_weight_events",
     "profile_public_directory",
     "purchase_order_import_intents",
     "purchase_order_item_cost_changes",
@@ -1691,6 +1702,51 @@
       ],
       "constraints": [
         "blend_recipes_recipe_type_check"
+      ]
+    },
+    "blend_ticket_product_weights.captured_how": {
+      "values": [
+        "at_save",
+        "backfill_at_apply"
+      ],
+      "constraints": [
+        "blend_ticket_product_weights_captured_how_check"
+      ]
+    },
+    "blend_ticket_product_weights.none_reason": {
+      "values": [
+        "no_parent",
+        "no_approved_weight",
+        "seed_or_each",
+        "unit_not_convertible",
+        "unknown_form"
+      ],
+      "constraints": [
+        "blend_ticket_product_weights_none_reason_check"
+      ],
+      "nullable": true
+    },
+    "blend_ticket_product_weights.product_form": {
+      "values": [
+        "liquid",
+        "dry",
+        "seed",
+        "each"
+      ],
+      "constraints": [
+        "blend_ticket_product_weights_product_form_check"
+      ],
+      "nullable": true
+    },
+    "blend_ticket_product_weights.weight_kind": {
+      "values": [
+        "density",
+        "net_weight",
+        "unit_weight",
+        "none"
+      ],
+      "constraints": [
+        "blend_ticket_product_weights_weight_kind_check"
       ]
     },
     "blend_tickets.order_link_status": {
@@ -2325,6 +2381,42 @@
       ],
       "nullable": true
     },
+    "job_loader_worksheet_weights.none_reason": {
+      "values": [
+        "no_parent",
+        "no_approved_weight",
+        "seed_or_each",
+        "unit_not_convertible",
+        "unknown_form"
+      ],
+      "constraints": [
+        "job_loader_worksheet_weights_none_reason_check"
+      ],
+      "nullable": true
+    },
+    "job_loader_worksheet_weights.product_form": {
+      "values": [
+        "liquid",
+        "dry",
+        "seed",
+        "each"
+      ],
+      "constraints": [
+        "job_loader_worksheet_weights_product_form_check"
+      ],
+      "nullable": true
+    },
+    "job_loader_worksheet_weights.weight_kind": {
+      "values": [
+        "density",
+        "net_weight",
+        "unit_weight",
+        "none"
+      ],
+      "constraints": [
+        "job_loader_worksheet_weights_weight_kind_check"
+      ]
+    },
     "job_loader_worksheets.load_balance_mode": {
       "values": [
         "proportional",
@@ -2678,6 +2770,36 @@
         "product_parent_brands_status_check"
       ]
     },
+    "product_parent_density_values.entered_unit": {
+      "values": [
+        "lb_per_gal",
+        "specific_gravity"
+      ],
+      "constraints": [
+        "product_parent_density_values_entered_unit_check"
+      ]
+    },
+    "product_parent_density_values.review_state": {
+      "values": [
+        "draft",
+        "approved",
+        "superseded"
+      ],
+      "constraints": [
+        "product_parent_density_values_review_state_check"
+      ]
+    },
+    "product_parent_density_values.source": {
+      "values": [
+        "measured",
+        "sds",
+        "label",
+        "supplier"
+      ],
+      "constraints": [
+        "product_parent_density_values_source_check"
+      ]
+    },
     "product_parent_events.event_type": {
       "values": [
         "created",
@@ -2754,6 +2876,27 @@
         "product_rate_events_event_type_check"
       ]
     },
+    "product_size_net_weight_values.review_state": {
+      "values": [
+        "draft",
+        "approved",
+        "superseded"
+      ],
+      "constraints": [
+        "product_size_net_weight_values_review_state_check"
+      ]
+    },
+    "product_size_net_weight_values.source": {
+      "values": [
+        "measured",
+        "sds",
+        "label",
+        "supplier"
+      ],
+      "constraints": [
+        "product_size_net_weight_values_source_check"
+      ]
+    },
     "product_supplier_links.comparison_status": {
       "values": [
         "pending",
@@ -2781,6 +2924,36 @@
       ],
       "constraints": [
         "product_use_timing_options_category_check"
+      ]
+    },
+    "product_weight_events.actor_kind": {
+      "values": [
+        "user",
+        "system"
+      ],
+      "constraints": [
+        "product_weight_events_actor_kind_check"
+      ]
+    },
+    "product_weight_events.event_type": {
+      "values": [
+        "draft_saved",
+        "draft_replaced",
+        "approved",
+        "corrected",
+        "returned_to_draft"
+      ],
+      "constraints": [
+        "product_weight_events_event_type_check"
+      ]
+    },
+    "product_weight_events.subject_kind": {
+      "values": [
+        "parent_density",
+        "size_net_weight"
+      ],
+      "constraints": [
+        "product_weight_events_subject_kind_check"
       ]
     },
     "products.container_type": {
@@ -3285,6 +3458,18 @@
       "table": "blend_recipe_items",
       "constraint": "blend_recipe_items_price_nonneg",
       "def": "CHECK ((price_per_unit_cents >= 0))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "blend_ticket_product_weights",
+      "constraint": "blend_ticket_product_weights_kind_fields",
+      "def": "CHECK ((((weight_kind = ANY (ARRAY['density'::text, 'net_weight'::text])) AND (value_id IS NOT NULL) AND (value_reviewed_at IS NOT NULL) AND (value_reviewed_by IS NOT NULL) AND (lb_per_unit IS NOT NULL) AND (per_unit IS NOT NULL) AND (source = ANY (ARRAY['measured'::text, 'sds'::text, 'label'::text, 'supplier'::text])) AND (value_basis IS NOT NULL) AND (none_reason IS NULL)) OR ((weight_kind = 'unit_weight'::text) AND (lb_per_unit IS NOT NULL) AND (per_unit IS NOT NULL) AND (source = 'unit'::text) AND (value_id IS NULL) AND (value_reviewed_at IS NULL) AND (value_reviewed_by IS NULL) AND (value_basis IS NULL) AND (none_reason IS NULL)) OR ((weight_kind = 'none'::text) AND (none_reason IS NOT NULL) AND (value_id IS NULL) AND (value_reviewed_at IS NULL) AND (value_reviewed_by IS NULL) AND (lb_per_unit IS NULL) AND (per_unit IS NULL) AND (source IS NULL) AND (value_basis IS NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "blend_ticket_product_weights",
+      "constraint": "blend_ticket_product_weights_lb_per_unit_check",
+      "def": "CHECK (((lb_per_unit IS NULL) OR (lb_per_unit > (0)::numeric)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -3882,6 +4067,24 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "job_loader_worksheet_weights",
+      "constraint": "job_loader_worksheet_weights_generations",
+      "def": "CHECK ((((weight_kind <> 'net_weight'::text) OR (pack_generation IS NOT NULL)) AND ((weight_kind <> 'density'::text) OR ((member_generation IS NOT NULL) AND (identity_generation IS NOT NULL)))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "job_loader_worksheet_weights",
+      "constraint": "job_loader_worksheet_weights_kind_fields",
+      "def": "CHECK ((((weight_kind = ANY (ARRAY['density'::text, 'net_weight'::text])) AND (value_id IS NOT NULL) AND (value_reviewed_at IS NOT NULL) AND (value_reviewed_by IS NOT NULL) AND (lb_per_unit IS NOT NULL) AND (per_unit IS NOT NULL) AND (source = ANY (ARRAY['measured'::text, 'sds'::text, 'label'::text, 'supplier'::text])) AND (value_basis IS NOT NULL) AND (none_reason IS NULL)) OR ((weight_kind = 'unit_weight'::text) AND (lb_per_unit IS NOT NULL) AND (per_unit IS NOT NULL) AND (source = 'unit'::text) AND (value_id IS NULL) AND (value_reviewed_at IS NULL) AND (value_reviewed_by IS NULL) AND (value_basis IS NULL) AND (none_reason IS NULL)) OR ((weight_kind = 'none'::text) AND (none_reason IS NOT NULL) AND (value_id IS NULL) AND (value_reviewed_at IS NULL) AND (value_reviewed_by IS NULL) AND (lb_per_unit IS NULL) AND (per_unit IS NULL) AND (source IS NULL) AND (value_basis IS NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "job_loader_worksheet_weights",
+      "constraint": "job_loader_worksheet_weights_lb_per_unit_check",
+      "def": "CHECK (((lb_per_unit IS NULL) OR (lb_per_unit > (0)::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "job_loader_worksheets",
       "constraint": "job_loader_worksheets_capacity_gal_check",
       "def": "CHECK ((capacity_gal > (0)::numeric))",
@@ -4452,6 +4655,36 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "product_parent_density_values",
+      "constraint": "product_parent_density_values_evidence_check",
+      "def": "CHECK (((evidence IS NULL) OR (length(evidence) <= 1000)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_density_values",
+      "constraint": "product_parent_density_values_lb_per_gal_check",
+      "def": "CHECK (((lb_per_gal > (0)::numeric) AND (lb_per_gal <= (20)::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_density_values",
+      "constraint": "product_parent_density_values_reason_check",
+      "def": "CHECK (((reason IS NULL) OR (length(reason) <= 1000)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_density_values",
+      "constraint": "product_parent_density_values_review_fields",
+      "def": "CHECK ((((review_state = 'approved'::text) AND (reviewed_by IS NOT NULL) AND (reviewed_at IS NOT NULL) AND (superseded_at IS NULL)) OR ((review_state = 'draft'::text) AND (reviewed_by IS NULL) AND (reviewed_at IS NULL) AND (superseded_at IS NULL)) OR ((review_state = 'superseded'::text) AND (superseded_at IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_parent_density_values",
+      "constraint": "product_parent_density_values_source_note_check",
+      "def": "CHECK (((source_note IS NULL) OR ((source_note = btrim(source_note)) AND (btrim(source_note) <> ''::text) AND (length(source_note) <= 1000))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "product_parent_members",
       "constraint": "product_parent_members_check",
       "def": "CHECK (((fill_source_product_id IS NULL) OR (size_role = 'fixed_tote'::text)))",
@@ -4524,6 +4757,36 @@
       "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
+      "table": "product_size_net_weight_values",
+      "constraint": "product_size_net_weight_values_evidence_check",
+      "def": "CHECK (((evidence IS NULL) OR (length(evidence) <= 1000)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_size_net_weight_values",
+      "constraint": "product_size_net_weight_values_net_lb_check",
+      "def": "CHECK (((net_lb > (0)::numeric) AND (net_lb <= (4000)::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_size_net_weight_values",
+      "constraint": "product_size_net_weight_values_reason_check",
+      "def": "CHECK (((reason IS NULL) OR (length(reason) <= 1000)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_size_net_weight_values",
+      "constraint": "product_size_net_weight_values_review_fields",
+      "def": "CHECK ((((review_state = 'approved'::text) AND (reviewed_by IS NOT NULL) AND (reviewed_at IS NOT NULL) AND (superseded_at IS NULL)) OR ((review_state = 'draft'::text) AND (reviewed_by IS NULL) AND (reviewed_at IS NULL) AND (superseded_at IS NULL)) OR ((review_state = 'superseded'::text) AND (superseded_at IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_size_net_weight_values",
+      "constraint": "product_size_net_weight_values_source_note_check",
+      "def": "CHECK (((source_note IS NULL) OR ((source_note = btrim(source_note)) AND (btrim(source_note) <> ''::text) AND (length(source_note) <= 1000))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "product_supplier_links",
       "constraint": "product_supplier_links_comparable_shape",
       "def": "CHECK (((comparison_status <> 'comparable'::text) OR ((link_status = 'confirmed'::text) AND (inventory_units_per_supplier_unit IS NOT NULL) AND (NULLIF(btrim(conversion_unit), ''::text) IS NOT NULL))))",
@@ -4576,6 +4839,18 @@
       "constraint": "product_use_timing_options_label_check",
       "def": "CHECK (((label = btrim(label)) AND (label <> ''::text) AND (POSITION((';'::text) IN (label)) = 0)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_weight_events",
+      "constraint": "product_weight_events_check",
+      "def": "CHECK ((((subject_kind = 'parent_density'::text) AND (parent_id IS NOT NULL) AND (product_id IS NULL)) OR ((subject_kind = 'size_net_weight'::text) AND (product_id IS NOT NULL) AND (parent_id IS NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_weight_events",
+      "constraint": "product_weight_events_check1",
+      "def": "CHECK ((((actor_kind = 'system'::text) AND (changed_by IS NULL) AND (changed_by_name IS NULL)) OR ((actor_kind = 'user'::text) AND (changed_by IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
     },
     {
       "table": "products",
@@ -5232,6 +5507,19 @@
         "created_at"
       ]
     },
+    "blend_ticket_product_weights": {
+      "no_default": [
+        "blend_ticket_id",
+        "product_id",
+        "product_name",
+        "weight_kind",
+        "unit_factors"
+      ],
+      "with_default": [
+        "captured_how",
+        "captured_at"
+      ]
+    },
     "blend_ticket_products": {
       "no_default": [
         "blend_ticket_id"
@@ -5255,6 +5543,15 @@
         "id",
         "created_at",
         "created_by"
+      ]
+    },
+    "blend_ticket_weight_basis": {
+      "no_default": [
+        "blend_ticket_id",
+        "unit_factors"
+      ],
+      "with_default": [
+        "captured_at"
       ]
     },
     "blend_tickets": {
@@ -6093,6 +6390,19 @@
         "id"
       ]
     },
+    "job_loader_worksheet_weights": {
+      "no_default": [
+        "worksheet_id",
+        "product_id",
+        "job_id",
+        "product_name",
+        "weight_kind",
+        "unit_factors"
+      ],
+      "with_default": [
+        "captured_at"
+      ]
+    },
     "job_loader_worksheets": {
       "no_default": [
         "job_id",
@@ -6666,6 +6976,30 @@
       ],
       "with_default": []
     },
+    "product_parent_density_state": {
+      "no_default": [
+        "parent_id"
+      ],
+      "with_default": [
+        "density_version",
+        "identity_generation"
+      ]
+    },
+    "product_parent_density_values": {
+      "no_default": [
+        "parent_id",
+        "lb_per_gal",
+        "entered_value",
+        "entered_unit",
+        "source",
+        "basis",
+        "review_state"
+      ],
+      "with_default": [
+        "id",
+        "created_at"
+      ]
+    },
     "product_parent_events": {
       "no_default": [
         "parent_id",
@@ -6759,6 +7093,30 @@
         "changed_at"
       ]
     },
+    "product_size_net_weight_state": {
+      "no_default": [
+        "product_id"
+      ],
+      "with_default": [
+        "net_weight_version",
+        "pack_generation",
+        "member_generation"
+      ]
+    },
+    "product_size_net_weight_values": {
+      "no_default": [
+        "product_id",
+        "net_lb",
+        "entered_value",
+        "source",
+        "basis",
+        "review_state"
+      ],
+      "with_default": [
+        "id",
+        "created_at"
+      ]
+    },
     "product_supplier_links": {
       "no_default": [
         "product_id",
@@ -6786,6 +7144,17 @@
       "with_default": [
         "is_active",
         "created_at"
+      ]
+    },
+    "product_weight_events": {
+      "no_default": [
+        "subject_kind",
+        "event_type",
+        "actor_kind"
+      ],
+      "with_default": [
+        "id",
+        "changed_at"
       ]
     },
     "products": {
@@ -7672,6 +8041,24 @@
       "height",
       "created_at"
     ],
+    "blend_ticket_product_weights": [
+      "blend_ticket_id",
+      "product_id",
+      "product_name",
+      "product_form",
+      "weight_kind",
+      "value_id",
+      "value_reviewed_at",
+      "value_reviewed_by",
+      "lb_per_unit",
+      "per_unit",
+      "unit_factors",
+      "source",
+      "value_basis",
+      "none_reason",
+      "captured_how",
+      "captured_at"
+    ],
     "blend_ticket_products": [
       "id",
       "blend_ticket_id",
@@ -7699,6 +8086,11 @@
       "created_at",
       "created_by",
       "blend_ticket_product_id"
+    ],
+    "blend_ticket_weight_basis": [
+      "blend_ticket_id",
+      "unit_factors",
+      "captured_at"
     ],
     "blend_tickets": [
       "id",
@@ -8751,6 +9143,27 @@
       "strip",
       "pests"
     ],
+    "job_loader_worksheet_weights": [
+      "worksheet_id",
+      "product_id",
+      "job_id",
+      "product_name",
+      "product_form",
+      "weight_kind",
+      "value_id",
+      "value_reviewed_at",
+      "value_reviewed_by",
+      "lb_per_unit",
+      "per_unit",
+      "unit_factors",
+      "source",
+      "value_basis",
+      "none_reason",
+      "pack_generation",
+      "member_generation",
+      "identity_generation",
+      "captured_at"
+    ],
     "job_loader_worksheets": [
       "id",
       "job_id",
@@ -9359,6 +9772,29 @@
       "product_id",
       "parent_event_id"
     ],
+    "product_parent_density_state": [
+      "parent_id",
+      "density_version",
+      "identity_generation"
+    ],
+    "product_parent_density_values": [
+      "id",
+      "parent_id",
+      "lb_per_gal",
+      "entered_value",
+      "entered_unit",
+      "source",
+      "source_note",
+      "basis",
+      "review_state",
+      "reason",
+      "evidence",
+      "created_by",
+      "created_at",
+      "reviewed_by",
+      "reviewed_at",
+      "superseded_at"
+    ],
     "product_parent_events": [
       "id",
       "parent_id",
@@ -9450,6 +9886,29 @@
       "changed_at",
       "reason"
     ],
+    "product_size_net_weight_state": [
+      "product_id",
+      "net_weight_version",
+      "pack_generation",
+      "member_generation"
+    ],
+    "product_size_net_weight_values": [
+      "id",
+      "product_id",
+      "net_lb",
+      "entered_value",
+      "source",
+      "source_note",
+      "basis",
+      "review_state",
+      "reason",
+      "evidence",
+      "created_by",
+      "created_at",
+      "reviewed_by",
+      "reviewed_at",
+      "superseded_at"
+    ],
     "product_supplier_links": [
       "id",
       "product_id",
@@ -9483,6 +9942,22 @@
       "sort_order",
       "is_active",
       "created_at"
+    ],
+    "product_weight_events": [
+      "id",
+      "subject_kind",
+      "parent_id",
+      "product_id",
+      "event_type",
+      "value_id",
+      "before_value",
+      "after_value",
+      "reason",
+      "evidence",
+      "actor_kind",
+      "changed_by",
+      "changed_by_name",
+      "changed_at"
     ],
     "products": [
       "id",

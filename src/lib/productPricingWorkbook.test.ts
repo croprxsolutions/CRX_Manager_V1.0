@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { deflateRawSync } from 'node:zlib';
 import type { Workbook } from 'exceljs';
-import type { PricingWorkbookExport } from './productPricing';
+import type { PricingPreviewResult, PricingWorkbookExport } from './productPricing';
 import {
   generateProductPricingWorkbook,
+  groupedUseTimingRefusal,
   MAX_PRICING_WORKBOOK_FILE_BYTES,
   MAX_PRICING_WORKBOOK_ROWS,
   MAX_PRICING_WORKBOOK_UNCOMPRESSED_BYTES,
@@ -84,9 +85,11 @@ async function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   });
 }
 
-async function loadGeneratedWorkbook(): Promise<{ workbook: Workbook; buffer: ArrayBuffer }> {
+async function loadGeneratedWorkbook(
+  options: Parameters<typeof generateProductPricingWorkbook>[1] = {},
+): Promise<{ workbook: Workbook; buffer: ArrayBuffer }> {
   const ExcelJS = await import('exceljs');
-  const blob = await generateProductPricingWorkbook(pricingExport);
+  const blob = await generateProductPricingWorkbook(pricingExport, options);
   const buffer = await blobToArrayBuffer(blob);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
@@ -368,4 +371,33 @@ describe('product pricing workbook', () => {
     // and streaming the forged archive is CPU-bound, so 15s was not enough
     // headroom during a pre-commit run on a busy box.
   }, 45_000);
+
+  it('locks and notes a grouped size\'s Use Timing cell and leaves other rows editable', async () => {
+    const groupedParents = new Map([['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Leading Zero 4L']]);
+    const { workbook, buffer } = await loadGeneratedWorkbook({ groupedParents });
+    const worksheet = workbook.getWorksheet(PRICING_WORKBOOK_SHEET)!;
+    const timingColumn = PRICING_WORKBOOK_HEADERS.indexOf('use_timing') + 1;
+    expect(worksheet.getCell(2, timingColumn).protection?.locked).not.toBe(false);
+    expect(worksheet.getCell(2, timingColumn).note).toBe('Set on parent Leading Zero 4L; change it on the product page\'s Parent panel');
+    expect(worksheet.getCell(3, timingColumn).protection?.locked).toBe(false);
+    expect(worksheet.getCell(3, timingColumn).note).toMatch(/separate labels with a semicolon/);
+    // Headers and manifest unchanged, so the server still accepts the file.
+    expect((await parseProductPricingWorkbook(buffer)).rowCount).toBe(2);
+  });
+
+  it('refuses a use timing change on a grouped size by product and parent name', () => {
+    const row = (productId: string, name: string, changes: Record<string, { before: unknown; after: unknown }>) => ({
+      sequence: 1, product_id: productId, submitted_row: {}, row_status: 'ready', error_code: null,
+      effect: { product_id: productId, product_name: name, product_info_changes: changes },
+    });
+    const preview = { rows: [
+      row('p1', 'Atrazine 1 gal', { use_timing: { before: 'Pre-Emerge', after: 'Post-Emergence' } }),
+      row('p2', 'Loose Product', { use_timing: { before: null, after: 'Pre-Emerge' } }),
+      row('p3', 'Atrazine 2.5 gal', { internal_notes: { before: null, after: 'x' } }),
+    ] } as unknown as PricingPreviewResult;
+    const grouped = new Map([['p1', 'Atrazine 4L'], ['p3', 'Atrazine 4L']]);
+    expect(groupedUseTimingRefusal(preview, grouped)).toBe('Nothing was saved. Use Timing is set on the parent: '
+      + 'Atrazine 1 gal (parent "Atrazine 4L"). Change it on the product page\'s Parent panel, then download a new workbook.');
+    expect(groupedUseTimingRefusal(preview, new Map())).toBeNull();
+  });
 });

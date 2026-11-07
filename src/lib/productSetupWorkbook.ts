@@ -8,6 +8,7 @@ import {
   PRICING_WORKBOOK_MIME,
   validatePricingWorkbookArchive,
 } from './productPricingWorkbook';
+import type { ProductParent } from './productParents';
 import type { ProductRatePerAcre, UseTimingOption } from '../types';
 import type { Json } from '../types/supabase';
 
@@ -19,12 +20,16 @@ import type { Json } from '../types/supabase';
  */
 const SETUP_WORKBOOK_SHEET = 'Setup';
 const RATES_WORKBOOK_SHEET = 'Rates';
+const PARENT_RATES_WORKBOOK_SHEET = 'Parent Rates';
 const MANIFEST_SHEET = '_crx_manifest';
-// A later format (for example after products are grouped into parents) changes this, so an older
-// download is refused as a whole.
-const SETUP_WORKBOOK_FORMAT_VERSION = 'crx-product-setup-v1';
+// v2 (PAR-1): grouped sizes take their category, use timings and rates from their parent. A v1
+// download predates that, so it is refused as a whole.
+const SETUP_WORKBOOK_FORMAT_VERSION = 'crx-product-setup-v2';
+const OLD_SETUP_WORKBOOK_FORMAT_VERSIONS = new Set(['crx-product-setup-v1']);
 /** The most rows one tab's save (and set_product_rates) takes at once. */
 export const MAX_SETUP_WORKBOOK_SAVE_ROWS = 2000;
+/** set_parent_rates refuses more than 500 rows in one call. */
+export const MAX_PARENT_RATE_SAVE_ROWS = 500;
 
 const SETUP_TEXT_FIELDS = [
   'product_name', 'sku', 'category', 'manufacturer', 'container_type', 'epa_registration',
@@ -42,12 +47,17 @@ export type SetupField = (typeof SETUP_EDITABLE_FIELDS)[number];
 
 const SETUP_HEADERS = [
   'product_id', 'setup_fingerprint', 'is_active', 'product_form', 'inventory_unit', 'unit_size',
-  'container_unit', ...SETUP_EDITABLE_FIELDS,
+  'container_unit', 'parent_name', ...SETUP_EDITABLE_FIELDS,
 ] as const;
+/** Set on a grouped size's parent, so locked on its Setup row. */
+const PARENT_OWNED_SETUP_FIELDS: readonly SetupField[] = ['category', 'use_timings', 'epa_registration'];
 const RATES_HEADERS = [
   'product_id', 'row_state', 'product_name', 'sku', 'product_form', 'inventory_unit', 'unit_size',
   'current_tier1_price_per_acre', 'current_tier2_price_per_acre', 'current_tier3_price_per_acre',
   'rate_per_acre', 'rate_unit', 'suggested_rate',
+] as const;
+const PARENT_RATES_HEADERS = [
+  'parent_id', 'row_state', 'parent_name', 'sizes', 'rate_per_acre', 'rate_unit', 'suggested_rate',
 ] as const;
 const RATES_EDITABLE = new Set<string>(['rate_per_acre', 'rate_unit', 'suggested_rate']);
 const HIDDEN = new Set<string>(['setup_fingerprint', 'row_state']);
@@ -141,9 +151,38 @@ export interface SetupPreview {
   invalid: SetupRowProblem[];
 }
 
+/** One parent's rates as downloaded and as uploaded (Parent Rates tab). */
+export interface ParentRateUploadRow {
+  parent_id: string;
+  parent_name: string;
+  rate_per_acre: string | null;
+  rate_unit: string | null;
+  suggested_rate: string | null;
+  expected: { parent_version: number; rate_per_acre: string | null; rate_unit: string | null; suggested_rate: string | null };
+}
+
 export interface ParsedSetupWorkbook {
   setupRows: Array<Record<(typeof SETUP_HEADERS)[number], string>>;
   rateRows: RateUploadRow[];
+  parentRateRows: ParentRateUploadRow[];
+  /** The grouping of the downloaded products when the file was made. */
+  membershipHash: string;
+}
+
+/** Grouped size id -> its parent's name. */
+export function groupedParentNames(parents: readonly ProductParent[]): Map<string, string> {
+  return new Map(parents.flatMap((parent) => parent.sizes.map((size) => [size.product_id, parent.name] as const)));
+}
+
+/**
+ * A hash of which parent each listed product belongs to (blank when none). An upload whose products
+ * were grouped or moved since the download no longer matches and is refused as a whole.
+ */
+export async function setupMembershipHash(productIds: readonly string[], parents: readonly ProductParent[]): Promise<string> {
+  const parentOf = new Map(parents.flatMap((parent) => parent.sizes.map((size) => [size.product_id, parent.id] as const)));
+  const pairs = [...productIds].sort().map((id) => `${id}=${parentOf.get(id) ?? ''}`).join('\n');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pairs));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export async function loadSetupWorkbookExport(): Promise<SetupWorkbookExport> {
@@ -221,7 +260,7 @@ function sameDecimal(a: string | null, b: string | null): boolean {
 }
 const labelOf = (options: readonly UseTimingOption[], code: string) => options.find((o) => o.code === code)?.label ?? code;
 
-function setupCell(product: SetupWorkbookProduct, field: (typeof SETUP_HEADERS)[number], options: readonly UseTimingOption[]): string | number {
+function setupCell(product: SetupWorkbookProduct, field: Exclude<(typeof SETUP_HEADERS)[number], 'parent_name'>, options: readonly UseTimingOption[]): string | number {
   if (field === 'is_rup' || field === 'is_active') return product[field] ? 'yes' : 'no';
   if (field === 'use_timings') return product.use_timings.map((code) => labelOf(options, code)).join('; ');
   const value = product[field];
@@ -249,25 +288,43 @@ async function styleSheet(sheet: Worksheet, headers: readonly string[], rowCount
   await sheet.protect('crx-setup-layout', { selectLockedCells: true, selectUnlockedCells: true, autoFilter: true, sort: true });
 }
 
-/** The download: a Setup tab, a Rates tab and a hidden manifest. Grey columns are for reference only. */
+/**
+ * The download: a Setup tab, a Rates tab (ungrouped products), a Parent Rates tab (one row per parent)
+ * and a hidden manifest. Grey columns and cells are for reference only.
+ */
 export async function generateSetupWorkbook(
-  exported: SetupWorkbookExport, options: readonly UseTimingOption[],
+  exported: SetupWorkbookExport, options: readonly UseTimingOption[], parents: readonly ProductParent[],
 ): Promise<Blob> {
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'CRX Manager';
 
   const setup = workbook.addWorksheet(SETUP_WORKBOOK_SHEET);
+  const grouped = groupedParentNames(parents);
   setup.addRow([...SETUP_HEADERS]);
-  for (const product of exported.rows) setup.addRow(SETUP_HEADERS.map((field) => setupCell(product, field, options)));
+  for (const product of exported.rows) {
+    setup.addRow(SETUP_HEADERS.map((field) => (field === 'parent_name' ? grouped.get(product.product_id) ?? '' : setupCell(product, field, options))));
+  }
   await styleSheet(setup, SETUP_HEADERS, exported.rows.length, (name) => (SETUP_EDITABLE_FIELDS as readonly string[]).includes(name));
+  setup.getCell(1, SETUP_HEADERS.indexOf('parent_name') + 1).note = 'For reference: a grouped size takes its category, use timings, EPA number and rates from this parent.';
+  exported.rows.forEach((product, index) => {
+    const parentName = grouped.get(product.product_id);
+    if (!parentName) return;
+    for (const field of PARENT_OWNED_SETUP_FIELDS) {
+      const cell = setup.getCell(index + 2, SETUP_HEADERS.indexOf(field) + 1);
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F4F3' } };
+      cell.protection = { locked: true };
+      cell.note = `Set on parent ${parentName}`;
+    }
+  });
   const timingColumn = SETUP_HEADERS.indexOf('use_timings') + 1;
   setup.getCell(1, timingColumn).note = 'Exact use timing labels, separated by a semicolon (;). Only Herbicide and Foliar Fertilizer products take them.';
   setup.getCell(1, SETUP_HEADERS.indexOf('is_rup') + 1).note = 'yes or no';
 
   const rates = workbook.addWorksheet(RATES_WORKBOOK_SHEET);
   rates.addRow([...RATES_HEADERS]);
-  for (const p of exported.rows) {
+  const ungrouped = exported.rows.filter((p) => !grouped.has(p.product_id));
+  for (const p of ungrouped) {
     const state: RateRowState = {
       rate_per_acre: p.rate_per_acre, rate_unit: p.rate_unit, suggested_rate: p.suggested_rate,
       pricing_version: p.pricing_version, unit_size: p.unit_size, inventory_unit: p.inventory_unit,
@@ -277,11 +334,31 @@ export async function generateSetupWorkbook(
       p.inventory_unit ?? '', p.unit_size ?? '', p.tier1_price_per_acre ?? '', p.tier2_price_per_acre ?? '',
       p.tier3_price_per_acre ?? '', p.rate_per_acre ?? '', p.rate_unit ?? '', p.suggested_rate ?? '']);
   }
-  await styleSheet(rates, RATES_HEADERS, exported.rows.length, (name) => RATES_EDITABLE.has(name));
+  await styleSheet(rates, RATES_HEADERS, ungrouped.length, (name) => RATES_EDITABLE.has(name));
   if (exported.rates_locked) rates.getCell(1, RATES_HEADERS.indexOf('rate_per_acre') + 1).note = 'Rates are locked: a Rates upload is refused until an admin unlocks them.';
+  rates.getCell(1, 1).note = 'Products not grouped under a parent. Grouped sizes take their rates from the Parent Rates tab.';
+
+  // One row per parent with a size in this download; its rates are copied onto every size.
+  const downloaded = new Set(exported.rows.map((p) => p.product_id));
+  const listedParents = parents.filter((parent) => parent.sizes.some((size) => downloaded.has(size.product_id)));
+  const parentRates = workbook.addWorksheet(PARENT_RATES_WORKBOOK_SHEET);
+  parentRates.addRow([...PARENT_RATES_HEADERS]);
+  for (const parent of listedParents) {
+    const expected = { parent_version: parent.parent_version, rate_per_acre: parent.rate_per_acre, rate_unit: parent.rate_unit, suggested_rate: parent.suggested_rate };
+    parentRates.addRow([parent.id, JSON.stringify({ parent_id: parent.id, ...expected }), parent.name,
+      parent.sizes.map((size) => size.product_name).join('; '), parent.rate_per_acre ?? '', parent.rate_unit ?? '', parent.suggested_rate ?? '']);
+  }
+  await styleSheet(parentRates, PARENT_RATES_HEADERS, listedParents.length, (name) => RATES_EDITABLE.has(name));
+  parentRates.getCell(1, PARENT_RATES_HEADERS.indexOf('rate_per_acre') + 1).note = exported.rates_locked
+    ? 'Rates are locked: a Parent Rates upload is refused until an admin unlocks them.'
+    : "A parent's rates are copied onto every size listed.";
 
   const manifest = workbook.addWorksheet(MANIFEST_SHEET, { state: 'veryHidden' });
-  manifest.addRows([['format_version', SETUP_WORKBOOK_FORMAT_VERSION], ['row_count', String(exported.rows.length)]]);
+  manifest.addRows([
+    ['format_version', SETUP_WORKBOOK_FORMAT_VERSION], ['row_count', String(exported.rows.length)],
+    ['rates_row_count', String(ungrouped.length)], ['parent_rates_row_count', String(listedParents.length)],
+    ['membership_hash', await setupMembershipHash([...downloaded], parents)],
+  ]);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return new Blob([new Uint8Array(buffer as unknown as ArrayBuffer)], { type: PRICING_WORKBOOK_MIME });
@@ -321,15 +398,46 @@ export async function parseSetupWorkbook(arrayBuffer: ArrayBuffer): Promise<Pars
   const manifest = workbook.getWorksheet(MANIFEST_SHEET);
   const entries = new Map<string, string>();
   manifest?.eachRow((row, n) => entries.set(cellValueToText(row.getCell(1).value, `Manifest ${n}`), cellValueToText(row.getCell(2).value, `Manifest ${n}`)));
-  if (entries.get('format_version') !== SETUP_WORKBOOK_FORMAT_VERSION) {
+  const formatVersion = entries.get('format_version') ?? '';
+  if (OLD_SETUP_WORKBOOK_FORMAT_VERSIONS.has(formatVersion)) {
+    throw new PricingWorkbookFormatError('This setup workbook was downloaded before products were grouped under parents. Download a new workbook.');
+  }
+  if (formatVersion !== SETUP_WORKBOOK_FORMAT_VERSION) {
     throw new PricingWorkbookFormatError('This is not a current CRX setup workbook. Download a fresh one.');
   }
-  const rowCountText = entries.get('row_count') ?? '';
-  if (!/^(?:0|[1-9]\d{0,5})$/.test(rowCountText)) throw new PricingWorkbookFormatError('The setup workbook manifest is damaged. Download a fresh one.');
-  const rowCount = Number(rowCountText);
+  const count = (key: string) => {
+    const text = entries.get(key) ?? '';
+    if (!/^(?:0|[1-9]\d{0,5})$/.test(text)) throw new PricingWorkbookFormatError('The setup workbook manifest is damaged. Download a fresh one.');
+    return Number(text);
+  };
+  const rowCount = count('row_count');
+  const membershipHash = entries.get('membership_hash') ?? '';
+  if (!/^[0-9a-f]{64}$/.test(membershipHash)) throw new PricingWorkbookFormatError('The setup workbook manifest is damaged. Download a fresh one.');
 
   const setupRows = readSheet(workbook.getWorksheet(SETUP_WORKBOOK_SHEET), SETUP_WORKBOOK_SHEET, SETUP_HEADERS, rowCount);
-  const rateRows = readSheet(workbook.getWorksheet(RATES_WORKBOOK_SHEET), RATES_WORKBOOK_SHEET, RATES_HEADERS, rowCount)
+  const parentRateRows = readSheet(workbook.getWorksheet(PARENT_RATES_WORKBOOK_SHEET), PARENT_RATES_WORKBOOK_SHEET,
+    PARENT_RATES_HEADERS, count('parent_rates_row_count'))
+    .map((row, index): ParentRateUploadRow => {
+      const damaged = new PricingWorkbookFormatError(`Parent Rates row ${index + 2} is damaged (its hidden download record or parent id). Download a fresh workbook.`);
+      let saved: unknown;
+      try {
+        saved = JSON.parse(row.row_state);
+      } catch {
+        throw damaged;
+      }
+      if (!saved || typeof saved !== 'object' || (saved as { parent_id?: unknown }).parent_id !== row.parent_id
+          || typeof (saved as { parent_version?: unknown }).parent_version !== 'number') throw damaged;
+      const { parent_id: _boundTo, ...expected } = saved as ParentRateUploadRow['expected'] & { parent_id: string };
+      return {
+        parent_id: row.parent_id,
+        parent_name: row.parent_name,
+        rate_per_acre: blankToNull(row.rate_per_acre),
+        rate_unit: blankToNull(row.rate_unit),
+        suggested_rate: blankToNull(row.suggested_rate),
+        expected,
+      };
+    });
+  const rateRows = readSheet(workbook.getWorksheet(RATES_WORKBOOK_SHEET), RATES_WORKBOOK_SHEET, RATES_HEADERS, count('rates_row_count'))
     .map((row, index) => {
       const damaged = new PricingWorkbookFormatError(`Rates row ${index + 2} is damaged (its hidden download record or product id). Download a fresh workbook.`);
       let saved: unknown;
@@ -349,7 +457,14 @@ export async function parseSetupWorkbook(arrayBuffer: ArrayBuffer): Promise<Pars
         expected,
       };
     });
-  return { setupRows, rateRows };
+  return { setupRows, rateRows, parentRateRows, membershipHash };
+}
+
+/** Parent Rates rows the person edited, compared with what they downloaded. */
+export function editedParentRateRows(rows: ParentRateUploadRow[]): ParentRateUploadRow[] {
+  return rows.filter((row) => !sameDecimal(row.rate_per_acre, blankToNull(row.expected.rate_per_acre))
+    || row.rate_unit !== blankToNull(row.expected.rate_unit)
+    || row.suggested_rate !== blankToNull(row.expected.suggested_rate));
 }
 
 /** Rates rows the person edited, compared with what they downloaded. */
@@ -406,6 +521,21 @@ const shown = (field: SetupField, value: SetupValue | undefined, options: readon
   return String(value);
 };
 
+/** Why an edited value cannot be saved from the Setup tab, or null when it can. */
+function setupEditRefusal(
+  field: SetupField, value: SetupValue, fingerprintMatches: boolean, parentName: string | undefined, categories: readonly string[],
+): string | null {
+  // A parent edit since the download also moves the fingerprint; that row is shown as stale instead.
+  if (parentName && PARENT_OWNED_SETUP_FIELDS.includes(field) && fingerprintMatches) {
+    // The database refuses a grouped size's EPA change, and the Parent panel does not edit it either.
+    if (field === 'epa_registration') return `${field} is set on parent "${parentName}" and cannot be changed from the workbook`;
+    return `${field} is set on parent "${parentName}"; change it on the product page's Parent panel`;
+  }
+  // Only listed names: an old alias would be rewritten by the database and move the use timings.
+  if (field === 'category' && value != null && !categories.includes(value as string)) return `unknown category "${value}"`;
+  return null;
+}
+
 /**
  * The Setup tab's preview: compares each uploaded row with the product as it is now. A row whose
  * values differ and whose download fingerprint no longer matches is stale (someone changed it since);
@@ -415,6 +545,8 @@ export function buildSetupPreview(
   rows: ParsedSetupWorkbook['setupRows'], current: SetupWorkbookExport, options: readonly UseTimingOption[],
   /** Active category names; a changed category must be one of them. */
   categories: readonly string[],
+  /** Grouped size id -> parent name, as loaded at upload time. */
+  groupedParents: ReadonlyMap<string, string>,
 ): SetupPreview {
   const byId = new Map(current.rows.map((row) => [row.product_id, row]));
   const preview: SetupPreview = { changes: [], stale: [], invalid: [] };
@@ -441,9 +573,10 @@ export function buildSetupPreview(
         continue;
       }
       if (sameSetupValue(field, product, parsed.value)) continue;
-      // Only listed names: an old alias would be rewritten by the database and move the use timings.
-      if (field === 'category' && parsed.value != null && !categories.includes(parsed.value as string)) {
-        problems.push(`unknown category "${parsed.value}"`);
+      const refusal = setupEditRefusal(field, parsed.value, row.setup_fingerprint === product.setup_fingerprint,
+        groupedParents.get(product.product_id), categories);
+      if (refusal) {
+        problems.push(refusal);
         continue;
       }
       changes[field] = parsed.value;

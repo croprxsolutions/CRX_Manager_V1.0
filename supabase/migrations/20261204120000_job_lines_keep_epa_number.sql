@@ -69,13 +69,17 @@
 --   load_recipe_into_job (no app access) deletes and re-writes lines before locking its job:
 --   two concurrent runs on one line-less job could deadlock; Postgres rolls one back whole.
 --
--- ROLLBACK (its own reviewed migration): drop the five triggers and six functions below and keep both
---   tables as history. While rolled back nothing is recorded: a new spray, a product added to a marked
---   job, and a product edited or removed meanwhile are lost to the record (roll forward then records them
---   as "Not recorded", like section 4). Re-granting direct writes on job_chemicals (the INSERT and UPDATE
---   column lists of 20261022101000, DELETE) is a permission change that needs Mason's approval. Roll
---   forward is a new migration re-creating the triggers, then re-running section 4: markers for newly
---   qualifying jobs and locks for the products of EVERY marked job (ON CONFLICT DO NOTHING).
+-- ROLLBACK (its own reviewed migration): drop the three recording triggers (trg_job_epa_freeze_on_spray,
+--   trg_job_epa_freeze_on_finish, trg_job_line_epa_lock) and their three functions; keep both tables as
+--   history, and keep both ID guards and _epa_norm for as long as the tables exist (without the guards a
+--   reused ID would inherit kept numbers). While rolled back nothing is recorded: a new spray, a product
+--   added to a marked job, and a product edited or removed meanwhile are lost to the record. Re-granting
+--   direct writes on job_chemicals (the INSERT and UPDATE column lists of 20261022101000, DELETE) is a
+--   permission change that needs Mason's approval. Roll forward is a new migration that re-creates the
+--   recording triggers, then sets not_recorded = true on EVERY existing marker (a product first locked on
+--   such a job afterwards may have been used while rolled back, so it is "Not recorded"; existing lock rows
+--   are kept), then re-runs section 4: markers for newly qualifying jobs and NULL locks for the products of
+--   EVERY marked job (ON CONFLICT DO NOTHING).
 
 SET LOCAL lock_timeout = '5s';
 
@@ -262,23 +266,27 @@ FOR EACH ROW EXECUTE FUNCTION public._trg_job_line_epa_lock();
 
 -- History outlives a deleted job (no foreign key), so a job ID that has EPA history can never be taken by
 -- a new job, and no job with history changes its ID: either would attach one job's kept numbers to another.
+-- AFTER, not BEFORE: an insert reusing an ID that another transaction is deleting waits on the primary key
+-- first, so the check runs after that transaction commits and sees any history it wrote (READ COMMITTED).
 CREATE FUNCTION public._trg_job_epa_id_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 BEGIN
   IF TG_OP = 'UPDATE' AND NEW.id IS NOT DISTINCT FROM OLD.id THEN
-    RETURN NEW;
+    RETURN NULL;
   END IF;
   IF EXISTS (SELECT 1 FROM public.job_epa_sprayed WHERE job_id = NEW.id)
      OR (TG_OP = 'UPDATE' AND EXISTS (SELECT 1 FROM public.job_epa_sprayed WHERE job_id = OLD.id)) THEN
     RAISE EXCEPTION 'JOB_EPA_HISTORY_ID: this job ID carries kept EPA numbers; use a new job ID' USING ERRCODE = '23505';
   END IF;
-  RETURN NEW;
+  RETURN NULL;
 END;
 $function$;
 ALTER FUNCTION public._trg_job_epa_id_guard() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._trg_job_epa_id_guard() FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE TRIGGER trg_job_epa_id_guard BEFORE INSERT OR UPDATE OF id ON public.jobs
+-- Named to sort before trg_job_epa_freeze_on_finish: AFTER triggers on one row fire in name order, and a
+-- job created already finished must be checked before its own marker is written.
+CREATE TRIGGER trg_job_epa_a_id_guard AFTER INSERT OR UPDATE OF id ON public.jobs
 FOR EACH ROW EXECUTE FUNCTION public._trg_job_epa_id_guard();
 
 -- The same for products: kept numbers outlive a deleted product, so a product ID that has one can never be
@@ -288,19 +296,19 @@ CREATE FUNCTION public._trg_product_epa_id_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 BEGIN
   IF TG_OP = 'UPDATE' AND NEW.id IS NOT DISTINCT FROM OLD.id THEN
-    RETURN NEW;
+    RETURN NULL;
   END IF;
   IF EXISTS (SELECT 1 FROM public.job_product_epa WHERE product_id = NEW.id)
      OR (TG_OP = 'UPDATE' AND EXISTS (SELECT 1 FROM public.job_product_epa WHERE product_id = OLD.id)) THEN
     RAISE EXCEPTION 'PRODUCT_EPA_HISTORY_ID: this product ID carries kept EPA numbers; use a new product ID' USING ERRCODE = '23505';
   END IF;
-  RETURN NEW;
+  RETURN NULL;
 END;
 $function$;
 ALTER FUNCTION public._trg_product_epa_id_guard() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._trg_product_epa_id_guard() FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE TRIGGER trg_product_epa_id_guard BEFORE INSERT OR UPDATE OF id ON public.products
+CREATE TRIGGER trg_product_epa_id_guard AFTER INSERT OR UPDATE OF id ON public.products
 FOR EACH ROW EXECUTE FUNCTION public._trg_product_epa_id_guard();
 
 -- ---------------------------------------------------------------------------------------------

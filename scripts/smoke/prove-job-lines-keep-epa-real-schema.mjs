@@ -497,7 +497,9 @@ async function main() {
   assert.notEqual(reuse.status, 0);
   assert.match(`${reuse.stdout}
 ${reuse.stderr}`, /JOB_EPA_HISTORY_ID/);
-  reuse = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `UPDATE public.jobs SET id = gen_random_uuid() WHERE id = '${JSPRAYED}';` });
+  const bare = scalar(`INSERT INTO public.jobs (job_number, customer_id, status, job_date, created_by)
+    VALUES ('JK-BARE', '${CUST}', 'completed', current_date, '${ADMIN}') RETURNING id;`);
+  reuse = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `UPDATE public.jobs SET id = gen_random_uuid() WHERE id = '${bare}';` });
   assert.notEqual(reuse.status, 0);
   assert.match(`${reuse.stdout}
 ${reuse.stderr}`, /JOB_EPA_HISTORY_ID/);
@@ -528,19 +530,20 @@ ${reuse.stderr}`, /JOB_EPA_HISTORY_ID/);
   const goneJob = save(ADMIN, null, [chem(gone, 0), chem(PE, 1)]);
   spray(goneJob);
   save(ADMIN, goneJob, [chem(PE, 0)]);
+  const idChange = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `UPDATE public.products SET id = gen_random_uuid() WHERE id = '${gone}';` });
+  assert.notEqual(idChange.status, 0);
+  assert.match(`${idChange.stdout}
+${idChange.stderr}`, /PRODUCT_EPA_HISTORY_ID/, 'a product with kept numbers never changes its ID');
   psql(`DELETE FROM public.products WHERE id = '${gone}';`);
   assert.equal(locks(goneJob), 'E=500-2,<deleted>=900-1', 'a deleted product keeps its kept number on the job');
-  // Its ID can never be taken by a new product, and a product with kept numbers never changes its ID.
-  for (const sql of [
-    `INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, category, epa_registration, current_cost, tier1_price, is_active)
-      VALUES ('${gone}', '[PROVER] Reuse', 'Z2', 'liquid', 'Gal', 'Herbicide', '900-2', 10.00, 15.00, true);`,
-    `UPDATE public.products SET id = gen_random_uuid() WHERE id = '${PE}';`,
-  ]) {
-    const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: sql });
-    assert.notEqual(r.status, 0);
-    assert.match(`${r.stdout}
-${r.stderr}`, /PRODUCT_EPA_HISTORY_ID/);
-  }
+  // Its ID can never be taken by a new product (a pricing-free shell, as the app creates products).
+  const reuseProduct = (id) => docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `INSERT INTO public.products
+    (id, product_name, sku, product_form, inventory_unit, category, is_active)
+    VALUES ('${id}', '[PROVER] Reuse', 'Z-${id.slice(-4)}', 'liquid', 'Gal', 'Herbicide', true);` });
+  const reused = reuseProduct(gone);
+  assert.notEqual(reused.status, 0);
+  assert.match(`${reused.stdout}
+${reused.stderr}`, /PRODUCT_EPA_HISTORY_ID/);
   console.log('[prover] deleting a product never deletes the kept number of a job, and its ID can never be reused');
 
   // Below the app roles: a line changed in place to another product on a sprayed job locks that product.
@@ -602,6 +605,38 @@ ${r.stderr}`, /PRODUCT_EPA_HISTORY_ID/);
   await bg.done;
   assert.equal(locks(raceD), `A=524-478,C=300-3`);
   console.log('[prover] a spray and a save or line write on one job run one after the other and the later sees the earlier; two sprays queue; an EPA edit never waits');
+
+  // ID reuse racing the transaction that writes the history and deletes the row: the reuse waits on the
+  // primary key, then the guard (an AFTER trigger) sees the committed history and refuses it.
+  const racer = '7a7a7a7a-0000-4000-8000-00000000003b';
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, category, epa_registration, current_cost, tier1_price, is_active)
+    VALUES ('${racer}', '[PROVER] Racer', 'Z3', 'liquid', 'Gal', 'Herbicide', '901-1', 10.00, 15.00, true);`, { user: 'supabase_admin' });
+  const racerJob = save(ADMIN, null, [chem(racer, 0)]);
+  bg = session(`BEGIN;
+    INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${racerJob}', current_date, 1);
+    DELETE FROM public.job_chemicals WHERE job_id = '${racerJob}';
+    DELETE FROM public.products WHERE id = '${racer}';
+    SELECT 'JK_READY'; ${HOLD_UNTIL_WAITER} COMMIT;`);
+  await bg.ready;
+  const raced = await waited(bg, () => reuseProduct(racer), 'the product ID reuse');
+  assert.notEqual(raced.status, 0, 'a product ID reused while its history commits is refused');
+  assert.match(`${raced.stdout}
+${raced.stderr}`, /PRODUCT_EPA_HISTORY_ID/);
+  const racerJobId = '7a7a7a7a-0000-4000-8000-00000000003c';
+  bg = session(`BEGIN;
+    INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, created_by)
+      VALUES ('${racerJobId}', 'JK-RACE', '${CUST}', 'completed', current_date, '${ADMIN}');
+    DELETE FROM public.jobs WHERE id = '${racerJobId}';
+    SELECT 'JK_READY'; ${HOLD_UNTIL_WAITER} COMMIT;`);
+  await bg.ready;
+  const racedJob = await waited(bg, () => docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `INSERT INTO public.jobs
+    (id, job_number, customer_id, status, job_date, created_by)
+    VALUES ('${racerJobId}', 'JK-RACE2', '${CUST}', 'scheduled', current_date, '${ADMIN}');` }), 'the job ID reuse');
+  assert.notEqual(racedJob.status, 0, 'a job ID reused while its history commits is refused');
+  assert.match(`${racedJob.stdout}
+${racedJob.stderr}`, /JOB_EPA_HISTORY_ID/);
+  console.log('[prover] an ID reused while another transaction writes its history and deletes the row is still refused');
 
   console.log('JOB_LINES_KEEP_EPA_PROOF_PASS');
 }

@@ -57,6 +57,17 @@ describe('approval drafts', () => {
     expect(approvalProblems(fert, initialDraft(fert))).toContain('Say whether each tote is shop-filled.');
   });
 
+  it('allows shop-filled only on a fertilizer parent that has a Bulk size, as approval does', () => {
+    const chem = group({ members: [member('a', { suggested_size_role: 'bulk' }), member('b', { suggested_size_role: 'fixed_tote' })] });
+    expect(approvalProblems(chem, { ...initialDraft(chem), totes: { b: true } }))
+      .toContain('Only fertilizer totes can be shop-filled: mark the tote vendor-filled.');
+    const fert = group({ members: [member('a', { category: 'Fertilizer', suggested_size_role: 'bulk' }),
+      member('b', { category: 'Fertilizer', suggested_size_role: 'fixed_tote' })] });
+    expect(approvalProblems(fert, { ...initialDraft(fert), totes: { b: true } })).toEqual([]);
+    const noBulk = { ...initialDraft(fert), totes: { b: true }, sizeRoles: { a: 'package' as const, b: 'fixed_tote' as const } };
+    expect(approvalProblems(fert, noBulk)).toContain('A shop-filled tote needs a Bulk size to fill from.');
+  });
+
   it('refuses two Bulk sizes', () => {
     const g = group();
     const draft = { ...initialDraft(g), sizeRoles: { a: 'bulk' as const, b: 'bulk' as const } };

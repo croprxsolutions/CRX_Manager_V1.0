@@ -4,15 +4,18 @@ import Badge, { type BadgeVariant } from '../ui/Badge';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import {
+  CONFLICT_LABELS,
   FLAG_LABELS,
   SIZE_ROLE_LABELS,
   approvalProblems,
   brandVariants,
+  conflictValueText,
+  parentIsFertilizer,
+  rateText,
   type ConflictField,
   type GroupDraft,
   type ProposalGroup,
   type ProposalMember,
-  type RateValues,
   type SizeRole,
 } from '../../lib/productParentProposals';
 
@@ -23,25 +26,8 @@ const STATUS_BADGE: Record<ProposalGroup['status'], { label: string; variant: Ba
   approved: { label: 'Approved', variant: 'success' },
 };
 
-const CONFLICT_LABELS: Record<ConflictField, string> = {
-  category: 'Category',
-  use_timings: 'Use Timing',
-  rates: 'Rate per acre',
-};
-
 function sizeText(m: ProposalMember): string {
   return [m.container_size, m.container_unit].filter(Boolean).join(' ') || '—';
-}
-
-function rateText(r: Pick<RateValues, 'rate_per_acre' | 'rate_unit' | 'suggested_rate'>): string {
-  const rate = r.rate_per_acre === null ? 'no rate' : `${r.rate_per_acre} ${r.rate_unit ?? ''}`.trim();
-  return r.suggested_rate ? `${rate} (suggested ${r.suggested_rate})` : rate;
-}
-
-function conflictValueText(field: ConflictField, value: unknown): string {
-  if (field === 'rates') return rateText(value as RateValues);
-  if (field === 'use_timings') return Array.isArray(value) && value.length > 0 ? value.join(', ') : 'none';
-  return value === null || value === '' ? 'none' : String(value);
 }
 
 interface ProposalGroupCardProps {
@@ -122,7 +108,8 @@ function ConflictPicks({ group, draft, onDraftChange }: { group: ProposalGroup; 
 }
 
 function SizeAnswers({ group, draft, onDraftChange }: { group: ProposalGroup; draft: GroupDraft; onDraftChange: (d: GroupDraft) => void }) {
-  const hasBulk = Object.values(draft.sizeRoles).includes('bulk');
+  // The database records shop-filled only for a fertilizer parent with a Bulk size to fill from.
+  const canShopFill = Object.values(draft.sizeRoles).includes('bulk') && parentIsFertilizer(group, draft);
   return (
     <div className="space-y-1">
       <p className="text-sm font-semibold text-gray-800">Size roles</p>
@@ -154,7 +141,7 @@ function SizeAnswers({ group, draft, onDraftChange }: { group: ProposalGroup; dr
               >
                 <option value="">Tote: choose…</option>
                 <option value="vendor">Vendor-filled package</option>
-                <option value="shop" disabled={!hasBulk}>Shop-filled from the Bulk size (fertilizer only)</option>
+                <option value="shop" disabled={!canShopFill && tote !== true}>Shop-filled from the Bulk size (fertilizer only)</option>
               </select>
             )}
           </div>
@@ -205,7 +192,8 @@ function DecisionControls(props: ProposalGroupCardProps & { draft: GroupDraft })
   const { group, draft, onDraftChange, busy } = props;
   const problems = approvalProblems(group, draft);
   return (
-    <div className="space-y-3 border-t pt-3">
+    // Locked while a preview or save runs, so the review always shows what the card shows.
+    <fieldset disabled={busy} className="space-y-3 border-t pt-3">
       <Input
         label="Parent name"
         value={draft.name}
@@ -235,7 +223,7 @@ function DecisionControls(props: ProposalGroupCardProps & { draft: GroupDraft })
         <Button size="sm" variant="secondary" disabled={busy} onClick={props.onHold}>Hold…</Button>
         <Button size="sm" variant="ghost" disabled={busy} onClick={props.onReject}>Reject…</Button>
       </div>
-    </div>
+    </fieldset>
   );
 }
 

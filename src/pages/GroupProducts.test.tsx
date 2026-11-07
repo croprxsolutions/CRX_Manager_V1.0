@@ -110,6 +110,7 @@ describe('GroupProducts', () => {
     const dialog = await screen.findByRole('dialog');
     expect(M.previewProductRateCorrection).toHaveBeenCalledWith({ productId: 'a', ratePerAcre: 2, rateUnit: 'qt' });
     expect(within(dialog).getByText(/\$10 \/ \$9 \/ \$8/)).toBeInTheDocument();
+    expect(within(dialog).getByText('Rate per acre:', { exact: false })).toHaveTextContent('Rate per acre: 2 qt');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Approve as shown' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Grouping is not switched on yet');
 

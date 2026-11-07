@@ -127,6 +127,12 @@ vi.mock('../lib/db', () => {
   };
 });
 
+// The brands section reads through its own RPC; keep it off H.rpc so these tests see only the EPA draft call.
+vi.mock('../lib/productBrands', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productBrands')>()),
+  getProductBrands: vi.fn(async () => ({ parentId: null, parentName: null, brands: [] })),
+}));
+
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: H.toast }),
 }));

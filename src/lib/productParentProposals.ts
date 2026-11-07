@@ -59,6 +59,13 @@ export interface ProposalConflicts {
 }
 export type ConflictField = keyof ProposalConflicts;
 
+export const CONFLICT_LABELS: Record<ConflictField, string> = {
+  category: 'Category',
+  use_timings: 'Use Timing',
+  rates: 'Rate per acre',
+};
+
+
 export interface ProposalGroup {
   id: string;
   proposal_id: string;
@@ -163,16 +170,23 @@ export async function decideGroup(input: {
   reason: string;
   idempotencyKey: string;
 }): Promise<void> {
-  const rpc = input.decision === 'hold' ? 'hold_product_parent_group' : 'reject_product_parent_group';
-  const { data, error } = await supabaseUntyped.rpc(rpc, {
+  const args = {
     p_group_id: input.group.id,
     p_expected_proposal_version: input.proposalVersion,
     p_group_fingerprint: input.group.group_fingerprint,
     p_reason: input.reason,
     p_idempotency_key: input.idempotencyKey,
-  });
+  };
+  // Literal RPC names, so the repo's RPC scans can check each one.
+  if (input.decision === 'hold') {
+    const { data, error } = await supabaseUntyped.rpc('hold_product_parent_group', args);
+    if (error) throw error;
+    assertRpcResult(data, 'hold_product_parent_group');
+    return;
+  }
+  const { data, error } = await supabaseUntyped.rpc('reject_product_parent_group', args);
   if (error) throw error;
-  assertRpcResult(data, rpc);
+  assertRpcResult(data, 'reject_product_parent_group');
 }
 
 /** What the admin chose for one group on the screen. */
@@ -190,6 +204,24 @@ export interface GroupDraft {
 
 function isFertilizer(category: string | null): boolean {
   return (category ?? '').toLowerCase().includes('fertilizer');
+}
+
+/** The parent's category as approval sets it: the picked value, else the first size's (the sizes agree). */
+export function parentIsFertilizer(group: ProposalGroup, draft: GroupDraft): boolean {
+  const pick = draft.picks.category;
+  const category = group.conflicts.category && pick !== undefined ? group.conflicts.category[pick] : group.members[0]?.category ?? null;
+  return isFertilizer(category);
+}
+
+export function rateText(r: Pick<RateValues, 'rate_per_acre' | 'rate_unit' | 'suggested_rate'>): string {
+  const rate = r.rate_per_acre === null ? 'no rate' : `${r.rate_per_acre} ${r.rate_unit ?? ''}`.trim();
+  return r.suggested_rate ? `${rate} (suggested ${r.suggested_rate})` : rate;
+}
+
+export function conflictValueText(field: ConflictField, value: unknown): string {
+  if (field === 'rates') return rateText(value as RateValues);
+  if (field === 'use_timings') return Array.isArray(value) && value.length > 0 ? value.join(', ') : 'none';
+  return value === null || value === '' ? 'none' : String(value);
 }
 
 /** Distinct brand variants per lower-case name across the sizes (one entry per distinct set of facts). */
@@ -262,6 +294,10 @@ export function approvalProblems(group: ProposalGroup, draft: GroupDraft): strin
   if (roles.filter((r) => r === 'bulk').length > 1) problems.push('Only one size can be Bulk.');
   const totes = group.members.filter((m) => draft.sizeRoles[m.product_id] === 'fixed_tote');
   if (totes.some((m) => draft.totes[m.product_id] === undefined)) problems.push('Say whether each tote is shop-filled.');
+  if (totes.some((m) => draft.totes[m.product_id] === true)) {
+    if (!roles.includes('bulk')) problems.push('A shop-filled tote needs a Bulk size to fill from.');
+    if (!parentIsFertilizer(group, draft)) problems.push('Only fertilizer totes can be shop-filled: mark the tote vendor-filled.');
+  }
   if (Object.values(draft.brands).some((b) => b.keep && !b.sourceBrandId)) {
     problems.push('Pick which version of each differing brand to keep.');
   }

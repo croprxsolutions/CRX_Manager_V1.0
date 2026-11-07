@@ -14,6 +14,7 @@ import { Sentry } from '../lib/sentry';
 import {
   FLAG_LABELS,
   approvalEntry,
+  approvalProblems,
   approveGroups,
   buildProposal,
   chosenRates,
@@ -213,11 +214,8 @@ export default function GroupProducts() {
         || g.members.some((m) => m.product_name.toLowerCase().includes(term))));
   }, [groups, statusFilter, flagFilter, search]);
 
-  const toggleSelected = (id: string, on: boolean) => setSelected((current) => {
-    const next = new Set(current);
-    if (on) next.add(id); else next.delete(id);
-    return next;
-  });
+  const toggleSelected = (id: string, on: boolean) =>
+    setSelected((current) => new Set(on ? [...current, id] : [...current].filter((x) => x !== id)));
 
   const flagsInUse = useMemo(() => [...new Set(groups.flatMap((g) => g.flags))].sort(), [groups]);
 
@@ -259,6 +257,12 @@ export default function GroupProducts() {
 
   const startApproval = async (ids: string[]) => {
     const chosen = groups.filter((g) => ids.includes(g.id));
+    // A selected group may have been edited into an unready state since it was ticked.
+    const notReady = chosen.filter((g) => !drafts[g.id] || approvalProblems(g, drafts[g.id]).length > 0);
+    if (notReady.length > 0) {
+      toast('error', `Not ready to approve: ${notReady.map((g) => g.suggested_name).join(', ')}. Open it and answer what it asks.`);
+      return;
+    }
     setBusy(true);
     try {
       const entries = [];

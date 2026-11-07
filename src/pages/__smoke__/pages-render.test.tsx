@@ -223,6 +223,7 @@ const COVERED = new Set<string>([
   'Fields',
   'FinancialDashboard',
   'GettingStarted',
+  'GroupProducts',
   'Integrity',
   'InventoryPage',
   'InvoiceDetail',

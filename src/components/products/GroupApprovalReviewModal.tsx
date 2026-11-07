@@ -1,7 +1,10 @@
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import {
+  CONFLICT_LABELS,
   SIZE_ROLE_LABELS,
+  conflictValueText,
+  type ConflictField,
   type ApprovalEntry,
   type PriceChange,
   type ProposalGroup,
@@ -58,6 +61,11 @@ export default function GroupApprovalReviewModal({ review, error, saving, onClos
           return (
             <div key={entry.group_id} className="rounded-lg border border-gray-200 p-3 space-y-1">
               <p className="font-semibold text-gray-900">{entry.name}</p>
+              {(Object.keys(entry.choices) as ConflictField[]).map((field) => (
+                <p key={field} className="text-gray-800">
+                  {CONFLICT_LABELS[field]}: <span className="font-medium">{conflictValueText(field, entry.choices[field])}</span>
+                </p>
+              ))}
               <ul className="list-disc pl-5 text-gray-800">
                 {group.members.map((m) => (
                   <li key={m.product_id}>

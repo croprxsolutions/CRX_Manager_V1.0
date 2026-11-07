@@ -33,6 +33,11 @@ describe('sanitizeError', () => {
     ['PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until registrations (REG-1) are built',
       'Nothing was saved. EPA number correction is switched off until registrations (REG-1) are built'],
     ['EVIDENCE_REQUIRED: say what shows it', 'Nothing was saved. Say what shows it'],
+    // RAISE texts of 20261117130000_tote_fill_from_bulk.sql (BLK-1a).
+    ['TOTE_FILL_STOCK_MOVED: stock of the tote or its bulk has moved since this fill; adjust stock instead',
+      'Nothing was saved. Stock of the tote or its bulk has moved since this fill; adjust stock instead'],
+    ['TOTE_FILL_TOTE_UNIT: "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)',
+      'Nothing was saved. "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)'],
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });

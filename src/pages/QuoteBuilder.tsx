@@ -733,6 +733,9 @@ export default function QuoteBuilder() {
   // `price` is the price_per_unit the database holds for that row (loaded, then each save's
   // item_prices): a sent quote keeps it on later saves (20261027040000). `todayApplied` marks a
   // "use today's price" choice the database already stored, so it is applied once, not again.
+  // Lines "Use Tier N" moved to today's price (KI-105). Picking another tier from the menu undoes it,
+  // so a sent price is never replaced by a choice the operator walked back (Sol, #1605).
+  const useTierKeysRef = useRef(new Set<string>());
   const savedLineIdsRef = useRef(new Map<string, {
     id: string;
     productId: string;
@@ -1821,13 +1824,21 @@ export default function QuoteBuilder() {
       return;
     }
     setTier(t);
+    const undo = useTierKeysRef.current;
+    useTierKeysRef.current = new Set();
     if (!toAssigned || !priceLocked) {
-      recalcAllForTier(t);
+      setSections((prev) => prev.map((sec) => ({
+        ...sec,
+        items: sec.items.map((item) => recalcItem(undo.has(item._key) ? { ...item, use_todays_price: false } : item, t)),
+      })));
       return;
     }
     const repriced = (item: LocalItem) => !!item.product_id && item.price_override == null;
     // A new choice: send it again even where an earlier one was saved.
     const keys = new Set(sections.flatMap((sec) => sec.items.filter(repriced).map((item) => item._key)));
+    // A line the operator had already moved to today's price stays moved if they pick another tier.
+    useTierKeysRef.current = new Set(sections.flatMap((sec) => sec.items
+      .filter((item) => keys.has(item._key) && (undo.has(item._key) || !item.use_todays_price)).map((item) => item._key)));
     savedLineIdsRef.current.forEach((saved, key) => { if (keys.has(key)) saved.todayApplied = false; });
     setSections((prev) => prev.map((sec) => ({
       ...sec,
@@ -1844,6 +1855,7 @@ export default function QuoteBuilder() {
     }
     // A new choice: send it again even where an earlier one was saved.
     savedLineIdsRef.current.forEach((saved) => { saved.todayApplied = false; });
+    useTierKeysRef.current = new Set();
     setSections((prev) =>
       prev.map((sec) => ({
         ...sec,
@@ -2297,6 +2309,8 @@ export default function QuoteBuilder() {
 
     // KI-105: a tier other than the customer's assigned one needs "Use Tier N" or the tick. The assigned
     // tier is re-read here, since an admin may have changed it while this quote was open (Sol).
+    // Screen-only BY DECISION (Mason, 2026-11-05, DECISION_LOG): anyone may quote at any tier, so
+    // save_quote does not check the tick, and an admin change landing after this read is not caught.
     // The operator may open another quote during the read; this save then belongs to neither (Codex, #1605).
     const routeAtTierRead = routeQuoteIdRef.current;
     const loadAtTierRead = quoteLoadSerialRef.current;
@@ -5385,6 +5399,7 @@ export default function QuoteBuilder() {
                                         // A new choice: send it again even if an earlier one was saved.
                                         const saved = savedLineIdsRef.current.get(item._key);
                                         if (saved) saved.todayApplied = false;
+                                        useTierKeysRef.current.delete(item._key);
                                         updateItem(sec._key, item._key, {
                                           price_override: null,
                                           use_todays_price: true,

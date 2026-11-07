@@ -620,6 +620,10 @@ admin changing it while a quote is open is caught; a tick applies to one quote, 
 "Use Tier N" on a sent quote moves each line without a negotiated price to today's Tier N price (a higher price
 still needs "Grower agreed"); changing the tier menu on a sent quote still keeps its sent prices, as before.
 The tick is not stored: re-saving a quote kept at another tier needs it again after the page is reopened.
+Picking a tier from the menu after "Use Tier N" undoes it, so the sent prices come back. Known limits, accepted
+with the screen-only rule: an admin change landing between Save's re-read and the save is not caught; and on
+another rep's sent booking "Use Tier N" changes the tier, which the database refuses (prices only), so that rep
+uses the tick or asks the booking's rep.
 
 ## Database and release process
 

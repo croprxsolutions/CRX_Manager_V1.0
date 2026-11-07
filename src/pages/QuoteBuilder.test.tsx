@@ -3448,6 +3448,22 @@ describe('QuoteBuilder', () => {
       expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 12, use_todays_price: true });
     });
 
+    it('picking the sent tier again after "Use Tier 1" puts back the sent price (Sol, #1605)', async () => {
+      const { quote } = configureLockedQuote(2);
+      renderQuoteBuilder(quote.id);
+      const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
+      await waitFor(() => expect(price).toBeEnabled());
+      fireEvent.click(await screen.findByRole('button', { name: 'Use Tier 1' }));
+      expect(price).toHaveValue(12);
+      fireEvent.change(screen.getByDisplayValue('Tier 1'), { target: { value: '2' } });
+
+      expect(price).toHaveValue(10);
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
+      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 10, use_todays_price: false });
+    });
+
     it('keeps the sent price through an edit after the catalog price rose', async () => {
       const { quote } = configureLockedQuote();
       renderQuoteBuilder(quote.id);

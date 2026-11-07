@@ -408,12 +408,44 @@ async function main() {
   ids = lineIds(none);
   save(ADMIN, none, [chem(PB, 1, { id: ids[0] }), chem(PB, '+1')]);
   assert.equal(lines(none), `1:${B_EPA},1:${B_EPA}`, "an ambiguous position takes the product's number");
-  // A line moved to another job by a direct write takes its product's number, not the old job's.
+  // A direct write (outside save_job) cannot change a sprayed or finished line's product or job: A to B
+  // and back to A would otherwise leave product A with A's CURRENT number.
   ids = lineIds(sprayed);
   setProductEpa(PA, OLD);
-  ok(ADMIN, `UPDATE public.job_chemicals SET job_id = '${JOLD}', sort_order = 7 WHERE id = '${ids[0]}';`);
-  assert.equal(scalar(`SELECT epa_registration FROM public.job_chemicals WHERE id = '${ids[0]}';`), OLD);
-  console.log("[prover] stale or other jobs' line ids on a sprayed job are refused; new lines, changed products, duplicates and unsprayed jobs take the product's number; a blank stays blank on a finished job; ambiguous positions and moved lines take the product's number");
+  const sprayedBefore = lines(sprayed);
+  refused(ADMIN, `UPDATE public.job_chemicals SET product_id = '${PB}' WHERE id = '${ids[0]}';`, /cannot change product or move to another job/);
+  refused(ADMIN, `UPDATE public.job_chemicals SET job_id = '${open}', sort_order = 7 WHERE id = '${ids[0]}';`, /cannot change product or move to another job/);
+  const openIds = lineIds(open);
+  refused(ADMIN, `UPDATE public.job_chemicals SET job_id = '${JOLD}', sort_order = 7 WHERE id = '${openIds[0]}';`, /cannot change product or move to another job/);
+  assert.equal(lines(sprayed), sprayedBefore, 'a refused direct write changes nothing');
+  // On a job not sprayed yet a direct product change is allowed and takes the new product's number.
+  ok(ADMIN, `UPDATE public.job_chemicals SET product_id = '${PA}' WHERE id = '${openIds[1]}';`);
+  assert.equal(scalar(`SELECT epa_registration FROM public.job_chemicals WHERE id = '${openIds[1]}';`), OLD);
+  console.log("[prover] stale or other jobs' line ids on a sprayed job are refused; new lines, changed products, duplicates and unsprayed jobs take the product's number; a blank stays blank on a finished job; ambiguous positions take the product's number; a direct product or job change on a sprayed or finished line is refused");
+
+  // A product EPA edit changes no demand, so it leaves inventory holds alone: same hold ids on an open
+  // job, and an edit with no signed-in user succeeds even where an open job has no creator.
+  const holdJob = save(ADMIN, null, [chem(PB, 0, { customer_supplied: false, quantity: 10, rate_per_acre: 1, rate_unit: 'gal/ac', price_per_unit_cents: 2000 })]);
+  const HOLDS = (job) => scalar(`SELECT COALESCE(string_agg(id::text || '@' || created_at::text, ',' ORDER BY id), '<none>')
+    FROM public.inventory_holds WHERE source_id = '${job}' AND hold_type = 'job';`);
+  const holdsBefore = HOLDS(holdJob);
+  assert.notEqual(holdsBefore, '<none>', 'the open job has a hold to keep');
+  const NOCREATOR = '00000000-0000-4000-8000-0000000000c2';
+  psql(`SET session_replication_role = replica;
+    INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, created_by)
+      VALUES ('${NOCREATOR}', 'JK-NOCREATOR', '${CUST}', 'scheduled', current_date, NULL);
+    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order, epa_registration)
+      VALUES ('${NOCREATOR}', '${PB}', 10, 'Gal', 2000, false, 0, '${B_EPA}');
+    SET session_replication_role = origin;`, { user: 'supabase_admin' });
+  setProductEpa(PB, '100-1079');
+  assert.equal(HOLDS(holdJob), holdsBefore, 'an EPA edit keeps the open job\'s holds as they were');
+  assert.equal(lines(holdJob), '0:100-1079');
+  assert.equal(lines(NOCREATOR), '0:100-1079', 'an edit with no signed-in user reaches a job with no creator');
+  setProductEpa(PB, B_EPA);
+  // A rep's chemical cost is still worked out on the server: a sent cost is not stored.
+  const repJob = save(REP, null, [chem(PB, 0, { customer_supplied: false, quantity: 10, rate_per_acre: 1, rate_unit: 'gal/ac', cost_per_unit_cents: 999999, price_per_unit_cents: 2000 })]);
+  assert.equal(scalar(`SELECT cost_per_unit_cents FROM public.job_chemicals WHERE job_id = '${repJob}';`), '1000', 'a rep cannot set chemical cost');
+  console.log("[prover] an EPA edit leaves holds alone (no creator needed); a rep's sent chemical cost is not stored");
 
   // Lock order: a spray in flight when an EPA edit starts finishes first, and the edit then leaves
   // that job alone (the edit waits on the job lock the spray's foreign key holds).

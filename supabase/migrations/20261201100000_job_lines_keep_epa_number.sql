@@ -24,7 +24,10 @@
 --      product) keeps the number stored on that line, when the job is sprayed or finished after the
 --      save. The database reads the stored number itself; nothing a caller sends sets it. A new line,
 --      a line whose product changed, a line moved to another job, two written lines sharing a
---      position, and any line of a job not sprayed yet take the product's number.
+--      position, and any line of a job not sprayed yet take the product's number. A direct write
+--      (outside save_job) that changes a line's product or moves it between jobs is refused when
+--      either job is sprayed or finished, so a sprayed line never swaps back to its product's
+--      current number; save_job (which deletes and re-writes) is the way to change those lines.
 --      The job screen sends each saved line's id from this same change (an older save_job ignores
 --      the key, so the screen can ship with or before this file). On a sprayed or finished job, a
 --      sent line id that is no longer a line of that job (a second tab or device saved meanwhile) is
@@ -37,12 +40,14 @@
 --      application report and WPS notice onto the line's number together.
 --
 -- NOT CHANGED: _save_job_cost_step2_impl and every check save_job makes (units, totals, idempotency,
---   roles); invoices and restricted-use records; prices, costs and inventory.
+--   roles); invoices and restricted-use records; prices, costs and inventory. _trg_sync_job_holds is
+--   re-emitted with one added early return (see (a)); what it rebuilds, and when, is otherwise unchanged.
 --
 -- SIDE EFFECTS, named: (a) restoring kept numbers in step 4, and a product EPA edit reaching open jobs
---   in step 3, are UPDATEs of job_chemicals, so the statement trigger trg_sync_job_holds_upd rebuilds
---   those jobs' holds from their unchanged lines, as any job save does. Step 4 updates only when a
---   kept number differs from the product's (after a product EPA edit). (b) Lock order is always
+--   in step 3, are UPDATEs of job_chemicals that change only the EPA number. They set the
+--   transaction-local flag crx.job_line_epa_only for that one statement, and the statement trigger
+--   trg_sync_job_holds_upd skips its hold rebuild while it is set: no demand changed, so holds keep
+--   their ids, times and creators, and an EPA edit never fails on an unrelated job's hold. (b) Lock order is always
 --   the product, then the job, then its lines. A product EPA edit holds its product row, then locks
 --   the open jobs using it (FOR UPDATE, in id order) before updating their lines. A line write reads
 --   its product FOR SHARE, so an edit in flight finishes first and an edit starting later waits for
@@ -51,15 +56,12 @@
 --   a spray, save or line write run one after the other: whichever commits first is seen by the other.
 --   (c) save_job now locks the job row before the impl does (FOR UPDATE, the lock the save already takes later), so
 --   the lines it reads are the ones it replaces; only an active admin or sales rep gets that far.
---   (d) A product EPA edit made with no signed-in user (a SQL fix, a service job) rebuilds open jobs'
---   holds with the job's creator as actor; if an open job using that product has no creator, the edit
---   is refused whole (nothing changes) and must be made by a signed-in admin.
 -- RARE WAIT: an EPA edit waits for in-flight saves and line writes using that product, and the
 --   reverse; other product edits (price, name) wait for those too. lock_timeout, or a deadlock with a
 --   writer that locks a job before writing its lines outside save_job, rolls one back whole (retry).
 --
--- ROLLBACK (its own reviewed migration): re-emit save_job from its previous body (20261019230000),
---   drop the two triggers, the five functions and the column.
+-- ROLLBACK (its own reviewed migration): re-emit save_job from its previous body (20261019230000) and
+--   _trg_sync_job_holds from 20260702174000, drop the two triggers, the five functions and the column.
 --
 -- ORDERING: apply after every older pending migration. The parked 20261127100000 must drop its own
 --   copy of steps 1-3 and restamp after this file.
@@ -88,9 +90,11 @@ BEGIN
          ('public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure, '88ca038686daffbbb2c7a46a05d37e5d'),
          -- Step 4 relies on these: every line deleted and re-written at COALESCE(sort_order, 0).
          ('public._save_job_cost_step2_impl(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure, '8acf34542105a90212ddb0a5e7c5d272'),
-         ('public._cost_step2_job_chemicals(uuid,jsonb)'::regprocedure, '5b5dfff699afa368f5f4a7cb72020f38'))
-         AND p.proowner = 'postgres'::regrole) <> 3 THEN
-    RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_PREFLIGHT: save_job or the save it wraps drifted from the body this file was written from';
+         ('public._cost_step2_job_chemicals(uuid,jsonb)'::regprocedure, '5b5dfff699afa368f5f4a7cb72020f38'),
+         -- Re-emitted below with one early return (20260702174000).
+         ('public._trg_sync_job_holds()'::regprocedure, 'f27618de61e5a9f040b355db278415fa'))
+         AND p.proowner = 'postgres'::regrole) <> 4 THEN
+    RAISE EXCEPTION 'JOB_LINES_KEEP_EPA_PREFLIGHT: save_job, the save it wraps or the hold trigger drifted from the body this file was written from';
   END IF;
   -- The column takes only the grants below; that holds only while the app roles have no table-wide
   -- SELECT, INSERT or UPDATE on job_chemicals.
@@ -129,6 +133,27 @@ $function$;
 ALTER FUNCTION public._job_line_epa_follows_product(uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._job_line_epa_follows_product(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
+-- The body of 20260702174000 with one early return: an UPDATE that changes only lines' EPA numbers
+-- (steps 3 and 4 set crx.job_line_epa_only for that one statement) changes no demand, so holds stay.
+CREATE OR REPLACE FUNCTION public._trg_sync_job_holds()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  r RECORD;
+BEGIN
+  IF TG_OP = 'UPDATE' AND current_setting('crx.job_line_epa_only', true) = 'on' THEN
+    RETURN NULL;
+  END IF;
+  FOR r IN SELECT DISTINCT job_id FROM affected WHERE job_id IS NOT NULL LOOP
+    PERFORM _sync_job_holds(r.job_id, auth.uid());
+  END LOOP;
+  RETURN NULL;  -- AFTER STATEMENT: return value ignored
+END;
+$function$;
+
 -- A written line takes its product's number, read with the product row locked FOR SHARE (see (b)).
 CREATE FUNCTION public._job_chemical_epa() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
@@ -137,6 +162,13 @@ BEGIN
      AND NEW.job_id IS NOT DISTINCT FROM OLD.job_id THEN
     NEW.epa_registration := OLD.epa_registration;
     RETURN NEW;
+  END IF;
+  -- A line of a sprayed or finished job keeps its number: changing its product or job in place (only a
+  -- direct write does; save_job deletes and re-writes) would give it some product's current number.
+  IF TG_OP = 'UPDATE' AND (NOT public._job_line_epa_follows_product(OLD.job_id)
+                           OR NOT public._job_line_epa_follows_product(NEW.job_id)) THEN
+    RAISE EXCEPTION 'A line on a sprayed or finished job cannot change product or move to another job. Edit the job and save it instead.'
+      USING ERRCODE = '55000';
   END IF;
   -- FOR SHARE on the product: an EPA edit in flight finishes first and this reads its number, and an
   -- edit that starts later waits until this line commits, so it sees the line (even on a new job).
@@ -175,10 +207,12 @@ BEGIN
    WHERE j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
      AND EXISTS (SELECT 1 FROM public.job_chemicals jc WHERE jc.job_id = j.id AND jc.product_id = NEW.id)
    ORDER BY j.id FOR UPDATE;
+  PERFORM set_config('crx.job_line_epa_only', 'on', true);
   UPDATE public.job_chemicals jc SET epa_registration = NULLIF(btrim(NEW.epa_registration), '')
    WHERE jc.product_id = NEW.id
      AND jc.epa_registration IS DISTINCT FROM NULLIF(btrim(NEW.epa_registration), '')
      AND public._job_line_epa_follows_product(jc.job_id);
+  PERFORM set_config('crx.job_line_epa_only', 'off', true);
   RETURN NULL;
 END;
 $function$;
@@ -263,7 +297,7 @@ BEGIN
   IF p_job_id IS NULL OR jsonb_array_length(p_kept) = 0 OR public._job_line_epa_follows_product(p_job_id) THEN
     RETURN;
   END IF;
-  -- Only when a number differs, so an ordinary re-save does not rebuild holds a second time.
+  -- Only when a number differs (an ordinary re-save writes nothing here).
   IF NOT EXISTS (SELECT 1 FROM public.job_chemicals jc
                    JOIN jsonb_to_recordset(p_kept) k(sort_order integer, product_id uuid, epa_registration text)
                      ON jc.sort_order = k.sort_order AND jc.product_id = k.product_id
@@ -272,6 +306,7 @@ BEGIN
                                      WHERE d.job_id = jc.job_id AND d.sort_order = jc.sort_order AND d.id <> jc.id)) THEN
     RETURN;
   END IF;
+  PERFORM set_config('crx.job_line_epa_only', 'on', true);
   UPDATE public.job_chemicals jc SET epa_registration = k.epa_registration
     FROM jsonb_to_recordset(p_kept) k(sort_order integer, product_id uuid, epa_registration text)
    WHERE jc.job_id = p_job_id AND jc.sort_order = k.sort_order AND jc.product_id = k.product_id
@@ -279,6 +314,7 @@ BEGIN
      -- A position written twice (a sort_order spelling the helper did not read) is ambiguous: keep nothing.
      AND NOT EXISTS (SELECT 1 FROM public.job_chemicals d
                       WHERE d.job_id = jc.job_id AND d.sort_order = jc.sort_order AND d.id <> jc.id);
+  PERFORM set_config('crx.job_line_epa_only', 'off', true);
 END;
 $function$;
 ALTER FUNCTION public._job_line_epa_restore(uuid, jsonb) OWNER TO postgres;

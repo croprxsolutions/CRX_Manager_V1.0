@@ -18,6 +18,8 @@
 - An EPA edit takes turns with a spray record, a job save or a new line using that product (the
   product is locked first, then the job). So a spray recorded during an edit keeps its number, and a
   line being added during an edit (even on a brand-new job) ends up with the edited number.
+- An EPA-number change alone no longer rebuilds a job's inventory holds (nothing about the amounts
+  changed). A line on a sprayed or finished job can only be changed through the job screen's save.
 - Needed before a product's EPA number can be corrected (parked work on `claude/sweet-bun-f7920f`,
   which drops its own copy of this column and builds on this file).
 - Proof: `node scripts/smoke/prove-job-lines-keep-epa-real-schema.mjs` (disposable real-schema database).

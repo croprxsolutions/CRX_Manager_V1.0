@@ -3107,6 +3107,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // Job lines keep their EPA number (local candidate 20261201100000).
   _product_epa_to_unsprayed_job_lines:
     "AFTER UPDATE OF epa_registration row trigger on products: copies the product's new number onto lines of jobs not sprayed yet, a replay finds them already equal and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked",
+  _trg_sync_job_holds:
+    "AFTER INSERT/UPDATE/DELETE statement trigger on job_chemicals (20260702174000, re-emitted with one early return): rebuilds the affected jobs' inventory holds from their current lines, so a replay rebuilds the same holds; skips an UPDATE that changes only lines' EPA numbers; Postgres refuses direct calls of a trigger function (grants unchanged: service_role only)",
   _job_line_epa_restore:
     "internal helper called only by save_job after its private implementation: sets a sprayed or finished job's re-written lines back to the EPA number stored on the line the caller named by id, read before the save; a replay names ids that no longer exist and writes nothing; every API-role EXECUTE (incl. service_role) is revoked",
   // KI-25 receipt queue (20261113140000).

@@ -53,23 +53,34 @@ function rowGallons(line: MappedLine): number | string {
   return entry.kind === 'volume' ? (line.quantity as number) * entry.factor : `${name}'s unit ${line.unit} isn't a volume unit`;
 }
 
+/** A left-out row's gallons when its amount and volume unit are known (an unlinked, dry or formless row), else 0. */
+function knownGallons(line: MappedLine): number {
+  if (badAmount(lineName(line), line.quantity) || !line.rowUnits) return 0;
+  const entry = unitEntry(lineName(line), line.unit, line.rowUnits);
+  return 'kind' in entry && entry.kind === 'volume' ? (line.quantity as number) * entry.factor : 0;
+}
+
 function volumeTotal(total: number, unit: string, header: UnitEntry, lines: MappedLine[]): Warning[] {
   if (total < 0) return unchecked(`Total volume not checked: the ticket total is ${total}`);
   const refused: string[] = [];
-  let gallons = 0;
+  // Gallons the tank surely holds, left-out rows included when their volume is known: these alone can show overfill.
+  let atLeast = 0;
   let anyCounted = false;
   for (const line of lines) {
     if (line.quantity === 0) continue;
     const row = rowGallons(line);
-    if (typeof row === 'string') refused.push(row);
-    else { gallons += row; anyCounted = true; }
+    if (typeof row === 'string') {
+      refused.push(row);
+      const known = knownGallons(line);
+      if (known > 0) { atLeast += known; anyCounted = true; }
+    } else { atLeast += row; anyCounted = true; }
   }
-  if (!Number.isFinite(gallons)) return unchecked('Total volume not checked: the total is too large to check');
-  const over = total === 0 ? anyCounted && gallons > 0 : gallons > total * header.factor * (1 + TOLERANCE);
+  if (!Number.isFinite(atLeast)) return unchecked('Total volume not checked: the total is too large to check');
+  const over = total === 0 ? anyCounted && atLeast > 0 : atLeast > total * header.factor * (1 + TOLERANCE);
   if (over) {
     // Left-out rows only lower the sum, so the products are over the tank whatever they hold.
-    const notCounted = refused.length > 0 ? ` Not counted: ${refused.join('; ')}.` : '';
-    return [{ level: 'mismatch', message: `The products add up to ${(gallons / header.factor).toFixed(2)} ${unit}, which is more than the total volume of ${total} ${unit}. A tank can't hold more product than its total.${notCounted}` }];
+    const notCounted = refused.length > 0 ? ` Counted by volume only, or left out: ${refused.join('; ')}.` : '';
+    return [{ level: 'mismatch', message: `The products add up to ${refused.length > 0 ? 'at least ' : ''}${(atLeast / header.factor).toFixed(2)} ${unit}, which is more than the total volume of ${total} ${unit}. A tank can't hold more product than its total.${notCounted}` }];
   }
   return refused.length > 0 ? unchecked(`Total volume not checked: ${refused.join('; ')}`) : [];
 }
@@ -90,7 +101,7 @@ function mappedTotalWarnings(total: unknown, headerUnit: string, headerUnits: We
   const entry = Object.prototype.hasOwnProperty.call(headerUnits.factors, key) ? headerUnits.factors[key] : undefined;
   if (entry?.kind === 'weight') return weightTotal(total, key, headerUnits, lines);
   if (entry?.kind === 'volume') return volumeTotal(total, key, entry, lines);
-  if (total <= 0 || !lines.some((line) => line.quantity !== 0)) return [];
+  if (!lines.some((line) => line.quantity !== 0)) return [];
   return unchecked(entry?.kind === 'count'
     ? `Total not checked: ${key} is a count, not a weight or volume`
     : `${word} not checked: ${key} is not in the unit table`);

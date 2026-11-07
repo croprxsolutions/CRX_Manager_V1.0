@@ -10,11 +10,18 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-07 — A product with no EPA number can be given one; old blank invoice lines may then show it
+
+**Decision (Mason, in session, 2026-11-07: "Yes, allow it"):** a parent EPA correction is not blocked by an old invoice line with no EPA copy when that line's size had no number either. Such a line showed none; after the correction, a reader that falls back to the size (the customer year-end summary) shows the added number. Printed invoices and statements print only the line's own copy, so they do not change. A blank line for a size that HAS a number still blocks, because it would show a different number.
+**Why:** Sol (round 3, PR #1611) found that a parent with no number could otherwise never be given one; Luna objected that the old line would change from blank to a number. Showing the product's real label beats a product that can never be fixed.
+**Enforcement:** `_product_parent_identity_after` in `supabase/migrations/20261207113000_parent_epa_correction.sql`, proven by `scripts/smoke/prove-parent-epa-correction-real-schema.mjs`.
+
 ## 2026-11-07 — A reversal belongs to the Central day its row was made (KI-18)
 
 **Decision (Mason, in chat, 2026-11-07):** reversing a write-off or a credit application checks only the accounting month of the Chicago (Central) day the write-off or application was made, the day its apply already checked. A row made at 9 pm Central on Oct 31 is October's: a closed October refuses its reversal, a closed November does not.
 **Why:** KI-18 batch 1 checked both the UTC and the Chicago day, so a row made 6/7-11:59 pm Central on a month's last day could not be reversed once either month closed. Live had 0 write-offs and 0 credit applications when this was decided, so no existing row changes month.
 **What this forbids/implies:** don't re-add the UTC-day check to `reverse_credit_memo_application`, `_unapply_return_credit_guard_impl_20260826`, `_void_invoice_split_provenance_impl_20260719` or `_reverse_write_off_replay_impl_20261015` (`20261206110000`).
+
 ## 2026-11-07 — Weight per gallon is capped at 20 lb/gal (DM-2 and DM-1 match)
 
 **Decision (Mason, in session, 2026-11-07):** "there is no liquid that heavy, most is 8lb-12lb is normal range of product weights, set them both to 20lbs". DM-2's density limit drops from 25 to 20 lb/gal, matching DM-1's 20 lb/gal strength limit.

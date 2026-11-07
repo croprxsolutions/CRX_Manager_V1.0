@@ -72,8 +72,8 @@ describe('loader worksheet weights from the getter', () => {
 });
 
 describe('selectedLoaderWeights (job page)', () => {
-  const shownPlan = (quantity: number) => computeLoaderWorksheet({ total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100,
-    products: [{ product_name: 'TEST Liquid', total_quantity: quantity, unit: 'Gal', product_id: 'p1', product_form: 'liquid', source_line_id: 'A-l1' }] });
+  const shownPlan = (quantity: number, productId = 'p1') => computeLoaderWorksheet({ total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100,
+    products: [{ product_name: 'TEST Liquid', total_quantity: quantity, unit: 'Gal', product_id: productId, product_form: 'liquid', source_line_id: 'A-l1' }] });
   const read = { status: 'ready' as const, entry: job('A', 8), units };
   const selected = { ...worksheet, id: 'A-w' } as JobLoaderWorksheet;
 
@@ -84,6 +84,11 @@ describe('selectedLoaderWeights (job page)', () => {
 
   it('withholds them when a product amount changed but the tank volumes did not', () => {
     expect(selectedLoaderWeights(read, selected, shownPlan(10))).toEqual({
+      reason: 'Product weights not shown: the job or worksheet changed since this page loaded. Reload to see them.' });
+  });
+
+  it('withholds them when the line now points at a different product with the same name and amount', () => {
+    expect(selectedLoaderWeights(read, selected, shownPlan(20, 'p2'))).toEqual({
       reason: 'Product weights not shown: the job or worksheet changed since this page loaded. Reload to see them.' });
   });
 });

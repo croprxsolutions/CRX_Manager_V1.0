@@ -382,6 +382,7 @@ function drawLoaderWorksheet(
     });
     y = doc.lastAutoTable.finalY + 16;
     if (caption) {
+      y = ensureRoom(doc, y, 14, margin);
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(8.5);
       doc.setTextColor(...GRAY);

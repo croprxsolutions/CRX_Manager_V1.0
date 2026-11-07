@@ -34,7 +34,7 @@ const sameSettings = (a: JobLoaderWorksheet, b: JobLoaderWorksheet) => a.capacit
 
 /** Every load's volume and each product's printed amount, so a weight is shown only for the exact plan on screen. */
 const planKey = (ws: LoaderWorksheet) => ws.loads.map((load) =>
-  `${load.volume}:${load.products.map((product) => `${product.product_name}=${product.amount} ${product.unit ?? ''}`).join(',')}`).join('|');
+  `${load.volume}:${load.products.map((product) => `${product.product_id ?? ''}:${product.product_name}=${product.amount} ${product.unit ?? ''}`).join(',')}`).join('|');
 
 export interface SelectedLoaderWeights { ws: LoaderWorksheet; weights: LoaderWeights; caption: string }
 

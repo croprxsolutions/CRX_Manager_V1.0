@@ -28,8 +28,8 @@
 --     (under the parent copy pass) take the new number in one transaction with one logged event; jobs
 --     not sprayed yet show it because they read the product's number. Sprayed and finished jobs (their
 --     job_product_epa rows), invoices and restricted-use records keep the number they were made with. It is
---     refused while any invoice line for one of the sizes has no EPA copy of its own (that line would
---     follow the change); the message names the invoices. And it stays refused while
+--     refused while any invoice line for one of the sizes that has a number has no EPA copy of its own
+--     (that line would follow the change); the message names the invoices. And it stays refused while
 --     _product_parent_epa_correction_enabled() is false, which this file creates as false.
 --
 -- NOT CHANGED: purchase orders show the product's current number (a buying request, not a
@@ -39,9 +39,10 @@
 --
 -- LOCKS: the correction locks the parent and its sizes (_lock_product_parent) and writes only
 --   product_parents and products; it locks no job or job line. A spray saved at the same time locks its
---   job and then takes FOR KEY SHARE on the products, which a non-key EPA update does not conflict with:
---   whichever commits first decides the number the job keeps (the old one if the spray was saved first),
---   and the two never wait on each other. The invoice trigger reads the product FOR SHARE.
+--   job and then takes FOR KEY SHARE on the products, which a non-key EPA update does not conflict with,
+--   so the two never wait on each other: a spray that read the number before the correction committed
+--   keeps the old number even if it commits after (a save in the same instant as the correction; accepted:
+--   the spray keeps the number it was saved against, Luna 2026-11-07). The invoice trigger reads the product FOR SHARE.
 --
 -- ROLLBACK (its own reviewed migration): re-emit _product_parent_identity_after and
 --   correct_product_parent_identity from their previous live bodies, drop trg_fill_invoice_line_epa
@@ -140,7 +141,8 @@ REVOKE ALL ON FUNCTION public._product_parent_epa_correction_enabled() FROM PUBL
 -- refused while switched off, when it is not a valid EPA number, and while any invoice line for a
 -- size that has a number has no EPA copy of its own (that line would show the new number instead).
 -- A line for a size with no number showed none, so giving it the corrected one changes no number
--- it showed (Sol 2026-11-07: a missing number must stay correctable).
+-- it showed; a reader falling back to the size then shows the added one (Mason, 2026-11-07: "Yes,
+-- allow it"; DECISION_LOG).
 CREATE OR REPLACE FUNCTION public._product_parent_identity_after(p_parent public.product_parents, p_changes jsonb) RETURNS jsonb
 LANGUAGE plpgsql STABLE SET search_path = public, pg_temp AS $function$
 DECLARE

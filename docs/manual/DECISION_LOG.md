@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-07 — A product with no EPA number can be given one; old blank invoice lines may then show it
+
+**Decision (Mason, in session, 2026-11-07: "Yes, allow it"):** a parent EPA correction is not blocked by an old invoice line with no EPA copy when that line's size had no number either. Such a line showed none; after the correction, a reader that falls back to the size (the customer year-end summary) shows the added number. Printed invoices and statements print only the line's own copy, so they do not change. A blank line for a size that HAS a number still blocks, because it would show a different number.
+**Why:** Sol (round 3, PR #1611) found that a parent with no number could otherwise never be given one; Luna objected that the old line would change from blank to a number. Showing the product's real label beats a product that can never be fixed.
+**Enforcement:** `_product_parent_identity_after` in `supabase/migrations/20261206113000_parent_epa_correction.sql`, proven by `scripts/smoke/prove-parent-epa-correction-real-schema.mjs`.
+
 ## 2026-11-07 — Sol: a test file is not money code by its name alone
 
 **Decision (Mason, in session, 2026-11-07):** a changed test or spec (`__tests__/`, `*.test.*`, `*.spec.*`) no longer needs Sol just because its name carries a money word (`MONEY_PATH_WORDS`). Money code, migrations, Edge Functions and every listed path in `docs/reference/sol-required-paths.md` (tests under those paths included) still need Sol.

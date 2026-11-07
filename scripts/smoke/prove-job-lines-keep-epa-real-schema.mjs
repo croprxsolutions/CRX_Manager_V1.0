@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261201100000_job_lines_keep_epa_number: every spray-job chemical line
+ * Real-schema proof for 20261202115000_job_lines_keep_epa_number: every spray-job chemical line
  * carries its own EPA number, a product EPA edit reaches only jobs not sprayed yet, and re-saving
  * a sprayed or finished job keeps the number on each line the screen sends back by its line id.
  *
@@ -23,7 +23,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261201100000_job_lines_keep_epa_number.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261202115000_job_lines_keep_epa_number.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -352,6 +352,10 @@ async function main() {
   ids = lineIds(JOLD);
   save(ADMIN, JOLD, [chem(PB, 0, { id: ids[1] }), chem(PA, 1, { id: ids[0] })]);
   assert.equal(lines(JOLD), `0:${B_EPA},1:${OLD}`);
+  // A position sent as text with a leading '+' is the same position save_job writes, so it keeps too.
+  ids = lineIds(JOLD);
+  save(ADMIN, JOLD, [chem(PB, '0', { id: ids[0] }), chem(PA, '+1', { id: ids[1] })]);
+  assert.equal(lines(JOLD), `0:${B_EPA},1:${OLD}`, "a '+1' position keeps its number");
   // A keyed save replayed after it committed (its ids are gone now) answers the same and changes nothing.
   ids = lineIds(sprayed);
   const keyed = [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })];

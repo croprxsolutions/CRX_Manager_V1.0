@@ -61,7 +61,7 @@ const TOUCHED = /FUNCTION\s+(public\.)?"?(save_job|save_field_app_invoice|save_i
 const REVIEWED_LATER = new Set([
   // Re-emits the save_job wrapper with the same is_admin() / _cost_step2_job_chemicals split, adding
   // only an EPA-number keep around the unchanged _save_job_cost_step2_impl call.
-  '20261201100000_job_lines_keep_epa_number.sql',
+  '20261202115000_job_lines_keep_epa_number.sql',
 ]);
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"

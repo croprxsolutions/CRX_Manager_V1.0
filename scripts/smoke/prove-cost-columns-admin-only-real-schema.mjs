@@ -90,7 +90,7 @@ const REVIEWED_LATER = new Set([
   // Adds job_chemicals.epa_registration (not a cost) with only the read grants every non-cost column
   // there has and no write grant; its postflight and prove-job-lines-keep-epa-real-schema.mjs check
   // that. No cost column's grant changes.
-  '20261201100000_job_lines_keep_epa_number.sql',
+  '20261202115000_job_lines_keep_epa_number.sql',
 ]);
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"

@@ -57,7 +57,7 @@ const TOUCHED = /transfer_job_to_invoice|job_chemicals|convert_to_gl_lb/i;
 const REVIEWED_LATER = new Set([
   // Adds job_chemicals.epa_registration (read-only to the app, set by a trigger) and wraps save_job's
   // lines with an EPA keep; transfer_job_to_invoice, the line units and convert_to_gl_lb are unchanged.
-  '20261201100000_job_lines_keep_epa_number.sql',
+  '20261202115000_job_lines_keep_epa_number.sql',
 ]);
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.

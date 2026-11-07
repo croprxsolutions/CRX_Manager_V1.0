@@ -1,7 +1,7 @@
--- 20261201100000_job_lines_keep_epa_number.sql
+-- 20261202115000_job_lines_keep_epa_number.sql
 --
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261201100000_job_lines_keep_epa_number.md.
+-- docs/reference/migrations.d/20261202115000_job_lines_keep_epa_number.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (Mason, 2026-11-06: "Yes, start it"): a spray job's printouts look up the product's CURRENT EPA
@@ -36,7 +36,7 @@
 --      every line (null for a new one); a save of a sprayed or finished job with a line lacking that
 --      key (an older cached build, which could not keep the numbers), or with an id that is not a
 --      line id at all, is refused with "Reload the app".
---   6. PERMISSION (Mason, 2026-11-07: "Yes, remove it"): signed-in users (and anon) can no longer
+--   6. PERMISSION (Mason, 2026-11-06: "Yes, remove it"): signed-in users (and anon) can no longer
 --      INSERT, UPDATE, DELETE or TRUNCATE job_chemicals directly. The app never writes it directly:
 --      save_job, create_job_from_quote_section, load_recipe_into_job and the quote functions write it
 --      with definer rights and are unaffected. Without direct writes a sprayed line cannot be deleted
@@ -242,6 +242,9 @@ EXECUTE FUNCTION public._product_epa_to_unsprayed_job_lines();
 -- "id" and keeps the same product: its sort_order (the key the save writes it under), product and
 -- stored number. A line id or sort_order sent twice keeps nothing (it would be ambiguous), and a
 -- malformed value keeps nothing and is left to save_job's own refusals.
+-- Scope: this guards a line's identity, not the whole job. A save that sends no old line ids (all new
+-- lines, or none) replaces the job's lines like any edit does; no line claims to be an old one, so
+-- each new line takes its product's current number, the same as adding a line by hand.
 CREATE FUNCTION public._job_line_epa_kept(p_job_id uuid, p_chemicals jsonb, p_replay boolean) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
@@ -280,7 +283,7 @@ BEGIN
       SELECT e.value->>'id' AS line_id, e.value->>'product_id' AS product_id,
              -- save_job writes COALESCE(sort_order, 0)
              CASE WHEN e.value->>'sort_order' IS NULL THEN 0
-                  WHEN (e.value->>'sort_order') ~ '^-?[0-9]{1,9}$' THEN (e.value->>'sort_order')::integer
+                  WHEN (e.value->>'sort_order') ~ '^[+-]?[0-9]{1,9}$' THEN (e.value->>'sort_order')::integer
              END AS sort_order
         FROM jsonb_array_elements(p_chemicals) e
        WHERE jsonb_typeof(e.value) = 'object'
@@ -351,7 +354,7 @@ BEGIN
   IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
   END IF;
-  -- A sprayed or finished job's returned lines keep their EPA number (20261201100000).
+  -- A sprayed or finished job's returned lines keep their EPA number (20261202115000).
   -- Only staff reach the job lock; anyone else is refused by the impl's own role check.
   IF EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true
                 AND role IN ('admin', 'sales_rep')) THEN

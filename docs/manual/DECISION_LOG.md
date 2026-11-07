@@ -10,9 +10,9 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
-## 2026-11-07 — Signed-in users cannot write job chemical lines directly
+## 2026-11-06 — Signed-in users cannot write job chemical lines directly
 
-**Decision:** Mason approved removing `authenticated` and `anon` INSERT, UPDATE, DELETE and TRUNCATE on `job_chemicals` (Mason, 2026-11-07: "Yes, remove it"; migration 20261201100000, PR #1584). Reads are unchanged.
+**Decision:** Mason approved removing `authenticated` and `anon` INSERT, UPDATE, DELETE and TRUNCATE on `job_chemicals` (Mason, 2026-11-06: "Yes, remove it"; migration 20261202115000, PR #1584). Reads are unchanged.
 **Why:** a sprayed job's lines keep the EPA number actually used, but a direct delete-and-re-add through the database API would give the line the product's newer number; two Sol rounds found variants of that hole, and the app never wrote the table directly (every write goes through save_job and the other definer-rights job functions).
 **What this forbids/implies:** job lines are written only by server functions; a screen or script that needs a new kind of line write gets an RPC, not a direct grant. Re-granting direct writes is a permission change that needs Mason.
 ## 2026-11-06 — Duplicate ingredients are replaced, never linked (DM-1)

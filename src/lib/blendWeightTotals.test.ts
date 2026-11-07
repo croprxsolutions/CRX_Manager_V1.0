@@ -71,12 +71,36 @@ describe('mapped ticket total (spray tank)', () => {
 
 describe('blank header unit with a map', () => {
   it('stops the legacy comparison when a line amount is unusable', () => {
-    expect(validateBlendMath(header(10, ''), [{ product_name: 'TEST A', quantity: Number.NaN, unit: 'Gal', rate_per_acre: null, rate_per_acre_unit: null }],
+    expect(validateBlendMath(header(10, ''), [{ product_name: 'TEST A', quantity: Number.NaN, unit: 'Gal', rate_per_acre: null, rate_per_acre_unit: null, product_form: null, product_rate_unit: null, product_inventory_unit: null }],
       { headerUnits: units, lines: [line({ quantity: Number.NaN })] })).toEqual([{ level: 'unchecked', message: 'Total not checked: TEST A has an invalid amount' }]);
   });
 
   it('otherwise keeps the legacy comparison', () => {
-    const products = [{ product_name: 'TEST A', quantity: 10, unit: null, rate_per_acre: null, rate_per_acre_unit: null }];
+    const products = [{ product_name: 'TEST A', quantity: 10, unit: null, rate_per_acre: null, rate_per_acre_unit: null, product_form: null, product_rate_unit: null, product_inventory_unit: null }];
     expect(validateBlendMath(header(30, ''), products, { headerUnits: units, lines: [line({})] })[0].level).toBe('mismatch');
+  });
+});
+
+describe('weights unavailable or still loading', () => {
+  const lbLine = { product_name: 'TEST A', quantity: 90, unit: 'Lb', rate_per_acre: null, rate_per_acre_unit: null,
+    product_form: 'dry', product_rate_unit: null, product_inventory_unit: null };
+
+  it('never reports a weight total as checked when weights are unavailable', () => {
+    expect(validateBlendMath(header(100, 'Lb'), [lbLine], { unavailable: true, lines: [line({ quantity: 90 })] }))
+      .toEqual([{ level: 'unchecked', message: 'Total weight not checked: weights unavailable' }]);
+    expect(validateBlendMath(header(100, 'MG'), [lbLine], { unavailable: true, lines: [line({ quantity: 90 })] })[0].message)
+      .toBe('Total weight not checked: weights unavailable');
+  });
+
+  it('keeps the spray-tank check and still refuses a bad amount when weights are unavailable', () => {
+    const gal = { ...lbLine, quantity: 20, unit: 'Gal', product_form: 'liquid' };
+    expect(validateBlendMath(header(10, 'Gal'), [gal], { unavailable: true, lines: [line({ quantity: 20, unit: 'Gal' })] }))
+      .toEqual(validateBlendMath(header(10, 'Gal'), [gal]));
+    expect(validateBlendMath(header(8, ''), [], { unavailable: true, lines: [line({ quantity: 10 }), line({ product_name: 'TEST B', quantity: -2 })] }))
+      .toEqual([{ level: 'unchecked', message: 'Total not checked: TEST B has a negative amount' }]);
+  });
+
+  it('shows no total warning while weights load, and leaves the other checks alone', () => {
+    expect(validateBlendMath(header(100, 'Lb'), [lbLine], { loading: true })).toEqual([]);
   });
 });

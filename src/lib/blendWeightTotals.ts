@@ -79,7 +79,7 @@ function volumeTotal(total: number, unit: string, header: UnitEntry, lines: Mapp
  * (`headerUnits`; null when a saved ticket's basis was never recorded). `legacyWeightUnits` only names the
  * kind of total in a message when the map cannot.
  */
-export function mappedTotalWarnings(total: unknown, headerUnit: string, headerUnits: WeightUnitFactors | null,
+function mappedTotalWarnings(total: unknown, headerUnit: string, headerUnits: WeightUnitFactors | null,
   lines: MappedLine[], legacyWeightUnits: ReadonlySet<string>): Warning[] {
   if (total == null) return [];
   const key = headerUnit.trim().toLowerCase();
@@ -97,9 +97,42 @@ export function mappedTotalWarnings(total: unknown, headerUnit: string, headerUn
 }
 
 /** With a blank header unit: a line amount that is not a usable number stops the legacy total comparison. */
-export function rawAmountWarnings(total: unknown, lines: MappedLine[]): Warning[] {
+function rawAmountWarnings(total: unknown, lines: MappedLine[]): Warning[] {
   if (typeof total !== 'number' || !(total > 0)) return [];
   const bad = lines.flatMap((line) => (line.quantity === 0 ? [] : [badAmount(lineName(line), line.quantity)]))
     .filter((reason): reason is string => reason !== null);
   return bad.length > 0 ? unchecked(`Total not checked: ${bad.join('; ')}`) : [];
+}
+
+/**
+ * What a DM-2 screen passes the checker: the unit map and weighed lines, or that the weight read failed
+ * (`unavailable`) or has not answered yet (`loading`, when no total check is shown rather than a false one).
+ */
+export type WeightTotalOptions =
+  | { headerUnits: WeightUnitFactors | null; lines: MappedLine[] }
+  | { unavailable: true; lines: MappedLine[] }
+  | { loading: true };
+
+interface TotalInput {
+  total: unknown;
+  rawUnit: string | null;
+  /** The header unit as the legacy checks normalise it. */
+  legacyUnit: string;
+  weights: WeightTotalOptions;
+  legacyWeightUnits: ReadonlySet<string>;
+  legacyVolumeUnits: ReadonlySet<string>;
+}
+
+/** The ticket total warnings for a DM-2 screen, or null to run the legacy total checks unchanged. */
+export function weightTotalWarnings({ total, rawUnit, legacyUnit, weights, legacyWeightUnits, legacyVolumeUnits }: TotalInput): Warning[] | null {
+  if ('loading' in weights) return [];
+  const header = (rawUnit ?? '').trim();
+  const raw = rawAmountWarnings(total, weights.lines);
+  if (header === '') return raw.length > 0 ? raw : null;
+  if ('headerUnits' in weights) return mappedTotalWarnings(total, header, weights.headerUnits, weights.lines, legacyWeightUnits);
+  if (raw.length > 0) return raw;
+  // Weights unavailable: a volume header keeps today's spray-tank check; any other total is not checked.
+  const isVolume = legacyVolumeUnits.has(legacyUnit) || legacyUnit === 'oz';
+  if (isVolume || typeof total !== 'number' || !(total > 0)) return null;
+  return unchecked('Total weight not checked: weights unavailable');
 }

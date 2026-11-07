@@ -6,8 +6,7 @@
 // this warning and the invoice disagree about the same line.
 import { fieldAppPricedQuantity } from './chemCalculator';
 import { asProductForm } from './units';
-import { mappedTotalWarnings, rawAmountWarnings, type MappedLine } from './blendWeightTotals';
-import type { WeightUnitFactors } from '../types';
+import { weightTotalWarnings, type WeightTotalOptions } from './blendWeightTotals';
 
 interface TicketData {
   total_acres: number | null;
@@ -248,16 +247,6 @@ export interface BlendMathWarning {
   message: string;
 }
 
-/**
- * DM-2: when a screen passes the unit map, the ticket total (checks 2 and 3 below) is checked through it and
- * each line's weight (`blendWeightTotals.ts`); without it the checker behaves exactly as before.
- */
-export interface WeightTotalOptions {
-  /** The map stored with the ticket's basis; null when a saved ticket's basis was never recorded. */
-  headerUnits: WeightUnitFactors | null;
-  lines: MappedLine[];
-}
-
 export function validateBlendMath(
   ticketData: TicketData,
   products: ProductData[],
@@ -389,14 +378,12 @@ export function validateBlendMath(
     }
   }
 
-  // DM-2: a recorded header unit is checked through the map; a blank one keeps the legacy comparison below,
-  // once no line's raw amount is unusable.
+  // DM-2 (blendWeightTotals.ts): a screen that passes weights gets the total checked through the unit map;
+  // null means the checks below run exactly as before.
   if (weights) {
-    const rawHeader = (ticketData.total_volume_unit ?? '').trim();
-    const mapped = rawHeader !== ''
-      ? mappedTotalWarnings(totalVolume, rawHeader, weights.headerUnits, weights.lines, WEIGHT_ONLY_UNITS)
-      : rawAmountWarnings(totalVolume, weights.lines);
-    if (rawHeader !== '' || mapped.length > 0) return [...warnings, ...mapped];
+    const total = weightTotalWarnings({ total: totalVolume, rawUnit: ticketData.total_volume_unit, legacyUnit: headerUnit,
+      weights, legacyWeightUnits: WEIGHT_ONLY_UNITS, legacyVolumeUnits: VOLUME_ONLY_UNITS });
+    if (total) return [...warnings, ...total];
   }
 
   // (2) and (3) both need each product measured in the ticket's own unit.

@@ -1841,6 +1841,163 @@ export interface UnitConversion {
   notes: string | null;
 }
 
+// DM-2 (20261207100000_product_weights): approved weight per gallon (liquid parent) and net weight per
+// pack (dry size stocked in Ea/Unit), read through get_product_weights and kept on saved tickets/worksheets.
+export type ProductWeightSource = 'measured' | 'sds' | 'label' | 'supplier';
+export type ProductWeightReviewState = 'draft' | 'approved' | 'superseded';
+export type ProductWeightKind = 'density' | 'net_weight' | 'unit_weight' | 'none';
+export type ProductWeightNoneReason = 'no_parent' | 'no_approved_weight' | 'seed_or_each' | 'unit_not_convertible' | 'unknown_form';
+export type ProductWeightEventType = 'draft_saved' | 'draft_replaced' | 'approved' | 'corrected' | 'returned_to_draft';
+
+/** lower(trim(unit)) -> pounds (weight), gallons (volume) or count per unit; names that collide are listed in `ambiguous`. */
+export interface WeightUnitFactors {
+  factors: Record<string, { kind: 'weight' | 'volume' | 'count'; factor: number }>;
+  ambiguous: string[];
+}
+
+/** One size's current weight (`_product_weight`): `products[id].weight` in get_product_weights. */
+export interface ProductWeight {
+  kind: ProductWeightKind;
+  /** Present (false) only when the product row does not exist. */
+  found?: false;
+  none_reason?: ProductWeightNoneReason;
+  product_form?: 'liquid' | 'dry' | 'seed' | 'each';
+  parent_id?: string;
+  lb_per_unit?: number;
+  per_unit?: string;
+  value_id?: string;
+  source?: ProductWeightSource | 'unit';
+  value_basis?: Record<string, unknown>;
+  reviewed_at?: string;
+  reviewed_by?: string;
+  reviewed_by_name?: string | null;
+  pack_generation?: number;
+  member_generation?: number;
+  identity_generation?: number;
+}
+
+export interface ProductParentDensityValue {
+  id: string;
+  parent_id: string;
+  lb_per_gal: number;
+  entered_value: number;
+  entered_unit: 'lb_per_gal' | 'specific_gravity';
+  source: ProductWeightSource;
+  source_note: string | null;
+  basis: Record<string, unknown>;
+  review_state: ProductWeightReviewState;
+  reason: string | null;
+  evidence: string | null;
+  created_by: string | null;
+  created_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  superseded_at: string | null;
+}
+
+export interface ProductSizeNetWeightValue {
+  id: string;
+  product_id: string;
+  net_lb: number;
+  entered_value: number;
+  source: ProductWeightSource;
+  source_note: string | null;
+  basis: Record<string, unknown>;
+  review_state: ProductWeightReviewState;
+  reason: string | null;
+  evidence: string | null;
+  created_by: string | null;
+  created_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  superseded_at: string | null;
+}
+
+export interface ProductParentDensityState {
+  parent_id: string;
+  density_version: number;
+  identity_generation: number;
+}
+
+export interface ProductSizeNetWeightState {
+  product_id: string;
+  net_weight_version: number;
+  pack_generation: number;
+  member_generation: number;
+}
+
+export interface ProductWeightEvent {
+  id: number;
+  subject_kind: 'parent_density' | 'size_net_weight';
+  parent_id: string | null;
+  product_id: string | null;
+  event_type: ProductWeightEventType;
+  value_id: string | null;
+  before_value: unknown[] | null;
+  after_value: unknown[] | null;
+  reason: string | null;
+  evidence: string | null;
+  actor_kind: 'user' | 'system';
+  changed_by: string | null;
+  changed_by_name: string | null;
+  changed_at: string;
+}
+
+/** The weight a saved blend ticket first used for a product (never changed). */
+export interface BlendTicketProductWeight {
+  blend_ticket_id: string;
+  product_id: string;
+  product_name: string;
+  product_form: 'liquid' | 'dry' | 'seed' | 'each' | null;
+  weight_kind: ProductWeightKind;
+  value_id: string | null;
+  value_reviewed_at: string | null;
+  value_reviewed_by: string | null;
+  lb_per_unit: number | null;
+  per_unit: string | null;
+  unit_factors: WeightUnitFactors;
+  source: ProductWeightSource | 'unit' | null;
+  value_basis: Record<string, unknown> | null;
+  none_reason: ProductWeightNoneReason | null;
+  captured_how: 'at_save' | 'backfill_at_apply';
+  captured_at: string;
+}
+
+export interface BlendTicketWeightBasis {
+  blend_ticket_id: string;
+  unit_factors: WeightUnitFactors;
+  captured_at: string;
+}
+
+/** A saved loader worksheet's weight for one product; used only while worksheet_weight_is_valid. */
+export interface JobLoaderWorksheetWeight {
+  worksheet_id: string;
+  product_id: string;
+  job_id: string;
+  product_name: string;
+  product_form: 'liquid' | 'dry' | 'seed' | 'each' | null;
+  weight_kind: ProductWeightKind;
+  value_id: string | null;
+  value_reviewed_at: string | null;
+  value_reviewed_by: string | null;
+  lb_per_unit: number | null;
+  per_unit: string | null;
+  unit_factors: WeightUnitFactors;
+  source: ProductWeightSource | 'unit' | null;
+  value_basis: Record<string, unknown> | null;
+  none_reason: ProductWeightNoneReason | null;
+  pack_generation: number | null;
+  member_generation: number | null;
+  identity_generation: number | null;
+  captured_at: string;
+}
+
+/** get_blend_ticket_weights' per-line weight: the saved row with its name as `captured_name`, or a placeholder. */
+export type BlendTicketWeightSnapshot = Omit<BlendTicketProductWeight, 'product_name'> & { captured_name: string };
+export type BlendTicketLineWeight =
+  | BlendTicketWeightSnapshot
+  | { weight_kind: 'none'; none_reason: 'unlinked' | 'not_recorded' };
+
 export type BlendTicketStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'needs_review';
 export type BlendTicketReviewStatus = 'unreviewed' | 'approved' | 'rejected';
 export type BlendTicketOrderLinkStatus = 'unlinked' | 'linked';

@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-07 — Sol: a test file is not money code by its name alone
+
+**Decision (Mason, in session, 2026-11-07):** a changed test or spec (`__tests__/`, `*.test.*`, `*.spec.*`) no longer needs Sol just because its name carries a money word (`MONEY_PATH_WORDS`). Money code, migrations, Edge Functions and every listed path in `docs/reference/sol-required-paths.md` (tests under those paths included) still need Sol.
+**Why:** on PR #1579 a one-line fix to `src/__tests__/return-credit-remediation-guards.test.ts` (matched by "credit") forced a full Sol of the whole PR after the live apply; that run reopened an unrelated, already-accepted area and cost two more rounds. A test cannot change what ships; the code it tests already needs Sol.
+**Enforcement:** `.claude/hooks/sol-risk-lib.mjs` (`solRiskPathProblem`), proven by `.claude/hooks/sol-risk-lib.test.mjs` (fails before the change, passes after).
+
 ## 2026-11-05 — Anyone may quote at a tier other than the customer's; the check stays on the screen (KI-105, To-Do 1.6)
 
 **Decision:** anyone, reps included, may override a customer's assigned price tier on a quote. Quote Builder warns and needs "Use Tier N" or the "Quote at Tier M anyway" tick before Save, for every role; the database never refuses a different tier (Mason, 2026-11-05). Supersedes the 2026-11-05 entry that parked the screen check until a rep-only database rule existed.

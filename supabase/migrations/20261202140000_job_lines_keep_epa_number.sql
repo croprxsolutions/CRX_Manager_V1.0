@@ -23,8 +23,9 @@
 --      the job keeps for it (NULL is a kept value too). Rows are only ever inserted ON CONFLICT DO
 --      NOTHING, so the first number written (the older one) wins and is never replaced. product_id has
 --      no foreign key on purpose: deleting a product never deletes a job's kept number. from_backfill
---      marks the numbers this file recorded for jobs finished before it (the number printed at apply
---      time, not a recovered history). Signed-in users may read the rows of jobs whose lines they can
+--      marks rows this file wrote for jobs sprayed or finished before it: their number is NULL with
+--      from_backfill true, read as "Not recorded", never the product's current number, which cannot
+--      prove what was sprayed (REG-1 build sheet section 7). Signed-in users may read the rows of jobs whose lines they can
 --      see (EPA numbers are public regulatory data); nobody but the owner can write them.
 --   3. When a job is first sprayed or finished, every product on its lines is locked at the product's
 --      number at that moment. A product added later to a sprayed job is locked at its number when added.
@@ -58,16 +59,17 @@
 --
 -- NAMED LIMITS: "sprayed" means a spray record is saved (or the job is finished): a correction made
 --   between the physical spray and the record being entered reaches the job. Products removed from a
---   finished job before this file are unknown (no history exists; live has 1 finished job, 0 spray
---   records; its one product has no EPA number, matching its invoice line). A spray entered and removed
+--   finished job before this file are unknown, and the products still on such jobs are kept as "Not
+--   recorded" (no history exists; live has 1 finished job, 0 spray records; its one product has no EPA
+--   number either, matching its invoice line). A spray entered and removed
 --   before this file leaves nothing to detect. Numbers are trimmed of spaces, tabs and line breaks.
 --   load_recipe_into_job (no app access) deletes and re-writes lines before locking its job:
 --   two concurrent runs on one line-less job could deadlock; Postgres rolls one back whole.
 --
 -- ROLLBACK (its own reviewed migration): drop the three triggers and four functions below and keep both
 --   tables as history. While rolled back nothing is recorded: a new spray, a product added to a marked
---   job, and a product edited or removed meanwhile are lost to the record (roll forward then records the
---   numbers current at that time). Re-granting direct writes on job_chemicals (the INSERT and UPDATE
+--   job, and a product edited or removed meanwhile are lost to the record (roll forward then records them
+--   as "Not recorded", like section 4). Re-granting direct writes on job_chemicals (the INSERT and UPDATE
 --   column lists of 20261022101000, DELETE) is a permission change that needs Mason's approval. Roll
 --   forward is a new migration re-creating the triggers, then re-running section 4: markers for newly
 --   qualifying jobs and locks for the products of EVERY marked job (ON CONFLICT DO NOTHING).
@@ -241,16 +243,16 @@ FOR EACH ROW EXECUTE FUNCTION public._trg_job_line_epa_lock();
 -- ---------------------------------------------------------------------------------------------
 -- Runs after the triggers exist (each CREATE TRIGGER holds a lock that blocks job, line and spray writes
 -- until commit), so nothing written meanwhile is missed. Locks cover the products of EVERY marked job.
+-- The number is NULL ("Not recorded"): what was sprayed before this file was never captured.
 INSERT INTO public.job_epa_sprayed (job_id, from_backfill)
 SELECT j.id, true FROM public.jobs j
  WHERE j.status IN ('completed', 'invoiced')
     OR EXISTS (SELECT 1 FROM public.job_applied_records r WHERE r.job_id = j.id)
 ON CONFLICT (job_id) DO NOTHING;
 INSERT INTO public.job_product_epa (job_id, product_id, epa_registration, from_backfill)
-SELECT DISTINCT jc.job_id, jc.product_id, public._epa_norm(p.epa_registration), true
+SELECT DISTINCT jc.job_id, jc.product_id, NULL::text, true
   FROM public.job_chemicals jc
   JOIN public.job_epa_sprayed s ON s.job_id = jc.job_id
-  JOIN public.products p ON p.id = jc.product_id
 ON CONFLICT (job_id, product_id) DO NOTHING;
 
 DO $postflight$

@@ -342,14 +342,14 @@ async function main() {
   assert.match(r.output, /already exists/);
   console.log('[prover] the file applies once, as one transaction');
 
-  // Backfill: finished and sprayed jobs are marked and lock their products at today's number; open jobs are not.
-  assert.equal(locks(JOLD), `A=${OLD},B=${B_EPA}`);
-  assert.equal(locks(JOTHER), `A=${OLD}`);
-  assert.equal(locks(JSPRAYED), `B=${B_EPA}`);
+  // Backfill: finished and sprayed jobs are marked and lock their products as Not recorded (NULL); open jobs are not.
+  assert.equal(locks(JOLD), 'A=<null>,B=<null>', 'never filled from the current number');
+  assert.equal(locks(JOTHER), 'A=<null>');
+  assert.equal(locks(JSPRAYED), 'B=<null>');
   assert.equal(locks(JOPEN), '<none>');
   assert.deepEqual([JOLD, JOTHER, JSPRAYED, JOPEN].map(marked), ['1', '1', '1', '0']);
   assert.deepEqual([JOLD, JOTHER, JSPRAYED].map(backfilled), ['true', 'true', 'true'], 'backfilled rows are flagged');
-  console.log('[prover] backfill: finished and sprayed jobs locked at the number they print today; the open job is not');
+  console.log('[prover] backfill: finished and sprayed jobs locked as Not recorded, never at the current number; the open job is not');
 
   // Permissions: no direct job line writes; the lock tables are not writable; the marker is not readable.
   for (const uid of [ADMIN, REP]) {
@@ -384,7 +384,7 @@ async function main() {
   setProductEpa(PA, NEW);
   assert.equal(shown(open), `0:${NEW},1:${B_EPA}`, 'an unsprayed job follows the product edit');
   assert.equal(shown(sprayed), `0:${OLD},1:${B_EPA}`, 'a sprayed job keeps its number');
-  assert.equal(shown(JOLD), `0:${OLD},1:${B_EPA}`, 'a finished job keeps its number');
+  assert.equal(shown(JOLD), '0:<null>,1:<null>', 'a job finished before the file shows Not recorded, not the edit');
   console.log('[prover] a product EPA edit reaches only jobs not sprayed yet');
 
   // Re-saves (admin and rep, delete-and-rewrite) keep the locks; a keyed replay changes nothing.

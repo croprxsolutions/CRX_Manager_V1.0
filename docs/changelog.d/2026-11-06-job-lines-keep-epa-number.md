@@ -9,7 +9,8 @@
 - The numbers live in a new table, `job_product_epa` (one row per job and product), with a marker
   table `job_epa_sprayed`. Nothing copies a number onto job lines and nothing follows product edits,
   so job saves, product edits and inventory holds work exactly as before.
-- Jobs already finished when this is applied are locked at the number their printouts show today.
+- Jobs already sprayed or finished when this is applied keep their products as "Not recorded": the
+  product's number today cannot prove what was sprayed (REG-1 build sheet section 7).
 - No printout reads the kept numbers yet, so every printout still shows the product's number. A
   follow-up PR moves the sent proof, applicator sheet, chemical application report and WPS notice to
   them. Recording starts when this is applied, so that history exists for the follow-up.

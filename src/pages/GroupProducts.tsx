@@ -20,6 +20,7 @@ import {
   chosenRates,
   decideGroup,
   initialDraft,
+  loadGroupingOpen,
   loadLatestProposal,
   loadProposalGroups,
   previewGroupPrices,
@@ -82,6 +83,7 @@ function BuildSummary({ proposal, groups, build }: { proposal: Proposal; groups:
 
 function useProposalData() {
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [groupingOpen, setGroupingOpen] = useState(false);
   const [groups, setGroups] = useState<ProposalGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -95,9 +97,10 @@ function useProposalData() {
     setLoadFailed(false);
     (async () => {
       try {
-        const latest = await loadLatestProposal();
+        const [latest, open] = await Promise.all([loadLatestProposal(), loadGroupingOpen()]);
         const rows = latest ? await loadProposalGroups(latest.id) : [];
         if (!active) return;
+        setGroupingOpen(open);
         const proposed = rows.filter((g) => g.status === 'proposed');
         const proposedIds = new Set(proposed.map((g) => g.id));
         setProposal(latest);
@@ -117,7 +120,7 @@ function useProposalData() {
   }, [reloadToken]);
 
   const reload = useCallback(() => setReloadToken((t) => t + 1), []);
-  return { proposal, groups, loading, loadFailed, reload, drafts, setDrafts, selected, setSelected };
+  return { proposal, groupingOpen, groups, loading, loadFailed, reload, drafts, setDrafts, selected, setSelected };
 }
 
 interface FilterBarProps {
@@ -192,7 +195,7 @@ export default function GroupProducts() {
   const { profile } = useAuth();
   const userId = profile?.id ?? '';
   const { toast } = useToast();
-  const { proposal, groups, loading, loadFailed, reload, drafts, setDrafts, selected, setSelected } = useProposalData();
+  const { proposal, groupingOpen, groups, loading, loadFailed, reload, drafts, setDrafts, selected, setSelected } = useProposalData();
   const [build, setBuild] = useState<BuildResult | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('proposed');
   const [flagFilter, setFlagFilter] = useState('');
@@ -256,6 +259,7 @@ export default function GroupProducts() {
   };
 
   const startApproval = async (ids: string[]) => {
+    if (!groupingOpen) return;
     const chosen = groups.filter((g) => ids.includes(g.id));
     // A selected group may have been edited into an unready state since it was ticked.
     const notReady = chosen.filter((g) => !drafts[g.id] || approvalProblems(g, drafts[g.id]).length > 0);
@@ -324,6 +328,12 @@ export default function GroupProducts() {
       {!loading && !loadFailed && proposal && (
         <>
           <BuildSummary proposal={proposal} groups={groups} build={build} />
+          {!groupingOpen && (
+            <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              Grouping is not switched on yet, so groups cannot be approved. You can build proposals and hold or
+              reject groups now; approving opens once the new product screens are live and grouping is switched on.
+            </div>
+          )}
           <FilterBar
             statusFilter={statusFilter}
             flagFilter={flagFilter}
@@ -350,6 +360,7 @@ export default function GroupProducts() {
                 onHold={() => setDecision({ kind: 'hold', group })}
                 onReject={() => setDecision({ kind: 'reject', group })}
                 onApprove={() => void startApproval([group.id])}
+                approveOff={!groupingOpen}
                 busy={busy}
               />
             ))}

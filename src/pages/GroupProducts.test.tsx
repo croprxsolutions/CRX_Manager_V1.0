@@ -5,6 +5,7 @@ import type { ProposalGroup, ProposalMember } from '../lib/productParentProposal
 const M = vi.hoisted(() => ({
   toast: vi.fn(),
   loadLatestProposal: vi.fn(),
+  loadGroupingOpen: vi.fn(),
   loadProposalGroups: vi.fn(),
   buildProposal: vi.fn(),
   decideGroup: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('../lib/productParentProposals', async (importOriginal) => {
   return {
     ...actual,
     loadLatestProposal: M.loadLatestProposal,
+    loadGroupingOpen: M.loadGroupingOpen,
     loadProposalGroups: M.loadProposalGroups,
     buildProposal: M.buildProposal,
     decideGroup: M.decideGroup,
@@ -66,6 +68,7 @@ describe('GroupProducts', () => {
   beforeEach(() => {
     Object.values(M).forEach((m) => m.mockReset());
     M.loadLatestProposal.mockResolvedValue(proposal);
+    M.loadGroupingOpen.mockResolvedValue(true);
     M.loadProposalGroups.mockResolvedValue([rateConflict, heldEpa]);
   });
 
@@ -137,6 +140,18 @@ describe('GroupProducts', () => {
     await waitFor(() => expect(M.decideGroup).toHaveBeenCalledWith(expect.objectContaining({
       decision: 'hold', proposalVersion: 3, reason: 'check the label first', group: expect.objectContaining({ id: 'g-rates' }),
     })));
+  });
+
+  it('does not offer approval while grouping is switched off, but still holds and rejects', async () => {
+    M.loadGroupingOpen.mockResolvedValue(false);
+    M.loadProposalGroups.mockResolvedValue([group('g-ok', {})]);
+    render(<GroupProducts />);
+    expect(await screen.findByRole('status')).toHaveTextContent('Grouping is not switched on yet');
+    expect(screen.queryByLabelText(/for batch approval/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Rho/ }));
+    expect(screen.getByRole('button', { name: 'Approve this group' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Hold…' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Reject…' })).toBeEnabled();
   });
 
   it('turns the EPA-has-parent refusal into plain English', async () => {

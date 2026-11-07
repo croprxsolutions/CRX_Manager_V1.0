@@ -144,6 +144,13 @@ export async function loadLatestProposal(): Promise<Proposal | null> {
   return ((data ?? []) as Proposal[])[0] ?? null;
 }
 
+/** Whether product grouping is switched on (admin only). While it is off, approval is always refused. */
+export async function loadGroupingOpen(): Promise<boolean> {
+  const { data, error } = await supabaseUntyped.rpc('get_product_grouping_open');
+  if (error) throw error;
+  return assertRpcResult<boolean>(data, 'get_product_grouping_open');
+}
+
 /** Every group of one proposal, read in pages so a large catalogue is never cut at the 1,000-row cap. */
 export async function loadProposalGroups(proposalId: string): Promise<ProposalGroup[]> {
   const { data, error } = await fetchAllRows<ProposalGroup>((from, to) => pageWithList(supabaseUntyped

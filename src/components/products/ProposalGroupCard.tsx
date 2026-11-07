@@ -40,6 +40,8 @@ interface ProposalGroupCardProps {
   onHold: () => void;
   onReject: () => void;
   onApprove: () => void;
+  /** Grouping is switched off: approval would be refused, so it is not offered. */
+  approveOff: boolean;
   busy: boolean;
 }
 
@@ -220,7 +222,7 @@ function DecisionControls(props: ProposalGroupCardProps & { draft: GroupDraft })
         </ul>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" disabled={busy || problems.length > 0} onClick={props.onApprove}>Approve this group</Button>
+        <Button size="sm" disabled={busy || problems.length > 0 || props.approveOff} title={props.approveOff ? 'Grouping is not switched on yet' : undefined} onClick={props.onApprove}>Approve this group</Button>
         <Button size="sm" variant="secondary" disabled={busy} onClick={props.onHold}>Hold…</Button>
         <Button size="sm" variant="ghost" disabled={busy} onClick={props.onReject}>Reject…</Button>
       </div>
@@ -236,7 +238,7 @@ export default function ProposalGroupCard(props: ProposalGroupCardProps) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white">
       <div className="flex items-start gap-3 p-3">
-        {group.status === 'proposed' && (
+        {group.status === 'proposed' && !props.approveOff && (
           <input
             type="checkbox"
             className="mt-1"

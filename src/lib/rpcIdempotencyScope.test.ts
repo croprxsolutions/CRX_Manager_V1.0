@@ -296,7 +296,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _post_invoice_public_impl_20260718: ['post_invoice'],
   // Direct EXECUTE is revoked (live 2026-11-06: proacl `postgres=X/postgres`). Private layers behind the
   // public void_invoice and unapply_credit_memo wrappers; they share the wrapper's receipt namespace.
-  // 20261128100000 (KI-18) re-emits the live bodies only to add the Chicago-date closed-month check.
+  // 20261204100000 (KI-18) re-emits the live bodies only to add the Chicago-date closed-month check.
   _void_invoice_split_provenance_impl_20260719: ['void_invoice'],
   _unapply_return_credit_guard_impl_20260826: ['unapply_credit_memo'],
   // Direct EXECUTE is revoked. This private implementation remains behind the
@@ -460,7 +460,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _price_order_below_cost_impl_20260810: ['price_order'],
   _save_invoice_lineage_unaware_impl_20260827: ['save_invoice'],
   _save_field_app_invoice_impl_20260714: ['save_field_app_invoice'],
-  // KI-18 batch 1 (20261128100000) re-emits these renamed private bodies only to take "today" from the
+  // KI-18 batch 1 (20261204100000) re-emits these renamed private bodies only to take "today" from the
   // Chicago date. Each was created by ALTER FUNCTION ... RENAME TO, so it kept the public operation
   // literal its wrapper binds; direct EXECUTE is revoked. Changing a literal would orphan existing receipts.
   _reverse_write_off_replay_impl_20261015: ['reverse_write_off'],

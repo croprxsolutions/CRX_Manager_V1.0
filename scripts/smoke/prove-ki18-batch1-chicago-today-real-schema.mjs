@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261128100000 (KI-18 batch 1: money, compliance and stock decisions take
+ * Real-schema proof for 20261204100000 (KI-18 batch 1: money, compliance and stock decisions take
  * "today" from the Chicago date). Builds the checked-in schema baseline in a network-disabled PostgreSQL
  * container, replays every migration before the candidate, then:
  *  - runs in a session zone whose date differs from Chicago's (the UTC-evening case) and shows BEFORE that
@@ -29,7 +29,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261128100000_ki18_batch1_chicago_today.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261204100000_ki18_batch1_chicago_today.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

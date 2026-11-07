@@ -1,6 +1,6 @@
 ## 2026-11-06 — KI-18 batch 1: money, compliance and stock decisions use the Chicago date
 
-- New migration `20261128100000_ki18_batch1_chicago_today.sql`. The database clock is UTC, so after 6 PM
+- New migration `20261204100000_ki18_batch1_chicago_today.sql`. The database clock is UTC, so after 6 PM
   (7 PM in summer) Central it thought it was already tomorrow. 30 functions now take "today" from the
   Chicago date: accounting-month checks on payments and credits, commission payment dates, the default
   quote expiry, AR reminder day counts, applicator-license expiry, inventory hold and stock checks, and default delivery, bill and payment dates. Four column defaults change the same way.
